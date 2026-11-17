@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="integrations_hero_connected_count">%1$d sur %2$d connectés</string>
+    <string name="settings_theme_auto_short">Automatique</string>
+</resources>

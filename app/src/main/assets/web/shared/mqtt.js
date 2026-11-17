@@ -78,6 +78,8 @@ const MQTT = {
                 // waiting for the next five-second timer tick.
                 if (!document.hidden) this.refreshVisibleData();
             });
+            // Older BYD WebViews may not fire visibilitychange; the app sends this.
+            window.addEventListener('overdrive:resume', () => this.refreshVisibleData());
         }
         this.refreshInterval = setInterval(() => {
             this.refreshVisibleData();
@@ -89,9 +91,15 @@ const MQTT = {
         // Skip overlapping cycles when the head unit/network is overloaded.
         if (document.hidden || this.refreshInFlight) return;
         this.refreshInFlight = true;
+        let timer = null;
         try {
-            await Promise.all([this.loadStatus(), this.loadTelemetry()]);
+            // fetch() has no timeout: never let one hung request hold the guard.
+            await Promise.race([
+                Promise.all([this.loadStatus(), this.loadTelemetry()]),
+                new Promise(resolve => { timer = setTimeout(resolve, 8000); })
+            ]);
         } finally {
+            clearTimeout(timer);
             this.refreshInFlight = false;
         }
     },

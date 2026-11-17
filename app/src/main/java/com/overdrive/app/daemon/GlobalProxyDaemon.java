@@ -162,9 +162,8 @@ public class GlobalProxyDaemon {
     }
 
     /**
-     * Inbound bind address. Always loopback: SECURITY (run-2 fix) — the 8119
-     * mixed-in must never be widened to the wildcard address. Tethered clients
-     * use the dedicated, authenticated clients-in inbound on 8122 instead.
+     * Inbound bind address: always loopback. Hotspot clients use the cellular relay (8121) or the
+     * client tunnel (8122); a wide bind here only opened this unauthenticated proxy to any LAN.
      */
     private static String inboundListen() {
         return LOCALHOST();

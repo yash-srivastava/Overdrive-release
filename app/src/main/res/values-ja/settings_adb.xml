@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_section_adb">ADB</string>
+    <string name="settings_adb_subtitle">接続、有効化、自動復旧。</string>
+    <string name="settings_adb_connection_title">接続</string>
+    <string name="settings_adb_automatic_title">自動復旧</string>
+    <string name="settings_adb_automatic_restore">ADB を自動で復旧</string>
+    <string name="settings_adb_automatic_description">起動時とADBが無効になったときに設定を復元します。設定変更の権限が事前に付与されている必要があり、Wi-Fiは不要です。DiLink 5では検証済みWi-Fiと認証済みの鍵によるワイヤレス復元も利用できます。</string>
+    <string name="settings_adb_recover">今すぐ ADB を復旧</string>
+    <string name="settings_adb_cancel_recovery">復旧をキャンセル</string>
+    <string name="settings_adb_manual_title">手動で有効化</string>
+    <string name="settings_adb_manual_description">対応する BYD ツールで ADB アクセスを要求します。Wi-Fi 接続は不要です。</string>
+    <string name="settings_adb_enable">ADB を有効化</string>
+    <string name="settings_adb_advanced_tools">高度なツール</string>
+    <string name="settings_adb_hide_advanced">高度なツールを隠す</string>
+    <string name="settings_adb_advanced_description">問題の診断、BYD ツールの起動、手動操作の取り消し。</string>
+    <string name="settings_adb_open_developer">開発者向けオプションを開く</string>
+    <string name="settings_adb_developer_page">BYD 開発者ページを要求</string>
+    <string name="settings_adb_diagnostics">互換性と接続を確認</string>
+    <string name="settings_adb_restore">手動での有効化による変更を元に戻す</string>
+    <string name="settings_adb_export">BYD 開発者ツールの APK を出力</string>
+    <string name="settings_adb_dialog_confirm">このネットワークでワイヤレス デバッグを承認</string>
+    <string name="settings_adb_dialog_confirm_description">まず検証済みの Wi-Fi ネットワークに接続してください。OverDrive によるワイヤレス デバッグのダイアログ確認を、このネットワークでのみ許可します。</string>
+    <string name="settings_adb_tools_unavailable">現在のモードまたはインストール済みの BYD ツールでは、手動での有効化を利用できません。</string>
+    <string name="settings_adb_recovery_availability">ローカル復元にはADB設定時に付与された設定変更の権限が必要です。Wi-FiやDiLink 5モードは不要です。</string>
+    <string name="settings_adb_details_title">前回の操作の詳細</string>
+    <string name="settings_adb_recovery_confirm_body">ローカル復元は事前に付与された設定変更の権限を使用し、Wi-Fiは不要です。DiLink 5では検証済みWi-Fiと認証済みの鍵も使用できます。 ポート 5555 のネットワーク ADB が開くか復元され、車両ネットワーク上の他の端末から到達可能になる場合があります。信頼できるネットワークでのみ続行してください。ADB キー認証は有効なままです。</string>
+    <string name="settings_adb_recovery_permission_missing">設定変更の権限がありません。ADBも利用できない場合は、先に「ADBを有効にする」または開発者向けオプションを使用し、ADBの設定をやり直してください。</string>
+    <string name="settings_adb_recovery_setting_enabled">ADBの設定は有効です。認証済みADB接続は確認できていません。</string>
+    <string name="settings_adb_recovery_setting_failed">ADBの設定を有効にして確認できませんでした。ファームウェアが変更を拒否している可能性があります。</string>
+    <string name="settings_adb_recovery_save_failed">自動復元の設定を保存できませんでした。ADBを確認して再試行してください。</string>
+</resources>

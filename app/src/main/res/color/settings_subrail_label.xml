@@ -1,12 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  Sub-rail row label color.
-    selected → onSecondaryContainer (matches the filled-pill background)
-    default  → onSurface (full-emphasis label)
-  ?attr resolution requires android:lStar fallback handling on older API,
-  but the alpha attr is fine on minSdk 25.
--->
+<!-- Sub-rail label: full-emphasis in every state; selection is carried by the fill and icon. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:state_selected="true" android:color="?attr/colorOnSecondaryContainer" />
+    <item android:state_selected="true" android:color="?attr/colorOnSurface" />
     <item android:color="?attr/colorOnSurface" />
 </selector>

@@ -44,12 +44,6 @@ class SentryDaemonController(
                "echo done"
     }
 
-    private fun getCheckCommand(): String {
-        // Match sentry_daemon nice-name only, not AccSentryDaemon (which is
-        // a separate daemon with its own controller).
-        return "pgrep -f 'sentry_daemon' 2>/dev/null | head -1"
-    }
-    
     override fun start(callback: DaemonCallback) {
         callback.onStatusChanged(DaemonStatus.STARTING, "Starting sentry daemon...")
         
@@ -85,19 +79,9 @@ class SentryDaemonController(
         )
     }
     
+    // Not `pgrep -f`: it matches the adb `sh -c` wrapper's own argv. Same probe as the health check.
     override fun isRunning(callback: (Boolean) -> Unit) {
-        adbLauncher.executeShellCommand(
-            getCheckCommand(),
-            object : AdbDaemonLauncher.LaunchCallback {
-                override fun onLog(message: String) {
-                    callback(message.trim().isNotEmpty())
-                }
-                override fun onLaunched() {}
-                override fun onError(error: String) {
-                    callback(false)
-                }
-            }
-        )
+        adbLauncher.isDaemonRunning(type.processName, callback)
     }
     
     override fun cleanup() {

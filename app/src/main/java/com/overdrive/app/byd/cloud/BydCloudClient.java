@@ -14,6 +14,7 @@ import java.io.InputStream;
 import java.io.InterruptedIOException;
 import java.util.Iterator;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BooleanSupplier;
 
 /**
  * High-level BYD cloud API client.
@@ -46,6 +47,12 @@ public final class BydCloudClient {
         this.config = config;
         // Region selects the transport codec: WBSK for China, Bangcle otherwise.
         this.codec = EnvelopeCodecFactory.createCodec(config.isChinaRegion());
+    }
+
+    BydCloudClient(BydCloudConfig config, EnvelopeCodec codec, BydCloudTransport transport) {
+        this.config = config;
+        this.codec = codec;
+        this.transport = transport;
     }
 
     /**
@@ -1144,6 +1151,14 @@ public final class BydCloudClient {
         return executeRemoteCommand(vin, commandType, extraParams, waitForResult);
     }
 
+    /** Optional authority belongs only to the manual request that supplied it. */
+    public CloudCommandResult executeRemoteCommandWithCode(String vin, String commandType,
+                                                           JSONObject extraParams,
+                                                           boolean waitForResult,
+                                                           BooleanSupplier authority) throws IOException {
+        return executeRemoteCommand(vin, commandType, extraParams, waitForResult, authority);
+    }
+
     private boolean executeRemoteCommand(String vin, String commandType, boolean waitForResult) throws IOException {
         return executeRemoteCommand(vin, commandType, null, waitForResult).success;
     }
@@ -1151,6 +1166,14 @@ public final class BydCloudClient {
     private CloudCommandResult executeRemoteCommand(String vin, String commandType,
                                                     JSONObject extraParams,
                                                     boolean waitForResult) throws IOException {
+        return executeRemoteCommand(vin, commandType, extraParams, waitForResult, null);
+    }
+
+    private CloudCommandResult executeRemoteCommand(String vin, String commandType,
+                                                    JSONObject extraParams,
+                                                    boolean waitForResult,
+                                                    BooleanSupplier authority) throws IOException {
+        BydCloudTransport.requireCurrentAuthority(authority);
         if (Thread.currentThread().isInterrupted()) {
             throw new IOException("remote command cancelled");
         }
@@ -1159,6 +1182,7 @@ public final class BydCloudClient {
         }
 
         BydCloudSession s = ensureSession();
+        BydCloudTransport.requireCurrentAuthority(authority);
         long nowMs = System.currentTimeMillis();
 
         // Build remote control request
@@ -1200,7 +1224,8 @@ public final class BydCloudClient {
         if (Thread.currentThread().isInterrupted()) {
             throw new IOException("remote command cancelled");
         }
-        JSONObject response = transport.postSecure("/control/remoteControl", env.outer);
+        JSONObject response = transport.postSecure(
+                "/control/remoteControl", env.outer, 0L, authority);
         if (Thread.currentThread().isInterrupted()) {
             throw new IOException("remote command cancelled");
         }

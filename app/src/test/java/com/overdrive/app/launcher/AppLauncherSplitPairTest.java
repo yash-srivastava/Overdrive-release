@@ -113,12 +113,38 @@ public class AppLauncherSplitPairTest {
                 "* Hist #0: ActivityRecord{ghi u0 com.maps.app/.MainActivity t42}"));
         // Shell/dumpsys failure: unverifiable, never "absent".
         assertEquals(AppLauncher.TASK_LOOKUP_FAILED,
-                AppLauncher.taskIdInDump(null, "com.maps.app"));
+                AppLauncher.taskIdInDump((String) null, "com.maps.app"));
         // Output with ZERO task headers (AMS not up / permission error text):
         // does not look like a task dump, so also unverifiable.
         assertEquals(AppLauncher.TASK_LOOKUP_FAILED,
                 AppLauncher.taskIdInDump(
                         "Can't find service: activity\n", "com.maps.app"));
+    }
+
+    @Test
+    public void incompleteTaskCaptureAllowsPositiveEvidenceButRejectsAbsence() {
+        String matching = "* Task{aaa #40 type=standard}\n"
+                + "    com.maps.app/.MainActivity\n";
+        String other = "* Task{aaa #40 type=standard}\n"
+                + "    com.other.app/.MainActivity\n";
+
+        assertEquals(40, AppLauncher.taskIdInDump(
+                new AppLauncher.ShellCaptureResult(
+                        matching, false, 0, true, true, false),
+                "com.maps.app"));
+        AppLauncher.ShellCaptureResult[] incomplete = {
+                new AppLauncher.ShellCaptureResult(other, false, 0, true, true, false),
+                new AppLauncher.ShellCaptureResult(other, false, 0, true, false, true),
+                new AppLauncher.ShellCaptureResult(other, false, 0, false, false, false),
+                new AppLauncher.ShellCaptureResult(other, true, -1, false, false, false),
+                new AppLauncher.ShellCaptureResult(other, false, 1, true, false, false),
+        };
+        for (AppLauncher.ShellCaptureResult capture : incomplete) {
+            assertEquals(AppLauncher.TASK_LOOKUP_FAILED,
+                    AppLauncher.taskIdInDump(capture, "com.maps.app"));
+        }
+        assertEquals(-1, AppLauncher.taskIdInDump(
+                AppLauncher.ShellCaptureResult.complete(other), "com.maps.app"));
     }
 
     @Test

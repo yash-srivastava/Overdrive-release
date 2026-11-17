@@ -455,37 +455,44 @@
 
 /* ===== AUTOMATION LIST CARDS ===== */
 /* Space stacked list cards like the shared `.card + .card` rhythm. */
-#automationList > * + * { margin-top: 16px; }
+#automationList > * + *,
+#groupList > * + * { margin-top: 16px; }
 #automationList .card.disabled {
     opacity: 0.6;
 }
-#automationList .header {
+#automationList .header,
+#groupList .header {
     display: flex;
     align-items: center;
     padding: 16px 20px;
     word-break: break-word;
 }
 /* icon actions / info spacing via sibling margins (flex gap ignored on Chrome-58). */
-#automationList .header > * + * { margin-left: 6px; }
-#automationList .info {
+#automationList .header > * + *,
+#groupList .header > * + * { margin-left: 6px; }
+#automationList .info,
+#groupList .info {
     flex: 1;
     min-width: 0;
     font-size: 14px;
     line-height: 1.5;
     color: var(--text-primary);
 }
-#automationList .actions {
+#automationList .actions,
+#groupList .actions {
     display: flex;
     flex-shrink: 0;
     flex-wrap: wrap;
 }
 @media (max-width: 773px) {
     /* Four action buttons wrap to two-per-row on narrow devices. */
-    #automationList .actions {
+    #automationList .actions,
+    #groupList .actions {
         max-width: 84px;
     }
 }
-#automationList .actions > * {
+#automationList .actions > *,
+#groupList .actions > * {
     margin-left: 6px;
     margin-top: 3px;
     margin-bottom: 3px;
@@ -649,6 +656,7 @@
     line-height: 1.45;
 }
 .signal-hint:empty { display: none; }
+.form-grid .row .inputs > .step-reading { flex: 0 0 100%; }
 .signal-hint-now { display: flex; align-items: baseline; }
 .signal-hint-label {
     text-transform: uppercase;
@@ -733,45 +741,9 @@
 }
 
 /* ── Action Groups ──────────────────────────────────────────────────────────
-   Saved-group list cards + the group editor's name field. Chrome-58 safe: plain
-   flexbox with explicit margins (no flex `gap`), no :is()/:has()/logical props. */
-
-/* Group list card: name/meta on the left, Edit + Delete on the right, vertically
-   centred with even spacing. Mirrors the app's card look (matches the binding rows
-   on the key-mapping page). */
-.group-card { margin-bottom: 10px; }
-.group-card .group-card-body {
-    display: flex;
-    align-items: center;
-    padding: 12px 14px;
-}
-.group-card .group-card-info {
-    flex: 1 1 auto;
-    min-width: 0;               /* let long names ellipsize instead of shoving buttons */
-    margin-right: 12px;
-}
-.group-card .group-card-name {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-primary, #e8e8e8);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.group-card .group-card-meta {
-    font-size: 12px;
-    color: var(--text-secondary, #9aa);
-    margin-top: 2px;
-}
-.group-card .group-card-actions {
-    display: flex;
-    align-items: center;
-    flex: none;
-}
-/* Edit (text btn) then Delete (icon btn) — even gap without flex gap. */
-.group-card .group-card-actions > * + * { margin-left: 8px; }
-.group-card .group-card-actions .btn { flex: none; }
-.group-card .group-card-actions .icon-btn { flex: none; }
+   The group editor's name field (saved-group cards share the #automationList card
+   rules). Chrome-58 safe: plain flexbox with explicit margins (no flex `gap`),
+   no :is()/:has()/logical props. */
 
 /* Group editor name row — label above a FULL-WIDTH input, matching the Add-tab
    name box and the rest of the form fields (was rendering at content width). */
@@ -1195,8 +1167,10 @@
 /* ===== LIST CARDS: recipe line (WHEN → IF → WAIT → THEN → ELSE chips) =====
    buildAutomationText(…, { recipe: true }) wraps the same text pieces in chips, so the
    card text is unchanged; the <br> separators stay in the DOM, the lines lay out as flex. */
-#automationList .info.recipe-info > br { display: none; }
-#automationList .info .automation-name {
+#automationList .info.recipe-info > br,
+#groupList .info.recipe-info > br { display: none; }
+#automationList .info .automation-name,
+#groupList .info .automation-name {
     display: block;
     font-size: var(--fs-title);
     font-weight: 600;
@@ -1205,23 +1179,29 @@
     overflow-wrap: break-word;
     word-wrap: break-word;
 }
-#automationList .info .automation-stats {
+#automationList .info .automation-stats,
+#groupList .info .automation-stats {
     display: block;
     margin-top: 2px;
     font-size: var(--fs-label);
     color: var(--on-surface-variant);
 }
-#automationList .recipe-line {
+#automationList .recipe-line,
+#groupList .recipe-line {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     margin-top: 8px;
     margin-bottom: -6px;   /* cancels the last row of chip margins */
 }
-#automationList .recipe-line:empty { display: none; }
-#automationList .recipe-line > * { margin: 0 6px 6px 0; }
+#automationList .recipe-line:empty,
+#groupList .recipe-line:empty { display: none; }
+#automationList .recipe-line > *,
+#groupList .recipe-line > * { margin: 0 6px 6px 0; }
 #automationList .recipe-sec,
-#automationList .recipe-chip {
+#automationList .recipe-chip,
+#groupList .recipe-sec,
+#groupList .recipe-chip {
     display: -webkit-inline-flex;
     display: inline-flex;
     align-items: center;
@@ -1230,7 +1210,8 @@
     box-sizing: border-box;
     color: var(--on-surface);
 }
-#automationList .recipe-sec {
+#automationList .recipe-sec,
+#groupList .recipe-sec {
     padding: 3px 10px 3px 6px;
     border-radius: var(--radius-full);
     border: 1px solid var(--step, var(--auto-other));
@@ -1239,7 +1220,8 @@
     letter-spacing: 0.04em;
     text-transform: uppercase;
 }
-#automationList .recipe-chip {
+#automationList .recipe-chip,
+#groupList .recipe-chip {
     padding: 4px 10px 4px 6px;
     border-radius: var(--radius-sm);
     background: var(--step-soft, var(--auto-other-soft));
@@ -1247,20 +1229,24 @@
     line-height: 1.35;
 }
 #automationList .recipe-sec > svg,
-#automationList .recipe-chip > svg {
+#automationList .recipe-chip > svg,
+#groupList .recipe-sec > svg,
+#groupList .recipe-chip > svg {
     flex: 0 0 auto;
     width: 16px;
     height: 16px;
     margin-right: 6px;
     color: var(--step, var(--auto-other));
 }
-#automationList .recipe-text {
+#automationList .recipe-text,
+#groupList .recipe-text {
     min-width: 0;
     overflow-wrap: break-word;
     word-wrap: break-word;
     word-break: break-word;
 }
-#automationList .recipe-join {
+#automationList .recipe-join,
+#groupList .recipe-join {
     font-size: var(--fs-caption);
     font-weight: 700;
     letter-spacing: 0.04em;
@@ -1269,7 +1255,8 @@
 }
 
 /* Card actions (publish/export, run, duplicate, edit, delete) + mode select: tonal. */
-#automationList .actions .icon-btn {
+#automationList .actions .icon-btn,
+#groupList .actions .icon-btn {
     width: 40px;
     height: 40px;
     border-color: transparent;
@@ -1277,7 +1264,8 @@
     background: var(--well);
     color: var(--on-surface-variant);
 }
-#automationList .actions .icon-btn.danger { background: var(--danger-soft); color: var(--danger); }
+#automationList .actions .icon-btn.danger,
+#groupList .actions .icon-btn.danger { background: var(--danger-soft); color: var(--danger); }
 #automationList .automation-mode-select {
     min-height: 40px;
     border-color: transparent;
@@ -1287,36 +1275,54 @@
     font-weight: 600;
 }
 @media (max-width: 773px) {
-    #automationList .actions { max-width: 92px; }   /* two 40px columns (+6px margins) */
+    #automationList .actions,
+    #groupList .actions { max-width: 92px; }   /* two 40px columns (+6px margins) */
 }
 /* Phones: the recipe gets the full card width; actions move to their own row below it. */
 @media (max-width: 600px) {
-    #automationList .header { flex-wrap: wrap; align-items: flex-start; }
-    #automationList .header > .info { flex: 1 1 100%; }
-    #automationList .header > .actions { max-width: none; margin: 8px 0 0 -6px; }
+    #automationList .header,
+    #groupList .header { flex-wrap: wrap; align-items: flex-start; }
+    #automationList .header > .info,
+    #groupList .header > .info { flex: 1 1 100%; }
+    #automationList .header > .actions,
+    #groupList .header > .actions { max-width: none; margin: 8px 0 0 -6px; }
 }
 
 /* Car: 56px targets, ≥15px text, 18px chip icons. */
-:root[data-android-embed="1"] #automationList .actions .icon-btn { width: 56px; height: 56px; }
+:root[data-android-embed="1"] #automationList .actions .icon-btn,
+:root[data-android-embed="1"] #groupList .actions .icon-btn { width: 56px; height: 56px; }
 :root[data-android-embed="1"] #automationList .automation-mode-select { min-height: 56px; font-size: 15px; }
 :root[data-android-embed="1"] #automationList .recipe-sec,
 :root[data-android-embed="1"] #automationList .recipe-chip,
 :root[data-android-embed="1"] #automationList .recipe-join,
-:root[data-android-embed="1"] #automationList .info .automation-stats { font-size: 15px; }
+:root[data-android-embed="1"] #automationList .info .automation-stats,
+:root[data-android-embed="1"] #groupList .recipe-sec,
+:root[data-android-embed="1"] #groupList .recipe-chip,
+:root[data-android-embed="1"] #groupList .recipe-join,
+:root[data-android-embed="1"] #groupList .info .automation-stats { font-size: 15px; }
 :root[data-android-embed="1"] #automationList .recipe-sec > svg,
-:root[data-android-embed="1"] #automationList .recipe-chip > svg { width: 18px; height: 18px; }
+:root[data-android-embed="1"] #automationList .recipe-chip > svg,
+:root[data-android-embed="1"] #groupList .recipe-sec > svg,
+:root[data-android-embed="1"] #groupList .recipe-chip > svg { width: 18px; height: 18px; }
 @media (max-width: 773px) {
-    :root[data-android-embed="1"] #automationList .actions { max-width: 124px; }
+    :root[data-android-embed="1"] #automationList .actions,
+    :root[data-android-embed="1"] #groupList .actions { max-width: 124px; }
 }
 
 /* RTL mirrors. */
-[dir="rtl"] #automationList .recipe-line > * { margin: 0 0 6px 6px; }
-[dir="rtl"] #automationList .recipe-sec { padding: 3px 6px 3px 10px; }
-[dir="rtl"] #automationList .recipe-chip { padding: 4px 6px 4px 10px; }
+[dir="rtl"] #automationList .recipe-line > *,
+[dir="rtl"] #groupList .recipe-line > * { margin: 0 0 6px 6px; }
+[dir="rtl"] #automationList .recipe-sec,
+[dir="rtl"] #groupList .recipe-sec { padding: 3px 6px 3px 10px; }
+[dir="rtl"] #automationList .recipe-chip,
+[dir="rtl"] #groupList .recipe-chip { padding: 4px 6px 4px 10px; }
 [dir="rtl"] #automationList .recipe-sec > svg,
-[dir="rtl"] #automationList .recipe-chip > svg { margin-right: 0; margin-left: 6px; }
+[dir="rtl"] #automationList .recipe-chip > svg,
+[dir="rtl"] #groupList .recipe-sec > svg,
+[dir="rtl"] #groupList .recipe-chip > svg { margin-right: 0; margin-left: 6px; }
 @media (max-width: 600px) {
-    [dir="rtl"] #automationList .header > .actions { margin: 8px 0 0 0; }   /* button margins already sit on the far side */
+    [dir="rtl"] #automationList .header > .actions,
+    [dir="rtl"] #groupList .header > .actions { margin: 8px 0 0 0; }   /* button margins already sit on the far side */
 }
 
 /* Keep the community publish button's primary signal (community-automations.css) as a
@@ -1324,17 +1330,21 @@
 #automationList .actions .icon-btn.community-publish-btn { background: var(--primary-soft); color: var(--primary); }
 @media (hover: hover) {
     .form-grid .row[data-step-cat] .icon-btn:hover,
-    #automationList .actions .icon-btn:hover { background: var(--well-2); color: var(--on-surface); }
+    #automationList .actions .icon-btn:hover,
+    #groupList .actions .icon-btn:hover { background: var(--well-2); color: var(--on-surface); }
     .form-grid .row[data-step-cat] .icon-btn.danger:hover,
-    #automationList .actions .icon-btn.danger:hover { background: var(--danger-soft); color: var(--danger); border-color: var(--danger); }
+    #automationList .actions .icon-btn.danger:hover,
+    #groupList .actions .icon-btn.danger:hover { background: var(--danger-soft); color: var(--danger); border-color: var(--danger); }
     #automationList .actions .icon-btn.community-publish-btn:hover { background: var(--primary-soft); color: var(--primary); border-color: var(--primary); }
 }
 
 /* ===== RUN NOW FEEDBACK ===== */
 /* While the test request is out the card shows a sweeping bar and the button a spinner;
    success pops a drawn check and a soft glow, failure shakes the button red. */
-#automationList .card { position: relative; }
-#automationList .card::after {
+#automationList .card,
+#groupList .card { position: relative; }
+#automationList .card::after,
+#groupList .card::after {
     content: "";
     position: absolute;
     top: 0;
@@ -1348,17 +1358,27 @@
     background-size: 40% 100%;
     transition: opacity 0.2s ease;
 }
-#automationList .card.is-running::after { opacity: 1; animation: auto-run-sweep 1.1s ease-in-out infinite; }
-#automationList .card.is-done { animation: auto-run-glow 0.9s ease-out; }
-#automationList .card.is-failed { animation: auto-run-glow-fail 0.9s ease-out; }
-#automationList .actions .icon-btn.run-btn { transition: background-color 0.2s ease, color 0.2s ease; }
-#automationList .actions .icon-btn.run-btn.is-running { background: var(--primary-soft); color: var(--primary); cursor: progress; opacity: 1; }
-#automationList .actions .icon-btn.run-btn.is-running svg { animation: auto-run-spin 0.8s linear infinite; }
-#automationList .actions .icon-btn.run-btn.is-done { background: var(--primary); color: var(--on-primary); animation: auto-run-pop 0.4s cubic-bezier(0.2, 0.9, 0.3, 1.3); }
-#automationList .actions .icon-btn.run-btn.is-failed { background: var(--danger-soft); color: var(--danger); animation: auto-run-shake 0.4s ease; }
+#automationList .card.is-running::after,
+#groupList .card.is-running::after { opacity: 1; animation: auto-run-sweep 1.1s ease-in-out infinite; }
+#automationList .card.is-done,
+#groupList .card.is-done { animation: auto-run-glow 0.9s ease-out; }
+#automationList .card.is-failed,
+#groupList .card.is-failed { animation: auto-run-glow-fail 0.9s ease-out; }
+#automationList .actions .icon-btn.run-btn,
+#groupList .actions .icon-btn.run-btn { transition: background-color 0.2s ease, color 0.2s ease; }
+#automationList .actions .icon-btn.run-btn.is-running,
+#groupList .actions .icon-btn.run-btn.is-running { background: var(--primary-soft); color: var(--primary); cursor: progress; opacity: 1; }
+#automationList .actions .icon-btn.run-btn.is-running svg,
+#groupList .actions .icon-btn.run-btn.is-running svg { animation: auto-run-spin 0.8s linear infinite; }
+#automationList .actions .icon-btn.run-btn.is-done,
+#groupList .actions .icon-btn.run-btn.is-done { background: var(--primary); color: var(--on-primary); animation: auto-run-pop 0.4s cubic-bezier(0.2, 0.9, 0.3, 1.3); }
+#automationList .actions .icon-btn.run-btn.is-failed,
+#groupList .actions .icon-btn.run-btn.is-failed { background: var(--danger-soft); color: var(--danger); animation: auto-run-shake 0.4s ease; }
 .run-btn .run-check { stroke-dasharray: 24; stroke-dashoffset: 24; animation: auto-run-draw 0.35s ease-out 0.05s forwards; }
 #automationList .card.is-done .recipe-sec,
-#automationList .card.is-done .recipe-chip { animation: auto-run-flow 0.5s ease-out both; animation-delay: calc(var(--run-i, 0) * 70ms); }
+#automationList .card.is-done .recipe-chip,
+#groupList .card.is-done .recipe-sec,
+#groupList .card.is-done .recipe-chip { animation: auto-run-flow 0.5s ease-out both; animation-delay: calc(var(--run-i, 0) * 70ms); }
 @keyframes auto-run-flow {
     0% { box-shadow: 0 0 0 0 transparent; transform: none; }
     35% { box-shadow: 0 0 0 2px var(--step, var(--primary)); transform: translateY(-1px); }
@@ -1372,13 +1392,21 @@
 @keyframes auto-run-glow { 0% { box-shadow: 0 0 0 0 var(--primary-glow); } 100% { box-shadow: 0 0 0 14px transparent; } }
 @keyframes auto-run-glow-fail { 0% { box-shadow: 0 0 0 0 var(--danger-soft); } 100% { box-shadow: 0 0 0 14px transparent; } }
 @media (prefers-reduced-motion: reduce) {
-    #automationList .card.is-running::after { animation: none; background-size: 100% 100%; }
+    #automationList .card.is-running::after,
+    #groupList .card.is-running::after { animation: none; background-size: 100% 100%; }
     #automationList .card.is-done,
     #automationList .card.is-failed,
     #automationList .actions .icon-btn.run-btn.is-done,
-    #automationList .actions .icon-btn.run-btn.is-failed { animation: none; }
-    #automationList .actions .icon-btn.run-btn.is-running svg { animation-duration: 2.4s; }
+    #automationList .actions .icon-btn.run-btn.is-failed,
+    #groupList .card.is-done,
+    #groupList .card.is-failed,
+    #groupList .actions .icon-btn.run-btn.is-done,
+    #groupList .actions .icon-btn.run-btn.is-failed { animation: none; }
+    #automationList .actions .icon-btn.run-btn.is-running svg,
+    #groupList .actions .icon-btn.run-btn.is-running svg { animation-duration: 2.4s; }
     .run-btn .run-check { animation: none; stroke-dashoffset: 0; }
     #automationList .card.is-done .recipe-sec,
-    #automationList .card.is-done .recipe-chip { animation: none; }
+    #automationList .card.is-done .recipe-chip,
+    #groupList .card.is-done .recipe-sec,
+    #groupList .card.is-done .recipe-chip { animation: none; }
 }

@@ -34,6 +34,23 @@ public final class VoiceOverlay {
     private boolean attached;
     private volatile Runnable onTap;
 
+    /** The reverse camera (or a gear not yet known) owns the screen: every pill steps aside meanwhile. */
+    private static volatile boolean suppressed;
+    private static volatile java.lang.ref.WeakReference<VoiceOverlay> current;
+
+    /** Main thread or any; applies to the pill on screen and any shown later. */
+    public static void setSuppressed(boolean on) {
+        if (suppressed == on) return;
+        suppressed = on;
+        java.lang.ref.WeakReference<VoiceOverlay> ref = current;
+        VoiceOverlay o = ref == null ? null : ref.get();
+        if (o != null) o.main.post(o::applySuppressed);
+    }
+
+    private void applySuppressed() {
+        if (root != null) root.setVisibility(suppressed ? android.view.View.GONE : android.view.View.VISIBLE);
+    }
+
     public VoiceOverlay(Context context) {
         app = context.getApplicationContext();
     }
@@ -57,6 +74,7 @@ public final class VoiceOverlay {
             if (!ensureAttached()) return;
             orb.setState(orbState);
             title.setText(text);
+            applySuppressed();
         });
     }
 
@@ -67,6 +85,7 @@ public final class VoiceOverlay {
             if (!ensureAttached()) return;
             orb.setState(orbState);
             title.setText(text);
+            applySuppressed();
             main.postDelayed(hideRunnable, holdMs);
         });
     }
@@ -108,6 +127,7 @@ public final class VoiceOverlay {
             lp.y = dp(28);
             wm.addView(root, lp);
             attached = true;
+            current = new java.lang.ref.WeakReference<>(this);
             return true;
         } catch (Throwable t) {
             Log.w(TAG, "attach failed: " + t.getMessage());

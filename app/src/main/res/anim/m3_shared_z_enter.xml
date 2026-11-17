@@ -1,23 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  Material 3 Shared-Axis (Z) ENTER for drill-down navigation.
-  Incoming destination grows in from 0.85x and fades up — feels like
-  a forward camera dolly. Pair with m3_shared_z_exit.xml.
-
-  Used by Settings → sub-page (Appearance, Privacy, About), Recordings → Video,
-  Integrations → Telegram / ABRP / MQTT.
--->
+<!-- Drill-down enter: slides in from the trailing edge. anim-ldrtl mirrors the x delta. -->
 <set xmlns:android="http://schemas.android.com/apk/res/android"
-    android:interpolator="@android:interpolator/decelerate_quad"
-    android:duration="280">
+    android:duration="220"
+    android:interpolator="@android:interpolator/decelerate_quad">
+    <translate
+        android:fromXDelta="8%p"
+        android:toXDelta="0" />
     <alpha
         android:fromAlpha="0.0"
         android:toAlpha="1.0" />
-    <scale
-        android:fromXScale="0.85"
-        android:toXScale="1.0"
-        android:fromYScale="0.85"
-        android:toYScale="1.0"
-        android:pivotX="50%"
-        android:pivotY="50%" />
 </set>

@@ -207,13 +207,49 @@ BYD.surveillance = {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body || {})
         });
-        const data = await resp.json();
+        const data = await this._readJsonReply(resp);
         if (!resp.ok || !data || data.success !== true) {
             throw new Error(data && data.error
                 ? data.error
                 : this._survT('surveillance.request_rejected', 'Request rejected'));
         }
         return data;
+    },
+
+    /** Parsed JSON body, or null when the reply is not JSON (proxy error page, empty or cut-off body). */
+    async _readJsonReply(resp) {
+        const text = await resp.text();
+        try {
+            return text ? JSON.parse(text) : null;
+        } catch (e) {
+            return null;
+        }
+    },
+
+    /** The car's saved surveillance switch, or null when it can't be read. */
+    async _readSurveillanceEnabled() {
+        try {
+            const resp = await fetch('/api/surveillance/config', { cache: 'no-store' });
+            const data = await this._readJsonReply(resp);
+            const enabled = data && data.success === true && data.config ? data.config.enabled : null;
+            return typeof enabled === 'boolean' ? enabled : null;
+        } catch (e) {
+            return null;
+        }
+    },
+
+    _applySurveillanceToggle(enabled, deferred) {
+        this.config.enabled = enabled;
+        if (this.savedConfig) this.savedConfig.enabled = enabled;
+        this.updateUI();
+        if (BYD.utils && BYD.utils.toast) {
+            // deferred=true → the vehicle is on, so the preference is stored
+            // but nothing is armed yet. Say that instead of a bare "enabled".
+            const msg = deferred
+                ? BYD.i18n.t(enabled ? 'surveillance.enabled_deferred' : 'surveillance.disabled_deferred')
+                : BYD.i18n.t(enabled ? 'surveillance.enabled' : 'surveillance.disabled');
+            BYD.utils.toast(msg, 'success');
+        }
     },
 
     /** Catalog lookup with an English fallback for when the catalog is not loaded. */
@@ -1657,32 +1693,44 @@ BYD.surveillance = {
         toggle.disabled = true;
         try {
             const body = await this._enqueueWrite(async () => {
-                const res = await fetch(
-                    enabled ? '/api/surveillance/enable' : '/api/surveillance/disable',
-                    { method: 'POST' });
-                const data = await res.json();
-                if (!res.ok || !data || data.success !== true) {
-                    throw new Error((data && data.error)
-                        || BYD.i18n.t('surveillance.toggle_failed'));
+                let res = null;
+                let data = null;
+                try {
+                    // A sized body keeps tunnels from re-framing an empty POST as chunked.
+                    res = await fetch(
+                        enabled ? '/api/surveillance/enable' : '/api/surveillance/disable',
+                        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+                    data = await this._readJsonReply(res);
+                } catch (network) {
+                    data = null;
+                }
+                if (!data) {
+                    // No JSON reply (tunnel error page, dropped connection): the outcome is unknown.
+                    const unconfirmed = new Error(BYD.i18n.t('surveillance.toggle_failed')
+                        + (res && !res.ok ? ' (HTTP ' + res.status + ')' : ''));
+                    unconfirmed.unconfirmed = true;
+                    throw unconfirmed;
+                }
+                if (!res.ok || data.success !== true) {
+                    throw new Error(data.error || BYD.i18n.t('surveillance.toggle_failed'));
                 }
                 return data;
             });
-            this.config.enabled = enabled;
-            if (this.savedConfig) this.savedConfig.enabled = enabled;
-            this.updateUI();
-            if (BYD.utils && BYD.utils.toast) {
-                // deferred=true → the vehicle is on, so the preference is stored
-                // but nothing is armed yet. Say that instead of a bare "enabled".
-                const msg = (body && body.deferred)
-                    ? BYD.i18n.t(enabled ? 'surveillance.enabled_deferred' : 'surveillance.disabled_deferred')
-                    : BYD.i18n.t(enabled ? 'surveillance.enabled' : 'surveillance.disabled');
-                BYD.utils.toast(msg, 'success');
-            }
+            this._applySurveillanceToggle(enabled, !!(body && body.deferred));
         } catch (e) {
-            toggle.checked = !!this.config.enabled;
-            if (BYD.utils && BYD.utils.toast) {
-                BYD.utils.toast((e && e.message)
-                    || BYD.i18n.t('surveillance.toggle_failed'), 'error');
+            const actual = e && e.unconfirmed ? await this._readSurveillanceEnabled() : null;
+            if (actual === enabled) {
+                this._applySurveillanceToggle(enabled, false);
+            } else {
+                if (actual !== null) {
+                    this.config.enabled = actual;
+                    if (this.savedConfig) this.savedConfig.enabled = actual;
+                }
+                toggle.checked = !!this.config.enabled;
+                if (BYD.utils && BYD.utils.toast) {
+                    BYD.utils.toast((e && e.message)
+                        || BYD.i18n.t('surveillance.toggle_failed'), 'error');
+                }
             }
         } finally {
             this._surveillanceTogglePending = false;
@@ -4382,6 +4430,76 @@ BYD.surveillance = {
             });
     },
 
+    // How close motion must be before the lights/horn fire. 'follow' keeps the detection zone's reach.
+    updateDeterrentZone(value) {
+        if (['follow', 'close', 'normal', 'extended'].indexOf(value) < 0) return;
+        const previous = this.config.deterrentZone || 'follow';
+        const writeVersion = this._nextImmediateWrite('deterrentZone');
+        this.config.deterrentZone = value;
+        this.updateDeterrentUI();
+        this._writeJson('/api/surveillance/config', { deterrentZone: value })
+            .then(() => {
+                if (this.savedConfig) this.savedConfig.deterrentZone = value;
+                if (!this._isLatestImmediateWrite('deterrentZone', writeVersion)) return;
+                this.config.deterrentZone = value;
+                this.updateDeterrentUI();
+            }).catch(e => {
+                if (!this._isLatestImmediateWrite('deterrentZone', writeVersion)) return;
+                this.config.deterrentZone = this.savedConfig
+                        && this.savedConfig.deterrentZone
+                    ? this.savedConfig.deterrentZone : previous;
+                this.updateDeterrentUI();
+                if (BYD.utils && BYD.utils.toast) {
+                    BYD.utils.toast(
+                        (e && e.message) || 'Could not save deterrent zone',
+                        'error');
+                }
+            });
+    },
+
+    // Deterrent hours: minutes since local midnight. Saves immediately, like the trigger.
+    updateDeterrentSchedule() {
+        const toMinutes = (id, fallback) => {
+            const el = document.getElementById(id);
+            const m = el && /^(\d{1,2}):(\d{2})/.exec(el.value || '');
+            if (!m) return fallback;
+            const h = parseInt(m[1], 10), min = parseInt(m[2], 10);
+            return (h >= 0 && h <= 23 && min >= 0 && min <= 59) ? h * 60 + min : fallback;
+        };
+        const toggle = document.getElementById('deterrentScheduleEnabled');
+        const previous = {
+            deterrentScheduleEnabled: this.config.deterrentScheduleEnabled === true,
+            deterrentScheduleStartMin: this.config.deterrentScheduleStartMin,
+            deterrentScheduleEndMin: this.config.deterrentScheduleEndMin
+        };
+        const next = {
+            deterrentScheduleEnabled: !!(toggle && toggle.checked),
+            deterrentScheduleStartMin: toMinutes('deterrentScheduleStart', 1200),
+            deterrentScheduleEndMin: toMinutes('deterrentScheduleEnd', 360)
+        };
+        const writeVersion = this._nextImmediateWrite('deterrentSchedule');
+        Object.keys(next).forEach(k => { this.config[k] = next[k]; });
+        this.updateDeterrentUI();
+        this._writeJson('/api/surveillance/config', next)
+            .then(() => {
+                if (this.savedConfig) Object.keys(next).forEach(k => { this.savedConfig[k] = next[k]; });
+                if (!this._isLatestImmediateWrite('deterrentSchedule', writeVersion)) return;
+                this.updateDeterrentUI();
+            }).catch(e => {
+                if (!this._isLatestImmediateWrite('deterrentSchedule', writeVersion)) return;
+                Object.keys(previous).forEach(k => {
+                    this.config[k] = this.savedConfig && k in this.savedConfig
+                        ? this.savedConfig[k] : previous[k];
+                });
+                this.updateDeterrentUI();
+                if (BYD.utils && BYD.utils.toast) {
+                    BYD.utils.toast(
+                        (e && e.message) || 'Could not save deterrent hours',
+                        'error');
+                }
+            });
+    },
+
     // Parked impact watch (opt-in). Saves immediately, like the deterrent settings.
     updateImpact(field, value) {
         if (field !== 'impactDetection' && field !== 'impactSensitivity') return;
@@ -4414,16 +4532,21 @@ BYD.surveillance = {
     async refreshImpactSensorStatus() {
         const target = document.getElementById('impactSensorStatus');
         if (!target) return;
+        const disabled = () => this._survT('surveillance.impact_status_disabled', 'Disabled');
         if (this.config.impactDetection !== true) {
-            target.textContent = 'Disabled';
+            target.textContent = disabled();
             return;
         }
         try {
             const response = await fetch('/api/surveillance/impact/status', { cache: 'no-store' });
             const data = await response.json();
             if (!data.success || !data.status) throw new Error('status unavailable');
+            if (this.config.impactDetection !== true) {
+                target.textContent = disabled();
+                return;
+            }
             const status = data.status;
-            const labels = {
+            const fallbacks = {
                 registered: 'Sensor listener registered; waiting for sample confirmation',
                 sampling: 'Receiving accelerometer samples',
                 unavailable: 'No usable accelerometer is available',
@@ -4431,10 +4554,16 @@ BYD.surveillance = {
                 inactive: 'Not active (vehicle is not in the parked sentry watch window)',
                 waiting: 'Waiting for sensor service'
             };
-            const detail = (status.sensor ? ' · ' + status.sensor : '') + (status.samples > 0 ? ' · ' + status.samples + ' samples/15s' : '');
-            target.textContent = (labels[status.state] || 'Status unknown') + detail;
+            const label = fallbacks[status.state]
+                ? this._survT('surveillance.impact_status_' + status.state, fallbacks[status.state])
+                : this._survT('surveillance.impact_status_unknown', 'Status unknown');
+            const samples = status.samples > 0
+                ? ' · ' + this._survT('surveillance.impact_status_samples', status.samples + ' samples/15s', { n: status.samples })
+                : '';
+            target.textContent = label + (status.sensor ? ' · ' + status.sensor : '') + samples;
         } catch (_) {
-            target.textContent = 'Status unavailable — daemon or sensor service not reporting';
+            target.textContent = this._survT('surveillance.impact_status_error',
+                'Status unavailable — the sensor service is not reporting');
         }
     },
 
@@ -4458,6 +4587,29 @@ BYD.surveillance = {
         if (triggerRow) triggerRow.style.display = action === 'silent' ? 'none' : '';
         const triggerSelect = document.getElementById('deterrentTrigger');
         if (triggerSelect) triggerSelect.value = this.config.deterrentTrigger || 'any';
+        const zoneRow = document.getElementById('deterrentZoneRow');
+        if (zoneRow) zoneRow.style.display = action === 'silent' ? 'none' : '';
+        const zoneSelect = document.getElementById('deterrentZone');
+        if (zoneSelect) zoneSelect.value = this.config.deterrentZone || 'follow';
+        const scheduleOn = this.config.deterrentScheduleEnabled === true;
+        const scheduleRow = document.getElementById('deterrentScheduleRow');
+        if (scheduleRow) scheduleRow.style.display = action === 'silent' ? 'none' : '';
+        const scheduleTimesRow = document.getElementById('deterrentScheduleTimesRow');
+        if (scheduleTimesRow) scheduleTimesRow.style.display = action !== 'silent' && scheduleOn ? '' : 'none';
+        const scheduleToggle = document.getElementById('deterrentScheduleEnabled');
+        if (scheduleToggle) scheduleToggle.checked = scheduleOn;
+        const hhmm = (minutes, fallback) => {
+            const v = Number.isInteger(minutes) && minutes >= 0 && minutes <= 1439 ? minutes : fallback;
+            return String(Math.floor(v / 60)).padStart(2, '0') + ':' + String(v % 60).padStart(2, '0');
+        };
+        const scheduleStart = document.getElementById('deterrentScheduleStart');
+        if (scheduleStart && document.activeElement !== scheduleStart) {
+            scheduleStart.value = hhmm(this.config.deterrentScheduleStartMin, 1200);
+        }
+        const scheduleEnd = document.getElementById('deterrentScheduleEnd');
+        if (scheduleEnd && document.activeElement !== scheduleEnd) {
+            scheduleEnd.value = hhmm(this.config.deterrentScheduleEndMin, 360);
+        }
 
         const badge = document.getElementById('deterrentBadge');
         if (badge) {

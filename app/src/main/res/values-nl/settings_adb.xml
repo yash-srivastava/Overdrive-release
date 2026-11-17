@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_section_adb">ADB</string>
+    <string name="settings_adb_subtitle">Verbinding, activering en automatisch herstel.</string>
+    <string name="settings_adb_connection_title">Verbinding</string>
+    <string name="settings_adb_automatic_title">Automatisch herstel</string>
+    <string name="settings_adb_automatic_restore">ADB automatisch herstellen</string>
+    <string name="settings_adb_automatic_description">Herstelt de ADB-instelling bij het starten en wanneer deze wordt uitgeschakeld. De toestemming voor instellingen moet al verleend zijn; wifi is niet nodig. DiLink 5 biedt ook draadloos herstel via gevalideerde wifi met een eerder geautoriseerde sleutel.</string>
+    <string name="settings_adb_recover">ADB nu herstellen</string>
+    <string name="settings_adb_cancel_recovery">Herstel annuleren</string>
+    <string name="settings_adb_manual_title">Handmatige activering</string>
+    <string name="settings_adb_manual_description">Gebruik compatibele BYD-hulpmiddelen om ADB-toegang aan te vragen. Een wifi-verbinding is niet nodig.</string>
+    <string name="settings_adb_enable">ADB activeren</string>
+    <string name="settings_adb_advanced_tools">Geavanceerde hulpmiddelen</string>
+    <string name="settings_adb_hide_advanced">Geavanceerde hulpmiddelen verbergen</string>
+    <string name="settings_adb_advanced_description">Diagnosticeer problemen, open BYD-hulpmiddelen of maak een handmatige poging ongedaan.</string>
+    <string name="settings_adb_open_developer">Ontwikkelaarsopties openen</string>
+    <string name="settings_adb_developer_page">BYD-ontwikkelaarspagina aanvragen</string>
+    <string name="settings_adb_diagnostics">Compatibiliteit en verbinding controleren</string>
+    <string name="settings_adb_restore">Wijzigingen van handmatige activering ongedaan maken</string>
+    <string name="settings_adb_export">APK van BYD-ontwikkelaarshulpmiddelen exporteren</string>
+    <string name="settings_adb_dialog_confirm">Draadloze foutopsporing op dit netwerk toestaan</string>
+    <string name="settings_adb_dialog_confirm_description">Verbind eerst met een gevalideerd wifi-netwerk. Geef OverDrive toestemming om het dialoogvenster voor draadloze foutopsporing alleen voor dit netwerk te bevestigen.</string>
+    <string name="settings_adb_tools_unavailable">Handmatige activering is niet beschikbaar voor de huidige modus of geïnstalleerde BYD-hulpmiddelen.</string>
+    <string name="settings_adb_recovery_availability">Lokaal herstel vereist de toestemming voor instellingen die tijdens de ADB-configuratie is verleend. Wifi of de DiLink 5-modus is niet nodig.</string>
+    <string name="settings_adb_details_title">Details van de laatste poging</string>
+    <string name="settings_adb_recovery_confirm_body">Lokaal herstel gebruikt de al verleende toestemming voor instellingen, zonder wifi. DiLink 5 kan ook gevalideerde wifi en een eerder geautoriseerde sleutel gebruiken. Dit kan netwerk-ADB op poort 5555 openen of herstellen, mogelijk bereikbaar voor andere apparaten in het voertuignetwerk. Ga alleen door op een vertrouwd netwerk. ADB-sleutelverificatie blijft actief.</string>
+    <string name="settings_adb_recovery_permission_missing">De toestemming voor instellingen ontbreekt. Als ADB ook niet beschikbaar is, gebruik dan eerst ADB inschakelen of Ontwikkelaarsopties en voltooi de ADB-configuratie opnieuw.</string>
+    <string name="settings_adb_recovery_setting_enabled">De ADB-instelling is ingeschakeld. Een geauthenticeerde ADB-verbinding is niet bevestigd.</string>
+    <string name="settings_adb_recovery_setting_failed">De ADB-instelling kon niet worden ingeschakeld en gecontroleerd. De firmware kan de wijziging weigeren.</string>
+    <string name="settings_adb_recovery_save_failed">De voorkeur voor automatisch herstel kon niet worden opgeslagen. Controleer ADB en probeer het opnieuw.</string>
+</resources>

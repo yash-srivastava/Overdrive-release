@@ -10,8 +10,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#00876C">
-    <script src="../shared/theme.js?v=11"></script>
-    <script src="../shared/app-shell.js?v=19"></script>
+    <script src="../shared/theme.js?v=12"></script>
+    <script src="../shared/app-shell.js?v=23"></script>
     <!--
       Storage: every storage option on one page (moved here from the Surveillance,
       Recording and Trips pages). Location + limit picks are staged and committed
@@ -39,7 +39,9 @@
         /* Section rows. */
         .st-usage-row { padding-bottom: 8px; border-bottom: 0; }
         .st-limit-row { margin-top: 16px; border-bottom: 0; }
-        .st-no-limit { display: flex; align-items: center; gap: 6px; margin-top: 8px; color: var(--on-surface-variant); font-size: var(--fs-caption); }
+        .st-no-limit { display: flex; align-items: center; margin-top: 8px; color: var(--on-surface-variant); font-size: var(--fs-caption); }
+        .st-no-limit input { margin: 0 6px 0 0; }
+        [dir="rtl"] .st-no-limit input { margin: 0 0 0 6px; }
         .st-limit-row + .slider-range-labels { margin-bottom: 4px; }
         .st-banner { margin-top: 12px; }
         .st-dot-warn { background-color: var(--warning); }
@@ -61,38 +63,24 @@
         #cdrRecommendBanner .info-row > .label { display: block; color: inherit; font-weight: 600; }
         #cdrRecommendBanner .info-row > .value { display: block; margin-top: 2px; font-weight: 400; }
 
-        /* Apply bar: room under the last tile, bar surface, toasts above it.
-           Car WebView injects .page-body { padding-bottom: 24px !important; } — st-page must win.
-           Footer stack: styles.css .footer-bar (mobile padding-bottom calc(12px + 40px + safe)),
-           revamp has-bottom-nav lifts the bar by --bottom-nav-h. +12px matches theme.js sticky clearance. */
-        .st-page .page-body { padding-bottom: calc(92px + var(--safe-bottom, 0px)) !important; }
-        :root[data-android-embed="1"] .st-page .page-body { padding-bottom: calc(100px + var(--safe-bottom, 0px)) !important; }
+        /* Apply bar: room under the last tile, bar surface, toasts above it. */
+        .st-page .page-body { padding-bottom: 128px; }
         .st-page .footer-bar { border-top-color: var(--hairline); background-color: var(--bar); box-shadow: none; }
         [dir="rtl"] .st-page .footer-bar { left: 0; right: var(--sidebar-width); }
-        .st-page .toast-container { bottom: calc(88px + var(--safe-bottom, 0px)); }
+        .st-page .toast-container { bottom: 104px; }
         :root[data-android-embed="1"] .st-page .footer-bar .btn { min-height: 56px; }
-        :root[data-android-embed="1"] .st-page .toast-container { bottom: calc(96px + var(--safe-bottom, 0px)); }
+        /* The in-app WebView forces .page-body to 24px and toasts to 24px, under the 80px bar. */
+        :root[data-android-embed="1"] .st-page .page-body { padding-bottom: 104px !important; }
+        :root[data-android-embed="1"] .st-page .toast-container { bottom: 96px !important; }
         @media (max-width: 768px) {
-            .st-page .page-body { padding-bottom: calc(124px + var(--safe-bottom, 0px)) !important; }
-            :root[data-android-embed="1"] .st-page .page-body { padding-bottom: calc(132px + var(--safe-bottom, 0px)) !important; }
-            .st-page .toast-container { bottom: calc(120px + var(--safe-bottom, 0px)); }
-            :root[data-android-embed="1"] .st-page .toast-container { bottom: calc(128px + var(--safe-bottom, 0px)); }
             [dir="rtl"] .st-page .footer-bar { right: 0; }
-            html.has-bottom-nav body.st-page .page-body {
-                padding-bottom: calc(var(--bottom-nav-h, 76px) + 84px + var(--safe-bottom, 0px)) !important;
-            }
-            :root[data-android-embed="1"] html.has-bottom-nav body.st-page .page-body {
-                padding-bottom: calc(var(--bottom-nav-h, 76px) + 92px + var(--safe-bottom, 0px)) !important;
-            }
-            html.has-bottom-nav body.st-page .toast-container {
-                bottom: calc(var(--bottom-nav-h, 76px) + 88px + var(--safe-bottom, 0px));
-            }
+            html.has-bottom-nav body.st-page .toast-container { bottom: 164px; }
         }
     </style>
 </head>
 <body class="r-settings st-page">
     <div class="app-layout">
-        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=19) -->
+        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=23) -->
         <div id="app-shell-mount"></div>
         <main class="main-content" aria-busy="true" inert style="pointer-events:none">
             <div class="mobile-header">
@@ -192,7 +180,7 @@
                                 <div class="slider-control">
                                     <span class="slider-value" id="survLimitValue">500 MB</span>
                                     <input type="range" class="slider" id="survLimitSlider" min="100" max="100000" step="100" value="500" oninput="StoragePage.updateSurvLimit(this.value)" data-i18n-attr="aria-label:recording.storage_limit" aria-label="Storage Limit">
-                                    <label class="st-no-limit"><input type="checkbox" id="surveillanceNoLimit" onchange="StoragePage.setNoLimit('surveillance', this.checked)"> No Limit</label>
+                                    <label class="st-no-limit"><input type="checkbox" id="surveillanceNoLimit" onchange="StoragePage.setNoLimit('surveillance', this.checked)"><span data-i18n="storage.no_limit">No Limit</span></label>
                                 </div>
                             </div>
                         </div>
@@ -258,7 +246,7 @@
                                 <div class="slider-control">
                                     <span class="slider-value" id="recLimitValue">500 MB</span>
                                     <input type="range" class="slider" id="recLimitSlider" min="100" max="100000" step="100" value="500" oninput="StoragePage.updateRecLimit(this.value)" data-i18n-attr="aria-label:recording.storage_limit" aria-label="Storage Limit">
-                                    <label class="st-no-limit"><input type="checkbox" id="recordingsNoLimit" onchange="StoragePage.setNoLimit('recordings', this.checked)"> No Limit</label>
+                                    <label class="st-no-limit"><input type="checkbox" id="recordingsNoLimit" onchange="StoragePage.setNoLimit('recordings', this.checked)"><span data-i18n="storage.no_limit">No Limit</span></label>
                                 </div>
                             </div>
                         </div>
@@ -318,7 +306,6 @@
                                 <div class="slider-control">
                                     <span class="slider-value" id="storageLimitValue">500 MB</span>
                                     <input type="range" class="slider" id="storageLimitSlider" min="100" max="100000" step="100" value="500" oninput="StoragePage.updateTripLimit(this.value)" data-i18n-attr="aria-label:trip.settings.storage_limit" aria-label="Storage Limit">
-                                    <label class="st-no-limit"><input type="checkbox" id="tripsNoLimit" onchange="StoragePage.setNoLimit('trips', this.checked)"> No Limit</label>
                                 </div>
                             </div>
                         </div>
@@ -461,11 +448,11 @@
 
     <script src="../shared/auth.js"></script>
     <script src="../shared/pwa-init.js?v=index1"></script>
-    <script src="../shared/core.js?v=24"></script>
+    <script src="../shared/core.js?v=27"></script>
     <script src="../shared/update-flow.js?v=3"></script>
-    <script src="../shared/storage-budget.js?v=8"></script>
+    <script src="../shared/storage-budget.js?v=9"></script>
     <script src="../shared/settings-hydration.js?v=1"></script>
-    <script src="../shared/storage.js?v=2"></script>
+    <script src="../shared/storage.js?v=3"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');

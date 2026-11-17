@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="web_state_retry_now">Réessayer maintenant</string>
+    <string name="web_state_retry_in">Nouvel essai automatique · prochain essai dans %1$d s</string>
+    <string name="web_state_retrying_now">Nouvel essai automatique · essai en cours…</string>
+    <string name="web_state_sign_in_title">Connexion à cette page impossible</string>
+    <string name="web_state_sign_in_body">Le service Caméra fonctionne, mais il a refusé la connexion de l\'application. OverDrive la rétablit automatiquement tant qu\'ADB est connecté.</string>
+</resources>

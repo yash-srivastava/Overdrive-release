@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Timeline bottom panel (filters + strip). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <corners android:radius="@dimen/od_radius_panel" />
+    <solid android:color="?attr/colorSurfaceContainer" />
+</shape>

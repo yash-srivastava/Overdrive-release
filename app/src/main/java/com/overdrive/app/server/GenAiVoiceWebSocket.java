@@ -158,7 +158,15 @@ public final class GenAiVoiceWebSocket {
     /** {@code mic=far} (the in-car voice assistant) selects far-field noise reduction. */
     public static void handle(
             Socket client, String websocketKey, String language, String mic) {
-        Session session = new Session(client, language, "far".equals(mic));
+        handle(client, websocketKey, language, mic, null);
+    }
+
+    /** {@code brief} (far-field only) makes it a Trip Briefing session: one question, one tool. */
+    public static void handle(
+            Socket client, String websocketKey, String language, String mic, String brief) {
+        boolean farField = "far".equals(mic);
+        Session session = new Session(client, language, farField,
+                farField ? com.overdrive.app.genai.GenAiTripBriefing.parse(brief) : null);
         try {
             session.handshake(websocketKey);
             if (!ACTIVE.compareAndSet(null, session)) {
@@ -300,7 +308,8 @@ public final class GenAiVoiceWebSocket {
         String tool = GenAiAction.TOOL_NAME.equals(name)
                 || GenAiContext.REALTIME_TOOL_NAME.equals(name)
                 || GenAiVoiceCommand.TOOL_NAME.equals(name)
-                || com.overdrive.app.genai.GenAiWebSearch.TOOL_NAME.equals(name) ? name : "unknown";
+                || com.overdrive.app.genai.GenAiWebSearch.TOOL_NAME.equals(name)
+                || com.overdrive.app.genai.GenAiTripBriefing.TOOL_NAME.equals(name) ? name : "unknown";
         StringBuilder out = new StringBuilder("Realtime tool call: name=").append(tool);
         if (argKey != null && argKey.matches("[a-z]{1,16}")) {
             out.append(' ').append(argKey).append('=')
@@ -470,6 +479,26 @@ public final class GenAiVoiceWebSocket {
                 .put("outputAudioTranscription", new JSONObject()));
     }
 
+    /**
+     * A Trip Briefing session: the far-field audio setup with trip_briefing_answer as its only
+     * tool (no vehicle tools, no search), so nothing else can run from it.
+     */
+    static JSONObject briefingSetup(boolean openAi, String model, String instructions,
+                                    com.overdrive.app.genai.GenAiTripBriefing briefing) throws Exception {
+        if (openAi) {
+            JSONObject setup = openAiSetup(model, instructions, true);
+            setup.getJSONObject("session").put("tools", new JSONArray().put(briefing.openAiTool()));
+            return setup;
+        }
+        JSONObject declaration = briefing.geminiTool();
+        stripUnsupportedGeminiSchemaKeys(declaration.optJSONObject("parameters"));
+        if (geminiDeclaresBehavior(model)) declaration.put("behavior", GEMINI_TOOL_BEHAVIOR);
+        JSONObject setup = geminiSetup(model, instructions, true, false, false);
+        setup.getJSONObject("setup").put("tools", new JSONArray().put(new JSONObject()
+                .put("functionDeclarations", new JSONArray().put(declaration))));
+        return setup;
+    }
+
     private static final class Session {
         private final Socket socket;
         private final Object outputLock = new Object();
@@ -477,6 +506,8 @@ public final class GenAiVoiceWebSocket {
                 new AtomicReference<>();
         private final String language;
         private final boolean farField;
+        // A Trip Briefing session (GenAiTripBriefing), or null.
+        private final com.overdrive.app.genai.GenAiTripBriefing briefing;
         // Binds daemon-minted proposal tokens to this session; they die with it.
         final String sessionId = UUID.randomUUID().toString();
         // Typed commands run here, one at a time and never on the OkHttp reader thread.
@@ -538,10 +569,12 @@ public final class GenAiVoiceWebSocket {
         private GenAiConfig config;
         private WebSocket providerSocket;
 
-        Session(Socket socket, String language, boolean farField) {
+        Session(Socket socket, String language, boolean farField,
+                com.overdrive.app.genai.GenAiTripBriefing briefing) {
             this.socket = socket;
             this.language = language;
             this.farField = farField;
+            this.briefing = briefing;
         }
 
         String summary() {
@@ -555,10 +588,12 @@ public final class GenAiVoiceWebSocket {
                     + " reason=" + (failure != null ? failure : stopReason)
                     + " route=" + route + " connectMs=" + connectMs() + " setupMs=" + setupMs
                     + " code=" + code
+                    + (briefing != null ? " brief=" + briefing.mode : "")
                     + (live && !GenAiConfig.PROVIDER_OPENAI.equals(provider)
                             ? " search=" + (searchThisAttempt ? "on"
                                     : searchFunctionThisAttempt ? "search_web" : "off") : "")
-                    + (farField ? " reply=\"" + replyForLog() + "\"" : "");
+                    // A briefing reply names the destination: never logged.
+                    + (farField && briefing == null ? " reply=\"" + replyForLog() + "\"" : "");
         }
 
         void noteReply(String text) {
@@ -660,7 +695,10 @@ public final class GenAiVoiceWebSocket {
             // Hands-free sessions start with a compact live snapshot (local time, the car's
             // headline status and coarse location, each under its own toggle); the Assistant
             // page keeps today's data-free start.
-            String instructions = GenAiContext.withResponseLanguage(
+            // A briefing session has one job and one tool, so none of the open conversation's guidance.
+            String instructions = briefing != null
+                    ? GenAiContext.withResponseLanguage(briefing.instructions(), language)
+                    : GenAiContext.withResponseLanguage(
                     runtime.realtimeInstructions(farField)
                             + "\n\n" + GenAiAction.realtimeInstructions(farField)
                             + (openAi ? "\n\n" + com.overdrive.app.genai.GenAiWebSearch
@@ -703,6 +741,7 @@ public final class GenAiVoiceWebSocket {
                                 .put("type", "live")
                                 .put("inputSampleRate", inputRate)
                                 .put("outputSampleRate", 24_000));
+                        if (briefing != null && briefing.asks()) sendBriefingKickoff(openAi);
                     } else if ("retry".equals(decision)) {
                         if (failure == null) logger.warn(connectTimedOut(now));
                         retryDirect(openAi, instructions, now);
@@ -922,6 +961,57 @@ public final class GenAiVoiceWebSocket {
             sendJson(new JSONObject()
                     .put("type", "state")
                     .put("state", "thinking"));
+        }
+
+        /** Ask mode: a user turn that makes the model ask the briefing question first. */
+        private void sendBriefingKickoff(boolean openAi) throws Exception {
+            WebSocket provider = providerSocket;
+            if (provider == null) return;
+            String text = briefing.kickoff();
+            if (openAi) {
+                provider.send(new JSONObject()
+                        .put("type", "conversation.item.create")
+                        .put("item", new JSONObject()
+                                .put("type", "message")
+                                .put("role", "user")
+                                .put("content", new JSONArray().put(new JSONObject()
+                                        .put("type", "input_text")
+                                        .put("text", text))))
+                        .toString());
+                provider.send(new JSONObject().put("type", "response.create").toString());
+            } else {
+                provider.send(new JSONObject()
+                        .put("clientContent", new JSONObject()
+                                .put("turns", new JSONArray().put(new JSONObject()
+                                        .put("role", "user")
+                                        .put("parts", new JSONArray().put(new JSONObject()
+                                                .put("text", text)))))
+                                .put("turnComplete", true))
+                        .toString());
+            }
+        }
+
+        /**
+         * A tool call in a briefing session: trip_briefing_answer goes to the hands-free client and
+         * the output tells the model what to say; anything else is refused.
+         */
+        private JSONObject briefingResult(String name, JSONObject arguments, boolean oneCall, long calledAt)
+                throws Exception {
+            boolean ours = oneCall && com.overdrive.app.genai.GenAiTripBriefing.TOOL_NAME.equals(name);
+            JSONObject answer = ours ? briefing.answerOf(arguments) : null;
+            JSONObject output = ours
+                    ? briefing.resultFor(answer)
+                    : new JSONObject().put("status", "rejected")
+                            .put("detail", oneCall ? "Unknown tool." : "Request one tool at a time.");
+            if (answer != null) {
+                sendJson(new JSONObject()
+                        .put("type", "briefing_answer")
+                        .put("answer", answer.optString("answer"))
+                        .put("app", answer.has("app") ? answer.optString("app") : JSONObject.NULL));
+            }
+            logToolCall(name, "answer", answer == null ? null : answer.optString("answer"), calledAt,
+                    output.toString(), output.optString("status", ""));
+            return output;
         }
 
         /**
@@ -1313,10 +1403,11 @@ public final class GenAiVoiceWebSocket {
             // The Assistant page gets Google Search too: live weather, traffic and opening
             // hours are asked for there as much as hands-free. Still Gemini-only, because
             // the built-in tool is Gemini's; the OpenAI path has no search tool to offer.
-            searchThisAttempt = !openAi && !searchSuppressed
+            searchThisAttempt = !openAi && !searchSuppressed && briefing == null
                     && googleSearchOffered(System.currentTimeMillis());
             // Without Google Search, Gemini still searches: search_web runs in the daemon.
-            searchFunctionThisAttempt = !openAi && !searchThisAttempt && !searchFunctionSuppressed;
+            searchFunctionThisAttempt = !openAi && !searchThisAttempt && !searchFunctionSuppressed
+                    && briefing == null;
             dropProvider(providerSocket);
             providerSocket = null;
             providerFailure = null;
@@ -1491,7 +1582,9 @@ public final class GenAiVoiceWebSocket {
                 logger.info("Realtime provider socket open after " + (providerOpenedAt - connectStartedAt)
                         + " ms (HTTP 101)");
                 try {
-                    JSONObject setup = openAi
+                    JSONObject setup = briefing != null
+                            ? briefingSetup(openAi, config.realtimeModel, instructions, briefing)
+                            : openAi
                             ? openAiSetup(
                                     config.realtimeModel, instructions, farField)
                             : geminiSetup(
@@ -1716,6 +1809,16 @@ public final class GenAiVoiceWebSocket {
                     String name = call.optString("name", "");
                     JSONObject arguments = new JSONObject(
                             call.optString("arguments", "{}"));
+                    if (briefing != null) {
+                        sendOpenAiFunctionOutput(call,
+                                briefingResult(name, arguments, true, calledAt).toString());
+                        providerSocket.send(new JSONObject()
+                                .put("type", "response.create").toString());
+                        sendJson(new JSONObject()
+                                .put("type", "state")
+                                .put("state", "thinking"));
+                        return true;
+                    }
                     if (farField && GenAiVoiceCommand.TOOL_NAME.equals(name)) {
                         // The reply (output + response.create) is sent once the
                         // command has run, off this reader thread.
@@ -1901,6 +2004,14 @@ public final class GenAiVoiceWebSocket {
                     JSONObject call = calls.optJSONObject(i);
                     if (call == null) continue;
                     String name = call.optString("name", "");
+                    if (briefing != null) {
+                        JSONObject answered = new JSONObject().put("name", name).put("response",
+                                briefingResult(name, call.optJSONObject("args"), oneCall, calledAt));
+                        String briefCallId = call.optString("id", "");
+                        if (!briefCallId.isEmpty()) answered.put("id", briefCallId);
+                        responses.put(answered);
+                        continue;
+                    }
                     if (oneCall && farField
                             && GenAiVoiceCommand.TOOL_NAME.equals(name)) {
                         // The toolResponse is sent once the command has run.

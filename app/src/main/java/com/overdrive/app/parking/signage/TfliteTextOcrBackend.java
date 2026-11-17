@@ -29,15 +29,15 @@ import java.util.List;
  *       exported by {@code dev/export_signage_ocr.py}); input NHWC RGB float
  *       with ImageNet normalisation, output a text probability map. Boxes are
  *       recovered with {@link ConnectedComponents} (no OpenCV).</li>
- *   <li><b>Recogniser</b> — a CRNN/SVTR-style CTC model (PP-OCRv4 mobile rec
- *       English); input {@code [1,48,W,3]} normalised to [-1,1], output
+ *   <li><b>Recogniser</b> — a CRNN/SVTR-style CTC model (PP-OCRv4 mobile rec,
+ *       Latin + Chinese); input {@code [1,48,W,3]} normalised to [-1,1], output
  *       {@code [1,T,C]} per-step class distribution decoded greedily by
  *       {@link CtcDecoder} with the dictionary in
  *       {@code signage_charset.txt} (blank at 0).</li>
  * </ol>
  *
  * The models SHIP IN THE APK ({@code assets/models/signage_*}: en_PP-OCRv3
- * mobile detector + recogniser, fp16 weights, ≈5.5 MB together, converted by
+ * mobile detector + PP-OCRv4 mobile recogniser, fp16 weights, ≈6.4 MB together, converted by
  * {@code dev/export_signage_ocr.py}). They are looked up first in
  * {@link #EXTERNAL_MODEL_DIR} (so a user can side-load a newer export on the
  * unit without a rebuild) and then in the APK assets. Only if neither has all
@@ -67,6 +67,11 @@ public final class TfliteTextOcrBackend implements TextOcrBackend {
     static final float BOX_MARGIN_FRAC = 0.15f;
     static final int DET_MIN_AREA = 8;
     static final int MAX_BOXES = 12;
+    /** Native-resolution pass: detector tiles per frame, and boxes it may add beyond the whole-frame pass. */
+    static final int MAX_FINE_TILES = 12;
+    static final int MAX_FINE_BOXES = 8;
+    /** A native-resolution box mostly inside a whole-frame box is the same text. */
+    static final float FINE_COVERED_FRAC = 0.5f;
     static final int REC_MAX_W = 320;
     static final int REC_MIN_W = 32;
     static final int NUM_THREADS = 2;
@@ -90,7 +95,11 @@ public final class TfliteTextOcrBackend implements TextOcrBackend {
     private final int recClasses;
 
     private ByteBuffer detInput;
+    private ByteBuffer detOutput;
+    private int[] tilePixels;
     private ByteBuffer recInput;
+    private ByteBuffer recOutput;
+    private float[] recFlat;
     private int recInputW = -1;
 
     private TfliteTextOcrBackend(Interpreter det, Interpreter rec, String[] charset, Log log,
@@ -223,20 +232,16 @@ public final class TfliteTextOcrBackend implements TextOcrBackend {
             int n = 0;
             for (int[] b : boxes) {
                 if (n++ >= MAX_BOXES) break;
-                int bw = b[2] - b[0] + 1, bh = b[3] - b[1] + 1;
-                if (bw < 8 || bh < 8) continue;
-                Bitmap crop = Bitmap.createBitmap(src, b[0], b[1], bw, bh);
-                try {
-                    CtcDecoder.Decoded d = recognise(crop);
-                    if (d.text != null && !d.text.trim().isEmpty()) {
-                        out.add(new TextLine(d.text.trim(), d.confidence,
-                                (b[0] + bw / 2f) / src.getWidth(), (b[1] + bh / 2f) / src.getHeight(),
-                                (float) bw / src.getWidth(), (float) bh / src.getHeight()));
-                    }
-                } finally {
-                    if (crop != src) crop.recycle();
-                }
+                recogniseBox(src, b, out);
             }
+            List<int[]> fine;
+            try {
+                fine = detectFine(src, boxes);
+            } catch (Throwable t) {
+                log.log("Signage OCR fine pass failed: " + t);
+                fine = Collections.emptyList();
+            }
+            for (int[] b : fine) recogniseBox(src, b, out);
         } catch (Throwable t) {
             log.log("Signage OCR read failed: " + t);
         } finally {
@@ -245,12 +250,32 @@ public final class TfliteTextOcrBackend implements TextOcrBackend {
         return out;
     }
 
+    private void recogniseBox(Bitmap src, int[] b, List<TextLine> out) {
+        int bw = b[2] - b[0] + 1, bh = b[3] - b[1] + 1;
+        if (bw < 8 || bh < 8) return;
+        Bitmap crop = Bitmap.createBitmap(src, b[0], b[1], bw, bh);
+        try {
+            CtcDecoder.Decoded d = recognise(crop);
+            if (d.text != null && !d.text.trim().isEmpty()) {
+                out.add(new TextLine(d.text.trim(), d.confidence,
+                        (b[0] + bw / 2f) / src.getWidth(), (b[1] + bh / 2f) / src.getHeight(),
+                        (float) bw / src.getWidth(), (float) bh / src.getHeight()));
+            }
+        } finally {
+            if (crop != src) crop.recycle();
+        }
+    }
+
     @Override
     public synchronized void close() {
         try { det.close(); } catch (Throwable ignored) {}
         try { rec.close(); } catch (Throwable ignored) {}
         detInput = null;
+        detOutput = null;
+        tilePixels = null;
         recInput = null;
+        recOutput = null;
+        recFlat = null;
     }
 
     // ==================== DETECTION ====================
@@ -307,6 +332,142 @@ public final class TfliteTextOcrBackend implements TextOcrBackend {
         }
     }
 
+    /**
+     * Native-resolution pass for text too small for {@link #detect}'s whole-frame resize (pillar
+     * placards a few pixels tall after it): detector tiles stitched into one map. Only boxes the
+     * whole-frame pass did not already cover are returned, so its reads are unchanged.
+     */
+    private List<int[]> detectFine(Bitmap src, List<int[]> coarse) {
+        List<int[]> out = new ArrayList<>();
+        int sw = src.getWidth(), sh = src.getHeight();
+        if (sw <= detW && sh <= detH) return out;
+        float s = 1f;
+        while (s > 0.25f && tileCount(Math.round(sw * s), detW) * tileCount(Math.round(sh * s), detH) > MAX_FINE_TILES) {
+            s *= 0.8f;
+        }
+        int fw = Math.max(1, Math.round(sw * s)), fh = Math.max(1, Math.round(sh * s));
+        Bitmap img = s < 1f ? Bitmap.createScaledBitmap(src, fw, fh, true) : src;
+        try {
+            int[] oshape = det.getOutputTensor(0).shape();
+            int oh, ow;
+            if (oshape.length == 4 && oshape[1] == 1) { oh = oshape[2]; ow = oshape[3]; }
+            else if (oshape.length == 4) { oh = oshape[1]; ow = oshape[2]; }
+            else if (oshape.length == 3) { oh = oshape[1]; ow = oshape[2]; }
+            else { oh = detH; ow = detW; }
+            if (detInput == null) {
+                detInput = ByteBuffer.allocateDirect(4 * 3 * detH * detW).order(ByteOrder.nativeOrder());
+            }
+            if (detOutput == null || detOutput.capacity() != 4 * oh * ow) {
+                detOutput = ByteBuffer.allocateDirect(4 * oh * ow).order(ByteOrder.nativeOrder());
+            }
+            if (tilePixels == null || tilePixels.length != detW * detH) tilePixels = new int[detW * detH];
+            float[] map = new float[fw * fh];
+            float[] tileProb = new float[oh * ow];
+            for (int ty : tileStarts(fh, detH)) {
+                for (int tx : tileStarts(fw, detW)) {
+                    int tw = Math.min(detW, fw - tx), th = Math.min(detH, fh - ty);
+                    img.getPixels(tilePixels, 0, detW, tx, ty, tw, th);
+                    fillTile(tilePixels, tw, th, detInput, detNchw, detW, detH);
+                    detInput.rewind();
+                    detOutput.rewind();
+                    det.run(detInput, detOutput);
+                    detOutput.rewind();
+                    detOutput.asFloatBuffer().get(tileProb);
+                    for (int y = 0; y < th; y++) {
+                        int orow = Math.min(oh - 1, y * oh / detH) * ow;
+                        int row = (ty + y) * fw + tx;
+                        for (int x = 0; x < tw; x++) {
+                            float v = tileProb[orow + Math.min(ow - 1, x * ow / detW)];
+                            if (v > map[row + x]) map[row + x] = v;
+                        }
+                    }
+                }
+            }
+            List<ConnectedComponents.Component> comps =
+                    ConnectedComponents.label(map, fw, fh, DET_BIN_THRESH, DET_MIN_AREA);
+            float inv = 1f / s;
+            for (ConnectedComponents.Component c : comps) {
+                if (c.meanScore() < DET_BOX_THRESH) continue;
+                int[] u = ConnectedComponents.unclip(c, DET_UNCLIP_RATIO, fw, fh);
+                int x0 = Math.round(u[0] * inv);
+                int y0 = Math.round(u[1] * inv);
+                int x1 = Math.round((u[2] + 1) * inv) - 1;
+                int y1 = Math.round((u[3] + 1) * inv) - 1;
+                int margin = Math.round((y1 - y0 + 1) * BOX_MARGIN_FRAC);
+                x0 = clamp(x0 - margin, 0, sw - 1);
+                y0 = clamp(y0 - margin, 0, sh - 1);
+                x1 = clamp(x1 + margin, 0, sw - 1);
+                y1 = clamp(y1 + margin, 0, sh - 1);
+                if (x1 <= x0 || y1 <= y0) continue;
+                int[] box = {x0, y0, x1, y1, c.area};
+                if (!covered(box, coarse)) out.add(box);
+            }
+            Collections.sort(out, (a, b) -> Integer.compare(b[4], a[4]));
+            if (out.size() > MAX_FINE_BOXES) out = new ArrayList<>(out.subList(0, MAX_FINE_BOXES));
+            Collections.sort(out, (a, b) -> {
+                int rowA = a[1] / 24, rowB = b[1] / 24;
+                return rowA != rowB ? Integer.compare(rowA, rowB) : Integer.compare(a[0], b[0]);
+            });
+            return out;
+        } finally {
+            if (img != src) img.recycle();
+        }
+    }
+
+    static int tileCount(int n, int tile) {
+        return n <= tile ? 1 : (n + tile - 1) / tile;
+    }
+
+    /** Evenly spread tile origins covering {@code n} with the fewest {@code tile}-sized tiles. */
+    static int[] tileStarts(int n, int tile) {
+        int c = tileCount(n, tile);
+        int[] s = new int[c];
+        for (int i = 1; i < c; i++) s[i] = Math.round((float) i * (n - tile) / (c - 1));
+        return s;
+    }
+
+    /** True when most of {@code box} lies inside one of {@code others}. */
+    static boolean covered(int[] box, List<int[]> others) {
+        long area = (long) (box[2] - box[0] + 1) * (box[3] - box[1] + 1);
+        if (area <= 0) return true;
+        for (int[] o : others) {
+            long iw = Math.min(box[2], o[2]) - Math.max(box[0], o[0]) + 1;
+            long ih = Math.min(box[3], o[3]) - Math.max(box[1], o[1]) + 1;
+            if (iw > 0 && ih > 0 && iw * ih >= FINE_COVERED_FRAC * area) return true;
+        }
+        return false;
+    }
+
+    /** ImageNet-normalised {@code tw×th} pixels (row stride {@code w}), padded with 0 (the mean) to {@code w×h}. */
+    private static void fillTile(int[] px, int tw, int th, ByteBuffer buf, boolean nchw, int w, int h) {
+        buf.rewind();
+        if (!nchw) {
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    if (x < tw && y < th) {
+                        int p = px[y * w + x];
+                        buf.putFloat((((p >> 16) & 0xFF) / 255f - IMAGENET_MEAN[0]) / IMAGENET_STD[0]);
+                        buf.putFloat((((p >> 8) & 0xFF) / 255f - IMAGENET_MEAN[1]) / IMAGENET_STD[1]);
+                        buf.putFloat(((p & 0xFF) / 255f - IMAGENET_MEAN[2]) / IMAGENET_STD[2]);
+                    } else {
+                        buf.putFloat(0f); buf.putFloat(0f); buf.putFloat(0f);
+                    }
+                }
+            }
+        } else {
+            for (int c = 0; c < 3; c++) {
+                int shift = c == 0 ? 16 : (c == 1 ? 8 : 0);
+                for (int y = 0; y < h; y++) {
+                    for (int x = 0; x < w; x++) {
+                        buf.putFloat(x < tw && y < th
+                                ? (((px[y * w + x] >> shift) & 0xFF) / 255f - IMAGENET_MEAN[c]) / IMAGENET_STD[c]
+                                : 0f);
+                    }
+                }
+            }
+        }
+    }
+
     // ==================== RECOGNITION ====================
 
     private CtcDecoder.Decoded recognise(Bitmap crop) {
@@ -337,11 +498,16 @@ public final class TfliteTextOcrBackend implements TextOcrBackend {
             int[] oshape = rec.getOutputTensor(0).shape();
             int steps = oshape.length >= 3 ? oshape[oshape.length - 2] : 1;
             int classes = oshape[oshape.length - 1];
-            ByteBuffer outBuf = ByteBuffer.allocateDirect(4 * steps * classes).order(ByteOrder.nativeOrder());
+            if (recOutput == null || recOutput.capacity() != 4 * steps * classes) {
+                recOutput = ByteBuffer.allocateDirect(4 * steps * classes).order(ByteOrder.nativeOrder());
+                recFlat = new float[steps * classes];
+            }
+            ByteBuffer outBuf = recOutput;
+            outBuf.rewind();
             recInput.rewind();
             rec.run(recInput, outBuf);
             outBuf.rewind();
-            float[] flat = new float[steps * classes];
+            float[] flat = recFlat;
             outBuf.asFloatBuffer().get(flat);
             boolean isProb = true;
             for (float v : flat) { if (v > 1.0001f || v < -0.0001f) { isProb = false; break; } }

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lighter disc behind play / pause inside the glass pill. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="@color/rec_player_quad_selected">
+    <item>
+        <inset android:inset="2dp">
+            <shape android:shape="oval">
+                <solid android:color="#26FFFFFF" />
+            </shape>
+        </inset>
+    </item>
+</ripple>

@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <item name="dashboard_hero_ribbon_alpha" format="float" type="dimen">1.0</item>
+    <item name="dashboard_hero_ribbon_alpha" format="float" type="dimen">0.5</item>
+    <item name="dash_hero_glow_alpha" format="float" type="dimen">0.16</item>
+    <item name="dash_hero_floor_alpha" format="float" type="dimen">0.55</item>
 </resources>

@@ -35,9 +35,7 @@ public class GpuMosaicRecorder {
     
     // EGL and OpenGL state
     private EGLCore eglCore;
-    // GL object names are valid only in their owning EGL context. Retain the
-    // exact owner so encoder-surface reinitialization can reuse these objects
-    // without carrying names into a replacement context.
+    // EGLCore that owns programId/overlayTextureId; reuse is only valid in it.
     private EGLCore glResourcesEglCore;
     private EGLSurface encoderSurface;
     private Surface encoderInputSurface;
@@ -104,9 +102,12 @@ public class GpuMosaicRecorder {
     private int uDl5FishTanLocation = -1;
     private int uRecordLayoutLocation;
     // Optional dedicated windshield camera (dashcam top band). uWindshieldTex
-    // is bound to GL_TEXTURE2 in drawFrame; uWindshieldReady gates its use.
+    // is bound to GL_TEXTURE2 in drawFrame; uTextureReady.x gates its use.
     private int uWindshieldTexLocation;
-    private int uWindshieldReadyLocation;
+    // x = dedicated windshield frame ready, y = telemetry overlay ready.
+    // Packed into one vec2 to keep fragment-uniform usage bounded on GLES 2.0.
+    private int uTextureReadyLocation;
+    private int uOverlayTexLocation;
     private int aPositionLocation;
     private int aTexCoordLocation;
 
@@ -217,14 +218,8 @@ public class GpuMosaicRecorder {
     private long lastFrameTime = 0;
     private long frameCount = 0;
     
-    // Overlay GL resources
+    // Telemetry overlay texture, sampled by the mosaic shader (texture unit 1).
     private int overlayTextureId;
-    private int overlayProgramId;
-    private int overlayAPositionLoc;
-    private int overlayATexCoordLoc;
-    private int overlayUTextureLoc;
-    private FloatBuffer overlayVertexBuffer;
-    private FloatBuffer overlayTexCoordBuffer;
 
     // Overlay state
     private volatile boolean overlayEnabled = false;
@@ -266,7 +261,7 @@ public class GpuMosaicRecorder {
     // signal, so we sacrifice one frame to keep the BufferQueue draining.
     // Threshold is derived from the encoder's frame budget × 2, refreshed on
     // every init() so an FPS change scales it correctly.
-    private long lastDrawDurationNs = 0;
+    private volatile long lastDrawDurationNs = 0;
 
     // Last PTS handed to the encoder surface. Belt-and-suspenders against
     // the encoder-input-queue lag at HW->NANO domain transition: PTS values
@@ -279,7 +274,7 @@ public class GpuMosaicRecorder {
     // nextFrameTimestampNs (audit P1).
     private long lastSwappedPtsNs = 0;
     private long maxDrawDurationNs = 100_000_000L;          // refreshed in init()
-    private int consecutiveSlowFrames = 0;
+    private volatile int consecutiveSlowFrames = 0;
     private static final int SLOW_FRAME_SKIP_THRESHOLD = 20; // ~0.7 s at 30 fps
     private int skippedFrames = 0;
     // Consecutive encoder draws skipped because the encoder's drainer thread
@@ -296,13 +291,58 @@ public class GpuMosaicRecorder {
     private static final int SURFACE_ERROR_REINIT_THRESHOLD = 3;
     private volatile boolean needsReinit = false;
 
+    // CPU recording engine (encoder.isCpuInput()): frames arrive through
+    // submitCpuFrame and are copied into the encoder's YUV buffers; no encoder
+    // surface or shaders. GL thread only unless marked volatile.
+    private volatile boolean cpuEngine;
+    private volatile boolean cpuEngineFailed;
+    private volatile java.util.function.Consumer<String> cpuEngineFailureListener;
+    private final boolean cpuTilesExact;
+    private final float cpuWindshieldCropY;
+    private int[] cpuSrcX;
+    // Overlay blend tables are rebuilt off the camera thread (see refreshCpuOverlay):
+    // three tables, cpuOverlayFront = newest ready, cpuOverlayHazard = the one the
+    // camera thread is blending, so the builder never writes a table in use.
+    private java.nio.ByteBuffer cpuOverlayRgba;
+    private final java.nio.ByteBuffer[] cpuOverlayTables = new java.nio.ByteBuffer[3];
+    private volatile int cpuOverlayFront = -1;
+    private volatile int cpuOverlayHazard = -1;
+    private int cpuOverlayGen;  // guarded by cpuOverlayTables; bumped on init/release
+    private final java.util.concurrent.atomic.AtomicBoolean cpuOverlayBuilding =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+    private static final java.util.concurrent.ExecutorService CPU_OVERLAY_BUILDER =
+        java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(() -> {
+                // Same priority as the overlay raster worker: cosmetic, never ahead of frames.
+                try {
+                    android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
+                } catch (Throwable ignored) {}
+                r.run();
+            }, "CpuOverlayBuild");
+            t.setDaemon(true);
+            return t;
+        });
+    private volatile boolean cpuOverlayErrorLogged;
+    private int cpuCodecErrors;
+    private int cpuMissingFrames;
+    // CPU recording thread (see CpuLane); null unless the CPU engine is running.
+    private volatile CpuLane cpuLane;
+    private final java.util.concurrent.atomic.AtomicInteger cpuSuperseded =
+        new java.util.concurrent.atomic.AtomicInteger();
+    private long cpuWindowStartMs;
+    private long cpuWorstTotalNs;
+    private long cpuWorstComposeNs;
+    private long cpuWorstOverlayNs;
+    private int cpuQueued;
+    private int cpuNoBuffer;
+    private int cpuBusy;
+
     // Per-stage timing diagnostic for drawFrame.
     //
-    // The encoder GL thread's drawFrame() bundles five distinct GPU/CPU
-    // operations under one timer in PanoramicCameraGpu.renderLoop's stage
-    // log: makeCurrent + clear + mosaic-shader-draw + overlay-upload-and-
-    // draw + eglSwapBuffersWithTimestamp. When the bundled "mosaic+swap"
-    // worst-frame goes high, we can't tell which sub-stage was responsible.
+    // The encoder GL thread's drawFrame() bundles GPU/CPU operations under
+    // one timer in PanoramicCameraGpu.renderLoop's stage log. The telemetry
+    // overlay is sampled by the mosaic shader, so its bitmap upload is
+    // measured separately while the merged draw is counted in "shd".
     //
     // This per-stage timer logs the worst frame in a 30s window (matching
     // the parent stage timer's cadence) and breaks out:
@@ -314,8 +354,8 @@ public class GpuMosaicRecorder {
     //            non-trivial rt is encoder-input backpressure (the render
     //            target could not be acquired), NOT clearing cost. (This was
     //            previously mislabeled "cls" — see issue #176.)
-    //   - shd:   mosaic shader bind + draw
-    //   - ovl:   overlay (texSubImage2D upload + composite draw)
+    //   - shd:   mosaic shader bind + draw, including overlay composition
+    //   - ovl:   overlay bitmap upload only (texImage2D / texSubImage2D)
     //   - swap:  eglSwapBuffersWithTimestamp itself (also blocks on encoder
     //            input-pool backpressure)
     //
@@ -323,9 +363,8 @@ public class GpuMosaicRecorder {
     // (queue), depending on when MediaCodec returns an input buffer — treat
     // rt+swap together as the encoder-queue wait.
     //
-    // Once a stutter event is captured, the dominant sub-stage tells us
-    // where to look — overlay upload vs shader draw vs encoder backpressure
-    // produce identical "mosaic+swap=207ms" symptoms in the parent log.
+    // Once a stutter event is captured, the dominant sub-stage distinguishes
+    // overlay upload, merged shader work, and encoder backpressure.
     private static final long DRAW_STAGE_LOG_INTERVAL_MS = 30_000L;
     private long drawStageWindowStartMs = 0;
     private long drawStageWorstTotalNs = 0;
@@ -354,6 +393,12 @@ public class GpuMosaicRecorder {
     // occupies (top band). MUST match the shader's `float split` and the
     // players' DASHCAM_SPLIT.
     private static final float DASHCAM_SPLIT = 0.70f;
+    // Match the top strip previously covered by the second overlay quad.
+    private static final float OVERLAY_BOTTOM_NDC = 0.8333f;
+    private static final float OVERLAY_TOP_SCREEN_Y =
+        (OVERLAY_BOTTOM_NDC + 1.0f) * 0.5f;
+    private static final float OVERLAY_SCREEN_HEIGHT =
+        (1.0f - OVERLAY_BOTTOM_NDC) * 0.5f;
     // Dedicated windshield camera native aspect (1920x1080 = 16:9). Used to
     // crop it vertically into the dashcam top band without stretch.
     private static final float WINDSHIELD_SOURCE_ASPECT = 1.7777778f;
@@ -403,8 +448,10 @@ public class GpuMosaicRecorder {
         "uniform mat4 uTexMatrix;\n" +
         "uniform float uApplyManualYFlip;\n" +
         "varying vec2 vTexCoord;\n" +
+        "varying vec2 vScreenCoord;\n" +
         "void main() {\n" +
         "    gl_Position = aPosition;\n" +
+        "    vScreenCoord = aPosition.xy * 0.5 + 0.5;\n" +
         "    vec2 src = aTexCoord;\n" +
         "    if (uApplyManualYFlip > 0.5) src.y = 1.0 - src.y;\n" +
         "    vTexCoord = (uTexMatrix * vec4(src, 0.0, 1.0)).xy;\n" +
@@ -422,25 +469,6 @@ public class GpuMosaicRecorder {
      *  user role mapping. 3-cam and APA branches are layout-independent so
      *  they stay as-is. */
     
-    // Overlay vertex shader - simple 2D passthrough
-    private static final String OVERLAY_VERTEX_SHADER =
-        "attribute vec4 aPosition;\n" +
-        "attribute vec2 aTexCoord;\n" +
-        "varying vec2 vTexCoord;\n" +
-        "void main() {\n" +
-        "    gl_Position = aPosition;\n" +
-        "    vTexCoord = aTexCoord;\n" +
-        "}\n";
-    
-    // Overlay fragment shader - standard sampler2D with alpha (NOT OES)
-    private static final String OVERLAY_FRAGMENT_SHADER =
-        "precision mediump float;\n" +
-        "varying vec2 vTexCoord;\n" +
-        "uniform sampler2D uTexture;\n" +
-        "void main() {\n" +
-        "    gl_FragColor = texture2D(uTexture, vTexCoord);\n" +
-        "}\n";
-
     private final boolean isTexture2D;
     // Sampler type for the dedicated windshield texture (unit 2). Independent
     // of isTexture2D because DiLink 5 (isTexture2D=true) still feeds an
@@ -510,12 +538,15 @@ public class GpuMosaicRecorder {
         this.quadrantStripOffsetX = normalizeOffsets(quadrantStripOffsetX);
         this.viewportWidth = viewportWidth > 0 ? viewportWidth : DEFAULT_VIEWPORT_WIDTH;
         this.viewportHeight = viewportHeight > 0 ? viewportHeight : DEFAULT_VIEWPORT_HEIGHT;
+        this.cpuTilesExact = cpuTilesExact(this.quadrantStripOffsetX,
+            this.viewportWidth * 2, this.viewportWidth / 2);
         // Windshield top-band crop: the dedicated windshield camera is 16:9;
         // the dashcam top band is full-width × DASHCAM_SPLIT of the encoder
         // output. Crop it vertically so it fills the band without stretch.
         float topBandAspect =
             ((float) this.viewportWidth / (float) this.viewportHeight) / DASHCAM_SPLIT;
         float cropY = windshieldCropY(WINDSHIELD_SOURCE_ASPECT, topBandAspect);
+        this.cpuWindshieldCropY = cropY;
         this.fragmentShader = buildFragmentShader(
             this.quadrantStripOffsetX, cropY, isTexture2D, windshieldTexture2D);
     }
@@ -527,24 +558,19 @@ public class GpuMosaicRecorder {
      * @param encoder Hardware encoder that provides the input surface
      */
     public void init(EGLCore eglCore, HardwareEventRecorderGpu encoder) {
-        // GL programs and textures survive encoder-surface replacement only
-        // when the exact EGLCore owner is unchanged. On context replacement,
-        // invalidate old names without deleting them through the new context;
-        // the old EGL owner is responsible for tearing down its context.
+        // Reuse GL objects only within their owning EGLCore; a new context drops
+        // the old names (its owner tears that context down).
         boolean sameGlContext = eglCore != null && glResourcesEglCore == eglCore;
         if (!sameGlContext) {
             if (glResourcesEglCore != null) {
                 logger.info("EGLCore changed; rebuilding recorder GL resources");
             }
             programId = 0;
-            overlayProgramId = 0;
             overlayTextureId = 0;
             overlayTextureInitialized = false;
             overlayTextureReady = false;
             vertexBuffer = null;
             texCoordBuffer = null;
-            overlayVertexBuffer = null;
-            overlayTexCoordBuffer = null;
             glResourcesEglCore = eglCore;
         }
 
@@ -667,6 +693,14 @@ public class GpuMosaicRecorder {
             }
         });
         
+        // CPU recording engine: no encoder surface or shaders (see submitCpuFrame).
+        cpuEngine = encoder.isCpuInput();
+        encoder.setLensTagSupplier(() -> LensTag.build(this));
+        if (cpuEngine) {
+            initCpuEngine();
+            return;
+        }
+
         // Get encoder's input surface
         encoderInputSurface = encoder.getInputSurface();
         if (encoderInputSurface == null) {
@@ -676,9 +710,7 @@ public class GpuMosaicRecorder {
         // Create EGL surface from encoder surface (with RECORDABLE flag)
         encoderSurface = eglCore.createWindowSurface(encoderInputSurface);
         
-        // Compile the profile-baked mosaic shader only when this EGL context
-        // does not already own a linked program. Replacing the encoder input
-        // Surface does not invalidate a program in the same context.
+        // A same-context encoder reinit keeps the linked profile-baked program.
         if (programId == 0) {
             programId = GlUtil.createProgram(VERTEX_SHADER, fragmentShader);
             if (programId == 0) {
@@ -708,15 +740,14 @@ public class GpuMosaicRecorder {
             uDl5FishTanLocation = GLES20.glGetUniformLocation(programId, "uDl5FishTan");
             uRecordLayoutLocation = GLES20.glGetUniformLocation(programId, "uRecordLayout");
             uWindshieldTexLocation = GLES20.glGetUniformLocation(programId, "uWindshieldTex");
-            uWindshieldReadyLocation = GLES20.glGetUniformLocation(programId, "uWindshieldReady");
+            uTextureReadyLocation = GLES20.glGetUniformLocation(programId, "uTextureReady");
+            uOverlayTexLocation = GLES20.glGetUniformLocation(programId, "uOverlayTex");
 
             GlUtil.checkGlError("glGetLocation");
         } else {
             logger.info("Reusing mosaic shader program for encoder reinitialization");
         }
 
-        // Immutable client-side quad geometry is independent of the encoder
-        // EGLSurface. Keep the direct buffers for same-context reinitialization.
         if (vertexBuffer == null) {
             vertexBuffer = GlUtil.createFloatBuffer(VERTEX_COORDS);
         }
@@ -724,65 +755,23 @@ public class GpuMosaicRecorder {
             texCoordBuffer = GlUtil.createFloatBuffer(TEX_COORDS);
         }
 
-        // The bitmap renderer is session-owned rather than a GL resource.
-        // Stop/join its worker before recycling its bitmaps on every reinit.
+        // Overlay texture (sampled by the mosaic shader on unit 1): retain it
+        // on a same-context reinit; its 1280x80 storage is fixed.
+        if (overlayTextureId == 0) {
+            int[] texIds = new int[1];
+            GLES20.glGenTextures(1, texIds, 0);
+            overlayTextureId = texIds[0];
+            overlayTextureInitialized = false;
+        }
+
+        // Stop/join the previous renderer's worker before recycling its bitmaps.
         if (overlayRenderer != null) {
             overlayRenderer.stopWorker();
             overlayRenderer.release();
-            overlayRenderer = null;
         }
+        overlayRenderer = new OverlayBitmapRenderer();
 
-        // Retain the overlay program and texture object when the EGLCore is
-        // unchanged. The shader is static; its locations remain valid.
-        if (overlayProgramId == 0) {
-            overlayProgramId = GlUtil.createProgram(OVERLAY_VERTEX_SHADER, OVERLAY_FRAGMENT_SHADER);
-            if (overlayProgramId == 0) {
-                logger.error("Failed to create overlay shader program - overlay disabled");
-                overlayEnabled = false;
-            } else {
-                overlayAPositionLoc = GLES20.glGetAttribLocation(overlayProgramId, "aPosition");
-                overlayATexCoordLoc = GLES20.glGetAttribLocation(overlayProgramId, "aTexCoord");
-                overlayUTextureLoc = GLES20.glGetUniformLocation(overlayProgramId, "uTexture");
-            }
-        } else {
-            logger.info("Reusing telemetry overlay shader program");
-        }
-
-        if (overlayProgramId != 0) {
-            if (overlayTextureId == 0) {
-                int[] texIds = new int[1];
-                GLES20.glGenTextures(1, texIds, 0);
-                overlayTextureId = texIds[0];
-                overlayTextureInitialized = false;
-            }
-
-            // Static overlay quad geometry is also reusable.
-            if (overlayVertexBuffer == null) {
-                float[] overlayVertexCoords = {
-                    -1.0f,  0.8333f,
-                     1.0f,  0.8333f,
-                    -1.0f,  1.0f,
-                     1.0f,  1.0f
-                };
-                overlayVertexBuffer = GlUtil.createFloatBuffer(overlayVertexCoords);
-            }
-            if (overlayTexCoordBuffer == null) {
-                float[] overlayTexCoords = {
-                    0.0f, 1.0f,
-                    1.0f, 1.0f,
-                    0.0f, 0.0f,
-                    1.0f, 0.0f
-                };
-                overlayTexCoordBuffer = GlUtil.createFloatBuffer(overlayTexCoords);
-            }
-
-            // OverlayBitmapRenderer always uses a fixed 1280x80 bitmap. Its
-            // replacement can upload with texSubImage2D into retained storage.
-            overlayRenderer = new OverlayBitmapRenderer();
-        }
-
-        // Do not display stale telemetry from the previous encoder session.
-        // Keep overlayTextureInitialized unchanged on a same-context reinit.
+        // No stale telemetry from the previous encoder session.
         overlayTextureReady = false;
 
         // Start the off-GL-thread raster worker if the overlay is already active
@@ -968,7 +957,7 @@ public class GpuMosaicRecorder {
         // Bind the optional windshield texture to unit 2 (dashcam top band).
         // Fall back to the camera texture when no windshield frame is ready so
         // the external sampler always has a valid binding; the shader gates
-        // actual use on uWindshieldReady. Bind target follows the sampler type
+        // actual use on uTextureReady.x. Bind target follows the sampler type
         // baked into the shader (windshieldTexture2D — decoupled encoder lane
         // ring copies are plain 2D; legacy + DiLink 5 stay EXTERNAL_OES).
         GLES20.glActiveTexture(GLES20.GL_TEXTURE2);
@@ -981,10 +970,67 @@ public class GpuMosaicRecorder {
         if (uWindshieldTexLocation >= 0) {
             GLES20.glUniform1i(uWindshieldTexLocation, 2);
         }
-        if (uWindshieldReadyLocation >= 0) {
-            GLES20.glUniform1f(uWindshieldReadyLocation,
-                (windshieldReady && windshieldTextureId != 0) ? 1.0f : 0.0f);
+        // Keep the overlay sampler off unit 0: sharing the camera's unit with a
+        // different sampler type (OES vs 2D) fails the draw on strict drivers.
+        if (uOverlayTexLocation >= 0) {
+            GLES20.glUniform1i(uOverlayTexLocation, 1);
         }
+        // Upload telemetry bitmap before the mosaic draw so the main shader
+        // can composite it in the same full-screen pass. The CPU Canvas raster
+        // remains on OverlayBitmapRenderer's background worker; the GL thread
+        // only uploads a newly swapped bitmap and binds the cached texture.
+        long tBeforeOverlayUploadNs = System.nanoTime();
+        boolean overlayCompositeReady = false;
+        if (overlayEnabled && overlayRecordingModeAllowed && overlayRenderer != null) {
+            overlayFrameCounter++;
+            try {
+                android.graphics.Bitmap overlayBitmap = overlayRenderer.swapAndGetFront();
+                if (overlayBitmap != null && !overlayBitmap.isRecycled()) {
+                    GLES20.glActiveTexture(GLES20.GL_TEXTURE1);
+                    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, overlayTextureId);
+                    if (!overlayTextureInitialized) {
+                        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, overlayBitmap, 0);
+                        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,
+                            GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
+                        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,
+                            GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+                        overlayTextureInitialized = true;
+                    } else {
+                        GLUtils.texSubImage2D(
+                            GLES20.GL_TEXTURE_2D, 0, 0, 0, overlayBitmap);
+                    }
+                    overlayTextureReady = true;
+
+                    if (overlayFrameCounter <= 3) {
+                        logger.info("Overlay: uploaded frame " + overlayFrameCounter
+                            + " bitmap=" + overlayBitmap.getWidth() + "x"
+                            + overlayBitmap.getHeight());
+                    }
+                }
+
+                if (overlayTextureReady) {
+                    GLES20.glActiveTexture(GLES20.GL_TEXTURE1);
+                    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, overlayTextureId);
+                    if (uOverlayTexLocation >= 0) {
+                        GLES20.glUniform1i(uOverlayTexLocation, 1);
+                    }
+                    overlayCompositeReady = true;
+                }
+            } catch (Exception e) {
+                // Preserve the camera frame if an overlay upload fails.
+                // The overlay is simply omitted for this frame.
+                if (overlayFrameCounter <= 5) {
+                    logger.error("Overlay upload error: " + e.getMessage(), e);
+                }
+            }
+        }
+        if (uTextureReadyLocation >= 0) {
+            GLES20.glUniform2f(
+                uTextureReadyLocation,
+                (windshieldReady && windshieldTextureId != 0) ? 1.0f : 0.0f,
+                overlayCompositeReady ? 1.0f : 0.0f);
+        }
+        long tAfterOverlayUploadNs = System.nanoTime();
         // uApaMode uniform: rewrite only on layout change. Per GLES2 spec
         // uniform values are part of the program object and persist across
         // glUseProgram of the same program. setCameraLayout sets the dirty
@@ -1079,72 +1125,9 @@ public class GpuMosaicRecorder {
         GLES20.glDisableVertexAttribArray(aTexCoordLocation);
         long tAfterShaderNs = System.nanoTime();
 
-        // OVERLAY PASS: Composite telemetry overlay if enabled
-        if (overlayEnabled && overlayRecordingModeAllowed && overlayRenderer != null) {
-            overlayFrameCounter++;
-            try {
-                // The software Canvas raster (renderFrame) now runs on
-                // OverlayBitmapRenderer's dedicated 2 Hz background worker
-                // (started in setOverlayEnabled), NOT here — the GL thread used
-                // to eat that per-icon Gaussian-blur raster every ~8th frame
-                // right before eglSwap. The GL thread now does ONLY the cheap
-                // half: swapAndGetFront() + texSubImage2D upload + composite.
-                //
-                // Upload new bitmap to texture ONLY when the double buffer actually swapped.
-                // swapAndGetFront() returns null when no new content is available,
-                // avoiding the expensive texImage2D/texSubImage2D call on unchanged frames.
-                android.graphics.Bitmap overlayBitmap = overlayRenderer.swapAndGetFront();
-                if (overlayBitmap != null && !overlayBitmap.isRecycled()) {
-                    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, overlayTextureId);
-                    if (!overlayTextureInitialized) {
-                        // First upload: allocate GPU texture storage with texImage2D
-                        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, overlayBitmap, 0);
-                        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
-                        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
-                        overlayTextureInitialized = true;
-                    } else {
-                        // Subsequent uploads: reuse existing texture storage with texSubImage2D
-                        // This avoids GPU texture reallocation on every update
-                        GLUtils.texSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, overlayBitmap);
-                    }
-                    overlayTextureReady = true;
-                    
-                    if (overlayFrameCounter <= 3) {
-                        logger.info("Overlay: uploaded frame " + overlayFrameCounter + 
-                            " bitmap=" + overlayBitmap.getWidth() + "x" + overlayBitmap.getHeight());
-                    }
-                }
-                
-                // Draw overlay quad EVERY frame (reuses last uploaded texture)
-                if (overlayTextureReady) {
-                    GLES20.glEnable(GLES20.GL_BLEND);
-                    GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
-                    
-                    GLES20.glUseProgram(overlayProgramId);
-                    
-                    GLES20.glActiveTexture(GLES20.GL_TEXTURE1);
-                    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, overlayTextureId);
-                    GLES20.glUniform1i(overlayUTextureLoc, 1);
-                    
-                    GLES20.glEnableVertexAttribArray(overlayAPositionLoc);
-                    GLES20.glVertexAttribPointer(overlayAPositionLoc, 2, GLES20.GL_FLOAT, false, 0, overlayVertexBuffer);
-                    GLES20.glEnableVertexAttribArray(overlayATexCoordLoc);
-                    GLES20.glVertexAttribPointer(overlayATexCoordLoc, 2, GLES20.GL_FLOAT, false, 0, overlayTexCoordBuffer);
-                    
-                    GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
-                    
-                    GLES20.glDisableVertexAttribArray(overlayAPositionLoc);
-                    GLES20.glDisableVertexAttribArray(overlayATexCoordLoc);
-                    GLES20.glDisable(GLES20.GL_BLEND);
-                }
-            } catch (Exception e) {
-                // Skip overlay on error, never drop frame
-                if (overlayFrameCounter <= 5) {
-                    logger.error("Overlay draw error: " + e.getMessage(), e);
-                }
-            }
-        }
-        long tAfterOverlayNs = System.nanoTime();
+        // Telemetry overlay is composited inside the mosaic fragment shader.
+        // No second program switch, blend-state change, quad setup, or draw.
+        long tAfterOverlayNs = tAfterShaderNs;
 
         // Push the HAL sensor timestamp straight through. MediaCodec uses the
         // value stamped on the encoder surface via eglPresentationTimeANDROID
@@ -1168,15 +1151,14 @@ public class GpuMosaicRecorder {
             consecutiveSurfaceErrors = 0;  // Reset on success
         } catch (RuntimeException e) {
             consecutiveSurfaceErrors++;
-            boolean isBadSurface = e.getMessage() != null && e.getMessage().contains("0x300d");
-            if (isBadSurface || consecutiveSurfaceErrors >= SURFACE_ERROR_REINIT_THRESHOLD) {
-                logger.error("Encoder surface dead (" + (isBadSurface ? "EGL_BAD_SURFACE" : consecutiveSurfaceErrors + " consecutive errors") +
-                    "), requesting reinit");
+            if (consecutiveSurfaceErrors >= SURFACE_ERROR_REINIT_THRESHOLD) {
+                logger.error("Encoder surface dead after " + consecutiveSurfaceErrors +
+                    " consecutive errors, requesting reinit");
                 needsReinit = true;
-                if (encoderSurface != null && eglCore != null) {
-                    try {
-                        eglCore.destroySurface(encoderSurface);
-                    } catch (Throwable ignored) {}
+                // Destroy before dropping it: init()/release() only free a non-null surface.
+                try {
+                    eglCore.destroySurface(encoderSurface);
+                } catch (Throwable ignored) {
                 }
                 encoderSurface = null;  // Prevent further attempts
                 return;
@@ -1212,8 +1194,8 @@ public class GpuMosaicRecorder {
         long stageMakeNs     = tAfterMakeCurrentNs - t0;
         long stageViewportNs = tAfterViewportNs   - tAfterMakeCurrentNs;
         long stageRtNs       = tAfterClearNs      - tAfterViewportNs;
-        long stageShaderNs   = tAfterShaderNs     - tAfterClearNs;
-        long stageOverlayNs  = tAfterOverlayNs    - tAfterShaderNs;
+        long stageOverlayNs  = tAfterOverlayUploadNs - tBeforeOverlayUploadNs;
+        long stageShaderNs   = (tAfterShaderNs - tAfterClearNs) - stageOverlayNs;
         long stageSwapNs     = tAfterSwapNs       - tAfterOverlayNs;
         drawStageWindowFrames++;
         if (stageTotalNs > drawStageWorstTotalNs) {
@@ -1416,6 +1398,12 @@ public class GpuMosaicRecorder {
                 (outputDir != null ? outputDir.getName() : "default") + ", prefix=" + prefix + ")");
             return;
         }
+        // Not a storage fault: skip the pre-flight and the write-fault probe; the caller retries.
+        HardwareEventRecorderGpu enc = encoder;
+        if (enc != null && enc.isAwaitingFreshFrame()) {
+            logger.info("Recording start deferred — waiting for the reopened camera's first frame");
+            return;
+        }
         // SOTA: Use StorageManager for recordings directory and auto-cleanup.
         // Each step is wrapped in lightweight timing because this path used
         // to silently stall for minutes when the boot reap held the storage
@@ -1519,13 +1507,6 @@ public class GpuMosaicRecorder {
 
             // Use target directory
             String outputPath = new java.io.File(targetDir, filename).getAbsolutePath();
-            // Camera warmup is not a storage failure. Defer this first drive
-            // file until a post-ACC encoded frame exists; the pipeline's
-            // existing retry path will start it when the frame barrier clears.
-            if (encoder != null && encoder.isWaitingForFreshDriveFrame(outputPath)) {
-                logger.info("ACC ON camera warmup: deferring first drive muxer");
-                return;
-            }
             // DIAGNOSTIC (root-cause confirm for "REC green, no file"): log the
             // FINAL resolved target + its free space + configured-vs-active
             // storage type at each segment open. With the user-reported trigger
@@ -2045,6 +2026,12 @@ public class GpuMosaicRecorder {
     public float getRectifyK1() { return rectifyK1; }
     /** Current 4th-order dewarp coefficient (0.0 = off). */
     public float getRectifyK2() { return rectifyK2; }
+    /** Mosaic width in pixels. */
+    public int getViewportWidth() { return viewportWidth; }
+    /** Mosaic height in pixels. */
+    public int getViewportHeight() { return viewportHeight; }
+    /** Per-quadrant strip-X offsets {front, right, rear, left}, 0..1. */
+    public float[] getQuadrantStripOffsetX() { return quadrantStripOffsetX.clone(); }
 
     /**
      * Sets the per-cam tile aspect ratio (tile_height / tile_width) used
@@ -2177,17 +2164,18 @@ public class GpuMosaicRecorder {
      */
     public void release() {
         recording = false;
+        CpuLane lane = cpuLane;
+        cpuLane = null;
+        if (lane != null && !lane.stop(1000)) {
+            logger.warn("CPU recording thread still copying after 1 s; releasing anyway");
+        }
         
         if (programId != 0) {
             GlUtil.deleteProgram(programId);
             programId = 0;
         }
         
-        // Release overlay resources
-        if (overlayProgramId != 0) {
-            GLES20.glDeleteProgram(overlayProgramId);
-            overlayProgramId = 0;
-        }
+        // Release merged telemetry overlay texture.
         if (overlayTextureId != 0) {
             GLES20.glDeleteTextures(1, new int[]{overlayTextureId}, 0);
             overlayTextureId = 0;
@@ -2203,20 +2191,664 @@ public class GpuMosaicRecorder {
         overlayTextureReady = false;
         overlayTextureInitialized = false;
 
-        // release() is terminal for this recorder. Clear context ownership and
-        // Java direct-buffer references so a later init rebuilds from scratch.
+        // release() is terminal: a later init rebuilds everything.
         glResourcesEglCore = null;
         vertexBuffer = null;
         texCoordBuffer = null;
-        overlayVertexBuffer = null;
-        overlayTexCoordBuffer = null;
         
         if (encoderSurface != null) {
             eglCore.destroySurface(encoderSurface);
             encoderSurface = null;
         }
+        cpuEngine = false;
+        resetCpuOverlay();
+        if (!cpuOverlayBuilding.get()) {
+            cpuOverlayRgba = null;
+            java.util.Arrays.fill(cpuOverlayTables, null);
+        }
         
         logger.info( "GpuMosaicRecorder released");
+    }
+
+    /** True when frames go through {@link #submitCpuFrame} instead of drawFrame. */
+    public boolean isCpuEngine() {
+        return cpuEngine;
+    }
+
+    /** Called (camera or CPU recording thread) when the CPU engine can't run here; arg is a RecordingEngine.WHY_* code. */
+    public void setCpuEngineFailureListener(java.util.function.Consumer<String> listener) {
+        this.cpuEngineFailureListener = listener;
+    }
+
+    /** Null when these settings render as the plain 2x2 copy; else the RecordingEngine.WHY_* reason. */
+    public String cpuIncompatibleReason() {
+        // DiLink 4 layouts only; the CPU engine renders every legacy layout itself.
+        if (cameraLayout != 0 || redMaskEnabled || apaCenterInset != 0.0f) {
+            return RecordingEngine.WHY_CAMERA_MODE;
+        }
+        return null;
+    }
+
+    private void initCpuEngine() {
+        // Free GL objects left by an earlier GPU-engine init of this recorder.
+        if (programId != 0) {
+            GlUtil.deleteProgram(programId);
+            programId = 0;
+        }
+        if (overlayTextureId != 0) {
+            GLES20.glDeleteTextures(1, new int[]{overlayTextureId}, 0);
+            overlayTextureId = 0;
+        }
+        overlayTextureReady = false;
+        overlayTextureInitialized = false;
+        encoderInputSurface = null;
+        if (overlayRenderer != null) {
+            overlayRenderer.stopWorker();
+            overlayRenderer.release();
+        }
+        overlayRenderer = new OverlayBitmapRenderer();
+        resetCpuOverlay();
+        cpuOverlayErrorLogged = false;
+        cpuEngineFailed = false;
+        cpuCodecErrors = 0;
+        cpuMissingFrames = 0;
+        cpuSrcX = cpuStripColumns(quadrantStripOffsetX, viewportWidth * 2, viewportWidth / 2);
+        CpuLane oldLane = cpuLane;
+        if (oldLane != null) oldLane.stop(1000);
+        CpuLane lane = new CpuLane();
+        cpuLane = lane;
+        lane.start();
+        reconcileOverlayWorker();
+        logger.info("GpuMosaicRecorder initialized (CPU engine, encoder codec="
+            + (encoder.isHevcCodec() ? "H.265" : "H.264") + ", tiles x="
+            + java.util.Arrays.toString(cpuSrcX) + ")");
+    }
+
+    /** True when every tile starts on an even column and fits the strip, as the shader samples it. */
+    static boolean cpuTilesExact(float[] offsets, int stripWidth, int tileWidth) {
+        for (int q = 0; q < 4; q++) {
+            double x = (double) offsets[q] * stripWidth;
+            long col = Math.round(x);
+            if (Math.abs(x - col) > 0.01 || (col & 1) != 0 || col < 0 || col + tileWidth > stripWidth) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Left strip column per output quadrant {TL, TR, BL, BR}, even and in range. */
+    static int[] cpuStripColumns(float[] offsets, int stripWidth, int tileWidth) {
+        int[] xs = new int[4];
+        for (int q = 0; q < 4; q++) {
+            int x = Math.round(offsets[q] * stripWidth);
+            x = Math.max(0, Math.min(stripWidth - tileWidth, x));
+            xs[q] = x & ~1;
+        }
+        return xs;
+    }
+
+    /**
+     * CPU engine counterpart of drawFrame, on the camera thread: same gates, then
+     * the frame goes to the CPU recording thread, which copies it into the encoder
+     * while this thread goes on with the GPU views. Never waits: a newer frame
+     * replaces one still waiting, and a full encoder drops it.
+     */
+    public void submitCpuFrame(CpuFrameSource frame, CpuFrameSource windshieldFrame,
+                               boolean windshieldReady, long frameTimestampNs) {
+        HardwareEventRecorderGpu enc = encoder;
+        CpuLane lane = cpuLane;
+        if (!cpuEngine || cpuEngineFailed || enc == null || lane == null) return;
+        if (frame == null) {
+            // A camera path that never binds an Image can't feed this engine.
+            if (++cpuMissingFrames >= 30) {
+                failCpuEngine(RecordingEngine.WHY_FRAMES_UNREADABLE, "no CPU frames from this camera path");
+            }
+            return;
+        }
+        cpuMissingFrames = 0;
+
+        if (consecutiveSlowFrames >= SLOW_FRAME_SKIP_THRESHOLD
+                && halContentionProbe.getAsBoolean()) {
+            skippedFrames++;
+            consecutiveSlowFrames = 0;
+            if (skippedFrames % 10 == 1) {
+                logger.warn("HAL contention: skipped " + skippedFrames
+                    + " CPU frames (last=" + (lastDrawDurationNs / 1_000_000) + "ms)");
+            }
+            return;
+        }
+        if (!enc.isDrainerRunning()) {
+            drainerDownSkips++;
+            if (drainerDownSkips % 50 == 1) {
+                logger.info("Encoder drainer not running — skipped " + drainerDownSkips
+                    + " CPU frames");
+            }
+            return;
+        }
+        drainerDownSkips = 0;
+
+        // A DiLink 4 layout setting only the shader renders: never record a wrong frame.
+        String incompatible = cpuIncompatibleReason();
+        if (incompatible != null) {
+            failCpuEngine(incompatible, "a DiLink 4 camera setting needs the GPU");
+            return;
+        }
+
+        // Lens on, 2x2 grid: raw tiles and no overlay (the player dewarps; overlay
+        // pixels would be resampled into the picture). Dashcam clips dewarp here.
+        int layout = recordLayout;
+        float k1 = rectifyK1;
+        float k2 = rectifyK2;
+        boolean rawLens = layout == 0 && (k1 != 0.0f || k2 != 0.0f);
+        boolean overlay = overlayEnabled && overlayRecordingModeAllowed && overlayRenderer != null
+                && !rawLens;
+        if (overlay) refreshCpuOverlay();
+        // Dashcam top band: the windshield frame when ready, else the 360 front
+        // (the shader's own fallback).
+        CpuFrameSource windshield = layout == 1 && windshieldReady ? windshieldFrame : null;
+        lane.post(new CpuFrameJob(frame, windshield, frameTimestampNs, overlay,
+            k1, k2, rectifyAspect, layout, rawLens));
+    }
+
+    /** Camera teardown: hands back a frame still waiting for the CPU recording thread. */
+    public void dropPendingCpuFrame() {
+        CpuLane lane = cpuLane;
+        if (lane != null) lane.dropPending();
+    }
+
+    /** CPU recording thread: one frame into the encoder. */
+    private void writeCpuFrame(CpuGridWriter w, CpuFrameJob job) {
+        HardwareEventRecorderGpu enc = encoder;
+        if (!cpuEngine || cpuEngineFailed || enc == null) return;
+        long start = System.nanoTime();
+        if (!w.bindSource(job.source.image)) {
+            failCpuEngine(RecordingEngine.WHY_FRAMES_UNREADABLE, w.error);
+            return;
+        }
+        // A windshield frame the CPU can't read falls back to the 360 front too.
+        w.windshield = job.windshield != null && w.bindWindshield(job.windshield.image);
+        int overlayTable = job.overlay ? acquireCpuOverlayTable() : -1;
+        w.overlayTable = overlayTable >= 0 ? cpuOverlayTables[overlayTable] : null;
+        w.job = job;
+        w.composeNs = 0;
+        w.overlayNs = 0;
+
+        // Same monotonic PTS clamp as the GPU swap path.
+        long ptsNs = job.ptsNs;
+        if (ptsNs <= lastSwappedPtsNs) ptsNs = lastSwappedPtsNs + 1_000_000L;
+
+        int result;
+        try {
+            result = enc.queueCpuFrame(w, ptsNs / 1000L, job.rawLens);
+        } finally {
+            w.releaseSource();
+            w.overlayTable = null;
+            w.job = null;
+            cpuOverlayHazard = -1;
+        }
+
+        switch (result) {
+            case HardwareEventRecorderGpu.CPU_FRAME_QUEUED:
+                lastSwappedPtsNs = ptsNs;
+                cpuCodecErrors = 0;
+                cpuQueued++;
+                if (recording) {
+                    lastFrameTime = System.currentTimeMillis();
+                    frameCount++;
+                }
+                break;
+            case HardwareEventRecorderGpu.CPU_FRAME_NO_BUFFER:
+                cpuNoBuffer++;
+                break;
+            case HardwareEventRecorderGpu.CPU_FRAME_BUSY:
+                cpuBusy++;
+                break;
+            case HardwareEventRecorderGpu.CPU_FRAME_WRITE_FAILED:
+                failCpuEngine(w.sourceRejected
+                        ? RecordingEngine.WHY_FRAMES_UNREADABLE
+                        : RecordingEngine.WHY_CODEC_REJECTED,
+                    w.error);
+                return;
+            default:
+                if (++cpuCodecErrors >= SURFACE_ERROR_REINIT_THRESHOLD) {
+                    logger.error("Encoder rejected " + cpuCodecErrors
+                        + " CPU frames in a row, requesting reinit");
+                    cpuCodecErrors = 0;
+                    needsReinit = true;
+                }
+                break;
+        }
+
+        long elapsedNs = System.nanoTime() - start;
+        lastDrawDurationNs = elapsedNs;
+        if (elapsedNs > maxDrawDurationNs) consecutiveSlowFrames++;
+        else consecutiveSlowFrames = 0;
+        if (elapsedNs > cpuWorstTotalNs) {
+            cpuWorstTotalNs = elapsedNs;
+            cpuWorstComposeNs = w.composeNs;
+            cpuWorstOverlayNs = w.overlayNs;
+        }
+        long nowMs = System.currentTimeMillis();
+        if (cpuWindowStartMs == 0) {
+            cpuWindowStartMs = nowMs;
+        } else if (nowMs - cpuWindowStartMs >= DRAW_STAGE_LOG_INTERVAL_MS) {
+            logger.info(String.format(Locale.US,
+                "CpuFrame(worst/30s): total=%dms copy=%dms ovl=%dms queued=%d noBuffer=%d busy=%d superseded=%d",
+                cpuWorstTotalNs / 1_000_000, cpuWorstComposeNs / 1_000_000,
+                cpuWorstOverlayNs / 1_000_000, cpuQueued, cpuNoBuffer, cpuBusy,
+                cpuSuperseded.getAndSet(0)));
+            cpuWorstTotalNs = cpuWorstComposeNs = cpuWorstOverlayNs = 0;
+            cpuQueued = cpuNoBuffer = cpuBusy = 0;
+            cpuWindowStartMs = nowMs;
+        }
+    }
+
+    private final Object cpuFailLock = new Object();
+
+    /** Camera or CPU recording thread; the listener hears about it once. */
+    private void failCpuEngine(String reason, String detail) {
+        synchronized (cpuFailLock) {
+            if (cpuEngineFailed) return;
+            cpuEngineFailed = true;
+        }
+        logger.warn("CPU recording engine stopped (" + reason + ": " + detail
+            + ") — switching recording to the GPU engine");
+        java.util.function.Consumer<String> listener = cpuEngineFailureListener;
+        if (listener != null) {
+            try {
+                listener.accept(reason);
+            } catch (Throwable t) {
+                logger.warn("CPU engine failure listener threw: " + t.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Picks up a new overlay bitmap and rebuilds its blend table on a background
+     * thread, so the camera thread never waits on it. While a rebuild runs, the
+     * renderer keeps its newest bitmap pending and frames blend the last table.
+     */
+    private void refreshCpuOverlay() {
+        if (cpuOverlayBuilding.get()) return;
+        android.graphics.Bitmap bitmap = overlayRenderer.swapAndGetFront();
+        if (bitmap == null || bitmap.isRecycled()) return;
+        if (bitmap.getConfig() != android.graphics.Bitmap.Config.ARGB_8888) return;
+        // The GL overlay quad covers the top 1/12 of the frame, full width.
+        final int bandW = viewportWidth & ~1;
+        final int bandH = Math.round(viewportHeight / 12f) & ~1;
+        int tableBytes = CpuMosaicCompositor.nativeOverlayBytes(bandW, bandH);
+        if (tableBytes <= 0) return;
+        int pixelBytes = bitmap.getRowBytes() * bitmap.getHeight();
+        try {
+            if (cpuOverlayRgba == null || cpuOverlayRgba.capacity() < pixelBytes) {
+                cpuOverlayRgba = java.nio.ByteBuffer.allocateDirect(pixelBytes);
+            }
+            for (int i = 0; i < cpuOverlayTables.length; i++) {
+                if (cpuOverlayTables[i] == null || cpuOverlayTables[i].capacity() < tableBytes) {
+                    cpuOverlayTables[i] = java.nio.ByteBuffer.allocateDirect(tableBytes)
+                        .order(java.nio.ByteOrder.nativeOrder());
+                    if (cpuOverlayFront == i) cpuOverlayFront = -1;
+                }
+            }
+            cpuOverlayRgba.clear();
+            bitmap.copyPixelsToBuffer(cpuOverlayRgba);  // premultiplied RGBA, as GL uploads it
+        } catch (RuntimeException e) {
+            logCpuOverlayError("CPU overlay copy failed: " + e.getMessage());
+            return;
+        }
+        final java.nio.ByteBuffer rgba = cpuOverlayRgba;
+        final int bw = bitmap.getWidth(), bh = bitmap.getHeight(), rowBytes = bitmap.getRowBytes();
+        final int gen;
+        synchronized (cpuOverlayTables) {
+            gen = cpuOverlayGen;
+        }
+        cpuOverlayBuilding.set(true);
+        try {
+            CPU_OVERLAY_BUILDER.execute(() -> buildCpuOverlayTable(rgba, bw, bh, rowBytes, bandW, bandH, gen));
+        } catch (RuntimeException e) {
+            cpuOverlayBuilding.set(false);
+            logCpuOverlayError("CPU overlay rebuild not scheduled: " + e.getMessage());
+        }
+    }
+
+    /** Builder thread: fills a table the camera thread isn't using, then publishes it. */
+    private void buildCpuOverlayTable(java.nio.ByteBuffer rgba, int bw, int bh, int rowBytes,
+                                      int bandW, int bandH, int gen) {
+        try {
+            int front = cpuOverlayFront, hazard = cpuOverlayHazard;
+            int t = 0;
+            while (t == front || t == hazard) t++;  // one of three is always free
+            java.nio.ByteBuffer table = cpuOverlayTables[t];
+            if (table != null && CpuMosaicCompositor.nativePrepareOverlay(
+                    rgba, bw, bh, rowBytes, table, bandW, bandH)) {
+                synchronized (cpuOverlayTables) {
+                    if (gen == cpuOverlayGen) cpuOverlayFront = t;  // not into a re-initialised session
+                }
+            }
+        } catch (Throwable e) {
+            logCpuOverlayError("CPU overlay rebuild failed: " + e.getMessage());
+        } finally {
+            cpuOverlayBuilding.set(false);
+        }
+    }
+
+    /** Drops the published table; a rebuild still running won't publish afterwards. */
+    private void resetCpuOverlay() {
+        synchronized (cpuOverlayTables) {
+            cpuOverlayGen++;
+            cpuOverlayFront = -1;
+        }
+        cpuOverlayHazard = -1;
+    }
+
+    /** Camera thread: marks the newest table in use (re-checked so the builder can't take it). */
+    private int acquireCpuOverlayTable() {
+        int f;
+        do {
+            f = cpuOverlayFront;
+            cpuOverlayHazard = f;
+        } while (f != cpuOverlayFront);
+        return f;
+    }
+
+    private void logCpuOverlayError(String message) {
+        if (!cpuOverlayErrorLogged) {
+            cpuOverlayErrorLogged = true;
+            logger.warn(message);
+        }
+    }
+
+    /** One frame for the CPU recording thread, with the settings it was taken under. */
+    private static final class CpuFrameJob {
+        final CpuFrameSource source;
+        final CpuFrameSource windshield;  // dashcam top band; null = the 360 front
+        final long ptsNs;
+        final boolean overlay;
+        final float k1;
+        final float k2;
+        final float aspect;
+        final int layout;
+        final boolean rawLens;
+        private final java.util.concurrent.atomic.AtomicBoolean released =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
+        CpuFrameJob(CpuFrameSource source, CpuFrameSource windshield, long ptsNs, boolean overlay,
+                    float k1, float k2, float aspect, int layout, boolean rawLens) {
+            this.source = source;
+            this.windshield = windshield;
+            this.ptsNs = ptsNs;
+            this.overlay = overlay;
+            this.k1 = k1;
+            this.k2 = k2;
+            this.aspect = aspect;
+            this.layout = layout;
+            this.rawLens = rawLens;
+            source.retain();
+            if (windshield != null) windshield.retain();
+        }
+
+        /** Hands the camera images back to the camera thread; once, from any path. */
+        void releaseSources() {
+            if (released.compareAndSet(false, true)) {
+                source.release();
+                if (windshield != null) windshield.release();
+            }
+        }
+    }
+
+    /**
+     * CPU recording thread: copies frames into the encoder in parallel with the
+     * camera thread's GPU work (blind-spot, live view). One frame runs and one
+     * waits; a newer frame replaces the waiting one, whose images go back at once.
+     */
+    private final class CpuLane implements Runnable {
+        private final Object lock = new Object();
+        private final CpuGridWriter writer = new CpuGridWriter();
+        private final Thread thread = new Thread(this, "CpuRecordLane");
+        private CpuFrameJob pending;     // guarded by lock
+        private boolean running = true;  // guarded by lock
+
+        void start() {
+            thread.setDaemon(true);
+            thread.start();
+        }
+
+        void post(CpuFrameJob job) {
+            CpuFrameJob handBack;
+            synchronized (lock) {
+                if (running) {
+                    handBack = pending;
+                    pending = job;
+                    lock.notifyAll();
+                } else {
+                    handBack = job;
+                }
+            }
+            if (handBack != null) {
+                handBack.releaseSources();
+                if (handBack != job) cpuSuperseded.incrementAndGet();
+            }
+        }
+
+        void dropPending() {
+            CpuFrameJob dropped;
+            synchronized (lock) {
+                dropped = pending;
+                pending = null;
+            }
+            if (dropped != null) dropped.releaseSources();
+        }
+
+        /** Stops after the running frame; false if it hasn't ended within the timeout. */
+        boolean stop(long timeoutMs) {
+            synchronized (lock) {
+                running = false;
+                lock.notifyAll();
+            }
+            dropPending();
+            if (Thread.currentThread() == thread) return true;
+            try {
+                thread.join(timeoutMs);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return !thread.isAlive();
+        }
+
+        @Override
+        public void run() {
+            // The recording copy's priority on the GPU engine (camera thread draw).
+            try {
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DISPLAY);
+            } catch (Throwable e) {
+                try {
+                    android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_FOREGROUND);
+                } catch (Throwable ignored) {}
+            }
+            while (true) {
+                CpuFrameJob job;
+                synchronized (lock) {
+                    while (running && pending == null) {
+                        try {
+                            lock.wait();
+                        } catch (InterruptedException ignored) {
+                        }
+                    }
+                    if (!running) break;
+                    job = pending;
+                    pending = null;
+                }
+                try {
+                    writeCpuFrame(writer, job);
+                } catch (Throwable t) {
+                    logger.warn("CPU frame failed: " + t);
+                } finally {
+                    job.releaseSources();
+                }
+            }
+            dropPending();
+        }
+    }
+
+    /** Fills one encoder input image from a camera frame. CPU recording thread only. */
+    private final class CpuGridWriter implements HardwareEventRecorderGpu.CpuFrameWriter {
+        private java.nio.ByteBuffer sy;
+        private java.nio.ByteBuffer su;
+        private java.nio.ByteBuffer sv;
+        private int sRowY;
+        private int sRowUV;
+        private int sPixUV;
+        private int srcW;
+        private int srcH;
+        private java.nio.ByteBuffer wy;
+        private java.nio.ByteBuffer wu;
+        private java.nio.ByteBuffer wv;
+        private int wRowY;
+        private int wRowUV;
+        private int wPixUV;
+        private int wsW;
+        private int wsH;
+        private boolean windshieldErrorLogged;
+        boolean windshield;
+        java.nio.ByteBuffer overlayTable;
+        CpuFrameJob job;
+        boolean sourceRejected;
+        String error;
+        long composeNs;
+        long overlayNs;
+
+        boolean bindSource(android.media.Image image) {
+            sourceRejected = false;
+            try {
+                if (image.getFormat() != android.graphics.ImageFormat.YUV_420_888) {
+                    error = "camera format " + image.getFormat();
+                    return false;
+                }
+                srcW = image.getWidth();
+                srcH = image.getHeight();
+                android.media.Image.Plane[] p = image.getPlanes();
+                if (p == null || p.length < 3 || p[0].getPixelStride() != 1
+                        || p[1].getPixelStride() != p[2].getPixelStride()
+                        || p[1].getRowStride() != p[2].getRowStride()) {
+                    error = "camera plane layout";
+                    return false;
+                }
+                sy = p[0].getBuffer();
+                su = p[1].getBuffer();
+                sv = p[2].getBuffer();
+                if (sy == null || su == null || sv == null
+                        || !sy.isDirect() || !su.isDirect() || !sv.isDirect()) {
+                    error = "camera planes not direct";
+                    return false;
+                }
+                sRowY = p[0].getRowStride();
+                sRowUV = p[1].getRowStride();
+                sPixUV = p[1].getPixelStride();
+                return true;
+            } catch (Throwable t) {
+                error = "camera planes unreadable: " + t;
+                return false;
+            }
+        }
+
+        boolean bindWindshield(android.media.Image image) {
+            try {
+                android.media.Image.Plane[] p = image.getFormat() == android.graphics.ImageFormat.YUV_420_888
+                    ? image.getPlanes() : null;
+                if (p != null && p.length >= 3 && p[0].getPixelStride() == 1
+                        && p[1].getPixelStride() == p[2].getPixelStride()
+                        && p[1].getRowStride() == p[2].getRowStride()
+                        && p[0].getBuffer().isDirect() && p[1].getBuffer().isDirect()
+                        && p[2].getBuffer().isDirect()) {
+                    wy = p[0].getBuffer();
+                    wu = p[1].getBuffer();
+                    wv = p[2].getBuffer();
+                    wRowY = p[0].getRowStride();
+                    wRowUV = p[1].getRowStride();
+                    wPixUV = p[1].getPixelStride();
+                    wsW = image.getWidth();
+                    wsH = image.getHeight();
+                    return true;
+                }
+            } catch (Throwable ignored) {
+            }
+            if (!windshieldErrorLogged) {
+                windshieldErrorLogged = true;
+                logger.warn("Windshield frame not CPU-readable; dashcam top band uses the 360 front");
+            }
+            return false;
+        }
+
+        void releaseSource() {
+            sy = su = sv = null;
+            wy = wu = wv = null;
+        }
+
+        @Override
+        public boolean write(android.media.Image input) {
+            android.media.Image.Plane[] d = input.getPlanes();
+            if (d == null || d.length < 3 || d[0].getPixelStride() != 1
+                    || d[1].getPixelStride() != d[2].getPixelStride()
+                    || d[1].getRowStride() != d[2].getRowStride()) {
+                error = "encoder plane layout";
+                return false;
+            }
+            java.nio.ByteBuffer dy = d[0].getBuffer();
+            java.nio.ByteBuffer du = d[1].getBuffer();
+            java.nio.ByteBuffer dv = d[2].getBuffer();
+            int dstW = input.getWidth();
+            int dstH = input.getHeight();
+            CpuFrameJob j = job;
+            if (j == null) {
+                error = "no frame";
+                return false;
+            }
+            int layout = j.layout;
+            long rc;
+            // 2x2 grid clips are raw tiles (lens correction runs in the player);
+            // dashcam clips are dewarped here.
+            if (layout == 0 && cpuTilesExact
+                    && srcW == viewportWidth * 2 && srcH * 2 == viewportHeight) {
+                rc = CpuMosaicCompositor.nativeCompose(
+                    sy, su, sv, sRowY, sRowUV, sPixUV, srcW, srcH,
+                    dy, du, dv, d[0].getRowStride(), d[1].getRowStride(), d[1].getPixelStride(),
+                    dstW, dstH, cpuSrcX[0], cpuSrcX[1], cpuSrcX[2], cpuSrcX[3],
+                    viewportWidth / 2, viewportHeight / 2);
+            } else {
+                float[] o = quadrantStripOffsetX;
+                rc = CpuMosaicCompositor.nativeRemap(
+                    sy, su, sv, sRowY, sRowUV, sPixUV, srcW, srcH,
+                    wy, wu, wv, wRowY, wRowUV, wPixUV, wsW, wsH,
+                    dy, du, dv, d[0].getRowStride(), d[1].getRowStride(), d[1].getPixelStride(),
+                    dstW, dstH, o[0], o[1], o[2], o[3],
+                    layout == 0 ? 0f : j.k1, layout == 0 ? 0f : j.k2, j.aspect, layout,
+                    windshield, cpuWindshieldCropY, DASHCAM_SPLIT);
+            }
+            // The camera frame is no longer read: the camera thread may close it now.
+            j.releaseSources();
+            if (rc < 0) {
+                // Camera-side rejections; the rest is the encoder buffer.
+                sourceRejected = rc == -1 || rc == -3 || rc == -20 || rc == -21
+                    || rc == -53 || rc == -54;
+                error = "grid copy rc=" + rc + " (encoder " + dstW + "x" + dstH
+                    + " stride " + d[0].getRowStride() + "/" + d[1].getRowStride()
+                    + " pix " + d[1].getPixelStride() + ")";
+                return false;
+            }
+            composeNs = rc;
+            java.nio.ByteBuffer table = overlayTable;
+            if (table != null) {
+                long t0 = System.nanoTime();
+                int orc = CpuMosaicCompositor.nativeBlendOverlay(table, dy, du, dv,
+                    d[0].getRowStride(), d[1].getRowStride(), d[1].getPixelStride(), dstW, dstH);
+                overlayNs = System.nanoTime() - t0;
+                if (orc < 0 && !cpuOverlayErrorLogged) {
+                    cpuOverlayErrorLogged = true;
+                    logger.warn("CPU overlay blend rejected (rc=" + orc + "); recording without it");
+                }
+            }
+            return true;
+        }
     }
 
     private static float[] normalizeOffsets(float[] quadrantStripOffsetX) {
@@ -2259,10 +2891,13 @@ public class GpuMosaicRecorder {
         return String.format(Locale.US,
             "#extension GL_OES_EGL_image_external : "
                 + (isTexture2D ? "enable\n" : "require\n") +
-            "precision mediump float;\n" +
+            // highp, as in GpuStreamScaler: fp16 snaps strip coordinates to ~2.5 texels.
+            "precision highp float;\n" +
             cameraSampler +
             windshieldSampler +
-            "uniform float uWindshieldReady;\n" +
+            // x = windshield frame ready, y = telemetry overlay texture ready.
+            "uniform vec2 uTextureReady;\n" +
+            "uniform sampler2D uOverlayTex;\n" +
             "uniform float uApaMode;\n" +
             "uniform vec2 uProducerForFront;\n" +
             "uniform vec2 uProducerForRight;\n" +
@@ -2299,6 +2934,7 @@ public class GpuMosaicRecorder {
             "uniform float uRecordLayout;\n" +
             com.overdrive.app.camera.dilink5.DiLink5FisheyeModel.GLSL +
             "varying vec2 vTexCoord;\n" +
+            "varying vec2 vScreenCoord;\n" +
             // NOTE: the previous revision of this file had a 4-tap
             // Catmull-Rom bicubic sampler here, gated on uRectifyK1 > 0.
             // It saturated the Adreno 610 command queue at 2560×1920 and
@@ -2336,6 +2972,19 @@ public class GpuMosaicRecorder {
             "    vec2 srcTile = vec2(srcAspect.x, srcAspect.y / uRectifyAspect);\n" +
             "    vec2 camUV = srcTile * 0.5 + 0.5;\n" +
             "    return clamp(camUV, vec2(0.0), vec2(1.0));\n" +
+            "}\n" +
+            // Match the former overlay quad's top-strip coverage and
+            // GL_SRC_ALPHA / GL_ONE_MINUS_SRC_ALPHA blend equation. The
+            // helper is shared by the normal camera and windshield paths.
+            "vec4 compositeTelemetryOverlay(vec4 baseColor) {\n" +
+            "    if (uTextureReady.y > 0.5 && vScreenCoord.y >= %.5f) {\n" +
+            "        vec2 overlayUv = vec2(vScreenCoord.x, (1.0 - vScreenCoord.y) / %.5f);\n" +
+            "        vec4 overlayColor = texture2D(uOverlayTex, overlayUv);\n" +
+            "        baseColor = vec4(\n" +
+            "            overlayColor.rgb * overlayColor.a + baseColor.rgb * (1.0 - overlayColor.a),\n" +
+            "            overlayColor.a * overlayColor.a + baseColor.a * (1.0 - overlayColor.a));\n" +
+            "    }\n" +
+            "    return baseColor;\n" +
             "}\n" +
             "void main() {\n" +
             "    vec2 samplePos;\n" +
@@ -2402,13 +3051,13 @@ public class GpuMosaicRecorder {
             "        if (vTexCoord.y < split) {\n" +
             "            float ly = vTexCoord.y / split;\n" +
             // Optional dedicated windshield camera for the top band. When a
-            // windshield frame is bound (uWindshieldReady), sample it directly
+            // windshield frame is bound (uTextureReady.x), sample it directly
             // (vertically cropped to the band aspect via cropY) and skip the
             // 360 front slice. Otherwise fall through to the 360 front slice.
-            "            if (uWindshieldReady > 0.5) {\n" +
+            "            if (uTextureReady.x > 0.5) {\n" +
             "                float cropY = %.5f;\n" +
             "                vec2 wuv = vec2(vTexCoord.x, cropY + ly * (1.0 - cropY * 2.0));\n" +
-            "                gl_FragColor = texture2D(uWindshieldTex, wuv);\n" +
+            "                gl_FragColor = compositeTelemetryOverlay(texture2D(uWindshieldTex, wuv));\n" +
             "                return;\n" +
             "            }\n" +
             "            vec2 camUV = rectifyTile(vec2(vTexCoord.x, ly));\n" +
@@ -2500,8 +3149,9 @@ public class GpuMosaicRecorder {
             "    vec4 src = texture2D(uCameraTex, samplePos);\n" +
             // Shared red-overlay suppression. See GlUtil.RED_MASK_GLSL.
             com.overdrive.app.camera.GlUtil.RED_MASK_GLSL +
-            "    gl_FragColor = src;\n" +
+            "    gl_FragColor = compositeTelemetryOverlay(src);\n" +
             "}\n",
+            OVERLAY_TOP_SCREEN_Y, OVERLAY_SCREEN_HEIGHT,
             offsets[0], offsets[1], offsets[2], offsets[3], windshieldCropY);
     }
 

@@ -78,9 +78,7 @@ class WireGuardSettingsDialog private constructor(
         switchExpose.setOnCheckedChangeListener(exposeListener)
 
         view.findViewById<MaterialButton>(R.id.btnWgPaste).setOnClickListener { pasteFromClipboard() }
-        view.findViewById<MaterialButton>(R.id.btnWgImport).setOnClickListener {
-            pickFile.launch(arrayOf("*/*"))
-        }
+        view.findViewById<MaterialButton>(R.id.btnWgImport).setOnClickListener { startImport() }
         view.findViewById<MaterialButton>(R.id.btnWgPhone).setOnClickListener { showPhoneSetup(view) }
 
         dialog = MaterialAlertDialogBuilder(context, R.style.Theme_Overdrive_M3_Dialog)
@@ -278,7 +276,45 @@ class WireGuardSettingsDialog private constructor(
         if (text.contains("PrivateKey", ignoreCase = true)) clipboard?.clearPrimaryClip()
     }
 
-    /** Result of the document picker started from the fragment. */
+    private fun startImport() {
+        if (WireGuardImport.hasDocumentPicker(context)) {
+            launchPicker(arrayOf("*/*"))
+            return
+        }
+        io.execute {
+            val files = WireGuardImport.findConfigFiles()
+            main.post { if (!closed) showConfigFiles(files) }
+        }
+    }
+
+    /** In-app list of .conf files; the BYD gallery stays available for QR pictures. */
+    private fun showConfigFiles(files: List<java.io.File>) {
+        val pickQr = context.getString(R.string.wgsetup_import_qr_picture)
+        val builder = MaterialAlertDialogBuilder(context, R.style.Theme_Overdrive_M3_Dialog)
+            .setTitle(R.string.wgsetup_import_pick_title)
+            .setNegativeButton(R.string.action_cancel, null)
+        if (files.isEmpty()) {
+            builder.setMessage(R.string.wgsetup_import_none_found)
+                .setPositiveButton(pickQr) { _, _ -> launchPicker(arrayOf("image/*")) }
+        } else {
+            val labels = files.map { "${it.name}\n${it.parent}" } + pickQr
+            builder.setItems(labels.toTypedArray()) { _, which ->
+                if (which < files.size) onFilePicked(Uri.fromFile(files[which]))
+                else launchPicker(arrayOf("image/*"))
+            }
+        }
+        builder.show()
+    }
+
+    private fun launchPicker(types: Array<String>) {
+        try {
+            pickFile.launch(types)
+        } catch (e: android.content.ActivityNotFoundException) {
+            toast(R.string.wgsetup_import_no_picker)
+        }
+    }
+
+    /** Result of the document picker started from the fragment, or a file from the in-app list. */
     fun onFilePicked(uri: Uri) {
         if (closed) return
         io.execute {

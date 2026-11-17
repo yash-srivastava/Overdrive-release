@@ -49,20 +49,22 @@
     // Translate [data-i18n] text while the HTML is still being parsed, so a
     // non-English page paints translated from the very first frame instead of
     // showing the English markup until core.js fetches the catalog. The
-    // catalog comes from (in order) the app bundle via AndroidBridge, the copy
-    // core.js cached in localStorage on the last load, or, on a cold cache
-    // only, a synchronous read of the same /i18n/<lang>.json. core.js picks up
+    // catalog comes from the app bundle via AndroidBridge, else the copy
+    // core.js cached in localStorage on the last load, for the language
+    // core.js resolved then (this file has no resolveLang()). A cold cache
+    // paints as before: there is no synchronous fetch. core.js picks up
     // window.__odI18nEarly, does the full hydrate and refreshes the cache.
     // English users skip all of this.
     (function earlyI18n() {
         var code = '';
-        try { code = localStorage.getItem('overdrive_locale') || ''; } catch (e) {}
         try {
             if (window.AndroidBridge && typeof window.AndroidBridge.getAppLocale === 'function') {
-                code = window.AndroidBridge.getAppLocale() || code;
+                code = window.AndroidBridge.getAppLocale() || '';
             }
         } catch (e) {}
-        if (!code && navigator.language) code = navigator.language;
+        if (!code) {
+            try { code = localStorage.getItem('overdrive_i18n_catalog_lang') || ''; } catch (e) {}
+        }
         if (/^iw(-|$)/i.test(code)) code = 'he';
         if (/^he-/i.test(code)) code = 'he';
         if (!code || /^en(-|$)/i.test(code)) return;
@@ -77,12 +79,6 @@
                 var c = localStorage.getItem('overdrive_i18n_catalog_' + lang);
                 if (c) return JSON.parse(c);
             } catch (e) {}
-            try {
-                var x = new XMLHttpRequest();
-                x.open('GET', '/i18n/' + lang + '.json', false);
-                x.send();
-                if (x.status === 200) return JSON.parse(x.responseText);
-            } catch (e) {}
             return null;
         }
         var cat = load(code);
@@ -93,12 +89,16 @@
             for (var i = 0; i < parts.length && cur != null; i++) cur = cur[parts[i]];
             return cur;
         }
+        // Each element is translated once. A later text-node record under an element already
+        // done is a page script writing it, and the script's text must win.
         function apply(el) {
+            if (el.__odI18nEarly) return;
             var v = look(el.getAttribute('data-i18n'));
             if (typeof v !== 'string') return;
             for (var c = el.firstChild; c; c = c.nextSibling) {
                 if (c.nodeType === 3 && /\S/.test(c.nodeValue)) {
                     if (c.nodeValue !== v) c.nodeValue = v;
+                    el.__odI18nEarly = true;
                     return;
                 }
             }

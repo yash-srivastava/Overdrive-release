@@ -168,6 +168,9 @@
     "tyre_wheel_pressure": "{0} ({1})"
   },
   "telegram": {
+    "deterrent_triggered": "Deterrente attivato: {0}",
+    "deterrent_screen": "Schermo",
+    "deterrent_cloud": "Cloud",
     "recording_caption": "📹 Registrazione ({0}) - {1}s",
     "recording_caption_no_label": "📹 Registrazione - {0}s",
     "proximity_alert": "🚨 Avviso di prossimita\nOra: {0}\nTrigger: {1} ({2})\nRegistrazione avviata...",
@@ -477,6 +480,7 @@
   },
   "vehicle_control": {
     "blocked_driving": "Questa azione non è disponibile mentre il veicolo è in movimento",
+    "blocked_unconfirmed": "Al momento non è possibile confermare che il veicolo sia parcheggiato. Riprova tra un attimo.",
     "cloud_required": "Connettere un account BYD nelle impostazioni per utilizzare questo controllo",
     "cloud_sent": "Invio tramite cloud",
     "cloud_unavailable_used_local": "Cloud non disponibile connessione diretta utilizzata",

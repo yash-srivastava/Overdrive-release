@@ -448,6 +448,10 @@ BYD.automations = {
         }
         this.render();
         this.renderForm();
+        // Group cards build their recipe from the schema; skip until the list itself has loaded.
+        if (this._groupsLoaded) {
+            try { this.renderGroupList(); } catch (_) {}
+        }
     },
 
     async refreshLocale() {
@@ -726,11 +730,13 @@ BYD.automations = {
     // `opts.recipe` (local list cards only): wrap the SAME text pieces in recipe markup —
     // block marker, joiners, one chip per step with its icon/hue — so the card's text is
     // unchanged. Without it (community cards) the output is the plain prose, as before.
+    // `opts.sections` limits the output to those section ids (the action-group cards).
     buildAutomationText(automation, opts) {
         const sections = this.schemaSections();
         if (!sections.length) return BYD.i18n.t('automation.failed_to_load_schema');
 
         const recipe = !!(opts && opts.recipe);
+        const onlySections = (opts && Array.isArray(opts.sections)) ? opts.sections : null;
         const chip = (text, hue, iconKey, extraClass) => '<span class="recipe-chip' + (extraClass ? ' ' + extraClass : '')
             + '" data-step-cat="' + hue + '">' + autoIconSvg(iconKey || hue) + '<span class="recipe-text">' + text + '</span></span>';
         const mark = (text, sectionId) => {
@@ -767,6 +773,7 @@ BYD.automations = {
                 result += '<span class="automation-stats">' + stats + '</span><br>';
             }
             for (const section of sections) {
+                if (onlySections && onlySections.indexOf(section.id) < 0) continue;
                 if (section.options && section.options.length) {
                     const sectionData = (automation[section.id] != null) ? automation[section.id] : [];
                     // Skip an empty else section entirely so automations without an
@@ -844,14 +851,16 @@ BYD.automations = {
             if (gvar) out += '(' + this.automationValueToText(gvar, entryVars[gvar.id]) + ') ';
             return out;
         }
-        if (dataVars.length) out += '(';
+        const parts = [];
         for (const variable of dataVars) {
+            // A shared/older entry has no value for a variable added later: leave it out.
+            if (!variable.signalAddress && entryVars[variable.id] === undefined) continue;
             const raw = variable.signalAddress
                 ? this._lhsAddress(entryVars[variable.id], entryVars.name, data)
                 : entryVars[variable.id];
-            out += variable.label + '=' + this.automationValueToText(variable, raw) + ',';
+            parts.push(variable.label + '=' + this.automationValueToText(variable, raw));
         }
-        if (dataVars.length) out = out.slice(0, out.length - 1) + ') ';
+        if (parts.length) out += '(' + parts.join(',') + ') ';
         // comparator/value live directly on the entry (not under .variables).
         if (data.comparator && data.value) {
             for (const variable of ['comparator', 'value']) {
@@ -1324,8 +1333,6 @@ BYD.automations = {
                 inputs.classList.add('has-cond-value');
                 inputs.append(valInp);
             }
-            inputs.querySelectorAll('.step-reading').forEach(el => el.remove());
-            this.appendStepReading(inputs, () => group.conditions[ci], false, 'step-reading');
         };
 
         const typeSel = this.createEnumInput(this.getTypeEnum('cg', options), group.conditions[ci].type,
@@ -1517,8 +1524,6 @@ BYD.automations = {
                     inputs.append(elseBox);
                 }
             }
-            inputs.querySelectorAll('.step-reading').forEach(el => el.remove());
-            this.appendStepReading(inputs, () => arr[i], true, 'step-reading');
         };
 
         const typeSel = this.createEnumInput(this.getTypeEnum('na', options, d >= this.maxActionDepth()), arr[i].type,
@@ -1969,73 +1974,6 @@ BYD.automations = {
     stopStatePolling() {
         if (this._statePollTimer) { clearInterval(this._statePollTimer); this._statePollTimer = null; }
         this._stateHiddenTicks = 0;
-    },
-
-    // Address a configured IF leaf using the same event type and attributes as the
-    // daemon's state map. An incomplete attribute selection is NOT a different signal.
-    conditionReadingAddress(entry) {
-        if (!entry || !entry.type) return '';
-        const spec = this.conditionCatalog().find(o => o && o.id === entry.type);
-        if (!spec) return '';
-        const attrs = [];
-        const variables = entry.variables || {};
-        for (const field of (spec.variables || [])) {
-            const value = variables[field.id];
-            if (value === undefined || value === null || String(value) === '') return '';
-            attrs.push(field.id + '=' + String(value));
-        }
-        return entry.type + (attrs.length ? ':' + attrs.sort().join(',') : '');
-    },
-
-    // Only associate an action with a reading where the state meaning is known.
-    // Command success is not evidence of vehicle state. Unmapped/write-only actions
-    // deliberately show no reading rather than inventing an On/Off value.
-    actionReadingAddress(entry) {
-        if (!entry || !entry.type) return '';
-        const simple = {
-            lock: 'lock', unlock: 'lock', powerOn: 'power', powerOff: 'power',
-            adas_slw: 'slw', cpd: 'cpd', steeringHeat: 'steeringHeat',
-            driveMode: 'driveMode', powertrainMode: 'powertrainMode'
-        };
-        if (simple[entry.type]) return simple[entry.type];
-        if (entry.type === 'setAc') return 'ac';
-        if (entry.type === 'setAcTemp') return 'acSetpoint';
-        if (entry.type === 'setAcFan') return 'acFanLevel';
-        if (entry.type === 'windows' || entry.type === 'windowsPreset') {
-            const areas = { '1': 'lf', '2': 'rf', '3': 'lr', '4': 'rr',
-                '5': 'sunroof', '6': 'sunshade' };
-            const area = entry.variables && areas[String(entry.variables.area)];
-            return area ? 'windowOpenPercent:area=' + area : '';
-        }
-        const fixed = {
-            drl: 'lights:area=drl', hazard: 'lights:area=hazard',
-            sunshade: 'windowState:area=sunshade', sunroof: 'windowState:area=sunroof'
-        };
-        if (fixed[entry.type]) return fixed[entry.type];
-        // Exact catalog matches are safe only for zero-attribute signals: an
-        // unqualified area/seat signal would otherwise display the wrong reading.
-        const spec = this.conditionCatalog().find(o => o && o.id === entry.type);
-        return spec && (!spec.variables || !spec.variables.length) ? entry.type : '';
-    },
-
-    // The same read-only hint is attached to flat/group IF rows and to flat/nested
-    // action rows. Rebuilding a row removes its previous hint; the callback always
-    // reads the current entry so changing an attribute updates the address.
-    appendStepReading(inputs, getEntry, isAction, className) {
-        const hint = document.createElement('div');
-        hint.classList.add(className);
-        inputs.append(hint);
-        this.buildSignalHint(hint, () => {
-            const entry = getEntry();
-            return isAction ? this.actionReadingAddress(entry) : this.conditionReadingAddress(entry);
-        });
-        if (isAction && getEntry() && getEntry().type && !this.actionReadingAddress(getEntry())) {
-            const note = document.createElement('div');
-            note.classList.add('field-help', className);
-            note.textContent = BYD.i18n.t('automation.reading_unavailable');
-            inputs.append(note);
-        }
-        return hint;
     },
 
     // The live value for a ${signal:…} token (or a bare address), or undefined when the signal
@@ -2969,11 +2907,6 @@ BYD.automations = {
                     inputs.append(this.createNestedActions(options, entry.elseActions,
                         'automation.else_actions'));
                 }
-            }
-            inputs.querySelectorAll('.step-reading').forEach(el => el.remove());
-            if (id === 'conditions' || id === 'triggers' || id === 'actions' || id === 'elseActions') {
-                this.appendStepReading(inputs, () => this.formData[id][index],
-                    id === 'actions' || id === 'elseActions', 'step-reading');
             }
         };
 
@@ -4106,6 +4039,7 @@ BYD.automations = {
 
     groupData: null,      // the group currently open in the editor, or null
     _groups: [],          // cached [{id, name, actions}] for the list
+    _groupsLoaded: false, // true once loadGroups() has filled _groups at least once
 
     // Load + render the saved groups into #groupList (called on init + after any change).
     async loadGroups() {
@@ -4120,6 +4054,7 @@ BYD.automations = {
         } catch (e) {
             this._groups = [];
         }
+        this._groupsLoaded = true;
         this.renderGroupList();
         // The saved-automation cards resolve an "Action Group" action's stored UUID to
         // its friendly name via this._groups (see automationValueToText). loadGroups()
@@ -4207,36 +4142,70 @@ BYD.automations = {
             return;
         }
         if (empty) empty.style.display = 'none';
-        for (const g of this._groups) {
-            const card = document.createElement('div');
-            card.classList.add('card', 'group-card');
-            const body = document.createElement('div');
-            body.classList.add('group-card-body');
-            const info = document.createElement('div');
-            info.classList.add('group-card-info');
-            const name = document.createElement('div');
-            name.classList.add('group-card-name');
-            name.textContent = g.name;
-            const meta = document.createElement('div');
-            meta.classList.add('group-card-meta');
-            meta.textContent = BYD.i18n.t('automation.group_action_count').replace('{n}', (g.actions || []).length);
-            info.append(name, meta);
-            const actions = document.createElement('div');
-            actions.classList.add('group-card-actions');
-            const edit = document.createElement('button');
-            edit.classList.add('btn', 'btn-secondary');
-            edit.textContent = BYD.i18n.t('common.edit');
-            edit.addEventListener('click', () => this.showGroupForm(g));
-            const del = document.createElement('button');
-            del.classList.add('delete', 'icon-btn', 'danger');
-            del.title = BYD.i18n.t('automation.delete_row');
-            del.innerHTML = deleteIcon;
-            del.addEventListener('click', () => this.deleteGroup(g.id, g.name));
-            actions.append(edit, del);
-            body.append(info, actions);
-            card.append(body);
-            list.append(card);
+        for (const g of this._groups) list.append(this.createGroupElement(g));
+    },
+
+    // Same card shape as an automation (recipe chips + icon actions), minus the mode row.
+    createGroupElement(g) {
+        const card = document.createElement('div');
+        card.classList.add('card', 'group-card');
+        card.setAttribute('data-group-id', g.id);
+
+        const header = document.createElement('div');
+        header.classList.add('header');
+        card.append(header);
+
+        const info = document.createElement('div');
+        info.classList.add('info', 'recipe-info');
+        const acts = Array.isArray(g.actions) ? g.actions : [];
+        let html = '<strong class="automation-name">' + escapeHtml(g.name) + '</strong><br>'
+            + '<span class="automation-stats">'
+            + escapeHtml(BYD.i18n.t('automation.group_action_count').replace('{n}', acts.length))
+            + '</span><br>';
+        if (this.schemaSections().length) {
+            html += this.buildAutomationText({ actions: acts }, { recipe: true, sections: ['actions'] });
         }
+        info.innerHTML = html;
+        header.append(info);
+
+        const actions = document.createElement('div');
+        actions.classList.add('actions');
+        header.append(actions);
+        const addButton = (title, icon, extra, onClick) => {
+            const b = document.createElement('button');
+            b.classList.add('action', 'icon-btn');
+            if (extra) b.classList.add(extra);
+            b.title = title;
+            b.setAttribute('aria-label', title);
+            b.innerHTML = icon;
+            b.addEventListener('click', () => onClick(b));
+            actions.append(b);
+            return b;
+        };
+        addButton(BYD.i18n.t('automation.trigger'), triggerIcon, 'run-btn', (b) => this.runGroup(g.id, b));
+        // No id, so Save creates a new group (mirrors the automation copy button).
+        addButton(BYD.i18n.t('automation.copy_group'), copyIcon, null,
+            () => this.showGroupForm({ name: g.name, actions: acts }));
+        addButton(BYD.i18n.t('automation.edit_group'), editIcon, null, () => this.showGroupForm(g));
+        addButton(BYD.i18n.t('common.delete'), deleteIcon, 'danger', () => this.deleteGroup(g.id, g.name));
+        return card;
+    },
+
+    async runGroup(id, btn) {
+        const card = btn && btn.closest ? btn.closest('.card') : null;
+        if (btn) {
+            if (btn.classList.contains('is-running')) return;
+            this._setRunState(btn, card, 'running');
+        }
+        let ok = false;
+        try {
+            const resp = await fetch('/api/action-groups/' + encodeURIComponent(id) + '/run', { method: 'POST' });
+            const result = await resp.json();
+            ok = !!(result && result.success);
+        } catch (e) {}
+        if (btn) this._setRunState(btn, card, ok ? 'done' : 'failed');
+        if (ok) return this.toast(BYD.i18n.t('automation.toast_group_ran'), 'success');
+        this.toast(BYD.i18n.t('errors.generic'), 'error');
     },
 
     // Open the group editor for a new (g == null) or existing group. Deep-clones so

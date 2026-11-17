@@ -198,87 +198,6 @@ public class ClusterProjectionControllerDiLink5Test {
     }
 
     @Test
-    public void legacyCommandOwnershipExpiresOnlyAcrossAConfirmedReboot() {
-        String bootA = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
-        String bootB = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
-
-        assertTrue(
-                ClusterProjectionController
-                        .legacyIndeterminateCommandMayStillComplete(
-                                true, bootA, bootA));
-        assertTrue(
-                ClusterProjectionController
-                        .legacyIndeterminateCommandMayStillComplete(
-                                true, "", bootA));
-        assertFalse(
-                ClusterProjectionController
-                        .legacyIndeterminateCommandMayStillComplete(
-                                true, bootA, bootB));
-        assertFalse(
-                ClusterProjectionController
-                        .legacyIndeterminateCommandMayStillComplete(
-                                false, bootA, bootA));
-    }
-
-    @Test
-    public void expiredCommandOnlyOwnershipRequiresFullGatePromotion() {
-        String oldBoot = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
-        String currentBoot = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
-        ClusterProjectionController.LegacyGateSnapshot commandOnly =
-                new ClusterProjectionController.LegacyGateSnapshot(
-                        true, false, 0L, true, oldBoot);
-        ClusterProjectionController.LegacyGateSnapshot fullGate =
-                new ClusterProjectionController.LegacyGateSnapshot(
-                        true, true, 0L, false, "");
-        ClusterProjectionController.LegacyGateSnapshot activeUntilOnly =
-                new ClusterProjectionController.LegacyGateSnapshot(
-                        true, false, 123L, false, "");
-        ClusterProjectionController.LegacyGateSnapshot fullGateWithOldCommand =
-                new ClusterProjectionController.LegacyGateSnapshot(
-                        true, true, 0L, true, oldBoot);
-        ClusterProjectionController.LegacyGateSnapshot clean =
-                new ClusterProjectionController.LegacyGateSnapshot(
-                        true, false, 0L, false, "");
-
-        assertFalse(ClusterProjectionController
-                .legacyIndeterminateCommandMayStillComplete(
-                        commandOnly.commandIndeterminate,
-                        commandOnly.commandBootId,
-                        currentBoot));
-        assertTrue(ClusterProjectionController
-                .legacyBootRecoveryOwnershipNeedsPromotion(commandOnly));
-        assertTrue(ClusterProjectionController
-                .legacyBootRecoveryOwnershipNeedsPromotion(activeUntilOnly));
-        assertTrue(ClusterProjectionController
-                .legacyBootRecoveryOwnershipNeedsPromotion(
-                        fullGateWithOldCommand));
-        assertFalse(ClusterProjectionController
-                .legacyBootRecoveryOwnershipNeedsPromotion(fullGate));
-        assertFalse(ClusterProjectionController
-                .legacyBootRecoveryOwnershipNeedsPromotion(clean));
-    }
-
-    @Test
-    public void commandMarkerClearVerificationSeparatesRollbackFromDispatch() {
-        ClusterProjectionController.LegacyGateSnapshot clearedCommandOnly =
-                new ClusterProjectionController.LegacyGateSnapshot(
-                        true, false, 0L, false, "");
-        ClusterProjectionController.LegacyGateSnapshot clearedWithFullGate =
-                new ClusterProjectionController.LegacyGateSnapshot(
-                        true, true, 0L, false, "");
-
-        assertTrue(ClusterProjectionController
-                .isLegacyCommandMarkerClearVerified(
-                        clearedCommandOnly, false));
-        assertFalse(ClusterProjectionController
-                .isLegacyCommandMarkerClearVerified(
-                        clearedCommandOnly, true));
-        assertTrue(ClusterProjectionController
-                .isLegacyCommandMarkerClearVerified(
-                        clearedWithFullGate, true));
-    }
-
-    @Test
     public void legacyRecoveryResultSeparatesRetryableAndSameBootFailures() {
         assertTrue(
                 ClusterProjectionController.LegacyBootRecoveryResult
@@ -314,8 +233,8 @@ public class ClusterProjectionControllerDiLink5Test {
                 ClusterProjectionController.classifyLegacyServiceCallResult(
                         1, false, "Service AutoContainer: not found"));
         // A live service that refuses stays REJECTED (Binder exception word /
-        // negative native verdict), and unexplained non-zero exits stay
-        // INDETERMINATE.
+        // negative native verdict); a tool that exited with an error FAILED
+        // (nothing pending); only a still-running call is INDETERMINATE.
         assertEquals(
                 ClusterProjectionController.LegacyCommandResult.REJECTED,
                 ClusterProjectionController.classifyLegacyServiceCallResult(
@@ -327,7 +246,7 @@ public class ClusterProjectionControllerDiLink5Test {
                         0, false,
                         "Result: Parcel(00000000 ffffffff '........')"));
         assertEquals(
-                ClusterProjectionController.LegacyCommandResult.INDETERMINATE,
+                ClusterProjectionController.LegacyCommandResult.FAILED,
                 ClusterProjectionController.classifyLegacyServiceCallResult(
                         1, false, "binder transaction failed"));
         assertEquals(

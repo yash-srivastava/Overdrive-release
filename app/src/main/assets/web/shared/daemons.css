@@ -1,0 +1,18 @@
+/* Daemons status page */
+.pr-row { display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--border-subtle); }
+.pr-row:last-child { border-bottom:none; }
+.pr-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; background:var(--text-muted); }
+.pr-dot.running { background:var(--status-success); }
+.pr-dot.user_stopped, .pr-dot.stopped { background:var(--text-muted); }
+.pr-dot.unknown, .pr-dot.starting { background:var(--status-warning, #d9a400); }
+.pr-info { flex:1; min-width:0; display:flex; flex-direction:column; }
+.pr-name { font-weight:600; font-size:14px; color:var(--text-primary); }
+.pr-meta { font-size:12px; color:var(--text-muted); font-family:var(--family-mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pr-state { font-size:12px; color:var(--text-secondary); white-space:nowrap; }
+.pr-note { font-size:13px; color:var(--text-secondary); line-height:1.5; margin:0; }
+.pr-group { font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-muted); margin:14px 0 2px; }
+.pr-url { font:13px var(--family-mono); word-break:break-all; color:var(--text-primary); }
+a.pr-url { color:var(--primary, var(--text-primary)); text-decoration:none; }
+a.pr-url:hover { text-decoration:underline; }
+.pr-sub { font-size:12px; color:var(--text-muted); }
+.pr-btn { margin-top:10px; padding:8px 14px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-elevated); color:var(--text-primary); cursor:pointer; }

@@ -685,6 +685,11 @@ public class SurveillanceIpcServer implements Runnable {
                     String s = request.optString("section", "");
                     JSONObject data = request.optJSONObject("data");
                     boolean ok = false;
+                    // (the device secret is the daemon's to keep: no forwarded write sets it)
+                    if ("auth".equals(s) && data != null) {
+                        data.remove("deviceSecret");
+                        data.remove("handedOff");
+                    }
                     if (!s.isEmpty() && data != null) {
                         synchronized (CONFIG_LOCK) {
                             // forceReload BEFORE merge so an app-forwarded delta
@@ -716,6 +721,10 @@ public class SurveillanceIpcServer implements Runnable {
                             String k = it.next();
                             map.put(k, values.get(k));
                         }
+                        if ("auth".equals(s)) {
+                            map.remove("deviceSecret");
+                            map.remove("handedOff");
+                        }
                         synchronized (CONFIG_LOCK) {
                             com.overdrive.app.config.UnifiedConfigManager.forceReload();
                             ok = com.overdrive.app.config.UnifiedConfigManager
@@ -744,11 +753,15 @@ public class SurveillanceIpcServer implements Runnable {
                     // includeTrips opts the (location-bearing) trip history into
                     // the bundle; default settings-only.
                     boolean includeTrips = request.optBoolean("includeTrips", false);
+                    // the login code only for a caller holding a session (this port takes any local app)
+                    boolean withSecret = com.overdrive.app.auth.AuthManager
+                            .validateJwt(request.optString("jwt", "")).valid;
                     JSONObject bundle = com.overdrive.app.config.ConfigBackupService.buildBundle(
                             com.overdrive.app.updater.AppUpdater.getInstalledVersion(),
                             deviceModelString(),
                             System.currentTimeMillis(),
-                            includeTrips);
+                            includeTrips,
+                            withSecret);
                     response.put("success", true);
                     response.put("bundle", bundle);
                     break;
@@ -770,12 +783,15 @@ public class SurveillanceIpcServer implements Runnable {
                         break;
                     }
                     com.overdrive.app.config.ConfigBackupService.ApplyResult res;
+                    boolean withSecret = com.overdrive.app.auth.AuthManager
+                            .validateJwt(request.optString("jwt", "")).valid;
                     synchronized (CONFIG_LOCK) {
                         com.overdrive.app.config.UnifiedConfigManager.forceReload();
                         res = com.overdrive.app.config.ConfigBackupService.applyBundle(
                                 bundle,
                                 com.overdrive.app.updater.AppUpdater.getInstalledVersion(),
-                                deviceModelString());
+                                deviceModelString(),
+                                withSecret);
                     }
                     response.put("success", res.getSuccess());
                     response.put("message", res.getMessage());

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="web_state_retry_now">أعد المحاولة الآن</string>
+    <string name="web_state_retry_in">إعادة المحاولة تلقائيًا · المحاولة التالية بعد %1$d ث</string>
+    <string name="web_state_retrying_now">إعادة المحاولة تلقائيًا · جارٍ المحاولة الآن…</string>
+    <string name="web_state_sign_in_title">تعذّر تسجيل الدخول إلى هذه الصفحة</string>
+    <string name="web_state_sign_in_body">خدمة الكاميرا تعمل لكنها لم تقبل تسجيل دخول التطبيق. يستعيده OverDrive تلقائيًا أثناء اتصال ADB.</string>
+</resources>

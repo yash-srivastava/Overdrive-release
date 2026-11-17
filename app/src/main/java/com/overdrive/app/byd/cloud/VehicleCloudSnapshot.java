@@ -198,11 +198,15 @@ public final class VehicleCloudSnapshot {
     // Each check validates against BYD sentinels AND online state
 
     public boolean hasSoc() {
-        return socPercent >= 0 && socPercent <= 100;
+        // BYD sends 0 when it has no reading (e.g. head-unit Wi-Fi dropped the cloud link), even
+        // while onlineState says online (#467), so a cloud 0 is never a battery level.
+        return socPercent > 0 && socPercent <= 100;
     }
 
     public boolean hasElecRange() {
-        return elecRangeKm > 0 || (elecRangeKm == 0 && isOnline());
+        // A 0 km next to a missing SoC is the same no-reading payload; a PHEV on its buffer
+        // still reports 0 km alongside a real SoC.
+        return elecRangeKm > 0 || (elecRangeKm == 0 && isOnline() && hasSoc());
     }
 
     public boolean hasFuelRange() {

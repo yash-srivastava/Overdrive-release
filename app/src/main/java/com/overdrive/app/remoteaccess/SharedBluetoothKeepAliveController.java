@@ -13,8 +13,8 @@ import org.json.JSONObject;
  * App-process owner of parked Bluetooth intent and its durable radio lease.
  *
  * <p>This class starts no thread, timer, receiver, scan, connection, or wake lock.
- * Existing parked/proximity ticks invoke reconciliation; explicit radio controls
- * use the same lock and saved Surveillance preference.
+ * Existing parked/proximity ticks and the Bluetooth watcher's native event callbacks
+ * invoke reconciliation; explicit controls use the same lock and saved preference.
  */
 public final class SharedBluetoothKeepAliveController {
     private static final String PREFS = "shared_bluetooth_runtime";

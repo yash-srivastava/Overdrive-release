@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One BYD dashcam clip: tap plays it; the trailing button saves a copy of the original file. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="?attr/selectableItemBackground"
+    android:gravity="center_vertical"
+    android:minHeight="64dp"
+    android:orientation="horizontal"
+    android:paddingVertical="@dimen/od_space_8"
+    android:paddingStart="@dimen/od_space_12">
+
+    <ImageView
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:contentDescription="@null"
+        android:src="@drawable/ic_play_circle"
+        app:tint="?attr/colorOnSurfaceVariant" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/od_space_12"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/tvFactoryClipTime"
+            style="@style/Widget.Overdrive.Rec.RowTime"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            tools:text="8 Nov, 14:32" />
+
+        <TextView
+            android:id="@+id/tvFactoryClipMeta"
+            style="@style/Widget.Overdrive.Rec.RowMeta"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="3dp"
+            android:ellipsize="middle"
+            android:singleLine="true"
+            tools:text="Normal/20261108_143200.mp4 · 182 MB" />
+    </LinearLayout>
+
+    <ImageButton
+        android:id="@+id/btnFactoryClipSave"
+        style="@style/Widget.Overdrive.Rec.RowAction"
+        android:layout_marginStart="@dimen/od_space_8"
+        android:contentDescription="@string/factory_dvr_save_copy"
+        android:src="@drawable/ic_backup_export"
+        android:tooltipText="@string/factory_dvr_save_copy" />
+</LinearLayout>

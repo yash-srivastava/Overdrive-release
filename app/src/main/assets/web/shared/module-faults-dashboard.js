@@ -17,6 +17,15 @@
             } catch (_) { return fallback; }
         },
 
+        count: function (n) {
+            var fallback = n === 1 ? '1 module warning' : n + ' module warnings';
+            try {
+                var key = 'moduleFaults.dashboard_warning_count';
+                var value = window.BYD && BYD.i18n && BYD.i18n.plural ? BYD.i18n.plural(key, n, { count: n }) : null;
+                return value && value !== key ? value : fallback;
+            } catch (_) { return fallback; }
+        },
+
         init: function () {
             if (this.initialized) return;
             this.initialized = true;
@@ -75,11 +84,7 @@
             }
 
             countNode.textContent = String(warnings.length);
-            summaryNode.textContent = this.t(
-                'dashboard_warning_count',
-                warnings.length + ' module warning(s)',
-                { count: warnings.length }
-            );
+            summaryNode.textContent = this.count(warnings.length);
             while (listNode.firstChild) listNode.removeChild(listNode.firstChild);
             warnings.forEach(function (module) {
                 var item = document.createElement('li');

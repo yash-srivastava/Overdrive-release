@@ -10,7 +10,6 @@ import com.google.android.material.slider.Slider
 import com.google.android.material.switchmaterial.SwitchMaterial
 import com.overdrive.app.R
 import com.overdrive.app.config.UnifiedConfigManager
-import com.overdrive.app.overlay.StatusOverlayChipOpacity
 import com.overdrive.app.overlay.StatusOverlayIconAppearance
 import com.overdrive.app.overlay.StatusOverlayService
 import com.overdrive.app.overlay.StatusOverlayUiWriter
@@ -48,11 +47,9 @@ class SettingsOverlayFragment : Fragment() {
     private var chipOpacityValue: TextView? = null
     private var opacityValue: TextView? = null
     private var sizeValue: TextView? = null
-    private var persistedChipOpacity = StatusOverlayChipOpacity.DEFAULT
+    private var persistedChipOpacity = 100
     private var persistedOpacity = 100
     private var persistedSize = 18
-    private var chipOpacitySaveGeneration = 0
-    private var chipOpacityDragInProgress = false
     private var iconOpacitySaveGeneration = 0
     private var iconSizeSaveGeneration = 0
     private var iconOpacityDragInProgress = false
@@ -123,14 +120,11 @@ class SettingsOverlayFragment : Fragment() {
     }
 
     override fun onPause() {
-        iconOpacitySaveGeneration++
-        iconSizeSaveGeneration++
         StatusOverlayService.clearIconAppearancePreview()
         super.onPause()
     }
 
     override fun onDestroyView() {
-        chipOpacitySaveGeneration++
         iconOpacitySaveGeneration++
         iconSizeSaveGeneration++
         StatusOverlayService.clearChipOpacityPreview()
@@ -159,9 +153,7 @@ class SettingsOverlayFragment : Fragment() {
         opacityValue = view.findViewById(R.id.tvOverlayIconOpacity)
         sizeValue = view.findViewById(R.id.tvOverlayIconSize)
 
-        val chipOpacityPct = StatusOverlayChipOpacity.clampStored(
-            cfg.optInt("chipOpacity", StatusOverlayChipOpacity.DEFAULT)
-        )
+        val chipOpacityPct = cfg.optInt("chipOpacity", 100).coerceIn(20, 100)
         val opacityPct = StatusOverlayIconAppearance.clampStoredOpacity(
             cfg.optInt("iconOpacity", 100)
         )
@@ -171,22 +163,19 @@ class SettingsOverlayFragment : Fragment() {
         persistedSize = sizeDp
         applyingStatusOverlayConfig = true
         // Material Slider throws on an off-step value; snap whatever is stored.
-        chipOpacity.value = StatusOverlayChipOpacity.snapSliderValue(chipOpacityPct)
+        chipOpacity.value = ((100 - chipOpacityPct) / 5 * 5).toFloat()
         opacity.value = StatusOverlayIconAppearance.snapOpacitySliderValue(opacityPct)
         size.value = StatusOverlayIconAppearance.snapSizeSliderValue(sizeDp)
         applyingStatusOverlayConfig = false
-        renderChipOpacity(chipOpacityPct)
+        renderChipOpacity(100 - chipOpacityPct)
         renderOpacity(100 - opacityPct)
         renderSize(sizeDp)
 
         chipOpacity.addOnChangeListener { _, value, fromUser ->
-            val opacity = value.toInt()
-            renderChipOpacity(opacity)
             if (fromUser) {
-                StatusOverlayService.previewChipOpacity(opacity)
-                if (!chipOpacity.isPressed) {
-                    commitChipOpacity(opacity)
-                }
+                renderChipOpacity(value.toInt())
+                // Show the change on the indicator while dragging; it's saved on release.
+                com.overdrive.app.overlay.StatusOverlayService.previewChipOpacity(100 - value.toInt())
             }
         }
         opacity.addOnChangeListener { _, value, fromUser ->
@@ -196,7 +185,7 @@ class SettingsOverlayFragment : Fragment() {
                     value.toInt()
                 )
                 StatusOverlayService.previewIconOpacity(stored)
-                if (opacity.isPressed.not()) {
+                if (!iconOpacityDragInProgress) {
                     commitIconOpacity(stored)
                 }
             }
@@ -206,7 +195,7 @@ class SettingsOverlayFragment : Fragment() {
             if (fromUser) {
                 val next = StatusOverlayIconAppearance.clampStoredSizeDp(value.toInt())
                 StatusOverlayService.previewIconSizeDp(next)
-                if (size.isPressed.not()) {
+                if (!iconSizeDragInProgress) {
                     commitIconSize(next)
                 }
             }
@@ -214,7 +203,6 @@ class SettingsOverlayFragment : Fragment() {
         val touch = object : Slider.OnSliderTouchListener {
             override fun onStartTrackingTouch(slider: Slider) {
                 when (slider) {
-                    chipOpacitySlider -> chipOpacityDragInProgress = true
                     opacitySlider -> iconOpacityDragInProgress = true
                     sizeSlider -> iconSizeDragInProgress = true
                 }
@@ -224,8 +212,15 @@ class SettingsOverlayFragment : Fragment() {
                 if (applyingStatusOverlayConfig) return
                 when (slider) {
                     chipOpacitySlider -> {
-                        chipOpacityDragInProgress = false
-                        commitChipOpacity(slider.value.toInt())
+                        val next = (100 - slider.value.toInt()).coerceIn(20, 100)
+                        if (next == persistedChipOpacity) {
+                            com.overdrive.app.overlay.StatusOverlayService.clearChipOpacityPreview()
+                            return
+                        }
+                        persistInt("chipOpacity", next, persistedChipOpacity) {
+                            persistedChipOpacity = it
+                            com.overdrive.app.overlay.StatusOverlayService.clearChipOpacityPreview()
+                        }
                     }
                     opacitySlider -> {
                         iconOpacityDragInProgress = false
@@ -283,26 +278,9 @@ class SettingsOverlayFragment : Fragment() {
         }
     }
 
-    private fun commitChipOpacity(rawOpacity: Int) {
-        val next = StatusOverlayChipOpacity.clampStored(rawOpacity)
-        if (next == persistedChipOpacity) {
-            if (!chipOpacityDragInProgress) {
-                StatusOverlayService.clearChipOpacityPreview()
-            }
-            return
-        }
-        val saveGeneration = ++chipOpacitySaveGeneration
-        persistChipOpacity(next, persistedChipOpacity, saveGeneration) {
-            persistedChipOpacity = it
-            if (saveGeneration == chipOpacitySaveGeneration && !chipOpacityDragInProgress) {
-                StatusOverlayService.clearChipOpacityPreview()
-            }
-        }
-    }
-
-    private fun renderChipOpacity(opacityPct: Int) {
+    private fun renderChipOpacity(transparency: Int) {
         chipOpacityValue?.text =
-            getString(R.string.settings_overlay_chip_opacity_value, opacityPct)
+            getString(R.string.settings_overlay_chip_opacity_value, transparency)
     }
 
     private fun renderOpacity(transparency: Int) {
@@ -313,22 +291,16 @@ class SettingsOverlayFragment : Fragment() {
         sizeValue?.text = getString(R.string.settings_overlay_icon_size_value, sizeDp)
     }
 
-    private fun persistChipOpacity(
-        value: Int,
-        previous: Int,
-        saveGeneration: Int,
-        onOk: (Int) -> Unit
-    ) {
+    private fun persistInt(key: String, value: Int, previous: Int, onOk: (Int) -> Unit) {
         val appContext = context?.applicationContext
-        StatusOverlayUiWriter.writeInt("chipOpacity", value) { ok ->
+        StatusOverlayUiWriter.writeInt(key, value) { ok ->
             if (ok) {
                 onOk(value)
                 appContext?.let { StatusOverlayService.startIfPermitted(it) }
             } else if (view != null) {
-                if (saveGeneration != chipOpacitySaveGeneration) return@writeInt
                 applyingStatusOverlayConfig = true
-                chipOpacitySlider?.value = StatusOverlayChipOpacity.snapSliderValue(previous)
-                renderChipOpacity(previous)
+                chipOpacitySlider?.value = (100 - previous).toFloat()
+                renderChipOpacity(100 - previous)
                 StatusOverlayService.clearChipOpacityPreview()
                 applyingStatusOverlayConfig = false
             }

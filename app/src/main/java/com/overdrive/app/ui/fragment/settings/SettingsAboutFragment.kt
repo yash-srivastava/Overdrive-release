@@ -506,7 +506,9 @@ class SettingsAboutFragment : Fragment() {
         if (!isAdded) return
         toast(getString(R.string.settings_backup_exporting))
         submitIo {
+            // (a session: the bundle keeps the login code, as before)
             val req = JSONObject().put("command", "EXPORT_CONFIG").put("includeTrips", includeTrips)
+                .put("jwt", com.overdrive.app.auth.AuthManager.generateJwt() ?: "")
             val resp = com.overdrive.app.server.DaemonIpcClient.send(req, 15_000)
             // The bundle build is the slow part; do the file write on this same
             // IO thread (no SAF round-trip in the direct path).
@@ -729,6 +731,7 @@ class SettingsAboutFragment : Fragment() {
             val bundle = try { JSONObject(bundleText) } catch (e: Exception) { null }
             val resp = if (bundle == null) null else {
                 val req = JSONObject().put("command", "REPLACE_CONFIG").put("bundle", bundle)
+                    .put("jwt", com.overdrive.app.auth.AuthManager.generateJwt() ?: "")
                 com.overdrive.app.server.DaemonIpcClient.send(req, 20_000)
             }
             mainHandler.post {

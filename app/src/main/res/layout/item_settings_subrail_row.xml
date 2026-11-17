@@ -1,39 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  Single sub-rail row.
-
-  Spec:
-    - 56dp tall (M3 list-item height for "one-line" rows).
-    - Leading icon 24dp + 16dp gap + label (TitleMedium) + 8dp + chevron 18dp.
-    - Background uses settings_subrail_row_bg selector (selected pill,
-      pressed feedback, default transparent).
-    - Label / icon colors are state-list selectors that flip with
-      android:state_selected.
-    - Outer view is the click target. Margin is 8dp left/right inside
-      the rail's 12dp inner padding so the active pill has breathing room.
-
-  The chevron is hidden by default and re-enabled by code only for
-  navigating sections (Recording / Surveillance). Internal sections
-  (Appearance, Daemons, etc.) hide it for a cleaner look — they swap
-  content in-place and don't need the affordance.
--->
+<!-- Settings sub-rail row (52dp). SettingsFragment shows the chevron only on sections that navigate. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="56dp"
-    android:layout_marginHorizontal="8dp"
-    android:layout_marginVertical="2dp"
-    android:background="@drawable/settings_subrail_row_bg"
+    android:layout_height="@dimen/set_subrail_row_height"
+    android:background="@drawable/set_subrail_row_bg"
     android:clickable="true"
     android:focusable="true"
     android:gravity="center_vertical"
     android:orientation="horizontal"
-    android:paddingHorizontal="16dp">
+    android:paddingStart="@dimen/set_subrail_row_padding_start"
+    android:paddingEnd="@dimen/set_subrail_row_padding_end">
 
     <ImageView
         android:id="@+id/subrailRowIcon"
-        android:layout_width="24dp"
-        android:layout_height="24dp"
+        android:layout_width="@dimen/od_icon_md"
+        android:layout_height="@dimen/od_icon_md"
         android:contentDescription="@null"
         app:tint="@color/settings_subrail_icon" />
 
@@ -41,19 +23,20 @@
         android:id="@+id/subrailRowLabel"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
+        android:layout_marginStart="14dp"
         android:layout_weight="1"
         android:ellipsize="end"
         android:maxLines="1"
-        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle"
         android:textColor="@color/settings_subrail_label" />
 
     <ImageView
         android:id="@+id/subrailRowChevron"
-        android:layout_width="18dp"
-        android:layout_height="18dp"
+        android:layout_width="@dimen/od_icon_sm"
+        android:layout_height="@dimen/od_icon_sm"
+        android:layout_marginStart="@dimen/od_space_8"
         android:contentDescription="@null"
         android:src="@drawable/ic_chevron_right"
         android:visibility="gone"
-        app:tint="@color/settings_subrail_icon" />
+        app:tint="?attr/colorOnSurfaceVariant" />
 </LinearLayout>

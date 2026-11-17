@@ -113,6 +113,16 @@ public final class CommandTranscriber implements AutoCloseable {
                 r == null ? 0 : r.extraWords, text, r == null ? 0 : r.wakeTail);
     }
 
+    /** The raw transcript of 16 kHz mono PCM, or null when nothing was decoded. */
+    public synchronized String transcript(short[] pcm, int offset, int length) {
+        return transcribe(pcm, offset, length);
+    }
+
+    /** Whether a transcript says "don't", "not", "never", "no" or the like anywhere. */
+    public static boolean saysNegation(String text) {
+        return TranscriptMatcher.saysNegation(text);
+    }
+
     /** Lowercase letters, digits and spaces only, capped — safe for the daemon log. */
     public static String logSafe(String text, int max) {
         if (text == null) return null;

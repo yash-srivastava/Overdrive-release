@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_section_adb">ADB</string>
+    <string name="settings_adb_subtitle">Připojení, povolení a automatické obnovení.</string>
+    <string name="settings_adb_connection_title">Připojení</string>
+    <string name="settings_adb_automatic_title">Automatické obnovení</string>
+    <string name="settings_adb_automatic_restore">Automaticky obnovovat ADB</string>
+    <string name="settings_adb_automatic_description">Obnoví nastavení ADB při spuštění a po jeho vypnutí. Vyžaduje dříve udělené oprávnění k nastavení; Wi-Fi není potřeba. DiLink 5 navíc umožňuje bezdrátovou obnovu přes ověřenou Wi-Fi a dříve autorizovaný klíč.</string>
+    <string name="settings_adb_recover">Obnovit ADB nyní</string>
+    <string name="settings_adb_cancel_recovery">Zrušit obnovení</string>
+    <string name="settings_adb_manual_title">Ruční povolení</string>
+    <string name="settings_adb_manual_description">Pomocí kompatibilních nástrojů BYD požádejte o přístup k ADB. Připojení Wi-Fi není nutné.</string>
+    <string name="settings_adb_enable">Povolit ADB</string>
+    <string name="settings_adb_advanced_tools">Pokročilé nástroje</string>
+    <string name="settings_adb_hide_advanced">Skrýt pokročilé nástroje</string>
+    <string name="settings_adb_advanced_description">Diagnostikujte problémy, otevřete nástroje BYD nebo vraťte ruční pokus zpět.</string>
+    <string name="settings_adb_open_developer">Otevřít možnosti pro vývojáře</string>
+    <string name="settings_adb_developer_page">Vyžádat stránku vývojáře BYD</string>
+    <string name="settings_adb_diagnostics">Zkontrolovat kompatibilitu a připojení</string>
+    <string name="settings_adb_restore">Vrátit změny ručního povolení</string>
+    <string name="settings_adb_export">Exportovat APK vývojářských nástrojů BYD</string>
+    <string name="settings_adb_dialog_confirm">Schválit bezdrátové ladění v této síti</string>
+    <string name="settings_adb_dialog_confirm_description">Nejprve se připojte k ověřené síti Wi-Fi. Povolte OverDrive potvrdit dialog bezdrátového ladění pouze pro tuto síť.</string>
+    <string name="settings_adb_tools_unavailable">Ruční povolení není dostupné pro aktuální režim nebo nainstalované nástroje BYD.</string>
+    <string name="settings_adb_recovery_availability">Místní obnova potřebuje oprávnění k nastavení udělené při konfiguraci ADB. Nepotřebuje Wi-Fi ani režim DiLink 5.</string>
+    <string name="settings_adb_details_title">Podrobnosti posledního pokusu</string>
+    <string name="settings_adb_recovery_confirm_body">Místní obnova používá již udělené oprávnění k nastavení bez Wi-Fi. DiLink 5 může také použít ověřenou Wi-Fi a dříve autorizovaný klíč. Tím lze otevřít nebo obnovit síťový přístup ADB na portu 5555, který může být dostupný dalším zařízením v síti vozidla. Pokračujte jen v důvěryhodné síti. Ověření klíčem ADB zůstává zapnuté.</string>
+    <string name="settings_adb_recovery_permission_missing">Chybí oprávnění k nastavení. Pokud není dostupné ani ADB, nejprve použijte Povolit ADB nebo Možnosti pro vývojáře a znovu dokončete konfiguraci ADB.</string>
+    <string name="settings_adb_recovery_setting_enabled">Nastavení ADB je zapnuté. Autentizované připojení ADB nebylo potvrzeno.</string>
+    <string name="settings_adb_recovery_setting_failed">Nastavení ADB se nepodařilo zapnout a ověřit. Firmware může změnu odmítat.</string>
+    <string name="settings_adb_recovery_save_failed">Volbu automatické obnovy se nepodařilo uložit. Zkontrolujte ADB a zkuste to znovu.</string>
+</resources>

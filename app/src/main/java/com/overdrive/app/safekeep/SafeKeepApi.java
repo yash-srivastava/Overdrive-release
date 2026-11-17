@@ -693,8 +693,16 @@ public final class SafeKeepApi {
     /** The identity is returned once for the recovery kit and never stored on the car. */
     private static boolean generateKey(OutputStream out) throws Exception {
         AgeCodec.KeyPair kp = AgeCodec.generate();
-        return json(out, new JSONObject().put("success", true).put("identity", kp.identity)
-                .put("recipient", kp.recipient));
+        JSONObject r = new JSONObject().put("success", true).put("identity", kp.identity)
+                .put("recipient", kp.recipient);
+        try {
+            // A scannable copy, so the in-car kit never has to be written to storage.
+            r.put("qr", "data:image/png;base64,"
+                    + java.util.Base64.getEncoder().encodeToString(QrPng.render(kp.identity, 8)));
+        } catch (Exception ignored) {
+            // The text and Copy button still carry the key.
+        }
+        return json(out, r);
     }
 
     private static boolean checkKey(String body, OutputStream out) throws Exception {

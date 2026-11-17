@@ -85,14 +85,14 @@ public class AuthMiddleware {
         // Compatibility for in-process/native callers that have no browser headers.
         // HTTP and WebSocket ingress must use the overload carrying Origin and port.
         return checkAuth(path, cookieHeader, authHeader, out, clientAddress,
-                hasTunnelHeaders, null, -1);
+                hasTunnelHeaders, null, -1, null);
     }
 
-    /** Full network-ingress check, including browser-origin restrictions on Tier 2. */
+    /** Full network-ingress check, including browser-origin and Host restrictions on Tier 2. */
     public static boolean checkAuth(String path, String cookieHeader, String authHeader,
                                      OutputStream out, java.net.SocketAddress clientAddress,
                                      boolean hasTunnelHeaders, String originHeader,
-                                     int localPort) throws Exception {
+                                     int localPort, String hostHeader) throws Exception {
         // Tier 0 — public paths (login UI, static assets, login submission)
         if (isPublicPath(path)) {
             return true;
@@ -156,7 +156,8 @@ public class AuthMiddleware {
         // caller. A foreign browser page also reaches this socket from loopback,
         // so a supplied Origin must independently identify the local listener.
         if (!hasTunnelHeaders && clientAddress != null
-                && isLocalBrowserOrigin(originHeader, localPort)) {
+                && isLocalBrowserOrigin(originHeader, localPort)
+                && isLocalHostHeader(hostHeader)) {
             String addrStr = clientAddress.toString();
             boolean isLoopback = addrStr.contains("127.0.0.1") || addrStr.contains("/0:0:0:0:0:0:0:1");
             if (isLoopback) {
@@ -166,6 +167,25 @@ public class AuthMiddleware {
 
         return handleUnauthorized(path, out,
             jwt == null || jwt.isEmpty() ? "No session token" : "Invalid session token");
+    }
+
+    /**
+     * A present Host must name this device. A DNS-rebinding page reaches the loopback socket under
+     * its own hostname, and its same-origin GETs carry no Origin. Native callers send a loopback
+     * Host, or none (HTTP/1.0).
+     */
+    static boolean isLocalHostHeader(String host) {
+        if (host == null) return true;
+        String h = host.trim().toLowerCase(java.util.Locale.ROOT);
+        if (h.startsWith("[")) {
+            int end = h.indexOf(']');
+            if (end < 0) return false;
+            h = h.substring(1, end);
+        } else if (h.indexOf(':') >= 0 && h.indexOf(':') == h.lastIndexOf(':')) {
+            h = h.substring(0, h.indexOf(':'));
+        }
+        return h.equals("127.0.0.1") || h.equals("localhost")
+                || h.equals("::1") || h.equals("0:0:0:0:0:0:0:1");
     }
 
     private static boolean isLocalBrowserOrigin(String origin, int localPort) {
@@ -238,7 +258,12 @@ public class AuthMiddleware {
         }
         return extractJwtFromCookie(cookieHeader);
     }
-    
+
+    /** The caller's token as sent (not validated), for routes that act on their own sign-in. */
+    static String sessionToken(String cookieHeader, String authHeader) {
+        return jwtFromHeaders(cookieHeader, authHeader);
+    }
+
     /**
      * Check if path is public (no auth required).
      */
@@ -298,6 +323,7 @@ public class AuthMiddleware {
         // API requests get 401 JSON
         if (path.startsWith("/api/") || path.startsWith("/ws") || 
             path.startsWith("/snapshot/") || path.startsWith("/video/") ||
+            path.startsWith("/hls/") ||
             path.startsWith("/thumb/") || path.startsWith("/h264/") || path.equals("/status")) {
             
             String json = "{\"error\":\"Unauthorized\",\"reason\":\"" + reason + "\",\"login\":\"/login.html\"}";

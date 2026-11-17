@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title data-i18n="app.road_sense_title">RoadSense - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
-    <script src="../shared/theme.js?v=11"></script>
-    <script src="../shared/app-shell.js?v=19"></script>
+    <script src="../shared/theme.js?v=12"></script>
+    <script src="../shared/app-shell.js?v=23"></script>
     <!--
       Bottom-tab manifest. Tabs grouping the RoadSense settings cards:
         General      — master enable + calibration mode
@@ -26,7 +26,7 @@
             { id: 'blindspot',   label: 'Blind Spot',  i18n: 'road_sense.tab_blindspot',   svg: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>' }
         ];
     </script>
-    <script src="../shared/app-tabs.js?v=3"></script>
+    <script src="../shared/app-tabs.js?v=4"></script>
     <link rel="stylesheet" href="../shared/styles.css?v=38">
     <link rel="stylesheet" href="../shared/revamp.css?v=2">
     <style>
@@ -130,7 +130,7 @@
 </head>
 <body class="r-settings">
     <div class="app-layout">
-        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=19) -->
+        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=23) -->
         <div id="app-shell-mount"></div>
         <!-- Main Content -->
         <main class="main-content" aria-busy="true" inert style="pointer-events:none">
@@ -529,6 +529,32 @@
                             <div class="setting-control">
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="rsClusterAuto" onchange="RoadSenseSettings.toggleClusterAuto()">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <!-- Same key as the Projection screen's switch: surveillance.clusterSpeedEnabled. -->
+                        <div class="setting-row">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="road_sense.map_cluster_speed">Show speed on cluster</div>
+                                <div class="setting-desc" data-i18n="road_sense.map_cluster_speed_desc">Overlay your current speed on anything projected to the cluster: apps, the map or the blind-spot camera. Same setting as on the Projection screen.</div>
+                            </div>
+                            <div class="setting-control">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="rsClusterSpeed" onchange="RoadSenseSettings.toggleClusterSpeed()">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <!-- Same key as the Projection screen's switch: surveillance.clusterAdasHideEnabled. -->
+                        <div class="setting-row">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="road_sense.map_cluster_adas_hide">Hide ADAS box while projecting</div>
+                                <div class="setting-desc" data-i18n="road_sense.map_cluster_adas_hide_desc">Hide the car's driver-assist (ADAS) box on the cluster while something is projected, on cars that support it. Same setting as on the Projection screen. If you turn it off during a projection, the box comes back when that projection ends.</div>
+                            </div>
+                            <div class="setting-control">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="rsClusterAdasHide" onchange="RoadSenseSettings.toggleClusterAdasHide()">
                                     <span class="toggle-slider"></span>
                                 </label>
                             </div>
@@ -1350,10 +1376,10 @@
     <div id="toastContainer" class="toast-container"></div>
 
     <script src="../shared/auth.js"></script>
-    <script src="../shared/core.js?v=24"></script>
+    <script src="../shared/core.js?v=27"></script>
     <script src="../shared/settings-hydration.js?v=1"></script>
     <script src="../shared/update-flow.js?v=3"></script>
-    <script src="../shared/road-sense.js?v=bsux2"></script>
+    <script src="../shared/road-sense.js?v=bsux3"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');

@@ -31,6 +31,10 @@
     <string name="wgsetup_import_too_large">Dosya çok büyük</string>
     <string name="wgsetup_import_no_qr">Görselde QR kod bulunamadı</string>
     <string name="wgsetup_imported">İçe aktarıldı. Metni kontrol edip Kaydet\'e dokunun.</string>
+    <string name="wgsetup_import_pick_title">Bir yapılandırma dosyası seçin</string>
+    <string name="wgsetup_import_qr_picture">QR kod görseli…</string>
+    <string name="wgsetup_import_none_found">Download, Documents veya Overdrive klasörlerinde ya da bir USB bellekte .conf dosyası bulunamadı. Dosyayı USB belleğin ana klasörüne veya Download klasörüne kopyalayıp yeniden deneyin.</string>
+    <string name="wgsetup_import_no_picker">Bu multimedya ünitesinde dosya seçici yok</string>
     <string name="wgsetup_phone_title">Bunu telefonunuzda açın</string>
     <string name="wgsetup_phone_steps">Kodu tarayın, oturum açın, ardından yönlendiricinizin dışa aktardığı yapılandırmayı yükleyin veya yapıştırın. Telefonun araca erişebilmesi gerekir (aynı Wi-Fi ya da erişim noktası veya etkin bir tünel üzerinden).</string>
     <string name="wgsetup_phone_lan_note">Bunu yalnızca kendi Wi-Fi ağınızda veya aracın erişim noktasında açın.</string>

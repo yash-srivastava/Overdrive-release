@@ -88,7 +88,7 @@ class HotspotBridgeService : Service() {
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val ch = NotificationChannel(
-                CHANNEL_ID, "Network & Hotspot", NotificationManager.IMPORTANCE_LOW
+                CHANNEL_ID, com.overdrive.app.util.AppLocaleContext.of(this).getString(R.string.notif_network_hotspot), NotificationManager.IMPORTANCE_LOW
             ).apply { setShowBadge(false) }
             getSystemService(NotificationManager::class.java)?.createNotificationChannel(ch)
         }
@@ -101,7 +101,7 @@ class HotspotBridgeService : Service() {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
         }
-        return b.setContentTitle("Network & Hotspot")
+        return b.setContentTitle(com.overdrive.app.util.AppLocaleContext.of(this).getString(R.string.notif_network_hotspot))
             .setContentText("OverDrive")
             .setSmallIcon(R.drawable.ic_play_circle)
             .setOngoing(false)

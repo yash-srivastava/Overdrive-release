@@ -104,6 +104,8 @@ public final class RemoteAccessMessageCodes {
         exact("Driver door is already locked; the key fob search is paused while locked", "keyfob_search_paused_locked");
         exact("Every active Bluetooth phone must confirm Away; a nearby key prevents locking", "phones_must_confirm_away");
         exact("Fresh confirmed keyfob departure is required", "keyfob_departure_required");
+        exact("A trusted phone is near the car; phone priority blocks keyfob locking", "keyfob_lock_phone_near");
+        exact("The key was left inside after a phone lock; unlock with a trusted phone", "keyfob_unlock_key_inside");
         exact("Newer signal revoked this transition", "newer_signal_revoked");
         exact("Learning mode: no vehicle command sent", "learning_mode_no_command");
         exact("Approach reading expired before the command", "approach_expired");

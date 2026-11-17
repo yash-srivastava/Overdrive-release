@@ -731,8 +731,7 @@ public class OemDashcamApiHandler {
         int oemId = com.overdrive.app.config.UnifiedConfigManager.resolveOemDashcamId();
         if (oemId < 0) {
             com.overdrive.app.daemon.CameraDaemon.log(
-                "OemDashcam: cannot start — no OEM dashcam camera (disabled, DiLink 5,"
-                    + " or DiLink 100 without a DVR camera)");
+                "OemDashcam: cannot start — id explicitly disabled");
             return null;
         }
         String outDir = com.overdrive.app.storage.StorageManager.getInstance()

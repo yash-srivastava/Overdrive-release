@@ -33,6 +33,10 @@ final class AndroidBluetoothPhoneReconnect implements BluetoothPhoneReconnectCon
     private boolean receiverRegistered;
     private BluetoothPhoneReconnectController.Failure receiverFailure;
     private boolean closed;
+    private BluetoothAdapter recoveryAdapter;
+    private Object recoveryBinder;
+    private int recoveryPermissions = -1;
+    private long recoveryGeneration;
     private final BroadcastReceiver pairingReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
             if (intent == null || !BluetoothDevice.ACTION_BOND_STATE_CHANGED.equals(intent.getAction()))
@@ -88,6 +92,36 @@ final class AndroidBluetoothPhoneReconnect implements BluetoothPhoneReconnectCon
     }
 
     @Override public boolean supported() { return platformSupported; }
+
+    @Override public synchronized long recoveryGeneration() {
+        // This is a local capability read. Creating another HFP proxy must not
+        // reopen a permission circuit that the same native service just refused.
+        int permissions = 0;
+        String[] names = {"android.permission.BLUETOOTH", "android.permission.BLUETOOTH_ADMIN",
+                "android.permission.BLUETOOTH_CONNECT", "android.permission.BLUETOOTH_PRIVILEGED"};
+        for (int i = 0; i < names.length; i++) {
+            if (context.checkSelfPermission(names[i])
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED) permissions |= 1 << i;
+        }
+        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+        Object binder = recoveryBinder;
+        try {
+            Field field = BluetoothAdapter.class.getDeclaredField("mService");
+            field.setAccessible(true);
+            Object service = adapter == null ? null : field.get(adapter);
+            binder = service instanceof IInterface ? ((IInterface) service).asBinder() : null;
+        } catch (ReflectiveOperationException | RuntimeException unavailable) {
+            // An unobservable service is not evidence of a changed service.
+        }
+        if (adapter != recoveryAdapter || binder != recoveryBinder
+                || permissions != recoveryPermissions) {
+            recoveryAdapter = adapter;
+            recoveryBinder = binder;
+            recoveryPermissions = permissions;
+            recoveryGeneration++;
+        }
+        return recoveryGeneration;
+    }
 
     @Override public boolean adapterOn() {
         return phase("adapter_state", () -> {

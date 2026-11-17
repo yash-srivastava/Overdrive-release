@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_section_adb">ADB</string>
+    <string name="settings_adb_subtitle">חיבור, הפעלה ושחזור אוטומטי.</string>
+    <string name="settings_adb_connection_title">חיבור</string>
+    <string name="settings_adb_automatic_title">שחזור אוטומטי</string>
+    <string name="settings_adb_automatic_restore">שחזור ADB אוטומטי</string>
+    <string name="settings_adb_automatic_description">משחזר את הגדרת ADB בהפעלה וכאשר היא מושבתת. נדרשת הרשאת הגדרות שכבר הוענקה; אין צורך ב-Wi-Fi. DiLink 5 תומך גם בשחזור אלחוטי ברשת Wi-Fi מאומתת עם מפתח שאושר בעבר.</string>
+    <string name="settings_adb_recover">שחזור ADB עכשיו</string>
+    <string name="settings_adb_cancel_recovery">ביטול השחזור</string>
+    <string name="settings_adb_manual_title">הפעלה ידנית</string>
+    <string name="settings_adb_manual_description">אפשר לבקש גישה ל־ADB באמצעות כלי BYD תואמים. אין צורך בחיבור Wi-Fi.</string>
+    <string name="settings_adb_enable">הפעלת ADB</string>
+    <string name="settings_adb_advanced_tools">כלים מתקדמים</string>
+    <string name="settings_adb_hide_advanced">הסתרת כלים מתקדמים</string>
+    <string name="settings_adb_advanced_description">אבחון בעיות, פתיחת כלי BYD או ביטול ניסיון ידני.</string>
+    <string name="settings_adb_open_developer">פתיחת אפשרויות למפתחים</string>
+    <string name="settings_adb_developer_page">בקשת דף המפתחים של BYD</string>
+    <string name="settings_adb_diagnostics">בדיקת תאימות וחיבור</string>
+    <string name="settings_adb_restore">ביטול שינויים מההפעלה הידנית</string>
+    <string name="settings_adb_export">ייצוא APK של כלי המפתחים של BYD</string>
+    <string name="settings_adb_dialog_confirm">אישור ניפוי באגים אלחוטי ברשת הזו</string>
+    <string name="settings_adb_dialog_confirm_description">יש להתחבר תחילה לרשת Wi-Fi מאומתת. אפשר לאפשר ל־OverDrive לאשר את חלון ניפוי הבאגים האלחוטי רק עבור הרשת הזו.</string>
+    <string name="settings_adb_tools_unavailable">הפעלה ידנית אינה זמינה במצב הנוכחי או עם כלי BYD המותקנים.</string>
+    <string name="settings_adb_recovery_availability">שחזור מקומי דורש את הרשאת ההגדרות שהוענקה בזמן הגדרת ADB. אין צורך ב-Wi-Fi או במצב DiLink 5.</string>
+    <string name="settings_adb_details_title">פרטי הניסיון האחרון</string>
+    <string name="settings_adb_recovery_confirm_body">שחזור מקומי משתמש בהרשאת ההגדרות שכבר הוענקה, ללא Wi-Fi. DiLink 5 יכול להשתמש גם ברשת Wi-Fi מאומתת ובמפתח שאושר בעבר. פעולה זו עשויה לפתוח או לשחזר גישת ADB ברשת ביציאה 5555, וייתכן שמכשירים אחרים ברשת הרכב יוכלו להגיע אליה. המשך רק ברשת מהימנה. אימות באמצעות מפתח ADB נשאר פעיל.</string>
+    <string name="settings_adb_recovery_permission_missing">הרשאת ההגדרות חסרה. אם גם ADB אינו זמין, יש להשתמש תחילה בהפעלת ADB או באפשרויות למפתחים ולהשלים שוב את הגדרת ADB.</string>
+    <string name="settings_adb_recovery_setting_enabled">הגדרת ADB מופעלת. עדיין לא אושר חיבור ADB מאומת.</string>
+    <string name="settings_adb_recovery_setting_failed">לא ניתן היה להפעיל ולאמת את הגדרת ADB. הקושחה עשויה לדחות את השינוי.</string>
+    <string name="settings_adb_recovery_save_failed">לא ניתן היה לשמור את העדפת השחזור האוטומטי. יש לבדוק את ADB ולנסות שוב.</string>
+</resources>

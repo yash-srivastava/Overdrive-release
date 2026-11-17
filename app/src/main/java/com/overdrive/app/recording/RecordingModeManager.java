@@ -941,6 +941,12 @@ public class RecordingModeManager {
             acc = accIsOn;
         }
         if (!acc || mode == Mode.NONE) {
+            // Legacy AVMCamera keeps its own reopen ladder; a process restart cannot revive it.
+            if (isLegacyCameraMode()) {
+                logger.info("forceWarmupRestart(" + reason + ") — no-op (accIsOn=" + acc
+                    + ", mode=" + mode + "); nothing to restart");
+                return;
+            }
             if (pipeline.isRunning()) {
                 logger.error("forceWarmupRestart(" + reason + ") — persistent camera"
                     + " has no recording mode to reactivate (accIsOn=" + acc
@@ -983,6 +989,17 @@ public class RecordingModeManager {
             return;
         }
         activateModeWithWarmup(mode, "force-warmup-" + reason, true);
+    }
+
+    /** Default camera mode: not DiLink 4, DiLink 5 or Camera2. */
+    private static boolean isLegacyCameraMode() {
+        try {
+            return !CameraDaemon.isDilink4ModeActiveStatic()
+                && !com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                && !com.overdrive.app.camera.camera2.Camera2Platform.isSelected();
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     /**

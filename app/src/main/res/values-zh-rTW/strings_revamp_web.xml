@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="web_state_retry_now">立即重試</string>
+    <string name="web_state_retry_in">自動重試中 · %1$d 秒後再次嘗試</string>
+    <string name="web_state_retrying_now">自動重試中 · 正在嘗試…</string>
+    <string name="web_state_sign_in_title">無法登入此頁面</string>
+    <string name="web_state_sign_in_body">攝影機背景服務正在執行，但未接受應用程式的登入。ADB 連線時，OverDrive 會自動恢復。</string>
+</resources>

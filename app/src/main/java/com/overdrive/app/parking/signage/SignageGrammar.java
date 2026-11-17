@@ -42,12 +42,22 @@ public final class SignageGrammar {
         public final int frame;
         /** Line height normalised to frame height — big text is signage, small text is not. */
         public final float heightNorm;
+        /** Box centre and width normalised to the frame; NaN when unknown. */
+        public final float cx, cy, widthNorm;
 
         public Observation(String text, float confidence, int frame, float heightNorm) {
+            this(text, confidence, frame, Float.NaN, Float.NaN, Float.NaN, heightNorm);
+        }
+
+        public Observation(String text, float confidence, int frame,
+                           float cx, float cy, float widthNorm, float heightNorm) {
             this.text = text == null ? "" : text;
             this.confidence = confidence;
             this.frame = frame;
             this.heightNorm = heightNorm;
+            this.cx = cx;
+            this.cy = cy;
+            this.widthNorm = widthNorm;
         }
     }
 
@@ -100,17 +110,19 @@ public final class SignageGrammar {
 
     /** Digits with the usual OCR look-alikes, normalised by {@link #digits}. */
     private static final String D = "[0-9OQDIZS]";
+    /** A value read as a percentage ("B 23%": the recorder's own pedal readout) is never a sign value. */
+    private static final String NOT_PERCENT = "(?!\\s?%)";
 
     // ------------------------------------------------------------ vocabulary
     // Every word is matched AFTER normalise(): upper-cased, NFKC-folded (full-
     // width "Ｂ２" → "B2"), diacritics stripped (ÉTAGE → ETAGE, SÓTANO → SOTANO,
     // PODLAŽÍ → PODLAZI, NIVÅ → NIVA, BÖLGE → BOLGE, TẦNG → TANG), and every
     // Unicode decimal digit (٢ ๒ २ ２) folded to ASCII. So the Latin lists below
-    // are spelled without accents on purpose. Non-Latin scripts are only ever
-    // seen when a language-specific recogniser is side-loaded — the bundled
-    // en_PP-OCRv3 model emits Latin letters and digits only, which is exactly
-    // what the level CODES on non-English signs are made of ("B2", "P3", "-1",
-    // "2F", "LG"); the words around them are a bonus, not a requirement.
+    // are spelled without accents on purpose. The bundled PP-OCRv4 recogniser
+    // emits Latin letters, digits and Chinese; other scripts are only seen when
+    // a language-specific recogniser is side-loaded. Latin codes are what the
+    // level CODES on non-English signs are made of ("B2", "P3", "-1", "2F",
+    // "LG"); the words around them are a bonus, not a requirement.
 
     /** Level / floor words followed by the value: "LEVEL 2", "ARAS 3", "PISO -1", "ЭТАЖ 3", "KAT 2". */
     private static final String LEVEL_WORDS = String.join("|",
@@ -150,7 +162,7 @@ public final class SignageGrammar {
 
     /** "B2", "LG1", "P3", "L2", "M1", "UG2" — code + one or two REAL digits. */
     private static final Pattern LEVEL_CODE = Pattern.compile(
-            "(?<![A-Z0-9])(B|LG|UG|UB|LB|P|L|M)\\s?[-.]?\\s?(\\d{1,2})(?![0-9A-Z])");
+            "(?<![A-Z0-9])(B|LG|UG|UB|LB|P|L|M)\\s?[-.]?\\s?(\\d{1,2})(?![0-9A-Z])" + NOT_PERCENT);
     /**
      * "LEVEL 2", "ARAS 3", "TINGKAT B1", "FLOOR -1", "PLANTA -1", "LVL G",
      * "KAT 2", "ЭТАЖ 3". A dash in front of the digit is always the SIGN of a
@@ -159,7 +171,7 @@ public final class SignageGrammar {
      */
     private static final Pattern LEVEL_WORD = Pattern.compile(
             "(?<![\\p{L}\\p{N}])(" + LEVEL_WORDS + ")"
-            + "\\s?[.:]?\\s?(B\\s?" + D + "|LG|UG|GF|G|-\\s?" + D + "{1,2}|" + D + "{1,2})(?![0-9A-Z])");
+            + "\\s?[.:]?\\s?(B\\s?" + D + "|LG|UG|GF|G|-\\s?" + D + "{1,2}|" + D + "{1,2})(?![0-9A-Z])" + NOT_PERCENT);
     /** RTL scripts often come out value-first from the recogniser: "2 קומה", "3 طابق". */
     private static final Pattern LEVEL_WORD_RTL = Pattern.compile(
             "(?<![0-9A-Z])(-?\\s?" + D + "{1,2})\\s?(קומה|מפלס|طابق|الطابق|الدور)(?![\\p{L}])");
@@ -203,7 +215,7 @@ public final class SignageGrammar {
      */
     private static final Pattern ZONE_WORD = Pattern.compile(
             "(?<![\\p{L}\\p{N}])(" + ZONE_WORDS + ")"
-            + "\\s?[-.:]?\\s?([A-Z]{1,2}\\d{0,2}|\\d{1,2})(?![0-9A-Z])");
+            + "\\s?[-.:]?\\s?([A-Z]{1,2}\\d{0,2}|\\d{1,2})(?![0-9A-Z])" + NOT_PERCENT);
     /** CJK zone: "A区", "B區", "C区域", Korean "A 구역" is covered by ZONE_WORD (value after). */
     private static final Pattern ZONE_CJK = Pattern.compile(
             "(?<![A-Z0-9])([A-Z]\\d{0,2}|\\d{1,2})\\s?(区域|区|區)(?![0-9A-Z])");
@@ -215,7 +227,7 @@ public final class SignageGrammar {
     /** "BAY 142", "LOT C12", "SPACE 07", "PETAK 23", "NO. 118", "#118", "VAGA 12", "PLATZ 23", "МЕСТО 45". */
     private static final Pattern BAY_WORD = Pattern.compile(
             "(?:(?<![\\p{L}\\p{N}])(" + BAY_WORDS + ")(?![A-Z])\\s?[.:#-]?\\s?|#\\s?)"
-            + "([A-Z]{0,2}\\s?-?\\d{1,4}[A-Z]?)(?![0-9A-Z])");
+            + "([A-Z]{0,2}\\s?-?\\d{1,4}[A-Z]?)(?![0-9A-Z])" + NOT_PERCENT);
     /** CJK bay: value BEFORE the unit — "12号车位", "３５番". */
     private static final Pattern BAY_CJK = Pattern.compile(
             "(?<![A-Z0-9])([A-Z]{0,2}\\d{1,4})\\s?(?:号|號)?\\s?(车位|車位|番|칸)(?![0-9A-Z])");
@@ -225,7 +237,13 @@ public final class SignageGrammar {
      * plate, which must never be mistaken for a bay.
      */
     private static final Pattern BAY_BARE = Pattern.compile(
-            "(?<![A-Z0-9])([A-Z]{1,2})\\s?-?\\s?(\\d{2,3})(?![0-9A-Z])");
+            "(?<![A-Z0-9])([A-Z]{1,2})\\s?-?\\s?(\\d{2,3})(?![0-9A-Z])" + NOT_PERCENT);
+    /** A standalone 4-digit group marks a licence plate line ("KA 50 MF 3155"): no bare bay in it. */
+    private static final Pattern PLATE_DIGITS = Pattern.compile("(?<![0-9])\\d{4}(?![0-9])");
+    /** A line that is only a level code ("B2"): the top of a level/location placard. */
+    private static final Pattern LEVEL_CODE_LINE = Pattern.compile("^(B|LG|UG|UB|LB|P|L|M)\\s?[-.]?\\s?(\\d{1,2})$");
+    /** The location code printed with it ("R03"); digit look-alikes fold, a leading "$" is an S. */
+    private static final Pattern PLACARD_CODE = Pattern.compile("^([A-Z$]{1,2})([0-9OQDIZS]{2,3})$");
 
     private SignageGrammar() {}
 
@@ -235,6 +253,7 @@ public final class SignageGrammar {
         Result r = new Result();
         if (observations == null || observations.isEmpty()) return r;
         Votes levels = new Votes(), zones = new Votes(), bays = new Votes();
+        Map<Observation, String> placard = placardCodes(observations);
 
         for (Observation o : observations) {
             if (o == null || o.text.trim().isEmpty()) continue;
@@ -316,8 +335,11 @@ public final class SignageGrammar {
             while (m.find()) {
                 bays.add(m.group(1), base * KEYWORD_WEIGHT, o, m.group());
             }
+            String code = placard.get(o);
+            if (code != null) bays.add(code, clamp01(o.confidence) * KEYWORD_WEIGHT, o, code);
             m = BAY_BARE.matcher(t);
-            while (m.find()) {
+            boolean plateLine = PLATE_DIGITS.matcher(t).find();
+            while (code == null && !plateLine && m.find()) {
                 String letters = m.group(1);
                 String digits = m.group(2);
                 // A code+digits that already parsed as a level (B2) can't reach
@@ -352,6 +374,43 @@ public final class SignageGrammar {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    /**
+     * Location codes printed on one placard with a level code: a line directly above or below an
+     * exact level-code line of the same frame. The placard is the signage evidence, so these
+     * codes are not discounted for their small size.
+     */
+    static Map<Observation, String> placardCodes(List<Observation> observations) {
+        Map<Observation, String> out = new java.util.IdentityHashMap<>();
+        for (Observation a : observations) {
+            if (a == null || !hasBox(a) || !LEVEL_CODE_LINE.matcher(normalise(a.text).trim()).matches()) continue;
+            for (Observation c : observations) {
+                if (c == null || c == a || c.frame != a.frame || !hasBox(c) || out.containsKey(c)) continue;
+                float h = Math.max(a.heightNorm, c.heightNorm);
+                float dy = Math.abs(c.cy - a.cy);
+                if (dy <= 0.3f * h || dy > 2f * h) continue;
+                if (Math.abs(c.cx - a.cx) > 0.6f * Math.max(a.widthNorm, c.widthNorm)) continue;
+                String code = placardCode(c.text);
+                if (code != null) out.put(c, code);
+            }
+        }
+        return out;
+    }
+
+    private static boolean hasBox(Observation o) {
+        return o.heightNorm > 0f && o.widthNorm > 0f && !Float.isNaN(o.cx) && !Float.isNaN(o.cy);
+    }
+
+    /** "R03" / "RO3" → "R03", "$01" → "S01"; null unless 1–2 letters lead 2–3 digit slots holding a real digit. */
+    static String placardCode(String raw) {
+        String t = normalise(raw);
+        if (t.indexOf('%') >= 0) return null;
+        Matcher m = PLACARD_CODE.matcher(t.replaceAll("[^A-Z0-9$]", ""));
+        if (!m.matches()) return null;
+        String d = m.group(2);
+        if (!d.matches(".*[0-9].*")) return null;
+        return m.group(1).replace('$', 'S') + digits(d);
+    }
 
     /**
      * Fold the OCR line into the grammar's alphabet: NFKC (full-width "Ｂ２" →

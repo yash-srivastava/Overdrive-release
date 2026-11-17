@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Fixed dark-theme swatch: shows that theme whatever the current one is. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="160dp"
+    android:height="58dp"
+    android:viewportWidth="160"
+    android:viewportHeight="58">
+    <path
+        android:fillColor="#FF0E241E"
+        android:pathData="M8,0L152,0A8,8 0,0 1,160 8L160,50A8,8 0,0 1,152 58L8,58A8,8 0,0 1,0 50L0,8A8,8 0,0 1,8 0Z" />
+    <path
+        android:fillColor="#FF5DDBB6"
+        android:pathData="M54.2,39L105.8,39A3,3 0,0 1,105.8 45L54.2,45A3,3 0,0 1,54.2 39Z" />
+</vector>

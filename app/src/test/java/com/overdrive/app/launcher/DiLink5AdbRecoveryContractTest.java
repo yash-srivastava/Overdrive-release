@@ -79,19 +79,19 @@ public class DiLink5AdbRecoveryContractTest {
     }
 
     @Test
-    public void daemonKeepsItsLimitsAndGainsOnlyTheLeaseHandshake() throws Exception {
+    public void daemonObservesClosedPortButLeavesMutationToCoordinator() throws Exception {
         String source = read(
                 "app/src/main/java/com/overdrive/app/daemon/AccSentryDaemon.java");
         assertTrue(source.contains("DILINK5_ADB_RECOVERY_RETRY_MS = 15 * 60_000L"));
         assertTrue(source.contains("DILINK5_ADB_CHECK_EVERY_TICKS = 6"));
-        assertTrue(source.contains("settings put global adb_enabled 1"));
-        assertTrue(source.contains("settings put global adb_wifi_enabled 1"));
-        assertTrue(source.contains("settings put global adb_allowed_connection_time 0"));
 
         String recoveryRegion = between(source,
                 "private static void recoverDilink5AdbIfNeeded",
-                "private static boolean isLoopbackPortOpen");
-        assertTrue(recoveryRegion.contains("AdbRecoveryLease"));
+                "private static String lastAdbRecoveryLeaseDeferral");
+        assertTrue(recoveryRegion.contains("waiting for coordinated app-process recovery"));
+        assertFalse(recoveryRegion.contains("settings put global adb_enabled"));
+        assertFalse(recoveryRegion.contains("settings put global adb_wifi_enabled"));
+        assertFalse(recoveryRegion.contains("settings put global adb_allowed_connection_time"));
     }
 
     @Test

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_section_adb">ADB</string>
+    <string name="settings_adb_subtitle">Verbindung, Aktivierung und automatische Wiederherstellung.</string>
+    <string name="settings_adb_connection_title">Verbindung</string>
+    <string name="settings_adb_automatic_title">Automatische Wiederherstellung</string>
+    <string name="settings_adb_automatic_restore">ADB automatisch wiederherstellen</string>
+    <string name="settings_adb_automatic_description">Stellt die ADB-Einstellung beim Start und nach dem Ausschalten wieder her. Die Berechtigung für Einstellungen muss bereits erteilt sein; WLAN ist nicht nötig. DiLink 5 bietet zusätzlich drahtlose Wiederherstellung über validiertes WLAN mit einem zuvor autorisierten Schlüssel.</string>
+    <string name="settings_adb_recover">ADB jetzt wiederherstellen</string>
+    <string name="settings_adb_cancel_recovery">Wiederherstellung abbrechen</string>
+    <string name="settings_adb_manual_title">Manuelle Aktivierung</string>
+    <string name="settings_adb_manual_description">Fordere mit kompatiblen BYD-Werkzeugen ADB-Zugriff an. Eine WLAN-Verbindung ist nicht erforderlich.</string>
+    <string name="settings_adb_enable">ADB aktivieren</string>
+    <string name="settings_adb_advanced_tools">Erweiterte Werkzeuge</string>
+    <string name="settings_adb_hide_advanced">Erweiterte Werkzeuge ausblenden</string>
+    <string name="settings_adb_advanced_description">Diagnostiziere Probleme, öffne BYD-Werkzeuge oder mache einen manuellen Versuch rückgängig.</string>
+    <string name="settings_adb_open_developer">Entwickleroptionen öffnen</string>
+    <string name="settings_adb_developer_page">BYD-Entwicklerseite anfordern</string>
+    <string name="settings_adb_diagnostics">Kompatibilität und Verbindung prüfen</string>
+    <string name="settings_adb_restore">Änderungen der manuellen Aktivierung rückgängig machen</string>
+    <string name="settings_adb_export">APK der BYD-Entwicklerwerkzeuge exportieren</string>
+    <string name="settings_adb_dialog_confirm">Drahtloses Debugging in diesem WLAN erlauben</string>
+    <string name="settings_adb_dialog_confirm_description">Verbinde dich zuerst mit einem validierten WLAN. Erlaube OverDrive, den Dialog für drahtloses Debugging nur für dieses WLAN zu bestätigen.</string>
+    <string name="settings_adb_tools_unavailable">Die manuelle Aktivierung ist für den aktuellen Modus oder die installierten BYD-Werkzeuge nicht verfügbar.</string>
+    <string name="settings_adb_recovery_availability">Die lokale Wiederherstellung benötigt die bei der ADB-Einrichtung erteilte Berechtigung für Einstellungen. Sie benötigt weder WLAN noch den DiLink-5-Modus.</string>
+    <string name="settings_adb_details_title">Details des letzten Versuchs</string>
+    <string name="settings_adb_recovery_confirm_body">Die lokale Wiederherstellung nutzt die bereits erteilte Berechtigung für Einstellungen ohne WLAN. DiLink 5 kann zusätzlich validiertes WLAN und einen zuvor autorisierten Schlüssel nutzen. Dies kann den ADB-Netzwerkzugriff auf Port 5555 öffnen oder wiederherstellen, der für andere Geräte im Fahrzeugnetz erreichbar sein könnte. Nur in einem vertrauenswürdigen Netzwerk fortfahren. Die ADB-Schlüsselauthentifizierung bleibt aktiviert.</string>
+    <string name="settings_adb_recovery_permission_missing">Die Berechtigung für Einstellungen fehlt. Wenn auch ADB nicht verfügbar ist, nutze zuerst ADB aktivieren oder Entwickleroptionen und schließe die ADB-Einrichtung erneut ab.</string>
+    <string name="settings_adb_recovery_setting_enabled">Die ADB-Einstellung ist aktiviert. Eine authentifizierte ADB-Verbindung wurde nicht bestätigt.</string>
+    <string name="settings_adb_recovery_setting_failed">Die ADB-Einstellung konnte nicht aktiviert und überprüft werden. Die Firmware kann die Änderung ablehnen.</string>
+    <string name="settings_adb_recovery_save_failed">Die Einstellung zur automatischen Wiederherstellung konnte nicht gespeichert werden. Prüfe ADB und versuche es erneut.</string>
+</resources>

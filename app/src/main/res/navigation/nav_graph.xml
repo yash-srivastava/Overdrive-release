@@ -319,7 +319,7 @@
     <fragment
         android:id="@+id/daemonsFragment"
         android:name="com.overdrive.app.ui.fragment.DaemonsFragment"
-        android:label="@string/settings_section_daemons"
+        android:label="@string/daemons_hero_title"
         tools:layout="@layout/fragment_daemons" />
 
     <!-- About — reachable from the portrait Settings hub's About row.
@@ -330,6 +330,12 @@
         android:name="com.overdrive.app.ui.fragment.settings.SettingsAboutFragment"
         android:label="@string/settings_section_about"
         tools:layout="@layout/fragment_settings_about" />
+
+    <fragment
+        android:id="@+id/settingsAdbFragment"
+        android:name="com.overdrive.app.ui.fragment.settings.SettingsAdbFragment"
+        android:label="@string/settings_section_adb"
+        tools:layout="@layout/fragment_settings_adb" />
 
     <!-- Security — PIN lock controls. Reachable from the portrait Settings
          hub's Security card and from the landscape sub-rail Security row. -->
@@ -353,6 +359,13 @@
             app:argType="string"
             android:defaultValue="" />
     </fragment>
+
+    <!-- BYD's own dashcam clips on the microSD card (read-only, entered from Recordings) -->
+    <fragment
+        android:id="@+id/factoryDvrFragment"
+        android:name="com.overdrive.app.ui.fragment.FactoryDvrFragment"
+        android:label="@string/factory_dvr_title"
+        tools:layout="@layout/fragment_factory_dvr" />
 
     <action
         android:id="@+id/action_global_videoPlayer"

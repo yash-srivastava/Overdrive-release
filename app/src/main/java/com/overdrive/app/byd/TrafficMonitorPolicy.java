@@ -86,6 +86,12 @@ public final class TrafficMonitorPolicy {
                 && !probeOutput.contains(NOT_DISABLED);
     }
 
+    /** Tri-state parse of {@link #stateProbeCommand()} output; unrecognised output is unknown. */
+    public static String probeState(String probeOutput) {
+        if (probeSaysDisabled(probeOutput)) return STATE_DISABLED;
+        return probeOutput != null && probeOutput.contains(NOT_DISABLED) ? STATE_ENABLED : STATE_UNKNOWN;
+    }
+
     /**
      * Resolve the verification tail of {@link #applyThenProbeCommand(boolean)}.
      * Returns {@link #STATE_UNKNOWN} when the delimiter is absent: the mutation
@@ -97,7 +103,7 @@ public final class TrafficMonitorPolicy {
         int cut = output.lastIndexOf(PROBE_DELIMITER);
         if (cut < 0) return STATE_UNKNOWN;
         String probe = output.substring(cut + PROBE_DELIMITER.length());
-        return probeSaysDisabled(probe) ? STATE_DISABLED : STATE_ENABLED;
+        return probeState(probe);
     }
 
     // ==================== Persisted preference ====================

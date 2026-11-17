@@ -48,12 +48,17 @@ object CustomExpr {
     private const val YD_PER_M = 1.0936133
     private const val FT_PER_M = 3.2808399
     private const val PSI_PER_KPA = 0.1450377
+    /** `mqtt('x')` reads the data key "mqtt:x": the latest payload of that automation channel. */
+    const val MQTT_PREFIX = "mqtt:"
+    private const val MQTT_TEXT = 64
+    private val CHANNEL = Regex("[A-Za-z0-9._-]{1,64}")
+    private val DECIMAL = Regex("[+-]?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)([eE][+-]?[0-9]+)?")
 
     private val ARITY = mapOf(
         "min" to 1..8, "max" to 1..8, "clamp" to 3..3, "lerp" to 3..3, "abs" to 1..1, "round" to 1..1,
         "floor" to 1..1, "ceil" to 1..1, "sqrt" to 1..1, "pow" to 2..2, "sin" to 1..1, "cos" to 1..1,
         "known" to 1..1, "ifknown" to 2..2, "fmt" to 1..2, "ramp" to 3..31, "mix" to 3..3, "alpha" to 2..2,
-        "dist" to 1..1, "near" to 1..1, "height" to 1..1, "consumption" to 1..1, "tyre" to 1..1,
+        "dist" to 1..1, "near" to 1..1, "height" to 1..1, "consumption" to 1..1, "tyre" to 1..1, "mqtt" to 1..1,
     )
     private val TWO = setOf("||", "&&", "==", "!=", "<=", ">=")
     private const val ONE = "?:+-*/%<>!(),"
@@ -186,6 +191,10 @@ object CustomExpr {
                         val args = ArrayList<Node>()
                         if (!isOp(")")) { args.add(cond()); while (isOp(",")) { p++; args.add(cond()) } }
                         expect(")")
+                        // a channel is named outright, so the file says which channels it reads before it runs
+                        if (t.text == "mqtt" && ((args.singleOrNull() as? Lit)?.v as? String)?.let { CHANNEL.matches(it) } != true) {
+                            throw Error("mqtt() needs a channel name in quotes", t.at)
+                        }
                         if (args.size !in ar) throw Error("${t.text}() takes ${if (ar.first == ar.last) "${ar.first}" else "${ar.first}–${ar.last}"} values", t.at)
                         Call(t.text, args)
                     }
@@ -211,6 +220,46 @@ object CustomExpr {
             is Lit -> {}
         }
     }
+
+    /** Every MQTT channel [n] reads through `mqtt('…')`. */
+    fun channels(n: Node, out: MutableSet<String>) {
+        when (n) {
+            is Call -> {
+                // the parser lets mqtt() through only with one channel literal
+                if (n.fn == "mqtt") out.add((n.args[0] as Lit).v as String) else for (a in n.args) channels(a, out)
+            }
+            is Unary -> channels(n.a, out)
+            is Binary -> { channels(n.a, out); channels(n.b, out) }
+            is Cond -> { channels(n.c, out); channels(n.a, out); channels(n.b, out) }
+            is Ref, is Lit -> {}
+        }
+    }
+
+    /**
+     * A channel's latest payload as a widget reads it: control characters dropped and the ends trimmed (as
+     * JavaScript's trim does), then a plain decimal is its finite number, other text its first 64 characters;
+     * nothing, or nothing left, is null.
+     */
+    fun mqttValue(raw: Any?): Any? {
+        if (raw is Number) return raw.toDouble().takeIf { it.isFinite() }
+        if (raw !is String) return null
+        val sb = StringBuilder(raw.length)
+        for (ch in raw) if (ch.code >= 0x20 && ch.code !in 0x7F..0x9F) sb.append(ch)
+        var a = 0
+        var b = sb.length
+        while (a < b && jsSpace(sb[a])) a++
+        while (b > a && jsSpace(sb[b - 1])) b--
+        if (a == b) return null
+        val t = sb.substring(a, b)
+        if (DECIMAL.matches(t)) t.toDouble().takeIf { it.isFinite() }?.let { return it }
+        if (t.length <= MQTT_TEXT) return t
+        // a cut never leaves half of a surrogate pair
+        return t.substring(0, if (Character.isHighSurrogate(t[MQTT_TEXT - 1])) MQTT_TEXT - 1 else MQTT_TEXT)
+    }
+
+    // JavaScript's whitespace, control characters aside (they are already gone)
+    private fun jsSpace(ch: Char) = ch == ' ' || ch == '\u00A0' || ch == '\u1680' || ch in '\u2000'..'\u200A' || ch == '\u2028' ||
+        ch == '\u2029' || ch == '\u202F' || ch == '\u205F' || ch == '\u3000' || ch == '\uFEFF'
 
     fun truthy(v: Any?): Boolean = when (v) {
         null -> false
@@ -313,6 +362,7 @@ object CustomExpr {
                 return fixed(x, d.toInt().coerceIn(0, 3))
             }
             "ramp" -> return ramp(v)
+            "mqtt" -> return mqttValue(s.get(MQTT_PREFIX + v[0]))
             "mix" -> {
                 val a = v[0] as? Col ?: return null; val b = v[1] as? Col ?: return null; val t = num(v[2]) ?: return null
                 return Col(GlassColor.mix(a.argb, b.argb, t.toFloat()))

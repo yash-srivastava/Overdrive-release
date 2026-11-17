@@ -131,7 +131,8 @@ data class RecordingFile(
         // proximity_20251224_132630.mp4 or proximity_20251224_132630_2.mp4
         private val PROXIMITY_FILENAME_PATTERN = Regex("""proximity_(\d{8})_(\d{6})(?:_\d+)?\.mp4""")
         // dvr_20251224_132630.mp4 or dvr_20251224_132630_2.mp4 — OEM forward-sensor dashcam
-        private val OEM_DASHCAM_FILENAME_PATTERN = Regex("""dvr_(\d{8})_(\d{6})(?:_\d+)?\.mp4""")
+        // (dvr_p_…: opened by parked Surveillance)
+        private val OEM_DASHCAM_FILENAME_PATTERN = Regex("""dvr_(?:p_)?(\d{8})_(\d{6})(?:_\d+)?\.mp4""")
 
         /**
          * Parses the writer's `yyyyMMdd_HHmmss` filename stamp.

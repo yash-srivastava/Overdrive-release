@@ -1,38 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  Recordings page — portrait. SOTA redesign matching events.html aesthetic.
-
-  Vertical rhythm:
-    1. Hero header
-       ・ Title row: "Recordings" + tonal Settings (right-aligned).
-       ・ Subtitle row: count chip pill ("12 today · 320 total · 42 GB")
-         on a faint surface, reads like the events.html top bar's count
-         strip.
-    2. Filter strip — compact two-row design so the library grid below gets
-       the maximum height (events.html `.filter-tabs-row2` parity):
-         ・ Row 1: Segmented Dashcam / Replays / Surveillance (running counts).
-         ・ Row 1b: place search card — COLLAPSED by default; toggled by the
-           search icon on Row 2, auto-shown while a query is active.
-         ・ Row 2: date jump (◀ Today ▶) + a single horizontal scroller
-           hosting the quick chips (TYPE for Dashcam; WHAT + SEVERITY for
-           Surveillance; PLACE when geocoded clips exist) + Reset + search
-           toggle + filter-sheet button. Section labels are dropped here for
-           compactness — actor/severity chips carry icons; the fully
-           labelled sections live in the filter bottom sheet.
-    3. Library container — hosts the embedded RecordingLibraryFragment list.
-
-  IDs preserved (consumed by RecordingsFragment.kt — DO NOT rename):
-    segmentedSource, segmentDashcam, segmentReplays, segmentSurveillance,
-    btnRecordingsSettings, libraryContainer,
-    btnPrevDay, btnNextDay, cardDateJump, tvSelectedDate, tvDayClipCount,
-    chipActorAny, chipActorPerson, chipActorVehicle, chipActorBike,
-    chipActorAnimal, chipSevAny, chipSevAlert, chipSevCritical,
-    btnFilterReset, chipTypeNormal, chipTypeProximity, chipGroupPlace,
-    rowTypeFilter, rowWhatFilter, scrollSeverityChips, rowPlaceFilter,
-    btnClearDate, tvRecordingsSummary,
-    cardPlaceSearch, etPlaceSearch, btnClearPlaceSearch (place substring search),
-    btnTogglePlaceSearch (expands/collapses the search card).
--->
+<!-- Recordings, portrait: counts + actions, collapsible place search, scrollable source segments,
+     date control + filters, then the inline quick-filter chips over a single-column library. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
@@ -45,24 +13,17 @@
         android:layout_height="match_parent"
         android:orientation="vertical">
 
-    <!-- ============ Header: counts + page actions ============ -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:paddingHorizontal="@dimen/page_padding_horizontal"
-        android:paddingTop="@dimen/page_padding_top"
-        android:paddingBottom="6dp">
-
+        <!-- Row 1: counts, search toggle, Select, settings. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:baselineAligned="false"
             android:gravity="center_vertical"
+            android:minHeight="@dimen/rec_header_row_height"
             android:orientation="horizontal"
-            android:baselineAligned="false">
+            android:paddingHorizontal="@dimen/od_page_padding_h"
+            android:paddingTop="@dimen/rec_header_padding_top">
 
-            <!-- Counts line. Populated by refreshCounts(); the pending string
-                 holds its height until the first scan lands. -->
             <FrameLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -70,188 +31,166 @@
 
                 <TextView
                     android:id="@+id/tvRecordingsSummary"
+                    style="@style/Widget.Overdrive.Rec.Summary"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:singleLine="true"
-                    android:ellipsize="end"
                     android:text="@string/recordings_summary_pending"
-                    android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
-                    android:textColor="?attr/colorOnSurfaceVariant"
-                    tools:text="12 today · 320 total · 42 GB" />
+                    tools:text="12 today · 148 total · 21.4 GB" />
 
                 <View
                     android:id="@+id/tvRecordingsSummarySkeleton"
-                    android:layout_width="196dp"
-                    android:layout_height="14dp"
+                    android:layout_width="@dimen/rec_skeleton_summary_width"
+                    android:layout_height="@dimen/rec_skeleton_summary_height"
                     android:layout_gravity="start|center_vertical"
                     android:background="@drawable/skeleton_block"
                     android:visibility="gone" />
             </FrameLayout>
 
             <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnTogglePlaceSearch"
+                style="@style/Widget.Overdrive.Rec.HeaderIcon"
+                android:layout_width="@dimen/od_touch_min"
+                android:layout_height="@dimen/od_touch_min"
+                android:layout_marginStart="@dimen/od_space_8"
+                android:contentDescription="@string/recording_lib_place_search_hint"
+                app:icon="@drawable/ic_nav_search" />
+
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnSelectRecordings"
-                style="@style/Widget.Overdrive.M3.Button.Header"
+                style="@style/Widget.Overdrive.Rec.TonalPill"
                 android:layout_width="wrap_content"
                 android:layout_height="48dp"
+                android:layout_marginStart="@dimen/od_space_8"
                 android:contentDescription="@string/recording_library_select"
-                android:text="@string/recording_library_select"
-                app:icon="@drawable/ic_check_circle"
-                app:iconGravity="textStart" />
+                android:text="@string/rec_action_select"
+                app:icon="@drawable/ic_check_circle" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnFactoryDvr"
+                style="@style/Widget.Overdrive.Rec.HeaderIcon"
+                android:layout_width="@dimen/od_touch_min"
+                android:layout_height="@dimen/od_touch_min"
+                android:layout_marginStart="@dimen/od_space_8"
+                android:contentDescription="@string/factory_dvr_open"
+                android:tooltipText="@string/factory_dvr_open"
+                app:icon="@drawable/ic_sd_card" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnRecordingsSettings"
-                style="@style/Widget.Overdrive.M3.Button.Header"
+                style="@style/Widget.Overdrive.Rec.HeaderIcon"
+                android:layout_width="@dimen/od_touch_min"
+                android:layout_height="@dimen/od_touch_min"
+                android:layout_marginStart="@dimen/od_space_8"
+                android:contentDescription="@string/recordings_action_settings"
+                app:icon="@drawable/ic_settings" />
+        </LinearLayout>
+
+        <!-- List | Timeline. Timeline swaps the list chrome for the date pill + Live. -->
+        <LinearLayout
+            android:id="@+id/recViewRow"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/od_touch_min"
+            android:layout_marginTop="@dimen/rec_header_row_gap"
+            android:baselineAligned="false"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="@dimen/od_page_padding_h">
+
+            <com.google.android.material.button.MaterialButtonToggleGroup
+                android:id="@+id/recViewToggle"
                 android:layout_width="wrap_content"
                 android:layout_height="48dp"
-                android:layout_marginStart="12dp"
-                android:contentDescription="@string/recordings_action_settings"
-                android:text="@string/recordings_action_settings"
-                app:icon="@drawable/ic_settings"
-                app:iconGravity="textStart" />
+                android:background="@drawable/rec_pill_track"
+                android:paddingHorizontal="3dp"
+                android:paddingVertical="0dp"
+                android:spacing="2dp"
+                android:theme="@style/ThemeOverlay.Overdrive.Rec.Segments"
+                app:checkedButton="@+id/btnViewList"
+                app:innerCornerSize="50%"
+                app:selectionRequired="true"
+                app:singleSelection="true">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnViewList"
+                    style="@style/Widget.Overdrive.Rec.Segment"
+                    android:layout_width="wrap_content"
+                    android:layout_height="48dp"
+                    android:text="@string/timeline_tab_list" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnViewTimeline"
+                    style="@style/Widget.Overdrive.Rec.Segment"
+                    android:layout_width="wrap_content"
+                    android:layout_height="48dp"
+                    android:text="@string/timeline_tab_timeline" />
+            </com.google.android.material.button.MaterialButtonToggleGroup>
+
+            <View
+                android:id="@+id/recTimelineHeaderSpace"
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1"
+                android:visibility="gone" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnTimelineDate"
+                style="@style/Widget.Overdrive.Rec.FilterPill"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:layout_marginStart="@dimen/od_space_8"
+                android:contentDescription="@string/timeline_cd_date"
+                android:visibility="gone"
+                app:icon="@drawable/ic_events"
+                tools:text="Today · Sat 15 Nov"
+                tools:visibility="visible" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnTimelineLive"
+                style="@style/Widget.Overdrive.Rec.FilterPill"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:layout_marginStart="@dimen/od_space_8"
+                android:text="@string/timeline_live"
+                android:visibility="gone"
+                app:icon="@drawable/tl_live_dot"
+                app:iconSize="10dp"
+                tools:visibility="visible" />
         </LinearLayout>
-    </LinearLayout>
 
-    <!-- ============ Top filter strip ============
-         Wrapped in a subtle MaterialCardView so the chip rows read as a
-         single coherent affordance rather than four loose horizontal
-         scrollers, mirroring events.html's `.filter-tabs-row2` block.
-    -->
-    <com.google.android.material.card.MaterialCardView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginHorizontal="@dimen/page_padding_horizontal"
-        android:layout_marginTop="6dp"
-        android:layout_marginBottom="@dimen/card_gap_vertical"
-        app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
-        app:cardCornerRadius="@dimen/card_radius_standard"
-        app:cardElevation="0dp"
-        app:strokeWidth="0dp">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="12dp">
-
-        <!-- Row 1: Dashcam | Replays | Surveillance segmented control -->
-        <com.google.android.material.button.MaterialButtonToggleGroup
-            android:id="@+id/segmentedSource"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            app:checkedButton="@id/segmentAll"
-            app:singleSelection="true"
-            app:selectionRequired="true">
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/segmentAll"
-                style="@style/Widget.Overdrive.M3.Button.Outlined"
-                android:layout_width="0dp"
-                android:layout_weight="1"
-                android:layout_height="48dp"
-                android:text="@string/recordings_segment_all"
-                android:textAllCaps="false"
-                android:textSize="12sp" />
-
-            <!-- Four weight-1 segments must share the card width with the
-                 runtime count labels ("Surveillance · 45"). Compact insets
-                 (12dp vs the M3 default 24dp), 12sp single-line ellipsized
-                 text keep the longest label from wrapping/clipping inside
-                 the fixed 44dp height on the portrait head unit. -->
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/segmentDashcam"
-                style="@style/Widget.Overdrive.M3.Button.Outlined"
-                android:layout_width="0dp"
-                android:layout_weight="1"
-                android:layout_height="48dp"
-                android:text="@string/recordings_segment_dashcam"
-                android:textAllCaps="false"
-                android:textSize="12sp"
-                android:maxLines="1"
-                android:ellipsize="end"
-                android:paddingHorizontal="8dp"
-                app:icon="@drawable/ic_directions_car"
-                app:iconSize="18dp"
-                app:iconGravity="textStart"
-                app:iconPadding="4dp" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/segmentReplays"
-                style="@style/Widget.Overdrive.M3.Button.Outlined"
-                android:layout_width="0dp"
-                android:layout_weight="1"
-                android:layout_height="48dp"
-                android:text="@string/recordings_segment_replays"
-                android:textAllCaps="false"
-                android:textSize="12sp"
-                android:maxLines="1"
-                android:ellipsize="end"
-                android:paddingHorizontal="8dp"
-                app:icon="@drawable/ic_instant_replay"
-                app:iconSize="18dp"
-                app:iconGravity="textStart"
-                app:iconPadding="4dp" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/segmentSurveillance"
-                style="@style/Widget.Overdrive.M3.Button.Outlined"
-                android:layout_width="0dp"
-                android:layout_weight="1"
-                android:layout_height="48dp"
-                android:text="@string/recordings_segment_surveillance"
-                android:textAllCaps="false"
-                android:textSize="12sp"
-                android:maxLines="1"
-                android:ellipsize="end"
-                android:paddingHorizontal="8dp"
-                app:icon="@drawable/ic_sentry"
-                app:iconSize="18dp"
-                app:iconGravity="textStart"
-                app:iconPadding="4dp" />
-        </com.google.android.material.button.MaterialButtonToggleGroup>
-
-        <!-- Row 1b: Free-text place search.
-             Substring narrowing across short / medium / displayName place
-             labels — routed through `placeContains=` on /api/recordings.
-             COLLAPSED by default to reclaim 58dp for the library grid;
-             RecordingsFragment.setupPlaceSearch expands it via
-             btnTogglePlaceSearch and auto-shows it while a query is
-             active (e.g. restored after rotation). Binds the same
-             etPlaceSearch / btnClearPlaceSearch IDs as the landscape
-             variant. -->
+        <!-- Place search: collapsed until the search toggle opens it (or a query is active). -->
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/cardPlaceSearch"
             android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:layout_marginTop="10dp"
+            android:layout_height="@dimen/od_touch_min"
+            android:layout_marginHorizontal="@dimen/od_page_padding_h"
+            android:layout_marginTop="@dimen/od_space_8"
             android:visibility="gone"
-            tools:visibility="visible"
             app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-            app:cardCornerRadius="@dimen/card_radius_standard"
+            app:cardCornerRadius="@dimen/od_radius_pill_48"
             app:cardElevation="0dp"
-            app:strokeColor="?attr/colorOutlineVariant"
-            app:strokeWidth="1dp">
+            app:strokeWidth="0dp"
+            tools:visibility="visible">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:paddingStart="14dp"
-                android:paddingEnd="6dp">
+                android:orientation="horizontal"
+                android:paddingStart="@dimen/od_space_16">
 
                 <ImageView
-                    android:layout_width="18dp"
-                    android:layout_height="18dp"
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
                     android:contentDescription="@null"
-                    android:src="@drawable/ic_events"
+                    android:src="@drawable/ic_location_pin"
                     app:tint="?attr/colorOnSurfaceVariant" />
 
                 <EditText
                     android:id="@+id/etPlaceSearch"
                     android:layout_width="0dp"
                     android:layout_height="match_parent"
+                    android:layout_marginStart="@dimen/od_space_12"
                     android:layout_weight="1"
-                    android:layout_marginStart="10dp"
                     android:background="@null"
                     android:hint="@string/recording_lib_place_search_hint"
                     android:imeOptions="actionSearch"
@@ -261,409 +200,430 @@
                     android:singleLine="true"
                     android:textColor="?attr/colorOnSurface"
                     android:textColorHint="?attr/colorOnSurfaceVariant"
-                    android:textSize="14sp" />
+                    android:textSize="15sp" />
 
                 <ImageButton
                     android:id="@+id/btnClearPlaceSearch"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
-                    android:background="?attr/selectableItemBackgroundBorderless"
+                    style="@style/Widget.Overdrive.Rec.RowAction"
                     android:contentDescription="@string/recording_library_clear_search"
-                    android:padding="14dp"
                     android:src="@drawable/ic_clear"
                     android:visibility="gone"
-                    app:tint="?attr/colorOnSurfaceVariant"
                     tools:visibility="visible" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- Row 2: date jump (◀ card ▶) -->
+        <!-- Source segments: full labels, scrolling instead of truncating when narrow. -->
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/od_touch_min"
+            android:layout_marginTop="@dimen/rec_header_row_gap"
+            android:clipToPadding="false"
+            android:fadingEdgeLength="@dimen/od_space_24"
+            android:fillViewport="true"
+            android:overScrollMode="never"
+            android:paddingHorizontal="@dimen/od_page_padding_h"
+            android:requiresFadingEdge="horizontal"
+            android:scrollbars="none">
+
+            <com.google.android.material.button.MaterialButtonToggleGroup
+                android:id="@+id/segmentedSource"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:background="@drawable/rec_pill_track"
+                android:paddingHorizontal="3dp"
+                android:paddingVertical="0dp"
+                android:spacing="2dp"
+                android:theme="@style/ThemeOverlay.Overdrive.Rec.Segments"
+                app:checkedButton="@id/segmentAll"
+                app:innerCornerSize="50%"
+                app:selectionRequired="true"
+                app:singleSelection="true">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/segmentAll"
+                    style="@style/Widget.Overdrive.Rec.Segment"
+                    android:layout_width="wrap_content"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:text="@string/recordings_segment_all" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/segmentDashcam"
+                    style="@style/Widget.Overdrive.Rec.Segment"
+                    android:layout_width="wrap_content"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:text="@string/recordings_segment_dashcam" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/segmentReplays"
+                    style="@style/Widget.Overdrive.Rec.Segment"
+                    android:layout_width="wrap_content"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:text="@string/recordings_segment_replays" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/segmentSurveillance"
+                    style="@style/Widget.Overdrive.Rec.Segment"
+                    android:layout_width="wrap_content"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:text="@string/recordings_segment_surveillance" />
+            </com.google.android.material.button.MaterialButtonToggleGroup>
+        </HorizontalScrollView>
+
+        <!-- Date control + Reset + Filters (pills inset 4dp, so rows abut for an 8dp visual gap). -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
+            android:layout_height="@dimen/od_touch_min"
+            android:baselineAligned="false"
             android:gravity="center_vertical"
-            android:layout_marginTop="10dp"
-            android:baselineAligned="false">
+            android:orientation="horizontal"
+            android:paddingHorizontal="@dimen/od_page_padding_h">
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnPrevDay"
-                style="@style/Widget.Overdrive.M3.HeaderIconButton"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:contentDescription="@string/cd_previous_day"
-                app:icon="@drawable/ic_chevron_left"
-                app:iconSize="22dp"
-                app:iconTint="?attr/colorOnSurfaceVariant"
-                app:iconGravity="textStart"
-                app:iconPadding="0dp" />
-
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/cardDateJump"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginHorizontal="8dp"
-                android:clickable="true"
-                android:focusable="true"
-                android:minHeight="48dp"
-                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                app:cardElevation="0dp"
-                app:cardCornerRadius="@dimen/card_radius_accent"
-                app:rippleColor="?attr/colorPrimary"
-                app:strokeColor="?attr/colorOutlineVariant"
-                app:strokeWidth="1dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:paddingHorizontal="14dp"
-                    android:paddingVertical="10dp">
-
-                    <ImageView
-                        android:layout_width="18dp"
-                        android:layout_height="18dp"
-                        android:contentDescription="@null"
-                        android:src="@drawable/ic_events"
-                        app:tint="?attr/colorOnSurfaceVariant" />
-
-                    <TextView
-                        android:id="@+id/tvSelectedDate"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="10dp"
-                        android:maxWidth="160dp"
-                        android:textColor="?attr/colorOnSurface"
-                        android:textSize="14sp"
-                        android:fontFamily="sans-serif-medium"
-                        android:singleLine="true"
-                        android:ellipsize="end"
-                        tools:text="Today" />
-
-                    <TextView
-                        android:id="@+id/tvDayClipCount"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="6dp"
-                        android:paddingHorizontal="9dp"
-                        android:paddingVertical="2dp"
-                        android:background="@drawable/recording_lib_count_pill"
-                        android:textColor="?attr/colorOnSurface"
-                        android:textSize="11sp"
-                        android:fontFamily="sans-serif-medium"
-                        android:visibility="gone"
-                        tools:text="12 clips"
-                        tools:visibility="visible" />
-
-                    <ImageButton
-                        android:id="@+id/btnClearDate"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
-                        android:layout_marginStart="6dp"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        android:contentDescription="@string/cd_clear_date_filter"
-                        android:padding="14dp"
-                        android:src="@drawable/ic_clear"
-                        android:visibility="gone"
-                        app:tint="?attr/colorOnSurfaceVariant"
-                        tools:visibility="visible" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnNextDay"
-                style="@style/Widget.Overdrive.M3.HeaderIconButton"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:contentDescription="@string/cd_next_day"
-                app:icon="@drawable/ic_chevron_right"
-                app:iconSize="22dp"
-                app:iconTint="?attr/colorOnSurfaceVariant"
-                app:iconGravity="textStart"
-                app:iconPadding="0dp" />
-
-            <!-- Quick-filter chips share the date row so the library grid
-                 gets the reclaimed height. Per-segment visibility is
-                 driven by RecordingsFragment.applyChipRowVisibility
-                 (rowTypeFilter ↔ Dashcam; rowWhatFilter +
-                 scrollSeverityChips ↔ Surveillance); rowPlaceFilter is
-                 toggled by renderPlaceChips when geocoded clips exist. -->
-            <HorizontalScrollView
+            <!-- Takes the space left after Reset and Filter, so those never get squeezed. -->
+            <LinearLayout
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:layout_marginStart="4dp"
-                android:scrollbars="none"
-                android:overScrollMode="never">
+                android:background="@drawable/rec_pill_track"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
 
-                <LinearLayout
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnPrevDay"
+                    style="@style/Widget.Overdrive.Rec.DateArrow"
+                    android:layout_width="@dimen/od_touch_min"
+                    android:layout_height="48dp"
+                    android:contentDescription="@string/cd_previous_day"
+                    app:icon="@drawable/ic_chevron_left" />
 
-                    <!-- TYPE chips (Dashcam segment only) -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardDateJump"
+                    android:layout_width="0dp"
+                    android:layout_height="@dimen/od_touch_min"
+                    android:layout_weight="1"
+                    android:clickable="true"
+                    android:focusable="true"
+                    app:cardBackgroundColor="@android:color/transparent"
+                    app:cardCornerRadius="@dimen/od_radius_pill_48"
+                    app:cardElevation="0dp"
+                    app:rippleColor="?attr/colorControlHighlight"
+                    app:strokeWidth="0dp">
+
                     <LinearLayout
-                        android:id="@+id/rowTypeFilter"
                         android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
+                        android:layout_height="match_parent"
                         android:gravity="center_vertical"
-                        android:visibility="gone"
-                        tools:visibility="visible">
+                        android:orientation="horizontal"
+                        android:paddingStart="@dimen/od_space_12"
+                        android:paddingEnd="@dimen/od_space_12">
 
-                        <com.google.android.material.chip.ChipGroup
-                            android:id="@+id/chipGroupType"
+                        <ImageView
+                            android:layout_width="@dimen/od_icon_sm"
+                            android:layout_height="@dimen/od_icon_sm"
+                            android:contentDescription="@null"
+                            android:src="@drawable/ic_events"
+                            app:tint="?attr/colorOnSurfaceVariant" />
+
+                        <TextView
+                            android:id="@+id/tvSelectedDate"
+                            style="@style/Widget.Overdrive.Rec.RowTime"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            app:chipSpacingHorizontal="6dp"
-                            app:singleLine="true">
+                            android:layout_marginStart="@dimen/od_space_6"
+                            android:ellipsize="end"
+                            android:maxWidth="160dp"
+                            tools:text="Today" />
 
-                            <com.google.android.material.chip.Chip
-                                android:id="@+id/chipTypeNormal"
-                                style="@style/Widget.Overdrive.M3.Chip.Filter"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="@string/recording_lib_chip_type_normal" />
-                            <com.google.android.material.chip.Chip
-                                android:id="@+id/chipTypeProximity"
-                                style="@style/Widget.Overdrive.M3.Chip.Filter"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="@string/recording_lib_chip_type_proximity" />
-                        </com.google.android.material.chip.ChipGroup>
-                    </LinearLayout>
-
-                    <!-- WHAT chips (Surveillance segment only) -->
-                    <LinearLayout
-                        android:id="@+id/rowWhatFilter"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:visibility="gone">
-
-                        <com.google.android.material.chip.ChipGroup
-                            android:id="@+id/chipGroupWhat"
+                        <TextView
+                            android:id="@+id/tvDayClipCount"
+                            style="@style/Widget.Overdrive.Rec.RowTime"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            app:chipSpacingHorizontal="6dp"
-                            app:singleLine="true">
+                            android:layout_marginStart="@dimen/od_space_6"
+                            android:textColor="?attr/colorOnSurfaceVariant"
+                            android:visibility="gone"
+                            tools:text="12"
+                            tools:visibility="visible" />
 
-                            <com.google.android.material.chip.Chip
-                                android:id="@+id/chipActorAny"
-                                style="@style/Widget.Overdrive.M3.Chip.Filter"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="@string/recording_lib_chip_any"
-                                android:checked="true" />
-                            <com.google.android.material.chip.Chip
-                                android:id="@+id/chipActorPerson"
-                                style="@style/Widget.Overdrive.M3.Chip.Filter"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="@string/recording_lib_chip_person"
-                                app:chipIcon="@drawable/ic_person"
-                                app:chipIconSize="16dp"
-                                app:chipIconTint="?attr/colorOnSurfaceVariant"
-                                app:chipIconVisible="true" />
-                            <com.google.android.material.chip.Chip
-                                android:id="@+id/chipActorVehicle"
-                                style="@style/Widget.Overdrive.M3.Chip.Filter"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="@string/recording_lib_chip_vehicle"
-                                app:chipIcon="@drawable/ic_directions_car"
-                                app:chipIconSize="16dp"
-                                app:chipIconTint="?attr/colorOnSurfaceVariant"
-                                app:chipIconVisible="true" />
-                            <com.google.android.material.chip.Chip
-                                android:id="@+id/chipActorBike"
-                                style="@style/Widget.Overdrive.M3.Chip.Filter"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="@string/recording_lib_chip_bike"
-                                app:chipIcon="@drawable/ic_pedal_bike"
-                                app:chipIconSize="16dp"
-                                app:chipIconTint="?attr/colorOnSurfaceVariant"
-                                app:chipIconVisible="true" />
-                            <com.google.android.material.chip.Chip
-                                android:id="@+id/chipActorAnimal"
-                                style="@style/Widget.Overdrive.M3.Chip.Filter"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="@string/recording_lib_chip_animal"
-                                app:chipIcon="@drawable/ic_pets"
-                                app:chipIconSize="16dp"
-                                app:chipIconTint="?attr/colorOnSurfaceVariant"
-                                app:chipIconVisible="true" />
-                        </com.google.android.material.chip.ChipGroup>
+                        <ImageButton
+                            android:id="@+id/btnClearDate"
+                            style="@style/Widget.Overdrive.Rec.RowAction"
+                            android:layout_marginEnd="-8dp"
+                            android:contentDescription="@string/cd_clear_date_filter"
+                            android:src="@drawable/ic_clear"
+                            android:visibility="gone"
+                            tools:visibility="visible" />
                     </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
 
-                    <!-- SEVERITY chips (Surveillance segment only) -->
-                    <LinearLayout
-                        android:id="@+id/scrollSeverityChips"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:visibility="gone">
-
-                        <com.google.android.material.chip.ChipGroup
-                            android:id="@+id/chipGroupSeverity"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            app:chipSpacingHorizontal="6dp"
-                            app:singleLine="true">
-
-                            <com.google.android.material.chip.Chip
-                                android:id="@+id/chipSevAny"
-                                style="@style/Widget.Overdrive.M3.Chip.Filter"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="@string/recording_lib_chip_any"
-                                android:checked="true" />
-                            <com.google.android.material.chip.Chip
-                                android:id="@+id/chipSevAlert"
-                                style="@style/Widget.Overdrive.M3.Chip.Filter"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="@string/recording_lib_chip_alert"
-                                app:chipIcon="@drawable/ic_warning"
-                                app:chipIconSize="16dp"
-                                app:chipIconTint="?attr/colorOnSurfaceVariant"
-                                app:chipIconVisible="true" />
-                            <com.google.android.material.chip.Chip
-                                android:id="@+id/chipSevCritical"
-                                style="@style/Widget.Overdrive.M3.Chip.Filter"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="@string/recording_lib_chip_critical"
-                                app:chipIcon="@drawable/ic_error"
-                                app:chipIconSize="16dp"
-                                app:chipIconTint="?attr/colorOnSurfaceVariant"
-                                app:chipIconVisible="true" />
-                        </com.google.android.material.chip.ChipGroup>
-                    </LinearLayout>
-
-                    <!-- PLACE chips — populated from Kotlin
-                         (renderPlaceChips); hidden until geocoding has
-                         tagged at least one clip. -->
-                    <LinearLayout
-                        android:id="@+id/rowPlaceFilter"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:visibility="gone">
-
-                        <com.google.android.material.chip.ChipGroup
-                            android:id="@+id/chipGroupPlace"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            app:chipSpacingHorizontal="6dp"
-                            app:singleLine="true" />
-                    </LinearLayout>
-
-                    <!-- PARKING SESSION chip — only present when the user
-                         arrived from a park on the Parking page ("Open
-                         events"). Narrows the list to the clips recorded
-                         during that park; the close icon (or Reset) drops it. -->
-                    <LinearLayout
-                        android:id="@+id/rowParkingFilter"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:visibility="gone">
-
-                        <com.google.android.material.chip.Chip
-                            android:id="@+id/chipParkingSession"
-                            style="@style/Widget.Overdrive.M3.Chip.Filter"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:checkable="false"
-                            android:text="@string/recording_lib_chip_parking_session"
-                            app:chipIcon="@drawable/ic_parking"
-                            app:chipIconSize="16dp"
-                            app:chipIconTint="?attr/colorOnSurfaceVariant"
-                            app:chipIconVisible="true"
-                            app:closeIconVisible="true" />
-                    </LinearLayout>
-                </LinearLayout>
-            </HorizontalScrollView>
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnNextDay"
+                    style="@style/Widget.Overdrive.Rec.DateArrow"
+                    android:layout_width="@dimen/od_touch_min"
+                    android:layout_height="48dp"
+                    android:contentDescription="@string/cd_next_day"
+                    app:icon="@drawable/ic_chevron_right" />
+            </LinearLayout>
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnFilterReset"
-                style="@style/Widget.Overdrive.M3.Button.Outlined"
+                style="@style/Widget.Overdrive.Rec.SheetReset"
                 android:layout_width="wrap_content"
-                android:layout_height="48dp"
-                android:layout_marginStart="2dp"
+                android:layout_height="@dimen/od_touch_min"
+                android:layout_marginStart="@dimen/od_space_8"
                 android:text="@string/recording_lib_filter_reset"
-                android:textAllCaps="false"
-                android:textSize="12sp"
                 android:visibility="gone"
-                android:minHeight="48dp"
-                android:insetTop="0dp"
-                android:insetBottom="0dp"
                 tools:visibility="visible" />
 
             <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnTogglePlaceSearch"
-                style="@style/Widget.Overdrive.M3.HeaderIconButton"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:contentDescription="@string/recording_lib_place_search_hint"
-                app:icon="@drawable/ic_nav_search"
-                app:iconSize="22dp"
-                app:iconTint="?attr/colorOnSurfaceVariant" />
-
-            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnOpenRecordingFilters"
-                style="@style/Widget.Overdrive.M3.HeaderIconButton"
-                android:layout_width="48dp"
+                style="@style/Widget.Overdrive.Rec.FilterPill"
+                android:layout_width="wrap_content"
                 android:layout_height="48dp"
-                android:layout_marginStart="6dp"
+                android:layout_marginStart="@dimen/od_space_8"
                 android:contentDescription="@string/recording_library_open_filters"
-                app:icon="@drawable/ic_filter_list"
-                app:iconSize="22dp"
-                app:iconTint="?attr/colorOnSurfaceVariant" />
+                android:text="@string/recording_lib_filter_button"
+                app:icon="@drawable/ic_filter_list" />
         </LinearLayout>
 
-        <!-- Row 6: STORAGE chips. Narrow the library to one physical volume
-             (Internal / SD card / USB). Clips already span every location in
-             the index; this filters by where each clip actually landed (the
-             per-clip storage badge shows the same tag). "Any" = all volumes.
-             Applies to both the Dashcam and Surveillance segments. -->
+        <!-- Quick filters per segment (Type / What + Severity / Place / This park); empty rows collapse. -->
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:clipToPadding="false"
+            android:overScrollMode="never"
+            android:paddingHorizontal="@dimen/od_page_padding_h"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <LinearLayout
+                    android:id="@+id/rowTypeFilter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingTop="@dimen/od_space_4"
+                    android:visibility="gone"
+                    tools:visibility="visible">
+
+                    <com.google.android.material.chip.ChipGroup
+                        android:id="@+id/chipGroupType"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        app:chipSpacingHorizontal="6dp"
+                        app:singleLine="true">
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chipTypeNormal"
+                            style="@style/Widget.Overdrive.M3.Chip.Filter"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/recording_lib_chip_type_normal" />
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chipTypeProximity"
+                            style="@style/Widget.Overdrive.M3.Chip.Filter"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/recording_lib_chip_type_proximity" />
+                    </com.google.android.material.chip.ChipGroup>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/rowWhatFilter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingTop="@dimen/od_space_4"
+                    android:visibility="gone">
+
+                    <com.google.android.material.chip.ChipGroup
+                        android:id="@+id/chipGroupWhat"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        app:chipSpacingHorizontal="6dp"
+                        app:singleLine="true">
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chipActorAny"
+                            style="@style/Widget.Overdrive.M3.Chip.Filter"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:checked="true"
+                            android:text="@string/recording_lib_chip_any" />
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chipActorPerson"
+                            style="@style/Widget.Overdrive.M3.Chip.Filter"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/recording_lib_chip_person"
+                            app:chipIcon="@drawable/ic_person"
+                            app:chipIconSize="16dp"
+                            app:chipIconTint="?attr/colorOnSurfaceVariant"
+                            app:chipIconVisible="true" />
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chipActorVehicle"
+                            style="@style/Widget.Overdrive.M3.Chip.Filter"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/recording_lib_chip_vehicle"
+                            app:chipIcon="@drawable/ic_directions_car"
+                            app:chipIconSize="16dp"
+                            app:chipIconTint="?attr/colorOnSurfaceVariant"
+                            app:chipIconVisible="true" />
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chipActorBike"
+                            style="@style/Widget.Overdrive.M3.Chip.Filter"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/recording_lib_chip_bike"
+                            app:chipIcon="@drawable/ic_pedal_bike"
+                            app:chipIconSize="16dp"
+                            app:chipIconTint="?attr/colorOnSurfaceVariant"
+                            app:chipIconVisible="true" />
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chipActorAnimal"
+                            style="@style/Widget.Overdrive.M3.Chip.Filter"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/recording_lib_chip_animal"
+                            app:chipIcon="@drawable/ic_pets"
+                            app:chipIconSize="16dp"
+                            app:chipIconTint="?attr/colorOnSurfaceVariant"
+                            app:chipIconVisible="true" />
+                    </com.google.android.material.chip.ChipGroup>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/scrollSeverityChips"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/od_space_8"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingTop="@dimen/od_space_4"
+                    android:visibility="gone">
+
+                    <com.google.android.material.chip.ChipGroup
+                        android:id="@+id/chipGroupSeverity"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        app:chipSpacingHorizontal="6dp"
+                        app:singleLine="true">
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chipSevAny"
+                            style="@style/Widget.Overdrive.M3.Chip.Filter"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:checked="true"
+                            android:text="@string/recording_lib_chip_any" />
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chipSevAlert"
+                            style="@style/Widget.Overdrive.M3.Chip.Filter"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/recording_lib_chip_alert"
+                            app:chipIcon="@drawable/ic_warning"
+                            app:chipIconSize="16dp"
+                            app:chipIconTint="?attr/colorOnSurfaceVariant"
+                            app:chipIconVisible="true" />
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chipSevCritical"
+                            style="@style/Widget.Overdrive.M3.Chip.Filter"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/recording_lib_chip_critical"
+                            app:chipIcon="@drawable/ic_error"
+                            app:chipIconSize="16dp"
+                            app:chipIconTint="?attr/colorOnSurfaceVariant"
+                            app:chipIconVisible="true" />
+                    </com.google.android.material.chip.ChipGroup>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/rowPlaceFilter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/od_space_8"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingTop="@dimen/od_space_4"
+                    android:visibility="gone">
+
+                    <com.google.android.material.chip.ChipGroup
+                        android:id="@+id/chipGroupPlace"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        app:chipSpacingHorizontal="6dp"
+                        app:singleLine="true" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/rowParkingFilter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/od_space_8"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingTop="@dimen/od_space_4"
+                    android:visibility="gone">
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/chipParkingSession"
+                        style="@style/Widget.Overdrive.M3.Chip.Filter"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:checkable="false"
+                        android:text="@string/recording_lib_chip_parking_session"
+                        app:chipIcon="@drawable/ic_parking"
+                        app:chipIconSize="16dp"
+                        app:chipIconTint="?attr/colorOnSurfaceVariant"
+                        app:chipIconVisible="true"
+                        app:closeIconVisible="true" />
+                </LinearLayout>
+            </LinearLayout>
+        </HorizontalScrollView>
+
+        <!-- Storage narrowing stays in the filter sheet; RecordingsFragment keeps this row hidden. -->
         <HorizontalScrollView
             android:id="@+id/rowStorageFilter"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:scrollbars="none"
+            android:layout_marginTop="@dimen/od_space_4"
+            android:clipToPadding="false"
             android:overScrollMode="never"
+            android:paddingHorizontal="@dimen/od_page_padding_h"
+            android:scrollbars="none"
             android:visibility="gone">
 
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical">
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginEnd="8dp"
+                    android:layout_marginEnd="@dimen/od_space_8"
                     android:text="@string/recording_lib_filter_section_storage"
-                    android:textColor="?attr/colorOnSurfaceVariant"
-                    android:textSize="11sp"
-                    android:fontFamily="sans-serif-medium"
-                    android:letterSpacing="0.06"
-                    android:textAllCaps="true" />
+                    android:textAppearance="@style/TextAppearance.Overdrive.Overline" />
 
                 <com.google.android.material.chip.ChipGroup
                     android:id="@+id/chipGroupStorage"
@@ -677,20 +637,23 @@
                         style="@style/Widget.Overdrive.M3.Chip.Filter"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="@string/recording_lib_chip_any"
-                        android:checked="true" />
+                        android:checked="true"
+                        android:text="@string/recording_lib_chip_any" />
+
                     <com.google.android.material.chip.Chip
                         android:id="@+id/chipStorageInternal"
                         style="@style/Widget.Overdrive.M3.Chip.Filter"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/recording_lib_storage_filter_internal" />
+
                     <com.google.android.material.chip.Chip
                         android:id="@+id/chipStorageSd"
                         style="@style/Widget.Overdrive.M3.Chip.Filter"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/recording_lib_storage_filter_sd" />
+
                     <com.google.android.material.chip.Chip
                         android:id="@+id/chipStorageUsb"
                         style="@style/Widget.Overdrive.M3.Chip.Filter"
@@ -700,28 +663,29 @@
                 </com.google.android.material.chip.ChipGroup>
             </LinearLayout>
         </HorizontalScrollView>
-        </LinearLayout>
-    </com.google.android.material.card.MaterialCardView>
 
-    <!-- ============ Library list (fills remaining height) ============ -->
-    <androidx.fragment.app.FragmentContainerView
-        android:id="@+id/libraryContainer"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1" />
+        <androidx.fragment.app.FragmentContainerView
+            android:id="@+id/libraryContainer"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginTop="@dimen/od_space_8"
+            android:layout_weight="1" />
 
-    <!--
-      Restoration-only host. FragmentManager may restore the landscape inline
-      player before RecordingsFragment can remove it after a portrait
-      recreation. Keeping the same container ID prevents a missing-container
-      crash; the player itself refuses to initialize media in this layout.
-    -->
-    <FrameLayout
-        android:id="@+id/previewContainer"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:importantForAccessibility="noHideDescendants"
-        android:visibility="gone" />
+        <!-- Restoration-only host for a landscape inline player; it never prepares media here. -->
+        <FrameLayout
+            android:id="@+id/previewContainer"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:importantForAccessibility="noHideDescendants"
+            android:visibility="gone" />
+
+        <!-- Timeline (TimelineFragment); shown instead of the list while the view is Timeline. -->
+        <FrameLayout
+            android:id="@+id/timelineContainer"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:visibility="gone" />
     </LinearLayout>
 
     <include layout="@layout/app_toast" />

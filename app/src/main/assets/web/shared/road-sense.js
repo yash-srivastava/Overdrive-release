@@ -138,7 +138,11 @@ BYD.roadSense = {
         // in a native fragment. The driver cluster is a single surface, so this and
         // autoProjectCluster are mutually exclusive: turning the map auto-project ON
         // while this is set prompts to hand the cluster over (see toggleClusterAuto).
-        projectionAutoStart: false
+        projectionAutoStart: false,
+        // Cluster overlay flags in UCM `surveillance` (shared with the Projection
+        // screen): the speed badge and hiding the OEM ADAS box. Opt-in: absent = off.
+        clusterSpeedEnabled: false,
+        clusterAdasHideEnabled: false
     },
     _hydrated: false,
     _writing: false,
@@ -411,6 +415,13 @@ BYD.roadSense = {
                 const pj = data.config.projection;
                 if (typeof pj.autoStartOnAcc === 'boolean') this.config.projectionAutoStart = pj.autoStartOnAcc;
             }
+            if (data && data.success && data.config) {
+                const sv = data.config.surveillance || {};
+                // Same truthiness as the daemon's optBoolean (true or "true", any case).
+                const flag = (v) => v === true || (typeof v === 'string' && v.toLowerCase() === 'true');
+                this.config.clusterSpeedEnabled = flag(sv.clusterSpeedEnabled);
+                this.config.clusterAdasHideEnabled = flag(sv.clusterAdasHideEnabled);
+            }
             return !!(data && data.success && data.config);
         } catch (e) {
             console.warn('RoadSense: failed to load config:', e);
@@ -479,6 +490,8 @@ BYD.roadSense = {
         if (clusterCard) {
             clusterCard.style.display = '';
             this._setChecked('rsClusterAuto', c.autoProjectCluster);
+            this._setChecked('rsClusterSpeed', c.clusterSpeedEnabled);
+            this._setChecked('rsClusterAdasHide', c.clusterAdasHideEnabled);
             if (loadLiveStatus) this.loadClusterStatus();
         }
 
@@ -2029,6 +2042,41 @@ BYD.roadSense = {
             this._toastFailed();
         } finally {
             this._clusterProjectPending = false;
+            el.disabled = false;
+        }
+    },
+
+    // Cluster overlays over every projection (apps, map, blind-spot). The daemon
+    // applies each on an open projection as soon as it saves.
+    toggleClusterSpeed() {
+        return this._toggleSurveillanceFlag('rsClusterSpeed', 'clusterSpeedEnabled');
+    },
+
+    toggleClusterAdasHide() {
+        return this._toggleSurveillanceFlag('rsClusterAdasHide', 'clusterAdasHideEnabled');
+    },
+
+    async _toggleSurveillanceFlag(id, key) {
+        const el = document.getElementById(id);
+        if (!el || !this._hydrated || el.disabled) return;
+        const on = el.checked;
+        el.disabled = true;
+        try {
+            const delta = {};
+            delta[key] = on;
+            const data = await this._saveSection('surveillance', delta);
+            if (data && data.success) {
+                this.config[key] = on;
+                this._toastSaved();
+            } else {
+                el.checked = !on;
+                this._toastFailed();
+            }
+        } catch (e) {
+            console.warn('RoadSense: ' + key + ' toggle failed:', e);
+            el.checked = !on;
+            this._toastFailed();
+        } finally {
             el.disabled = false;
         }
     },

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Trip Briefing: the car-start "Heading to work? Want directions?" prompt. The spoken line is
+         greeting + heading + duration (or one extra that replaces it) + question, joined by spaces,
+         and read aloud by text-to-speech. -->
+    <string name="trip_briefing_greeting_morning">Goedemorgen.</string>
+    <string name="trip_briefing_greeting_afternoon">Goedemiddag.</string>
+    <string name="trip_briefing_greeting_evening">Goedenavond.</string>
+    <string name="trip_briefing_heading_home">Op weg naar huis?</string>
+    <string name="trip_briefing_heading_work">Op weg naar je werk?</string>
+    <!-- %1$s: the place's name, e.g. "Phoenix Mall". -->
+    <string name="trip_briefing_heading_place">Op weg naar %1$s?</string>
+    <plurals name="trip_briefing_duration">
+        <item quantity="one">Ongeveer %1$d minuut.</item>
+        <item quantity="other">Ongeveer %1$d minuten.</item>
+    </plurals>
+    <!-- %1$s: range left, %2$s: the trip's length, each "31 km" or "19 mi". -->
+    <string name="trip_briefing_extra_range">Krap bereik: nog %1$s voor een rit van %2$s.</string>
+    <plurals name="trip_briefing_extra_hazards">
+        <item quantity="one">%1$d nieuw gevaar onderweg.</item>
+        <item quantity="other">%1$d nieuwe gevaren onderweg.</item>
+    </plurals>
+    <!-- %1$s: an hour of the day in the device's clock format, e.g. "7 PM" or "19:00". -->
+    <string name="trip_briefing_extra_rain">Rond %1$s gaat het waarschijnlijk regenen.</string>
+    <string name="trip_briefing_question">Zal ik de navigatie starten?</string>
+    <string name="trip_briefing_distance_km">%1$d km</string>
+    <string name="trip_briefing_distance_mi">%1$d mi</string>
+
+    <!-- The destination as the AI assistant should say it. -->
+    <string name="trip_briefing_said_home">thuis</string>
+    <string name="trip_briefing_said_work">werk</string>
+
+    <!-- Card -->
+    <string name="trip_briefing_title_home">Thuis</string>
+    <string name="trip_briefing_title_work">Werk</string>
+    <!-- Title for a regular destination that has no name yet. -->
+    <string name="trip_briefing_title_unnamed">Je vaste bestemming</string>
+    <string name="trip_briefing_name_place">Naam geven</string>
+    <string name="trip_briefing_no">Nee</string>
+    <string name="trip_briefing_go_failed">De route is niet gestart. Open de kaart om te navigeren.</string>
+    <!-- The car's own navigation app. -->
+    <string name="trip_briefing_app_car">Autonavigatie</string>
+</resources>

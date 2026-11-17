@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Trip Briefing voice turn: said once the driver answered the briefing question. -->
+    <string name="voice_brief_starting">길 안내를 시작할게요.</string>
+    <string name="voice_brief_opening_waze">Waze를 열게요.</string>
+    <string name="voice_brief_opening_gmaps">Google Maps를 열게요.</string>
+    <string name="voice_brief_starting_car">차량 내비게이션을 시작할게요.</string>
+    <string name="voice_brief_app_missing">그 앱은 설치되어 있지 않아요. 화면에서 앱을 선택하세요.</string>
+</resources>

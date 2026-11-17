@@ -75,6 +75,12 @@ public final class ClusterViewMirrorService extends Binder {
     public static final int TXN_REPROJECT = IBinder.FIRST_CALL_TRANSACTION + 1;  // + view size
     public static final int TXN_DETACH    = IBinder.FIRST_CALL_TRANSACTION + 2;
     public static final int TXN_STATE     = IBinder.FIRST_CALL_TRANSACTION + 3;
+    // Additive, session-scoped input protocol. Old daemons return "not handled", letting
+    // new clients retain the discrete tap/swipe path without replaying an accepted DOWN.
+    public static final int TXN_INPUT_CAPABILITIES = IBinder.FIRST_CALL_TRANSACTION + 4;
+    public static final int TXN_TOUCH = IBinder.FIRST_CALL_TRANSACTION + 5;
+    public static final int TXN_KEY = IBinder.FIRST_CALL_TRANSACTION + 6;
+    public static final int TXN_INPUT_CANCEL = IBinder.FIRST_CALL_TRANSACTION + 7;
 
     // Mirror state reported back to the UI (matches the UI-side constants).
     public static final int STATE_STOPPED       = 0;
@@ -101,8 +107,11 @@ public final class ClusterViewMirrorService extends Binder {
     private IBinder sessionOwnerToken;     // retained across detach as an ordering watermark
     private IBinder.DeathRecipient sessionOwnerDeath;
     private long newestSessionId;
+    private final ClusterInputRelay.TouchStream touchStream = new ClusterInputRelay.TouchStream();
+    private long lastInputSequence;
     private boolean holdsProjection;      // true only while WE hold the "viewmirror" sustained token
     private long ownerCastGeneration;     // cast mirrored by ownerToken; 0 when not a cast
+    private long ownerLayoutGeneration;   // physical layout source; 0 for the single-app path
     private int state = STATE_STOPPED;
     private int clusterW = 1, clusterH = 1;
     private int layerStack = -1;
@@ -238,6 +247,31 @@ public final class ClusterViewMirrorService extends Binder {
         }
     }
 
+    /**
+     * Layout stop/switch releases slot displays while its own sustained token is still held.
+     * Use normal teardown here so the mirror's token is released as well; the authoritative
+     * projection-close hook intentionally leaves that token for its caller to clear.
+     */
+    public static boolean detachBeforeLayoutRelease(String reason) {
+        ClusterViewMirrorService i = instance;
+        if (i == null) return true;
+        synchronized (i.lock) {
+            logger.info("detachBeforeLayoutRelease(" + reason + ")");
+            i.detachCurrentLocked();
+            return i.state == STATE_STOPPED && i.mirrorToken == null
+                    && i.outputSurface == null && i.ownerToken == null && !i.holdsProjection;
+        }
+    }
+
+    /** Serialize discrete Layout input with teardown, keeping its VD alive through CANCEL. */
+    public boolean withLayoutInput(long generation, java.util.function.BooleanSupplier dispatch) {
+        synchronized (lock) {
+            if (generation <= 0 || state != STATE_ACTIVE || ownerLayoutGeneration != generation
+                    || !com.overdrive.app.launcher.ClusterLayouts.ownsGeneration(generation)) return false;
+            return dispatch.getAsBoolean();
+        }
+    }
+
     /** Snapshot for the status endpoint. */
     public int currentState() { synchronized (lock) { return state; } }
     public int currentClusterW() { synchronized (lock) { return clusterW; } }
@@ -245,18 +279,37 @@ public final class ClusterViewMirrorService extends Binder {
     public int currentScaleMode() { synchronized (lock) { return scaleMode; } }
     /**
      * Atomic touch-relay snapshot:
-     * state,w,h,scaleMode,inputDisplayId,src(x,y,w,h),dst(x,y,w,h).
+     * state,w,h,scaleMode,inputDisplayId,src(x,y,w,h),dst(x,y,w,h),
+     * inputPanel(x,y,w,h),inputBuffer(w,h).
      */
     public int[] inputSnapshot() {
         synchronized (lock) {
+            int[] live = null;
+            if (ownerCastGeneration > 0L && "hosted".equals(
+                    com.overdrive.app.launcher.DiLink5ClusterCast.currentProjectionTransport())) {
+                live = com.overdrive.app.launcher.DiLink5ClusterCast
+                        .currentInputMapping(ownerCastGeneration);
+            }
+            if (live == null || live.length != 7) {
+                return new int[] {
+                        state,
+                        clusterW,
+                        clusterH,
+                        scaleMode,
+                        fissionDisplayId,
+                        projSrc[0], projSrc[1], projSrc[2], projSrc[3],
+                        projDst[0], projDst[1], projDst[2], projDst[3]
+                };
+            }
             return new int[] {
                     state,
                     clusterW,
                     clusterH,
                     scaleMode,
-                    fissionDisplayId,
+                    live[0],
                     projSrc[0], projSrc[1], projSrc[2], projSrc[3],
-                    projDst[0], projDst[1], projDst[2], projDst[3]
+                    projDst[0], projDst[1], projDst[2], projDst[3],
+                    live[1], live[2], live[3], live[4], live[5], live[6]
             };
         }
     }
@@ -285,7 +338,7 @@ public final class ClusterViewMirrorService extends Binder {
             try { logger.warn("onTransact(" + code + ") failed: " + t.getMessage()); }
             catch (Throwable ignored) { /* logging must never crash the daemon */ }
             try {
-                if (reply != null && code >= TXN_ATTACH && code <= TXN_STATE) {
+                if (reply != null && code >= TXN_ATTACH && code <= TXN_INPUT_CANCEL) {
                     reply.writeNoException();
                     reply.writeInt(STATE_STOPPED);
                 }
@@ -356,6 +409,72 @@ public final class ClusterViewMirrorService extends Binder {
                 }
                 return true;
             }
+            case TXN_INPUT_CAPABILITIES:
+            case TXN_TOUCH:
+            case TXN_KEY:
+            case TXN_INPUT_CANCEL: {
+                data.enforceInterface(DESCRIPTOR);
+                IBinder owner = data.readStrongBinder();
+                long sessionId = data.readLong();
+                boolean accepted = false;
+                synchronized (lock) {
+                    boolean current = state == STATE_ACTIVE && owner != null
+                            && matchesActiveSessionLocked(owner, sessionId, true);
+                    long liveLayoutGeneration = com.overdrive.app.launcher.ClusterLayouts.isActive()
+                            ? com.overdrive.app.launcher.ClusterLayouts.generation() : 0L;
+                    current = current && ownerLayoutGeneration == liveLayoutGeneration;
+                    if (code == TXN_INPUT_CAPABILITIES) {
+                        accepted = current && fissionDisplayId > 0
+                                && ClusterInputRelay.supportsStreaming();
+                    } else {
+                        long sequence = data.readLong();
+                        if (current && sequence > lastInputSequence) {
+                            lastInputSequence = sequence;
+                            if (code == TXN_INPUT_CANCEL) {
+                                touchStream.cancel();
+                                accepted = true;
+                            } else if (code == TXN_KEY) {
+                                long eventTime = data.readLong();
+                                long age = android.os.SystemClock.uptimeMillis() - eventTime;
+                                int keyCode = data.readInt();
+                                long inputLayoutGeneration = data.dataAvail() >= 8 ? data.readLong() : 0L;
+                                if (age >= -50L && age <= 250L
+                                        && inputLayoutGeneration == liveLayoutGeneration) {
+                                    touchStream.cancel();
+                                    accepted = ClusterInputRelay.key(inputSnapshot(), keyCode);
+                                }
+                            } else {
+                                long eventTime = data.readLong();
+                                int action = data.readInt(), index = data.readInt();
+                                int count = data.readInt();
+                                if (count > 0 && count <= ClusterTouchSequence.MAX_POINTERS
+                                        && data.dataAvail() >= count * 12) {
+                                    int[] ids = new int[count];
+                                    float[] xs = new float[count], ys = new float[count];
+                                    for (int i = 0; i < count; i++) {
+                                        ids[i] = data.readInt();
+                                        xs[i] = data.readFloat(); ys[i] = data.readFloat();
+                                    }
+                                    long inputLayoutGeneration =
+                                            data.dataAvail() >= 8 ? data.readLong() : 0L;
+                                    if (inputLayoutGeneration == liveLayoutGeneration) {
+                                        accepted = touchStream.event(inputSnapshot(), action, index,
+                                                eventTime, ids, xs, ys);
+                                    } else touchStream.cancel();
+                                } else {
+                                    touchStream.cancel();
+                                }
+                            }
+                        }
+                    }
+                }
+                if (reply != null) {
+                    reply.writeNoException();
+                    reply.writeInt(accepted ? 1 : 0);
+                    if (code == TXN_INPUT_CAPABILITIES) reply.writeLong(ownerLayoutGeneration);
+                }
+                return true;
+            }
             default:
                 return super.onTransact(code, data, reply, flags);
         }
@@ -399,8 +518,12 @@ public final class ClusterViewMirrorService extends Binder {
             try {
                 ClusterProjectionController projection =
                         ClusterProjectionController.getInstance();
-                boolean diLink5 =
-                        com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5();
+                final long layoutGenerationAtAttach =
+                        com.overdrive.app.launcher.ClusterLayouts.isActive()
+                                ? com.overdrive.app.launcher.ClusterLayouts.generation() : 0L;
+                final boolean layoutSource = layoutGenerationAtAttach > 0L;
+                boolean diLink5 = !layoutSource
+                        && com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5();
                 // A hard close marks the source non-open before detaching us. Refuse an attach
                 // that arrives in the detach→close window so it cannot bind a fresh mirror to a
                 // fission display that is about to be destroyed.
@@ -411,7 +534,7 @@ public final class ClusterViewMirrorService extends Binder {
                 }
                 // The preview only mirrors a cast. A late attach while a stop is re-homing the app
                 // would otherwise take a hold that keeps the cluster blank after the cast is gone.
-                if (castGenerationAtAttach <= 0L) {
+                if (!layoutSource && castGenerationAtAttach <= 0L) {
                     logger.info("attach: no active cast");
                     releaseSurface(surface);
                     return STATE_NO_PROJECTION;
@@ -423,6 +546,11 @@ public final class ClusterViewMirrorService extends Binder {
                 BsNativeLayer.FissionDisplay fd = diLink5
                         ? BsNativeLayer.resolveDiLink5MirrorDisplay(diLink5TargetId)
                         : BsNativeLayer.resolveFissionDisplay();
+                if (layoutSource && (fd.displayId <= 0
+                        || fd.displayId != com.overdrive.app.launcher.ClusterLayouts.physicalDisplayId())) {
+                    releaseSurface(surface);
+                    return STATE_NO_PROJECTION;
+                }
                 Context ctx = resolveContext();
                 int diLink5Width = diLink5
                         ? com.overdrive.app.launcher.DiLink5ClusterCast
@@ -432,7 +560,10 @@ public final class ClusterViewMirrorService extends Binder {
                         ? com.overdrive.app.launcher.DiLink5ClusterCast
                                 .currentTargetDisplayHeight()
                         : 0;
-                Point panel = diLink5Width > 1 && diLink5Height > 1
+                Point panel = layoutSource
+                        ? new Point(com.overdrive.app.launcher.ClusterLayouts.panelWidth(),
+                                com.overdrive.app.launcher.ClusterLayouts.panelHeight())
+                        : diLink5Width > 1 && diLink5Height > 1
                         ? new Point(diLink5Width, diLink5Height)
                         : ((ctx != null)
                             ? BsNativeLayer.clusterDisplaySize(ctx, fd)
@@ -444,11 +575,20 @@ public final class ClusterViewMirrorService extends Binder {
                     state = STATE_NO_PROJECTION;
                     return state;
                 }
+                if (layoutSource && (!com.overdrive.app.launcher.ClusterLayouts.isActive()
+                        || layoutGenerationAtAttach != com.overdrive.app.launcher.ClusterLayouts.generation())) {
+                    releaseSurface(surface);
+                    state = STATE_NO_PROJECTION;
+                    return state;
+                }
                 this.scaleMode = normalizeMode(mode);
                 this.clusterW = Math.max(1, panel.x);
                 this.clusterH = Math.max(1, panel.y);
                 this.layerStack = fd.layerStack;
-                this.fissionDisplayId = fd.displayId;
+                this.fissionDisplayId = diLink5
+                        ? com.overdrive.app.launcher.DiLink5ClusterCast
+                                .currentContentDisplayId()
+                        : fd.displayId;
 
                 // Nothing is projected on the cluster → nothing to mirror. Never proceed on an
                 // unresolved or head-unit (0) stack.
@@ -507,7 +647,8 @@ public final class ClusterViewMirrorService extends Binder {
                     return state;
                 }
                 state = STATE_ACTIVE;
-                ownerCastGeneration = castGenerationAtAttach;   // sampled before `lock`; see above
+                ownerCastGeneration = layoutSource ? 0L : castGenerationAtAttach;
+                ownerLayoutGeneration = layoutGenerationAtAttach;
                 // The mirror composites the WHOLE cluster layer stack; suppress the daemon speed
                 // badge (a layer on that stack) for the mirror's duration so it isn't re-captured
                 // into the head-unit preview. Re-shown on teardown. Best-effort — never fail the
@@ -623,6 +764,7 @@ public final class ClusterViewMirrorService extends Binder {
      * {@code lock}.
      */
     private boolean applyProjection(Rect box) {
+        touchStream.cancel();
         ProjectionGeometry.Mapping mapping = ProjectionGeometry.calculate(
                 clusterW, clusterH, box.left, box.top, box.width(), box.height(), scaleMode);
         Rect src = new Rect(
@@ -640,6 +782,10 @@ public final class ClusterViewMirrorService extends Binder {
     }
 
     private void teardownLocked() {
+        // Send CANCEL while the original input endpoint is still alive, before releasing
+        // the display/owner. Covers pause, owner death, ACC-off and cast replacement.
+        touchStream.cancel();
+        lastInputSequence = 0L;
         if (mirrorToken != null) {
             // Unbind the output surface BEFORE destroying the token so SurfaceFlinger stops
             // compositing the fission stack into the app Surface first — closes the ACC-off
@@ -658,6 +804,7 @@ public final class ClusterViewMirrorService extends Binder {
         unlinkOwnerLocked();
         activeSessionId = 0L;
         ownerCastGeneration = 0L;
+        ownerLayoutGeneration = 0L;
         fissionDisplayId = -1;
         projSrc = new int[] { 0, 0, 0, 0 };
         projDst = new int[] { 0, 0, 0, 0 };

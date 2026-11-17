@@ -10,6 +10,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -83,6 +87,8 @@ class DaemonKeepaliveService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var screenOffReceiver: ScreenOffReceiver? = null
     private var powerStateReceiver: BroadcastReceiver? = null
+    private var recoveryNetworkCallback: ConnectivityManager.NetworkCallback? = null
+    private var recoveryStateListener: com.overdrive.app.launcher.AdbShellExecutor.ConnectionStateListener? = null
     private var startupOnOnlySnapshot: Boolean? = null
     private val vehicleModeSyncLock = Any()
     private val vehicleModeSyncHandler = Handler(Looper.getMainLooper())
@@ -119,6 +125,8 @@ class DaemonKeepaliveService : Service() {
         // The release is MODE-GATED at fire time, so onAndOff keeps holding the lock
         // exactly as before (byte-identical behaviour).
         registerPowerStateReceiver()
+        // Recovery callbacks are registered only after onStartCommand proves this
+        // process is not in the parked-shutdown state.
         // ...but SCREEN_OFF is an EDGE broadcast: if this service is (re)created while
         // the vehicle is ALREADY parked with the screen already off — e.g. a START_STICKY
         // respawn or a ProcessRevival-driven relaunch while parked — no SCREEN_OFF will
@@ -231,6 +239,14 @@ class DaemonKeepaliveService : Service() {
             }
         } catch (e: Exception) {
             Log.w(TAG, "parked-marker onStartCommand gate failed (${e.message}) — proceeding")
+        }
+
+        if (adbRecoveryAllowedByParkedGate() &&
+            recoveryNetworkCallback == null && recoveryStateListener == null
+        ) {
+            registerAdbRecoveryLifecycle()
+            com.overdrive.app.launcher.adb.AdbRecoveryManager
+                .get(applicationContext).triggerAutomatic()
         }
 
         if (vehicleModeSync) {
@@ -364,6 +380,9 @@ class DaemonKeepaliveService : Service() {
 
         unregisterScreenOffReceiver()
         unregisterPowerStateReceiver()
+        com.overdrive.app.launcher.adb.AdbRecoveryManager
+            .get(applicationContext).cancelAutomatic()
+        unregisterAdbRecoveryLifecycle()
         com.overdrive.app.byd.BydDataCollector.stopDiLink5Producer()
         releaseWakeLock()
 
@@ -376,10 +395,10 @@ class DaemonKeepaliveService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Daemon Keepalive",
+                com.overdrive.app.util.AppLocaleContext.of(this).getString(R.string.notif_channel_keepalive),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Keeps daemons running in background"
+                description = com.overdrive.app.util.AppLocaleContext.of(this@DaemonKeepaliveService).getString(R.string.notif_channel_keepalive_desc)
                 setShowBadge(false)
             }
             
@@ -412,8 +431,9 @@ class DaemonKeepaliveService : Service() {
             PendingIntent.FLAG_IMMUTABLE
         )
 
-        val title = getString(R.string.daemon_keepalive_notif_title)
-        val text  = getString(R.string.daemon_keepalive_notif_text)
+        val strings = com.overdrive.app.util.AppLocaleContext.of(this)
+        val title = strings.getString(R.string.daemon_keepalive_notif_title)
+        val text  = strings.getString(R.string.daemon_keepalive_notif_text)
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle(title)
@@ -447,10 +467,10 @@ class DaemonKeepaliveService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 SUMMARY_CHANNEL_ID,
-                "Overdrive Status",
+                com.overdrive.app.util.AppLocaleContext.of(this).getString(R.string.notif_channel_summary),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Combined status row for Overdrive's background services"
+                description = com.overdrive.app.util.AppLocaleContext.of(this@DaemonKeepaliveService).getString(R.string.notif_channel_summary_desc)
                 setShowBadge(false)
             }
             val manager = getSystemService(NotificationManager::class.java)
@@ -495,8 +515,8 @@ class DaemonKeepaliveService : Service() {
             Notification.Builder(this)
         }
         val notification = builder
-            .setContentTitle(getString(R.string.overdrive_status_summary_title))
-            .setContentText(getString(R.string.overdrive_status_summary_text))
+            .setContentTitle(com.overdrive.app.util.AppLocaleContext.of(this).getString(R.string.overdrive_status_summary_title))
+            .setContentText(com.overdrive.app.util.AppLocaleContext.of(this).getString(R.string.overdrive_status_summary_text))
             .setSmallIcon(R.drawable.ic_sentry)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -599,8 +619,13 @@ class DaemonKeepaliveService : Service() {
                         }
                     }
                     Intent.ACTION_SCREEN_ON,
+                    Intent.ACTION_USER_PRESENT,
                     "com.byd.action.ACC_ON",
                     "com.byd.action.IGN_ON" -> {
+                        if (adbRecoveryAllowedByParkedGate()) {
+                    com.overdrive.app.launcher.adb.AdbRecoveryManager
+                                .get(applicationContext).triggerAutomatic()
+                        }
                         // Some DiLink 5 builds deliver the vendor ignition edge
                         // only to registered receivers. Mirror BootReceiver's
                         // publication from this long-lived dynamic receiver so
@@ -626,6 +651,7 @@ class DaemonKeepaliveService : Service() {
             addAction("com.byd.action.ACC_OFF")
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_USER_PRESENT)
             addAction("com.byd.action.ACC_ON")
             addAction("com.byd.action.IGN_ON")
         }
@@ -640,6 +666,61 @@ class DaemonKeepaliveService : Service() {
         } catch (t: Throwable) {
             Log.w(TAG, "Failed to register PowerStateReceiver: ${t.message}")
         }
+    }
+
+    private fun adbRecoveryAllowedByParkedGate(): Boolean =
+        com.overdrive.app.launcher.adb.DiLink5AdbAutomaticRecoveryGate.allowed()
+
+    private fun registerAdbRecoveryLifecycle() {
+        if (recoveryNetworkCallback != null || recoveryStateListener != null) return
+        val coordinator = com.overdrive.app.launcher.adb.AdbRecoveryManager
+            .get(applicationContext)
+        val connectivity = getSystemService(ConnectivityManager::class.java)
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+                if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+                    && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                    && adbRecoveryAllowedByParkedGate()) {
+                    coordinator.triggerAutomatic()
+                }
+            }
+        }
+        try {
+            connectivity?.registerNetworkCallback(
+                NetworkRequest.Builder()
+                    .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                    .build(),
+                callback,
+            )
+            recoveryNetworkCallback = callback
+        } catch (t: Throwable) {
+            Log.w(TAG, "ADB recovery network callback unavailable: ${t.message}")
+        }
+        val listener = com.overdrive.app.launcher.AdbShellExecutor.ConnectionStateListener { state, _ ->
+            if ((state == com.overdrive.app.launcher.AdbShellExecutor.ConnectionState.DISCONNECTED ||
+                state == com.overdrive.app.launcher.AdbShellExecutor.ConnectionState.CONNECTED) &&
+                adbRecoveryAllowedByParkedGate()) {
+                coordinator.triggerAutomatic()
+            }
+        }
+        com.overdrive.app.launcher.AdbShellExecutor.addConnectionStateListener(listener)
+        recoveryStateListener = listener
+    }
+
+    private fun unregisterAdbRecoveryLifecycle() {
+        recoveryNetworkCallback?.let { callback ->
+            try {
+                getSystemService(ConnectivityManager::class.java)
+                    ?.unregisterNetworkCallback(callback)
+            } catch (_: Throwable) {
+            }
+        }
+        recoveryNetworkCallback = null
+        recoveryStateListener?.let {
+            com.overdrive.app.launcher.AdbShellExecutor.removeConnectionStateListener(it)
+        }
+        recoveryStateListener = null
     }
 
     private fun unregisterPowerStateReceiver() {
@@ -943,6 +1024,8 @@ class DaemonKeepaliveService : Service() {
         // (marker gone after having been present) and rebuild the stack even though
         // its process-lifetime guard is still set from the pre-park session.
         DaemonStartupManager.noteParkObserved()
+        com.overdrive.app.launcher.adb.AdbRecoveryManager
+            .get(appCtx).cancelAutomatic()
         try { DaemonStartupManager.stopHealthChecks() } catch (t: Throwable) {
             Log.w(TAG, "parkStanddown: stopHealthChecks failed: ${t.message}")
         }

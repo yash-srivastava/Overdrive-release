@@ -27,6 +27,12 @@
         'ru': 'РУ', 'ar': 'ع', 'he': 'עב'
     };
 
+    // Catalog lookup that never shows a raw key (t() returns the key on a miss).
+    function tr(key, fallback) {
+        var v = BYD.i18n.t(key);
+        return (v && v !== key) ? v : fallback;
+    }
+
     function shortLabel(lang) {
         return SHORT_LABELS[lang] || lang.slice(0, 2).toUpperCase();
     }
@@ -36,7 +42,8 @@
         var btn = document.createElement('button');
         btn.className = 'lang-chip';
         btn.type = 'button';
-        btn.setAttribute('aria-label', 'Select language');
+        btn.setAttribute('aria-label', tr('common.select_language', 'Select language'));
+        btn.title = tr('common.select_language', 'Select language');
         btn.innerHTML =
             '<svg class="lang-chip-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
                 '<circle cx="12" cy="12" r="10"/>' +
@@ -50,6 +57,8 @@
         // from setLang() (chip click) OR from the /status poll (when changed
         // via Android settings on another path).
         BYD.i18n.onChange(function (lang) {
+            btn.setAttribute('aria-label', tr('common.select_language', 'Select language'));
+            btn.title = tr('common.select_language', 'Select language');
             var span = btn.querySelector('.lang-chip-text');
             if (!span) return;
             span.style.transition = 'opacity 0.2s';
@@ -69,6 +78,13 @@
         if (sheetVisible) return;
         sheetVisible = true;
         if (!sheet) sheet = buildSheet();
+        // The sheet is built once: bring its header into the current language on every open.
+        var title = sheet.querySelector('.lang-sheet-title');
+        if (title) title.textContent = tr('common.select_language', 'Select language');
+        var closeBtn = sheet.querySelector('.lang-sheet-close');
+        if (closeBtn) closeBtn.setAttribute('aria-label', tr('common.close', 'Close'));
+        var searchInput = sheet.querySelector('.lang-sheet-search input');
+        if (searchInput) searchInput.setAttribute('placeholder', tr('common.search', 'Search'));
         document.body.appendChild(sheet);
         // force reflow so the open transition runs
         void sheet.offsetWidth;
@@ -101,8 +117,8 @@
             '<div class="lang-sheet" role="dialog" aria-modal="true">' +
                 '<div class="lang-sheet-handle"></div>' +
                 '<div class="lang-sheet-header">' +
-                    '<h3 class="lang-sheet-title">' + esc(BYD.i18n.t('common.select_language')) + '</h3>' +
-                    '<button class="lang-sheet-close" type="button" aria-label="Close">' +
+                    '<h3 class="lang-sheet-title">' + esc(tr('common.select_language', 'Select language')) + '</h3>' +
+                    '<button class="lang-sheet-close" type="button" aria-label="' + esc(tr('common.close', 'Close')) + '">' +
                         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>' +
                     '</button>' +
                 '</div>' +

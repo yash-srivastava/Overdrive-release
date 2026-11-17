@@ -125,7 +125,7 @@ public class VoiceEngineListenWindowContractTest {
     public void listenBudgetIsNeverWallClockAnchored() throws Exception {
         String src = readProjectFile(ENGINE);
         assertFalse(src.contains("cueEndsAt"));
-        String reArm = block(src, "    private void reArm() {");
+        String reArm = block(src, "    private void reArm(LocalCommandSpotter.Match wake) {");
         assertTrue(reArm.contains("listenFromSample = turnSamples"));
     }
 

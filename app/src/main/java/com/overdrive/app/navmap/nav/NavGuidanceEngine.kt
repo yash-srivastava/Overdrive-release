@@ -71,6 +71,23 @@ class NavGuidanceEngine {
         /** Allowed backward search (segments) — small, to recover from a bad fix
          *  without letting the match jump back on a parallel/return leg. */
         private const val MATCH_BACK_WINDOW = 3
+        /** A first fix matches the earliest segment within this much of the nearest. */
+        private const val FIRST_MATCH_SLACK_M = 25.0
+        /** Under way once this much route (or this share of a short one) is behind the car. */
+        private const val SET_OUT_M = 150.0
+        private const val SET_OUT_FRACTION = 0.3
+        /** A reroute to within this of the old destination is the same trip (routers snap the end differently). */
+        private const val SAME_DEST_M = 150.0
+        /** Fixes at this speed or more add to the distance driven. */
+        private const val MOVING_MPS = 2.0
+        private const val JITTER_MAX_M = 15.0
+        private const val STOPPED_MPS = 1.0
+        /** Along-route reach between fixes beyond twice the distance moved. */
+        private const val ADVANCE_SLACK_M = 50.0
+        /** Near the end, a car this near the route is wandering GPS, not off it. */
+        private const val NEAR_DEST_WANDER_M = 60.0
+        /** A pass this much further from a point than the route's closest still counts as an approach to it. */
+        private const val APPROACH_SLACK_M = 5.0
 
         /**
          * Remaining along-route distance (m) within which a reroute is pointless:
@@ -101,17 +118,52 @@ class NavGuidanceEngine {
 
     /** Carried matched-segment index for the windowed monotonic matcher (−1 = none). */
     private var matchedSegIndex = -1
-    /** elapsedRealtime ms when the current off-route divergence began (0 = on route). */
+    /** elapsedRealtime ms when the current off-route divergence began (0 = on route), less the time stood still since. */
     private var offRouteSinceMs = 0L
+    // the last timed update, and whether the car stood still then
+    private var lastUpdateMs = 0L
+    private var lastStood = false
 
     /**
      * Begin guidance along [route]. Resets all per-route latch + matcher state.
      */
+    /** Part of a route to this destination is behind the car (reroutes to the same destination keep it). */
+    var hasSetOut = false
+        private set
+    private var destLat = Double.NaN
+    private var destLng = Double.NaN
+    /** Distance driven (moving fixes only) since guidance to this destination began. */
+    var traveledM = 0.0
+        private set
+    /** Along-route position of the last match (−1: none yet, this route). */
+    private var lastAlongM = -1.0
+    private var lastLat = Double.NaN
+    private var lastLng = Double.NaN
+    // the last match on the route itself
+    private var goodAlongM = -1.0
+    // how far off the route the last fix was
+    private var lastOffM = Double.NaN
+
+    private fun alongOf(seg: Int, t: Double): Double =
+        if (seg + 1 < cumArcM.size) cumArcM[seg] + t * (cumArcM[seg + 1] - cumArcM[seg]) else routeArcLenM
+
     fun start(route: NavRoute) {
         this.route = route
         this.consecutiveOffRoute = 0
         this.matchedSegIndex = -1
         this.offRouteSinceMs = 0L
+        lastUpdateMs = 0L
+        lastStood = false
+        val end = route.points.lastOrNull()
+        if (end == null || destLat.isNaN() || haversineMeters(destLat, destLng, end.lat, end.lng) > SAME_DEST_M) {
+            hasSetOut = false
+            traveledM = 0.0
+        }
+        lastAlongM = -1.0
+        goodAlongM = -1.0
+        lastOffM = Double.NaN
+        destLat = end?.lat ?: Double.NaN
+        destLng = end?.lng ?: Double.NaN
         // Prefix-sum the polyline arc length for the progress-fraction (route-trim) feed.
         val pts = route.points
         val cum = DoubleArray(pts.size)
@@ -129,8 +181,19 @@ class NavGuidanceEngine {
         this.consecutiveOffRoute = 0
         this.matchedSegIndex = -1
         this.offRouteSinceMs = 0L
+        lastUpdateMs = 0L
+        lastStood = false
         this.cumArcM = DoubleArray(0)
         this.routeArcLenM = 0.0
+        hasSetOut = false
+        traveledM = 0.0
+        lastAlongM = -1.0
+        goodAlongM = -1.0
+        lastOffM = Double.NaN
+        lastLat = Double.NaN
+        lastLng = Double.NaN
+        destLat = Double.NaN
+        destLng = Double.NaN
         Log.i(TAG, "guidance stopped")
     }
 
@@ -142,6 +205,44 @@ class NavGuidanceEngine {
 
     /** Whether a route is currently loaded (between [start] and [stop]). */
     fun isActive(): Boolean = route != null
+
+    /** Along-route metres of the last match on the route itself (−1: none yet on this route). */
+    val progressM: Double get() = goodAlongM
+
+    /** The last fix was on the route (within its lateral band), whatever the off-route latch says yet. */
+    val onRoute: Boolean get() = lastOffM <= OFF_ROUTE_LATERAL_M
+
+    /** How far off the route the last fix was (NaN: none yet). */
+    val offRouteM: Double get() = lastOffM
+
+    /** A trip picked up again after a restart had already set out: the latch carries over. */
+    fun resumeSetOut() {
+        if (route != null) hasSetOut = true
+    }
+
+    class RoutePoint(val alongM: Double, val lat: Double, val lng: Double)
+
+    /**
+     * The route's first close approach to (lat, lng) at or beyond [fromAlongM]: the earliest point within a few metres
+     * of the closest there, so a road the route uses twice counts at the pass that comes first. Null with no route.
+     */
+    fun approachAfter(lat: Double, lng: Double, fromAlongM: Double): RoutePoint? {
+        val pts = route?.points ?: return null
+        var best = Double.MAX_VALUE
+        for (i in 0 until pts.size - 1) {
+            if (cumArcM[i + 1] < fromAlongM) continue
+            val s = pointToSegment(lat, lng, pts[i].lat, pts[i].lng, pts[i + 1].lat, pts[i + 1].lng)
+            if (alongOf(i, s.t) >= fromAlongM && s.distMeters < best) best = s.distMeters
+        }
+        if (best == Double.MAX_VALUE) return null
+        for (i in 0 until pts.size - 1) {
+            if (cumArcM[i + 1] < fromAlongM) continue
+            val s = pointToSegment(lat, lng, pts[i].lat, pts[i].lng, pts[i + 1].lat, pts[i + 1].lng)
+            val a = alongOf(i, s.t)
+            if (a >= fromAlongM && s.distMeters <= best + APPROACH_SLACK_M) return RoutePoint(a, s.lat, s.lng)
+        }
+        return null
+    }
 
     /**
      * Process one GPS fix and return the derived [GuidanceState].
@@ -192,6 +293,14 @@ class NavGuidanceEngine {
         //    forward window (+small back window) around it so the snap advances along
         //    the route and doesn't jump to a nearer-but-earlier/parallel segment.
         //    First fix (no carried index) falls back to a full global scan.
+        // The car can't advance along the route faster than it moves: a candidate further on than that (a loop's own
+        // end, a later leg passing close by) is a jump, not progress.
+        val moved = if (lastLat.isNaN()) 0.0 else haversineMeters(lastLat, lastLng, lat, lng)
+        lastLat = lat
+        lastLng = lng
+        // (a move too big for GPS jitter counts even with no speed reading)
+        if (speedMps >= MOVING_MPS || moved >= JITTER_MAX_M) traveledM += moved
+        val maxAlong = if (lastAlongM < 0.0) Double.MAX_VALUE else lastAlongM + 2.0 * moved + ADVANCE_SLACK_M
         var bestDist = Double.MAX_VALUE
         var bestSegStart = 0
         var bestT = 0.0
@@ -203,27 +312,49 @@ class NavGuidanceEngine {
             lo = (matchedSegIndex - MATCH_BACK_WINDOW).coerceAtLeast(0)
             hi = (matchedSegIndex + MATCH_FWD_WINDOW).coerceAtMost(pts.size - 2)
         } else { lo = 0; hi = pts.size - 2 }
-        for (i in lo..hi) {
-            val a = pts[i]; val b = pts[i + 1]
-            val snap = pointToSegment(lat, lng, a.lat, a.lng, b.lat, b.lng)
-            if (snap.distMeters < bestDist) {
-                bestDist = snap.distMeters; bestSegStart = i; bestT = snap.t
-                bestLat = snap.lat; bestLng = snap.lng
-            }
-        }
-        // If the windowed match is poor (we likely diverged or the window was wrong),
-        // do ONE global rescan so a real reroute/teleport re-acquires correctly.
-        if (matchedSegIndex >= 0 && bestDist > OFF_ROUTE_LATERAL_M) {
-            for (i in 0 until pts.size - 1) {
+        for (pass in 0..1) {
+            // the second pass only if nothing in reach was found (a long gap between fixes, a teleport)
+            if (pass == 1 && bestDist < Double.MAX_VALUE) break
+            for (i in lo..hi) {
                 val a = pts[i]; val b = pts[i + 1]
                 val snap = pointToSegment(lat, lng, a.lat, a.lng, b.lat, b.lng)
+                if (pass == 0 && alongOf(i, snap.t) > maxAlong) continue
                 if (snap.distMeters < bestDist) {
                     bestDist = snap.distMeters; bestSegStart = i; bestT = snap.t
                     bestLat = snap.lat; bestLng = snap.lng
                 }
             }
         }
+        // First fix: of the segments about as near, the earliest. A round trip starts on its own last leg's street,
+        // and matching there would put the car at the end.
+        if (matchedSegIndex < 0) {
+            for (i in 0 until bestSegStart) {
+                val a = pts[i]; val b = pts[i + 1]
+                val snap = pointToSegment(lat, lng, a.lat, a.lng, b.lat, b.lng)
+                if (snap.distMeters <= bestDist + FIRST_MATCH_SLACK_M) {
+                    bestDist = snap.distMeters; bestSegStart = i; bestT = snap.t
+                    bestLat = snap.lat; bestLng = snap.lng
+                    break
+                }
+            }
+        }
+        // If the windowed match is poor (we likely diverged or the window was wrong),
+        // do ONE global rescan so a real reroute/teleport re-acquires correctly — within reach along the route.
+        if (matchedSegIndex >= 0 && bestDist > OFF_ROUTE_LATERAL_M) {
+            for (i in 0 until pts.size - 1) {
+                val a = pts[i]; val b = pts[i + 1]
+                val snap = pointToSegment(lat, lng, a.lat, a.lng, b.lat, b.lng)
+                if (alongOf(i, snap.t) > maxAlong) continue
+                if (snap.distMeters < bestDist) {
+                    bestDist = snap.distMeters; bestSegStart = i; bestT = snap.t
+                    bestLat = snap.lat; bestLng = snap.lng
+                }
+            }
+        }
+        lastAlongM = alongOf(bestSegStart, bestT)
         matchedSegIndex = bestSegStart
+        if (bestDist <= OFF_ROUTE_LATERAL_M) goodAlongM = lastAlongM
+        lastOffM = bestDist
 
         // 2) Off-route detection.
         var offRoute: Boolean
@@ -244,6 +375,10 @@ class NavGuidanceEngine {
             val diverging = bestDist > OFF_ROUTE_LATERAL_M
             if (diverging || headingDiverged) {
                 if (offRouteSinceMs == 0L) offRouteSinceMs = nowMs
+                // (time stood still neither counts nor starts it over: off the route in stop-and-go still leaves it)
+                else if ((speedMps < STOPPED_MPS || lastStood) && lastUpdateMs in 1..nowMs) {
+                    offRouteSinceMs = minOf(nowMs, offRouteSinceMs + (nowMs - lastUpdateMs))
+                }
                 val budget = when {
                     headingDiverged && diverging -> OFF_ROUTE_MS_WRONG_WAY
                     speedMps >= HIGHWAY_SPEED_MPS -> OFF_ROUTE_MS_HIGHWAY
@@ -255,6 +390,8 @@ class NavGuidanceEngine {
                 offRouteSinceMs = 0L
                 offRoute = false
             }
+            lastUpdateMs = nowMs
+            lastStood = speedMps < STOPPED_MPS
         }
 
         // 3) Remaining distance: partial remainder of the current segment plus
@@ -268,11 +405,18 @@ class NavGuidanceEngine {
             remaining += haversineMeters(pts[i].lat, pts[i].lng, pts[i + 1].lat, pts[i + 1].lng)
         }
 
+        // A car standing still isn't leaving the route (GPS drifts under a canopy, at a pump).
+        if (speedMps < STOPPED_MPS) {
+            offRoute = false
+            consecutiveOffRoute = 0
+        }
+
         // 2b) Final-approach guard: once the along-route remainder is inside the
         //     near-destination band, suppress any off-route latch. A GPS wander
         //     this close to the pin must NOT spawn a reroute (it would loop the car
         //     around its own destination); guidance just waits for arrival.
-        if (remaining <= NEAR_DEST_NO_REROUTE_M) {
+        // (only for a car near the route: one well off it there missed the last turn and needs a reroute)
+        if (remaining <= NEAR_DEST_NO_REROUTE_M && bestDist <= NEAR_DEST_WANDER_M) {
             offRoute = false
             offRouteSinceMs = 0L
             consecutiveOffRoute = 0
@@ -282,9 +426,15 @@ class NavGuidanceEngine {
         //    along-route remainder is effectively zero (snapped past the last
         //    vertex). The straight-line check handles a GPS fix that's laterally
         //    off the final segment; the remainder check handles overshooting it.
-        val last = pts[pts.size - 1]
-        val distToEnd = haversineMeters(lat, lng, last.lat, last.lng)
-        val arrived = distToEnd <= ARRIVAL_RADIUS_M || remaining <= ARRIVAL_RADIUS_M
+        //    Along the route only (so every stop on it passed in order, and a destination across a divided road isn't
+        //    reached from the far side); the map adds a long stop at the pin itself. Nothing counts until part of the
+        //    route is behind the car: a round trip starts at its own end, a loop round the block never gets far from it.
+        //    Under way takes both: the route behind the car, and the car actually having driven that far (a jump
+        //    along the route doesn't count).
+        val setOutM = minOf(SET_OUT_M, routeArcLenM * SET_OUT_FRACTION)
+        if (!hasSetOut && routeArcLenM - remaining >= setOutM && traveledM >= setOutM) hasSetOut = true
+        // (on the route: the remainder to the end means nothing for a car that went on past the last turn)
+        val arrived = hasSetOut && remaining <= ARRIVAL_RADIUS_M && bestDist <= OFF_ROUTE_LATERAL_M
 
         // 5) ETA: scale the route's total duration by the remaining fraction of
         //    its total distance (proportional model — robust when per-maneuver

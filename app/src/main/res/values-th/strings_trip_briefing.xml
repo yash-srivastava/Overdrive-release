@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Trip Briefing: the car-start "Heading to work? Want directions?" prompt. The spoken line is
+         greeting + heading + duration (or one extra that replaces it) + question, joined by spaces,
+         and read aloud by text-to-speech. -->
+    <string name="trip_briefing_greeting_morning">สวัสดีตอนเช้า</string>
+    <string name="trip_briefing_greeting_afternoon">สวัสดีตอนบ่าย</string>
+    <string name="trip_briefing_greeting_evening">สวัสดีตอนเย็น</string>
+    <string name="trip_briefing_heading_home">กำลังกลับบ้านใช่ไหม</string>
+    <string name="trip_briefing_heading_work">กำลังไปที่ทำงานใช่ไหม</string>
+    <!-- %1$s: the place's name, e.g. "Phoenix Mall". -->
+    <string name="trip_briefing_heading_place">กำลังไป %1$s ใช่ไหม</string>
+    <plurals name="trip_briefing_duration">
+        <item quantity="other">ประมาณ %1$d นาที</item>
+    </plurals>
+    <!-- %1$s: range left, %2$s: the trip's length, each "31 km" or "19 mi". -->
+    <string name="trip_briefing_extra_range">ระยะวิ่งเหลือน้อย: เหลือ %1$s สำหรับทริประยะ %2$s</string>
+    <plurals name="trip_briefing_extra_hazards">
+        <item quantity="other">มีจุดอันตรายใหม่ %1$d จุดบนเส้นทาง</item>
+    </plurals>
+    <!-- %1$s: an hour of the day in the device's clock format, e.g. "7 PM" or "19:00". -->
+    <string name="trip_briefing_extra_rain">ฝนน่าจะตกช่วงประมาณ %1$s</string>
+    <string name="trip_briefing_question">ต้องการให้นำทางไหม</string>
+    <string name="trip_briefing_distance_km">%1$d กม.</string>
+    <string name="trip_briefing_distance_mi">%1$d ไมล์</string>
+
+    <!-- The destination as the AI assistant should say it. -->
+    <string name="trip_briefing_said_home">บ้าน</string>
+    <string name="trip_briefing_said_work">ที่ทำงาน</string>
+
+    <!-- Card -->
+    <string name="trip_briefing_title_home">บ้าน</string>
+    <string name="trip_briefing_title_work">ที่ทำงาน</string>
+    <!-- Title for a regular destination that has no name yet. -->
+    <string name="trip_briefing_title_unnamed">จุดแวะประจำของคุณ</string>
+    <string name="trip_briefing_name_place">ตั้งชื่อสถานที่</string>
+    <string name="trip_briefing_no">ไม่ต้อง</string>
+    <string name="trip_briefing_go_failed">ไม่ได้เริ่มนำทาง เปิดแผนที่เพื่อนำทาง</string>
+    <!-- The car's own navigation app. -->
+    <string name="trip_briefing_app_car">ระบบนำทางในรถ</string>
+</resources>

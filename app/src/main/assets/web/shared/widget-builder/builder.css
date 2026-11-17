@@ -478,6 +478,7 @@
 .wb.wb-narrow[data-panel="layers"] .wb-left, .wb.wb-narrow[data-panel="edit"] .wb-right { display: flex; }
 .wb.wb-narrow[data-panel="data"] .wb-sim { display: block; }
 .wb.wb-narrow .wb-stagehead { grid-template-areas: "ctl save"; padding: 12px 12px 10px 14px; }
+[dir="rtl"] .wb.wb-narrow .wb-stagehead { padding: 12px 14px 10px 12px; }
 .wb.wb-narrow .wb-st-title, .wb.wb-narrow .wb-zoom, .wb.wb-narrow .wb-meter { display: none; }
 .wb.wb-narrow .wb-save-long { display: none; }
 .wb.wb-narrow .wb-save-short { display: inline; }

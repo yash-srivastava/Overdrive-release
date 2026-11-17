@@ -1,21 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  RoadSense Map — head-unit map surface (Phase 1+2).
-
-  Layout:
-    - A full-bleed MapLibre MapView fills the CoordinatorLayout so the
-      basemap reaches edge-to-edge under the translucent app bar.
-    - A MaterialToolbar (transparent over the map, in a transparent
-      AppBarLayout) provides the back affordance + title. It sits ABOVE
-      the map in z-order, so taps on its surface don't reach the map.
-    - A "locate me / recenter" FAB anchored bottom-end.
-    - CoordinatorLayout is the root so Snackbars slide in above the FAB
-      and the tap-to-confirm BottomSheetDialog behaves correctly.
-
-  The MapView uses the default SurfaceView render surface (foreground=false).
-  Map options (initial camera, gestures) are applied at runtime in
-  RoadSenseMapActivity rather than via XML attrs so the single source of
-  truth for the camera stays in code.
+  Full-bleed MapLibre MapView under floats: back + search pills top-start, control capsule top-end,
+  zoom capsule over recenter bottom-end. Insets, widths and visibility are set in RoadSenseMapActivity.
+  clipChildren=false lets the floats' shadows draw outside their parents.
 -->
 <androidx.coordinatorlayout.widget.CoordinatorLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
@@ -24,7 +11,19 @@
     android:id="@+id/mapRoot"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="?attr/colorSurface">
+    android:background="?attr/colorSurface"
+    android:clipChildren="false">
+
+    <!-- Takes the window's first focus (targetSdk 25 always assigns one) so the search
+         field stays unfocused, without its recents dropdown, until it is tapped. -->
+    <View
+        android:id="@+id/mapFocusSink"
+        android:layout_width="1dp"
+        android:layout_height="1dp"
+        android:defaultFocusHighlightEnabled="false"
+        android:focusable="true"
+        android:focusableInTouchMode="true"
+        android:importantForAccessibility="no" />
 
     <org.maplibre.android.maps.MapView
         android:id="@+id/mapView"
@@ -43,76 +42,79 @@
     <!-- Glass navigation HUD (maneuver card, lanes, trip bar, compass, re-centre); shown while navigating. -->
     <include layout="@layout/nav_hud" />
 
+    <!-- Back: a 56dp floating pill (the toolbar). The code pads the bar below the status bar. -->
     <com.google.android.material.appbar.AppBarLayout
         android:id="@+id/mapAppBar"
-        android:layout_width="match_parent"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:background="@drawable/map_top_scrim"
+        android:layout_gravity="top|start"
+        android:layout_marginStart="@dimen/map_float_margin"
+        android:layout_marginTop="@dimen/map_float_margin"
+        android:background="@null"
+        android:clipChildren="false"
+        android:clipToPadding="false"
         app:elevation="0dp"
         app:liftOnScroll="false">
 
-        <!-- Toolbar over the map. A subtle top scrim (map_top_scrim) sits behind
-             it so the back chevron + title stay legible on any basemap, light or
-             dark. The nav icon gets a tonal circular background for a clear,
-             always-visible back affordance. -->
+        <!-- The toolbar style hides outline shadows; the pill restores them. -->
         <com.google.android.material.appbar.MaterialToolbar
             android:id="@+id/mapToolbar"
-            android:layout_width="match_parent"
-            android:layout_height="?attr/actionBarSize"
-            android:background="@android:color/transparent"
-            app:navigationIcon="@drawable/ic_back"
-            app:navigationIconTint="@android:color/white"
+            android:layout_width="@dimen/map_float_size"
+            android:layout_height="@dimen/map_float_size"
+            android:background="@drawable/map_float_surface"
+            android:elevation="@dimen/map_float_elevation"
+            android:outlineAmbientShadowColor="@android:color/black"
+            android:outlineSpotShadowColor="@android:color/black"
+            android:padding="0dp"
+            app:contentInsetEnd="0dp"
+            app:contentInsetStart="0dp"
+            app:contentInsetStartWithNavigation="0dp"
             app:navigationContentDescription="@string/roadsense_map_back"
-            app:title="@string/roadsense_map_title"
-            app:titleTextColor="@android:color/white" />
+            app:navigationIcon="@drawable/ic_back"
+            app:navigationIconTint="?attr/colorOnSurface" />
     </com.google.android.material.appbar.AppBarLayout>
 
-    <!-- Search column — a floating M3 search field with a live autocomplete
-         dropdown directly beneath it. Both live in one top-anchored column so
-         the dropdown tracks the search bar's left/right edges and sits flush
-         under it (Google-Maps style). The whole column is hidden while a route
-         is active (the maneuver banner takes over). The Activity offsets this
-         column's top margin past the status bar + toolbar in applyWindowInsets. -->
+    <!-- Search pill beside the back pill, with the autocomplete dropdown beneath it.
+         RoadSenseMapActivity sets the width (clear of the end capsule) and the top inset. -->
     <LinearLayout
         android:id="@+id/navSearchColumn"
-        android:layout_width="match_parent"
+        android:layout_width="@dimen/map_search_max_width"
         android:layout_height="wrap_content"
-        android:layout_gravity="top"
-        android:layout_marginHorizontal="16dp"
+        android:layout_gravity="top|start"
+        android:layout_marginStart="@dimen/map_search_inset"
+        android:layout_marginTop="@dimen/map_float_margin"
+        android:clipChildren="false"
+        android:clipToPadding="false"
         android:orientation="vertical">
 
-        <!-- Floating M3 search field: rounded 28dp card, leading search glyph,
-             the input, and a trailing clear (X) shown only when non-empty.
-             Search-as-you-type drives the dropdown below; submit (IME / the
-             leading-glyph affordance) is the on-submit fallback. -->
+        <!-- Leading search glyph (submit), the input, and a clear (X) shown only when non-empty. -->
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/navSearchBar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             app:cardCornerRadius="28dp"
-            app:cardElevation="1dp"
-            app:strokeWidth="1dp"
-            app:strokeColor="?attr/colorOutlineVariant"
+            app:cardElevation="@dimen/map_float_elevation"
+            app:strokeWidth="0dp"
             app:cardBackgroundColor="?attr/colorSurfaceContainerHighest">
 
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="56dp"
+                android:layout_height="@dimen/map_float_size"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:paddingStart="6dp"
-                android:paddingEnd="6dp">
+                android:paddingStart="8dp"
+                android:paddingEnd="4dp">
 
                 <ImageButton
                     android:id="@+id/navSearchButton"
-                    android:layout_width="44dp"
-                    android:layout_height="44dp"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/roadsense_map_search_action"
-                    android:padding="10dp"
+                    android:padding="12dp"
                     android:scaleType="fitCenter"
                     android:src="@drawable/ic_nav_search"
-                    app:tint="?attr/colorPrimary" />
+                    app:tint="?attr/colorOnSurfaceVariant" />
 
                 <EditText
                     android:id="@+id/navSearchInput"
@@ -134,11 +136,11 @@
 
                 <ImageButton
                     android:id="@+id/navSearchClear"
-                    android:layout_width="44dp"
-                    android:layout_height="44dp"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/roadsense_map_clear_search"
-                    android:padding="11dp"
+                    android:padding="13dp"
                     android:scaleType="fitCenter"
                     android:src="@drawable/ic_clear"
                     android:visibility="gone"
@@ -316,155 +318,114 @@
         android:stateListAnimator="@null"
         tools:ignore="ImageContrastCheck" />
 
+    <!-- Recenter: a 56dp round float at bottom-end, under the zoom capsule. -->
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/fabLocate"
+        style="@style/Widget.Overdrive.Map.FloatButton"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|end"
-        android:layout_margin="24dp"
+        android:layout_marginEnd="@dimen/map_float_margin"
+        android:layout_marginBottom="@dimen/map_float_margin"
         android:contentDescription="@string/roadsense_map_recenter"
         android:src="@drawable/ic_my_location"
-        app:backgroundTint="?attr/colorPrimaryContainer"
-        app:tint="?attr/colorOnPrimaryContainer"
-        app:elevation="0dp"
-        app:pressedTranslationZ="0dp"
-        android:stateListAnimator="@null"
         tools:ignore="ImageContrastCheck" />
 
-    <!-- Map-control stack, TOP-end: hazard-visibility filter + POI (EV/fuel)
-         toggle. Mini FABs in a tonal surface so they read as map controls. -->
+    <!-- Top-end capsule: hazard filter, charging/fuel, map layers, theme, 2D/3D. Flat 56dp
+         buttons with hairlines between the visible ones; toggles tint their button when on. -->
     <LinearLayout
         android:id="@+id/mapControlsTop"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="top|end"
-        android:layout_marginEnd="28dp"
-        android:layout_marginTop="140dp"
-        android:orientation="vertical">
+        android:layout_marginEnd="@dimen/map_float_margin"
+        android:layout_marginTop="@dimen/map_float_margin"
+        android:background="@drawable/map_float_surface"
+        android:divider="@drawable/map_capsule_divider"
+        android:elevation="@dimen/map_float_elevation"
+        android:orientation="vertical"
+        android:showDividers="middle">
 
         <com.google.android.material.floatingactionbutton.FloatingActionButton
             android:id="@+id/fabHazardFilter"
+            style="@style/Widget.Overdrive.Map.CapsuleButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="10dp"
             android:contentDescription="@string/roadsense_map_hazards_filter"
             android:src="@drawable/ic_hazard_filter"
-            app:fabSize="mini"
-            app:backgroundTint="?attr/colorSurfaceContainerHighest"
-            app:tint="?attr/colorOnSurface"
-            app:elevation="0dp"
-            app:pressedTranslationZ="0dp"
-            android:stateListAnimator="@null"
             tools:ignore="ImageContrastCheck" />
 
         <com.google.android.material.floatingactionbutton.FloatingActionButton
             android:id="@+id/fabPoi"
+            style="@style/Widget.Overdrive.Map.CapsuleButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="10dp"
             android:contentDescription="@string/roadsense_map_poi_toggle"
             android:src="@drawable/ic_poi_pin"
-            app:fabSize="mini"
-            app:backgroundTint="?attr/colorSurfaceContainerHighest"
-            app:tint="?attr/colorOnSurface"
-            app:elevation="0dp"
-            app:pressedTranslationZ="0dp"
-            android:stateListAnimator="@null"
             tools:ignore="ImageContrastCheck" />
 
         <!-- Google map type + live traffic picker; shown only when a Google key is usable. -->
         <com.google.android.material.floatingactionbutton.FloatingActionButton
             android:id="@+id/fabMapLayers"
+            style="@style/Widget.Overdrive.Map.CapsuleButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="10dp"
             android:contentDescription="@string/navmap_google_layers_cd"
             android:src="@drawable/ic_map_layers"
             android:visibility="gone"
-            app:fabSize="mini"
-            app:backgroundTint="?attr/colorSurfaceContainerHighest"
-            app:tint="?attr/colorOnSurface"
-            app:elevation="0dp"
-            app:pressedTranslationZ="0dp"
-            android:stateListAnimator="@null"
             tools:ignore="ImageContrastCheck" />
 
-        <!-- Map day/night override (Auto → Light → Dark). Lets the user pin the
-             basemap scheme directly from the map; AUTO (default) follows the
-             Overdrive app theme. Icon reflects the current mode (auto/sun/moon)
-             and the FAB is accented when a scheme is pinned. -->
+        <!-- Map scheme Auto / Light / Dark; the icon follows the mode. -->
         <com.google.android.material.floatingactionbutton.FloatingActionButton
             android:id="@+id/fabMapTheme"
+            style="@style/Widget.Overdrive.Map.CapsuleButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="10dp"
             android:contentDescription="@string/roadsense_map_theme_toggle"
             android:src="@drawable/ic_map_theme_auto"
-            app:fabSize="mini"
-            app:backgroundTint="?attr/colorSurfaceContainerHighest"
-            app:tint="?attr/colorOnSurface"
-            app:elevation="0dp"
-            app:pressedTranslationZ="0dp"
-            android:stateListAnimator="@null"
             tools:ignore="ImageContrastCheck" />
 
-        <!-- 2D / 3D buildings toggle. An extended-style mini FAB showing the
-             CURRENT mode as a text label ("2D" / "3D"); tapping flips it. Default
-             2D; the choice is persisted. 3D adds a fill-extrusion building layer
-             (GPU-heavier), so it's an explicit opt-in. -->
+        <!-- 2D / 3D buildings; hidden on the Google basemap. -->
         <com.google.android.material.floatingactionbutton.FloatingActionButton
             android:id="@+id/fabMap3d"
+            style="@style/Widget.Overdrive.Map.CapsuleButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:contentDescription="@string/roadsense_map_dimension_toggle"
             android:src="@drawable/ic_map_3d"
-            app:fabSize="mini"
-            app:backgroundTint="?attr/colorSurfaceContainerHighest"
-            app:tint="?attr/colorOnSurface"
-            app:elevation="0dp"
-            app:pressedTranslationZ="0dp"
-            android:stateListAnimator="@null"
             tools:ignore="ImageContrastCheck" />
     </LinearLayout>
 
-    <!-- Zoom +/- stack, bottom-end above the locate FAB. Mini FABs in a tonal
-         surface so they read as map controls, not primary actions. -->
+    <!-- Bottom-end zoom capsule above the recenter button. -->
     <LinearLayout
         android:id="@+id/zoomControls"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|end"
-        android:layout_marginEnd="28dp"
-        android:layout_marginBottom="96dp"
-        android:orientation="vertical">
+        android:layout_marginEnd="@dimen/map_float_margin"
+        android:layout_marginBottom="@dimen/map_zoom_bottom"
+        android:background="@drawable/map_float_surface"
+        android:divider="@drawable/map_capsule_divider"
+        android:elevation="@dimen/map_float_elevation"
+        android:orientation="vertical"
+        android:showDividers="middle">
 
         <com.google.android.material.floatingactionbutton.FloatingActionButton
             android:id="@+id/fabZoomIn"
+            style="@style/Widget.Overdrive.Map.CapsuleButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="10dp"
             android:contentDescription="@string/roadsense_map_zoom_in"
             android:src="@drawable/ic_zoom_in"
-            app:fabSize="mini"
-            app:backgroundTint="?attr/colorSurfaceContainerHighest"
-            app:tint="?attr/colorOnSurface"
-            app:elevation="0dp"
-            app:pressedTranslationZ="0dp"
-            android:stateListAnimator="@null"
             tools:ignore="ImageContrastCheck" />
 
         <com.google.android.material.floatingactionbutton.FloatingActionButton
             android:id="@+id/fabZoomOut"
+            style="@style/Widget.Overdrive.Map.CapsuleButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:contentDescription="@string/roadsense_map_zoom_out"
             android:src="@drawable/ic_zoom_out"
-            app:fabSize="mini"
-            app:backgroundTint="?attr/colorSurfaceContainerHighest"
-            app:tint="?attr/colorOnSurface"
-            app:elevation="0dp"
-            app:pressedTranslationZ="0dp"
-            android:stateListAnimator="@null"
             tools:ignore="ImageContrastCheck" />
     </LinearLayout>
 
@@ -483,7 +444,7 @@
         android:visibility="gone"
         app:cardBackgroundColor="?attr/colorSurfaceContainer"
         app:cardCornerRadius="28dp"
-        app:cardElevation="2dp"
+        app:cardElevation="8dp"
         app:strokeWidth="1dp"
         app:strokeColor="?attr/colorOutlineVariant"
         app:cardPreventCornerOverlap="false"

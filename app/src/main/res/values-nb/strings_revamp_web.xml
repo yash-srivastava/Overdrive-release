@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="web_state_retry_now">Prøv igjen nå</string>
+    <string name="web_state_retry_in">Prøver igjen automatisk · neste forsøk om %1$d s</string>
+    <string name="web_state_retrying_now">Prøver igjen automatisk · prøver nå…</string>
+    <string name="web_state_sign_in_title">Kunne ikke logge på denne siden</string>
+    <string name="web_state_sign_in_body">Kamera-daemonen kjører, men godtok ikke appens pålogging. OverDrive gjenoppretter den automatisk mens ADB er tilkoblet.</string>
+</resources>

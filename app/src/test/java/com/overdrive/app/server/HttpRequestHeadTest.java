@@ -97,8 +97,14 @@ public class HttpRequestHeadTest {
         failsWith(400, () -> duplicate.accept("content-length: 8"));
         failsWith(400, () -> new HttpRequestHead.Framing()
                 .accept("Content-Length: 4, 4"));
+        HttpRequestHead.Framing lengthThenChunked = new HttpRequestHead.Framing();
+        lengthThenChunked.accept("Content-Length: 8");
+        failsWith(400, () -> lengthThenChunked.accept("Transfer-Encoding: chunked"));
+        HttpRequestHead.Framing chunkedThenLength = new HttpRequestHead.Framing();
+        chunkedThenLength.accept("Transfer-Encoding: chunked");
+        failsWith(400, () -> chunkedThenLength.accept("Content-Length: 8"));
         failsWith(400, () -> new HttpRequestHead.Framing()
-                .accept("Transfer-Encoding: chunked"));
+                .accept("Transfer-Encoding: gzip, chunked"));
         failsWith(400, () -> new HttpRequestHead.Framing()
                 .accept("Transfer-Encoding: identity"));
         failsWith(400, () -> new HttpRequestHead.Framing()

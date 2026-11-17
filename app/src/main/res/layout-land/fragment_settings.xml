@@ -1,72 +1,38 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Settings — landscape variant (SOTA two-pane sub-rail).
-
-  Composition:
-    Left:  fixed-width vertical sub-rail (~280dp) with section list. The
-           rail uses surfaceContainerLow with rounded inner pills for
-           the active row. Header overline "SETTINGS" sits on top.
-    Right: detail pane on surfaceContainerLow, hosts a child fragment
-           via @id/settingsContent. SettingsFragment swaps fragments in
-           with a fade animation (anim/fade_in, anim/fade_out).
-
-  Math (canvas 1920×1080 / 960dp × 540dp logical):
-    - Sub-rail: 280dp.
-    - Detail: weight=1 (fills remaining ~680dp+ on landscape head-unit).
-
-  Design notes:
-    - No card chrome on the rail itself — it IS the rail. Active row gets
-      a colorSecondaryContainer pill (settings_subrail_row_bg selector).
-    - Detail pane is corner-radius 24dp on the leading edges so the
-      surfaces nest visually (rail bleeds into pane). cardElevation 0dp
-      keeps the M3 "no shadow" surface look.
-    - All IDs the sub-rail driver needs:
-        subrailHeader, subrailContainer, subrailRow_<section>, settingsContent.
-    - Each row is the same item_settings_subrail_row include. The Kotlin
-      driver (SettingsFragment) inflates one row per Section enum value,
-      tags it with the section, wires its click, and toggles selection.
-
-  Constraints honored:
-    - No hardcoded #hex (all ?attr/* tokens).
-    - Material 3 widgets only.
-    - Auto light/dark via ?attr resolution.
-    - Portrait users see layout/fragment_settings.xml unchanged.
+  Settings, landscape: 236dp sub-rail | hairline | detail pane (settingsContent).
+  SettingsFragment keys this branch on settingsContent, which only exists in this variant.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="?android:attr/colorBackground"
     android:baselineAligned="false"
     android:orientation="horizontal">
 
-    <!-- ============== SUB-RAIL ============== -->
     <LinearLayout
         android:id="@+id/settingsSubrailContainer"
-        android:layout_width="280dp"
+        android:layout_width="@dimen/set_subrail_width"
         android:layout_height="match_parent"
         android:background="?android:attr/colorBackground"
         android:contentDescription="@string/cd_settings_subrail"
         android:orientation="vertical"
-        android:paddingHorizontal="4dp"
-        android:paddingTop="20dp"
-        android:paddingBottom="16dp">
+        android:paddingHorizontal="@dimen/od_space_12"
+        android:paddingTop="14dp"
+        android:paddingBottom="14dp">
 
-        <!-- Overline header -->
         <TextView
             android:id="@+id/subrailHeader"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginHorizontal="20dp"
-            android:layout_marginBottom="20dp"
-            android:letterSpacing="0.08"
+            android:accessibilityHeading="true"
+            android:paddingStart="@dimen/set_subrail_row_padding_start"
+            android:paddingTop="@dimen/od_space_4"
+            android:paddingEnd="@dimen/set_subrail_row_padding_start"
+            android:paddingBottom="10dp"
             android:text="@string/settings_subrail_overline"
-            android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-            android:textColor="?attr/colorOnSurfaceVariant" />
+            android:textAppearance="@style/TextAppearance.Overdrive.Overline" />
 
-        <!-- Scrollable rail body — host for dynamic rows.
-             SettingsFragment inflates one item_settings_subrail_row per
-             Section enum value into this container at runtime. -->
         <androidx.core.widget.NestedScrollView
             android:layout_width="match_parent"
             android:layout_height="0dp"
@@ -82,21 +48,14 @@
         </androidx.core.widget.NestedScrollView>
     </LinearLayout>
 
-    <!-- ============== DETAIL PANE ============== -->
-    <com.google.android.material.card.MaterialCardView
+    <View
+        android:layout_width="@dimen/od_hairline"
+        android:layout_height="match_parent"
+        android:background="?attr/colorOutlineVariant" />
+
+    <FrameLayout
+        android:id="@+id/settingsContent"
         android:layout_width="0dp"
         android:layout_height="match_parent"
-        android:layout_weight="1"
-        android:layout_marginTop="@dimen/page_padding_top"
-        android:layout_marginEnd="@dimen/page_padding_top"
-        android:layout_marginBottom="@dimen/page_padding_top"
-        app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
-        app:cardCornerRadius="@dimen/card_radius_hero"
-        app:cardElevation="0dp">
-
-        <FrameLayout
-            android:id="@+id/settingsContent"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent" />
-    </com.google.android.material.card.MaterialCardView>
+        android:layout_weight="1" />
 </LinearLayout>

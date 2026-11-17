@@ -52,6 +52,8 @@ public final class GenAiInsights {
     private static final int MAX_TEXT_CHARS = 12_000;
     private static final int MAX_TITLE_CHARS = 120;
     private static final int MAX_PROMPT_CHARS = 600;
+    // Provider trouble is often short ("high demand" 503s): a run from an automation tries again instead of losing the day.
+    private static final long[] RETRY_DELAYS_MS = {2 * 60_000L, 10 * 60_000L, 30 * 60_000L};
 
     private static final String INSIGHT_INSTRUCTIONS =
             "Write one concise OverDrive insight for a dashboard inbox. "
@@ -99,14 +101,33 @@ public final class GenAiInsights {
             return false;
         }
         Thread thread = new Thread(() -> {
+            boolean held = true;
             try {
-                generateLocked(
-                        runtime, requestedMode, prompt, notify, source,
-                        LocaleManager.get());
+                for (int attempt = 0; ; attempt++) {
+                    try {
+                        generateLocked(
+                                runtime, requestedMode, prompt, notify, source,
+                                LocaleManager.get());
+                        return;
+                    } catch (GenAiRuntime.GenAiException e) {
+                        if (attempt >= RETRY_DELAYS_MS.length || !retryable(e)) throw e;
+                        logger.warn("Insight generation failed (" + e.code + "): " + e.getMessage()
+                                + "; trying again in " + RETRY_DELAYS_MS[attempt] / 60_000L + " min");
+                    }
+                    // (not held while waiting: an insight asked for by hand meanwhile goes ahead, and stands in)
+                    held = false;
+                    GENERATING.set(false);
+                    Thread.sleep(RETRY_DELAYS_MS[attempt]);
+                    GenAiConfig now = GenAiConfig.fromUnifiedConfig();
+                    if (!now.enabled || !now.isConfigured() || !GENERATING.compareAndSet(false, true)) return;
+                    held = true;
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             } catch (Throwable t) {
                 logger.warn("Insight generation failed: " + t.getMessage());
             } finally {
-                GENERATING.set(false);
+                if (held) GENERATING.set(false);
             }
         }, "GenAiInsight");
         thread.setDaemon(true);
@@ -116,6 +137,62 @@ public final class GenAiInsights {
         } catch (Throwable t) {
             GENERATING.set(false);
             return false;
+        }
+    }
+
+    /** Worth another go later: the provider busy, rate-limited, unreachable, or answering nothing. */
+    static boolean retryable(GenAiRuntime.GenAiException e) {
+        return e.status == 429 || e.status == 503 || "provider_unreachable".equals(e.code)
+                || "empty_provider_response".equals(e.code);
+    }
+
+    /**
+     * The scheduled insight, now, when today's (this week's) time has passed with none made since: the car was asleep
+     * then, or the provider kept failing. For a car start; it runs off the caller's thread.
+     */
+    public static void catchUpAsync() {
+        Thread thread = new Thread(() -> {
+            try {
+                GenAiConfig c = GenAiConfig.fromUnifiedConfig();
+                if (!c.enabled || !c.isConfigured()
+                        || GenAiConfig.INSIGHT_SCHEDULE_OFF.equals(c.insightSchedule)) {
+                    return;
+                }
+                java.time.ZonedDateTime now = java.time.ZonedDateTime.now();
+                if (GenAiConfig.INSIGHT_SCHEDULE_WEEKLY.equals(c.insightSchedule)
+                        && now.getDayOfWeek().getValue() != Math.max(1, Math.min(7, c.insightDay))) {
+                    return;
+                }
+                java.time.ZonedDateTime due = now.toLocalDate()
+                        .atTime(Math.max(0, Math.min(23, c.insightHour)), Math.max(0, Math.min(59, c.insightMinute)))
+                        .atZone(now.getZone());
+                if (now.isBefore(due) || lastScheduledAt() >= due.toInstant().toEpochMilli()) return;
+                if (requestAsync(c.insightMode, "", c.insightNotifications, "schedule")) {
+                    logger.info("Scheduled insight missed at " + due.toLocalTime() + "; making it now");
+                }
+            } catch (Throwable t) {
+                logger.warn("Insight catch-up failed: " + t.getMessage());
+            }
+        }, "GenAiInsightCatchUp");
+        thread.setDaemon(true);
+        try {
+            thread.start();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    // When the newest scheduled (or automation-made) insight was made; 0 when none.
+    private static long lastScheduledAt() {
+        synchronized (STORE_LOCK) {
+            ensureLoadedLocked();
+            long newest = 0L;
+            for (JSONObject item : items) {
+                String source = item.optString("source", "");
+                if ("schedule".equals(source) || "automation".equals(source)) {
+                    newest = Math.max(newest, item.optLong("createdAt", 0L));
+                }
+            }
+            return newest;
         }
     }
 

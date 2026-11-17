@@ -107,8 +107,43 @@ public class AuthApiHandler {
      *                       bounds a caller who rotates X-Forwarded-For, which otherwise
      *                       minted a fresh per-client bucket on every single request.
      */
+    /**
+     * The app (a session from this head unit) taking the device secret it was handed (handoff: the shared config stops
+     * carrying it), or asking for a new one (regenerate: the reply carries it; other sessions end).
+     */
+    static void handleSecret(String method, String path, boolean localSession, OutputStream out) throws Exception {
+        if (!"POST".equals(method)) {
+            HttpResponse.sendJson(out, 405, "{\"success\":false,\"error\":\"POST only\"}");
+            return;
+        }
+        if (!localSession) {
+            HttpResponse.sendJson(out, 403, "{\"success\":false,\"error\":\"Local session only\"}");
+            return;
+        }
+        if (path.equals("/api/auth/handoff")) {
+            boolean ok = AuthManager.handoffDone();
+            HttpResponse.sendJson(out, ok ? 200 : 503, new JSONObject().put("success", ok).toString());
+            return;
+        }
+        String token = AuthManager.regenerateToken();
+        AuthManager.AuthState state = AuthManager.getState();
+        if (token == null || state == null) {
+            HttpResponse.sendJson(out, 503, "{\"success\":false,\"error\":\"Could not save a new secret\"}");
+            return;
+        }
+        HttpResponse.sendJson(out, 200, new JSONObject().put("success", true).put("deviceId", state.deviceId)
+                .put("secret", state.deviceSecret).toString());
+    }
+
     public static boolean handle(String method, String path, String body, OutputStream out,
                                   String clientIdentity, String socketIp)
+            throws Exception {
+        return handle(method, path, body, out, clientIdentity, socketIp, null, null);
+    }
+
+    /** As above; {@code jwt} is the caller's token (logout signs that browser out), {@code userAgent} labels a login. */
+    public static boolean handle(String method, String path, String body, OutputStream out,
+                                  String clientIdentity, String socketIp, String jwt, String userAgent)
             throws Exception {
 
         if (path.equals("/auth/status") && method.equals("GET")) {
@@ -133,20 +168,56 @@ public class AuthApiHandler {
             }
 
             if (rateError != null) {
+                com.overdrive.app.notifications.LoginAttemptNotifier.loginFailed(clientIdentity, socketIp, true);
                 JSONObject resp = new JSONObject();
                 resp.put("success", false);
                 resp.put("error", rateError);
                 HttpResponse.sendJson(out, resp.toString());
                 return true;
             }
-            return handleTokenValidation(body, out, clientKey);
+            return handleTokenValidation(body, out, clientKey, userAgent, clientIdentity, socketIp);
         }
 
         if (path.equals("/auth/logout") && method.equals("POST")) {
-            return handleLogout(out);
+            return handleLogout(out, jwt);
         }
 
         return false;
+    }
+
+    /**
+     * Signed-in browsers: GET /api/auth/sessions, POST /api/auth/sessions/revoke {id},
+     * POST /api/auth/sessions/revoke-others. The caller holds a valid JWT (checked by HttpServer).
+     */
+    static void handleSessions(String method, String path, String body, OutputStream out, String jwt)
+            throws Exception {
+        String currentId = AuthManager.sessionIdOf(jwt);
+        if (path.equals("/api/auth/sessions") && "GET".equals(method)) {
+            HttpResponse.sendJsonNoCors(out, new JSONObject()
+                    .put("success", true)
+                    .put("currentId", currentId == null ? JSONObject.NULL : currentId)
+                    .put("sessions", AuthManager.listSessions(currentId)).toString());
+            return;
+        }
+        if (path.equals("/api/auth/sessions/revoke") && "POST".equals(method)) {
+            String id = "";
+            try {
+                id = new JSONObject(body == null ? "" : body).optString("id", "");
+            } catch (Exception ignored) {}
+            boolean ok = com.overdrive.app.auth.AuthSessions.revoke(id);
+            if (ok) log("Signed out a browser session");
+            HttpResponse.sendJsonNoCors(out, ok ? 200 : 404, new JSONObject()
+                    .put("success", ok).put("current", ok && id.equals(currentId)).toString());
+            return;
+        }
+        if (path.equals("/api/auth/sessions/revoke-others") && "POST".equals(method)) {
+            int revoked = com.overdrive.app.auth.AuthSessions.revokeAllExcept(currentId);
+            if (revoked > 0) log("Signed out " + revoked + " other browser session(s)");
+            HttpResponse.sendJsonNoCors(out, revoked >= 0 ? 200 : 503, new JSONObject()
+                    .put("success", revoked >= 0).put("revoked", Math.max(0, revoked)).toString());
+            return;
+        }
+        HttpResponse.sendJsonNoCors(out, 404, "{\"success\":false,\"error\":\"Not found\"}");
     }
 
     /**
@@ -310,7 +381,8 @@ public class AuthApiHandler {
      * Validates device token and returns JWT session.
      */
     private static boolean handleTokenValidation(String body, OutputStream out,
-                                                  String clientKey)
+                                                  String clientKey, String userAgent,
+                                                  String clientIdentity, String socketIp)
             throws Exception {
         JSONObject response = new JSONObject();
 
@@ -327,7 +399,7 @@ public class AuthApiHandler {
                 // login hand every other tunnel caller a full fresh allowance.
                 clearRateLimit(clientKey);
 
-                String jwt = AuthManager.generateJwt();
+                String jwt = AuthManager.generateSessionJwt(userAgent);
                 AuthManager.AuthState state = AuthManager.getState();
                 if (jwt == null || state == null) {
                     // Auth state was invalidated between validateDeviceToken
@@ -343,11 +415,14 @@ public class AuthApiHandler {
                     response.put("expiresIn", AuthManager.JWT_EXPIRY_SECONDS);
 
                     log("Token validated for device: " + state.deviceId);
+                    com.overdrive.app.notifications.LoginAttemptNotifier.loginSucceeded(clientIdentity, socketIp,
+                            com.overdrive.app.auth.AuthSessions.labelFor(userAgent));
                 }
             } else {
                 response.put("success", false);
                 response.put("error", Messages.get("errors.invalid_device_token"));
                 log("Invalid token attempt from " + clientKey);
+                com.overdrive.app.notifications.LoginAttemptNotifier.loginFailed(clientIdentity, socketIp, false);
             }
 
         } catch (Exception e) {
@@ -363,7 +438,10 @@ public class AuthApiHandler {
      * POST /auth/logout
      * Logs out the user. Client should clear stored JWT.
      */
-    private static boolean handleLogout(OutputStream out) throws Exception {
+    private static boolean handleLogout(OutputStream out, String jwt) throws Exception {
+        // A tracked browser's token stops working here too, not only in that browser.
+        String sessionId = AuthManager.sessionIdOf(jwt);
+        if (sessionId != null) com.overdrive.app.auth.AuthSessions.revoke(sessionId);
         JSONObject response = new JSONObject();
         response.put("success", true);
         response.put("message", Messages.get("messages.logged_out"));

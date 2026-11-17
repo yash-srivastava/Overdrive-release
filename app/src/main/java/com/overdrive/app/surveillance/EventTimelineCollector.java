@@ -111,6 +111,10 @@ public class EventTimelineCollector {
 
     // State
     private long recordingStartTimeMs = 0;
+    // Pre-roll actually flushed into this clip vs the configured window; 0 when unknown
+    // (rotated segments have no trigger inside them).
+    private long actualPreRecordMs = 0;
+    private long requestedPreRecordMs = 0;
     private volatile boolean collecting = false;
     // COLLECTION GENERATION (audit R11-4 / ExtD-5). Bumped by every
     // startCollecting* call. A stopAndWrite carrying an expected generation
@@ -168,6 +172,50 @@ public class EventTimelineCollector {
     }
 
     // ========================================================================
+    // DETERRENT MARKS (process-wide)
+    // ========================================================================
+    // The cloud and screen deterrents fire outside any collector, so they stamp the wall-clock
+    // moment here; stopAndWrite copies the marks inside the clip window into the sidecar.
+    public static final String DETERRENT_CLOUD = "cloud";
+    public static final String DETERRENT_SCREEN = "screen";
+    private static final int MAX_DETERRENT_MARKS = 256;
+    private static final long DETERRENT_RETAIN_MS = 60L * 60L * 1000L;
+    private static final java.util.ArrayDeque<Object[]> deterrentMarks = new java.util.ArrayDeque<>();
+
+    /** Records that a deterrent fired now. Cheap and safe from any thread. */
+    public static void recordDeterrentFired(String type, String action) {
+        if (type == null) return;
+        long now = System.currentTimeMillis();
+        synchronized (deterrentMarks) {
+            while (!deterrentMarks.isEmpty()
+                    && ((Long) deterrentMarks.peekFirst()[0] < now - DETERRENT_RETAIN_MS
+                        || deterrentMarks.size() >= MAX_DETERRENT_MARKS)) {
+                deterrentMarks.pollFirst();
+            }
+            deterrentMarks.addLast(new Object[]{now, type, action});
+        }
+    }
+
+    /** Marks with fromWallMs <= t < toWallMs as [{type, tMs, action?}], tMs relative to fromWallMs. */
+    static JSONArray snapshotDeterrents(long fromWallMs, long toWallMs) {
+        JSONArray out = new JSONArray();
+        synchronized (deterrentMarks) {
+            for (Object[] mark : deterrentMarks) {
+                long t = (Long) mark[0];
+                if (t < fromWallMs || t >= toWallMs) continue;
+                try {
+                    JSONObject o = new JSONObject().put("type", mark[1]).put("tMs", t - fromWallMs);
+                    if (mark[2] != null) o.put("action", mark[2]);
+                    out.put(o);
+                } catch (Exception ignored) {
+                    // Skip a malformed mark.
+                }
+            }
+        }
+        return out;
+    }
+
+    // ========================================================================
     // LIFECYCLE
     // ========================================================================
 
@@ -188,6 +236,14 @@ public class EventTimelineCollector {
         return startCollecting(preRecordMs, /*flushPreRing=*/true);
     }
 
+    /** As {@link #startCollecting(long)}, also recording the configured pre-roll for the sidecar. */
+    public synchronized int startCollecting(long actualPreRecordMs, long requestedPreRecordMs) {
+        int gen = startCollecting(actualPreRecordMs, /*flushPreRing=*/true);
+        this.actualPreRecordMs = Math.max(0L, actualPreRecordMs);
+        this.requestedPreRecordMs = Math.max(0L, requestedPreRecordMs);
+        return gen;
+    }
+
     /**
      * Segment-rotation entry point: start collecting WITHOUT replaying the
      * pre-trigger ring buffer. The pre-ring captured spans from before the
@@ -204,6 +260,8 @@ public class EventTimelineCollector {
         collectionGen++; // audit R11-4 / ExtD-5 — invalidates stale stops
         spanCount = 0;
         inflightStart = -1;
+        actualPreRecordMs = 0;
+        requestedPreRecordMs = 0;
 
         // Timeline origin: the start of the video (preRecordMs before now)
         recordingStartTimeMs = System.currentTimeMillis() - preRecordMs;
@@ -321,9 +379,13 @@ public class EventTimelineCollector {
             logger.info("stopAndWrite skipped — stale collection gen "
                     + expectedGen + " (current " + collectionGen + ") for "
                     + (mp4File != null ? mp4File.getName() : "null"));
+            writeLensOnlySidecar(mp4File);
             return;
         }
-        if (!collecting) return;
+        if (!collecting) {
+            writeLensOnlySidecar(mp4File);
+            return;
+        }
         collecting = false;
 
         commitInflight();
@@ -331,8 +393,10 @@ public class EventTimelineCollector {
         final int count = spanCount;
         if (count == 0 && (actors == null || actors.isEmpty())) {
             logger.info("No events collected, skipping sidecar write");
+            writeLensOnlySidecar(mp4File);
             return;
         }
+        final JSONArray deterrents = snapshotDeterrents(recordingStartTimeMs, System.currentTimeMillis());
 
         final long[]  starts = new long[count];
         final long[]  ends   = new long[count];
@@ -349,6 +413,8 @@ public class EventTimelineCollector {
         System.arraycopy(spanCameras,     0, cams,   0, count);
 
         final long durationMs = System.currentTimeMillis() - recordingStartTimeMs;
+        final long preRollMs = actualPreRecordMs;
+        final long requestedPreRollMs = requestedPreRecordMs;
         // Snapshot actors so the writer thread sees an immutable copy
         final java.util.List<Actor> actorsCopy =
                 (actors == null || actors.isEmpty())
@@ -416,7 +482,8 @@ public class EventTimelineCollector {
 
         writeExecutor.execute(() -> {
             writeJsonSidecar(mp4File, starts, ends, types, confs, counts, cams, count,
-                    durationMs, actorsCopy, heroThumb, startG, peakG, endG, parkingSessionId);
+                    durationMs, actorsCopy, heroThumb, startG, peakG, endG, parkingSessionId,
+                    deterrents, preRollMs, requestedPreRollMs);
             // SRT subtitle sidecar — localized prose so VLC / video.js / ExoPlayer
             // can show "Person detected close range" / "Charging started · 4.3 kW"
             // without re-encoding the burned-in English overlay. Wrapped so an
@@ -621,7 +688,8 @@ public class EventTimelineCollector {
      * FAR NOTICE misclassification profile (mirrors the headline + hero gates).
      */
     private static boolean isSuppressedFromSrt(Actor a) {
-        if (a.isStaticForTimeline) return true;
+        // Same rule as the headline: a standing person keeps its subtitle line.
+        if (a.isStaticForTimeline && a.classGroup != Actor.ClassGroup.PERSON) return true;
         // The low-conf FAR NOTICE misclassification profile. SUMMARY scope, so
         // PERSON is exempt (a real far still person keeps its SRT line per the
         // hard invariant); only non-person FPs (car/bike/animal) drop. Canonical
@@ -902,6 +970,16 @@ public class EventTimelineCollector {
     // COLD PATH — Async JSON file I/O
     // ========================================================================
 
+    /** Queued behind any pending timeline write for the clip; never replaces an existing sidecar. */
+    private void writeLensOnlySidecar(final File mp4File) {
+        if (mp4File == null || com.overdrive.app.surveillance.LensTag.forFile(mp4File) == null) return;
+        writeExecutor.execute(() -> {
+            if (com.overdrive.app.surveillance.LensTag.writeSidecarIfAbsent(mp4File)) {
+                logger.info("Lens-only sidecar saved: " + mp4File.getName());
+            }
+        });
+    }
+
     private void writeJsonSidecar(File mp4File, long[] starts, long[] ends,
                                    byte[] types, float[] confs, byte[] counts,
                                    byte[] cameras, int count, long durationMs) {
@@ -947,7 +1025,7 @@ public class EventTimelineCollector {
                                    com.overdrive.app.geo.GeoSnapshot peakGeo,
                                    com.overdrive.app.geo.GeoSnapshot endGeo) {
         writeJsonSidecar(mp4File, starts, ends, types, confs, counts, cameras, count,
-                durationMs, actors, heroThumbnail, startGeo, peakGeo, endGeo, null);
+                durationMs, actors, heroThumbnail, startGeo, peakGeo, endGeo, null, null, 0L, 0L);
     }
 
     private void writeJsonSidecar(File mp4File, long[] starts, long[] ends,
@@ -957,7 +1035,9 @@ public class EventTimelineCollector {
                                    com.overdrive.app.geo.GeoSnapshot startGeo,
                                    com.overdrive.app.geo.GeoSnapshot peakGeo,
                                    com.overdrive.app.geo.GeoSnapshot endGeo,
-                                   String parkingSessionId) {
+                                   String parkingSessionId,
+                                   JSONArray deterrents,
+                                   long preRecordMs, long requestedPreRecordMs) {
         final String[] CAMERA_NAMES = {"front", "right", "rear", "left"};
 
         try {
@@ -969,21 +1049,34 @@ public class EventTimelineCollector {
             JSONObject root = new JSONObject();
             root.put("version", 3);
             root.put("durationMs", durationMs);
+            // Where the trigger sits in this clip, and what was asked for (first segment only).
+            if (requestedPreRecordMs > 0L) {
+                root.put("preRecordMs", preRecordMs);
+                root.put("requestedPreRecordMs", requestedPreRecordMs);
+            }
             // Composition layout so the player picks the right per-camera zoom
             // regions. Sentry events are composited under the SENTRY layout
             // profile (surveillance.recordingLayout), independent of the
             // dashcam layout; fall back to the dashcam value when the sentry
             // key is unset. Read at write time; omitted for the default
             // standard layout to keep legacy sidecars byte-identical.
+            org.json.JSONObject lens = null;
             try {
-                String survLayout = com.overdrive.app.config.UnifiedConfigManager
-                        .getSurveillance().optString("recordingLayout",
-                            com.overdrive.app.config.UnifiedConfigManager
-                                .getRecording().optString("recordingLayout", "standard"));
-                if ("dashcam".equals(survLayout)) {
-                    root.put("layout", "dashcam");
-                }
-            } catch (Throwable ignored) { /* default standard */ }
+                lens = com.overdrive.app.surveillance.LensTag.forFile(mp4File);
+                if (lens != null) root.put("lens", lens);
+            } catch (Throwable ignored) { /* no lens tag */ }
+            // A lens-tagged clip is a 2x2 grid whatever the layout setting says now.
+            if (lens == null) {
+                try {
+                    String survLayout = com.overdrive.app.config.UnifiedConfigManager
+                            .getSurveillance().optString("recordingLayout",
+                                com.overdrive.app.config.UnifiedConfigManager
+                                    .getRecording().optString("recordingLayout", "standard"));
+                    if ("dashcam".equals(survLayout)) {
+                        root.put("layout", "dashcam");
+                    }
+                } catch (Throwable ignored) { /* default standard */ }
+            }
 
             JSONArray eventsArray = new JSONArray();
             int motionN = 0, personN = 0, carN = 0, bikeN = 0, animalN = 0;
@@ -1054,6 +1147,8 @@ public class EventTimelineCollector {
             }
 
             root.put("events", eventsArray);
+            // Deterrent fire points (cloud / screen); omitted when none fired.
+            if (deterrents != null && deterrents.length() > 0) root.put("deterrents", deterrents);
 
             // ---- Actors (v3) ----
             int personCount = 0, vehicleCount = 0, bikeCount = 0, animalCount = 0;
@@ -1137,7 +1232,10 @@ public class EventTimelineCollector {
                     // intentional card-keeps-person / hero-shows-no-box asymmetry,
                     // NOT a bug. Real moving/approaching/closer far actors are never
                     // dropped on any surface (trend + everMoved exemptions in core).
-                    boolean contributesToHeadline = !a.isStaticForTimeline
+                    // A standing person is static after ~800 ms but is the loiterer surveillance
+                    // exists for; the engine keeps static persons, so the headline does too.
+                    boolean contributesToHeadline =
+                            (a.classGroup == Actor.ClassGroup.PERSON || !a.isStaticForTimeline)
                             && !(a.classGroup == Actor.ClassGroup.PERSON && !a.confirmed)
                             && !Actor.suppressFromSummary(a);
                     if (contributesToHeadline) {

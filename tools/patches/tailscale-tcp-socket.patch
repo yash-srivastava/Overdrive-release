@@ -188,3 +188,33 @@ index 6fe3883..88acd35 100644
  	// Unix sockets hang around in the filesystem even after nobody
  	// is listening on them. (Which is really unfortunate but long-
  	// entrenched semantics.) Try connecting first; if it works, then
+diff --git a/wgengine/netstack/netstack.go b/wgengine/netstack/netstack.go
+--- a/wgengine/netstack/netstack.go
++++ b/wgengine/netstack/netstack.go
+@@ -1586,7 +1586,13 @@
+ 			dialIP = ipv4Loopback
+ 		}
+ 	case isTailscaleIP:
+-		dialIP = ipv4Loopback
++		// OverDrive (Android, userspace networking): never raw-forward a tailnet
++		// connection into the device's loopback. Its daemon IPC servers, this
++		// daemon's own LocalAPI and the local proxies all trust 127.0.0.1
++		// callers; only ports published through Serve (handled above) are
++		// reachable from the tailnet.
++		r.Complete(true) // sends a RST
++		return
+ 	}
+ 	dialAddr := netip.AddrPortFrom(dialIP, uint16(reqDetails.LocalPort))
+ 
+@@ -1924,6 +1930,11 @@
+ 	var backendRemoteAddr *net.UDPAddr
+ 	isLocal := ns.isLocalIP(dstAddr.Addr())
+ 	isLoopback := dstAddr.Addr() == ipv4Loopback || dstAddr.Addr() == ipv6Loopback
++	if isLocal {
++		// OverDrive: same rule as TCP; no raw tailnet UDP into device loopback.
++		client.Close()
++		return
++	}
+ 	if isLocal {
+ 		backendRemoteAddr = &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: int(port)}
+ 		backendListenAddr = &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: int(srcPort)}

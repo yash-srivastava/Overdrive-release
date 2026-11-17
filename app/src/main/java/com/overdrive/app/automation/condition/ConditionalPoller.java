@@ -83,6 +83,8 @@ final class ConditionalPoller {
 
             long token = ++generation;
             AtomicBoolean first = new AtomicBoolean(true);
+            // A dead periodic future leaves its worker behind; never leak it.
+            if (worker != null) worker.shutdown();
             worker = Executors.newSingleThreadExecutor(runnable -> {
                 Thread thread = new Thread(runnable, "AutomationSignal-" + name);
                 thread.setDaemon(true);
@@ -135,6 +137,11 @@ final class ConditionalPoller {
                 } catch (RejectedExecutionException rejected) {
                     inFlight.set(false);
                     if (isCurrent(token)) logger.warn(name + " poll dispatch rejected");
+                } catch (Throwable dispatchFailed) {
+                    // e.g. the worker thread could not be created: release the slot so the
+                    // next tick retries instead of the signal going silently dead.
+                    inFlight.set(false);
+                    logger.error(name + " poll dispatch failed", dispatchFailed);
                 }
             }, 0L, periodMs, TimeUnit.MILLISECONDS);
         }

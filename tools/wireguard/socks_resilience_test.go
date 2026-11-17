@@ -246,16 +246,12 @@ func TestPipeClosesBothSides(t *testing.T) {
 }
 
 func TestPipeHalfCloseIdleReaped(t *testing.T) {
-	old := pipeIdle
-	pipeIdle = 100 * time.Millisecond
-	defer func() { pipeIdle = old }()
-
 	a1, a2 := net.Pipe()
 	b1, b2 := net.Pipe()
 	defer a1.Close()
 	defer b1.Close()
 	done := make(chan struct{})
-	go func() { pipe(a2, b2); close(done) }()
+	go func() { pipeWithIdle(a2, b2, 100*time.Millisecond); close(done) }()
 	// a1 ends but b1 stays silent forever: the idle limit must reap it.
 	a1.Close()
 	select {

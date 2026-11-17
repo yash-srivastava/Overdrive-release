@@ -28,7 +28,6 @@ public class SurveillanceEngineGpu {
     private long lastMotionTime = 0;
     // volatile: read cross-thread by hasActiveMotion() (RMM control thread) to
     // drive the parked-idle fps ramp. Written only on the motion thread.
-    private volatile String finalDeterrentSummary = "";
     private volatile long firstMotionTime = 0;  // When sustained motion started (for duration check)
 
     // Parked-idle throttle keyframe pulse: last time we forced an IDR while idle.
@@ -705,6 +704,8 @@ public class SurveillanceEngineGpu {
     
     // Object detection filters (SOTA: Quadrant-relative height filter in YoloDetector)
     private float minObjectSize = 0.12f;  // 12% of QUADRANT height (~8m for person in 2x2 grid)
+    // Extended zone: the AI also reaches ~15 m. Baseline and trigger passes must use the same value per camera.
+    private static final float EXTENDED_ZONE_MIN_OBJECT_SIZE = 0.05f;
     private float aiConfidence = 0.25f;  // 25% confidence (lowered for debugging)
     // FIX (Bug B): tri-state semantics for classFilter:
     //   null            -> uninitialised, fall back to "all classes" defaults
@@ -1042,6 +1043,9 @@ public class SurveillanceEngineGpu {
             t.setPriority(Thread.MIN_PRIORITY);
             return t;
         });
+    // True while a per-trigger ensureSurveillanceSpace is queued but not yet started.
+    private final java.util.concurrent.atomic.AtomicBoolean surveillanceSpaceQueued =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
     // --- END SOTA FIX ---
 
     // State
@@ -1363,6 +1367,10 @@ public class SurveillanceEngineGpu {
     private volatile boolean eventEverApproaching = false;       // any non-static actor read APPROACHING this event
     private volatile boolean eventEverSawPerson = false;         // any YOLO-classified PERSON this event (any conf/sev/static) → hard KEEP
     private volatile boolean eventEverSawMovingObject = false;   // any YOLO-classified MOVING (!isStaticForTimeline) vehicle/bike/animal → hard KEEP (parked cars excluded — they are the FP target)
+    // Class-filtered deterrents: capture time of the newest confirmed person / moving vehicle or bike.
+    private volatile long deterrentPersonSeenWallMs = -1;
+    private volatile long deterrentMoverSeenWallMs = -1;
+    private static final long DETERRENT_EVIDENCE_MS = 5_000;
     private volatile boolean eventTriggerWasLateralMass = false; // trigger was a side-cam proximity-mass override → possible real lateral actor a fisheye-distorted YOLO can't classify → hard KEEP
     private volatile boolean eventTriggerWasAiTimeout = false;    // trigger fired on the AI-timeout fallback with NO in-sequence YOLO confirmation → could be a YOLO-missed real actor → hard KEEP
     // YOLO ran during this event AND produced raw class detections that the
@@ -1475,6 +1483,14 @@ public class SurveillanceEngineGpu {
             // far/mid lateral crosser at NOTICE) still protects its clip. Person
             // evidence can only ever PROTECT a clip, never delete one.
             if (a.classGroup == Actor.ClassGroup.PERSON) eventEverSawPerson = true;
+            if (a.confirmed && a.lastSeenWallMs > 0) {
+                if (a.classGroup == Actor.ClassGroup.PERSON) {
+                    if (a.lastSeenWallMs > deterrentPersonSeenWallMs) deterrentPersonSeenWallMs = a.lastSeenWallMs;
+                } else if (!a.isStaticForTimeline && (a.classGroup == Actor.ClassGroup.VEHICLE
+                        || a.classGroup == Actor.ClassGroup.BIKE)) {
+                    if (a.lastSeenWallMs > deterrentMoverSeenWallMs) deterrentMoverSeenWallMs = a.lastSeenWallMs;
+                }
+            }
             // Mirror the person KEEP for a MOVING vehicle/bike. A YOLO-classified
             // car/bike that is NOT timeline-static is a real moving object — the
             // discard must never delete it even if it stayed at NOTICE (a close
@@ -2421,8 +2437,13 @@ public class SurveillanceEngineGpu {
             }
             
             // Log frame count every 100 frames to confirm frames are arriving
+            // (INFO every 1000 keeps a heartbeat in exported logs; the rest is DEBUG).
             if (frameCount % 100 == 0) {
-                logger.info("Surveillance frame #" + frameCount + " received");
+                if (frameCount % 1000 == 0) {
+                    logger.info("Surveillance frame #" + frameCount + " received");
+                } else {
+                    logger.debug("Surveillance frame #" + frameCount + " received");
+                }
             }
             
             // MOTION THROTTLING: Skip frames to achieve 10 FPS (saves 66% CPU)
@@ -2713,7 +2734,7 @@ public class SurveillanceEngineGpu {
                                 java.util.List<com.overdrive.app.ai.Detection> dets =
                                         detectorSnap.detect(quadCrop, qW, qH,
                                                 aiConfidence, true, true, false,
-                                                true, minObjectSize);
+                                                true, minObjectSizeFor(q));
                                 // POST-INFERENCE epoch re-check (audit R4
                                 // ExtB-2): the entry guard ran BEFORE the
                                 // ~250ms detect(); a disarm→rearm bounce
@@ -4498,10 +4519,14 @@ public class SurveillanceEngineGpu {
                     // but keep the deterrents firing as a normal trigger tick would.
                     else if (android.os.SystemClock.elapsedRealtime() < eventStartRetryAtMs) {
                         try {
-                            com.overdrive.app.byd.cloud.BydCloudDeterrent.getInstance()
-                                    .onMotionDetected(eventEverSawPerson, eventEverSawMovingObject);
-                            ScreenDeterrent.getInstance().onMotionDetected();
-                            deterrentFiredTime = now;
+                            boolean cloudFired = com.overdrive.app.byd.cloud.BydCloudDeterrent.getInstance()
+                                    .onMotionDetected(freshDeterrentEvidence(deterrentPersonSeenWallMs),
+                                            freshDeterrentEvidence(deterrentMoverSeenWallMs),
+                                            deterrentNearestRow(results));
+                            // Only a deterrent that actually fired arms its light-echo suppression (#546).
+                            if (ScreenDeterrent.getInstance().onMotionDetected() | cloudFired) {
+                                deterrentFiredTime = now;
+                            }
                         } catch (Exception e) {
                             logger.debug("Deterrent dispatch failed: " + e.getMessage());
                         }
@@ -4770,10 +4795,14 @@ public class SurveillanceEngineGpu {
                         // background threads and never block the surveillance pipeline.
                         // Each one independently honors its own enabled flag and cooldown.
                         try {
-                            com.overdrive.app.byd.cloud.BydCloudDeterrent.getInstance()
-                                    .onMotionDetected(eventEverSawPerson, eventEverSawMovingObject);
-                            ScreenDeterrent.getInstance().onMotionDetected();
-                            deterrentFiredTime = now;  // Track when deterrent was dispatched
+                            boolean cloudFired = com.overdrive.app.byd.cloud.BydCloudDeterrent.getInstance()
+                                    .onMotionDetected(freshDeterrentEvidence(deterrentPersonSeenWallMs),
+                                            freshDeterrentEvidence(deterrentMoverSeenWallMs),
+                                            deterrentNearestRow(results));
+                            // Only a deterrent that actually fired arms its light-echo suppression (#546).
+                            if (ScreenDeterrent.getInstance().onMotionDetected() | cloudFired) {
+                                deterrentFiredTime = now;
+                            }
                         } catch (Exception e) {
                             logger.debug("Deterrent dispatch failed: " + e.getMessage());
                         }
@@ -4789,10 +4818,14 @@ public class SurveillanceEngineGpu {
                     // SOTA: Recurring deterrent — re-trigger while motion continues.
                     // Per-deterrent cooldowns prevent spamming.
                     try {
-                        com.overdrive.app.byd.cloud.BydCloudDeterrent.getInstance()
-                                .onMotionDetected(eventEverSawPerson, eventEverSawMovingObject);
-                        ScreenDeterrent.getInstance().onMotionDetected();
-                        deterrentFiredTime = now;  // Track latest deterrent dispatch
+                        boolean cloudFired = com.overdrive.app.byd.cloud.BydCloudDeterrent.getInstance()
+                                .onMotionDetected(freshDeterrentEvidence(deterrentPersonSeenWallMs),
+                                            freshDeterrentEvidence(deterrentMoverSeenWallMs),
+                                            deterrentNearestRow(results));
+                        // Only a deterrent that actually fired arms its light-echo suppression (#546).
+                        if (ScreenDeterrent.getInstance().onMotionDetected() | cloudFired) {
+                            deterrentFiredTime = now;
+                        }
                     } catch (Exception e) {
                         // Fail silently — never block surveillance
                     }
@@ -4959,10 +4992,14 @@ public class SurveillanceEngineGpu {
                             }
                         }
                         try {
-                            com.overdrive.app.byd.cloud.BydCloudDeterrent.getInstance()
-                                    .onMotionDetected(eventEverSawPerson, eventEverSawMovingObject);
-                            ScreenDeterrent.getInstance().onMotionDetected();
-                            deterrentFiredTime = now;
+                            boolean cloudFired = com.overdrive.app.byd.cloud.BydCloudDeterrent.getInstance()
+                                    .onMotionDetected(freshDeterrentEvidence(deterrentPersonSeenWallMs),
+                                            freshDeterrentEvidence(deterrentMoverSeenWallMs),
+                                            deterrentNearestRow(results));
+                            // Only a deterrent that actually fired arms its light-echo suppression (#546).
+                            if (ScreenDeterrent.getInstance().onMotionDetected() | cloudFired) {
+                                deterrentFiredTime = now;
+                            }
                         } catch (Exception e) {
                             logger.debug("Deterrent dispatch failed: " + e.getMessage());
                         }
@@ -5313,7 +5350,7 @@ public class SurveillanceEngineGpu {
                                     byte[] quadCrop = cropFromMosaic(frameSnapshot, qr, qW, qH);
                                     if (quadCrop != null) {
                                         java.util.List<com.overdrive.app.ai.Detection> dets =
-                                                detectorSnap.detect(quadCrop, qW, qH, aiConfidence, true, true, false, true, minObjectSize);
+                                                detectorSnap.detect(quadCrop, qW, qH, aiConfidence, true, true, false, true, minObjectSizeFor(qr));
                                         // POST-INFERENCE epoch re-check (audit
                                         // R4 ExtB-2): the per-quadrant check
                                         // above ran BEFORE this ~250ms detect.
@@ -5394,7 +5431,7 @@ public class SurveillanceEngineGpu {
                             byte[] quadCrop = cropFromMosaic(frameSnapshot, qToRefresh, qW, qH);
                             if (quadCrop != null) {
                                 java.util.List<com.overdrive.app.ai.Detection> dets =
-                                        detectorSnap.detect(quadCrop, qW, qH, aiConfidence, true, true, false, true, minObjectSize);
+                                        detectorSnap.detect(quadCrop, qW, qH, aiConfidence, true, true, false, true, minObjectSizeFor(qToRefresh));
                                 // POST-INFERENCE epoch re-check (audit R4
                                 // ExtB-2): entry guard ran before the detect.
                                 if (!active || armEpoch != refreshEpoch) {
@@ -5831,7 +5868,7 @@ public class SurveillanceEngineGpu {
 
                 java.util.List<com.overdrive.app.ai.Detection> detections = detectorSnap.detect(
                         dewarpApplied ? dewarpedInput : cropData,
-                        qW, qH, aiConfidence, detectPerson, detectCar, detectAnimal, detectBike, minObjectSize);
+                        qW, qH, aiConfidence, detectPerson, detectCar, detectAnimal, detectBike, minObjectSizeFor(qIdx));
                 // Inference actually ran (an empty result still counts — it proves
                 // the lane is alive, which is exactly what the field log could not
                 // distinguish from "never dispatched").
@@ -7714,6 +7751,36 @@ public class SurveillanceEngineGpu {
         return String.format("trust=%s(%s)", trusted ? "YES" : "NO→YOLO-gated", coh);
     }
 
+    /** Cloud Deterrent zone input: the nearest row of this tick's MEDIUM+ motion (larger = closer), NaN if none. */
+    /** A Person or Person-or-Vehicle deterrent needs that actor seen within the last few seconds. */
+    private static boolean freshDeterrentEvidence(long seenWallMs) {
+        long age = System.currentTimeMillis() - seenWallMs;
+        return seenWallMs > 0 && age >= 0 && age <= DETERRENT_EVIDENCE_MS;
+    }
+
+    /** The AI size gate for one camera: never larger than the user's, smaller on an Extended zone. */
+    private float minObjectSizeFor(int quadrant) {
+        float base = minObjectSize;
+        SurveillanceConfig cfg = config;
+        if (cfg != null && quadrant >= 0 && quadrant < MotionPipelineV2.NUM_QUADRANTS
+                && "extended".equals(cfg.getEffectiveDetectionZone(quadrant))) {
+            return Math.min(base, EXTENDED_ZONE_MIN_OBJECT_SIZE);
+        }
+        return base;
+    }
+
+    private static float deterrentNearestRow(MotionPipelineV2.QuadrantResult[] results) {
+        float nearest = Float.NaN;
+        if (results == null) return nearest;
+        for (MotionPipelineV2.QuadrantResult r : results) {
+            if (r == null || !r.motionDetected || r.activeBlocks <= 0
+                    || r.threatLevel < MotionPipelineV2.THREAT_MEDIUM
+                    || Float.isNaN(r.centroidY) || Float.isInfinite(r.centroidY)) continue;
+            if (Float.isNaN(nearest) || r.centroidY > nearest) nearest = r.centroidY;
+        }
+        return nearest;
+    }
+
     private boolean trackerInZone(int quadrant) {
         if (config == null) return true;  // no config → no gate
         // Resolve the per-quadrant effective zone (per-quadrant override
@@ -8422,6 +8489,19 @@ public class SurveillanceEngineGpu {
                                                File eventFile,
                                                com.overdrive.app.camera.OemDashcamPipeline.FinalizedClip
                                                        oemFinalizedClip) {
+        sendFinalTelegramNotification(videoFilename, heroPhotoPath, snapIn, liveActors,
+                sceneryIdsIn, eventFile, oemFinalizedClip, java.util.Collections.<String>emptySet());
+    }
+
+    private void sendFinalTelegramNotification(String videoFilename, String heroPhotoPath,
+                                               java.util.List<Actor> snapIn,
+                                               java.util.List<Actor> liveActors,
+                                               java.util.Set<Long> sceneryIdsIn,
+                                               File eventFile,
+                                               com.overdrive.app.camera.OemDashcamPipeline.FinalizedClip
+                                                       oemFinalizedClip,
+                                               java.util.Set<String> firedDeterrents) {
+        final String deterrentCaption = deterrentTelegramCaption(firedDeterrents);
         // Event-peak union (not the TTL-pruned lastActors) so the caption names
         // the same actor the hero shows — see finalNotificationActors().
         java.util.List<Actor> snap = snapIn != null
@@ -8569,7 +8649,7 @@ public class SurveillanceEngineGpu {
                     if (enc != null) durationSec = enc.getLastFinalizedDurationSec();
                 } catch (Throwable ignored) {}
                 String label = threat != null ? Actor.groupLabel(threat.classGroup) : null;
-                TelegramNotifier.notifyVideoRecorded(videoPath, label, durationSec, finalDeterrentSummary);
+                TelegramNotifier.notifyVideoRecorded(videoPath, label, durationSec, deterrentCaption);
             } else {
                 logger.debug("Surveillance video upload skipped — clip path unresolved/missing");
             }
@@ -8586,7 +8666,7 @@ public class SurveillanceEngineGpu {
                 String label = threat != null ? Actor.groupLabel(threat.classGroup) : null;
                 TelegramNotifier.notifyVideoRecorded(
                         oemFinalizedClip.getPath(), label,
-                        oemFinalizedClip.getDurationSeconds(), finalDeterrentSummary);
+                        oemFinalizedClip.getDurationSeconds(), deterrentCaption);
             }
         } catch (Throwable t) {
             logger.debug("Telegram OEM surveillance video send failed: " + t.getMessage());
@@ -8744,6 +8824,28 @@ public class SurveillanceEngineGpu {
      *  the discard-keep (eventEverSawPerson). */
     private static boolean isLowConfFarNotice(Actor a) {
         return Actor.suppressFromSummary(a);
+    }
+
+    /** Localized plain-motion push title; English fallback when the catalog is unavailable. */
+    private static String motionTitle(String camHint) {
+        if (camHint == null) return notifText("notifications.motion_detected", "Motion detected");
+        String cam = notifText("notifications.camera_" + camHint, camHint);
+        String key = "notifications.motion_at";
+        try {
+            String v = com.overdrive.app.server.Messages.get(key, cam);
+            if (v != null && !v.equals(key)) return v;
+        } catch (Throwable ignored) {
+        }
+        return "Motion at " + camHint;
+    }
+
+    private static String notifText(String key, String fallback) {
+        try {
+            String v = com.overdrive.app.server.Messages.get(key);
+            if (v != null && !v.equals(key)) return v;
+        } catch (Throwable ignored) {
+        }
+        return fallback;
     }
 
     /** Camera name for a caption — the actor's CURRENT (last-seen) quadrant, NOT
@@ -8970,6 +9072,8 @@ public class SurveillanceEngineGpu {
                 logger.debug("Fallback hero: getFrameAtTime returned null for " + mp4File.getName());
                 return;
             }
+            // Raw (player-dewarped) clips get the same lens correction as playback.
+            frame = LensTag.dewarpFrameForClip(frame, mp4File);
             File tmpFile = new File(outFile.getAbsolutePath() + ".tmp");
             try (java.io.FileOutputStream fos = new java.io.FileOutputStream(tmpFile)) {
                 frame.compress(android.graphics.Bitmap.CompressFormat.JPEG, 92, fos);
@@ -9088,8 +9192,8 @@ public class SurveillanceEngineGpu {
                 String name = cameraNameFor(a);
                 if (name != null) { camHint = name; break; }
             }
-            String title = (camHint != null) ? "Motion at " + camHint : "Motion detected";
-            String body = "Recording in progress";
+            String title = motionTitle(camHint);
+            String body = notifText("notifications.recording_in_progress", "Recording in progress");
 
             com.overdrive.app.notifications.NotificationBus.get().publish(
                     new com.overdrive.app.notifications.NotificationEvent(
@@ -9212,6 +9316,32 @@ public class SurveillanceEngineGpu {
      *        threat box. The caller must decide this: by the time we run, both
      *        sources are just a file on disk.
      */
+    /** Deterrent types ("screen", "cloud") marked in [fromWallMs, now); empty without a window. */
+    private static java.util.Set<String> firedDeterrentTypes(long fromWallMs) {
+        java.util.Set<String> types = new java.util.HashSet<>();
+        if (fromWallMs <= 0L) return types;
+        org.json.JSONArray marks =
+                EventTimelineCollector.snapshotDeterrents(fromWallMs, System.currentTimeMillis());
+        for (int i = 0; i < marks.length(); i++) {
+            org.json.JSONObject mark = marks.optJSONObject(i);
+            if (mark != null && !mark.optString("type").isEmpty()) types.add(mark.optString("type"));
+        }
+        return types;
+    }
+
+    private static String deterrentTelegramCaption(java.util.Set<String> fired) {
+        if (fired == null || fired.isEmpty()) return "";
+        java.util.List<String> names = new java.util.ArrayList<>();
+        if (fired.contains(EventTimelineCollector.DETERRENT_SCREEN)) {
+            names.add(com.overdrive.app.telegram.TelegramMessages.get("deterrent_screen"));
+        }
+        if (fired.contains(EventTimelineCollector.DETERRENT_CLOUD)) {
+            names.add(com.overdrive.app.telegram.TelegramMessages.get("deterrent_cloud"));
+        }
+        return names.isEmpty() ? "" : com.overdrive.app.telegram.TelegramMessages.get(
+                "deterrent_triggered", String.join(" + ", names));
+    }
+
     private void publishMotionFinal(String videoFilename, String heroJpegName,
                                     boolean heroIsCloseUp) {
         // Legacy entry: computes the actor union + scenery verdicts from live
@@ -9229,6 +9359,15 @@ public class SurveillanceEngineGpu {
                                     boolean heroIsCloseUp,
                                     java.util.List<Actor> snapIn,
                                     java.util.Set<Long> sceneryIdsIn) {
+        publishMotionFinal(videoFilename, heroJpegName, heroIsCloseUp, snapIn, sceneryIdsIn,
+                java.util.Collections.<String>emptySet());
+    }
+
+    private void publishMotionFinal(String videoFilename, String heroJpegName,
+                                    boolean heroIsCloseUp,
+                                    java.util.List<Actor> snapIn,
+                                    java.util.Set<Long> sceneryIdsIn,
+                                    java.util.Set<String> firedDeterrents) {
         try {
             // Event-peak union (NOT the bare TTL-pruned lastActors) so the push
             // title/body name the same actor the hero thumbnail shows. A close
@@ -9363,7 +9502,7 @@ public class SurveillanceEngineGpu {
             // or plain "Motion at front" when AI didn't classify.
             String title;
             if (threat == null) {
-                title = (camHint != null) ? "Motion at " + camHint : "Motion detected";
+                title = motionTitle(camHint);
             } else {
                 StringBuilder sb = new StringBuilder();
                 if (peakSev == Actor.Severity.CRITICAL) sb.append("CRITICAL · ");
@@ -9409,6 +9548,15 @@ public class SurveillanceEngineGpu {
                 if (sb.length() == 0) sb.append("Motion detected");
                 if (hasHero) sb.append(" · close-up view");
                 body = sb.toString();
+            }
+            // Before the place suffix: the Notification Log clamps to two lines.
+            final boolean screenDeterrentFired = firedDeterrents != null
+                    && firedDeterrents.contains(EventTimelineCollector.DETERRENT_SCREEN);
+            final boolean cloudDeterrentFired = firedDeterrents != null
+                    && firedDeterrents.contains(EventTimelineCollector.DETERRENT_CLOUD);
+            if (screenDeterrentFired || cloudDeterrentFired) {
+                body = body + " · Deterrent triggered: " + (screenDeterrentFired && cloudDeterrentFired
+                        ? "Screen + Cloud" : screenDeterrentFired ? "Screen" : "Cloud");
             }
 
             // Place suffix — appended only when the resolver has a synchronous
@@ -9476,30 +9624,14 @@ public class SurveillanceEngineGpu {
             data.put("vehicleCount", vehicles);
             data.put("bikeCount", bikes);
             data.put("animalCount", animals);
-            // Include only deterrents that reached their successful execution
-            // point. Web Push and the final Telegram video caption share this verdict.
-            org.json.JSONObject deterrents =
-                    com.overdrive.app.notifications.DeterrentNotificationStatus.consume();
-            java.util.List<String> firedDeterrents = new java.util.ArrayList<>();
-            if (deterrents.has("screenDeterrentFired")) {
-                data.put("screenDeterrentFired", true);
-                firedDeterrents.add("Screen deterrent");
-            }
-            if (deterrents.has("cloudDeterrentFired")) {
-                data.put("cloudDeterrentFired", true);
-                firedDeterrents.add("Cloud deterrent");
-            }
-            finalDeterrentSummary = firedDeterrents.isEmpty() ? ""
-                    : "Deterrent fired: " + android.text.TextUtils.join(" + ", firedDeterrents);
-            if (!finalDeterrentSummary.isEmpty()) {
-                body = body + " · " + finalDeterrentSummary;
-            }
             if (closest != null && closest != Actor.Proximity.UNKNOWN) {
                 data.put("closestProximity", closest.name());
             }
             if (camHint != null) data.put("camera", camHint);
             if (placeMid != null) data.put("place", placeMid);
             if (placeCC  != null) data.put("placeCountry", placeCC);
+            if (screenDeterrentFired) data.put("screenDeterrentFired", true);
+            if (cloudDeterrentFired) data.put("cloudDeterrentFired", true);
 
             com.overdrive.app.notifications.NotificationEvent.Severity nsev;
             if (peakSev == Actor.Severity.CRITICAL) {
@@ -9630,17 +9762,17 @@ public class SurveillanceEngineGpu {
         // Re-read the live surveillance dir: enableSurveillance() may have
         // snapshotted the internal fallback during the boot mount-race, and the
         // SD/USB mount (incl. the smRef.ensure*Mounted attempt just above) may
-        // have landed since. We MUST resolve LIVE (getLiveSurveillanceDir)
+        // have landed since. We MUST resolve LIVE (getLiveSurveillanceDirUnlocked)
         // rather than read getSurveillanceDir(): the volatile surveillanceDir
         // field is frozen while the arm session is active (updateActiveDirectories
         // skips the surveillance branch), so getSurveillanceDir() would return
         // the stale internal fallback for a mount that landed after the bounded
-        // enable-wait. getLiveSurveillanceDir() bypasses that freeze and falls
-        // back to internal when the external is genuinely unavailable. Resolved
+        // enable-wait. The live resolve bypasses that freeze and falls back to
+        // internal when the external is genuinely unavailable. Resolved
         // ONCE here (recording == false above), so the in-flight clip can't be
         // split across volumes; null-guard back to the snapshot.
         File trigDir = (smRef != null)
-                ? (afterLoss ? smRef.getLiveSurveillanceDirIfMounted() : smRef.getLiveSurveillanceDir())
+                ? (afterLoss ? smRef.getLiveSurveillanceDirIfMounted() : smRef.getLiveSurveillanceDirUnlocked())
                 : eventOutputDir;
         if (trigDir == null) trigDir = eventOutputDir;
         // ENOSPC internal-spill: if the configured external is mounted-but-FULL,
@@ -9673,18 +9805,11 @@ public class SurveillanceEngineGpu {
         // smart mode, so trigger an immediate prune so the first segment doesn't
         // land on a near-full card.
         //
-        // Position and executor are BOTH load-bearing; see the twin dispatch on
-        // the smart-trigger path (startRecording) for the full rationale. In
-        // short: ensureSurveillanceSpace() takes StorageManager's
+        // The executor is load-bearing; see the twin dispatch on the smart-trigger
+        // path (startRecording). ensureSurveillanceSpace() takes StorageManager's
         // surveillanceCleanupLock with no wall-clock bound (UNLIMITED_REAP, shell
-        // fallback budgets seconds per directory), and so do
-        // getLiveSurveillanceDir() / resolveSurveillanceTargetWithEnospcFallback
-        // above. Dispatching BEFORE those resolves — as this used to — let the
-        // maintenance thread win the lock and park the CALLER on the resolve for
-        // the walk's whole duration. Here the caller is enable() on the daemon/
-        // control thread, so on a dropped/bridged SD mount that stalled arming
-        // itself: `active` already true, `recording` still false, nothing being
-        // recorded, and the control thread deaf to the next arm/disarm.
+        // fallback budgets seconds per directory), and the caller here is
+        // enable() on the daemon/control thread.
         //
         // Uses storageMaintenanceExecutor rather than a raw thread so it is
         // daemon + MIN_PRIORITY, bounded, and actually shut down by release().
@@ -10626,31 +10751,33 @@ public class SurveillanceEngineGpu {
         // a synchronous scan + delete here was costing 100-200ms on the
         // motion-detection thread on near-full SD cards, which was the
         // dominant contributor to lag at motion onset. Two changes:
-        //   1. SD-card mount check stays sync (cheap, microseconds, and we
-        //      need a valid path before triggerEventRecording).
+        //   1. The SD/USB mount check is bounded (isMountWritableBounded) and
+        //      never remounts on this thread; a volume that doesn't answer in
+        //      time gets this event on internal storage.
         //   2. ensureSurveillanceSpace fires on storageMaintenanceExecutor (NOT
         //      aiExecutor — that placement cost 43 s of zero YOLO during an SD
         //      remount storm; see the executor's own comment and the
-        //      dispatch-after-resolve rationale at the execute() site below).
+        //      constraints at the execute() site below).
         //      A cheap noop if already under the limit, and worst case it runs
         //      in parallel with the recording itself. New recordings still
         //      write; old ones get pruned a beat later.
         com.overdrive.app.storage.StorageManager storageManager;
+        boolean volumeUnanswered = false;
         try {
             storageManager = com.overdrive.app.storage.StorageManager.getInstance();
             com.overdrive.app.storage.StorageManager.StorageType type =
                     storageManager.getSurveillanceStorageType();
-            if (type == com.overdrive.app.storage.StorageManager.StorageType.SD_CARD &&
-                    !storageManager.isSdCardMounted()) {
-                logger.warn("SD card unmounted before recording - attempting remount");
-                if (!storageManager.ensureSdCardMounted(true)) {
-                    logger.error("SD card remount failed - event may write to stale path");
-                }
-            } else if (type == com.overdrive.app.storage.StorageManager.StorageType.USB &&
-                    !storageManager.isUsbMounted()) {
-                logger.warn("USB unmounted before recording - attempting remount");
-                if (!storageManager.ensureUsbMounted(true)) {
-                    logger.error("USB remount failed - event may write to stale path");
+            if (type == com.overdrive.app.storage.StorageManager.StorageType.SD_CARD
+                    || type == com.overdrive.app.storage.StorageManager.StorageType.USB) {
+                String volume = (type == com.overdrive.app.storage.StorageManager.StorageType.SD_CARD)
+                        ? "SD card" : "USB";
+                Boolean writable = storageManager.isMountWritableBounded(type);
+                if (writable == null) {
+                    volumeUnanswered = true;
+                    logger.warn(volume + " did not answer before recording - saving this event to internal storage");
+                } else if (!writable) {
+                    logger.warn(volume + " unmounted before recording - remounting in the background");
+                    storageManager.remountInBackground(type);
                 }
             }
         } catch (Exception e) {
@@ -10663,17 +10790,19 @@ public class SurveillanceEngineGpu {
         String fileName = "event_" + timestamp + ".mp4";
         // Re-read the live surveillance dir: enableSurveillance() may have
         // snapshotted the internal fallback during the boot mount-race, and the
-        // SD/USB mount (incl. the smRef.ensure*Mounted attempt just above) may
-        // have landed since. We MUST resolve LIVE (getLiveSurveillanceDir)
-        // rather than read getSurveillanceDir(): the volatile surveillanceDir
-        // field is frozen while the arm session is active (updateActiveDirectories
-        // skips the surveillance branch), so getSurveillanceDir() would return
-        // the stale internal fallback for a mount that landed after the bounded
-        // enable-wait. getLiveSurveillanceDir() bypasses that freeze and falls
-        // back to internal when the external is genuinely unavailable. Resolved
-        // ONCE here (recording == false above), so the in-flight clip can't be
-        // split across volumes; null-guard back to the snapshot.
-        File trigDir = (smRef != null) ? smRef.getLiveSurveillanceDir() : eventOutputDir;
+        // SD/USB mount may have landed since. We MUST resolve LIVE
+        // (getLiveSurveillanceDirUnlocked) rather than read getSurveillanceDir():
+        // the volatile surveillanceDir field is frozen while the arm session is
+        // active (updateActiveDirectories skips the surveillance branch), so
+        // getSurveillanceDir() would return the stale internal fallback for a
+        // mount that landed after the bounded enable-wait. The live resolve
+        // bypasses that freeze and falls back to internal when the external is
+        // genuinely unavailable. Resolved ONCE here (recording == false above),
+        // so the in-flight clip can't be split across volumes; null-guard back
+        // to the snapshot.
+        File trigDir = (smRef == null) ? eventOutputDir
+                : volumeUnanswered ? smRef.getInternalSurveillanceDir()
+                : smRef.getLiveSurveillanceDirUnlocked();
         if (trigDir == null) trigDir = eventOutputDir;
         // ENOSPC internal-spill: if the configured external is mounted-but-FULL,
         // redirect THIS event to the INTERNAL SURVEILLANCE dir so it isn't
@@ -10719,10 +10848,7 @@ public class SurveillanceEngineGpu {
             currentEventFile = unique;
         }
 
-        // Storage housekeeping — dispatched HERE, deliberately AFTER the
-        // getLiveSurveillanceDir()/ENOSPC resolves above.
-        //
-        // Two constraints fix its position:
+        // Storage housekeeping, off this thread. Two constraints:
         //  (a) NOT on aiExecutor. ensureSurveillanceSpace() has no wall-clock
         //      bound (UNLIMITED_REAP) and its shell fallback budgets seconds per
         //      directory listing, so on a dropped/bridged SD mount it runs for
@@ -10732,21 +10858,17 @@ public class SurveillanceEngineGpu {
         //      evidence (log_2C26G4RL, 2026-07-19): SD remount failures coincided
         //      with ~43 s of zero YOLO while HIGH(loiter) motion fired
         //      continuously, and five real sequences expired WITHOUT trigger.
-        //  (b) AFTER the directory resolves. Both the cleanup and
-        //      getLiveSurveillanceDir()/resolveSurveillanceTargetWithEnospcFallback
-        //      take StorageManager.surveillanceCleanupLock. Submitting the walk
-        //      first let the maintenance thread win that lock and park THIS thread
-        //      (AiLaneWorker) on the resolve for the walk's whole duration, which
-        //      would have relocated the stall from the AI lane to the motion lane
-        //      on the trigger path. Dispatching after the resolves means the engine
-        //      thread never contends for that lock in this method.
-        if (smRef != null) {
+        //  (b) Coalesced: each run walks the whole pool under surveillanceCleanupLock,
+        //      so at most one request waits behind a running one.
+        if (smRef != null && surveillanceSpaceQueued.compareAndSet(false, true)) {
             try {
                 storageMaintenanceExecutor.execute(() -> {
+                    surveillanceSpaceQueued.set(false);
                     try { smRef.ensureSurveillanceSpace(50 * 1024 * 1024); }
                     catch (Exception e) { logger.warn("Async storage cleanup failed: " + e.getMessage()); }
                 });
             } catch (java.util.concurrent.RejectedExecutionException ignored) {
+                surveillanceSpaceQueued.set(false);
                 // Engine releasing — skip housekeeping. The daemon's 30 s periodic
                 // reclaim performs an equivalent surveillance pass independently.
             }
@@ -11105,11 +11227,11 @@ public class SurveillanceEngineGpu {
         try {
             HardwareEventRecorderGpu encoder = recorder.getEncoder();
             if (encoder != null) {
-                long actual = encoder.getActualPreRecordDurationMs();
-                if (actual > 0) {
-                    actualPreRecordMs = actual;
-                    logger.info("Timeline using actual pre-record duration: " + actual + "ms (configured: " + preRecordMs + "ms)");
-                }
+                // 0 = the clip starts live (no history flushed); the configured value would
+                // place every marker that much too late.
+                actualPreRecordMs = Math.max(0L, encoder.getActualPreRecordDurationMs());
+                logger.info("Timeline pre-record: actual " + actualPreRecordMs
+                        + "ms, requested " + preRecordMs + "ms");
             }
         } catch (Exception e) {
             logger.warn("Could not get actual pre-record duration: " + e.getMessage());
@@ -11122,7 +11244,7 @@ public class SurveillanceEngineGpu {
         // additionally keeps any stale stop from touching that next
         // collection).
         if (recording) {
-            timelineGen = timelineCollector.startCollecting(actualPreRecordMs);
+            timelineGen = timelineCollector.startCollecting(actualPreRecordMs, preRecordMs);
         }
         
         logger.info("Event recording triggered successfully");
@@ -11618,6 +11740,8 @@ public class SurveillanceEngineGpu {
         // Final-segment anchor for the metadata flush, frozen before a later
         // timeline restart can re-point it.
         final long stoppingSegmentStartMs = timelineCollector.getRecordingStartTimeMs();
+        // Deterrents marked during this event: the window the sidecar (Events pills) uses.
+        final java.util.Set<String> stoppingDeterrents = firedDeterrentTypes(stoppingSegmentStartMs);
         // Timeline generation snapshot (audit R11-4 / ExtD-5): frozen with the
         // other stop-time snapshots. If a later startCollecting bumps
         // the generation before our KEEP flush runs, the flush's inline
@@ -11757,11 +11881,11 @@ public class SurveillanceEngineGpu {
             // currentEventFile, all cleared above.
             if (!videoName.equals(lastFinalNotifiedEvent.getAndSet(videoName))) {
                 try { publishMotionFinal(videoName, heroName, heroIsCloseUp,
-                        stoppingNotifActors, stoppingSceneryIds); }
+                        stoppingNotifActors, stoppingSceneryIds, stoppingDeterrents); }
                 catch (Throwable t) { logger.debug("publishMotionFinal threw: " + t.getMessage()); }
                 try { sendFinalTelegramNotification(videoName, heroPath,
                         stoppingNotifActors, stoppingActors, stoppingSceneryIds, stoppingFile,
-                        oemFinalizedClip); }
+                        oemFinalizedClip, stoppingDeterrents); }
                 catch (Throwable t) { logger.debug("sendFinalTelegramNotification threw: " + t.getMessage()); }
             } else {
                 logger.debug("Final notification already sent for " + videoName + "; skipping duplicate");

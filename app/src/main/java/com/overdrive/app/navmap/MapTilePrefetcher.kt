@@ -85,6 +85,19 @@ object MapTilePrefetcher {
 
     private const val DEFAULT_MAX_REGIONS = 8
 
+    /** A frequent place's box (~5.5 km square): the streets around it, not the whole town. */
+    private const val PLACE_HALF_DEG = 0.025
+    /** At most this many frequent places kept offline (each a few MB of the ambient cache). */
+    private const val MAX_PLACE_REGIONS = 12
+    /** A place this near one already prefetched is covered by it. */
+    private const val PLACE_SAME_M = 1_000.0
+    /** A place's region is fetched again after this long (the basemap is updated weekly). */
+    private const val PLACE_REFRESH_MS = 60L * 24 * 60 * 60_000L
+    private const val TYPE_LOCATE = "roadsense"
+    private const val TYPE_PLACE = "place"
+    /** Regions saved under the build-free vector tile URLs (VectorTileKeys); older ones no longer match the map. */
+    private const val KEYS = 1
+
     private const val METERS_PER_DEG_LAT = 111_320.0
 
     /** If true, prefetch is allowed on metered networks. Default false (don't burn cellular data). */
@@ -110,6 +123,104 @@ object MapTilePrefetcher {
     private var lastCenterLat: Double = Double.NaN
     private var lastCenterLng: Double = Double.NaN
 
+    // Frequent places still to fetch, one after another; and the boxes fully downloaded (for the offline fallback).
+    private val placeQueue = ArrayDeque<Pair<Double, Double>>()
+    private var placeStyleUrl: String = ""
+    private var placePixelRatio: Float = 1f
+    @Volatile
+    private var doneBounds: List<LatLngBounds> = emptyList()
+
+    /** Whether a fully downloaded region covers (lat, lng): the vector map has the streets there offline. */
+    @JvmStatic
+    fun coversOffline(lat: Double, lng: Double): Boolean =
+        doneBounds.any { lat <= it.latitudeNorth && lat >= it.latitudeSouth && lng <= it.longitudeEast && lng >= it.longitudeWest }
+
+    /**
+     * Fetch the streets around frequent places ([places]: saved ones, recent destinations) not yet offline, so the
+     * map shows them with no network. Only when [unmetered] (Wi-Fi that isn't a phone's hotspot); one region at a time,
+     * after any download in flight. Main thread.
+     */
+    @JvmStatic
+    fun prefetchPlaces(context: Context, styleUrl: String, places: List<Pair<Double, Double>>, pixelRatio: Float, unmetered: Boolean) {
+        try {
+            val appCtx = context.applicationContext
+            refreshCoverage(appCtx)
+            if (!unmetered || places.isEmpty() || isMetered(appCtx)) return
+            OfflineManager.getInstance(appCtx).listOfflineRegions(object : OfflineManager.ListOfflineRegionsCallback {
+                override fun onList(offlineRegions: Array<OfflineRegion>?) {
+                    try {
+                        val now = System.currentTimeMillis()
+                        val wanted = ArrayList<Pair<Double, Double>>()
+                        for (pl in places) {
+                            if (wanted.size >= MAX_PLACE_REGIONS) break
+                            if (wanted.none { haversineMeters(it.first, it.second, pl.first, pl.second) < PLACE_SAME_M }) wanted.add(pl)
+                        }
+                        val kept = ArrayList<Pair<Double, Double>>()
+                        for (r in (offlineRegions ?: emptyArray()).filter { typeOf(it) == TYPE_PLACE }) {
+                            val m = meta(r)
+                            val at = Pair(m.optDouble("lat", Double.NaN), m.optDouble("lng", Double.NaN))
+                            val stillWanted = wanted.any { haversineMeters(it.first, it.second, at.first, at.second) < PLACE_SAME_M }
+                            // (no longer a frequent place, a download that never finished, saved under old tile URLs, or old)
+                            if (!stillWanted || !m.optBoolean("done", false) || m.optInt("keys", 0) != KEYS ||
+                                now - m.optLong("ts", 0L) > PLACE_REFRESH_MS) {
+                                deleteRegion(r)
+                            } else {
+                                kept.add(at)
+                            }
+                        }
+                        placeStyleUrl = styleUrl
+                        placePixelRatio = pixelRatio
+                        placeQueue.clear()
+                        wanted.filter { w -> kept.none { haversineMeters(it.first, it.second, w.first, w.second) < PLACE_SAME_M } }
+                            .forEach { placeQueue.addLast(it) }
+                        if (placeQueue.isNotEmpty()) Log.i(TAG, "prefetchPlaces: ${placeQueue.size} place(s) to fetch")
+                        nextPlace(appCtx)
+                    } catch (t: Throwable) {
+                        Log.e(TAG, "prefetchPlaces.onList failed", t)
+                    }
+                }
+
+                override fun onError(error: String) {
+                    Log.w(TAG, "prefetchPlaces list error: $error")
+                }
+            })
+        } catch (t: Throwable) {
+            Log.e(TAG, "prefetchPlaces failed", t)
+        }
+    }
+
+    // The next queued place, unless a download is running (its completion comes back here) or the network turned metered.
+    private fun nextPlace(context: Context) {
+        try {
+            if (inFlight || placeQueue.isEmpty()) return
+            if (isMetered(context)) { placeQueue.clear(); return }
+            val (lat, lng) = placeQueue.removeFirst()
+            startRegion(context, placeStyleUrl, lat, lng, PLACE_HALF_DEG, placePixelRatio, buildMetadata(System.currentTimeMillis(), TYPE_PLACE, lat, lng))
+        } catch (t: Throwable) {
+            inFlight = false
+            Log.e(TAG, "nextPlace failed", t)
+        }
+    }
+
+    // The fully downloaded regions' boxes, for [coversOffline].
+    private fun refreshCoverage(context: Context) {
+        try {
+            OfflineManager.getInstance(context.applicationContext).listOfflineRegions(object : OfflineManager.ListOfflineRegionsCallback {
+                override fun onList(offlineRegions: Array<OfflineRegion>?) {
+                    doneBounds = (offlineRegions ?: emptyArray())
+                        .filter { meta(it).let { m -> m.optBoolean("done", false) && m.optInt("keys", 0) == KEYS } }
+                        .mapNotNull { it.definition.bounds }
+                }
+
+                override fun onError(error: String) {
+                    Log.w(TAG, "refreshCoverage list error: $error")
+                }
+            })
+        } catch (t: Throwable) {
+            Log.e(TAG, "refreshCoverage failed", t)
+        }
+    }
+
     /**
      * Set the ambient (LRU) tile cache to 256 MB. Idempotent: a guard flag ensures we only issue the
      * native call once per process. Safe to call on every map-ready.
@@ -117,6 +228,7 @@ object MapTilePrefetcher {
     @JvmStatic
     fun configureAmbientCache(context: Context) {
         try {
+            refreshCoverage(context)
             if (ambientConfigured) return
             ambientConfigured = true
             val appCtx = context.applicationContext
@@ -217,59 +329,55 @@ object MapTilePrefetcher {
             }
 
             val appCtx = context.applicationContext
-            val manager = OfflineManager.getInstance(appCtx)
 
             // Keep region count bounded before adding a new one.
             pruneRegions(appCtx, DEFAULT_MAX_REGIONS)
 
-            // Box around center. Longitude degrees shrink with latitude, so scale E/W by cos(lat) to
-            // keep the box roughly square in meters.
-            val lonHalf = BOX_HALF_DEG / max(0.01, cos(Math.toRadians(centerLat)))
-            val latNorth = centerLat + BOX_HALF_DEG
-            val latSouth = centerLat - BOX_HALF_DEG
-            val lonEast = centerLng + lonHalf
-            val lonWest = centerLng - lonHalf
-            val bounds: LatLngBounds = LatLngBounds.from(latNorth, lonEast, latSouth, lonWest)
-
-            val definition: OfflineRegionDefinition = OfflineTilePyramidRegionDefinition(
-                styleUrl,
-                bounds,
-                MIN_ZOOM,
-                MAX_ZOOM,
-                pixelRatio
-            )
-
-            val metadata = buildMetadata(System.currentTimeMillis())
-
-            inFlight = true
-            manager.createOfflineRegion(
-                definition,
-                metadata,
-                object : OfflineManager.CreateOfflineRegionCallback {
-                    override fun onCreate(offlineRegion: OfflineRegion) {
-                        try {
-                            offlineRegion.setObserver(makeObserver(offlineRegion))
-                            offlineRegion.setDownloadState(OfflineRegion.STATE_ACTIVE)
-                            // Record the center only once the region is actually created/started.
-                            lastCenterLat = centerLat
-                            lastCenterLng = centerLng
-                            Log.i(TAG, "prefetch started around ($centerLat,$centerLng) z$MIN_ZOOM..$MAX_ZOOM")
-                        } catch (t: Throwable) {
-                            inFlight = false
-                            Log.e(TAG, "onCreate: failed to start download", t)
-                        }
-                    }
-
-                    override fun onError(error: String) {
-                        inFlight = false
-                        Log.w(TAG, "createOfflineRegion error: $error")
-                    }
-                }
-            )
+            startRegion(appCtx, styleUrl, centerLat, centerLng, BOX_HALF_DEG, pixelRatio,
+                buildMetadata(System.currentTimeMillis(), TYPE_LOCATE, centerLat, centerLng)) {
+                // Record the center only once the region is actually created/started.
+                lastCenterLat = centerLat
+                lastCenterLng = centerLng
+            }
         } catch (t: Throwable) {
             inFlight = false
             Log.e(TAG, "prefetchAround failed", t)
         }
+    }
+
+    // A tile-pyramid region [halfDeg] each way of (centerLat, centerLng), downloaded now.
+    private fun startRegion(
+        context: Context, styleUrl: String, centerLat: Double, centerLng: Double, halfDeg: Double, pixelRatio: Float,
+        metadata: ByteArray, onStarted: (() -> Unit)? = null
+    ) {
+        // Box around center. Longitude degrees shrink with latitude, so scale E/W by cos(lat) to
+        // keep the box roughly square in meters.
+        val lonHalf = halfDeg / max(0.01, cos(Math.toRadians(centerLat)))
+        val bounds: LatLngBounds = LatLngBounds.from(centerLat + halfDeg, centerLng + lonHalf, centerLat - halfDeg, centerLng - lonHalf)
+        val definition: OfflineRegionDefinition = OfflineTilePyramidRegionDefinition(styleUrl, bounds, MIN_ZOOM, MAX_ZOOM, pixelRatio)
+        inFlight = true
+        OfflineManager.getInstance(context.applicationContext).createOfflineRegion(
+            definition,
+            metadata,
+            object : OfflineManager.CreateOfflineRegionCallback {
+                override fun onCreate(offlineRegion: OfflineRegion) {
+                    try {
+                        offlineRegion.setObserver(makeObserver(context.applicationContext, offlineRegion))
+                        offlineRegion.setDownloadState(OfflineRegion.STATE_ACTIVE)
+                        onStarted?.invoke()
+                        Log.i(TAG, "prefetch started around ($centerLat,$centerLng) z$MIN_ZOOM..$MAX_ZOOM")
+                    } catch (t: Throwable) {
+                        inFlight = false
+                        Log.e(TAG, "onCreate: failed to start download", t)
+                    }
+                }
+
+                override fun onError(error: String) {
+                    inFlight = false
+                    Log.w(TAG, "createOfflineRegion error: $error")
+                }
+            }
+        )
     }
 
     /**
@@ -285,7 +393,11 @@ object MapTilePrefetcher {
                 object : OfflineManager.ListOfflineRegionsCallback {
                     override fun onList(offlineRegions: Array<OfflineRegion>?) {
                         try {
-                            val regions = offlineRegions ?: return
+                            // (the Locate regions only: frequent places have their own cap)
+                            val all = offlineRegions?.filter { typeOf(it) == TYPE_LOCATE } ?: return
+                            // (saved under old tile URLs: they no longer match the map)
+                            val (regions, stale) = all.partition { meta(it).optInt("keys", 0) == KEYS }
+                            stale.forEach { deleteRegion(it) }
                             // Keep room for the new region we are about to create.
                             val keep = max(0, maxRegions - 1)
                             if (regions.size <= keep) return
@@ -313,7 +425,7 @@ object MapTilePrefetcher {
 
     // --- internals ---
 
-    private fun makeObserver(region: OfflineRegion): OfflineRegion.OfflineRegionObserver =
+    private fun makeObserver(context: Context, region: OfflineRegion): OfflineRegion.OfflineRegionObserver =
         object : OfflineRegion.OfflineRegionObserver {
             override fun onStatusChanged(status: OfflineRegionStatus) {
                 try {
@@ -325,6 +437,9 @@ object MapTilePrefetcher {
                             TAG,
                             "prefetch complete: ${status.completedResourceCount}/${status.requiredResourceCount} resources"
                         )
+                        // (complete: it counts for the offline fallback) then the next place
+                        markDone(context, region)
+                        nextPlace(context)
                     }
                 } catch (t: Throwable) {
                     inFlight = false
@@ -339,6 +454,8 @@ object MapTilePrefetcher {
                     Log.e(TAG, "onError: stop failed", t)
                 } finally {
                     inFlight = false
+                    // (a failed place waits for the next map session)
+                    placeQueue.clear()
                     Log.w(TAG, "prefetch error: reason=${error.reason} message=${error.message}")
                 }
             }
@@ -350,10 +467,37 @@ object MapTilePrefetcher {
                     Log.e(TAG, "tileCountLimit: stop failed", t)
                 } finally {
                     inFlight = false
+                    placeQueue.clear()
                     Log.w(TAG, "prefetch stopped: tile count limit ($limit) exceeded")
                 }
             }
         }
+
+    private fun markDone(context: Context, region: OfflineRegion) {
+        try {
+            val m = meta(region).put("done", true)
+            region.updateMetadata(m.toString().toByteArray(Charsets.UTF_8), object : OfflineRegion.OfflineRegionUpdateMetadataCallback {
+                override fun onUpdate(metadata: ByteArray) {
+                    refreshCoverage(context)
+                }
+
+                override fun onError(error: String) {
+                    Log.w(TAG, "markDone error: $error")
+                }
+            })
+        } catch (t: Throwable) {
+            Log.e(TAG, "markDone failed", t)
+        }
+    }
+
+    private fun meta(region: OfflineRegion): JSONObject = try {
+        JSONObject(String(region.metadata ?: ByteArray(0), Charsets.UTF_8))
+    } catch (t: Throwable) {
+        JSONObject()
+    }
+
+    // A region's kind; the oldest ones carry none: Locate's.
+    private fun typeOf(region: OfflineRegion): String = meta(region).optString("type", TYPE_LOCATE)
 
     private fun deleteRegion(region: OfflineRegion) {
         try {
@@ -371,10 +515,13 @@ object MapTilePrefetcher {
         }
     }
 
-    private fun buildMetadata(ts: Long): ByteArray {
+    private fun buildMetadata(ts: Long, type: String, lat: Double, lng: Double): ByteArray {
         val json = JSONObject()
-        json.put("type", "roadsense")
+        json.put("type", type)
         json.put("ts", ts)
+        json.put("lat", lat)
+        json.put("lng", lng)
+        json.put("keys", KEYS)
         return json.toString().toByteArray(Charsets.UTF_8)
     }
 

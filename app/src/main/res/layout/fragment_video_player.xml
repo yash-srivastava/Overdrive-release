@@ -1,54 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  SOTA Video player overlay.
-
-  Composition: full-bleed ZoomableVideoView with two overlay bars (top +
-  bottom) plus a floating quadrant selector pill above the bottom controls.
-  Both overlays use semi-transparent black scrims rather than M3 surface
-  tokens — this is INTENTIONAL.
-
-  Why dark-only chrome (the only place in the app that doesn't follow
-  ?attr/colorBackground):
-    The player runs in front of arbitrary video frames. A light theme
-    overlay would be unreadable over a bright sky shot or a sunlit road,
-    and chrome legibility matters more than theme correctness here.
-    Most pro players (YouTube, VLC, ExoPlayer's PlayerView, Photos) make
-    the same call. The video surface itself is also #000000 by spec —
-    that's the letterbox color, not a theme decision.
-
-  Brand correctness:
-    The progress / thumb tint is ?attr/colorPrimary (brand teal), so the
-    accent still flips to the dark-mode primary when the rest of the app
-    does. The previous build hard-coded #6C63FF (purple) which never
-    matched anything in the design system — that has been replaced.
-
-  Preserved IDs (VideoPlayerFragment.kt findViewById targets):
-    videoView, btnBack, tvTitle, tvMeta, topBar, bottomControls,
-    eventTimeline, seekBar, btnPlayPause, btnPrev, btnNext,
-    tvCurrentTime, tvDuration, tvEventInfo
-
-  Quadrant zoom (single-camera fullscreen over the AVM 2x2 mosaic):
-    quadrantBar, btnQuadrantAll, btnQuadrantFront, btnQuadrantRight,
-    btnQuadrantRear, btnQuadrantLeft. The video surface is a
-    ZoomableVideoView so it can apply a TextureView matrix per
-    quadrant — see VideoPlayerFragment.setQuadrant for the wiring.
--->
+<!-- Video player (inline preview and full screen). Chrome stays dark over any frame: camera views
+     top-start, audio + maximise top-end, play/pause centred, timeline row at the bottom.
+     topBar, quadrantBar, btnPlayPause and bottomControls fade together (VideoPlayerFragment). -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#000000">
+    android:background="@color/rec_player_bg">
 
-    <!-- Video Surface — letterboxed black is by spec, not theme.
-         ZoomableVideoView lets us apply a per-quadrant matrix transform so
-         the user can see one of the four AVM cameras at native resolution
-         without re-encoding. Same VideoView API surface (setVideoURI,
-         start, pause, currentPosition, ...) so the fragment doesn't care. -->
     <com.overdrive.app.ui.view.ZoomableVideoView
         android:id="@+id/videoView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_gravity="center" />
+
+    <ImageButton
+        android:id="@+id/btnPlayPause"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:layout_gravity="center"
+        android:background="@drawable/rec_player_glass_circle"
+        android:contentDescription="@string/cd_play_pause"
+        android:scaleType="center"
+        android:src="@drawable/rec_ic_pause"
+        app:tint="@color/rec_player_on_glass" />
 
     <LinearLayout
         android:id="@+id/playerLoadingContainer"
@@ -57,7 +33,7 @@
         android:layout_gravity="center"
         android:gravity="center"
         android:orientation="vertical"
-        android:padding="24dp">
+        android:padding="@dimen/od_space_24">
 
         <ProgressBar
             android:layout_width="48dp"
@@ -67,9 +43,9 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
+            android:layout_marginTop="@dimen/od_space_12"
             android:text="@string/video_player_buffering"
-            android:textColor="#FFFFFF"
+            android:textColor="@color/rec_player_on_glass"
             android:textSize="14sp" />
     </LinearLayout>
 
@@ -78,42 +54,42 @@
         android:layout_width="320dp"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
-        android:background="#E61C1B1F"
+        android:background="@drawable/rec_player_panel"
         android:gravity="center"
         android:orientation="vertical"
-        android:padding="24dp"
+        android:padding="@dimen/od_space_24"
         android:visibility="gone">
 
         <TextView
             android:id="@+id/tvPlayerError"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:fontFamily="sans-serif-medium"
             android:gravity="center"
             android:text="@string/video_player_error_title"
-            android:textColor="#FFFFFF"
-            android:textSize="18sp"
-            android:textStyle="bold" />
+            android:textColor="@color/rec_player_on_glass"
+            android:textSize="18sp" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="@dimen/od_space_8"
             android:gravity="center"
             android:text="@string/video_player_error_body"
-            android:textColor="#B3FFFFFF"
+            android:textColor="@color/rec_player_on_glass_variant"
             android:textSize="14sp" />
 
         <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="@dimen/od_space_16"
             android:orientation="horizontal">
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnPlayerRetry"
                 style="@style/Widget.Material3.Button.TonalButton"
                 android:layout_width="wrap_content"
-                android:layout_height="48dp"
+                android:layout_height="@dimen/od_touch_min"
                 android:text="@string/video_player_retry"
                 android:textAllCaps="false" />
 
@@ -121,292 +97,210 @@
                 android:id="@+id/btnPlayerErrorNext"
                 style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="wrap_content"
-                android:layout_height="48dp"
-                android:layout_marginStart="8dp"
+                android:layout_height="@dimen/od_touch_min"
+                android:layout_marginStart="@dimen/od_space_8"
                 android:text="@string/video_player_next"
                 android:textAllCaps="false"
                 android:visibility="gone" />
         </LinearLayout>
     </LinearLayout>
 
-    <!-- ==================== TOP BAR ==================== -->
-    <!-- Dark scrim is intentional; see header comment. -->
+    <!-- Top: back (full screen only), camera views, title (full screen), audio, maximise. -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="top"
-        android:background="#99000000"
+        android:background="@drawable/rec_player_scrim_top"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingHorizontal="12dp"
-        android:paddingVertical="10dp">
+        android:paddingStart="@dimen/rec_player_padding"
+        android:paddingTop="@dimen/rec_player_padding"
+        android:paddingEnd="@dimen/rec_player_padding"
+        android:paddingBottom="@dimen/od_space_16">
 
         <ImageButton
             android:id="@+id/btnBack"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
+            style="@style/Widget.Overdrive.Rec.PlayerGlassButton"
+            android:layout_marginEnd="@dimen/od_space_4"
             android:contentDescription="@string/cd_back"
-            android:scaleType="centerInside"
-            android:src="@drawable/ic_back"
-            android:tint="#FFFFFF" />
+            android:src="@drawable/ic_back" />
 
-        <TextView
-            android:id="@+id/tvTitle"
+        <!-- Camera views; clickable so taps in its gaps don't reach the video's gestures. -->
+        <LinearLayout
+            android:id="@+id/quadrantBar"
+            android:layout_width="wrap_content"
+            android:layout_height="@dimen/od_touch_min"
+            android:background="@drawable/rec_player_glass_pill"
+            android:clickable="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="2dp">
+
+            <ImageButton
+                android:id="@+id/btnQuadrantAll"
+                style="@style/Widget.Overdrive.Rec.PlayerQuadButton"
+                android:contentDescription="@string/cd_player_quadrant_all"
+                android:src="@drawable/ic_quadrant_all" />
+
+            <ImageButton
+                android:id="@+id/btnQuadrantFront"
+                style="@style/Widget.Overdrive.Rec.PlayerQuadButton"
+                android:contentDescription="@string/cd_player_quadrant_front"
+                android:src="@drawable/ic_quadrant_front" />
+
+            <ImageButton
+                android:id="@+id/btnQuadrantRight"
+                style="@style/Widget.Overdrive.Rec.PlayerQuadButton"
+                android:contentDescription="@string/cd_player_quadrant_right"
+                android:src="@drawable/ic_quadrant_right" />
+
+            <ImageButton
+                android:id="@+id/btnQuadrantRear"
+                style="@style/Widget.Overdrive.Rec.PlayerQuadButton"
+                android:contentDescription="@string/cd_player_quadrant_rear"
+                android:src="@drawable/ic_quadrant_rear" />
+
+            <ImageButton
+                android:id="@+id/btnQuadrantLeft"
+                style="@style/Widget.Overdrive.Rec.PlayerQuadButton"
+                android:contentDescription="@string/cd_player_quadrant_left"
+                android:src="@drawable/ic_quadrant_left" />
+        </LinearLayout>
+
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
+            android:layout_marginStart="@dimen/od_space_12"
+            android:layout_marginEnd="@dimen/od_space_4"
             android:layout_weight="1"
-            android:ellipsize="middle"
-            android:maxLines="1"
-            android:text="@string/player_title_recording"
-            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-            android:textColor="#FFFFFF" />
+            android:orientation="vertical">
 
-        <TextView
-            android:id="@+id/tvMeta"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-            android:textColor="#B3FFFFFF" />
+            <TextView
+                android:id="@+id/tvTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="middle"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:shadowColor="@color/rec_thumb_text_shadow"
+                android:shadowDy="1"
+                android:shadowRadius="2"
+                android:text="@string/player_title_recording"
+                android:textColor="@color/rec_player_on_glass"
+                android:textSize="15sp" />
 
-        <!--
-          Fullscreen toggle. Hidden by default; VideoPlayerFragment shows it
-          only when the host registers an onFullscreenToggle callback (i.e.
-          inline mode in the Recordings two-pane). Icon flips between
-          ic_fullscreen and ic_fullscreen_exit to mirror current state.
-        -->
-        <!--
-          Audio mute toggle. Visible whenever the player is loaded; the icon
-          mirrors the current MediaPlayer mute state (set inside
-          setupVideoPlayer's setOnPreparedListener).
-        -->
+            <TextView
+                android:id="@+id/tvMeta"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFeatureSettings="tnum"
+                android:maxLines="1"
+                android:shadowColor="@color/rec_thumb_text_shadow"
+                android:shadowDy="1"
+                android:shadowRadius="2"
+                android:textColor="@color/rec_player_on_glass_variant"
+                android:textSize="12sp" />
+        </LinearLayout>
+
         <ImageButton
             android:id="@+id/btnMute"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:layout_marginStart="8dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
+            style="@style/Widget.Overdrive.Rec.PlayerGlassButton"
             android:contentDescription="@string/cd_player_mute"
-            android:scaleType="centerInside"
-            android:src="@drawable/ic_volume_off"
-            android:tint="#FFFFFF" />
+            android:src="@drawable/ic_volume_off" />
 
         <ImageButton
             android:id="@+id/btnFullscreen"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:layout_marginStart="8dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
+            style="@style/Widget.Overdrive.Rec.PlayerGlassButton"
             android:contentDescription="@string/cd_player_maximize"
-            android:scaleType="centerInside"
             android:src="@drawable/ic_fullscreen"
-            android:tint="#FFFFFF"
             android:visibility="gone" />
     </LinearLayout>
 
-    <!-- ==================== QUADRANT SELECTOR ====================
-         Floats above the bottom controls so it stays out of the timeline
-         while remaining within the auto-hide overlay group (the fragment
-         fades it in/out together with topBar + bottomControls). The pill
-         design follows M3 segmented-button visuals; selection state is
-         driven from VideoPlayerFragment so the icon highlight stays in
-         sync with the active ZoomableVideoView quadrant.
-
-         clickable=true so taps in the pill's padding/margin gaps absorb
-         here rather than falling through to the ZoomableVideoView's
-         GestureDetector — without it, double-tapping a button gap would
-         zoom into a quadrant of the video underneath the bar.
-
-         No android:tint on the ImageButtons: the vector drawables encode
-         their own lit/dim cell colors (ic_quadrant_*), and a tint would
-         flatten all four cells to a single color, killing the position
-         map. -->
-    <LinearLayout
-        android:id="@+id/quadrantBar"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom|center_horizontal"
-        android:layout_marginBottom="184dp"
-        android:background="@drawable/bg_quadrant_bar"
-        android:clickable="true"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingHorizontal="6dp"
-        android:paddingVertical="6dp">
-
-        <ImageButton
-            android:id="@+id/btnQuadrantAll"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/cd_player_quadrant_all"
-            android:scaleType="centerInside"
-            android:src="@drawable/ic_quadrant_all" />
-
-        <ImageButton
-            android:id="@+id/btnQuadrantFront"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:layout_marginStart="2dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/cd_player_quadrant_front"
-            android:scaleType="centerInside"
-            android:src="@drawable/ic_quadrant_front" />
-
-        <ImageButton
-            android:id="@+id/btnQuadrantRight"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:layout_marginStart="2dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/cd_player_quadrant_right"
-            android:scaleType="centerInside"
-            android:src="@drawable/ic_quadrant_right" />
-
-        <ImageButton
-            android:id="@+id/btnQuadrantRear"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:layout_marginStart="2dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/cd_player_quadrant_rear"
-            android:scaleType="centerInside"
-            android:src="@drawable/ic_quadrant_rear" />
-
-        <ImageButton
-            android:id="@+id/btnQuadrantLeft"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:layout_marginStart="2dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/cd_player_quadrant_left"
-            android:scaleType="centerInside"
-            android:src="@drawable/ic_quadrant_left" />
-    </LinearLayout>
-
-    <!-- ==================== BOTTOM CONTROLS ==================== -->
+    <!-- Bottom: event legend, then prev / time / events + scrubber / duration / next.
+         The timeline row stays left-to-right so the scrubber and event markers line up. -->
     <LinearLayout
         android:id="@+id/bottomControls"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
-        android:background="#CC000000"
+        android:background="@drawable/rec_player_scrim_bottom"
         android:orientation="vertical"
-        android:paddingHorizontal="12dp"
-        android:paddingVertical="10dp">
+        android:paddingStart="@dimen/od_space_4"
+        android:paddingTop="@dimen/od_space_16"
+        android:paddingEnd="@dimen/od_space_4"
+        android:paddingBottom="@dimen/od_space_2">
 
-        <!-- Event Timeline -->
-        <FrameLayout
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:layout_marginBottom="4dp">
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="20dp"
-                android:layout_gravity="center_vertical"
-                android:background="#33FFFFFF" />
-
-            <com.overdrive.app.ui.view.EventTimelineView
-                android:id="@+id/eventTimeline"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:clickable="true"
-                android:focusable="true" />
-        </FrameLayout>
-
-        <!-- Seek bar — brand teal accent so it matches the rest of the app -->
-        <SeekBar
-            android:id="@+id/seekBar"
+        <TextView
+            android:id="@+id/tvEventInfo"
+            style="@style/Widget.Overdrive.Rec.PlayerCaption"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:progressBackgroundTint="#55FFFFFF"
-            android:progressTint="?attr/colorPrimary"
-            android:thumbTint="?attr/colorPrimary" />
+            android:gravity="end"
+            android:paddingHorizontal="@dimen/od_space_12"
+            tools:text="2 person · 1 car" />
 
-        <!-- Time + transport row -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="@dimen/od_touch_min"
             android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingHorizontal="4dp">
+            android:layoutDirection="ltr"
+            android:orientation="horizontal">
 
             <ImageButton
                 android:id="@+id/btnPrev"
-                android:layout_width="56dp"
-                android:layout_height="56dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
+                style="@style/Widget.Overdrive.Rec.PlayerTransport"
                 android:contentDescription="@string/cd_player_prev"
-                android:scaleType="centerInside"
-                android:src="@android:drawable/ic_media_previous"
-                android:tint="#FFFFFF"
-                android:visibility="gone" />
-
-            <ImageButton
-                android:id="@+id/btnPlayPause"
-                android:layout_width="56dp"
-                android:layout_height="56dp"
-                android:layout_marginStart="2dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/cd_play_pause"
-                android:scaleType="centerInside"
-                android:src="@android:drawable/ic_media_pause"
-                android:tint="#FFFFFF" />
-
-            <ImageButton
-                android:id="@+id/btnNext"
-                android:layout_width="56dp"
-                android:layout_height="56dp"
-                android:layout_marginStart="2dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/cd_player_next"
-                android:scaleType="centerInside"
-                android:src="@android:drawable/ic_media_next"
-                android:tint="#FFFFFF"
+                android:src="@drawable/ic_chevron_left"
                 android:visibility="gone" />
 
             <TextView
                 android:id="@+id/tvCurrentTime"
+                style="@style/Widget.Overdrive.Rec.PlayerTime"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:fontFamily="monospace"
-                android:text="@string/player_time_zero"
-                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                android:textColor="#FFFFFF" />
+                android:layout_marginStart="@dimen/od_space_4"
+                android:text="@string/player_time_zero" />
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:fontFamily="monospace"
-                android:text="@string/player_time_separator"
-                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                android:textColor="#80FFFFFF" />
+            <FrameLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1">
+
+                <com.overdrive.app.ui.view.EventTimelineView
+                    android:id="@+id/eventTimeline"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/rec_player_event_band"
+                    android:layout_gravity="center_vertical"
+                    android:layout_marginHorizontal="@dimen/rec_player_track_inset"
+                    android:clickable="true"
+                    android:focusable="true" />
+
+                <SeekBar
+                    android:id="@+id/seekBar"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:paddingStart="@dimen/rec_player_track_inset"
+                    android:paddingEnd="@dimen/rec_player_track_inset"
+                    android:progressBackgroundTint="@color/rec_player_track_inactive"
+                    android:progressTint="?attr/colorPrimary"
+                    android:thumbTint="?attr/colorPrimary" />
+            </FrameLayout>
 
             <TextView
                 android:id="@+id/tvDuration"
+                style="@style/Widget.Overdrive.Rec.PlayerTime"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:fontFamily="monospace"
-                android:text="@string/player_time_zero"
-                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                android:textColor="#FFFFFF" />
+                android:layout_marginEnd="@dimen/od_space_4"
+                android:text="@string/player_time_zero" />
 
-            <TextView
-                android:id="@+id/tvEventInfo"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="12dp"
-                android:layout_weight="1"
-                android:ellipsize="end"
-                android:gravity="end"
-                android:maxLines="1"
-                android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
-                android:textColor="#B3FFFFFF" />
+            <ImageButton
+                android:id="@+id/btnNext"
+                style="@style/Widget.Overdrive.Rec.PlayerTransport"
+                android:contentDescription="@string/cd_player_next"
+                android:src="@drawable/ic_chevron_right"
+                android:visibility="gone" />
         </LinearLayout>
     </LinearLayout>
 </FrameLayout>

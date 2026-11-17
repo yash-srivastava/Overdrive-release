@@ -109,8 +109,25 @@ public class OdometerReader {
      * </ol>
      */
     public double readOdometerKm() {
+        Reading reading = readOdometer();
+        return reading != null ? reading.km : -1;
+    }
+
+    /** An odometer value and one count of the register it came from, both in km. */
+    public static final class Reading {
+        public final double km;
+        public final double stepKm;
+
+        Reading(double km, double stepKm) {
+            this.km = km;
+            this.stepKm = stepKm;
+        }
+    }
+
+    /** {@link #readOdometerKm()} with the register's step; null when no source answers. */
+    public Reading readOdometer() {
         if (!initialized || statisticDevice == null) {
-            return snapshotOdometerKm();
+            return snapshotReading();
         }
 
         // Tier 1 — the authoritative total-distance register, in RAW cluster units
@@ -143,17 +160,22 @@ public class OdometerReader {
                     logger.info("Odometer refined via getMileageNumber("
                             + MILEAGE_KIND_TOTAL + ") — 0.1 unit resolution");
                 }
-                return fineRaw * unitFactor();
+                return new Reading(fineRaw * unitFactor(), MILEAGE_NUMBER_SCALE * unitFactor());
             }
             if (!loggedFallback) {
                 loggedFallback = true;
                 logger.info("Odometer source: getTotalMileageValue (whole-unit resolution)");
             }
-            return coarseRaw * unitFactor();
+            return new Reading(coarseRaw * unitFactor(), unitFactor());
         }
 
         // Tier 2 — already-collected snapshot value (has its own feature-ID fallback).
-        return snapshotOdometerKm();
+        return snapshotReading();
+    }
+
+    private Reading snapshotReading() {
+        double km = snapshotOdometerKm();
+        return km > 0 ? new Reading(km, Math.max(1.0, unitFactor())) : null;
     }
 
     /**

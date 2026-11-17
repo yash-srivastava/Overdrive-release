@@ -1,6 +1,8 @@
 package com.overdrive.app.ui.daemon
 
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -12,6 +14,7 @@ import com.google.zxing.common.HybridBinarizer
 import com.google.zxing.qrcode.QRCodeReader
 import com.overdrive.app.wireguard.WireGuardConfig
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.IOException
 
 /**
@@ -30,6 +33,51 @@ object WireGuardImport {
 
     private const val MAX_IMAGE_BYTES = 10 * 1024 * 1024
     private const val MAX_IMAGE_SIDE = 2400
+    private const val BYD_PHOTO_PICKER = "com.byd.auto_photo"
+    private const val MAX_LISTED_FILES = 50
+    private val DROP_FOLDERS = listOf("Download", "Documents", "Overdrive")
+
+    /**
+     * True when the system document picker can show a .conf. BYD head units route it to their
+     * photo gallery, which lists images only.
+     */
+    fun hasDocumentPicker(context: Context): Boolean = try {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*")
+        val pkg = context.packageManager
+            .resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName
+        pkg != null && pkg != BYD_PHOTO_PICKER
+    } catch (e: Exception) {
+        false
+    }
+
+    /**
+     * .conf files, newest first, in the top folder and first-level folders of internal storage
+     * and of every mounted USB or SD volume. Blocking; call off the main thread.
+     */
+    fun findConfigFiles(): List<File> {
+        val roots = LinkedHashSet<File>()
+        roots += android.os.Environment.getExternalStorageDirectory()
+        File("/storage").listFiles()?.forEach { volume ->
+            if (volume.isDirectory && volume.name != "emulated" && volume.name != "self") roots += volume
+        }
+        val dirs = LinkedHashSet<File>()
+        for (root in roots) {
+            dirs += root
+            DROP_FOLDERS.forEach { dirs += File(root, it) }
+            root.listFiles()?.forEach { if (it.isDirectory && !it.name.startsWith(".")) dirs += it }
+        }
+        val found = LinkedHashMap<String, File>()
+        for (dir in dirs) {
+            val files = try { dir.listFiles() } catch (e: Exception) { null } ?: continue
+            for (f in files) {
+                if (!f.name.endsWith(".conf", ignoreCase = true) || !f.isFile) continue
+                if (f.length() !in 1..WireGuardConfig.MAX_INPUT_BYTES.toLong()) continue
+                val key = try { f.canonicalPath } catch (e: IOException) { f.absolutePath }
+                found.putIfAbsent(key, f)
+            }
+        }
+        return found.values.sortedByDescending { it.lastModified() }.take(MAX_LISTED_FILES)
+    }
 
     fun read(context: Context, uri: Uri): Result {
         val mime = context.contentResolver.getType(uri).orEmpty()

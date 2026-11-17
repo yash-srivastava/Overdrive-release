@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="dash_vehicle_line">%1$s · %2$.1f kWh</string>
+    <string name="dash_range_caption">quãng đường</string>
+    <string name="dash_status_remote_on">Truy cập từ xa: bật</string>
+    <string name="dash_status_remote_off">Truy cập từ xa: tắt</string>
+    <string name="dash_status_remote_state">Truy cập từ xa · %1$s</string>
+    <string name="dash_status_services">%1$d/%2$d dịch vụ</string>
+    <string name="dash_status_view">Xem</string>
+    <string name="dash_status_recording_idle">Không ghi hình</string>
+    <string name="dash_services_running">%1$d/%2$d đang chạy</string>
+    <string name="dash_charge_eta_left">còn %1$s</string>
+    <string name="dash_charge_session_inline">%1$s trong phiên này</string>
+    <plurals name="dash_clip_count">
+        <item quantity="other">%1$d clip</item>
+    </plurals>
+</resources>

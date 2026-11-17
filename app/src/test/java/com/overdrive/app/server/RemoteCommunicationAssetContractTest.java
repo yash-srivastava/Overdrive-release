@@ -54,11 +54,12 @@ public class RemoteCommunicationAssetContractTest {
         assertTrue(script.contains("window.addEventListener('pageshow'"));
         assertTrue(script.contains("window.addEventListener('beforeunload'"));
         assertTrue(script.contains("self.stopTalk('Navigation', true)"));
-        assertTrue(script.contains("self.stopTalk(self.tt('communicate.limit_30s',"
-                + " '30 second limit reached'))"));
-        assertTrue(script.contains(
-                "self.stopTalk(self.tt('communicate.mic_inactive',"
-                        + " 'Microphone stream became inactive'))"));
+        // Stop reasons are protocol: the 30 s limit must reach the server in the exact text
+        // RemoteCommunicationWebSocket.isGracefulStopReason matches, in every UI language.
+        assertTrue(script.contains("self.stopTalk('30 second limit reached')"));
+        assertTrue(readRepositoryFile("app/src/main/java/com/overdrive/app/server/RemoteCommunicationWebSocket.java")
+                .contains("\"30 second limit reached\".equals(reason)"));
+        assertTrue(script.contains("self.stopTalk('Microphone stream became inactive')"));
         assertTrue(script.contains("MAX_SESSION_MS: 30000"));
         assertTrue(script.contains("AUDIO_INACTIVITY_MS: 3000"));
         assertTrue(script.contains("now - this.lastMeterAt >= 100"));

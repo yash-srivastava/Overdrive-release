@@ -2,7 +2,11 @@ package com.overdrive.app.launcher;
 
 import android.graphics.Rect;
 
+import com.overdrive.app.camera.dilink5.ClusterTransport;
+import com.overdrive.app.config.UnifiedConfigManager;
 import com.overdrive.app.logging.DaemonLogger;
+
+import org.json.JSONObject;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Field;
@@ -11,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Puts a cast app into FREEFORM windowing at explicit bounds on the driver-cluster
@@ -142,8 +147,17 @@ final class ClusterFreeformWindow {
     // Resolved-once method handles for the hot path. `resizeTask` is called on every live drag
     // frame, so re-scanning getMethods() each time would be pure overhead.
     private static volatile Method cachedResizeTask;
-    /** One-shot latch for {@link #ensureFreeformSupportEnabled()}. */
     private static volatile boolean freeformSettingChecked;
+    private static volatile boolean freeformRecoveryChecked;
+    private static volatile String freeformSettingState = "unchecked";
+    private static volatile boolean freeformCurrentBootSupported;
+    private static final ConcurrentHashMap<String, Integer> freeformLosses =
+            new ConcurrentHashMap<>();
+    private static final java.util.Set<String> freeformSuppressed =
+            ConcurrentHashMap.newKeySet();
+    private static volatile boolean freeformSuppressionLoaded;
+    private static final String FREEFORM_RECOVERY_KEY = "clusterFreeformRecovery";
+    private static final String FREEFORM_SUPPRESSION_KEY = "clusterFreeformSuppression";
 
     /**
      * Immutable task-cache snapshot for the LIVE-DRAG fast path. Resolving a task id costs an ATM
@@ -206,11 +220,18 @@ final class ClusterFreeformWindow {
         final boolean known;
         final int taskId;
         final int displayId;
+        /** Windowing mode from this same task row; null is not evidence of a living freeform task. */
+        final Integer windowingMode;
 
         TaskLocation(boolean known, int taskId, int displayId) {
+            this(known, taskId, displayId, null);
+        }
+
+        TaskLocation(boolean known, int taskId, int displayId, Integer windowingMode) {
             this.known = known;
             this.taskId = taskId;
             this.displayId = displayId;
+            this.windowingMode = windowingMode;
         }
 
         static TaskLocation unknown() { return new TaskLocation(false, -1, -1); }
@@ -232,6 +253,17 @@ final class ClusterFreeformWindow {
             cacheGeneration++;
             taskCache = null;
         }
+    }
+
+    static void beginDirectPlacementAttempt() {
+        synchronized (ClusterFreeformWindow.class) {
+            // Re-read ownership and the live setting for each direct launch. A previous
+            // attempt must not suppress reassertion after external drift or a failed write.
+            freeformRecoveryChecked = false;
+            freeformSettingChecked = false;
+            freeformSettingState = "unchecked";
+        }
+        ensureFreeformSupportEnabled();
     }
 
     /**
@@ -330,6 +362,12 @@ final class ClusterFreeformWindow {
         // ── Full apply. Each rung is independent + guarded; the verify at the end decides.
         // First make sure freeform is even permitted on this build (one-shot; see the method doc —
         // AMS caches the setting at boot, so this may only help after a restart).
+        boolean learnDiLink5Support = ClusterTransport.isDiLink5();
+        if (learnDiLink5Support) loadFreeformSuppression();
+        if (shouldSuppressFreeform(learnDiLink5Support, freeformSuppressed.contains(pkg))) {
+            logger.warn("applyBounds " + pkg + " skipped after repeated current-boot freeform loss");
+            return false;
+        }
         ensureFreeformSupportEnabled();
         boolean resizeable = invokeSetTaskResizeable(svc, taskId, RESIZE_MODE_FORCE_RESIZEABLE);
 
@@ -409,7 +447,19 @@ final class ClusterFreeformWindow {
             }
         }
 
-        if (ok) markConverted(pkg, taskId);
+        if (ok) {
+            markConverted(pkg, taskId);
+            freeformCurrentBootSupported = true;
+            if (learnDiLink5Support) {
+                boolean changedSuppression = freeformLosses.remove(pkg) != null;
+                changedSuppression = freeformSuppressed.remove(pkg) || changedSuppression;
+                if (changedSuppression) persistFreeformSuppression();
+            }
+        } else if (learnDiLink5Support) {
+            int losses = freeformLosses.merge(pkg, 1, (a, b) -> Math.min(2, a + b));
+            if (losses >= 2) freeformSuppressed.add(pkg);
+            persistFreeformSuppression();
+        }
         logger.info("applyBounds " + pkg + " task=" + taskId + " → " + bounds.toShortString()
                 + " resizeable=" + resizeable + " stack=" + stackId + "(mode=" + stackMode
                 + ",size=" + stackSized + ") freeformMode=" + mode
@@ -1102,26 +1152,64 @@ final class ClusterFreeformWindow {
      * @param displayId the display the task must be on, or -1 to accept any display (used only
      *   when the caller could not resolve the cluster display id).
      */
+    private static final int TASK_QUERY_LIMIT = 65;
+
+    static final class RunningTaskInventory {
+        final List<?> tasks;
+        final boolean complete;
+
+        RunningTaskInventory(List<?> tasks) {
+            this.tasks = tasks;
+            this.complete = tasks != null && taskInventoryComplete(tasks.size());
+        }
+    }
+
+    /** Positive matches remain useful even when the capped list cannot prove absence. */
+    static RunningTaskInventory queryRunningTasks(Object svc) throws Exception {
+        Method getTasks = null;
+        for (Method method : svc.getClass().getMethods()) {
+            if (!"getTasks".equals(method.getName())) continue;
+            if (getTasks == null || method.getParameterTypes().length
+                    > getTasks.getParameterTypes().length) {
+                getTasks = method;
+            }
+        }
+        if (getTasks == null) return null;
+        Class<?>[] parameterTypes = getTasks.getParameterTypes();
+        Object[] args = runningTaskQueryArgs(parameterTypes);
+        Object raw = getTasks.invoke(svc, args);
+        if (!(raw instanceof List)) return null;
+        return new RunningTaskInventory((List<?>) raw);
+    }
+
+    static Object[] runningTaskQueryArgs(Class<?>[] parameterTypes) {
+        Object[] args = new Object[parameterTypes.length];
+        boolean suppliedLimit = false;
+        for (int i = 0; i < parameterTypes.length; i++) {
+            if (parameterTypes[i] == int.class) {
+                args[i] = suppliedLimit ? -1 : TASK_QUERY_LIMIT;
+                suppliedLimit = true;
+            } else if (parameterTypes[i] == boolean.class) {
+                args[i] = Boolean.FALSE;
+            } else {
+                args[i] = null;
+            }
+        }
+        return args;
+    }
+
+    static boolean taskInventoryComplete(int size) {
+        return size > 0 && size < TASK_QUERY_LIMIT;
+    }
+
     private static int findTaskIdViaAtm(String pkg, int displayId) {
         try {
             Object svc = service();
             if (svc == null) return -1;
-            Method getTasks = null;
-            for (Method m : svc.getClass().getMethods()) {
-                if ("getTasks".equals(m.getName())) { getTasks = m; break; }
-            }
-            if (getTasks == null) return -1;
-            Class<?>[] pt = getTasks.getParameterTypes();
-            Object[] args = new Object[pt.length];
-            for (int i = 0; i < pt.length; i++) {
-                if (pt[i] == int.class) args[i] = (i == 0 ? 64 : 0);
-                else if (pt[i] == boolean.class) args[i] = Boolean.FALSE;
-                else args[i] = null;
-            }
-            Object raw = getTasks.invoke(svc, args);
-            if (!(raw instanceof List)) return -1;
+            RunningTaskInventory inventory = queryRunningTasks(svc);
+            if (inventory == null) return -1;
             int anyDisplayMatch = -1;
-            for (Object task : (List<?>) raw) {
+            for (Object task : inventory.tasks) {
                 if (task == null) continue;
                 if (!taskMatchesPackage(task, pkg)) continue;
                 Object id = readFieldNoThrow(task, "taskId");
@@ -1161,48 +1249,143 @@ final class ClusterFreeformWindow {
         try {
             Object svc = service();
             if (svc == null) return TaskLocation.unknown();
-            Method getTasks = null;
-            for (Method method : svc.getClass().getMethods()) {
-                if ("getTasks".equals(method.getName())) {
-                    getTasks = method;
-                    break;
-                }
-            }
-            if (getTasks == null) return TaskLocation.unknown();
-            Class<?>[] parameterTypes = getTasks.getParameterTypes();
-            Object[] args = new Object[parameterTypes.length];
-            for (int i = 0; i < parameterTypes.length; i++) {
-                if (parameterTypes[i] == int.class) args[i] = (i == 0 ? 64 : 0);
-                else if (parameterTypes[i] == boolean.class) args[i] = Boolean.FALSE;
-                else args[i] = null;
-            }
-            Object raw = getTasks.invoke(svc, args);
-            if (!(raw instanceof List)) return TaskLocation.unknown();
+            RunningTaskInventory inventory = queryRunningTasks(svc);
+            if (inventory == null) return TaskLocation.unknown();
 
             List<TaskLocation> locations = new ArrayList<>();
-            for (Object task : (List<?>) raw) {
-                if (task == null || !taskMatchesPackage(task, pkg)) continue;
+            for (Object task : inventory.tasks) {
+                Boolean match = taskPackageMatch(task, pkg);
+                if (match == null) {
+                    locations.add(TaskLocation.unknown());
+                    continue;
+                }
+                if (!match) continue;
                 Object id = readFieldNoThrow(task, "taskId");
                 if (!(id instanceof Integer)) id = readFieldNoThrow(task, "id");
-                if (!(id instanceof Integer)) continue;
+                if (!(id instanceof Integer)) {
+                    locations.add(TaskLocation.unknown());
+                    continue;
+                }
                 int taskId = (Integer) id;
                 int displayId = taskDisplayId(svc, task, taskId);
-                locations.add(new TaskLocation(true, taskId, displayId));
+                locations.add(taskLocationFromSnapshot(task, taskId, displayId));
             }
-            return selectTaskLocation(locations, targetDisplayId);
+            return selectTaskLocation(locations, targetDisplayId, inventory.complete);
         } catch (Throwable t) {
             logger.debug("findTaskLocation failed: " + unwrap(t));
             return TaskLocation.unknown();
         }
     }
 
+    static TaskLocation taskLocationFromSnapshot(Object task, int taskId, int displayId) {
+        return new TaskLocation(true, taskId, displayId, windowingModeOf(task));
+    }
+
+    /** True only when every matching task is known to be off {@code displayId}. */
+    static Boolean packageTasksReclaimedFromDisplay(String pkg, int displayId) {
+        if (pkg == null || !AppLauncher.isValidPackageName(pkg) || displayId <= 0) return null;
+        try {
+            Object svc = service();
+            if (svc == null) return null;
+            RunningTaskInventory inventory = queryRunningTasks(svc);
+            if (inventory == null) return null;
+            List<TaskLocation> matches = new ArrayList<>();
+            for (Object task : inventory.tasks) {
+                Boolean match = taskPackageMatch(task, pkg);
+                if (match == null) {
+                    matches.add(TaskLocation.unknown());
+                    continue;
+                }
+                if (!match) continue;
+                Object id = readFieldNoThrow(task, "taskId");
+                if (!(id instanceof Integer)) id = readFieldNoThrow(task, "id");
+                if (!(id instanceof Integer)) {
+                    matches.add(TaskLocation.unknown());
+                    continue;
+                }
+                int taskId = (Integer) id;
+                matches.add(taskLocationFromSnapshot(task, taskId, taskDisplayId(svc, task, taskId)));
+            }
+            return allTasksReclaimedFromDisplay(matches, displayId, inventory.complete);
+        } catch (Throwable t) {
+            logger.debug("packageTasksReclaimedFromDisplay failed: " + unwrap(t));
+            return null;
+        }
+    }
+
+    /** Whether any task of {@code pkg} is on {@code displayId}; null when evidence is incomplete. */
+    static Boolean packageTaskOnDisplay(String pkg, int displayId) {
+        Boolean reclaimed = packageTasksReclaimedFromDisplay(pkg, displayId);
+        return reclaimed == null ? null : !reclaimed;
+    }
+
+    static Boolean allTasksReclaimedFromDisplay(
+            List<TaskLocation> locations, int targetDisplayId) {
+        return allTasksReclaimedFromDisplay(locations, targetDisplayId, true);
+    }
+
+    static Boolean allTasksReclaimedFromDisplay(
+            List<TaskLocation> locations, int targetDisplayId, boolean inventoryComplete) {
+        if (locations == null || targetDisplayId <= 0) return null;
+        var incomplete = false;
+        for (TaskLocation location : locations) {
+            if (location == null || !location.known || location.taskId <= 0
+                    || location.displayId < 0) {
+                incomplete = true;
+                continue;
+            }
+            if (location.displayId == targetDisplayId) return Boolean.FALSE;
+        }
+        return incomplete || !inventoryComplete ? null : Boolean.TRUE;
+    }
+
+    /** Predecessor density leases have no package; do not invent one for their recovery. */
+    static Boolean displayTasksReclaimed(int displayId) {
+        if (displayId <= 0) return null;
+        try {
+            Object svc = service();
+            if (svc == null) return null;
+            RunningTaskInventory inventory = queryRunningTasks(svc);
+            if (inventory == null) return null;
+            List<TaskLocation> locations = new ArrayList<>();
+            for (Object task : inventory.tasks) {
+                if (task == null) {
+                    locations.add(TaskLocation.unknown());
+                    continue;
+                }
+                Object id = readFieldNoThrow(task, "taskId");
+                if (!(id instanceof Integer)) id = readFieldNoThrow(task, "id");
+                if (!(id instanceof Integer)) {
+                    locations.add(TaskLocation.unknown());
+                } else {
+                    int taskId = (Integer) id;
+                    locations.add(taskLocationFromSnapshot(task, taskId,
+                            taskDisplayId(svc, task, taskId)));
+                }
+            }
+            return allTasksReclaimedFromDisplay(locations, displayId, inventory.complete);
+        } catch (Throwable t) {
+            logger.debug("displayTasksReclaimed failed: " + unwrap(t));
+            return null;
+        }
+    }
+
     static TaskLocation selectTaskLocation(
             List<TaskLocation> locations, int targetDisplayId) {
+        return selectTaskLocation(locations, targetDisplayId, true);
+    }
+
+    static TaskLocation selectTaskLocation(
+            List<TaskLocation> locations, int targetDisplayId, boolean inventoryComplete) {
         if (locations == null) return TaskLocation.unknown();
         TaskLocation onTarget = null;
         TaskLocation unknownDisplay = null;
+        boolean incomplete = !inventoryComplete;
         for (TaskLocation location : locations) {
-            if (location == null || location.taskId <= 0) continue;
+            if (location == null || !location.known || location.taskId <= 0) {
+                incomplete = true;
+                continue;
+            }
             if (location.displayId >= 0 &&
                     location.displayId != targetDisplayId) {
                 return location;
@@ -1215,7 +1398,7 @@ final class ClusterFreeformWindow {
         }
         if (unknownDisplay != null) return unknownDisplay;
         if (onTarget != null) return onTarget;
-        return TaskLocation.absent();
+        return incomplete ? TaskLocation.unknown() : TaskLocation.absent();
     }
 
     /**
@@ -1226,11 +1409,34 @@ final class ClusterFreeformWindow {
      * <p>The exclusive-root gate is intentional: both APIs move the whole root task, so invoking
      * them on a root containing siblings would drag unrelated head-unit apps onto the cluster.
      */
+    enum MoveTaskResult {
+        NOT_DISPATCHED,
+        DISPATCHED_UNCONFIRMED,
+        CONFIRMED
+    }
+
+    interface MoveDispatchAuthority {
+        boolean runIfCurrent(Runnable dispatch);
+    }
+
     static boolean moveTaskToDisplay(int taskId, int targetDisplayId) {
-        if (taskId <= 0 || targetDisplayId <= 0) return false;
+        return moveTaskToDisplayResult(taskId, targetDisplayId, dispatch -> {
+            dispatch.run();
+            return true;
+        }) == MoveTaskResult.CONFIRMED;
+    }
+
+    static MoveTaskResult moveTaskToDisplayResult(
+            int taskId,
+            int targetDisplayId,
+            MoveDispatchAuthority authority) {
+        if (taskId <= 0 || targetDisplayId <= 0 || authority == null) {
+            return MoveTaskResult.NOT_DISPATCHED;
+        }
+        boolean dispatched = false;
         try {
             Object svc = service();
-            if (svc == null) return false;
+            if (svc == null) return MoveTaskResult.NOT_DISPATCHED;
             int rootTaskId = -1;
             int currentDisplayId = -1;
             for (Object info : atmTaskList(svc)) {
@@ -1247,7 +1453,7 @@ final class ClusterFreeformWindow {
                 if (liveChildren != 1) {
                     logger.warn("moveTaskToDisplay refused task=" + taskId
                             + " because its root contains " + liveChildren + " tasks");
-                    return false;
+                    return MoveTaskResult.NOT_DISPATCHED;
                 }
                 rootTaskId = stackOrRootTaskId(info);
                 Object display = readFieldNoThrow(info, "displayId");
@@ -1256,20 +1462,40 @@ final class ClusterFreeformWindow {
             }
             if (currentDisplayId == targetDisplayId) {
                 focusMovedTask(svc, taskId, rootTaskId);
-                return true;
+                return MoveTaskResult.CONFIRMED;
             }
             if (rootTaskId < 0) {
                 logger.warn("moveTaskToDisplay could not resolve root for task=" + taskId);
-                return false;
+                return MoveTaskResult.NOT_DISPATCHED;
             }
 
-            boolean dispatched = false;
+            final int moveRootTaskId = rootTaskId;
             for (String name : new String[] {
                     "moveRootTaskToDisplay", "moveStackToDisplay" }) {
                 try {
-                    Method method = svc.getClass().getMethod(
-                            name, int.class, int.class);
-                    method.invoke(svc, rootTaskId, targetDisplayId);
+                    Method method = svc.getClass().getMethod(name, int.class, int.class);
+                    final boolean[] invocationStarted = { false };
+                    final boolean[] invoked = { false };
+                    final Throwable[] failure = { null };
+                    boolean admitted = authority.runIfCurrent(() -> {
+                        invocationStarted[0] = true;
+                        try {
+                            method.invoke(svc, moveRootTaskId, targetDisplayId);
+                            invoked[0] = true;
+                        } catch (Throwable t) {
+                            failure[0] = t;
+                        }
+                    });
+                    if (!admitted) return MoveTaskResult.NOT_DISPATCHED;
+                    if (failure[0] != null) {
+                        logger.debug(name + " failed after dispatch began: " + unwrap(failure[0]));
+                        if (invocationStarted[0]) {
+                            dispatched = true;
+                            break;
+                        }
+                        continue;
+                    }
+                    if (!invoked[0]) continue;
                     dispatched = true;
                     logger.info(name + "(" + rootTaskId + "," + targetDisplayId
                             + ") dispatched for task=" + taskId);
@@ -1280,20 +1506,20 @@ final class ClusterFreeformWindow {
                     logger.debug(name + " failed: " + unwrap(t));
                 }
             }
-            if (!dispatched) return false;
+            if (!dispatched) return MoveTaskResult.NOT_DISPATCHED;
 
             for (int attempt = 0; attempt < 5; attempt++) {
                 int actualDisplay = taskDisplayIdById(svc, taskId);
                 if (actualDisplay == targetDisplayId) {
                     focusMovedTask(svc, taskId, rootTaskId);
                     invalidateTaskCache();
-                    return true;
+                    return MoveTaskResult.CONFIRMED;
                 }
                 try {
                     Thread.sleep(120L);
                 } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
-                    return false;
+                    return MoveTaskResult.DISPATCHED_UNCONFIRMED;
                 }
             }
             logger.warn("moveTaskToDisplay verification failed task=" + taskId
@@ -1301,7 +1527,9 @@ final class ClusterFreeformWindow {
         } catch (Throwable t) {
             logger.warn("moveTaskToDisplay failed: " + unwrap(t));
         }
-        return false;
+        return dispatched
+                ? MoveTaskResult.DISPATCHED_UNCONFIRMED
+                : MoveTaskResult.NOT_DISPATCHED;
     }
 
     /**
@@ -1323,34 +1551,22 @@ final class ClusterFreeformWindow {
         try {
             Object svc = service();
             if (svc == null) return AppLauncher.TASK_LOOKUP_FAILED;
-            Method getTasks = null;
-            for (Method method : svc.getClass().getMethods()) {
-                if ("getTasks".equals(method.getName())) {
-                    getTasks = method;
-                    break;
+            RunningTaskInventory inventory = queryRunningTasks(svc);
+            if (inventory == null) return AppLauncher.TASK_LOOKUP_FAILED;
+            boolean complete = inventory.complete;
+            for (Object task : inventory.tasks) {
+                Boolean match = taskPackageMatch(task, pkg);
+                if (match == null) {
+                    complete = false;
+                    continue;
                 }
-            }
-            if (getTasks == null) return AppLauncher.TASK_LOOKUP_FAILED;
-            Class<?>[] parameterTypes = getTasks.getParameterTypes();
-            Object[] args = new Object[parameterTypes.length];
-            for (int i = 0; i < parameterTypes.length; i++) {
-                if (parameterTypes[i] == int.class) args[i] = (i == 0 ? 64 : 0);
-                else if (parameterTypes[i] == boolean.class) args[i] = Boolean.FALSE;
-                else args[i] = null;
-            }
-            Object raw = getTasks.invoke(svc, args);
-            if (!(raw instanceof List)) return AppLauncher.TASK_LOOKUP_FAILED;
-            List<?> tasks = (List<?>) raw;
-            // A live system always runs at least one task (home / SystemUI); an empty
-            // answer is a failed query, not proof that the package is gone.
-            if (tasks.isEmpty()) return AppLauncher.TASK_LOOKUP_FAILED;
-            for (Object task : tasks) {
-                if (task == null || !taskMatchesPackage(task, pkg)) continue;
+                if (!match) continue;
                 Object id = readFieldNoThrow(task, "taskId");
                 if (!(id instanceof Integer)) id = readFieldNoThrow(task, "id");
                 if (id instanceof Integer && (Integer) id > 0) return (Integer) id;
+                complete = false;
             }
-            return -1;
+            return complete ? -1 : AppLauncher.TASK_LOOKUP_FAILED;
         } catch (Throwable t) {
             logger.debug("liveTaskIdForPackage failed: " + unwrap(t));
             return AppLauncher.TASK_LOOKUP_FAILED;
@@ -1612,14 +1828,22 @@ final class ClusterFreeformWindow {
 
     /** True when a RunningTaskInfo's top or base activity belongs to {@code pkg}. */
     private static boolean taskMatchesPackage(Object task, String pkg) {
+        return Boolean.TRUE.equals(taskPackageMatch(task, pkg));
+    }
+
+    /** Missing identity is unknown, not proof that the task belongs to another package. */
+    private static Boolean taskPackageMatch(Object task, String pkg) {
+        if (task == null) return null;
+        boolean complete = true;
         for (String field : new String[] { "topActivity", "baseActivity" }) {
             Object cn = readFieldNoThrow(task, field);
             if (cn instanceof android.content.ComponentName
                     && pkg.equals(((android.content.ComponentName) cn).getPackageName())) {
                 return true;
             }
+            if (!(cn instanceof android.content.ComponentName)) complete = false;
         }
-        return false;
+        return complete ? Boolean.FALSE : null;
     }
 
     /**
@@ -1756,6 +1980,129 @@ final class ClusterFreeformWindow {
         return false;
     }
 
+    private static synchronized void loadFreeformSuppression() {
+        if (freeformSuppressionLoaded) return;
+        freeformSuppressionLoaded = true;
+        JSONObject projection = UnifiedConfigManager.loadConfig().optJSONObject("projection");
+        JSONObject saved = projection == null
+                ? null : projection.optJSONObject(FREEFORM_SUPPRESSION_KEY);
+        if (saved == null) return;
+        String currentBoot = freeformBootId();
+        if (currentBoot.isEmpty() || !currentBoot.equals(saved.optString("bootId", ""))) {
+            try {
+                UnifiedConfigManager.updateSection("projection",
+                        new JSONObject().put(FREEFORM_SUPPRESSION_KEY, JSONObject.NULL));
+            } catch (Throwable ignored) { }
+            return;
+        }
+        org.json.JSONArray packages = saved.optJSONArray("packages");
+        if (packages != null) {
+            for (int i = 0; i < packages.length(); i++) {
+                String pkg = packages.optString(i, "");
+                if (AppLauncher.isValidPackageName(pkg)) freeformSuppressed.add(pkg);
+            }
+        }
+        JSONObject losses = saved.optJSONObject("losses");
+        if (losses != null) {
+            java.util.Iterator<String> keys = losses.keys();
+            while (keys.hasNext()) {
+                String pkg = keys.next();
+                int count = losses.optInt(pkg, 0);
+                if (AppLauncher.isValidPackageName(pkg) && count > 0) {
+                    freeformLosses.put(pkg, Math.min(2, count));
+                }
+            }
+        }
+    }
+
+    static boolean shouldSuppressFreeform(boolean diLink5Transport, boolean packageSuppressed) {
+        return diLink5Transport && packageSuppressed;
+    }
+
+    private static synchronized void persistFreeformSuppression() {
+        try {
+            org.json.JSONArray packages = new org.json.JSONArray();
+            for (String pkg : freeformSuppressed) packages.put(pkg);
+            JSONObject losses = new JSONObject();
+            for (java.util.Map.Entry<String, Integer> entry : freeformLosses.entrySet()) {
+                losses.put(entry.getKey(), entry.getValue());
+            }
+            JSONObject value = new JSONObject()
+                    .put("bootId", freeformBootId())
+                    .put("packages", packages)
+                    .put("losses", losses);
+            UnifiedConfigManager.updateSection("projection",
+                    new JSONObject().put(FREEFORM_SUPPRESSION_KEY, value));
+        } catch (Throwable ignored) { }
+    }
+
+    /**
+     * Reconcile the durable freeform-setting owner after process/daemon restart. No write is
+     * performed here: a matching expected value remains owned, a confirmed prior value clears the
+     * record, and external drift relinquishes ownership without overwriting it.
+     */
+    static synchronized void recoverFreeformSupportOwnership() {
+        if (freeformRecoveryChecked) return;
+        freeformRecoveryChecked = true;
+        JSONObject projection = UnifiedConfigManager.loadConfig().optJSONObject("projection");
+        JSONObject ownership = projection == null
+                ? null : projection.optJSONObject(FREEFORM_RECOVERY_KEY);
+        if (ownership == null) return;
+        String prior = ownership.optString("prior", null);
+        String expected = ownership.optString("expected", null);
+        String originBoot = ownership.optString("bootId", "");
+        String current = (prior == null || expected == null) ? "" :
+                runSettingsCmd("settings get global " + SETTING_ENABLE_FREEFORM);
+        String decision = freeformRecoveryDecision(prior, expected, current);
+        if ("unreadable".equals(decision)) {
+            freeformSettingState = "ownership_unreadable";
+            freeformSettingChecked = true;
+            return;
+        }
+        if ("restored".equals(decision)) {
+            if (clearFreeformOwnership()) {
+                freeformSettingState = "restored";
+                freeformSettingChecked = false;
+            }
+            return;
+        }
+        if ("expected".equals(decision)) {
+            String boot = freeformBootId();
+            if (!boot.isEmpty() && !boot.equals(originBoot)) {
+                try {
+                    ownership.put("bootId", boot);
+                    ownership.put("uncertain", false);
+                    UnifiedConfigManager.updateSection("projection",
+                            new JSONObject().put(FREEFORM_RECOVERY_KEY, ownership));
+                } catch (Throwable ignored) { }
+            }
+            freeformSettingState = "owned_expected";
+            freeformSettingChecked = true;
+            return;
+        }
+        // Another actor owns the new value. Relinquish our record without changing their state.
+        if (clearFreeformOwnership()) freeformSettingState = "external_change";
+        freeformSettingChecked = false;
+    }
+
+    static String freeformRecoveryDecision(String prior, String expected, String current) {
+        if (prior == null || expected == null || current == null || current.isEmpty()) {
+            return "unreadable";
+        }
+        if (prior.equals(current)) return "restored";
+        if (expected.equals(current)) return "expected";
+        return "external";
+    }
+
+    private static boolean clearFreeformOwnership() {
+        try {
+            return UnifiedConfigManager.updateSection("projection",
+                    new JSONObject().put(FREEFORM_RECOVERY_KEY, JSONObject.NULL));
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     /**
      * Best-effort: turn ON {@code Settings.Global.enable_freeform_support} so freeform windowing is
      * available to AMS at all.
@@ -1778,23 +2125,127 @@ final class ClusterFreeformWindow {
      * {@code WRITE_SECURE_SETTINGS}, which the daemon has as uid 2000 (shell).
      */
     private static void ensureFreeformSupportEnabled() {
+        recoverFreeformSupportOwnership();
         if (freeformSettingChecked) return;
         synchronized (ClusterFreeformWindow.class) {
-            // Latch BEFORE doing the work (rather than after) on purpose: this is a best-effort,
-            // idempotent, one-shot hint, and a concurrent second caller should skip it rather than
-            // queue behind a process fork. Worst case we attempt it once and never retry, which is
-            // exactly the intended cost model.
             if (freeformSettingChecked) return;
+            String cur = runSettingsCmd("settings get global " + SETTING_ENABLE_FREEFORM);
+            if ("1".equals(cur)) {
+                freeformSettingState = "already_enabled";
+                freeformSettingChecked = true;
+                logger.info("freeform support already enabled");
+                return;
+            }
+            if (!("0".equals(cur) || "null".equals(cur))) {
+                freeformSettingState = "unreadable";
+                freeformSettingChecked = true;
+                logger.warn("freeform support setting is unreadable; refusing an unowned write");
+                return;
+            }
+            String split = runSettingsCmd(
+                    "settings get global enable_non_resizable_multi_window");
+            JSONObject ownership = new JSONObject();
+            try {
+                ownership.put("prior", cur);
+                ownership.put("expected", "1");
+                ownership.put("splitPrior", split);
+                ownership.put("bootId", freeformBootId());
+                ownership.put("uncertain", true);
+                if (!UnifiedConfigManager.updateSection("projection",
+                        new JSONObject().put(FREEFORM_RECOVERY_KEY, ownership))) {
+                    freeformSettingState = "ownership_persist_failed";
+                    freeformSettingChecked = true;
+                    return;
+                }
+            } catch (Throwable t) {
+                freeformSettingState = "ownership_persist_failed";
+                freeformSettingChecked = true;
+                return;
+            }
+            String readback = runSettingsCmd("settings put global " + SETTING_ENABLE_FREEFORM
+                    + " 1 && settings get global " + SETTING_ENABLE_FREEFORM);
+            freeformSettingState = "1".equals(readback) ? "configured_next_boot" : "write_unconfirmed";
+            try {
+                ownership.put("uncertain", !"1".equals(readback));
+                UnifiedConfigManager.updateSection("projection",
+                        new JSONObject().put(FREEFORM_RECOVERY_KEY, ownership));
+            } catch (Throwable ignored) { }
             freeformSettingChecked = true;
+            logger.warn("freeform setting state=" + freeformSettingState
+                    + "; current-boot placement support=" + freeformCurrentBootSupported
+                    + "; split-window setting was preserved as '" + split + "'");
         }
-        String cur = runSettingsCmd("settings get global " + SETTING_ENABLE_FREEFORM);
-        if ("1".equals(cur)) {
-            logger.info("freeform support already enabled");
-            return;
+    }
+
+    static boolean prepareHostedFreeformState() {
+        recoverFreeformSupportOwnership();
+        JSONObject projection = UnifiedConfigManager.loadConfig().optJSONObject("projection");
+        JSONObject ownership = projection == null
+                ? null : projection.optJSONObject(FREEFORM_RECOVERY_KEY);
+        if (ownership == null) return true;
+        String split = runSettingsCmd("settings get global enable_non_resizable_multi_window");
+        if (split.isEmpty()) {
+            freeformSettingState = "split_state_unreadable";
+            return false;
         }
-        runSettingsCmd("settings put global " + SETTING_ENABLE_FREEFORM + " 1");
-        logger.warn("freeform support was '" + cur + "' — set to 1. AMS caches this at boot "
-                + "(retrieveSettings), so on-cluster resize may only take effect after a restart.");
+        if (!("0".equals(split) || "null".equals(split))) {
+            freeformSettingState = "preserved_for_split";
+            return true;
+        }
+        String prior = ownership.optString("prior", null);
+        String expected = ownership.optString("expected", null);
+        if (!("0".equals(prior) || "null".equals(prior)) || !"1".equals(expected)) {
+            freeformSettingState = "ownership_unreadable";
+            return false;
+        }
+        String current = runSettingsCmd("settings get global " + SETTING_ENABLE_FREEFORM);
+        String decision = freeformRecoveryDecision(prior, expected, current);
+        if ("restored".equals(decision)) return clearFreeformOwnership();
+        if (!"expected".equals(decision)) return false;
+        String command = "null".equals(prior)
+                ? "settings delete global " + SETTING_ENABLE_FREEFORM
+                    + " && settings get global " + SETTING_ENABLE_FREEFORM
+                : "settings put global " + SETTING_ENABLE_FREEFORM + " 0"
+                    + " && settings get global " + SETTING_ENABLE_FREEFORM;
+        String readback = runSettingsCmd(command);
+        if (!prior.equals(readback)) {
+            freeformSettingState = "restore_unconfirmed";
+            return false;
+        }
+        if (!clearFreeformOwnership()) return false;
+        freeformSettingChecked = false;
+        freeformRecoveryChecked = true;
+        freeformSettingState = "restored_for_hosted";
+        return true;
+    }
+
+    static boolean hasFreeformSupportOwnership() {
+        JSONObject projection = UnifiedConfigManager.loadConfig().optJSONObject("projection");
+        return projection != null && projection.optJSONObject(FREEFORM_RECOVERY_KEY) != null;
+    }
+
+    static JSONObject freeformSupportStatus() {
+        loadFreeformSuppression();
+        recoverFreeformSupportOwnership();
+        JSONObject result = new JSONObject();
+        try {
+            result.put("settingState", freeformSettingState);
+            result.put("currentBootSupported", freeformCurrentBootSupported);
+            result.put("suppressedPackages", freeformSuppressed.size());
+            JSONObject ownership = UnifiedConfigManager.loadConfig().optJSONObject("projection");
+            result.put("ownershipPending", ownership != null
+                    && ownership.optJSONObject(FREEFORM_RECOVERY_KEY) != null);
+        } catch (Throwable ignored) { }
+        return result;
+    }
+
+    private static String freeformBootId() {
+        try {
+            return new String(java.nio.file.Files.readAllBytes(
+                    java.nio.file.Paths.get("/proc/sys/kernel/random/boot_id"))).trim();
+        } catch (Throwable ignored) {
+            return "";
+        }
     }
 
     /**
@@ -1821,8 +2272,10 @@ final class ClusterFreeformWindow {
             }, "ClusterFreeformSettings");
             reader.setDaemon(true);
             reader.start();
-            if (!p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) p.destroyForcibly();
+            boolean completed = p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS);
+            if (!completed) p.destroyForcibly();
             reader.join(500);
+            if (!completed || reader.isAlive() || p.exitValue() != 0) return "";
             return sb.toString();
         } catch (Throwable t) {
             logger.debug("settings cmd failed (" + cmd + "): " + t.getMessage());

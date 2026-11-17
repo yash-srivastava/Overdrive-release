@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Speed button while playback is faster than 1x. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="@color/rec_player_quad_selected">
+    <item>
+        <inset android:inset="4dp">
+            <shape android:shape="rectangle">
+                <corners android:radius="20dp" />
+                <solid android:color="#335DDBB6" />
+            </shape>
+        </inset>
+    </item>
+</ripple>

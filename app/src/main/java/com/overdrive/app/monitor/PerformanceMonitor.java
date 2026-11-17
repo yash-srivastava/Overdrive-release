@@ -80,10 +80,8 @@ public class PerformanceMonitor {
     // Lets the freq-ratio fallback tag its estimate honestly (issue #173).
     // Sampler-thread-confined (collectMetrics runs on a single scheduler task).
     private boolean lastGpuMaxFreqWasReal = false;
-    // Cache immutable hardware-ceiling sources and the unavailable result.
-    // devfreq max_freq nodes are policy caps and can change at runtime, so
-    // those values are deliberately re-read instead of being cached.
-    // 0 = unresolved; -1 = resolved-absent (use the conservative default).
+    // Frequency-table maximum or the not-found result: 0 = unresolved, -1 = none readable.
+    // max_gpuclk and devfreq max_freq follow thermal/policy caps, so they are read every sample.
     private double cachedGpuMaxFreqMhz = 0;
     // Cache the resolved busy-counter path, including a confirmed missing path.
     // The kernel's sysfs topology is stable for the daemon's lifetime.
@@ -91,7 +89,7 @@ public class PerformanceMonitor {
     private boolean gpuBusyPathAbsent = false;
     private boolean gpuBusyResolutionLogged = false;
     // Resolve the GPU devfreq directory once instead of enumerating sysfs on
-    // every dashboard sample. null = unresolved, sentinel = no matching GPU.
+    // every dashboard sample. null = unresolved (or the last listing failed).
     private java.io.File[] gpuDevfreqDevices = null;
 
     // Cache the resolved CPU/GPU thermal-zone /temp paths. The original code
@@ -153,10 +151,7 @@ public class PerformanceMonitor {
             return t;
         });
         
-        // A sysfs/proc sweep can exceed the sample interval on slower BYD head units.
-        // Fixed-rate scheduling immediately runs missed samples back-to-back,
-        // keeping the sampler busy instead of giving the UI/camera time to run.
-        // Fixed-delay guarantees a full idle interval after each sweep.
+        // Fixed delay: a sweep slower than the interval must not run the next one back-to-back.
         scheduler.scheduleWithFixedDelay(this::collectMetrics, 0, SAMPLE_INTERVAL_MS, TimeUnit.MILLISECONDS);
         logger.info("Performance monitoring started");
     }
@@ -198,7 +193,7 @@ public class PerformanceMonitor {
      * Update client heartbeat timestamp.
      * @param clientId Client identifier
      */
-    public void clientHeartbeat(String clientId) {
+    public synchronized void clientHeartbeat(String clientId) {
         if (clientId != null && activeClients.containsKey(clientId)) {
             activeClients.put(clientId, System.currentTimeMillis());
         } else if (clientId != null) {
@@ -525,11 +520,11 @@ public class PerformanceMonitor {
             java.io.File[] devices = gpuDevfreqDevices;
             if (devices == null) {
                 java.io.File[] discovered = new java.io.File("/sys/class/devfreq/").listFiles();
-                if (discovered == null) discovered = new java.io.File[0];
                 // Cache the directory listing; frequency and load are still
-                // read live so thermal/governor changes remain visible.
-                gpuDevfreqDevices = discovered;
-                devices = discovered;
+                // read live so thermal/governor changes remain visible. A null
+                // listing (transient I/O or SELinux denial) is retried next sample.
+                if (discovered != null) gpuDevfreqDevices = discovered;
+                devices = discovered != null ? discovered : new java.io.File[0];
             }
             if (devices.length > 0) {
                     for (java.io.File device : devices) {
@@ -661,7 +656,6 @@ public class PerformanceMonitor {
             lastGpuMaxFreqWasReal = cachedGpuMaxFreqMhz > 0;
             return cachedGpuMaxFreqMhz > 0 ? cachedGpuMaxFreqMhz : 650.0;
         }
-
         lastGpuMaxFreqWasReal = false;
         String[] paths = {
             "/sys/class/kgsl/kgsl-3d0/max_gpuclk",
@@ -686,25 +680,13 @@ public class PerformanceMonitor {
                     }
                     if (maxRaw > 0) {
                         lastGpuMaxFreqWasReal = true;
-                        double maxMhz = normalizeFrequency(maxRaw);
-                        cachedGpuMaxFreqMhz = maxMhz;
-                        return maxMhz;
+                        cachedGpuMaxFreqMhz = normalizeFrequency(maxRaw);
+                        return cachedGpuMaxFreqMhz;
                     }
                 } else {
                     try {
                         long v = Long.parseLong(line.trim());
-                        if (v > 0) {
-                            lastGpuMaxFreqWasReal = true;
-                            double maxMhz = normalizeFrequency(v);
-                            // devfreq max_freq is a runtime policy cap, not a
-                            // hardware ceiling. Keep it live; the KGSL/Mali
-                            // hardware-max and available_frequencies nodes are
-                            // immutable for the daemon's lifetime.
-                            boolean immutableMaximum = path.endsWith("max_gpuclk")
-                                    || path.endsWith("max_clock");
-                            if (immutableMaximum) cachedGpuMaxFreqMhz = maxMhz;
-                            return maxMhz;
-                        }
+                        if (v > 0) { lastGpuMaxFreqWasReal = true; return normalizeFrequency(v); }
                     } catch (NumberFormatException ignored) {}
                 }
             } catch (Exception ignored) {}

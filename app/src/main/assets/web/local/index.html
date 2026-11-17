@@ -10,8 +10,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#00876C">
-    <script src="../shared/theme.js?v=11"></script>
-    <script src="../shared/app-shell.js?v=19"></script>
+    <script src="../shared/theme.js?v=12"></script>
+    <script src="../shared/app-shell.js?v=23"></script>
     <link rel="stylesheet" href="../shared/leaflet.css">
     <script src="../shared/leaflet.js"></script>
     <link rel="stylesheet" href="../shared/styles.css?v=38">
@@ -169,6 +169,7 @@
                                     <span id="dashRangeConfidence"></span>
                                     <span id="dashRangeSamples"></span>
                                     <span id="dashRangeLegs"></span>
+                                    <a id="dashRangeCalibrate" class="dash-range-cal" href="trips.html#calibrate-range" data-i18n="trip.range_cal.button" hidden>Calibrate</a>
                                 </div>
                             </div>
                             <!-- PHEV-only fuel gauge — hidden unless /api/status
@@ -213,9 +214,15 @@
                                 <strong id="glSentryText">--</strong>
                             </div>
                         </div>
-                        <div class="dash-glance-charge" id="dashGlanceCharge" hidden>
-                            <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><path d="M13 2 3 14h7l-1 8 11-13h-7l1-7z"/></svg>
-                            <span id="dashGlanceChargeText">--</span>
+                        <div class="dash-glance-strips">
+                            <div class="dash-glance-rec" id="dashGlanceRec" hidden>
+                                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><circle cx="12" cy="12" r="7"/></svg>
+                                <span id="dashGlanceRecText">--</span>
+                            </div>
+                            <div class="dash-glance-charge" id="dashGlanceCharge" hidden>
+                                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><path d="M13 2 3 14h7l-1 8 11-13h-7l1-7z"/></svg>
+                                <span id="dashGlanceChargeText">--</span>
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -245,7 +252,7 @@
                     </svg>
                 </button>
 
-                    <article class="dash-card dash-module-faults-card" id="dashModuleFaults" data-card-id="module-faults" hidden aria-live="polite">
+                    <article class="dash-card dash-module-faults-card" id="dashModuleFaults" hidden aria-live="polite">
                         <div class="dash-card-head">
                             <div>
                                 <span class="dash-card-kicker" data-i18n="moduleFaults.dashboard_kicker">Vehicle health</span>
@@ -412,12 +419,18 @@
                             <div class="dash-metric"><span><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v5"/></svg>12V</span><strong id="dash12v">--</strong></div>
                             <div class="dash-metric" id="dashPowerMetric"><span data-i18n="dashboard.metric_power"><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>Power</span><strong id="dashAcc">--</strong></div>
                             <div class="dash-connectivity-metrics">
-                                <!-- Value = SSID / Mobile Data / Ethernet; small = IPv4 when known -->
-                                <div class="dash-metric"><span data-i18n="dashboard.metric_network"><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>Network</span><strong id="dashNetwork">--</strong><small id="dashNetworkIp" style="display:none"></small></div>
+                                <!-- Value = SSID / Mobile Data / Ethernet; small = IPv4, then Wi-Fi dBm, when known.
+                                     The Wi-Fi switch and its note sit in the tile's top corner. -->
+                                <div class="dash-metric dash-network-metric"><span data-i18n="dashboard.metric_network"><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>Network</span>
+                                    <div class="dash-wifi-ctrl" id="dashWifiCtrl" hidden>
+                                        <label class="toggle-switch dash-wifi-switch" id="dashWifiSwitch"><input type="checkbox" id="dashWifiToggle" onchange="BYD.dashboard.toggleWifi(this.checked)"><span class="toggle-slider"></span></label>
+                                    </div><strong id="dashNetwork">--</strong>
+                                    <div class="dash-net-detail"><small id="dashNetworkIp" style="display:none"></small><small id="dashNetworkRssi" class="dash-net-rssi" style="display:none"></small><button type="button" class="dash-wifi-info" id="dashWifiInfoBtn" hidden aria-expanded="false" aria-controls="dashWifiNote" data-i18n-attr="title:dashboard.wifi_note_title;aria-label:dashboard.wifi_note_title" title="Wi-Fi and BYD connected services" aria-label="Wi-Fi and BYD connected services" onclick="BYD.dashboard.toggleWifiNote()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></svg></button></div>
+                                    <p class="dash-wifi-note" id="dashWifiNote" hidden data-i18n="dashboard.wifi_cloud_note">Joining Wi-Fi can switch off the car's own SIM link to BYD, so BYD app remote controls may stop working until Wi-Fi is off.</p>
+                                </div>
                                 <div class="dash-metric dash-bluetooth-metric" id="dashBluetoothMetric" data-state="unknown">
                                     <span data-i18n="dashboard.metric_bluetooth"><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7l10 10-5 4V3l5 4L7 17"/></svg>Bluetooth</span>
                                     <strong class="dash-radio-value" id="dashBluetoothValue" role="status" aria-live="polite" aria-label="Vehicle Bluetooth: Unknown">
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M7 7l10 10-5 4V3l5 4L7 17"/></svg>
                                         <span id="dashBluetooth"><span data-i18n="common.unknown">Unknown</span></span>
                                     </strong>
                                     <small id="dashBluetoothDetail"><span data-i18n="dashboard.bluetooth_detail_initial">Vehicle radio</span></small>
@@ -568,6 +581,7 @@
         }
         .dash-module-faults-list {
             display: grid;
+            grid-gap: 6px;
             gap: 6px;
             margin: 10px 0 0;
             padding-left: 19px;
@@ -1044,15 +1058,14 @@
         }
         .dash-car-door.locked   { fill: var(--primary); opacity: 1; }
         .dash-car-door.unlocked { fill: var(--warning); opacity: 1; }
-        /* An OPEN door outranks lock state — warn amber (door-open is WARN severity,
-           the same tier as "unlocked"), and nudged ajar (outward). */
-        .dash-car-door.open { fill: var(--warning); opacity: 1; }
-        .dash-car-door.open.lf, .dash-car-door.open.lr { transform: translateX(-3px); }
-        .dash-car-door.open.rf, .dash-car-door.open.rr { transform: translateX(3px); }
+        /* An OPEN door outranks lock state: danger red (amber stays "unlocked"), swung clearly ajar. */
+        .dash-car-door.open { fill: var(--danger); opacity: 1; }
+        .dash-car-door.open.lf, .dash-car-door.open.lr { transform: translateX(-6px); }
+        .dash-car-door.open.rf, .dash-car-door.open.rr { transform: translateX(6px); }
 
-        /* Trunk/hood open → outline the rear/front windshield in warn amber. Uses stroke,
+        /* Trunk/hood open → outline the rear/front windshield in red. Uses stroke,
            so it never clashes with the AC fill tint on the same glass. */
-        .dash-car-glass.open { stroke: var(--warning); stroke-width: 2.5; }
+        .dash-car-glass.open { stroke: var(--danger); stroke-width: 2.5; }
 
         .dash-car-tyre { fill: var(--outline-variant); }
         .dash-car-tyre.normal { fill: var(--primary); opacity: 0.75; }
@@ -1066,7 +1079,7 @@
             font-family: inherit;
         }
         .dash-car-psi-unit {
-            font-size: 0.45em;
+            font-size: 0.6em;
             font-weight: 600;
         }
         .dash-car-psi.warn  { fill: var(--warning); }
@@ -1326,6 +1339,14 @@
         .dash-range-meta span { margin-right: 12px; }
         [dir="rtl"] .dash-range-meta span { margin-right: 0; margin-left: 12px; }
         .dash-range-meta span:empty { display: none; }
+        .dash-range-cal {
+            margin-left: auto;
+            color: var(--primary);
+            font-weight: 600;
+            text-decoration: none;
+        }
+        [dir="rtl"] .dash-range-cal { margin-left: 0; margin-right: auto; }
+        .dash-range-cal[hidden] { display: none; }
 
         /* Charging takeover strip — full width under the status tiles. */
         .dash-glance-charge {
@@ -1350,6 +1371,30 @@
             animation: dashBoltPulse 1.4s ease-in-out infinite;
         }
         [dir="rtl"] .dash-glance-charge svg { margin-right: 0; margin-left: 8px; }
+        /* The live clip strip shares the hero's bottom grid area with the charging strip. */
+        .dash-glance-strips { grid-area: charge; min-width: 0; }
+        .dash-glance-rec {
+            display: flex;
+            align-items: center;
+            margin-top: 12px;
+            padding: 10px 14px;
+            border-radius: var(--radius-md);
+            background: var(--danger-soft);
+            color: var(--danger);
+            font-size: var(--fs-label);
+            font-weight: 600;
+            line-height: 1.3;
+            font-variant-numeric: tabular-nums;
+        }
+        .dash-glance-rec[hidden] { display: none; }
+        .dash-glance-rec svg {
+            width: 12px;
+            height: 12px;
+            margin-right: 8px;
+            flex: 0 0 auto;
+            animation: dashBoltPulse 1.4s ease-in-out infinite;
+        }
+        [dir="rtl"] .dash-glance-rec svg { margin-right: 0; margin-left: 8px; }
         @keyframes dashBoltPulse {
             0%, 100% { opacity: 1; }
             50%      { opacity: 0.45; }
@@ -2402,6 +2447,53 @@
         [dir="rtl"] .dash-metric small { margin: 0 6px 0 0; }
         .dash-metric > span { margin-bottom: 6px; }
 
+        /* Network tile: Wi-Fi switch pinned to the top corner, so the tile keeps its height. */
+        .dash-network-metric { position: relative; }
+        .dash-network-metric > span { padding-right: 52px; }
+        [dir="rtl"] .dash-network-metric > span { padding-right: 0; padding-left: 52px; }
+        .dash-wifi-ctrl {
+            position: absolute;
+            top: -6px;
+            right: 8px;
+            display: flex;
+            align-items: center;
+        }
+        [dir="rtl"] .dash-wifi-ctrl { right: auto; left: 8px; }
+        /* The app's own switch, a little smaller so it fits the tile's label row. */
+        .dash-wifi-switch { transform: scale(.8); transform-origin: 100% 50%; }
+        [dir="rtl"] .dash-wifi-switch { transform-origin: 0 50%; }
+        .dash-wifi-ctrl[hidden], .dash-wifi-note[hidden] { display: none; }
+        .dash-wifi-info {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            margin: 2px 0 0 -4px;
+            padding: 0;
+            border: none;
+            border-radius: 50%;
+            background: transparent;
+            color: var(--on-surface-variant);
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .dash-wifi-info svg { width: 16px; height: 16px; }
+        .dash-wifi-info[hidden] { display: none; }
+        [dir="rtl"] .dash-wifi-info { margin: 2px -4px 0 0; }
+        .dash-wifi-info[aria-expanded="true"] { color: var(--primary); }
+        .dash-metric .dash-wifi-switch .toggle-slider { display: block; margin: 0; }
+        /* IP, dBm and the info icon on one line under the network name, wrapping cleanly on phones. */
+        .dash-net-detail { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; }
+        .dash-metric .dash-net-detail small { margin: 4px 0 0; }
+        .dash-net-rssi { white-space: nowrap; }
+        .dash-wifi-note {
+            margin: 8px 0 0;
+            color: var(--on-surface-variant);
+            font-size: var(--fs-caption);
+            line-height: 1.4;
+        }
+
         /* Energy tile (mock .mini-bar) and readings with small units. */
         .dash-mini-bar {
             position: relative;
@@ -2839,6 +2931,8 @@
             .dash-glance-side,
             .dash-glance-car { margin-top: 16px; }
             .dash-car-psi { font-size: 19px; }
+            /* No room beside the car outline at phone width. */
+            .dash-car-psi-unit { display: none; }
             .dash-command-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             .dash-command-grid-media { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             #dashCustomCommands > .dash-command:last-child:nth-child(odd) { grid-column: 1 / -1; }
@@ -2860,10 +2954,10 @@
 
     <script src="../shared/auth.js"></script>
     <script src="../shared/pwa-init.js?v=index1"></script>
-    <script src="../shared/core.js?v=24"></script>
+    <script src="../shared/core.js?v=27"></script>
     <script src="../shared/module-faults-dashboard.js?v=1"></script>
     <script src="../shared/update-flow.js?v=3"></script>
-    <script src="../shared/map.js?v=8"></script>
+    <script src="../shared/map.js?v=9"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
@@ -2880,6 +2974,7 @@
             aiInsightEnabled: false,
             VEHICLE_STATE_STALE_AFTER_FAILURES: 2,
             VEHICLE_STATE_POLL_MS: 6000,
+            VEHICLE_STATE_TIMEOUT_MS: 8000,
             AI_INSIGHT_POLL_MS: 300000,
             initAiInsight: function() {
                 var self = this;
@@ -3030,6 +3125,14 @@
             },
             command: function(btn, url, payload) {
                 if (!btn || btn.classList.contains('pending')) return;
+                var openParts = BYD.dashboard.openDoorParts;
+                if (url === '/api/vehicle/lock' && openParts && openParts.length
+                        && Date.now() - (BYD.dashboard.openDoorPartsAt || 0) < 20000
+                        && BYD.utils && BYD.utils.toast) {
+                    BYD.utils.toast((BYD.i18n.t('dashboard.lock_door_open_warning')
+                        || 'Open: {parts}. The car may refuse to lock until it is closed.')
+                        .replace('{parts}', openParts.join(', ')), 'warning');
+                }
                 btn.classList.add('pending');
                 fetch(url, {
                     method: 'POST',
@@ -3175,10 +3278,24 @@
                     this.vehicleStateRefreshQueued = true;
                     return this.vehicleStateRequest;
                 }
-                var request = fetch('/api/vehicle/state', { cache: 'no-store' })
+                // A request in flight when the link dropped can hang; bound it so the single-flight slot frees.
+                var abort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+                var deadlineTimer = null;
+                var deadline = new Promise(function(resolve, reject) {
+                    deadlineTimer = setTimeout(function() {
+                        if (abort) { try { abort.abort(); } catch (ignored) {} }
+                        reject(new Error('vehicle-state request timed out'));
+                    }, self.VEHICLE_STATE_TIMEOUT_MS);
+                });
+                deadline.catch(function() {});
+                var request = Promise.race([
+                    abort ? fetch('/api/vehicle/state', { cache: 'no-store', signal: abort.signal })
+                        : fetch('/api/vehicle/state', { cache: 'no-store' }),
+                    deadline
+                ])
                     .then(function(r) {
                         if (!r.ok) throw new Error('HTTP ' + r.status);
-                        return r.json();
+                        return Promise.race([r.json(), deadline]);
                     }).then(function(data) {
                         if (!data || data.success !== true) {
                             throw new Error('Invalid vehicle-state response');
@@ -3194,6 +3311,7 @@
                         }
                         return null;
                     }).finally(function() {
+                        clearTimeout(deadlineTimer);
                         self.vehicleStateRequest = null;
                         if (self.vehicleStateRefreshQueued) {
                             self.vehicleStateRefreshQueued = false;
@@ -3207,8 +3325,9 @@
             },
             startVehicleStatePolling: function() {
                 this.stopVehicleStatePolling();
-                if (document.hidden) return;
+                // One snapshot even in a tab opened in the background; only the repeat waits until it is shown.
                 this.refreshVehicleState();
+                if (document.hidden) return;
                 var self = this;
                 this.vehicleStatePollTimer = setInterval(function() {
                     self.refreshVehicleState();
@@ -3220,6 +3339,101 @@
                     this.vehicleStatePollTimer = null;
                 }
             },
+            onOffText: function(on) {
+                var key = on ? 'dashboard.state_on' : 'dashboard.state_off';
+                var value = BYD.i18n.t(key);
+                return value && value !== key ? value : (on ? 'On' : 'Off');
+            },
+            // Whole numbers without ".0"; one decimal only when the car reports one.
+            percentText: function(value) {
+                var rounded = Math.round(value * 10) / 10;
+                return (rounded % 1 === 0 ? rounded.toFixed(0) : rounded.toFixed(1)) + '%';
+            },
+            // The car's Wi-Fi client radio (not the hotspot), via /api/network/wifi.
+            wifiEnabled: null,
+            wifiBusy: false,
+            wifiText: function(key, fallback) {
+                var value = BYD.i18n.t(key);
+                return value && value !== key ? value : fallback;
+            },
+            renderWifi: function() {
+                var ctrl = document.getElementById('dashWifiCtrl');
+                var input = document.getElementById('dashWifiToggle');
+                var sw = document.getElementById('dashWifiSwitch');
+                var info = document.getElementById('dashWifiInfoBtn');
+                if (!ctrl || !input) return;
+                ctrl.hidden = this.wifiEnabled === null;
+                if (info) info.hidden = ctrl.hidden;
+                if (ctrl.hidden) {
+                    var note = document.getElementById('dashWifiNote');
+                    if (note) note.hidden = true;
+                    if (info) info.setAttribute('aria-expanded', 'false');
+                }
+                input.checked = this.wifiEnabled === true;
+                input.disabled = this.wifiBusy;
+                var label = this.wifiEnabled
+                    ? this.wifiText('dashboard.wifi_turn_off', 'Turn Wi-Fi off')
+                    : this.wifiText('dashboard.wifi_turn_on', 'Turn Wi-Fi on');
+                input.setAttribute('aria-label', label);
+                if (sw) sw.title = label;
+            },
+            refreshWifi: function() {
+                var self = this;
+                if (this.wifiBusy) return;
+                fetch('/api/network/wifi', { cache: 'no-store' }).then(function(r) {
+                    return r.ok ? r.json() : null;
+                }).then(function(data) {
+                    if (self.wifiBusy) return;
+                    self.wifiEnabled = data && data.success && typeof data.enabled === 'boolean'
+                        ? data.enabled : null;
+                    self.renderWifi();
+                }).catch(function() {
+                    if (self.wifiBusy) return;
+                    self.wifiEnabled = null;
+                    self.renderWifi();
+                });
+            },
+            toggleWifi: function(wanted) {
+                var self = this;
+                if (this.wifiBusy || this.wifiEnabled === null || wanted === this.wifiEnabled) {
+                    this.renderWifi();
+                    return;
+                }
+                var enable = wanted === true;
+                if (!enable && !window.confirm(this.wifiText('dashboard.wifi_off_confirm',
+                        'Turn Wi-Fi off? If you reach the car over Wi-Fi, this page will disconnect.'))) {
+                    this.renderWifi();
+                    return;
+                }
+                this.wifiBusy = true;
+                this.renderWifi();
+                fetch('/api/network/wifi', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: enable })
+                }).then(function(r) {
+                    return r.json().then(function(data) {
+                        if (!r.ok || !data || !data.success) throw new Error('HTTP ' + r.status);
+                    });
+                }).then(function() {
+                    self.wifiEnabled = enable;
+                }, function() {
+                    if (BYD.utils && BYD.utils.toast) {
+                        BYD.utils.toast(self.wifiText('dashboard.wifi_toggle_failed', "Couldn't switch Wi-Fi."), 'error');
+                    }
+                }).then(function() {
+                    self.wifiBusy = false;
+                    self.renderWifi();
+                    setTimeout(function() { self.refreshWifi(); }, 3000);
+                });
+            },
+            toggleWifiNote: function() {
+                var note = document.getElementById('dashWifiNote');
+                var button = document.getElementById('dashWifiInfoBtn');
+                if (!note) return;
+                note.hidden = !note.hidden;
+                if (button) button.setAttribute('aria-expanded', note.hidden ? 'false' : 'true');
+            },
             initVehicleStatePolling: function() {
                 var self = this;
                 document.addEventListener('visibilitychange', function() {
@@ -3229,6 +3443,15 @@
                         self.startVehicleStatePolling();
                     }
                 });
+                document.addEventListener('byd:reconnected', function() {
+                    if (!document.hidden) self.startVehicleStatePolling();
+                });
+                // Some browsers skip visibilitychange for a tab opened in the background; core.js does the same.
+                var resumeIfIdle = function() {
+                    if (!document.hidden && !self.vehicleStatePollTimer) self.startVehicleStatePolling();
+                };
+                window.addEventListener('pageshow', resumeIfIdle);
+                window.addEventListener('focus', resumeIfIdle);
                 this.startVehicleStatePolling();
             },
             markVehicleStateUnavailable: function() {
@@ -3323,10 +3546,18 @@
                     // lock state — it's the safety-relevant signal. Falls back to lock
                     // colour (locked/unlocked) when the door is closed or open is unknown.
                     var doorOpen = (data.doorOpen && typeof data.doorOpen === 'object') ? data.doorOpen : {};
+                    var doorNames = {
+                        lf: BYD.i18n.t('dashboard.door_front_left') || 'Front left',
+                        rf: BYD.i18n.t('dashboard.door_front_right') || 'Front right',
+                        lr: BYD.i18n.t('dashboard.door_rear_left') || 'Rear left',
+                        rr: BYD.i18n.t('dashboard.door_rear_right') || 'Rear right'
+                    };
+                    var openParts = [];
                     if (data.doors || data.doorOpen) {
                         var locks = data.doors || {};
                         var doorMap = { lf: 'glDoorLF', rf: 'glDoorRF', lr: 'glDoorLR', rr: 'glDoorRR' };
                         for (var dk in doorMap) {
+                            if (doorOpen[dk] === true) openParts.push(doorNames[dk]);
                             var dEl = document.getElementById(doorMap[dk]);
                             if (!dEl) continue;
                             var cls = 'dash-car-door ' + dk;
@@ -3348,6 +3579,18 @@
                     setGlassOpen('glGlassFront', doorOpen.hood === true);
                     setGlassOpen('glGlassRear', doorOpen.trunk === true
                         || (data.trunk && data.trunk.open === true));
+                    if (doorOpen.hood === true) openParts.push(BYD.i18n.t('dashboard.door_hood') || 'Hood');
+                    if (doorOpen.trunk === true || (data.trunk && data.trunk.open === true)) {
+                        openParts.push(BYD.i18n.t('dashboard.door_trunk') || 'Trunk');
+                    }
+                    // A physically open door is what stops locking, so it outranks the lock text.
+                    if (openParts.length) {
+                        setText('glLockText', (BYD.i18n.t('dashboard.doors_open_list') || 'Open: {parts}')
+                            .replace('{parts}', openParts.join(', ')));
+                        setRowState('glLockText', 'alert');
+                    }
+                    BYD.dashboard.openDoorParts = openParts;
+                    BYD.dashboard.openDoorPartsAt = Date.now();
 
                     // Windows — 0-100 = % open, anything else = no reading.
                     if (data.windows) {
@@ -3383,9 +3626,7 @@
                             || data.climate.acOn === true;
                         panel.classList.toggle('ac-on', acOn);
                         var climText = climateKnown
-                            ? (acOn
-                                ? (BYD.i18n.t('dashboard.glance_ac_on') || 'AC on')
-                                : (BYD.i18n.t('dashboard.glance_ac_off') || 'AC off'))
+                            ? BYD.dashboard.onOffText(acOn)
                             : '--';
                         var t = data.climate.insideTempC;
                         if (typeof t === 'number' && t > 0) {
@@ -3763,6 +4004,8 @@
                         }) || (snapshot.sampleCount + ' samples'))
                         : '';
                 }
+                var calibrate = document.getElementById('dashRangeCalibrate');
+                if (calibrate) calibrate.hidden = false;
                 var legs = document.getElementById('dashRangeLegs');
                 if (legs) {
                     if (snapshot.isPhev
@@ -3947,11 +4190,12 @@
                     : translated('dashboard.drive_power_off', 'Vehicle off');
                 var stateText = translated(
                     state.stateKey, state.stateFallback, state.detailVars);
-                var detailText = translated(
+                var detailText = state.mode === 'parked' ? '' : translated(
                     state.detailKey, state.detailFallback, state.detailVars);
                 setIfChanged('dashDrivePower', powerText);
                 setIfChanged('dashDriveMode', stateText);
-                setIfChanged('dashDriveDetail', detailText);
+                var detailEl = setIfChanged('dashDriveDetail', detailText);
+                if (detailEl) detailEl.style.display = detailText ? '' : 'none';
 
                 root.className = 'dash-drive-state is-' + state.mode;
                 if (state.speedKmh !== null) root.classList.add('has-speed');
@@ -4020,16 +4264,112 @@
                         return vars && vars[k] != null ? String(vars[k]) : m;
                     });
                 }
+                var plain = radio.state === 'on' || radio.state === 'off';
+                var shown = plain ? this.onOffText(radio.state === 'on') : radio.label;
                 if (metric) {
                     metric.setAttribute('data-state', radio.state);
                     metric.title = btText('dashboard.bluetooth_title',
                         'Vehicle Bluetooth: {state}. {detail}',
-                        { state: radio.label, detail: radio.detail });
+                        { state: shown, detail: radio.detail });
                 }
                 if (value) value.setAttribute('aria-label', btText('dashboard.bluetooth_aria',
-                    'Vehicle Bluetooth: {state}', { state: radio.label }));
-                if (label) label.textContent = radio.label;
-                if (detail) detail.textContent = radio.detail;
+                    'Vehicle Bluetooth: {state}', { state: shown }));
+                if (label) label.textContent = shown;
+                if (detail) {
+                    detail.textContent = plain ? '' : radio.detail;
+                    detail.style.display = plain ? 'none' : '';
+                }
+            },
+            // Clip timer: the daemon reports the open clip's elapsed time; between 5 s polls it
+            // ticks locally, and it stops after 15 s without a fresh status.
+            setRecordingClip: function(clip) {
+                var valid = clip && typeof clip.elapsedMs === 'number' && isFinite(clip.elapsedMs);
+                this._recClip = valid ? {
+                    elapsedMs: Math.max(0, clip.elapsedMs),
+                    durationMs: Number(clip.durationMs) > 0 ? Number(clip.durationMs) : 0,
+                    pending: clip.rotationPending === true,
+                    audio: clip.audio === true,
+                    layout: clip.layout,
+                    kind: clip.kind,
+                    at: this._recNow()
+                } : null;
+                var self = this;
+                if (this._recClip && !this._recTimer) {
+                    this._recTimer = setInterval(function () { self.renderRecordingClip(); }, 1000);
+                } else if (!this._recClip && this._recTimer) {
+                    clearInterval(this._recTimer);
+                    this._recTimer = null;
+                }
+                this.renderRecordingClip();
+            },
+            _recNow: function() {
+                return (window.performance && performance.now) ? performance.now() : Date.now();
+            },
+            renderRecordingClip: function() {
+                function tr(key, fallback, vars) {
+                    var v = BYD.i18n.t(key, vars);
+                    if (v && v !== key) return v;
+                    if (vars) Object.keys(vars).forEach(function (n) { fallback = fallback.split('{' + n + '}').join(vars[n]); });
+                    return fallback;
+                }
+                function clock(ms) {
+                    var total = Math.max(0, Math.floor(ms / 1000));
+                    var h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), sec = total % 60;
+                    var mm = h > 0 && m < 10 ? '0' + m : String(m);
+                    return (h > 0 ? h + ':' : '') + mm + ':' + (sec < 10 ? '0' + sec : sec);
+                }
+                var strip = document.getElementById('dashGlanceRec');
+                var text = document.getElementById('dashGlanceRecText');
+                var chip = document.getElementById('dashRecChip');
+                var chipText = chip ? (chip.querySelector('.dash-chip-text') || chip) : null;
+                var clip = this._recClip;
+                var age = clip ? this._recNow() - clip.at : 0;
+                if (!clip || age > 15000) {
+                    if (strip) strip.hidden = true;
+                    if (chip && !chip.hidden) {
+                        chipText.textContent = tr('dashboard.chip_recording', 'Recording');
+                        chip.title = chipText.textContent;
+                    }
+                    if (this._recTimer) {
+                        clearInterval(this._recTimer);
+                        this._recTimer = null;
+                    }
+                    return;
+                }
+                var elapsed = clip.elapsedMs + Math.max(0, age);
+                // Continuous and Drive Mode start a new clip every clip length; other kinds end with the event.
+                var rotating = (clip.kind === 'CONTINUOUS' || clip.kind === 'DRIVE_MODE') && clip.durationMs > 0;
+                var shown = rotating ? Math.min(elapsed, clip.durationMs) : elapsed;
+                var parts = [];
+                if (rotating) {
+                    parts.push(tr('dashboard.rec_clip_progress', 'Clip {elapsed} / {total}', {
+                        elapsed: clock(shown), total: clock(clip.durationMs) }));
+                    parts.push(clip.pending || elapsed >= clip.durationMs
+                        ? tr('dashboard.rec_next_pending', 'Starting the next clip…')
+                        : tr('dashboard.rec_next_in', 'Next clip in {time}', {
+                            time: clock(Math.ceil((clip.durationMs - elapsed) / 1000) * 1000) }));
+                } else {
+                    parts.push(tr('dashboard.rec_clip_elapsed', 'Clip {elapsed}', { elapsed: clock(shown) }));
+                }
+                var mode = {
+                    CONTINUOUS: ['recording.mode_continuous_name', 'Continuous'],
+                    DRIVE_MODE: ['recording.mode_drive_name', 'Drive Mode'],
+                    PROXIMITY_GUARD: ['recording.mode_proximity_name', 'Proximity Guard'],
+                    SURVEILLANCE: ['status.sentry', 'Surveillance']
+                }[clip.kind];
+                if (mode) parts.push(tr(mode[0], mode[1]));
+                parts.push(clip.layout === 'dashcam'
+                    ? tr('dashboard.rec_layout_dashcam', 'Dashcam view')
+                    : tr('dashboard.rec_layout_grid', '360° grid'));
+                parts.push(clip.audio
+                    ? tr('dashboard.rec_audio_on', 'Cabin sound')
+                    : tr('dashboard.rec_audio_off', 'No sound'));
+                if (text) text.textContent = parts.join(' · ');
+                if (strip) strip.hidden = false;
+                if (chip && !chip.hidden) {
+                    chipText.textContent = tr('dashboard.chip_recording_time', 'Recording · {time}', { time: clock(shown) });
+                    chip.title = chipText.textContent;
+                }
             },
             updateFromStatus: function(status) {
                 if (!status) return;
@@ -4078,9 +4418,7 @@
                     return h || (hours + 'h ago');
                 }
                 function tOnOff(on) {
-                    return on
-                        ? (BYD.i18n.t('status.on') || 'ON')
-                        : (BYD.i18n.t('status.off') || 'OFF');
+                    return BYD.dashboard.onOffText(on);
                 }
 
                 var driveState = this.updateDriveState(status);
@@ -4101,6 +4439,7 @@
                     recChip.hidden = !isRecording;
                     if (isRecording) setChip('dashRecChip', tr('dashboard.chip_recording', 'Recording'), 'alert is-live');
                 }
+                this.setRecordingClip(isRecording ? status.recordingStatus.clip : null);
                 setText('dashAcc', tOnOff(driveState.powerOn));
 
                 var batteryVoltage = status.battery
@@ -4113,8 +4452,8 @@
                 setText('dash12v', batteryFresh
                     ? batteryVoltage.toFixed(1) + 'V' : '--');
                 var socPercent = (status.soc && status.soc.percent !== undefined) ? status.soc.percent : null;
-                if (socPercent !== null) {
-                    var socText = socPercent.toFixed(1) + '%';
+                if (typeof socPercent === 'number' && isFinite(socPercent)) {
+                    var socText = BYD.dashboard.percentText(socPercent);
                     setText('dashSoc', socText);
                     this.glance.setFigure(document.getElementById('dashHeroSoc'), socText);
                 } else {
@@ -4155,7 +4494,7 @@
                 var net = status.network || {};
                 var netName = null;
                 if (net.type === 'wifi') {
-                    netName = net.ssid || (BYD.i18n.t('status.wifi') || 'WiFi');
+                    netName = net.ssid || (BYD.i18n.t('status.wifi') || 'Wi-Fi');
                 } else if (net.type === 'cellular') {
                     netName = BYD.i18n.t('status.mobile_data') || 'Mobile Data';
                 } else if (net.type === 'ethernet') {
@@ -4167,6 +4506,13 @@
                     var ip = (netName && net.ip) ? net.ip : '';
                     netIpEl.textContent = ip;
                     netIpEl.style.display = ip ? '' : 'none';
+                }
+                var rssiEl = document.getElementById('dashNetworkRssi');
+                if (rssiEl) {
+                    var dbm = net.type === 'wifi' && typeof net.rssiDbm === 'number' && net.rssiDbm < 0
+                        ? net.rssiDbm + ' dBm' : '';
+                    rssiEl.textContent = dbm;
+                    rssiEl.style.display = dbm ? '' : 'none';
                 }
                 this.updateBluetoothStatus(status.bluetooth, false);
 
@@ -4230,8 +4576,8 @@
                                       : c.full ? 'Full' : c.plugged ? 'Plugged in' : 'Idle';
                     setText('dashChargeState', BYD.i18n.t(stateKey) || fallbackState);
 
-                    if (c.socPercent !== undefined && c.socPercent !== null) {
-                        setText('dashChargeSoc', c.socPercent.toFixed(1) + '%');
+                    if (typeof c.socPercent === 'number' && isFinite(c.socPercent)) {
+                        setText('dashChargeSoc', BYD.dashboard.percentText(c.socPercent));
                         var socBar = document.getElementById('dashChargeSocBar');
                         if (socBar) socBar.style.width = Math.max(0, Math.min(100, c.socPercent)) + '%';
                     } else {
@@ -4367,6 +4713,8 @@
                 pillsTimer = setTimeout(function() { BYD.dashboard.layoutPills(); }, 150);
             });
             BYD.dashboard.initVehicleStatePolling();
+            BYD.dashboard.refreshWifi();
+            setInterval(function() { if (!document.hidden) BYD.dashboard.refreshWifi(); }, 30000);
             BYD.dashboard.initAiInsight();
             BYD.dashboard.refreshSecurityDigest();
             setInterval(function() { BYD.dashboard.refreshSecurityDigest(); }, 60000);

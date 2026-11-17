@@ -2,7 +2,11 @@ package com.overdrive.app.streaming;
 
 import org.java_websocket.server.WebSocketServer;
 import org.java_websocket.WebSocket;
+import org.java_websocket.drafts.Draft;
+import org.java_websocket.exceptions.InvalidDataException;
+import org.java_websocket.framing.CloseFrame;
 import org.java_websocket.handshake.ClientHandshake;
+import org.java_websocket.handshake.ServerHandshakeBuilder;
 
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
@@ -85,6 +89,48 @@ public class WebSocketStreamServer extends WebSocketServer
 
     public void setIdleShutdownCallback(Runnable callback) {
         this.idleShutdownCallback = callback;
+    }
+
+    private volatile long lastRefusalLogMs = 0L;
+
+    /**
+     * Camera video only for a valid session, as on 8080: the session cookie, an Authorization bearer, or ?token= (the
+     * pages use the authenticated /ws on 8080; this port is kept for older clients). Not by address: a tailnet peer can
+     * arrive as loopback.
+     */
+    @Override
+    public ServerHandshakeBuilder onWebsocketHandshakeReceivedAsServer(WebSocket conn, Draft draft,
+            ClientHandshake request) throws InvalidDataException {
+        String auth = request.hasFieldValue("Authorization") ? request.getFieldValue("Authorization") : null;
+        if (auth == null || auth.isEmpty()) auth = bearerFromQuery(request.getResourceDescriptor());
+        String cookie = request.hasFieldValue("Cookie") ? request.getFieldValue("Cookie") : null;
+        if (!com.overdrive.app.server.AuthMiddleware.hasValidJwt(cookie, auth)) {
+            long now = android.os.SystemClock.elapsedRealtime();
+            if (now - lastRefusalLogMs > 60_000L) {
+                lastRefusalLogMs = now;
+                logger.warn("WS client refused (no valid session): " + conn.getRemoteSocketAddress());
+            }
+            throw new InvalidDataException(CloseFrame.POLICY_VALIDATION, "Unauthorized");
+        }
+        return super.onWebsocketHandshakeReceivedAsServer(conn, draft, request);
+    }
+
+    // "Bearer <token>" from a ?token= in the request path, or null.
+    private static String bearerFromQuery(String resource) {
+        if (resource == null) return null;
+        int q = resource.indexOf('?');
+        if (q < 0) return null;
+        for (String param : resource.substring(q + 1).split("&")) {
+            int eq = param.indexOf('=');
+            if (eq > 0 && "token".equals(param.substring(0, eq))) {
+                try {
+                    return "Bearer " + java.net.URLDecoder.decode(param.substring(eq + 1), "UTF-8");
+                } catch (Exception e) {
+                    return null;
+                }
+            }
+        }
+        return null;
     }
     
     /**
@@ -192,8 +238,8 @@ public class WebSocketStreamServer extends WebSocketServer
                 // transparently. This adds NO teardown path and is bounded — it only
                 // touches a single deferred send per keyframe request (the requestSync
                 // hook below still fires immediately to bias the next frame to an IDR),
-                // so keep-warm intent is untouched. Use a one-shot daemon Timer so we
-                // never block the WS reader thread; conn.isOpen() guards a client that
+                // so keep-warm intent is untouched. The shared retry scheduler (one
+                // pending retry per client) never blocks the WS reader thread; conn.isOpen() guards a client that
                 // disconnected during the deferral window.
                 final WebSocket deferredConn = conn;
                 // Repeated requests from one client share a single pending retry.

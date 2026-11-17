@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_section_adb">ADB</string>
+    <string name="settings_adb_subtitle">Kết nối, bật và khôi phục tự động.</string>
+    <string name="settings_adb_connection_title">Kết nối</string>
+    <string name="settings_adb_automatic_title">Khôi phục tự động</string>
+    <string name="settings_adb_automatic_restore">Tự động khôi phục ADB</string>
+    <string name="settings_adb_automatic_description">Khôi phục cài đặt ADB khi khởi động và khi bị tắt. Cần được cấp quyền cài đặt từ trước; không cần Wi-Fi. DiLink 5 còn hỗ trợ khôi phục không dây qua Wi-Fi đã xác thực với khóa đã được cho phép.</string>
+    <string name="settings_adb_recover">Khôi phục ADB ngay</string>
+    <string name="settings_adb_cancel_recovery">Hủy khôi phục</string>
+    <string name="settings_adb_manual_title">Bật thủ công</string>
+    <string name="settings_adb_manual_description">Dùng công cụ BYD tương thích để yêu cầu quyền truy cập ADB. Không cần kết nối Wi-Fi.</string>
+    <string name="settings_adb_enable">Bật ADB</string>
+    <string name="settings_adb_advanced_tools">Công cụ nâng cao</string>
+    <string name="settings_adb_hide_advanced">Ẩn công cụ nâng cao</string>
+    <string name="settings_adb_advanced_description">Chẩn đoán vấn đề, mở công cụ BYD hoặc hoàn tác một lần thử thủ công.</string>
+    <string name="settings_adb_open_developer">Mở tùy chọn nhà phát triển</string>
+    <string name="settings_adb_developer_page">Yêu cầu trang nhà phát triển BYD</string>
+    <string name="settings_adb_diagnostics">Kiểm tra tính tương thích và kết nối</string>
+    <string name="settings_adb_restore">Hoàn tác thay đổi khi bật thủ công</string>
+    <string name="settings_adb_export">Xuất APK công cụ nhà phát triển BYD</string>
+    <string name="settings_adb_dialog_confirm">Cho phép gỡ lỗi không dây trên mạng này</string>
+    <string name="settings_adb_dialog_confirm_description">Trước tiên, hãy kết nối với mạng Wi-Fi đã được xác thực. Cho phép OverDrive xác nhận hộp thoại gỡ lỗi không dây chỉ cho mạng này.</string>
+    <string name="settings_adb_tools_unavailable">Không thể bật thủ công trong chế độ hiện tại hoặc với công cụ BYD đã cài đặt.</string>
+    <string name="settings_adb_recovery_availability">Khôi phục cục bộ cần quyền cài đặt được cấp khi thiết lập ADB. Không cần Wi-Fi hoặc chế độ DiLink 5.</string>
+    <string name="settings_adb_details_title">Chi tiết lần thử gần nhất</string>
+    <string name="settings_adb_recovery_confirm_body">Khôi phục cục bộ sử dụng quyền cài đặt đã được cấp mà không cần Wi-Fi. DiLink 5 còn có thể dùng Wi-Fi đã xác thực và khóa đã được cho phép. Thao tác có thể mở hoặc khôi phục ADB mạng ở cổng 5555, có thể truy cập từ thiết bị khác trong mạng xe. Chỉ tiếp tục trên mạng tin cậy. Xác thực bằng khóa ADB vẫn bật.</string>
+    <string name="settings_adb_recovery_permission_missing">Thiếu quyền cài đặt. Nếu ADB cũng không khả dụng, hãy dùng Bật ADB hoặc Tùy chọn nhà phát triển trước, rồi hoàn tất lại thiết lập ADB.</string>
+    <string name="settings_adb_recovery_setting_enabled">Cài đặt ADB đã được bật. Chưa xác nhận được kết nối ADB đã xác thực.</string>
+    <string name="settings_adb_recovery_setting_failed">Không thể bật và xác minh cài đặt ADB. Firmware có thể từ chối thay đổi này.</string>
+    <string name="settings_adb_recovery_save_failed">Không thể lưu tùy chọn khôi phục tự động. Kiểm tra ADB rồi thử lại.</string>
+</resources>

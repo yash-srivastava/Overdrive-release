@@ -195,13 +195,13 @@ class GlassDynamicsView(context: Context, env: GlassEnv, ticker: GlassTicker) : 
         tick(c, -90f, 4f)
         small.color = t.text3
         small.textAlign = Paint.Align.CENTER
-        c.drawText("REGEN", CX - R * 0.77f, LABEL_Y, small)
-        c.drawText("DRIVE", CX + R * 0.77f, LABEL_Y, small)
+        c.drawText(gs(com.overdrive.app.R.string.glass_dyn_regen), CX - R * 0.77f, LABEL_Y, small)
+        c.drawText(gs(com.overdrive.app.R.string.glass_dyn_drive), CX + R * 0.77f, LABEL_Y, small)
         // the panel
         caption.color = t.text2
-        c.drawText("ACCELERATOR", PX0, ROW1 + 10f, caption)
-        c.drawText("BRAKE", PX0, ROW2 + 10f, caption)
-        c.drawText("G-FORCE", PX0, ROW3 + 10f, caption)
+        c.drawText(gs(com.overdrive.app.R.string.glass_dyn_accelerator), PX0, ROW1 + 10f, caption)
+        c.drawText(gs(com.overdrive.app.R.string.glass_dyn_brake), PX0, ROW2 + 10f, caption)
+        c.drawText(gs(com.overdrive.app.R.string.glass_dyn_gforce), PX0, ROW3 + 10f, caption)
         p.color = GlassColor.alpha(ink, if (t.night) 0.09f else 0.08f)
         for (y in floatArrayOf(ROW1, ROW2, ROW3)) { r.set(PX0, y + BAR_DY, PX1, y + BAR_DY + BAR_H); c.drawRoundRect(r, BAR_H / 2f, BAR_H / 2f, p) }
         s.strokeWidth = 1.2f; s.color = GlassColor.alpha(ink, if (t.night) 0.4f else 0.36f)
@@ -236,7 +236,7 @@ class GlassDynamicsView(context: Context, env: GlassEnv, ticker: GlassTicker) : 
         kwText.alpha = (kwText.alpha * dim).roundToInt()
         c.drawText(kwStr, CX, CY - 30f, kwText)
         rpmText.color = t.text2
-        val bottom = if (!live) "Live while you drive" else rpmStr
+        val bottom = if (!live) gs(com.overdrive.app.R.string.glass_dyn_live_note) else rpmStr
         if (bottom.isNotEmpty()) c.drawText(bottom, CX, RPM_Y, rpmText)
 
         drawBar(c, t, ROW1, accel.value / 100f, accelKnown, accelFill, accelStr, dim)

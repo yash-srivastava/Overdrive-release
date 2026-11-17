@@ -106,10 +106,11 @@ public final class ScreenDeterrentVideo {
 
     /**
      * Loops the video until the supplied stop predicate fires. Audio tracks are
-     * never selected, so playback is always silent.
+     * never selected, so playback is always silent. {@code onShown} runs once,
+     * after the first frame is released to the layer.
      */
     public static boolean play(String path, int displayWidth, int displayHeight,
-                               StopSignal stop, Runnable onFrame) {
+                               StopSignal stop, Runnable onFrame, Runnable onShown) {
         if (path == null || path.isEmpty() || displayWidth <= 0 || displayHeight <= 0) {
             return false;
         }
@@ -158,7 +159,7 @@ public final class ScreenDeterrentVideo {
                     + " on " + displayWidth + "x" + displayHeight);
 
             return decodeLoop(codec, extractor, frameGapUs(format),
-                    trackDurationUs(format), stop, onFrame);
+                    trackDurationUs(format), stop, onFrame, onShown);
         } catch (Throwable t) {
             logger.warn("Deterrent video playback failed: " + t.getMessage());
             return false;
@@ -185,7 +186,7 @@ public final class ScreenDeterrentVideo {
 
     private static boolean decodeLoop(MediaCodec codec, MediaExtractor extractor,
                                       long frameGapUs, long trackDurationUs,
-                                      StopSignal stop, Runnable onFrame)
+                                      StopSignal stop, Runnable onFrame, Runnable onShown)
             throws Exception {
         MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
         ThrottledStop shouldStop = new ThrottledStop(stop);
@@ -239,6 +240,9 @@ public final class ScreenDeterrentVideo {
                         return rendered;
                     }
                     codec.releaseOutputBuffer(outputIndex, true);
+                    if (!rendered && onShown != null) {
+                        try { onShown.run(); } catch (Throwable ignored) {}
+                    }
                     rendered = true;
                     if (onFrame != null) {
                         try { onFrame.run(); } catch (Throwable ignored) {}

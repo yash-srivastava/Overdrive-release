@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title data-i18n="remote_access.document_title">Proximity - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
-    <script src="../shared/theme.js?v=11"></script>
-    <script src="../shared/app-shell.js?v=19"></script>
+    <script src="../shared/theme.js?v=12"></script>
+    <script src="../shared/app-shell.js?v=23"></script>
     <link rel="stylesheet" href="../shared/styles.css?v=38">
     <link rel="stylesheet" href="../shared/revamp.css?v=2">
-    <link rel="stylesheet" href="../shared/remote-access.css?v=15">
+    <link rel="stylesheet" href="../shared/remote-access.css?v=16">
 </head>
 <body>
     <div class="app-layout">
@@ -232,6 +232,16 @@
                             <span class="ra-rule-copy"><strong data-i18n="remote_access.lock_waits_for_key_absence">Phone locking waits for the key search</strong><span id="raLockWaitsForKeyDetail" data-i18n="remote_access.lock_waits_for_key_absence_desc">Off: phones lock as soon as every active phone is away; a key detected nearby or found inside still blocks. On: also wait until a key search confirms no key is inside. Protects against a key left in the car before its next search runs.</span></span>
                             <span class="ra-switch"><input type="checkbox" id="raLockWaitsForKeyAbsence" aria-label="Phone locking waits for the key search" data-i18n-attr="aria-label:remote_access.lock_waits_for_key_absence" aria-describedby="raLockWaitsForKeyDetail" disabled><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
                         </label>
+                        <label class="ra-rule ra-phone-priority-rule" id="raPhonePriorityRule">
+                            <span class="ra-rule-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg></span>
+                            <span class="ra-rule-copy"><strong data-i18n="remote_access.phone_priority">A trusted phone takes priority over the keyfob</strong><span id="raPhonePriorityDetail" data-i18n="remote_access.phone_priority_desc">While a trusted phone is confirmed near the car, keyfob departure does not lock it. Leave this off if a phone often stays in the car: it would then stop keyfob walk-away locking.</span></span>
+                            <span class="ra-switch"><input type="checkbox" id="raPhonePriority" aria-label="A trusted phone takes priority over the keyfob" data-i18n-attr="aria-label:remote_access.phone_priority" aria-describedby="raPhonePriorityDetail" disabled><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
+                        </label>
+                        <label class="ra-rule ra-key-inside-rule" id="raLockWithKeyInsideRule">
+                            <span class="ra-rule-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/><circle cx="12" cy="16" r="1.5"/></svg></span>
+                            <span class="ra-rule-copy"><strong data-i18n="remote_access.lock_with_key_inside">Lock with the key left inside</strong><span id="raLockWithKeyInsideDetail" data-i18n="remote_access.lock_with_key_inside_desc">A phone departure locks the car even when the key is detected inside, without waiting for the key search. The key then cannot unlock the car until it is unlocked another way, such as a trusted phone returning or the key's own button.</span></span>
+                            <span class="ra-switch"><input type="checkbox" id="raLockWithKeyInside" aria-label="Lock with the key left inside" data-i18n-attr="aria-label:remote_access.lock_with_key_inside" aria-describedby="raLockWithKeyInsideDetail" disabled><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
+                        </label>
                          <div class="ra-keyfob-window ra-advanced">
                              <label class="ra-field"><span data-i18n="remote_access.keyfob_lock_window">Keyfob locking window</span>
                                  <input type="number" id="raKeyFobLockSeconds" min="5" max="300" step="5" value="5" aria-describedby="raKeyFobLockWindowHint" disabled>
@@ -323,8 +333,9 @@
     <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
     <div id="toastContainer" class="toast-container"></div>
     <script src="../shared/auth.js"></script>
-    <script src="../shared/core.js?v=24"></script>
-    <script src="../shared/remote-access.js?v=28"></script>
+    <script src="../shared/core.js?v=27"></script>
+    <script src="../shared/update-flow.js?v=3"></script>
+    <script src="../shared/remote-access.js?v=30"></script>
     <script>
         function toggleSidebar() {
             var sidebar = document.getElementById('sidebar');

@@ -43,7 +43,7 @@ class RecordingSectionHeaderDecoration(
 
     private val headerHeightPx: Int = (40f * density).toInt()
     private val headerInsetTopPx: Int = (12f * density).toInt()
-    private val headerPaddingHorizPx: Float = 20f * density
+    private val headerPaddingHorizPx: Float = 8f * density
     private val labelOffsetYPx: Float = 18f * density
 
     private val labelStrings = LabelStrings(
@@ -58,14 +58,21 @@ class RecordingSectionHeaderDecoration(
 
     private val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = TypedValue.applyDimension(
-            TypedValue.COMPLEX_UNIT_SP, 11f, res.displayMetrics
+            TypedValue.COMPLEX_UNIT_SP, 12f, res.displayMetrics
         )
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         letterSpacing = 0.08f
-        color = ResourcesCompat.getColor(res, R.color.text_secondary, null)
+        color = com.google.android.material.color.MaterialColors.getColor(
+            context, com.google.android.material.R.attr.colorOnSurfaceVariant,
+            ResourcesCompat.getColor(res, R.color.text_secondary, null)
+        )
     }
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = ResourcesCompat.getColor(res, R.color.bg_surface, null)
+        // The sticky band matches the page background, so the list reads as one surface.
+        color = com.google.android.material.color.MaterialColors.getColor(
+            context, android.R.attr.colorBackground,
+            ResourcesCompat.getColor(res, R.color.bg_surface, null)
+        )
     }
 
     override fun getItemOffsets(

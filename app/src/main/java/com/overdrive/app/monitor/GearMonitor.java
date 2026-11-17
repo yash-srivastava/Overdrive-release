@@ -461,6 +461,39 @@ public class GearMonitor {
     }
     
     /**
+     * The gear read from the car now where it can be (legacy: the gearbox device itself, not the telemetry copy that
+     * can be a second old), else the current fresh reading; null when unknown. For a one-off check, not polling.
+     */
+    public GearReading readNow() {
+        if (!isRunning) return null;
+        if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            Method getter = getGearMethod;
+            Object device = gearboxDevice;
+            if (getter != null && device != null) {
+                try {
+                    int gear = (int) getter.invoke(device);
+                    if (isValidGearMode(gear)) return new GearReading(gear, SystemClock.elapsedRealtime());
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+        long at = lastUpdateTime;
+        int gear = getCurrentGearIfFresh();
+        return gear == BydVehicleData.UNAVAILABLE ? null : new GearReading(gear, at);
+    }
+
+    /** A gear and when it was taken at its source (elapsedRealtime). */
+    public static final class GearReading {
+        public final int gear;
+        public final long observedAtMs;
+
+        GearReading(int gear, long observedAtMs) {
+            this.gear = gear;
+            this.observedAtMs = observedAtMs;
+        }
+    }
+
+    /**
      * Get last update time.
      */
     public long getLastUpdateTime() {

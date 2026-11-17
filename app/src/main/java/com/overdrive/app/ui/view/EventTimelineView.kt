@@ -122,6 +122,14 @@ class EventTimelineView @JvmOverloads constructor(
         return super.performAccessibilityAction(action, arguments)
     }
 
+    /** True when a tap at [x] (view coordinates) would snap to an event rather than seek. */
+    fun hasEventNear(x: Float): Boolean {
+        if (width <= 0 || durationMs <= 0 || events.isEmpty()) return false
+        val requestedMs = ((x / width).coerceIn(0f, 1f) * durationMs).toLong()
+        val thresholdMs = (durationMs * 32L / width).coerceAtLeast(500L)
+        return events.any { kotlin.math.abs(it.startMs - requestedMs) <= thresholdMs }
+    }
+
     private fun selectNearest(requestedMs: Long) {
         val nearest = events.minByOrNull { kotlin.math.abs(it.startMs - requestedMs) }
         val thresholdMs = if (width > 0) (durationMs * 32L / width).coerceAtLeast(500L) else 500L

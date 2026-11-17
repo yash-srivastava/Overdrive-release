@@ -130,6 +130,7 @@ object LanguagePickerDialog {
         // AppCompat's per-app locale. Re-inflate both overlays against the new locale.
         com.overdrive.app.overlay.StatusOverlayService.refreshTheme(context)
         com.overdrive.app.roadsense.overlay.RoadSenseOverlayService.relocalizeIfRunning()
+        com.overdrive.app.overlay.GlassWidgetsOverlayService.relocalizeIfRunning()
     }
 
     /**

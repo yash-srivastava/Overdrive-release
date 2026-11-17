@@ -2472,6 +2472,11 @@ public class TelegramBotDaemon {
         }
     }
     
+    private static final Object PAIR_LOCK = new Object();
+    private static final int PAIR_MAX_FAILURES = 5;
+    private static String pairFailedPin = "";
+    private static int pairFailedAttempts = 0;
+
     private static void handlePairCommand(long chatId, String username, String firstName, String pin) {
         if (ownerChatId > 0) {
             sendMessage(chatId, tr("pair.already_paired"));
@@ -2510,10 +2515,25 @@ public class TelegramBotDaemon {
         }
         
         if (!pin.equals(expectedPin)) {
+            // Five wrong guesses at one PIN clear it, so it can't be brute-forced.
+            synchronized (PAIR_LOCK) {
+                if (!expectedPin.equals(pairFailedPin)) {
+                    pairFailedPin = expectedPin;
+                    pairFailedAttempts = 0;
+                }
+                pairFailedAttempts++;
+                log("pair: wrong PIN from " + chatId + " (" + pairFailedAttempts + "/"
+                        + PAIR_MAX_FAILURES + ")");
+                if (pairFailedAttempts >= PAIR_MAX_FAILURES) {
+                    pairFailedAttempts = 0;
+                    pairFailedPin = "";
+                    clearPairPinFromConfig();
+                }
+            }
             sendMessage(chatId, tr("pair.invalid"));
             return;
         }
-        
+
         // PIN valid — pair owner
         // Persist to disk BEFORE the in-memory set. freshSnapshotForIpc() runs
         // on the IPC worker pool and re-reads ownerChatId from disk per command;
@@ -3123,7 +3143,7 @@ public class TelegramBotDaemon {
             case "DAEMON_CRASH": return tr("critical.type.daemon_crash");
             case "SYSTEM_REBOOT": return tr("critical.type.system_reboot");
             case "SYSTEM_ERROR": return tr("critical.type.system_error");
-            default: return TelegramMessages.isPortuguese()
+            default: return TelegramMessages.mapsTechnicalDetails()
                     ? tr("critical.type.unknown") : mdEscape(type);
         }
     }

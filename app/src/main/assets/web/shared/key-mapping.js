@@ -108,6 +108,10 @@ window.KM = (function () {
         { id: 'recirculation',   i18n: 'keymap.act_recirculation',    kind: 'api',
           method: 'POST', path: '/api/vehicle/climate', body: '{"action":"recirculate_${v}"}',
           payloads: [ { v: 'on', i18n: 'keymap.recirculate' }, { v: 'off', i18n: 'keymap.fresh_air' } ] },
+        // AC air outlets — a button binds ONE fixed pattern (SDK wind mode 1-7). ${v} carries it.
+        { id: 'ac_airflow',      i18n: 'keymap.act_ac_airflow',       kind: 'api',
+          method: 'POST', path: '/api/vehicle/climate', body: '{"action":"set_airflow","mode":${v}}',
+          payloads: [ { v: '1', i18n: 'keymap.airflow_face' }, { v: '2', i18n: 'keymap.airflow_face_feet' }, { v: '3', i18n: 'keymap.airflow_feet' }, { v: '4', i18n: 'keymap.airflow_feet_windscreen' }, { v: '5', i18n: 'keymap.airflow_windscreen' }, { v: '6', i18n: 'keymap.airflow_face_feet_windscreen' }, { v: '7', i18n: 'keymap.airflow_face_windscreen' } ] },
         { id: 'max_cool',        i18n: 'keymap.act_max_cool',         kind: 'api',
           method: 'POST', path: '/api/vehicle/climate', body: '{"action":"max_cool_${v}"}',
           payloads: [ { v: 'on', i18n: 'keymap.on' }, { v: 'off', i18n: 'keymap.off' } ] },
@@ -549,6 +553,7 @@ window.KM = (function () {
         climate: 'climate', ac_fan: 'climate', ac_fan_step: 'climate', ac_temp_step: 'climate',
         ac_temp_step_driver: 'climate', ac_temp_step_passenger: 'climate',
         ac_auto: 'climate', fan_only: 'climate', steering_heat: 'climate', recirculation: 'climate',
+        ac_airflow: 'climate',
         max_cool: 'climate', air_purify: 'climate', rain_close_windows: 'windows_body',
         defrost_front: 'climate', defrost_rear: 'climate',
         seat_heat_driver: 'climate', seat_heat_passenger: 'climate',
@@ -646,7 +651,14 @@ window.KM = (function () {
     // parallel action, so the stock function may still fire alongside the mapped one.
     // We surface a warning for these; the double-press + block-single-click binding is
     // the best available suppression. 293 = Mute, 313 = Phone/Bluetooth.
-    var NATIVE_SIDE_EFFECT_CODES = { 293: 1, 313: 1 };
+    // Voice: DiLink 3 starts Hi BYD from 304 before key filters run, and a press arrives
+    // as 327 then 304, so either mapping still opens it (#532/#540).
+    var NATIVE_SIDE_EFFECT_CODES = {
+        293: 'keymap.native_side_effect_warn',
+        313: 'keymap.native_side_effect_warn',
+        304: 'keymap.native_side_effect_voice_warn',
+        327: 'keymap.native_side_effect_voice_warn'
+    };
 
     var state = {
         enabled: false,
@@ -1614,7 +1626,12 @@ window.KM = (function () {
     function syncNativeSideEffectWarn(code) {
         var w = $('kmNativeSideEffectWarn');
         if (!w) return;
-        w.style.display = (code != null && NATIVE_SIDE_EFFECT_CODES[code]) ? '' : 'none';
+        var key = code != null ? NATIVE_SIDE_EFFECT_CODES[code] : null;
+        if (key) {
+            w.setAttribute('data-i18n', key);
+            w.textContent = tr(key);
+        }
+        w.style.display = key ? '' : 'none';
     }
 
     function onKnownButtonChange() {

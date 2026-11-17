@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Trip Briefing: the car-start "Heading to work? Want directions?" prompt. The spoken line is
+         greeting + heading + duration (or one extra that replaces it) + question, joined by spaces,
+         and read aloud by text-to-speech. -->
+    <string name="trip_briefing_greeting_morning">좋은 아침이에요.</string>
+    <string name="trip_briefing_greeting_afternoon">좋은 오후예요.</string>
+    <string name="trip_briefing_greeting_evening">좋은 저녁이에요.</string>
+    <string name="trip_briefing_heading_home">집으로 가시나요?</string>
+    <string name="trip_briefing_heading_work">출근하시나요?</string>
+    <!-- %1$s: the place's name, e.g. "Phoenix Mall". -->
+    <string name="trip_briefing_heading_place">%1$s에 가시나요?</string>
+    <plurals name="trip_briefing_duration">
+        <item quantity="other">약 %1$d분 걸려요.</item>
+    </plurals>
+    <!-- %1$s: range left, %2$s: the trip's length, each "31 km" or "19 mi". -->
+    <string name="trip_briefing_extra_range">주행 가능 거리가 빠듯해요. %2$s 거리에 %1$s 남았어요.</string>
+    <plurals name="trip_briefing_extra_hazards">
+        <item quantity="other">가는 길에 새로운 위험 요소가 %1$d개 있어요.</item>
+    </plurals>
+    <!-- %1$s: an hour of the day in the device's clock format, e.g. "7 PM" or "19:00". -->
+    <string name="trip_briefing_extra_rain">%1$s쯤 비가 올 것 같아요.</string>
+    <string name="trip_briefing_question">길 안내를 시작할까요?</string>
+    <string name="trip_briefing_distance_km">%1$dkm</string>
+    <string name="trip_briefing_distance_mi">%1$d마일</string>
+
+    <!-- The destination as the AI assistant should say it. -->
+    <string name="trip_briefing_said_home">집</string>
+    <string name="trip_briefing_said_work">직장</string>
+
+    <!-- Card -->
+    <string name="trip_briefing_title_home">집</string>
+    <string name="trip_briefing_title_work">직장</string>
+    <!-- Title for a regular destination that has no name yet. -->
+    <string name="trip_briefing_title_unnamed">자주 가는 곳</string>
+    <string name="trip_briefing_name_place">이름 지정</string>
+    <string name="trip_briefing_no">아니요</string>
+    <string name="trip_briefing_go_failed">길 안내가 시작되지 않았습니다. 지도를 열어 안내를 시작하세요.</string>
+    <!-- The car's own navigation app. -->
+    <string name="trip_briefing_app_car">차량 내비게이션</string>
+</resources>

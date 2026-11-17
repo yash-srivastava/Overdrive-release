@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_section_adb">ADB</string>
+    <string name="settings_adb_subtitle">Connexió, activació i recuperació automàtica.</string>
+    <string name="settings_adb_connection_title">Connexió</string>
+    <string name="settings_adb_automatic_title">Recuperació automàtica</string>
+    <string name="settings_adb_automatic_restore">Restaura ADB automàticament</string>
+    <string name="settings_adb_automatic_description">Restaura l’ajust d’ADB a l’inici i quan es desactiva. Cal haver concedit el permís d’ajustos; no cal Wi-Fi. DiLink 5 també permet la recuperació sense fil amb Wi-Fi validada i una clau autoritzada prèviament.</string>
+    <string name="settings_adb_recover">Recupera ADB ara</string>
+    <string name="settings_adb_cancel_recovery">Cancel·la la recuperació</string>
+    <string name="settings_adb_manual_title">Activació manual</string>
+    <string name="settings_adb_manual_description">Utilitza eines BYD compatibles per demanar accés a ADB. No cal connexió Wi-Fi.</string>
+    <string name="settings_adb_enable">Activa ADB</string>
+    <string name="settings_adb_advanced_tools">Eines avançades</string>
+    <string name="settings_adb_hide_advanced">Amaga les eines avançades</string>
+    <string name="settings_adb_advanced_description">Diagnostica problemes, obre les eines BYD o desfés un intent manual.</string>
+    <string name="settings_adb_open_developer">Obre les opcions de desenvolupador</string>
+    <string name="settings_adb_developer_page">Demana la pàgina de desenvolupador BYD</string>
+    <string name="settings_adb_diagnostics">Comprova la compatibilitat i la connexió</string>
+    <string name="settings_adb_restore">Desfés els canvis de l’activació manual</string>
+    <string name="settings_adb_export">Exporta l’APK de les eines de desenvolupador BYD</string>
+    <string name="settings_adb_dialog_confirm">Aprova la depuració sense fil en aquesta xarxa</string>
+    <string name="settings_adb_dialog_confirm_description">Connecta’t primer a una xarxa Wi-Fi validada. Permet que OverDrive confirmi el diàleg de depuració sense fil només per a aquesta xarxa.</string>
+    <string name="settings_adb_tools_unavailable">L’activació manual no està disponible per al mode actual o les eines BYD instal·lades.</string>
+    <string name="settings_adb_recovery_availability">La recuperació local necessita el permís d’ajustos concedit durant la configuració d’ADB. No necessita Wi-Fi ni el mode DiLink 5.</string>
+    <string name="settings_adb_details_title">Detalls de l’últim intent</string>
+    <string name="settings_adb_recovery_confirm_body">La recuperació local utilitza el permís d’ajustos ja concedit, sense Wi-Fi. DiLink 5 també pot utilitzar Wi-Fi validada i una clau autoritzada prèviament. Això pot obrir o restaurar l’accés ADB de xarxa al port 5555, accessible possiblement des d’altres dispositius de la xarxa del vehicle. Continueu només en una xarxa de confiança. L’autenticació amb clau ADB continua activa.</string>
+    <string name="settings_adb_recovery_permission_missing">Falta el permís d’ajustos. Si ADB tampoc està disponible, utilitza primer Activa ADB o Opcions de desenvolupador i torna a completar la configuració d’ADB.</string>
+    <string name="settings_adb_recovery_setting_enabled">L’ajust d’ADB està activat. No s’ha confirmat cap connexió ADB autenticada.</string>
+    <string name="settings_adb_recovery_setting_failed">No s’ha pogut activar i verificar l’ajust d’ADB. El firmware pot rebutjar el canvi.</string>
+    <string name="settings_adb_recovery_save_failed">No s’ha pogut desar la preferència de recuperació automàtica. Comprova ADB i torna-ho a provar.</string>
+</resources>

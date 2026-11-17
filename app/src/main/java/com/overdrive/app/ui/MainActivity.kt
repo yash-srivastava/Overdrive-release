@@ -1,25 +1,41 @@
 package com.overdrive.app.ui
 
-import android.animation.Animator
-import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Rect
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.LayerDrawable
 import android.os.Bundle
+import android.os.HandlerThread
+import android.os.SystemClock
 import android.view.Gravity
+import android.view.PixelCopy
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.PathInterpolator
 import android.widget.ImageButton
+import android.widget.PopupWindow
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.content.res.AppCompatResources
 import androidx.appcompat.widget.TooltipCompat
+import androidx.core.view.doOnLayout
+import androidx.core.view.doOnPreDraw
+import androidx.dynamicanimation.animation.DynamicAnimation
+import androidx.dynamicanimation.animation.FloatValueHolder
+import androidx.dynamicanimation.animation.SpringAnimation
+import androidx.dynamicanimation.animation.SpringForce
 import androidx.navigation.NavController
+import androidx.navigation.NavDestination
 import androidx.navigation.fragment.NavHostFragment
 import androidx.navigation.ui.AppBarConfiguration
 import androidx.navigation.ui.navigateUp
@@ -37,6 +53,7 @@ import com.overdrive.app.ui.fragment.SettingsFragment
 import com.overdrive.app.ui.navigation.NavigationRailCatalog
 import com.overdrive.app.ui.privacy.ScreenshotPrivacyController
 import com.overdrive.app.ui.util.PreferencesManager
+import com.overdrive.app.ui.widget.RailPlateDrawable
 import com.overdrive.app.ui.widget.SwipeExpandableRailScrollView
 import com.overdrive.app.ui.viewmodel.DaemonsViewModel
 import com.overdrive.app.ui.viewmodel.LogsViewModel
@@ -91,19 +108,28 @@ open class MainActivity : AppCompatActivity() {
     private val NAV_POLL_MAX_ATTEMPTS = 20
     private val RAIL_COMPACT_WIDTH_DP = 80
     private val RAIL_EXPANDED_WIDTH_DP = 216
-    private val RAIL_ANIMATION_MS = 350L
-    // Floor for a re-toggle that interrupts a slide part-way: the duration
-    // scales with the distance left, but never gets so short it reads as a snap.
-    private val RAIL_ANIMATION_MIN_MS = 140L
+    // Rubber-band limits past the expanded and compact widths while dragging.
+    private val RAIL_STRETCH_ABOVE_DP = 24
+    private val RAIL_STRETCH_BELOW_DP = 12
+    private val RAIL_RUBBER_BAND = 0.55f
+    private val RAIL_SPRING_STIFFNESS = 500f
+    private val RAIL_FLING_DP_PER_S = 800f
+    // Labels stay hidden for the first 40% of the slide, then fade in linearly.
+    private val RAIL_LABEL_FADE_START = 0.4f
+    private val RAIL_SECTION_LABEL_ALPHA = 0.85f
+    private val RAIL_SCRIM_ALPHA = 0.32f
+    private val RAIL_MARK_COMPACT_SCALE = 0.75f
+    private val REMOTE_ROW_TINT_ALPHA = 26
+    private val REMOTE_POPOVER_ENTER_MS = 220L
+    private val REMOTE_POPOVER_EXIT_MS = 120L
     // The always-pinned rows. Every other key lives in NavigationRailCatalog,
     // which is the set the user can hide.
     private val RAIL_KEY_DASHBOARD = "dashboard"
     private val RAIL_KEY_SETTINGS = "settings"
     private val RAIL_KEY_ABOUT = "about"
+    // Docked (landscape) expanded preference; the overlay rail always starts compact.
     private val KEY_RAIL_EXPANDED = "navigation_rail_expanded"
-    // M3 emphasized-decelerate — same curve ZoomableVideoView uses, so the rail
-    // shares the app's motion vocabulary instead of a stock Decelerate.
-    private val RAIL_EASING = PathInterpolator(0.05f, 0.7f, 0.1f, 1.0f)
+    private val KEY_RAIL_AUTO_OVERRIDE = "navigation_rail_auto_override"
 
     // Handler + runnable owned by the activity so they can be cancelled in
     // onDestroy() — prevents the periodic update check from leaking the
@@ -121,24 +147,55 @@ open class MainActivity : AppCompatActivity() {
     // the user's current task. The marker is consumed from both cold and
     // singleTop warm intents so a later launcher tap gates normally.
     private var headlessBootSilenceGate: Boolean = false
+    private var pinCover: android.view.View? = null
     private var remoteDevSession: Boolean = false
 
     // UI elements
     private lateinit var toolbar: MaterialToolbar
     private lateinit var navigationRail: LinearLayout
     private lateinit var navigationRailScroll: SwipeExpandableRailScrollView
-    // The rail's outer column: wordmark, scrolling destinations, pinned
-    // collapse row. Width animates here, not on the scroller.
+    // The rail's outer column: brand, scrolling destinations, pinned footer.
     private lateinit var navigationRailContainer: LinearLayout
     private var navigationRailBrand: TextView? = null
     private var navigationRailCollapseRow: LinearLayout? = null
+    // Target state; railCommittedExpanded is what the layout currently holds.
     private var navigationRailExpanded = false
-    private var navigationRailAnimator: ValueAnimator? = null
-    // Which form the rows currently hold. Rows sit in expanded form for the
-    // whole slide and only return to compact once a collapse settles, so a
-    // starting slide can skip a redundant 17-row relayout on its first frame.
-    // Starts false to match item_rail_destination.xml's compact form.
-    private var navigationRailRowsExpandedForm = false
+    private var railCommittedExpanded: Boolean? = null
+    // Docked = landscape push; otherwise the rail overlays the stage over shellRailScrim.
+    private var railDockedMode = true
+    private var railUserExpanded = true
+    private var railAutoCollapsed = false
+    private var railAutoCollapseOverridden = false
+    private var railSliding = false
+    // A finger is driving the rail; any programmatic toggle clears it and wins.
+    private var railDragInProgress = false
+    private var railVisualWidth = 0f
+    private var railDragOrigin = 0f
+    private var railPlateVisibleWidth = Int.MAX_VALUE
+    private var railLabelsShown: Boolean? = null
+    private var railRevealAnimated = false
+    private val railSpringValue = FloatValueHolder()
+    private var railSpring: SpringAnimation? = null
+    private val railClipRect = Rect()
+    private var railBackCallback: OnBackPressedCallback? = null
+    private var railStage: View? = null
+    private var railScrim: View? = null
+    private var railBrandMark: View? = null
+    private var railDivider: View? = null
+    private var railCollapseIcon: View? = null
+    private var railRemoteText: View? = null
+    private var railLabelViews: List<View> = emptyList()
+    private var railSectionViews: List<Pair<View, View>> = emptyList()
+    private var railTooltipRows: List<Pair<View, String>> = emptyList()
+    private var railPlateRows: List<View> = emptyList()
+    private var appBarLayout: View? = null
+    private var subPageHeaderVisible = false
+    private var contentImmersive = false
+    private var remoteHalo: View? = null
+    private var remotePopoverContent: View? = null
+    private var remotePopover: PopupWindow? = null
+    private var remoteProviderLabel: String? = null
+    private var themeSnapshotView: ImageView? = null
     private var railItems: List<RailItem> = emptyList()
     private var railActionItems: List<RailActionItem> = emptyList()
     // Order here must track the include order in both activity_main_new.xml
@@ -261,6 +318,7 @@ open class MainActivity : AppCompatActivity() {
         }
 
         setContentView(R.layout.activity_main_new)
+        showThemeSnapshot()
 
         // Storage setup is posted off the onCreate critical path so a failure
         // (e.g. ROM lacking the All-Files-Access Settings activity on BYD SL7)
@@ -292,8 +350,7 @@ open class MainActivity : AppCompatActivity() {
             // Generate device ID early - this syncs to file for daemon compatibility
             // Must happen BEFORE any daemon starts
             val deviceId = com.overdrive.app.util.DeviceIdGenerator.generateDeviceId(this)
-
-            android.util.Log.i("MainActivity", "Device ID initialized: " + redactDeviceIdForLog(deviceId))
+            android.util.Log.i("MainActivity", "Device ID initialized: ${com.overdrive.app.util.DeviceIdGenerator.forLog(deviceId)}")
 
             // Apply BYD whitelist (ACC + data cache) to prevent background killing
             // CRITICAL: Run on background thread to avoid blocking UI on boot
@@ -330,7 +387,8 @@ open class MainActivity : AppCompatActivity() {
         initViews()
         screenshotPrivacyController = ScreenshotPrivacyController(this).also { it.start() }
         setupNavigation(savedInstanceState)
-        handleNavigateExtra(intent)
+        // A restore (even after process death) replays the original launch intent; only a fresh start obeys it.
+        if (savedInstanceState == null) handleNavigateExtra(intent)
         setupCopyButton()
         if (!remoteDevSession) setupLogListener()
         observeViewModels()
@@ -369,9 +427,6 @@ open class MainActivity : AppCompatActivity() {
         // dead before the new daemon launcher starts. See UpdateLifecycle for
         // the sentinel handshake details.
         if (!remoteDevSession) runDaemonStartup(intent, fromOnCreate = true)
-        
-        // Handle Location start intent (from SentryDaemon restart)
-        if (!remoteDevSession) handleLocationStartIntent(intent)
         
         // Check traffic monitor status early so drawer shows correct state
         checkTrafficMonitorStatus()
@@ -519,7 +574,6 @@ open class MainActivity : AppCompatActivity() {
         // moveTaskToBack drives the matching onPause below.
         if (!headlessLaunch) maybeShowPinLock()
         intent?.let {
-            if (!remoteDevSession) handleLocationStartIntent(it)
             handleNavigateExtra(it)
             // Critical: when MainActivity is already running and the install
             // script's `am start --ez post_update true` re-delivers the
@@ -545,14 +599,33 @@ open class MainActivity : AppCompatActivity() {
      * Deep-link entry for external surfaces (the OverDrive launcher's glance
      * widgets, notifications). A plain string extra keeps the contract stable
      * across both APKs without sharing code: `--es navigate_to trips`.
-     * The extra is STRIPPED once consumed so an OS task-restore of the same
-     * intent record cannot replay the navigation over the user's later state.
+     * The extra is STRIPPED once consumed, and onCreate skips it on a restore (which
+     * replays the original launch intent), so it never replays over the user's later state.
      * Unknown values are ignored (forward/backward compatible).
      */
     private fun handleNavigateExtra(intent: android.content.Intent) {
         val target = intent.getStringExtra(EXTRA_NAVIGATE_TO) ?: return
         intent.removeExtra(EXTRA_NAVIGATE_TO)
         setIntent(intent)
+        if (target == "assistant_briefing") {
+            // Trip Briefing's "Name this place": the Assistant page, opened on its Trip Briefing tab.
+            val open = currentNavFragment() as? com.overdrive.app.ui.fragment.WebViewFragment
+            if (navController.currentDestination?.id == R.id.genAiFragment &&
+                open?.view != null && open.isForPagePath("/assistant")
+            ) {
+                open.showPagePath("/assistant#briefing")
+                return
+            }
+            // The tab goes in its own argument so no #briefing pins later reloads to it.
+            navigateToRailDestination(
+                R.id.genAiFragment,
+                android.os.Bundle().apply {
+                    putString("page_path", "/assistant")
+                    putString(com.overdrive.app.ui.fragment.WebViewFragment.ARG_PAGE_TAB, "briefing")
+                },
+            )
+            return
+        }
         val destinationId = when (target) {
             "trips" -> R.id.tripsFragment
             "charging" -> R.id.chargingFragment
@@ -835,7 +908,7 @@ open class MainActivity : AppCompatActivity() {
         // and clears the pending value, so this can't loop or fire a stale destination.
         pendingRailDestination?.let { dest ->
             pendingRailDestination = null
-            navigateToRailDestination(dest)
+            navigateToRailDestination(dest, pendingRailArgs, pendingRailReselect)
         }
     }
 
@@ -884,6 +957,48 @@ open class MainActivity : AppCompatActivity() {
             android.util.Log.i("MainActivity", "Boot-silence latch consumed on first onPause")
         }
         if (!remoteDevSession) com.overdrive.app.auth.PinSession.notePaused()
+        if (isChangingConfigurations) captureThemeSnapshot()
+        else if (!remoteDevSession) coverForPinLock()
+    }
+
+    /** Leaving with PIN lock on: secure the window and cover it, so recents and the return frame show nothing. */
+    private fun coverForPinLock() {
+        try {
+            if (!com.overdrive.app.auth.PinManager.isEnabled()) return
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+            setPinCover(true)
+        } catch (t: Throwable) {
+            android.util.Log.w("MainActivity", "PIN cover failed: ${t.message}")
+        }
+    }
+
+    /** Opaque, touch-swallowing view over the whole window while the PIN lock is due. */
+    private fun setPinCover(show: Boolean) {
+        val root = window.decorView as? android.view.ViewGroup ?: return
+        val existing = pinCover
+        if (!show) {
+            if (existing != null) root.removeView(existing)
+            pinCover = null
+            return
+        }
+        if (existing != null) {
+            existing.bringToFront()
+            return
+        }
+        val value = android.util.TypedValue()
+        val color = if (theme.resolveAttribute(android.R.attr.colorBackground, value, true)
+                && value.type >= android.util.TypedValue.TYPE_FIRST_COLOR_INT
+                && value.type <= android.util.TypedValue.TYPE_LAST_COLOR_INT) value.data
+            else android.graphics.Color.BLACK
+        val cover = android.view.View(this).apply {
+            setBackgroundColor(color)
+            isClickable = true
+            isFocusable = true
+        }
+        root.addView(cover, android.view.ViewGroup.LayoutParams(
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT))
+        pinCover = cover
     }
 
     /**
@@ -913,14 +1028,11 @@ open class MainActivity : AppCompatActivity() {
         if (remoteDevSession) return
         try {
             val pinEnabled = com.overdrive.app.auth.PinManager.isEnabled()
-            // Apply / clear FLAG_SECURE based on current lock state, regardless
-            // of whether we're about to gate (covers the unlock-now path too).
-            if (pinEnabled && !com.overdrive.app.auth.PinSession.isUnlocked()) {
-                window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
-            } else {
+            if (!pinEnabled) {
                 window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+                setPinCover(false)
+                return
             }
-            if (!pinEnabled) return
 
             // Headless boot: BootReceiver may launch us with minimize_on_start
             // so the app process exists for daemon stability, but the user
@@ -929,10 +1041,19 @@ open class MainActivity : AppCompatActivity() {
             // flag is one-shot per Activity instance (latched in onCreate
             // from the original launch intent) and explicitly cleared on
             // any subsequent user-driven foreground entry below.
-            if (headlessBootSilenceGate) return
-
-            val autoLock = com.overdrive.app.auth.PinManager.getAutoLockMs()
-            if (com.overdrive.app.auth.PinSession.shouldGate(autoLock)) {
+            //
+            // Decide the gate before securing the window: shouldGate re-locks a timed-out session,
+            // and the window must already be secure and covered while the PIN screen comes up.
+            val gate = !headlessBootSilenceGate && com.overdrive.app.auth.PinSession.shouldGate(
+                com.overdrive.app.auth.PinManager.getAutoLockMs())
+            val locked = gate || !com.overdrive.app.auth.PinSession.isUnlocked()
+            if (locked) {
+                window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+            } else {
+                window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+            }
+            setPinCover(locked)
+            if (gate) {
                 val pinIntent = android.content.Intent(this, com.overdrive.app.ui.PinLockActivity::class.java)
                 pinIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
                 startActivity(pinIntent)
@@ -1006,11 +1127,6 @@ open class MainActivity : AppCompatActivity() {
         appUpdater = updater
         updater.checkForUpdate(object : com.overdrive.app.updater.AppUpdater.UpdateCallback {
             override fun onUpdateAvailable(currentVersion: String, newVersion: String, releaseNotes: String) {
-                if (currentVersion.trim() == newVersion.trim()) {
-                    logsViewModel.debug("Update", "Suppressed update offer with identical version ($currentVersion)")
-                    updater.close()
-                    return
-                }
                 // Don't close updater here — performAppUpdate will use it.
                 com.overdrive.app.updater.UpdateDialog.showUpdateAvailable(
                     this@MainActivity, currentVersion, newVersion, releaseNotes,
@@ -1103,12 +1219,6 @@ open class MainActivity : AppCompatActivity() {
         updater.checkForUpdate(object : com.overdrive.app.updater.AppUpdater.UpdateCallback {
             override fun onUpdateAvailable(currentVersion: String, newVersion: String, releaseNotes: String) {
                 if (!isCurrentManualUpdateCheck(checkGeneration)) {
-                    updater.close()
-                    return
-                }
-                if (currentVersion.trim() == newVersion.trim()) {
-                    logsViewModel.debug("Update", "Suppressed manual update offer with identical version ($currentVersion)")
-                    Toast.makeText(this@MainActivity, getString(R.string.toast_app_up_to_date, currentVersion), Toast.LENGTH_LONG).show()
                     updater.close()
                     return
                 }
@@ -1613,35 +1723,6 @@ open class MainActivity : AppCompatActivity() {
     }
     
     /**
-     * Handle Location start intent from SentryDaemon or boot receiver.
-     * This is called when the daemon detects Location service died and launches the app to restart it.
-     */
-    private fun handleLocationStartIntent(intent: android.content.Intent) {
-        val action = intent.action
-        val startLocation = intent.getBooleanExtra("start_location", false)
-        
-        if (action == "com.overdrive.app.START_LOCATION_ACTIVITY" || startLocation) {
-            logsViewModel.info("Location", "Received Location start intent from SentryDaemon")
-            
-            // Start LocationSidecarService directly
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                logsViewModel.info("Location", "Auto-starting Location service...")
-                try {
-                    val serviceIntent = android.content.Intent(this, com.overdrive.app.services.LocationSidecarService::class.java)
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                        startForegroundService(serviceIntent)
-                    } else {
-                        startService(serviceIntent)
-                    }
-                    logsViewModel.info("Location", "Location service start requested")
-                } catch (e: Exception) {
-                    logsViewModel.error("Location", "Failed to start Location service: ${e.message}")
-                }
-            }, 1000)
-        }
-    }
-    
-    /**
      * Setup the privileged shell (UID 1000) for daemon management.
      * This must be done before starting any daemons that need elevated privileges.
      */
@@ -1688,7 +1769,21 @@ open class MainActivity : AppCompatActivity() {
         statusIndicator = findViewById(R.id.statusIndicator)
         urlStatusDot = findViewById(R.id.urlStatusDot)
         btnCopyUrl = findViewById(R.id.btnCopyUrl)
-        
+        appBarLayout = findViewById(R.id.appBarLayout)
+        railStage = findViewById(R.id.shellStage)
+        // shellRailScrim only exists in the overlay (portrait) variant.
+        railScrim = findViewById(R.id.shellRailScrim)
+        railDockedMode = railScrim == null
+        railBrandMark = findViewById(R.id.shellBrandMark)
+        railDivider = findViewById(R.id.shellRailDivider)
+        railRemoteText = findViewById(R.id.shellRemoteText)
+        remoteHalo = findViewById(R.id.shellRemoteHalo)
+        // The popover body ships inside the footer; it is shown in a PopupWindow instead.
+        remotePopoverContent = findViewById<View>(R.id.shellRemotePopover)?.also { content ->
+            (content.parent as? ViewGroup)?.removeView(content)
+            content.visibility = View.VISIBLE
+        }
+
         // Brand version + device id used to live in the drawer header; in the
         // rail-based shell they're surfaced on the Dashboard card instead.
     }
@@ -1701,9 +1796,32 @@ open class MainActivity : AppCompatActivity() {
     /** Hide the rail and app bar while a screen fills the window. Any navigation restores them. */
     fun setContentImmersive(immersive: Boolean) {
         if (!::navigationRailContainer.isInitialized) return
-        val visibility = if (immersive) View.GONE else View.VISIBLE
-        navigationRailContainer.visibility = visibility
-        findViewById<View>(R.id.appBarLayout)?.visibility = visibility
+        contentImmersive = immersive
+        if (immersive) {
+            dismissRemotePopover()
+            if (!railDockedMode && navigationRailExpanded) {
+                setNavigationRailExpanded(false, animate = false)
+            } else if (railSliding) {
+                settleRailNow()
+            }
+        }
+        navigationRailContainer.visibility = if (immersive) View.GONE else View.VISIBLE
+        // The overlay stage reserves the compact rail's slot with a margin.
+        val stage = railStage
+        val params = stage?.layoutParams as? ViewGroup.MarginLayoutParams
+        if (!railDockedMode && stage != null && params != null) {
+            val start = if (immersive) 0 else dp(RAIL_COMPACT_WIDTH_DP)
+            if (params.marginStart != start) {
+                params.marginStart = start
+                stage.layoutParams = params
+            }
+        }
+        applySubPageHeader()
+    }
+
+    private fun applySubPageHeader() {
+        appBarLayout?.visibility =
+            if (subPageHeaderVisible && !contentImmersive) View.VISIBLE else View.GONE
     }
 
     private fun setupNavigation(savedInstanceState: Bundle?) {
@@ -1745,13 +1863,16 @@ open class MainActivity : AppCompatActivity() {
 
         // Settings is a top-level rail destination, so NavigationUI hides the
         // up caret; it has to be restored when Recordings opens it as a child.
+        // The toolbar is a sub-page header: shown only where there is an up caret.
         navController.addOnDestinationChangedListener { _, destination, arguments ->
-            setContentImmersive(false)
-            if (destination.id == R.id.settingsFragment &&
+            val fromRecordings = destination.id == R.id.settingsFragment &&
                 arguments?.getBoolean(SettingsFragment.KEY_FROM_RECORDINGS) == true
-            ) {
+            if (fromRecordings) {
                 supportActionBar?.setDisplayHomeAsUpEnabled(true)
             }
+            subPageHeaderVisible = fromRecordings ||
+                destination.id !in appBarConfiguration.topLevelDestinations
+            setContentImmersive(false)
         }
 
         setupCustomRail(savedInstanceState)
@@ -1780,6 +1901,7 @@ open class MainActivity : AppCompatActivity() {
                 R.id.recordingsFragment, R.drawable.ic_recording, R.string.rail_recordings,
                 ownedDestinationIds = setOf(
                     R.id.videoPlayerFragment,
+                    R.id.factoryDvrFragment,
                     R.id.surveillanceSettingsWebFragment,
                     R.id.recordingSettingsWebFragment,
                 )),
@@ -1835,11 +1957,12 @@ open class MainActivity : AppCompatActivity() {
             RailItem(NavigationRailCatalog.DIAGNOSTICS, R.id.railDestDiagnostics,
                 R.id.diagnosticsFragment,
                 R.drawable.ic_diagnostics, R.string.rail_diagnostics,
-                ownedDestinationIds = setOf(R.id.adbConsoleFragment)),
+                ownedDestinationIds = setOf(R.id.adbConsoleFragment, R.id.moduleFaultsFragment)),
             RailItem(RAIL_KEY_SETTINGS, R.id.railDestSettings, R.id.settingsFragment,
                 R.drawable.ic_settings, R.string.rail_settings,
                 ownedDestinationIds = setOf(
                     R.id.daemonsFragment,
+                    R.id.settingsAdbFragment,
                     R.id.settingsSecurityFragment,
                 )),
             RailItem(RAIL_KEY_ABOUT, R.id.railDestAbout, R.id.settingsAboutFragment,
@@ -1847,19 +1970,11 @@ open class MainActivity : AppCompatActivity() {
         )
         railItems = items
 
-        val languageClick = View.OnClickListener {
-            com.overdrive.app.ui.dialog.LanguagePickerDialog.show(this) {
-                recreate()
-            }
+        val helpClick = View.OnClickListener {
+            collapseRailOverlay()
+            startOnboardingReplay()
         }
-        val helpClick = View.OnClickListener { startOnboardingReplay() }
         val actions = listOf(
-            RailActionItem(
-                R.id.railLanguageButton,
-                R.drawable.ic_language,
-                R.string.settings_language_label,
-                languageClick
-            ),
             RailActionItem(
                 R.id.railHelpButton,
                 R.drawable.ic_help,
@@ -1878,6 +1993,7 @@ open class MainActivity : AppCompatActivity() {
             row.contentDescription = label
             TooltipCompat.setTooltipText(row, label)
             row.setOnClickListener {
+                collapseRailOverlay()
                 val activity = item.launchActivity
                 if (activity != null) {
                     startActivity(Intent(this, activity))
@@ -1903,11 +2019,6 @@ open class MainActivity : AppCompatActivity() {
                 ?.setText(section.labelRes)
         }
 
-        // Portrait keeps these actions in the toolbar. Landscape renders
-        // them as full rail rows after the destination list.
-        findViewById<View>(R.id.toolbarLanguageButton)?.setOnClickListener(languageClick)
-        findViewById<View>(R.id.toolbarHelpButton)?.setOnClickListener(helpClick)
-
         navigationRailCollapseRow?.let { row ->
             row.findViewById<ImageView>(R.id.railItemIcon)
                 ?.setImageResource(R.drawable.ic_chevron_right)
@@ -1916,22 +2027,22 @@ open class MainActivity : AppCompatActivity() {
             row.findViewById<TextView>(R.id.railItemLabel)
                 ?.setText(R.string.rail_collapse_label)
             row.setOnClickListener {
-                setNavigationRailExpanded(!navigationRailExpanded, animate = true)
+                val expand = !navigationRailExpanded
+                onUserRailChoice(expand)
+                setNavigationRailExpanded(expand, animate = true)
             }
         }
-        navigationRailScroll.onRailSwipe = { action ->
-            when (action) {
-                NavigationRailSwipePolicy.Action.EXPAND ->
-                    setNavigationRailExpanded(true, animate = true)
-                NavigationRailSwipePolicy.Action.COLLAPSE ->
-                    setNavigationRailExpanded(false, animate = true)
-                NavigationRailSwipePolicy.Action.NONE -> Unit
-            }
+        railScrim?.setOnClickListener { collapseRailOverlay() }
+        if (!railDockedMode) {
+            railBackCallback = object : OnBackPressedCallback(false) {
+                override fun handleOnBackPressed() = collapseRailOverlay()
+            }.also { onBackPressedDispatcher.addCallback(this, it) }
         }
-        setNavigationRailExpanded(
-            savedInstanceState?.getBoolean(KEY_RAIL_EXPANDED, true) ?: true,
-            animate = false
-        )
+        bindRailViews()
+        navigationRailScroll.railDragListener = railDragListener
+        railUserExpanded = savedInstanceState?.getBoolean(KEY_RAIL_EXPANDED, true) ?: true
+        railAutoCollapseOverridden = savedInstanceState?.getBoolean(KEY_RAIL_AUTO_OVERRIDE, false) ?: false
+        setNavigationRailExpanded(railDockedMode && railUserExpanded, animate = false)
         refreshNavigationRailVisibility()
 
         // Selection sync — light up the row whose destinationId matches
@@ -1943,26 +2054,25 @@ open class MainActivity : AppCompatActivity() {
         // colliding with the matcher.
         val syncItems = items.filter { it.launchActivity == null && it.destinationId != 0 }
         navController.addOnDestinationChangedListener { _, destination, _ ->
-            var node: androidx.navigation.NavDestination? = destination
-            while (node != null) {
+            dismissRemotePopover()
+            collapseRailOverlay()
+            updateSettingsRailCollapse(destination)
+            var match: RailItem? = null
+            var node: NavDestination? = destination
+            while (node != null && match == null) {
                 val nodeId = node.id
-                val match = syncItems.firstOrNull {
+                match = syncItems.firstOrNull {
                     it.destinationId == nodeId || nodeId in it.ownedDestinationIds
-                }
-                if (match != null) {
-                    applyNavigationRailVisibility(match.key)
-                    syncItems.forEach { item ->
-                        navigationRail.findViewById<View>(item.rowId)?.isSelected =
-                            (item.key == match.key)
-                    }
-                    return@addOnDestinationChangedListener
                 }
                 node = node.parent
             }
+            val activeKey = match?.key
+            applyNavigationRailVisibility(activeKey)
             syncItems.forEach { item ->
-                navigationRail.findViewById<View>(item.rowId)?.isSelected = false
+                navigationRail.findViewById<View>(item.rowId)?.isSelected = item.key == activeKey
             }
-            applyNavigationRailVisibility(activeKey = null)
+            match?.let { navigationRail.findViewById<View>(it.rowId) }
+                ?.let(::revealRailRowWhenLaidOut)
         }
 
     }
@@ -2035,303 +2145,396 @@ open class MainActivity : AppCompatActivity() {
     )
 
     /**
-     * Expanded is the default so destinations are named without requiring a gesture.
-     * A left swipe (or chevron button) still collapses to the compact 80dp icon rail;
-     * right reverses it.
-     *
-     * Rows are switched to their expanded (horizontal) form up-front and stay
-     * there for the whole slide. Both widths put the icon centre on the same
-     * 40dp line, so holding one form keeps the icons visually static instead of
-     * letting them drift to the centre of the widening rail and snap back at
-     * the end. Labels then only need to cross-fade.
+     * Moves the rail to [expanded]. Docked (landscape) pushes the stage by translation; overlay
+     * (portrait) slides over the scrim. Widths commit once the spring settles, and a call during a
+     * slide re-targets the running spring from its current value and velocity.
      */
-    private fun setNavigationRailExpanded(expanded: Boolean, animate: Boolean) {
-        val stateChanged = navigationRailExpanded != expanded
+    private fun setNavigationRailExpanded(
+        expanded: Boolean,
+        animate: Boolean,
+        velocity: Float = 0f,
+    ) {
         navigationRailExpanded = expanded
-        // Capture the in-flight width before cancelling so an interrupted slide
-        // resumes from where it is rather than jumping to a stale edge.
-        val startWidth = navigationRailContainer.width
-            .takeIf { it > 0 } ?: navigationRailContainer.layoutParams.width
-        // Clear the field BEFORE cancelling: cancel() delivers onAnimationEnd
-        // synchronously, and the identity check there is what stops the outgoing
-        // slide from settling rows to a state this call is about to replace.
-        val outgoing = navigationRailAnimator
-        navigationRailAnimator = null
-        outgoing?.cancel()
-
-        val targetWidth = dp(
-            if (expanded) RAIL_EXPANDED_WIDTH_DP else RAIL_COMPACT_WIDTH_DP
-        )
-        if (!animate || !stateChanged || !navigationRailContainer.isLaidOut) {
-            updateRailExpandButton(expanded, animate = false, durationMs = 0L)
-            navigationRailContainer.layoutParams =
-                navigationRailContainer.layoutParams.apply { width = targetWidth }
-            // force: this is the assert-the-truth path (first bind, rotation,
-            // density change), so it must re-apply even if the memo agrees —
-            // dp() padding is density-derived and can go stale.
-            applyRailItemLayout(expanded, force = true)
-            if (expanded) setRailLabelsVisible(true, durationMs = 0L)
-            setRailSectionsExpanded(expanded, durationMs = 0L)
+        railDragInProgress = false
+        updateRailExpandButton(expanded)
+        railBackCallback?.isEnabled = expanded && !railDockedMode
+        if (!railSliding && railCommittedExpanded == expanded) return
+        val container = navigationRailContainer
+        if (!animate || !ValueAnimator.areAnimatorsEnabled() || !container.isLaidOut ||
+            container.visibility != View.VISIBLE
+        ) {
+            railSpring?.cancel()
+            commitRail(expanded)
             return
         }
+        beginRailSlide()
+        val spring = railSpring ?: createRailSpring().also { railSpring = it }
+        if (!spring.isRunning) {
+            railSpringValue.value = railVisualWidth
+            spring.setStartVelocity(velocity)
+        } else if (velocity != 0f) {
+            spring.setStartVelocity(velocity)
+        }
+        val target = dp(if (expanded) RAIL_EXPANDED_WIDTH_DP else RAIL_COMPACT_WIDTH_DP)
+        spring.animateToFinalPosition(target.toFloat())
+    }
 
-        // Interrupting a slide part-way shortens the remaining travel, so scale
-        // the duration to it — otherwise a re-toggle crawls the last few dp.
-        val travel = Math.abs(targetWidth - startWidth)
-        val fullTravel = dp(RAIL_EXPANDED_WIDTH_DP - RAIL_COMPACT_WIDTH_DP)
-        val slideMs = (
-            if (fullTravel > 0) RAIL_ANIMATION_MS * travel / fullTravel
-            else RAIL_ANIMATION_MS
-            ).coerceAtLeast(RAIL_ANIMATION_MIN_MS)
-
-        updateRailExpandButton(expanded, animate = true, durationMs = slideMs)
-        // Expanded row geometry for the entire slide — see the kdoc above.
-        applyRailItemLayout(true)
-        setRailLabelsVisible(expanded, durationMs = slideMs)
-        setRailSectionsExpanded(expanded, durationMs = slideMs)
-
-        navigationRailAnimator = ValueAnimator.ofInt(startWidth, targetWidth).apply {
-            duration = slideMs
-            interpolator = RAIL_EASING
-            addUpdateListener { animator ->
-                navigationRailContainer.layoutParams =
-                    navigationRailContainer.layoutParams.apply {
-                        width = animator.animatedValue as Int
-                    }
+    private fun createRailSpring(): SpringAnimation =
+        SpringAnimation(railSpringValue).apply {
+            setSpring(
+                SpringForce()
+                    .setDampingRatio(SpringForce.DAMPING_RATIO_NO_BOUNCY)
+                    .setStiffness(RAIL_SPRING_STIFFNESS)
+            )
+            setMinimumVisibleChange(DynamicAnimation.MIN_VISIBLE_CHANGE_PIXELS)
+            addUpdateListener { _, value, _ -> applyRailFrame(value) }
+            addEndListener { _, canceled, _, _ ->
+                if (!canceled) commitRail(navigationRailExpanded)
             }
-            addListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) {
-                    // Identity separates "this slide finished" from "this slide
-                    // was cancelled by a re-toggle" — the caller clears the field
-                    // before cancelling, so a superseded slide bails here.
-                    if (navigationRailAnimator !== this@apply) return
-                    navigationRailAnimator = null
-                    // Expanding needs no settle: the rows already hold expanded
-                    // geometry, so a completed expand costs zero relayout.
-                    if (!expanded) applyRailItemLayout(false)
+        }
+
+    /** Lays the rail out at its widest once; frames then move only the clip and transforms. */
+    private fun beginRailSlide() {
+        if (railSliding) return
+        railSliding = true
+        val container = navigationRailContainer
+        container.layoutParams = container.layoutParams.apply {
+            width = dp(RAIL_EXPANDED_WIDTH_DP + RAIL_STRETCH_ABOVE_DP)
+        }
+        setRailTextSlack(dp(RAIL_STRETCH_ABOVE_DP))
+        setRailLabelsShown(true)
+        if (railDockedMode) {
+            pinRailStage()
+        } else {
+            railScrim?.visibility = View.VISIBLE
+        }
+        applyRailFrame(railVisualWidth)
+    }
+
+    /** End padding for the stretch slack, so text ellipsizes exactly as in the settled rail. */
+    private fun setRailTextSlack(extra: Int) {
+        val rowEnd = resources.getDimensionPixelSize(R.dimen.shell_rail_content_inset) + extra
+        railPlateRows.forEach { row ->
+            if (row.paddingEnd != rowEnd) {
+                row.setPaddingRelative(row.paddingStart, row.paddingTop, rowEnd, row.paddingBottom)
+            }
+        }
+        val sectionEnd = resources.getDimensionPixelSize(R.dimen.shell_rail_plate_inset_h) + extra
+        railSectionViews.forEach { (label, _) ->
+            if (label.paddingEnd != sectionEnd) {
+                label.setPaddingRelative(
+                    label.paddingStart, label.paddingTop, sectionEnd, label.paddingBottom,
+                )
+            }
+        }
+    }
+
+    /** Holds the stage at its widest during a docked slide, so it reflows at most once. */
+    private fun pinRailStage() {
+        val stage = railStage ?: return
+        val body = stage.parent as? View ?: return
+        val params = stage.layoutParams as? LinearLayout.LayoutParams ?: return
+        params.width = (body.width - body.paddingLeft - body.paddingRight -
+            dp(RAIL_COMPACT_WIDTH_DP)).coerceAtLeast(0)
+        params.weight = 0f
+        stage.layoutParams = params
+    }
+
+    private fun unpinRailStage() {
+        val stage = railStage ?: return
+        stage.translationX = 0f
+        val params = stage.layoutParams as? LinearLayout.LayoutParams ?: return
+        if (params.width == 0 && params.weight == 1f) return
+        params.width = 0
+        params.weight = 1f
+        stage.layoutParams = params
+    }
+
+    private fun applyRailFrame(width: Float) {
+        val compact = dp(RAIL_COMPACT_WIDTH_DP)
+        val expanded = dp(RAIL_EXPANDED_WIDTH_DP)
+        val container = navigationRailContainer
+        val layoutWidth = container.layoutParams.width
+        val visual = width.coerceIn(
+            (compact - dp(RAIL_STRETCH_BELOW_DP)).toFloat(),
+            layoutWidth.toFloat(),
+        )
+        railVisualWidth = visual
+        val visible = kotlin.math.ceil(visual).toInt().coerceIn(0, layoutWidth)
+        val rtl = isRailRtl()
+        if (rtl) {
+            railClipRect.set(layoutWidth - visible, 0, layoutWidth, container.height)
+        } else {
+            railClipRect.set(0, 0, visible, container.height)
+        }
+        container.clipBounds = railClipRect
+        val progress = ((visual - compact) / (expanded - compact)).coerceIn(0f, 1f)
+        if (railDockedMode) {
+            railStage?.translationX = (visual - layoutWidth) * (if (rtl) -1f else 1f)
+        } else {
+            railScrim?.alpha = progress * RAIL_SCRIM_ALPHA
+        }
+        applyRailProgress(progress, visible)
+    }
+
+    /** Cross-fades labels and moves the brand, chevron and divider for [progress] 0 (compact)..1. */
+    private fun applyRailProgress(progress: Float, visibleWidth: Int) {
+        val labelAlpha = ((progress - RAIL_LABEL_FADE_START) / (1f - RAIL_LABEL_FADE_START))
+            .coerceIn(0f, 1f)
+        railLabelViews.forEach { it.alpha = labelAlpha }
+        railSectionViews.forEach { (label, rule) ->
+            label.alpha = labelAlpha * RAIL_SECTION_LABEL_ALPHA
+            rule.alpha = 1f - labelAlpha
+        }
+        navigationRailBrand?.alpha = labelAlpha
+        railRemoteText?.alpha = labelAlpha
+        // ic_chevron_right auto-mirrors in RTL, so rotation only tracks the slide.
+        railCollapseIcon?.rotation = 180f * progress
+        applyRailBrandMark(progress)
+        applyRailDivider(visibleWidth)
+        if (railPlateVisibleWidth != visibleWidth) {
+            railPlateVisibleWidth = visibleWidth
+            railPlateRows.forEach { row ->
+                if (row.isSelected || row.isPressed || row.isFocused || row.isHovered ||
+                    row === navigationRailCollapseRow || row === statusPill
+                ) {
+                    row.invalidate()
                 }
-            })
-            start()
-        }
-    }
-
-    /**
-     * Cross-fade the destination labels. Rows stay in their expanded form for
-     * the whole slide, so the labels are laid out either way — fading them
-     * beats flipping GONE/VISIBLE at the boundary, which is what made them pop.
-     * The collapse settle in [applyRailRowLayout] takes them back to GONE.
-     *
-     * A duration of 0 applies the end state immediately.
-     */
-    private fun setRailLabelsVisible(visible: Boolean, durationMs: Long) {
-        forEachRailRow { row, _ ->
-            val label = row.findViewById<TextView>(R.id.railItemLabel) ?: return@forEachRailRow
-            label.animate().cancel()
-            if (durationMs <= 0L) {
-                label.alpha = if (visible) 1f else 0f
-                label.visibility = View.VISIBLE
-                return@forEachRailRow
             }
-            // Coming from GONE the alpha is whatever it was left at (the XML
-            // default is opaque), so seed it to 0 or the fade-in would be a pop.
-            // An interrupted slide is already VISIBLE mid-fade — resume from
-            // its current alpha instead.
-            if (visible && label.visibility != View.VISIBLE) label.alpha = 0f
-            label.visibility = View.VISIBLE
-            label.animate()
-                .alpha(if (visible) 1f else 0f)
-                // Fade in over the back half, once the rail has the room for
-                // text; fade out over the front half so it never squeezes into
-                // a narrowing rail.
-                .setStartDelay(if (visible) durationMs / 2 else 0L)
-                .setDuration(durationMs / 2)
-                .setInterpolator(RAIL_EASING)
-                .start()
         }
     }
 
-    /**
-     * Cross-fade each category header between its label and the hairline that
-     * stands in for it at the compact 80dp width. Header height is fixed, so
-     * neither state relayouts the rail. A duration of 0 applies the end state
-     * immediately.
-     */
-    private fun setRailSectionsExpanded(expanded: Boolean, durationMs: Long) {
-        railSections.forEach { section ->
-            val header = navigationRail.findViewById<View>(section.headerId)
-                ?: return@forEach
-            val label = header.findViewById<TextView>(R.id.railSectionLabel)
-                ?: return@forEach
-            val rule = header.findViewById<View>(R.id.railSectionRule) ?: return@forEach
-            label.animate().cancel()
-            rule.animate().cancel()
-            if (durationMs <= 0L) {
-                label.alpha = if (expanded) 1f else 0f
-                // INVISIBLE, not GONE: the fixed height stays either way, and
-                // this keeps the hidden label out of the a11y tree.
-                label.visibility = if (expanded) View.VISIBLE else View.INVISIBLE
-                rule.alpha = if (expanded) 0f else 1f
-                return@forEach
+    /** Mark at 24dp beside the wordmark when expanded; centred at 75% scale when compact. */
+    private fun applyRailBrandMark(progress: Float) {
+        val mark = railBrandMark ?: return
+        val markWidth = mark.layoutParams.width.toFloat()
+        val inset = resources.getDimension(R.dimen.shell_rail_brand_inset)
+        val compactStart = (dp(RAIL_COMPACT_WIDTH_DP) - markWidth * RAIL_MARK_COMPACT_SCALE) / 2f
+        val start = compactStart + (inset - compactStart) * progress
+        val scale = RAIL_MARK_COMPACT_SCALE + (1f - RAIL_MARK_COMPACT_SCALE) * progress
+        val rtl = isRailRtl()
+        mark.pivotX = if (rtl) markWidth else 0f
+        mark.pivotY = mark.layoutParams.height / 2f
+        mark.scaleX = scale
+        mark.scaleY = scale
+        mark.translationX = (start - inset) * (if (rtl) -1f else 1f)
+    }
+
+    /** The divider keeps its 28dp side margins at every visible width. */
+    private fun applyRailDivider(visibleWidth: Int) {
+        val divider = railDivider ?: return
+        val margins = 2 * resources.getDimensionPixelSize(R.dimen.shell_rail_content_inset)
+        val laidOut = navigationRailContainer.layoutParams.width - margins
+        if (laidOut <= 0) return
+        divider.pivotX = if (isRailRtl()) laidOut.toFloat() else 0f
+        divider.scaleX = ((visibleWidth - margins).toFloat() / laidOut).coerceIn(0f, 1f)
+    }
+
+    private fun setRailLabelsShown(shown: Boolean) {
+        if (railLabelsShown == shown) return
+        railLabelsShown = shown
+        val visibility = if (shown) View.VISIBLE else View.GONE
+        railLabelViews.forEach { it.visibility = visibility }
+        // INVISIBLE keeps the fixed header height and the hidden label out of the a11y tree.
+        railSectionViews.forEach { (label, _) ->
+            label.visibility = if (shown) View.VISIBLE else View.INVISIBLE
+        }
+        navigationRailBrand?.visibility = visibility
+        railRemoteText?.visibility = visibility
+        railTooltipRows.forEach { (row, label) ->
+            TooltipCompat.setTooltipText(row, if (shown) null else label)
+        }
+    }
+
+    private fun commitRail(expanded: Boolean) {
+        val container = navigationRailContainer
+        val target = dp(if (expanded) RAIL_EXPANDED_WIDTH_DP else RAIL_COMPACT_WIDTH_DP)
+        railSliding = false
+        railCommittedExpanded = expanded
+        railVisualWidth = target.toFloat()
+        container.clipBounds = null
+        if (container.layoutParams.width != target) {
+            container.layoutParams = container.layoutParams.apply { width = target }
+        }
+        setRailTextSlack(0)
+        if (railDockedMode) {
+            unpinRailStage()
+        } else {
+            railScrim?.alpha = if (expanded) RAIL_SCRIM_ALPHA else 0f
+            railScrim?.visibility = if (expanded) View.VISIBLE else View.GONE
+            // The open overlay is modal for accessibility, like a drawer.
+            railStage?.importantForAccessibility =
+                if (expanded) View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                else View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+            (railStage as? ViewGroup)?.descendantFocusability =
+                if (expanded) ViewGroup.FOCUS_BLOCK_DESCENDANTS else ViewGroup.FOCUS_AFTER_DESCENDANTS
+            if (expanded) {
+                // Keys and typing must not reach the page behind the scrim.
+                railStage?.findFocus()?.let { focused ->
+                    (getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)
+                        ?.hideSoftInputFromWindow(focused.windowToken, 0)
+                    focused.clearFocus()
+                }
             }
-            label.visibility = View.VISIBLE
-            label.animate()
-                .alpha(if (expanded) 1f else 0f)
-                // Same halves as the row labels: text arrives once the rail has
-                // the width for it, and leaves before the rail narrows.
-                .setStartDelay(if (expanded) durationMs / 2 else 0L)
-                .setDuration(durationMs / 2)
-                .setInterpolator(RAIL_EASING)
-                .withEndAction { if (!expanded) label.visibility = View.INVISIBLE }
-                .start()
-            rule.animate()
-                .alpha(if (expanded) 0f else 1f)
-                .setStartDelay(if (expanded) 0L else durationMs / 2)
-                .setDuration(durationMs / 2)
-                .setInterpolator(RAIL_EASING)
-                .start()
+        }
+        setRailLabelsShown(expanded)
+        applyRailProgress(if (expanded) 1f else 0f, Int.MAX_VALUE)
+    }
+
+    private fun settleRailNow() {
+        railSpring?.cancel()
+        commitRail(navigationRailExpanded)
+    }
+
+    private fun isRailRtl(): Boolean =
+        resources.configuration.layoutDirection == View.LAYOUT_DIRECTION_RTL
+
+    private val railDragListener = object : SwipeExpandableRailScrollView.RailDragListener {
+        override fun onRailDragStart() {
+            dismissRemotePopover()
+            railSpring?.cancel()
+            beginRailSlide()
+            railDragOrigin = railVisualWidth
+            railDragInProgress = true
+        }
+
+        override fun onRailDrag(delta: Float) {
+            // Something committed or retargeted the rail mid-drag; stop tracking.
+            if (!railSliding || !railDragInProgress) return
+            val compact = dp(RAIL_COMPACT_WIDTH_DP).toFloat()
+            val expanded = dp(RAIL_EXPANDED_WIDTH_DP).toFloat()
+            var width = railDragOrigin + delta
+            if (width > expanded) {
+                width = expanded + rubberBand(width - expanded, dp(RAIL_STRETCH_ABOVE_DP).toFloat())
+            } else if (width < compact) {
+                width = compact - rubberBand(compact - width, dp(RAIL_STRETCH_BELOW_DP).toFloat())
+            }
+            applyRailFrame(width)
+        }
+
+        override fun onRailDragEnd(velocity: Float) {
+            if (!railSliding || !railDragInProgress) return
+            railDragInProgress = false
+            val expand = NavigationRailSwipePolicy.settleExpanded(
+                railVisualWidth,
+                dp(RAIL_COMPACT_WIDTH_DP).toFloat(),
+                dp(RAIL_EXPANDED_WIDTH_DP).toFloat(),
+                velocity,
+                RAIL_FLING_DP_PER_S * resources.displayMetrics.density,
+            )
+            // A drag released toward the state already targeted is not a new preference.
+            if (expand != navigationRailExpanded) onUserRailChoice(expand)
+            setNavigationRailExpanded(expand, animate = true, velocity = velocity)
         }
     }
 
-    /** Drops any queued label / chevron view animations. */
-    private fun cancelRailViewAnimations() {
-        forEachRailRow { row, _ ->
-            row.findViewById<TextView>(R.id.railItemLabel)?.animate()?.cancel()
-        }
-        railSections.forEach { section ->
-            val header = navigationRail.findViewById<View>(section.headerId)
-                ?: return@forEach
-            header.findViewById<TextView>(R.id.railSectionLabel)?.animate()?.cancel()
-            header.findViewById<View>(R.id.railSectionRule)?.animate()?.cancel()
-        }
-        navigationRailCollapseRow
-            ?.findViewById<ImageView>(R.id.railItemIcon)
-            ?.animate()
-            ?.cancel()
+    /** Resistance past an edge: about half the finger travel at first, never beyond [limit]. */
+    private fun rubberBand(overshoot: Float, limit: Float): Float =
+        overshoot * limit * RAIL_RUBBER_BAND / (limit + RAIL_RUBBER_BAND * overshoot)
+
+    /** Docked toggles and drags are the user's preference; the overlay rail never persists. */
+    private fun onUserRailChoice(expanded: Boolean) {
+        if (!railDockedMode) return
+        railUserExpanded = expanded
+        if (railAutoCollapsed) railAutoCollapseOverridden = true
     }
 
-    /**
-     * Walks every rail row — destinations, secondary actions, then the pinned
-     * collapse row, which lives outside [navigationRail] but takes the same
-     * compact/expanded treatment. The label res passed for it is the
-     * collapsed-state one, which is where the tooltip stands in for the label.
-     */
-    private inline fun forEachRailRow(action: (LinearLayout, Int) -> Unit) {
+    private fun collapseRailOverlay() {
+        if (!railDockedMode && navigationRailExpanded) {
+            setNavigationRailExpanded(false, animate = true)
+        }
+    }
+
+    /** Docked rail collapses while Settings (or a page drilled from it) shows its own sub-rail. */
+    private fun updateSettingsRailCollapse(destination: NavDestination) {
+        val inSettings = destination.id == R.id.settingsFragment ||
+            (destination.id !in appBarConfiguration.topLevelDestinations &&
+                navController.previousBackStackEntry?.destination?.id == R.id.settingsFragment)
+        // Leaving Settings ends the override in every mode, so it can't resurface after a rotation.
+        if (!inSettings) railAutoCollapseOverridden = false
+        if (!railDockedMode) return
+        if (inSettings == railAutoCollapsed) return
+        railAutoCollapsed = inSettings
+        val target = !(railAutoCollapsed && !railAutoCollapseOverridden) && railUserExpanded
+        if (target != navigationRailExpanded) setNavigationRailExpanded(target, animate = true)
+    }
+
+    /** Caches the views each slide frame touches and clips every row plate to the visible rail. */
+    private fun bindRailViews() {
+        val rows = ArrayList<View>()
+        val tooltips = ArrayList<Pair<View, String>>()
         railItems.forEach { item ->
-            navigationRail.findViewById<LinearLayout>(item.rowId)?.let {
-                action(it, item.labelRes)
+            navigationRail.findViewById<View>(item.rowId)?.let { row ->
+                rows += row
+                tooltips += row to getString(item.labelRes)
             }
         }
         railActionItems.forEach { item ->
-            navigationRail.findViewById<LinearLayout>(item.rowId)?.let {
-                action(it, item.labelRes)
+            navigationRail.findViewById<View>(item.rowId)?.let { row ->
+                rows += row
+                tooltips += row to getString(item.labelRes)
             }
         }
-        navigationRailCollapseRow?.let { action(it, R.string.rail_expand) }
-    }
-
-    /**
-     * Switch every row between the compact (vertical) and expanded (horizontal)
-     * form. Each call relayouts ~17 rows, so it no-ops when the rows already
-     * hold the requested form — during a slide that keeps the work off the
-     * first and last frames, where a dropped frame is most visible.
-     *
-     * [force] skips the memo for paths that must assert absolute state: the
-     * initial bind, and rotation, where the inflated views are new (landscape
-     * even carries two extra rows) so the memo describes a dead hierarchy.
-     */
-    private fun applyRailItemLayout(expanded: Boolean, force: Boolean = false) {
-        if (!force && navigationRailRowsExpandedForm == expanded) return
-        navigationRailRowsExpandedForm = expanded
-        forEachRailRow { row, labelRes -> applyRailRowLayout(row, labelRes, expanded) }
-        navigationRailBrand?.let { brand ->
-            val inset = resources.getDimensionPixelSize(
-                R.dimen.rail_item_pill_inset_horizontal
-            ) + resources.getDimensionPixelSize(R.dimen.rail_item_pill_content_inset)
-            brand.gravity = if (expanded) {
-                Gravity.START or Gravity.CENTER_VERTICAL
-            } else {
-                Gravity.CENTER
+        navigationRailCollapseRow?.let { row ->
+            rows += row
+            tooltips += row to getString(R.string.rail_expand)
+        }
+        tooltips += statusPill to getString(R.string.dashboard_metric_tunnel)
+        railTooltipRows = tooltips
+        railLabelViews = rows.mapNotNull { it.findViewById<View>(R.id.railItemLabel) }
+        railSectionViews = railSections.mapNotNull { section ->
+            val header = navigationRail.findViewById<View>(section.headerId)
+            val label = header?.findViewById<View>(R.id.railSectionLabel)
+            val rule = header?.findViewById<View>(R.id.railSectionRule)
+            if (label != null && rule != null) label to rule else null
+        }
+        railCollapseIcon = navigationRailCollapseRow?.findViewById(R.id.railItemIcon)
+        (statusPill.background?.mutate() as? LayerDrawable)?.let { plate ->
+            for (index in 0 until plate.numberOfLayers) {
+                if (plate.getId(index) != android.R.id.mask) {
+                    plate.getDrawable(index)?.alpha = REMOTE_ROW_TINT_ALPHA
+                }
             }
-            brand.setPadding(if (expanded) inset else dp(8), 0, dp(8), 0)
+        }
+        railPlateRows = rows + statusPill
+        railPlateRows.forEach { row ->
+            val background = row.background
+            if (background != null && background !is RailPlateDrawable) {
+                // Detach first so the platform does not clear the wrapped drawable's callback.
+                row.background = null
+                row.background = RailPlateDrawable(
+                    background,
+                    { railPlateVisibleWidth },
+                    { isRailRtl() },
+                )
+            }
         }
     }
 
-    private fun applyRailRowLayout(row: LinearLayout, labelRes: Int, expanded: Boolean) {
-        val label = row.findViewById<TextView>(R.id.railItemLabel) ?: return
-        // Must stay the insets rail_item_indicator.xml uses: content sits inside
-        // the selected plate, and with the 24dp icon this also holds the icon
-        // centre on the 40dp line at both rail widths.
-        val horizontalPadding = if (expanded) {
-            resources.getDimensionPixelSize(R.dimen.rail_item_pill_inset_horizontal) +
-                resources.getDimensionPixelSize(R.dimen.rail_item_pill_content_inset)
-        } else {
-            0
-        }
-        val verticalPadding = dp(6)
-
-        row.orientation =
-            if (expanded) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
-        row.gravity =
-            if (expanded) Gravity.CENTER_VERTICAL else Gravity.CENTER
-        row.minimumHeight = dp(56)
-        row.setPadding(
-            horizontalPadding,
-            verticalPadding,
-            horizontalPadding,
-            verticalPadding
-        )
-
-        val labelParams = label.layoutParams as LinearLayout.LayoutParams
-        labelParams.width =
-            if (expanded) 0 else ViewGroup.LayoutParams.WRAP_CONTENT
-        labelParams.weight = if (expanded) 1f else 0f
-        labelParams.marginStart = if (expanded) dp(12) else 0
-        labelParams.topMargin = if (expanded) 0 else dp(4)
-        label.layoutParams = labelParams
-        label.gravity =
-            if (expanded) Gravity.START or Gravity.CENTER_VERTICAL
-            else Gravity.CENTER_HORIZONTAL
-        // Visibility is owned by setRailLabelsVisible during a slide; only the
-        // settled compact state drops the label out of layout entirely.
-        if (!expanded) {
-            label.animate().cancel()
-            label.alpha = 0f
-            label.visibility = View.GONE
-        }
-
-        // Tooltip only earns its place while the label is hidden. contentDescription
-        // is set once at bind time in setupCustomRail and never changes.
-        TooltipCompat.setTooltipText(row, if (expanded) null else getString(labelRes))
+    private fun revealRailRowWhenLaidOut(row: View) {
+        val smooth = railRevealAnimated && ValueAnimator.areAnimatorsEnabled()
+        railRevealAnimated = true
+        navigationRail.doOnLayout { revealRailRow(row, smooth) }
     }
 
-    /**
-     * Chevron points right when collapsed, left when expanded. Rotating one
-     * drawable rather than swapping two keeps the affordance continuous with
-     * the slide instead of blinking to a different asset mid-motion.
-     */
-    private fun updateRailExpandButton(
-        expanded: Boolean,
-        animate: Boolean,
-        durationMs: Long
-    ) {
-        val row = navigationRailCollapseRow ?: return
-        val icon = row.findViewById<ImageView>(R.id.railItemIcon) ?: return
-        val descriptionRes = if (expanded) R.string.rail_collapse else R.string.rail_expand
-        val description = getString(descriptionRes)
-        row.contentDescription = description
+    /** Scrolls [row] fully clear of the rail's fading edges. */
+    private fun revealRailRow(row: View, smooth: Boolean) {
+        val scroll = navigationRailScroll
+        val viewport = scroll.height - scroll.paddingTop - scroll.paddingBottom
+        if (row.visibility != View.VISIBLE || viewport <= 0) return
+        val margin = scroll.verticalFadingEdgeLength
+        val current = scroll.scrollY
+        val target = when {
+            row.top - margin < current -> row.top - margin
+            row.bottom + margin > current + viewport -> row.bottom + margin - viewport
+            else -> return
+        }.coerceIn(0, (navigationRail.height - viewport).coerceAtLeast(0))
+        if (smooth) scroll.smoothScrollTo(0, target) else scroll.scrollTo(0, target)
+    }
 
-        icon.animate().cancel()
-        // The vector auto-mirrors in RTL, so expansion alone controls rotation.
-        val targetRotation = if (expanded) 180f else 0f
-        if (!animate) {
-            icon.rotation = targetRotation
-            return
-        }
-        icon.animate()
-            .rotation(targetRotation)
-            .setDuration(durationMs)
-            .setInterpolator(RAIL_EASING)
-            .start()
+    private fun updateRailExpandButton(expanded: Boolean) {
+        navigationRailCollapseRow?.contentDescription =
+            getString(if (expanded) R.string.rail_collapse else R.string.rail_expand)
     }
 
     private fun dp(value: Int): Int =
@@ -2339,24 +2542,35 @@ open class MainActivity : AppCompatActivity() {
 
     /**
      * Navigate to a rail destination, popping any sub-pages so the tab
-     * resets to its root. Uses M3 expressive fade-through (the incoming
-     * destination scales up slightly while the outgoing fades) so the
-     * switch reads as motion, not just a cross-fade.
+     * resets to its root, with the peer crossfade. [reselect] re-delivers
+     * [args] to a destination that is already showing.
      */
-    private fun navigateToRailDestination(destinationId: Int) {
+    private fun navigateToRailDestination(
+        destinationId: Int,
+        args: android.os.Bundle? = null,
+        reselect: Boolean = false,
+    ) {
+        // A newer request always supersedes a deferred one.
+        pendingRailDestination = null
+        pendingRailArgs = null
+        pendingRailReselect = false
         // Reselecting an already-visible top-level screen is a no-op. Besides avoiding a
         // pointless transition, this prevents Surface-backed screens such as Projection from
         // being torn down and recreated while a resize transaction is still settling.
-        if (navController.currentDestination?.id == destinationId) return
+        if (!reselect && navController.currentDestination?.id == destinationId) return
         // A late click can race Activity state saving (for example while a configuration
         // transition is settling). Navigation cannot commit after that point; FragmentManager
         // would throw. Stash the target and re-drive it from onResume (once the Activity is
         // resumed and state is no longer saved) so the user's tap isn't silently dropped.
         if (supportFragmentManager.isStateSaved) {
             pendingRailDestination = destinationId
+            pendingRailArgs = args
+            pendingRailReselect = reselect
             return
         }
         pendingRailDestination = null
+        pendingRailArgs = null
+        pendingRailReselect = false
         val options = androidx.navigation.NavOptions.Builder()
             .setLaunchSingleTop(true)
             .setRestoreState(false)
@@ -2367,12 +2581,16 @@ open class MainActivity : AppCompatActivity() {
             .setPopExitAnim(R.anim.m3_fade_through_exit)
             .build()
         try {
-            navController.navigate(destinationId, /* args = */ null, options)
+            navController.navigate(destinationId, args, options)
         } catch (_: IllegalArgumentException) {
             // Destination not in graph — defensive only.
         } catch (_: IllegalStateException) {
             // FragmentManager state may have been saved between the guard and navigate().
-            pendingRailDestination = destinationId
+            if (supportFragmentManager.isStateSaved) {
+                pendingRailDestination = destinationId
+                pendingRailArgs = args
+                pendingRailReselect = reselect
+            }
         }
     }
     
@@ -2383,9 +2601,120 @@ open class MainActivity : AppCompatActivity() {
             val clip = ClipData.newPlainText(getString(R.string.clip_label_url), url)
             clipboard.setPrimaryClip(clip)
             Toast.makeText(this, getString(R.string.toast_url_copied_short), Toast.LENGTH_SHORT).show()
+            dismissRemotePopover()
         }
         btnCopyUrl.setOnClickListener(copyUrl)
-        findViewById<View>(R.id.statusPill)?.setOnClickListener(copyUrl)
+        statusPill.setOnClickListener { toggleRemotePopover() }
+        remotePopoverContent?.findViewById<View>(R.id.shellRemoteDetails)?.setOnClickListener {
+            dismissRemotePopover()
+            collapseRailOverlay()
+            navigateToRailDestination(
+                R.id.dashboardFragment,
+                Bundle().apply { putBoolean(ARG_EXPAND_REMOTE, true) },
+                reselect = true,
+            )
+        }
+    }
+
+    private fun toggleRemotePopover() {
+        if (remotePopover?.isShowing == true) dismissRemotePopover() else showRemotePopover()
+    }
+
+    /** Popover above the Remote access row, scaling in from the row's leading corner. */
+    private fun showRemotePopover() {
+        val content = remotePopoverContent ?: return
+        // A popover still fading out keeps the body until its exit transition ends.
+        if (isFinishing || isDestroyed || !statusPill.isAttachedToWindow || content.parent != null) return
+        refreshRemotePopover()
+        val decorWidth = window.decorView.width
+        val edge = resources.getDimensionPixelSize(R.dimen.shell_rail_plate_inset_h)
+        val width = minOf(
+            resources.getDimensionPixelSize(R.dimen.shell_popover_width),
+            (decorWidth - 2 * edge).coerceAtLeast(0),
+        )
+        val animated = ValueAnimator.areAnimatorsEnabled()
+        val popup = remotePopover ?: PopupWindow(
+            content, width, ViewGroup.LayoutParams.WRAP_CONTENT, true,
+        ).apply {
+            setBackgroundDrawable(
+                AppCompatResources.getDrawable(this@MainActivity, R.drawable.shell_popover_bg)
+            )
+            elevation = resources.getDimension(R.dimen.shell_popover_elevation)
+            isOutsideTouchable = true
+            animationStyle = 0
+        }.also { remotePopover = it }
+        popup.width = width
+        popup.exitTransition =
+            if (animated) android.transition.Fade().setDuration(REMOTE_POPOVER_EXIT_MS) else null
+        content.measure(
+            View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+        )
+        val anchor = IntArray(2).also { statusPill.getLocationInWindow(it) }
+        val rtl = isRailRtl()
+        val x = if (rtl) anchor[0] + statusPill.width - edge - width else anchor[0] + edge
+        val gap = resources.getDimensionPixelSize(R.dimen.shell_popover_gap)
+        val y = anchor[1] - content.measuredHeight - gap
+        popup.showAtLocation(
+            statusPill, Gravity.TOP or Gravity.LEFT,
+            x.coerceIn(0, (decorWidth - width).coerceAtLeast(0)), y.coerceAtLeast(0),
+        )
+        if (!animated) return
+        val surface = content.parent as? View ?: content
+        surface.pivotX = width * (if (rtl) 0.8f else 0.2f)
+        surface.pivotY = content.measuredHeight.toFloat()
+        surface.alpha = 0f
+        surface.scaleX = 0.92f
+        surface.scaleY = 0.92f
+        surface.animate()
+            .alpha(1f)
+            .scaleX(1f)
+            .scaleY(1f)
+            .setDuration(REMOTE_POPOVER_ENTER_MS)
+            .setInterpolator(PathInterpolator(0.2f, 0.9f, 0.25f, 1f))
+            .start()
+    }
+
+    private fun refreshRemotePopover() {
+        val content = remotePopoverContent ?: return
+        val title = getString(R.string.dashboard_metric_tunnel)
+        val provider = remoteProviderLabel
+        content.findViewById<TextView>(R.id.shellRemotePopoverTitle)?.text =
+            if (provider == null) title
+            else getString(R.string.shell_title_with_detail, title, provider)
+        content.findViewById<TextView>(R.id.shellRemotePopoverUrl)?.let { url ->
+            url.text = mainViewModel.currentUrl.value ?: tvCurrentUrl.text
+            // This window is outside the screenshot-privacy overlay, so cover the URL here.
+            url.foreground =
+                if (com.overdrive.app.config.UnifiedConfigManager.isScreenshotPrivacyModeEnabled()) {
+                    AppCompatResources.getDrawable(this, R.drawable.shell_privacy_cover)
+                } else {
+                    null
+                }
+        }
+        remotePopover?.takeIf { it.isShowing && statusPill.isAttachedToWindow }?.let { popup ->
+            content.measure(
+                View.MeasureSpec.makeMeasureSpec(popup.width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+            )
+            val anchor = IntArray(2).also { statusPill.getLocationInWindow(it) }
+            val edge = resources.getDimensionPixelSize(R.dimen.shell_rail_plate_inset_h)
+            val gap = resources.getDimensionPixelSize(R.dimen.shell_popover_gap)
+            val decorWidth = window.decorView.width
+            val x = if (isRailRtl()) anchor[0] + statusPill.width - edge - popup.width else anchor[0] + edge
+            val y = anchor[1] - content.measuredHeight - gap
+            popup.update(
+                x.coerceIn(0, (decorWidth - popup.width).coerceAtLeast(0)), y.coerceAtLeast(0), -1, -1,
+            )
+        }
+    }
+
+    private fun dismissRemotePopover() {
+        remotePopover?.takeIf { it.isShowing }?.let { popup ->
+            // No exit fade while finishing, so the popup window never outlives the activity.
+            if (isFinishing) popup.exitTransition = null
+            popup.dismiss()
+        }
     }
     
     private fun setupLogListener() {
@@ -2470,9 +2799,25 @@ open class MainActivity : AppCompatActivity() {
                 getString(R.string.dashboard_tunnel_stopping)
             TunnelDisplayPolicy.Kind.FAILED ->
                 getString(R.string.dashboard_tunnel_failed)
-            TunnelDisplayPolicy.Kind.ONLINE -> display.url
+            // The rail row shows the host; the popover carries the full URL.
+            TunnelDisplayPolicy.Kind.ONLINE ->
+                display.url?.removePrefix("https://")?.removePrefix("http://")
             TunnelDisplayPolicy.Kind.HIDDEN -> getString(R.string.dashboard_no_tunnel)
         }
+        remoteProviderLabel = when {
+            display.kind == TunnelDisplayPolicy.Kind.STARTING_ZROK ||
+                (display.isOnline && display.url == zrokUrl) ->
+                getString(R.string.tunnel_label_zrok)
+            display.kind == TunnelDisplayPolicy.Kind.STARTING_CLOUDFLARED ||
+                (display.isOnline && display.url == cloudflaredUrl) ->
+                getString(R.string.tunnel_label_cloudflared)
+            display.kind == TunnelDisplayPolicy.Kind.STARTING_TAILSCALE ||
+                (display.isOnline && display.url == tailscaleUrl) ->
+                getString(R.string.tunnel_label_tailscale)
+            else -> null
+        }
+        statusPill.contentDescription =
+            getString(R.string.dashboard_metric_tunnel) + ", " + tvCurrentUrl.text
         val drawableRes = when (display.kind) {
             TunnelDisplayPolicy.Kind.ONLINE -> R.drawable.status_dot_online
             TunnelDisplayPolicy.Kind.STARTING_ZROK,
@@ -2485,7 +2830,13 @@ open class MainActivity : AppCompatActivity() {
         }
         statusIndicator.setBackgroundResource(drawableRes)
         urlStatusDot.setBackgroundResource(drawableRes)
+        remoteHalo?.setBackgroundResource(drawableRes)
         mainViewModel.setCurrentUrl(display.url)
+        if (!display.isVisible) {
+            dismissRemotePopover()
+        } else if (remotePopover?.isShowing == true) {
+            refreshRemotePopover()
+        }
     }
     
     override fun onSupportNavigateUp(): Boolean {
@@ -2576,7 +2927,12 @@ open class MainActivity : AppCompatActivity() {
         // (camera.decoupledEncoderLane) — the native-AVM reverse-camera
         // starvation fix. Legacy camera mode only; applied at the next
         // camera restart. Default false = shipped zero-copy behaviour.
-        val decoupledEncoderLaneEnabled: Boolean
+        val decoupledEncoderLaneEnabled: Boolean,
+        // Recording engine preference (camera.recordingEngine, default CPU on
+        // DiLink 3) and what the running pipeline uses ("cpu"/"gpu"/"") + why.
+        val recordingEngineCpu: Boolean,
+        val recordingEngineActive: String,
+        val recordingEngineWhy: String
     )
 
     /**
@@ -2703,6 +3059,7 @@ open class MainActivity : AppCompatActivity() {
                 "concurrentAvmProbeEnabled", false)
             val decoupledEncoderLaneEnabled = cameraSection.optBoolean(
                 "decoupledEncoderLane", false)
+            val recordingEngineCpu = com.overdrive.app.surveillance.RecordingEngine.prefersCpu()
 
             CameraMappingState(
                 summary = summary,
@@ -2722,7 +3079,10 @@ open class MainActivity : AppCompatActivity() {
                 oemDashcamCameraId = oemDashcamCameraId,
                 oemDashcamManualOverride = oemDashcamManualOverride,
                 concurrentAvmProbeEnabled = concurrentAvmProbeEnabled,
-                decoupledEncoderLaneEnabled = decoupledEncoderLaneEnabled
+                decoupledEncoderLaneEnabled = decoupledEncoderLaneEnabled,
+                recordingEngineCpu = recordingEngineCpu,
+                recordingEngineActive = config.optString("recordingEngineActive", ""),
+                recordingEngineWhy = config.optString("recordingEngineWhy", "")
             )
         } catch (e: Exception) {
             logsViewModel.error("Camera", "Failed to load camera mapping state: ${e.message}")
@@ -3484,6 +3844,46 @@ open class MainActivity : AppCompatActivity() {
             }.start()
         }
 
+        // Recording engine: write-through like the lane switch, then restart the
+        // camera service so the camera reader and encoder switch together.
+        val recordingEngineSwitch = dialogView.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(R.id.swRecordingEngineCpu)
+        dialogView.findViewById<TextView>(R.id.tvRecordingEngineStatus)?.text =
+            recordingEngineStatusText(state.recordingEngineActive, state.recordingEngineWhy)
+        recordingEngineSwitch?.isChecked = state.recordingEngineCpu
+        val recordingEngineReverting = java.util.concurrent.atomic.AtomicBoolean(false)
+        recordingEngineSwitch?.setOnCheckedChangeListener { switchView, checked ->
+            if (recordingEngineReverting.get()) return@setOnCheckedChangeListener
+            switchView.isEnabled = false
+            Thread {
+                val ok = try {
+                    com.overdrive.app.camera.CameraConfigResolver.saveRecordingEngine(checked)
+                } catch (e: Exception) {
+                    logsViewModel.error("Camera", "Failed to save recordingEngine: ${e.message}")
+                    false
+                }
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    if (ok) {
+                        restartCameraDaemonForCameraSettings()
+                        dialog.dismiss()
+                    } else {
+                        switchView.isEnabled = true
+                        recordingEngineReverting.set(true)
+                        try {
+                            (switchView as? android.widget.CompoundButton)?.isChecked = !checked
+                        } finally {
+                            recordingEngineReverting.set(false)
+                        }
+                        Toast.makeText(
+                            this,
+                            getString(R.string.toast_failed_to_save_short),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+            }.start()
+        }
+
         fun refreshOemDashcamSubLabel(
             isManual: Boolean,
             dashcamId: Int,
@@ -3947,6 +4347,26 @@ open class MainActivity : AppCompatActivity() {
      *       opens it (without that, the HAL emits event 1002).</li>
      * </ol>
      */
+    /** "In use: CPU" / "In use: GPU (reason)" for the Camera probe's engine card. */
+    private fun recordingEngineStatusText(active: String, why: String): String {
+        val reason = when (why) {
+            "camera_mode" -> R.string.camera_recording_engine_why_camera_mode
+            "native_missing" -> R.string.camera_recording_engine_why_native_missing
+            "codec_rejected" -> R.string.camera_recording_engine_why_codec_rejected
+            "frames_unreadable" -> R.string.camera_recording_engine_why_frames_unreadable
+            "restart_pending" -> R.string.camera_recording_engine_why_restart_pending
+            "acc_off" -> R.string.camera_recording_engine_why_acc_off
+            else -> 0
+        }
+        return when {
+            active == "cpu" -> getString(R.string.camera_recording_engine_in_use_cpu)
+            active == "gpu" && reason != 0 ->
+                getString(R.string.camera_recording_engine_in_use_gpu_reason, getString(reason))
+            active == "gpu" -> getString(R.string.camera_recording_engine_in_use_gpu)
+            else -> getString(R.string.camera_recording_engine_in_use_unknown)
+        }
+    }
+
     private fun restartCameraDaemonForCameraSettings() {
         // Guard every continuation against an Activity that's destroyed mid-
         // restart. The chain is: Thread → runOnUiThread → AdbDaemonLauncher
@@ -4718,15 +5138,16 @@ open class MainActivity : AppCompatActivity() {
 
     /** Track current traffic monitor state to show correct button */
     private var trafficMonitorEnabled: Boolean? = null
-    
+    private var trafficMonitorCheckingDialog: androidx.appcompat.app.AlertDialog? = null
+
     /**
      * Check if BYD Traffic Monitor app is currently enabled or disabled.
      * Updates the drawer menu item title accordingly.
-     * 
+     *
      * Uses ADB shell — if ADB isn't connected yet, shows a "checking" state
      * and retries automatically when the drawer is opened.
      */
-    private fun checkTrafficMonitorStatus() {
+    private fun checkTrafficMonitorStatus(onChecked: ((Boolean?) -> Unit)? = null) {
         // Show loading state while we check
         updateTrafficMonitorMenuItemText(getString(R.string.traffic_monitor_loading))
         
@@ -4737,26 +5158,27 @@ open class MainActivity : AppCompatActivity() {
             TrafficMonitorPolicy.stateProbeCommand(),
             object : AdbDaemonLauncher.LaunchCallback {
                 override fun onLog(message: String) {
-                    val isDisabled = TrafficMonitorPolicy.probeSaysDisabled(message)
+                    val enabled = when (TrafficMonitorPolicy.probeState(message)) {
+                        TrafficMonitorPolicy.STATE_ENABLED -> true
+                        TrafficMonitorPolicy.STATE_DISABLED -> false
+                        else -> null
+                    }
                     runOnUiThread {
-                        trafficMonitorEnabled = !isDisabled
-                        updateTrafficMonitorMenuItem(!isDisabled)
+                        if (isFinishing || isDestroyed) return@runOnUiThread
+                        trafficMonitorEnabled = enabled
+                        if (enabled != null) updateTrafficMonitorMenuItem(enabled)
+                        else updateTrafficMonitorMenuItemText(getString(R.string.traffic_monitor_tap_to_check))
+                        onChecked?.invoke(enabled)
                     }
                 }
-                override fun onLaunched() {
-                    // Command completed — if onLog wasn't called, default to enabled
-                    if (trafficMonitorEnabled == null) {
-                        runOnUiThread {
-                            trafficMonitorEnabled = true
-                            updateTrafficMonitorMenuItem(true)
-                        }
-                    }
-                }
+                // executeShellCommand always delivers onLog first; the probe output is the only state source.
+                override fun onLaunched() {}
                 override fun onError(error: String) {
                     runOnUiThread {
-                        // Actual ADB connection failure
+                        if (isFinishing || isDestroyed) return@runOnUiThread
                         trafficMonitorEnabled = null
                         updateTrafficMonitorMenuItemText(getString(R.string.traffic_monitor_tap_to_check))
+                        onChecked?.invoke(null)
                     }
                 }
             }
@@ -4777,13 +5199,8 @@ open class MainActivity : AppCompatActivity() {
      * Shows an informational dialog explaining what the traffic monitor is,
      * why disabling it is recommended, and lets the user take action.
      */
-    private fun onTrafficMonitorClicked() {
-        val currentlyEnabled = trafficMonitorEnabled
-        
+    private fun onTrafficMonitorClicked(currentlyEnabled: Boolean?) {
         if (currentlyEnabled == null) {
-            // ADB not connected — retry the check and show explanation
-            checkTrafficMonitorStatus()
-            
             com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.Theme_Overdrive_M3_Dialog)
                 .setIcon(R.drawable.ic_warning)
                 .setTitle(getString(R.string.dialog_traffic_cannot_check_title))
@@ -4920,36 +5337,131 @@ open class MainActivity : AppCompatActivity() {
         })
     }
     
+    // ==================== Recreate crossfade ====================
+
+    /** Copies the outgoing window so the recreated instance can fade it out over the new theme. */
+    private fun captureThemeSnapshot() {
+        pendingThemeSnapshot?.bitmap?.recycle()
+        pendingThemeSnapshot = null
+        if (!ValueAnimator.areAnimatorsEnabled()) return
+        if (com.overdrive.app.config.UnifiedConfigManager.isScreenshotPrivacyModeEnabled()) return
+        // A new window size would misalign the snapshot.
+        val geometry = ActivityInfo.CONFIG_ORIENTATION or ActivityInfo.CONFIG_SCREEN_SIZE or
+            ActivityInfo.CONFIG_SMALLEST_SCREEN_SIZE or ActivityInfo.CONFIG_SCREEN_LAYOUT
+        if (changingConfigurations and geometry != 0) return
+        val decor = window?.peekDecorView() ?: return
+        if (!decor.isAttachedToWindow || decor.width <= 0 || decor.height <= 0) return
+        val bitmap = try {
+            Bitmap.createBitmap(decor.width, decor.height, Bitmap.Config.ARGB_8888)
+        } catch (_: Throwable) {
+            return
+        }
+        val done = java.util.concurrent.CountDownLatch(1)
+        val copied = java.util.concurrent.atomic.AtomicBoolean(false)
+        // The result is posted to this thread; the main thread blocks on the latch meanwhile.
+        val thread = HandlerThread("ThemeSnapshot").apply { start() }
+        try {
+            PixelCopy.request(window, bitmap, { result ->
+                copied.set(result == PixelCopy.SUCCESS)
+                done.countDown()
+            }, android.os.Handler(thread.looper))
+            done.await(THEME_SNAPSHOT_WAIT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+        } catch (_: Throwable) {
+        } finally {
+            thread.quitSafely()
+        }
+        if (copied.get()) {
+            pendingThemeSnapshot = ThemeSnapshot(bitmap, SystemClock.uptimeMillis(), taskId)
+        } else if (done.count == 0L) {
+            // A copy that timed out may still write into the bitmap; leave that one to the GC.
+            bitmap.recycle()
+        }
+    }
+
+    /** Lays the previous instance's snapshot over the window and fades it out. */
+    private fun showThemeSnapshot() {
+        val snapshot = pendingThemeSnapshot ?: return
+        pendingThemeSnapshot = null
+        val decor = window.decorView as? ViewGroup
+        val fresh = snapshot.taskId == taskId &&
+            SystemClock.uptimeMillis() - snapshot.takenAtMs <= THEME_SNAPSHOT_MAX_AGE_MS
+        if (!fresh || decor == null || !ValueAnimator.areAnimatorsEnabled()) {
+            snapshot.bitmap.recycle()
+            return
+        }
+        val cover = ImageView(this).apply {
+            setImageBitmap(snapshot.bitmap)
+            scaleType = ImageView.ScaleType.FIT_XY
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+        }
+        themeSnapshotView = cover
+        decor.addView(
+            cover,
+            ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+        )
+        cover.doOnPreDraw {
+            if (cover.width != snapshot.bitmap.width || cover.height != snapshot.bitmap.height) {
+                removeThemeSnapshot()
+            } else {
+                cover.animate()
+                    .alpha(0f)
+                    .setDuration(resources.getInteger(R.integer.od_motion_theme_fade).toLong())
+                    .setInterpolator(PathInterpolator(0.4f, 0f, 0.2f, 1f))
+                    .withEndAction { removeThemeSnapshot() }
+                    .start()
+            }
+        }
+    }
+
+    private fun removeThemeSnapshot() {
+        val cover = themeSnapshotView ?: return
+        themeSnapshotView = null
+        cover.animate().cancel()
+        (cover.parent as? ViewGroup)?.removeView(cover)
+        val bitmap = (cover.drawable as? BitmapDrawable)?.bitmap
+        cover.setImageDrawable(null)
+        bitmap?.recycle()
+    }
+
+    private class ThemeSnapshot(val bitmap: Bitmap, val takenAtMs: Long, val taskId: Int)
+
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
         // Orientation and screen-size changes recreate this Activity so Android
         // reinflates the correct layout/layout-land hierarchy. Re-assert the
         // rail only for configuration changes the Activity explicitly handles.
         if (::navigationRailScroll.isInitialized) {
-            setNavigationRailExpanded(navigationRailExpanded, animate = false)
+            settleRailNow()
         }
         // Keep the onboarding overlay aligned for handled configuration changes.
         onboardingHost?.onConfigChanged()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
-        outState.putBoolean(KEY_RAIL_EXPANDED, navigationRailExpanded)
+        outState.putBoolean(KEY_RAIL_EXPANDED, railUserExpanded)
+        outState.putBoolean(KEY_RAIL_AUTO_OVERRIDE, railAutoCollapseOverridden)
         super.onSaveInstanceState(outState)
     }
 
     override fun onDestroy() {
+        trafficMonitorCheckingDialog?.dismiss()
+        trafficMonitorCheckingDialog = null
         vehicleSetupAssistant?.detach()
         vehicleSetupAssistant = null
         screenshotPrivacyController?.stop()
         screenshotPrivacyController = null
-        navigationRailAnimator?.cancel()
-        navigationRailAnimator = null
+        railSpring?.cancel()
+        railSpring = null
         if (::navigationRailScroll.isInitialized) {
-            navigationRailScroll.onRailSwipe = null
-            // The label cross-fade posts a delayed animation; the chevron runs one
-            // too. Cancel both so nothing stays queued against a destroyed view.
-            cancelRailViewAnimations()
+            navigationRailScroll.railDragListener = null
         }
+        // Without the exit transition the popup window is removed before the activity's.
+        remotePopover?.let { popup ->
+            popup.exitTransition = null
+            popup.dismiss()
+        }
+        remotePopover = null
+        removeThemeSnapshot()
         // Remove log listener
         if (!remoteDevSession) LogManager.setLogListener(null)
         actionIoExecutor.shutdownNow()
@@ -4987,21 +5499,11 @@ open class MainActivity : AppCompatActivity() {
             daemonStartupCoordinator.pendingWatchdog = null
             daemonStartupCoordinator.watchdogHandler = null
         }
-        // Stop the Activity-scoped DaemonStartupManager's health-check loop and quit
-        // its dedicated "DaemonHealthCheck" HandlerThread. Without this it leaks one
-        // live OS thread per Activity recreate (theme switch, language change, any
-        // config change outside the manifest's configChanges set), each pinning the
-        // destroyed Activity via the Context it was constructed with.
-        //
-        // Deliberately NOT the full cleanup(): that also calls
-        // adbLauncher.releasePerInstanceResources() and shuts down the zrok
-        // launcher/executor, and this Activity's adbLauncher is shared with other
-        // components (AdbConsoleFragment, AppUpdater, the update-APK rm at ~line 231).
-        // Releasing those here would be a behaviour change beyond fixing the thread
-        // leak I introduced, so this stops only what I added.
+        // Stops the manager's timers and health-check thread; a real exit hands supervision to a
+        // boot-scoped manager. Not cleanup(): this adbLauncher is shared with other components.
         if (::daemonStartupManager.isInitialized) {
-            try { daemonStartupManager.stopHealthCheckThread() } catch (t: Throwable) {
-                android.util.Log.w("MainActivity", "stopHealthCheckThread failed: ${t.message}")
+            try { daemonStartupManager.onHostDestroyed(isChangingConfigurations) } catch (t: Throwable) {
+                android.util.Log.w("MainActivity", "daemon supervision handoff failed: ${t.message}")
             }
         }
         // Note: We intentionally do NOT call cleanupAll() here
@@ -5021,15 +5523,29 @@ open class MainActivity : AppCompatActivity() {
     /** Daemon storage (scratch root) opt-in. Needs no daemon: see ScratchRootDialog. */
     fun invokeDaemonStorageAction() = com.overdrive.app.ui.dialog.ScratchRootDialog.show(this)
     fun invokeTrafficMonitorAction() {
-        // Match drawer-open behavior: refresh status before showing dialog.
+        if (trafficMonitorCheckingDialog?.isShowing == true) return
         try {
             packageManager.getPackageInfo(TrafficMonitorPolicy.PACKAGE, 0)
         } catch (e: PackageManager.NameNotFoundException) {
             android.util.Log.w("TrafficMonitor", "${TrafficMonitorPolicy.PACKAGE} not installed on this firmware — ignoring toggle.")
             return
         }
-        checkTrafficMonitorStatus()
-        onTrafficMonitorClicked()
+        // The dialog offers an action, so it waits for a fresh probe; a cancelled check never reopens it.
+        val checking = com.google.android.material.dialog.MaterialAlertDialogBuilder(this, R.style.Theme_Overdrive_M3_Dialog)
+            .setIcon(R.drawable.ic_traffic_monitor)
+            .setMessage(getString(R.string.traffic_monitor_loading))
+            .setNegativeButton(getString(R.string.action_cancel), null)
+            .create()
+        trafficMonitorCheckingDialog = checking
+        checking.setOnDismissListener {
+            if (trafficMonitorCheckingDialog === checking) trafficMonitorCheckingDialog = null
+        }
+        checking.show()
+        checkTrafficMonitorStatus { enabled ->
+            if (trafficMonitorCheckingDialog !== checking || !checking.isShowing) return@checkTrafficMonitorStatus
+            checking.dismiss()
+            onTrafficMonitorClicked(enabled)
+        }
     }
 
     // ===================== Onboarding bridge =====================
@@ -5186,6 +5702,8 @@ open class MainActivity : AppCompatActivity() {
     // deferred rather than silently dropped. Cleared once consumed or when a later navigation
     // supersedes it.
     private var pendingRailDestination: Int? = null
+    private var pendingRailArgs: android.os.Bundle? = null
+    private var pendingRailReselect = false
 
     /**
      * Orientation-agnostic Settings anchor for the Expert tour (portrait card vs landscape
@@ -5207,7 +5725,7 @@ open class MainActivity : AppCompatActivity() {
             this, daemonStartupManager.adbLauncher,
         ).also { onboardingHost = it }
 
-    /** Toolbar "?" — opens the Expert chapter menu (the on-demand help tour). */
+    /** Rail "Guided tour" row: opens the Expert chapter menu (the on-demand help tour). */
     fun startOnboardingReplay() = ensureOnboardingHost().startExpertTour()
 
     /** Hidden Diagnostics long-press — wipe onboarding state and re-run the full novice track. */
@@ -5228,9 +5746,11 @@ open class MainActivity : AppCompatActivity() {
         const val EXTRA_NAVIGATE_TO = "navigate_to"
         const val EXTRA_REMOTE_DEV_SESSION = "remote_dev_session"
         private const val EXTRA_MINIMIZE_ON_START = "minimize_on_start"
+        /** Boolean argument for dashboardFragment: open with the Remote access card expanded. */
+        const val ARG_EXPAND_REMOTE = "od_expand_remote"
+        private const val THEME_SNAPSHOT_MAX_AGE_MS = 2_000L
+        private const val THEME_SNAPSHOT_WAIT_MS = 150L
+        // Handed from the instance being recreated to its replacement, main thread only.
+        private var pendingThemeSnapshot: ThemeSnapshot? = null
     }
 }
-
-/** SECURITY (V60-05): never log the raw device ID — it is the credential-cipher key seed. */
-fun redactDeviceIdForLog(did: String?): String =
-    if (did.isNullOrEmpty() || did.length <= 8) "****" else did.take(4) + "…" + did.takeLast(4) + " (redacted)"

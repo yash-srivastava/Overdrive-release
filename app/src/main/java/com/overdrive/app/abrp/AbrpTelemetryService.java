@@ -86,11 +86,8 @@ public class AbrpTelemetryService {
     private Object gearboxDevice;       // BYDAutoGearboxDevice
     private Method getGearboxAutoModeTypeMethod;
 
-    // HTTP client (proxy configured lazily on first upload)
+    // HTTP client; routing is per request via ProxyHelper.chainProxySelector().
     private OkHttpClient httpClient;
-    private volatile boolean proxyChecked = false;
-    private volatile long lastProxyCheckTime = 0;
-    private volatile Boolean lastProxyAvailable = null;
 
     // Scheduler
     private ScheduledExecutorService scheduler;
@@ -506,9 +503,7 @@ public class AbrpTelemetryService {
                 } else {
                     failedUploads++;
                     consecutiveFailures++;
-                    // Invalidate proxy cache on HTTP error — may need to switch proxy mode
-                    proxyChecked = false;
-                    com.overdrive.app.mqtt.ProxyHelper.invalidateCache();
+                    // An HTTP status means the route worked; keep the proxy caches.
                     logger.warn("Upload failed: HTTP " + response.code() + " - " + responseBody);
                     return false;
                 }
@@ -519,7 +514,6 @@ public class AbrpTelemetryService {
             consecutiveFailures++;
             // Invalidate proxy cache on connection error — proxy state may have changed
             // (e.g., singbox started after we cached a direct connection)
-            proxyChecked = false;
             com.overdrive.app.mqtt.ProxyHelper.invalidateCache();
             logger.error("Upload error: " + e.getMessage());
             return false;

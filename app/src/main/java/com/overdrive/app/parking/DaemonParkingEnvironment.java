@@ -322,6 +322,10 @@ public final class DaemonParkingEnvironment implements ParkingEnvironment {
             // Other UIDs (Telegram bot daemon) read the stills: keep the tree traversable.
             try { d.setReadable(true, false); d.setExecutable(true, false); } catch (Throwable ignored) {}
         }
+        File nomedia = new File(d, ".nomedia");
+        if (!nomedia.exists()) {
+            try { nomedia.createNewFile(); } catch (Throwable ignored) {}
+        }
         return d;
     }
 
@@ -421,7 +425,7 @@ public final class DaemonParkingEnvironment implements ParkingEnvironment {
             RecordingsIndex idx = RecordingsIndex.getInstance();
             if (!idx.isAvailable()) return null;
             RecordingsIndex.Filter f = new RecordingsIndex.Filter();
-            f.type = "normal";
+            f.types = new HashSet<>(java.util.Arrays.asList("normal", "oemDashcam", "proximity"));
             f.fromMs = sessionStartMs - 20L * 60_000L;
             f.toMs = sessionStartMs + 60_000L;
             for (JSONObject row : idx.queryRecordings(f, 3, 0)) {
@@ -429,7 +433,9 @@ public final class DaemonParkingEnvironment implements ParkingEnvironment {
                 String path = row.optString("path", null);
                 if (path == null) continue;
                 File file = new File(path);
-                if (file.isFile() && file.length() > 0) return file;
+                if (!file.isFile() || file.length() == 0) continue;
+                // A fresh fix in the newest clip = open sky after any older clip: no garage approach.
+                return recordedUnderSky(sidecarOf(file)) ? null : file;
             }
         } catch (Throwable ignored) {}
         return null;
@@ -439,6 +445,7 @@ public final class DaemonParkingEnvironment implements ParkingEnvironment {
     public List<byte[]> extractTailFrames(File mp4, int count, long tailMs) {
         List<byte[]> out = new ArrayList<>();
         if (mp4 == null || !mp4.isFile() || count <= 0) return out;
+        boolean grid = isCameraGrid(mp4);
         MediaMetadataRetriever mmr = new MediaMetadataRetriever();
         try {
             mmr.setDataSource(mp4.getAbsolutePath());
@@ -447,12 +454,31 @@ public final class DaemonParkingEnvironment implements ParkingEnvironment {
             if (durationMs <= 0) return out;
             long span = Math.min(tailMs, durationMs);
             long start = durationMs - span;
+            long lastSig = 0L;
             for (int i = 0; i < count; i++) {
                 long tMs = start + (span * (i + 1)) / (count + 1);
                 Bitmap frame = null;
                 try {
                     frame = mmr.getFrameAtTime(tMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
                     if (frame == null) continue;
+                    // Nearby times can resolve to the same sync frame; a repeat would double its votes.
+                    long sig = pixelSignature(frame);
+                    if (i > 0 && sig == lastSig) continue;
+                    lastSig = sig;
+                    if (grid && frame.getWidth() >= 1280 && frame.getHeight() >= 720) {
+                        int qw = frame.getWidth() / 2, qh = frame.getHeight() / 2;
+                        for (int q = 0; q < 4; q++) {
+                            Bitmap view = Bitmap.createBitmap(frame, (q % 2) * qw, (q / 2) * qh, qw, qh);
+                            try {
+                                ByteArrayOutputStream bos = new ByteArrayOutputStream(300_000);
+                                view.compress(Bitmap.CompressFormat.JPEG, 92, bos);
+                                out.add(bos.toByteArray());
+                            } finally {
+                                if (view != frame) view.recycle();
+                            }
+                        }
+                        continue;
+                    }
                     Bitmap use = frame;
                     if (frame.getWidth() > 1600) {
                         float s = 1600f / frame.getWidth();
@@ -472,6 +498,58 @@ public final class DaemonParkingEnvironment implements ParkingEnvironment {
             try { mmr.release(); } catch (Throwable ignored) {}
         }
         return out;
+    }
+
+    /** Our 4-camera recordings are a 2×2 grid unless recorded in the dashcam layout. */
+    static boolean isCameraGrid(File mp4) {
+        String name = mp4.getName();
+        if (!name.startsWith("cam_") && !name.startsWith("proximity_")) return false;
+        String layout = null;
+        JSONObject j = sidecarOf(mp4);
+        if (j != null) {
+            if (j.has("lens")) return true;
+            layout = j.optString("layout", "standard");
+        }
+        if (layout == null) {
+            try { layout = UnifiedConfigManager.getRecording().optString("recordingLayout", "standard"); }
+            catch (Throwable t) { layout = "standard"; }
+        }
+        return !"dashcam".equals(layout);
+    }
+
+    /** The clip's JSON sidecar, or null. */
+    static JSONObject sidecarOf(File mp4) {
+        try {
+            File sidecar = new File(mp4.getParentFile(), mp4.getName().replace(".mp4", ".json"));
+            if (!sidecar.isFile() || sidecar.length() >= 512_000L) return null;
+            return new JSONObject(new String(
+                    java.nio.file.Files.readAllBytes(sidecar.toPath()), java.nio.charset.StandardCharsets.UTF_8));
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** True when the clip's last GPS fix was under a minute old: open sky, not a garage. */
+    static boolean recordedUnderSky(JSONObject sidecar) {
+        JSONObject geo = sidecar == null ? null : sidecar.optJSONObject("geo");
+        if (geo == null) return false;
+        JSONObject fix = geo.optJSONObject("end");
+        if (fix == null) fix = geo.optJSONObject("start");
+        if (fix == null || !fix.has("ageMs")) return false;
+        long age = fix.optLong("ageMs", -1L);
+        return age >= 0L && age < 60_000L;
+    }
+
+    /** Cheap identity for a decoded frame: a sparse pixel sample. */
+    private static long pixelSignature(Bitmap b) {
+        long h = 1125899906842597L;
+        int w = b.getWidth(), ht = b.getHeight();
+        for (int y = 1; y < 24; y++) {
+            for (int x = 1; x < 32; x++) {
+                h = 31 * h + b.getPixel(x * w / 32, y * ht / 24);
+            }
+        }
+        return h;
     }
 
     // ==================== IMAGE OPS ====================

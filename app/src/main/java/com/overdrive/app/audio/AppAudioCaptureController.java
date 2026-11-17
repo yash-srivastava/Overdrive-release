@@ -431,8 +431,9 @@ public class AppAudioCaptureController {
 
         AppAudioCaptureController current = owner;
         boolean needsIngest = recordingDemand || listenerDemand;
+        // A recording keeps its 48 kHz capture; the compatibility listener rate applies only without one.
         int desiredCaptureRate =
-                listenerDemand && listenerDiPlusCompatibility
+                listenerDemand && listenerDiPlusCompatibility && !recordingDemand
                         ? LISTENER_CAPTURE_RATE
                         : (needsIngest ? SAMPLE_RATE : WAKE_CAPTURE_RATE);
         // The requested input, or plain MIC once the head unit refused it (failedAudioSource):

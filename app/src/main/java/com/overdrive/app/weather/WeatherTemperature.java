@@ -65,6 +65,8 @@ public final class WeatherTemperature {
     // Drives the "rain likely" automation trigger; kept on the same cache clock as temp.
     private static final int PRECIP_HOURS = 6;
     private static volatile int cachedPrecipProb = -1;
+    // The same next-hours window as {localHour, probability %} pairs (Trip Briefing's rain note).
+    private static volatile int[][] cachedPrecipSlots = new int[0][];
 
     private WeatherTemperature() {}
 
@@ -77,6 +79,12 @@ public final class WeatherTemperature {
         if (cachedPrecipProb < 0) return -1;
         if (System.currentTimeMillis() - lastFetchTime > STALE_MS) return -1;
         return cachedPrecipProb;
+    }
+
+    /** Next-hours slots as {local hour, probability %}, empty when none or stale. Never blocks. */
+    public static int[][] getCachedPrecipSlots() {
+        if (System.currentTimeMillis() - lastFetchTime > STALE_MS) return new int[0][];
+        return cachedPrecipSlots;
     }
 
     /**
@@ -144,7 +152,10 @@ public final class WeatherTemperature {
                     // Parse precip first so a temp-only success still updates rain (and
                     // vice versa); both share lastFetchTime set once below on any success.
                     int precip = parseMeanPrecip(root);
-                    if (precip >= 0) cachedPrecipProb = precip;
+                    if (precip >= 0) {
+                        cachedPrecipProb = precip;
+                        cachedPrecipSlots = parsePrecipSlots(root);
+                    }
                     JSONObject current = root.optJSONObject("current");
                     if (current != null && current.has("temperature_2m")) {
                         double temp = current.getDouble("temperature_2m");
@@ -198,6 +209,31 @@ public final class WeatherTemperature {
             return (int) Math.round(sum / (double) n);
         } catch (Exception e) {
             return -1;
+        }
+    }
+
+    private static int[][] parsePrecipSlots(JSONObject root) {
+        try {
+            JSONObject hourly = root.optJSONObject("hourly");
+            org.json.JSONArray times = hourly == null ? null : hourly.optJSONArray("time");
+            org.json.JSONArray probs = hourly == null ? null : hourly.optJSONArray("precipitation_probability");
+            if (times == null || probs == null || times.length() != probs.length()) return new int[0][];
+            int nowHour = java.time.LocalTime.now().getHour();
+            java.util.List<int[]> out = new java.util.ArrayList<>(PRECIP_HOURS);
+            boolean started = false;
+            for (int i = 0; i < times.length() && out.size() < PRECIP_HOURS; i++) {
+                String ts = times.optString(i, "");
+                int t = ts.indexOf('T');
+                if (t < 0 || ts.length() < t + 3) continue;
+                int hour = Integer.parseInt(ts.substring(t + 1, t + 3));
+                if (!started && hour != nowHour) continue;
+                started = true;
+                int p = probs.optInt(i, -1);
+                if (p >= 0) out.add(new int[] {hour, p});
+            }
+            return out.toArray(new int[0][]);
+        } catch (Exception e) {
+            return new int[0][];
         }
     }
 

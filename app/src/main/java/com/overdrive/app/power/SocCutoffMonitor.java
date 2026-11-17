@@ -232,6 +232,7 @@ public final class SocCutoffMonitor {
     private static void performShutdown(double finalSoc) {
         logger.warn("performShutdown: SoC=" + finalSoc + "% — beginning voluntary exit");
         latchForThisPark();
+        try { com.overdrive.app.server.timeline.TimelineJournal.noteSync("power", "stopped", "soc_cutoff", null); } catch (Throwable ignored) { }
         // Before anything is torn down: the daemon that delivers the notice is about to stop.
         boolean noticeQueued = PowerNotice.send(PowerNotice.KIND_SOC_CUTOFF,
                 "SoC " + Math.round(finalSoc) + "% (cutoff " + cutoffPercent() + "%)");

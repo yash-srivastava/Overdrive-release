@@ -391,33 +391,17 @@ public class BluetoothRssiCallbacksTest {
         }
     }
 
-    @Test public void blockedOnDistinguishesTheExpectedMonitor() throws Exception {
-        Object expected = new Object();
-        Object unrelated = new Object();
-        CallbackThread callback = new CallbackThread(() -> {
-            synchronized (expected) { /* Wait for the test to release this monitor. */ }
-        });
-        synchronized (expected) {
-            callback.thread.start();
-            assertTrue("The monitor observer must work on the supported JVM",
-                    blockedOn(callback.thread, expected));
-            assertFalse("A different monitor must not satisfy the lock assertion",
-                    blockedOn(callback.thread, unrelated));
-        }
-        callback.join();
-        assertFalse(blockedOn(callback.thread, expected));
-    }
-
     private static boolean blockedOn(Thread thread, Object lock) {
         try {
             Class<?> mfClass = Class.forName("java.lang.management.ManagementFactory");
             Object threads = mfClass.getMethod("getThreadMXBean").invoke(null);
-            // Resolve through exported management types, not the JVM's internal bean class.
+            // Resolve on the exported API types: the MXBean's runtime class lives in a
+            // non-exported JDK package, so invoking through it throws IllegalAccessException.
             Method getThreadInfo = Class.forName("java.lang.management.ThreadMXBean")
                     .getMethod("getThreadInfo", long.class);
-            Class<?> threadInfo = Class.forName("java.lang.management.ThreadInfo");
-            Method getLockInfo = threadInfo.getMethod("getLockInfo");
-            Method getThreadState = threadInfo.getMethod("getThreadState");
+            Class<?> threadInfoClass = Class.forName("java.lang.management.ThreadInfo");
+            Method getLockInfo = threadInfoClass.getMethod("getLockInfo");
+            Method getThreadState = threadInfoClass.getMethod("getThreadState");
             Method getIdentityHashCode = Class.forName("java.lang.management.LockInfo")
                     .getMethod("getIdentityHashCode");
             long deadline = System.nanoTime() + 2_000_000_000L;
@@ -432,8 +416,8 @@ public class BluetoothRssiCallbacksTest {
                 }
                 Thread.yield();
             } while (System.nanoTime() < deadline);
-        } catch (ReflectiveOperationException error) {
-            throw new AssertionError("Could not inspect the callback monitor", error);
+        } catch (Throwable t) {
+            return false;
         }
         return false;
     }

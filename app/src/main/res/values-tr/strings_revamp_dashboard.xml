@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="dash_vehicle_line">%1$s · %2$.1f kWh</string>
+    <string name="dash_range_caption">menzil</string>
+    <string name="dash_status_remote_on">Uzaktan erişim açık</string>
+    <string name="dash_status_remote_off">Uzaktan erişim kapalı</string>
+    <string name="dash_status_remote_state">Uzaktan erişim · %1$s</string>
+    <string name="dash_status_services">%2$d hizmetten %1$d</string>
+    <string name="dash_status_view">Görüntüle</string>
+    <string name="dash_status_recording_idle">Kayıt beklemede</string>
+    <string name="dash_services_running">%2$d hizmetten %1$d çalışıyor</string>
+    <string name="dash_charge_eta_left">%1$s kaldı</string>
+    <string name="dash_charge_session_inline">bu oturumda %1$s</string>
+    <plurals name="dash_clip_count">
+        <item quantity="one">%1$d klip</item>
+        <item quantity="other">%1$d klip</item>
+    </plurals>
+</resources>

@@ -1,12 +1,22 @@
 package com.overdrive.app.ui.fragment
 
+import android.content.res.ColorStateList
 import android.content.res.Configuration
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.text.Editable
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.TextPaint
 import android.text.TextWatcher
 import android.text.format.Formatter
+import android.text.style.ReplacementSpan
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -14,11 +24,13 @@ import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.PopupMenu
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.annotation.AttrRes
+import androidx.annotation.ColorInt
+import androidx.appcompat.app.AppCompatDialog
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.commit
 import androidx.navigation.fragment.findNavController
@@ -32,6 +44,7 @@ import com.google.android.material.datepicker.CalendarConstraints
 import com.google.android.material.datepicker.DateValidatorPointBackward
 import com.google.android.material.datepicker.MaterialDatePicker
 import com.google.android.material.bottomsheet.BottomSheetDialog
+import com.google.android.material.sidesheet.SideSheetDialog
 import com.overdrive.app.R
 import com.overdrive.app.ui.model.RecordingFile
 import com.overdrive.app.ui.util.RecordingScanner
@@ -46,6 +59,9 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import com.overdrive.app.ui.timeline.TimelineFragment
+import com.overdrive.app.ui.timeline.TimelineLinks
+import com.overdrive.app.ui.timeline.TimelinePrefs
 
 /**
  * Recordings page — single native two-pane surface.
@@ -85,6 +101,7 @@ class RecordingsFragment : Fragment() {
      * Empty set => show both (the default). Both selected => same as empty.
      */
     private val dashcamTypes = mutableSetOf<String>()
+    private var filterSheet: AppCompatDialog? = null
 
     /**
      * v3 place filter. Selected short-labels (district / city, lowercased
@@ -163,6 +180,12 @@ class RecordingsFragment : Fragment() {
     private var currentInlineIndex: Int = -1
     private var activeInlinePath: String? = null
     private var selectedInlineRecording: RecordingFile? = null
+        set(value) {
+            val changed = value?.path != field?.path
+            field = value
+            // Its ⋮ needs SafeKeep state even when the clip is far outside the list's fetched window.
+            if (changed && value != null) libraryFragment?.prefetchSafeKeepState(value)
+        }
 
     /**
      * Whether the inline player is currently maximized (chrome hidden +
@@ -197,6 +220,16 @@ class RecordingsFragment : Fragment() {
      * mutations are guarded by `synchronized(pendingPosts)`.
      */
     private val pendingPosts = mutableListOf<Runnable>()
+
+    // -------- List | Timeline --------
+    private var timelineMode = false
+    private var timelineModeResolved = false
+    private var timelineStartMs = -1L
+    private var timelineEndMs = -1L
+    private var timelineDayMs = -1L
+    private var suppressViewToggle = false
+    /** List chrome the timeline hid, with the visibility each had. */
+    private val timelineHiddenViews = mutableMapOf<View, Int>()
 
     enum class Source { ALL, DASHCAM, REPLAYS, SURVEILLANCE }
 
@@ -277,7 +310,9 @@ class RecordingsFragment : Fragment() {
         setupResetButton(view)
         setupParkingChip(view)
         setupLibraryActions(view)
+        setupSelectionBar(view)
         setupPreviewActions(view)
+        setupTimelineMode(view, savedInstanceState)
 
         updateDateHeader(view)
         renderActiveFilterAffordances(view)
@@ -345,9 +380,12 @@ class RecordingsFragment : Fragment() {
         outState.putBoolean(KEY_PLAYER_FULLSCREEN, playerFullscreen)
         outState.putString(KEY_PLACE_CONTAINS, placeContainsQuery)
         outState.putString(KEY_PARKING_SESSION, parkingSessionId)
+        outState.putBoolean(KEY_TIMELINE_MODE, timelineMode)
     }
 
     override fun onDestroyView() {
+        filterSheet?.dismiss()
+        filterSheet = null
         synchronized(pendingPosts) {
             pendingPosts.forEach { mainHandler.removeCallbacks(it) }
             pendingPosts.clear()
@@ -365,12 +403,15 @@ class RecordingsFragment : Fragment() {
             onListChanged = null
             onContentChanged = null
             onClearAllFiltersRequested = null
+            selectionHost = null
         }
         (childFragmentManager.findFragmentByTag(TAG_INLINE_PLAYER) as? VideoPlayerFragment)?.apply {
             onFullscreenToggle = null
             onPlaylistItemChanged = null
             onDurationResolved = null
         }
+        timelineFragment()?.onDayChanged = null
+        timelineHiddenViews.clear()
         libraryFragment = null
         skeleton?.cancel()
         skeleton = null
@@ -670,14 +711,20 @@ class RecordingsFragment : Fragment() {
         root.findViewById<TextView>(R.id.tvPreviewTitle)?.text =
             RecordingUiText.headline(hostContext, recording)
         root.findViewById<TextView>(R.id.tvPreviewFilename)?.text = recording.name
-        root.findViewById<TextView>(R.id.tvPreviewTypeBadge)?.text = when (recording.type) {
-            RecordingFile.RecordingType.NORMAL -> getString(R.string.recording_lib_type_normal)
-            RecordingFile.RecordingType.SENTRY -> getString(R.string.recording_lib_type_event)
-            RecordingFile.RecordingType.PROXIMITY ->
-                getString(R.string.recording_lib_type_proximity)
-            RecordingFile.RecordingType.OEM_DASHCAM ->
-                getString(R.string.recording_lib_type_oem)
-            RecordingFile.RecordingType.REPLAY -> getString(R.string.recording_lib_type_replay)
+        root.findViewById<TextView>(R.id.tvPreviewTypeBadge)?.apply {
+            text = when (recording.type) {
+                RecordingFile.RecordingType.NORMAL -> getString(R.string.recording_lib_type_normal)
+                RecordingFile.RecordingType.SENTRY -> getString(R.string.recording_lib_type_event)
+                RecordingFile.RecordingType.PROXIMITY ->
+                    getString(R.string.recording_lib_type_proximity)
+                RecordingFile.RecordingType.OEM_DASHCAM ->
+                    getString(R.string.recording_lib_type_oem)
+                RecordingFile.RecordingType.REPLAY -> getString(R.string.recording_lib_type_replay)
+            }
+            paintBadge(
+                ColorUtils.setAlphaComponent(themeColor(PRIMARY_ATTR), TYPE_BADGE_FILL_ALPHA),
+                themeColor(ON_PRIMARY_CONTAINER_ATTR)
+            )
         }
 
         val severity = recording.peakSeverity?.uppercase(Locale.ROOT)
@@ -693,11 +740,12 @@ class RecordingsFragment : Fragment() {
                 else -> null
             }
             if (tone == null) {
-                setBackgroundColor(themeColor(SURFACE_HIGHEST_ATTR))
-                setTextColor(themeColor(ON_SURFACE_VARIANT_ATTR))
+                paintBadge(themeColor(SURFACE_HIGHEST_ATTR), themeColor(ON_SURFACE_VARIANT_ATTR))
             } else {
-                setBackgroundColor(ContextCompat.getColor(hostContext, tone.first))
-                setTextColor(ContextCompat.getColor(hostContext, tone.second))
+                paintBadge(
+                    ContextCompat.getColor(hostContext, tone.first),
+                    ContextCompat.getColor(hostContext, tone.second)
+                )
             }
         }
         root.findViewById<TextView>(R.id.tvPreviewDetectedValue)?.text =
@@ -747,29 +795,15 @@ class RecordingsFragment : Fragment() {
             setPreviewDetailsExpanded(root, !expanded)
         }
 
+        // The preview overflow is the full actions menu (share, evidence pack, SafeKeep, delete).
         root.findViewById<View>(R.id.btnPreviewMore)?.setOnClickListener { anchor ->
             val recording = selectedInlineRecording ?: return@setOnClickListener
-            val shareTitle = getString(R.string.action_share)
-            val deleteTitle = getString(R.string.action_delete)
-            PopupMenu(requireContext(), anchor).apply {
-                menu.add(shareTitle)
-                menu.add(deleteTitle)
-                setOnMenuItemClickListener { item ->
-                    when (item.title?.toString()) {
-                        shareTitle -> {
-                            libraryFragment?.shareRecording(recording)
-                            true
-                        }
-                        deleteTitle -> {
-                            libraryFragment?.requestDeleteRecording(recording)
-                            true
-                        }
-                        else -> false
-                    }
-                }
-                show()
+            libraryFragment?.showRecordingActions(anchor, recording) {
+                selectedInlineRecording?.path == recording.path
             }
         }
+        // Rounded inline video; applyFullscreenLayout drops the clip while maximised.
+        root.findViewById<View>(R.id.previewContainer)?.clipToOutline = true
     }
 
     /**
@@ -892,7 +926,7 @@ class RecordingsFragment : Fragment() {
         // Collapse the library column without detaching its fragment.
         val params = library.layoutParams as? LinearLayout.LayoutParams
         if (params != null) {
-            params.weight = if (fullscreen) 0f else 11f
+            params.weight = if (fullscreen) 0f else LIBRARY_PANE_WEIGHT
             params.width = 0
             library.layoutParams = params
         }
@@ -908,17 +942,29 @@ class RecordingsFragment : Fragment() {
         // card corner radius while fullscreen, restore both on collapse.
         if (twoPane != null) {
             val pad = if (fullscreen) 0 else
-                resources.getDimensionPixelSize(R.dimen.page_padding_horizontal)
+                resources.getDimensionPixelSize(R.dimen.od_page_padding_h)
+            val padTop = if (fullscreen) 0 else
+                resources.getDimensionPixelSize(R.dimen.rec_body_padding_top)
             val padBottom = if (fullscreen) 0 else
-                resources.getDimensionPixelSize(R.dimen.page_padding_bottom)
-            twoPane.setPadding(pad, twoPane.paddingTop, pad, padBottom)
+                resources.getDimensionPixelSize(R.dimen.rec_body_padding_bottom)
+            twoPane.setPadding(pad, padTop, pad, padBottom)
         }
         previewContent?.let {
-            val pad = if (fullscreen) 0 else (8 * resources.displayMetrics.density).toInt()
+            val pad = if (fullscreen) 0 else
+                resources.getDimensionPixelSize(R.dimen.rec_preview_padding)
             it.setPadding(pad, pad, pad, pad)
         }
         previewCard?.radius = if (fullscreen) 0f else
-            resources.getDimension(R.dimen.card_radius_hero)
+            resources.getDimension(R.dimen.od_radius_card)
+        val videoFrame = rootView.findViewById<View>(R.id.previewContainer)
+        if (videoFrame != null) {
+            videoFrame.clipToOutline = !fullscreen
+            if (fullscreen) {
+                videoFrame.background = ColorDrawable(Color.BLACK)
+            } else {
+                videoFrame.setBackgroundResource(R.drawable.rec_video_frame)
+            }
+        }
         previewHeader?.visibility = if (fullscreen) View.GONE else View.VISIBLE
         previewInsightsToggle?.visibility = if (fullscreen) View.GONE else View.VISIBLE
         if (fullscreen) setPreviewDetailsExpanded(rootView, false)
@@ -1002,14 +1048,62 @@ class RecordingsFragment : Fragment() {
         }
     }
 
+    /**
+     * Landscape header hosts the selection bar in place of row 1; keyed on the bar, which only the
+     * landscape layout has. Elsewhere the library keeps its own bar.
+     */
+    private fun setupSelectionBar(view: View) {
+        val bar = view.findViewById<View>(R.id.recSelectionBar) ?: return
+        val headerRow = view.findViewById<View>(R.id.recHeaderRow) ?: return
+        val count = view.findViewById<TextView>(R.id.tvRecSelectionCount)
+        val actions = listOfNotNull(
+            view.findViewById<View>(R.id.btnRecSelectionAll),
+            view.findViewById<View>(R.id.btnRecSelectionShare),
+            view.findViewById<View>(R.id.btnRecSelectionDelete)
+        )
+        view.findViewById<View>(R.id.btnRecSelectionCancel)?.setOnClickListener {
+            libraryFragment?.exitSelectionFromHost()
+        }
+        view.findViewById<View>(R.id.btnRecSelectionAll)?.setOnClickListener {
+            libraryFragment?.selectAllFromHost()
+        }
+        view.findViewById<View>(R.id.btnRecSelectionShare)?.setOnClickListener {
+            libraryFragment?.shareSelectionFromHost()
+        }
+        view.findViewById<View>(R.id.btnRecSelectionDelete)?.setOnClickListener {
+            libraryFragment?.deleteSelectionFromHost()
+        }
+        libraryFragment?.selectionHost =
+            RecordingLibraryFragment.SelectionHost { active, selected, enabled ->
+                bar.visibility = if (active) View.VISIBLE else View.GONE
+                headerRow.visibility = if (active) View.INVISIBLE else View.VISIBLE
+                count?.text = bar.resources.getString(R.string.recording_lib_selected_count, selected)
+                actions.forEach {
+                    it.isEnabled = enabled
+                    it.alpha = if (enabled) 1f else DISABLED_ACTION_ALPHA
+                }
+            }
+    }
+
     private fun openRecordingFilters() {
         val ctx = context ?: return
-        val sheet = BottomSheetDialog(ctx, R.style.Theme_Overdrive_M3_BottomSheet)
+        // One sheet at a time; a second tap while it opens is ignored.
+        if (filterSheet?.isShowing == true) return
+        // The two-pane body exists only in the landscape layout, which uses the end-edge side sheet.
+        val sideSheet = view?.findViewById<View>(R.id.twoPaneBody) != null
+        val sheet: AppCompatDialog = if (sideSheet) {
+            SideSheetDialog(ctx, R.style.ThemeOverlay_Overdrive_Rec_SideSheet)
+        } else {
+            BottomSheetDialog(ctx, R.style.Theme_Overdrive_M3_BottomSheet)
+        }
         val content = LayoutInflater.from(ctx)
             .inflate(R.layout.sheet_recording_library_filters, null, false)
-        // M3 sheets are edge-to-edge: without this the Apply button sits
-        // behind the system navigation bar on the head unit.
-        com.overdrive.app.ui.util.SheetInsets.padForNavigationBar(content)
+        if (sideSheet) {
+            content.findViewById<View>(R.id.sheetDragHandle)?.visibility = View.GONE
+        } else {
+            // M3 bottom sheets are edge-to-edge: keep Apply clear of the navigation bar.
+            com.overdrive.app.ui.util.SheetInsets.padForNavigationBar(content)
+        }
         sheet.setContentView(content)
 
         val localTypes = dashcamTypes.toMutableSet()
@@ -1017,6 +1111,7 @@ class RecordingsFragment : Fragment() {
         val localSeverities = severityFilter.toMutableSet()
         val localStorages = storageFilter.toMutableSet()
         var localPlace = placeFilter.firstOrNull()
+        var localParking = parkingSessionId
         var clearSearchOnApply = false
 
         val typeNormal = content.findViewById<Chip>(R.id.chipTypeNormal)
@@ -1033,6 +1128,7 @@ class RecordingsFragment : Fragment() {
         val storageInternal = content.findViewById<Chip>(R.id.chipStorageInternal)
         val storageSd = content.findViewById<Chip>(R.id.chipStorageSd)
         val storageUsb = content.findViewById<Chip>(R.id.chipStorageUsb)
+        val parkingChip = content.findViewById<Chip>(R.id.sheetChipParking)
 
         fun syncChecks() {
             typeNormal.isChecked = "NORMAL" in localTypes
@@ -1049,6 +1145,7 @@ class RecordingsFragment : Fragment() {
             storageInternal.isChecked = "INTERNAL" in localStorages
             storageSd.isChecked = "SD_CARD" in localStorages
             storageUsb.isChecked = "USB" in localStorages
+            parkingChip?.isChecked = localParking.isNotEmpty()
         }
 
         fun toggle(set: MutableSet<String>, value: String) {
@@ -1070,6 +1167,15 @@ class RecordingsFragment : Fragment() {
         storageInternal.setOnClickListener { toggle(localStorages, "INTERNAL") }
         storageSd.setOnClickListener { toggle(localStorages, "SD_CARD") }
         storageUsb.setOnClickListener { toggle(localStorages, "USB") }
+        // Parking: only the arrived-with session can be kept or dropped here.
+        if (parkingSessionId.isNotEmpty()) {
+            content.findViewById<View>(R.id.sheetParkingSection)?.visibility = View.VISIBLE
+            parkingChip?.text = parkingSessionLabel(ctx, parkingSessionId)
+            parkingChip?.setOnClickListener {
+                localParking = if (localParking.isEmpty()) parkingSessionId else ""
+                syncChecks()
+            }
+        }
 
         content.findViewById<View>(R.id.sheetTypeSection).visibility =
             if (currentSource == Source.DASHCAM) View.VISIBLE else View.GONE
@@ -1104,6 +1210,7 @@ class RecordingsFragment : Fragment() {
             localSeverities.clear()
             localStorages.clear()
             localPlace = null
+            localParking = ""
             clearSearchOnApply = true
             placeGroup.check(placeById.entries.first { it.value == null }.key)
             syncChecks()
@@ -1119,6 +1226,7 @@ class RecordingsFragment : Fragment() {
             storageFilter.addAll(localStorages)
             placeFilter.clear()
             localPlace?.let(placeFilter::add)
+            parkingSessionId = localParking
             if (clearSearchOnApply) {
                 placeContainsQuery = ""
                 view?.let(::clearPlaceSearchInput)
@@ -1131,8 +1239,11 @@ class RecordingsFragment : Fragment() {
             refreshCounts()
             sheet.dismiss()
         }
+        content.findViewById<View>(R.id.btnFilterCancel)?.setOnClickListener { sheet.dismiss() }
 
         syncChecks()
+        filterSheet = sheet
+        sheet.setOnDismissListener { if (filterSheet === sheet) filterSheet = null }
         sheet.show()
     }
 
@@ -1154,6 +1265,9 @@ class RecordingsFragment : Fragment() {
                 Source.SURVEILLANCE ->
                     findNavController().navigate(R.id.surveillanceSettingsWebFragment)
             }
+        }
+        view.findViewById<MaterialButton>(R.id.btnFactoryDvr)?.setOnClickListener {
+            findNavController().navigateDrillDown(R.id.factoryDvrFragment)
         }
     }
 
@@ -1459,7 +1573,7 @@ class RecordingsFragment : Fragment() {
         renderParkingChip(view)
         val chipsActive = storageActive || parkingSessionId.isNotEmpty() || when (currentSource) {
             Source.ALL -> placeFilter.isNotEmpty() || searchActive
-            Source.DASHCAM -> dashcamTypes.isNotEmpty() || placeFilter.isNotEmpty() || searchActive
+            Source.DASHCAM -> dashcamTypes.size == 1 || placeFilter.isNotEmpty() || searchActive
             Source.REPLAYS -> placeFilter.isNotEmpty() || searchActive
             Source.SURVEILLANCE -> actorClassFilter.isNotEmpty()
                 || severityFilter.isNotEmpty()
@@ -1470,7 +1584,10 @@ class RecordingsFragment : Fragment() {
         // on the date card.
         view.findViewById<MaterialButton>(R.id.btnFilterReset)?.visibility =
             if (chipsActive) View.VISIBLE else View.GONE
-        view.findViewById<View>(R.id.btnOpenRecordingFilters)?.isSelected = chipsActive
+        val filterCount = activeSheetFilterCount()
+        view.findViewById<View>(R.id.btnOpenRecordingFilters)?.isSelected = filterCount > 0
+        view.findViewById<MaterialButton>(R.id.btnOpenRecordingFilters)
+            ?.let { renderFilterCount(it, filterCount) }
         // Toggle the inline clear-X button on the search card so the user
         // can wipe the search without manually backspacing every char.
         view.findViewById<ImageButton>(R.id.btnClearPlaceSearch)?.visibility =
@@ -1480,6 +1597,50 @@ class RecordingsFragment : Fragment() {
     private fun onFiltersChanged(view: View) {
         renderActiveFilterAffordances(view)
         libraryFragment?.let { applyAllFiltersTo(it) }
+    }
+
+    /** Filter-sheet sections narrowing the current segment (same rules as [applyAllFiltersTo]). */
+    private fun activeSheetFilterCount(): Int {
+        var count = 0
+        when (currentSource) {
+            // Both dashcam types checked is the same as none (see applyAllFiltersTo).
+            Source.DASHCAM -> if (dashcamTypes.size == 1) count++
+            Source.SURVEILLANCE -> {
+                if (actorClassFilter.isNotEmpty()) count++
+                if (severityFilter.isNotEmpty()) count++
+            }
+            Source.ALL, Source.REPLAYS -> Unit
+        }
+        if (placeFilter.isNotEmpty()) count++
+        if (parkingSessionId.isNotEmpty()) count++
+        if (storageFilter.isNotEmpty()) count++
+        // The sheet's Reset clears the place search too, so it counts as a filter.
+        if (placeContainsQuery.isNotEmpty()) count++
+        return count
+    }
+
+    private fun renderFilterCount(button: MaterialButton, count: Int) {
+        val label = getString(R.string.recording_lib_filter_button)
+        if (count <= 0) {
+            button.text = label
+            button.contentDescription = getString(R.string.recording_library_open_filters)
+            return
+        }
+        val ctx = button.context
+        val digits = String.format(Locale.getDefault(), "%d", count)
+        button.text = SpannableStringBuilder(label).append(' ').apply {
+            append(
+                digits,
+                CountBadgeSpan(
+                    fill = button.themeColor(PRIMARY_ATTR),
+                    textColor = button.themeColor(ON_PRIMARY_ATTR),
+                    textSizePx = ctx.resources.getDimension(R.dimen.rec_filter_badge_text),
+                    sizePx = ctx.resources.getDimension(R.dimen.rec_filter_badge_size)
+                ),
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+        }
+        button.contentDescription = getString(R.string.recording_lib_filter_button_active, count)
     }
 
     // -----------------------------------------------------------------
@@ -1819,6 +1980,7 @@ class RecordingsFragment : Fragment() {
                 if (staleSelections.isNotEmpty()) {
                     placeFilter.removeAll(staleSelections.toSet())
                     libraryFragment?.let { applyAllFiltersTo(it) }
+                    renderActiveFilterAffordances(v)
                 }
                 renderPlaceChips(v)
 
@@ -2016,6 +2178,256 @@ class RecordingsFragment : Fragment() {
         return cal.timeInMillis
     }
 
+    // -----------------------------------------------------------------
+    // List | Timeline
+    // -----------------------------------------------------------------
+
+    /** Wires List | Timeline, the date pill and Live; the mode is resolved once per instance. */
+    private fun setupTimelineMode(root: View, savedInstanceState: Bundle?) {
+        val ctx = context ?: return
+        if (!timelineModeResolved) {
+            timelineModeResolved = true
+            val args = if (savedInstanceState == null) arguments else null
+            val saved = savedInstanceState
+                ?.takeIf { it.containsKey(KEY_TIMELINE_MODE) }
+                ?.getBoolean(KEY_TIMELINE_MODE)
+            timelineMode = TimelinePrefs.resolveInitialMode(
+                saved = saved,
+                argView = args?.getString(TimelineLinks.ARG_VIEW),
+                argParking = !args?.getString("parkingSessionId").isNullOrBlank(),
+                remembered = TimelinePrefs.isTimelineRemembered(ctx),
+            )
+            if (timelineMode && args != null) {
+                timelineStartMs = args.getLong(TimelineLinks.ARG_TIME_MS, -1L)
+                timelineEndMs = args.getLong(TimelineLinks.ARG_END_MS, -1L)
+            }
+        }
+        val toggle = root.findViewById<MaterialButtonToggleGroup>(R.id.recViewToggle) ?: return
+        suppressViewToggle = true
+        toggle.check(if (timelineMode) R.id.btnViewTimeline else R.id.btnViewList)
+        suppressViewToggle = false
+        toggle.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (!isChecked || suppressViewToggle) return@addOnButtonCheckedListener
+            val wantTimeline = checkedId == R.id.btnViewTimeline
+            if (wantTimeline == timelineMode) return@addOnButtonCheckedListener
+            context?.let { TimelinePrefs.setTimelineRemembered(it, wantTimeline) }
+            if (wantTimeline) {
+                // A clip playing in the List carries on in the timeline from the same moment.
+                val at = inlinePlayingWallMs()
+                if (at > 0L) enterTimelineMode(root, at, true) else enterTimelineMode(root, -1L, false)
+            } else {
+                exitTimelineMode(root)
+            }
+        }
+        root.findViewById<View>(R.id.btnTimelineDate)?.setOnClickListener { showTimelineDatePicker() }
+        root.findViewById<MaterialButton>(R.id.btnTimelineLive)?.let { live ->
+            live.iconTint = null
+            live.setOnClickListener {
+                runCatching {
+                    findNavController().navigate(
+                        R.id.liveViewFragment, null, com.overdrive.app.ui.util.NavOptionsExt.m3FadeThrough()
+                    )
+                }
+            }
+        }
+        root.findViewById<View>(R.id.btnPreviewShowInTimeline)?.setOnClickListener {
+            val recording = selectedInlineRecording ?: return@setOnClickListener
+            val at = TimelineLinks.timeFromFilename(recording.file.name) ?: recording.timestamp
+            // Only the List/Timeline toggle sets the default view; this is a one-off jump.
+            suppressViewToggle = true
+            toggle.check(R.id.btnViewTimeline)
+            suppressViewToggle = false
+            enterTimelineMode(root, at, true)
+        }
+        updateTimelineDatePill(root, if (timelineDayMs > 0L) timelineDayMs else System.currentTimeMillis())
+        if (!timelineMode) return
+        applyTimelineChrome(root, true)
+        val existing = timelineFragment()
+        if (existing != null) {
+            bindTimelineFragment(existing)
+            if (existing.isHidden) childFragmentManager.commit { show(existing) }
+        } else {
+            val tl = TimelineFragment.newInstance(timelineStartMs, timelineEndMs)
+            bindTimelineFragment(tl)
+            childFragmentManager.commit { replace(R.id.timelineContainer, tl, TAG_TIMELINE) }
+        }
+        if (timelineStartMs > 0L) updateTimelineDatePill(root, timelineStartMs)
+        timelineStartMs = -1L
+        timelineEndMs = -1L
+    }
+
+    private fun timelineFragment(): TimelineFragment? =
+        childFragmentManager.findFragmentByTag(TAG_TIMELINE) as? TimelineFragment
+
+    private fun bindTimelineFragment(tl: TimelineFragment) {
+        tl.onDayChanged = { day ->
+            timelineDayMs = day
+            view?.let { updateTimelineDatePill(it, day) }
+        }
+    }
+
+    /** Stops inline playback first so nothing keeps playing behind the timeline. */
+    private fun enterTimelineMode(root: View, atMs: Long, play: Boolean) {
+        setPlayerFullscreen(false)
+        removeInlinePlayerForTimeline()
+        if (root.findViewById<View>(R.id.recSelectionBar)?.visibility == View.VISIBLE ||
+            libraryFragment?.isSelectingFromHost() == true
+        ) {
+            runCatching { libraryFragment?.exitSelectionFromHost() }
+        }
+        timelineMode = true
+        applyTimelineChrome(root, true)
+        val manager = childFragmentManager
+        runCatching { manager.executePendingTransactions() }
+        val existing = timelineFragment()
+        if (existing != null) {
+            bindTimelineFragment(existing)
+            // Kept hidden since the List: shown as it was (position, zoom, filter), or moved to [atMs].
+            if (existing.isHidden) {
+                runCatching { manager.beginTransaction().show(existing).commitNowAllowingStateLoss() }
+                    .onFailure { runCatching { manager.beginTransaction().show(existing).commitAllowingStateLoss() } }
+            }
+            if (atMs > 0L) {
+                existing.jumpTo(atMs, play)
+            } else {
+                existing.currentWallMs.takeIf { it > 0L }?.let { updateTimelineDatePill(root, it) }
+            }
+        } else {
+            val tl = TimelineFragment.newInstance(atMs, -1L)
+            bindTimelineFragment(tl)
+            runCatching {
+                manager.beginTransaction()
+                    .replace(R.id.timelineContainer, tl, TAG_TIMELINE)
+                    .commitNowAllowingStateLoss()
+            }.onFailure {
+                runCatching {
+                    manager.beginTransaction()
+                        .replace(R.id.timelineContainer, tl, TAG_TIMELINE)
+                        .commitAllowingStateLoss()
+                }
+            }
+        }
+        if (atMs > 0L) updateTimelineDatePill(root, atMs)
+    }
+
+    private fun exitTimelineMode(root: View) {
+        timelineMode = false
+        val manager = childFragmentManager
+        runCatching { manager.executePendingTransactions() }
+        timelineFragment()?.let { tl ->
+            tl.onDayChanged = null
+            // Hidden, not removed: it pauses and stops polling, and switching back is instant.
+            if (!tl.isHidden) {
+                runCatching { manager.beginTransaction().hide(tl).commitNowAllowingStateLoss() }
+                    .onFailure { runCatching { manager.beginTransaction().hide(tl).commitAllowingStateLoss() } }
+            }
+        }
+        applyTimelineChrome(root, false)
+    }
+
+    /** Wall time the inline player is at while it plays, else -1. */
+    private fun inlinePlayingWallMs(): Long {
+        val rec = selectedInlineRecording ?: return -1L
+        val player = (childFragmentManager.findFragmentByTag(TAG_INLINE_PLAYER)
+            ?: childFragmentManager.findFragmentById(R.id.previewContainer)) as? VideoPlayerFragment ?: return -1L
+        val pos = player.playingPositionMs()
+        if (pos < 0L) return -1L
+        return (TimelineLinks.timeFromFilename(rec.file.name) ?: rec.timestamp) + pos
+    }
+
+    private fun removeInlinePlayerForTimeline() {
+        val manager = childFragmentManager
+        val player = (manager.findFragmentByTag(TAG_INLINE_PLAYER)
+            ?: manager.findFragmentById(R.id.previewContainer)) as? VideoPlayerFragment
+        activeInlinePath = null
+        selectedInlineRecording = null
+        currentInlineIndex = -1
+        libraryFragment?.setActiveRecording(null)
+        showPreviewPlaceholder()
+        if (player == null) return
+        player.onFullscreenToggle = null
+        player.onPlaylistItemChanged = null
+        player.onDurationResolved = null
+        runCatching { manager.beginTransaction().remove(player).commitNowAllowingStateLoss() }
+            .onFailure { runCatching { manager.beginTransaction().remove(player).commitAllowingStateLoss() } }
+    }
+
+    /** Hides every list-only view (remembering its visibility) for the timeline, or restores them. */
+    private fun applyTimelineChrome(root: View, on: Boolean) {
+        val container = root.findViewById<View>(R.id.timelineContainer) ?: return
+        val column = container.parent as? ViewGroup ?: return
+        val keep = listOfNotNull(
+            root.findViewById<View>(R.id.btnRecordingsSettings),
+            root.findViewById<View>(R.id.recViewToggle),
+        )
+        if (on) {
+            for (i in 0 until column.childCount) {
+                val child = column.getChildAt(i)
+                if (child === container || keep.any { isAncestorOrSelf(child, it) }) continue
+                hideForTimeline(child)
+            }
+            hideForTimeline(root.findViewById<View>(R.id.cardPlaceSearch))
+            hideForTimeline(root.findViewById<View>(R.id.btnSelectRecordings))
+            hideForTimeline(root.findViewById<View>(R.id.btnTogglePlaceSearch))
+            container.visibility = View.VISIBLE
+        } else {
+            container.visibility = View.GONE
+            for ((v, visibility) in timelineHiddenViews) v.visibility = visibility
+            timelineHiddenViews.clear()
+        }
+        val timelineOnly = if (on) View.VISIBLE else View.GONE
+        root.findViewById<View>(R.id.recTimelineHeaderSpace)?.visibility = timelineOnly
+        root.findViewById<View>(R.id.btnTimelineDate)?.visibility = timelineOnly
+        root.findViewById<View>(R.id.btnTimelineLive)?.visibility = timelineOnly
+    }
+
+    private fun hideForTimeline(v: View?) {
+        if (v == null || timelineHiddenViews.containsKey(v)) return
+        timelineHiddenViews[v] = v.visibility
+        v.visibility = View.GONE
+    }
+
+    private fun isAncestorOrSelf(ancestor: View, view: View): Boolean {
+        var current: View? = view
+        while (current != null) {
+            if (current === ancestor) return true
+            current = current.parent as? View
+        }
+        return false
+    }
+
+    /** "Today · Sat 15 Nov" for the timeline's current day. */
+    private fun updateTimelineDatePill(root: View, dayMs: Long) {
+        val pill = root.findViewById<MaterialButton>(R.id.btnTimelineDate) ?: return
+        val locale = Locale.getDefault()
+        val dayStart = Calendar.getInstance().apply {
+            timeInMillis = dayMs
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val today = startOfTodayMillis()
+        val yesterday = Calendar.getInstance().apply {
+            timeInMillis = today
+            add(Calendar.DAY_OF_YEAR, -1)
+        }.timeInMillis
+        val date = SimpleDateFormat(
+            android.text.format.DateFormat.getBestDateTimePattern(locale, "EEEdMMM"), locale
+        ).format(Date(dayMs))
+        val relative = when (dayStart) {
+            today -> getString(R.string.timeline_today)
+            yesterday -> getString(R.string.timeline_yesterday)
+            else -> null
+        }
+        pill.text = if (relative != null) getString(R.string.timeline_gap_fmt, relative, date) else date
+    }
+
+    /** The day picker: days with footage (and alerts) marked; a pick opens that day, the strip picks the time. */
+    private fun showTimelineDatePicker() {
+        timelineFragment()?.takeIf { it.isAdded && !it.isHidden }?.showDayPicker()
+    }
+
     private data class DirStats(val total: Int, val today: Int, val bytes: Long)
 
     companion object {
@@ -2033,6 +2445,8 @@ class RecordingsFragment : Fragment() {
         private const val KEY_PLACE_CONTAINS = "recordings_place_contains"
         private const val KEY_PARKING_SESSION = "recordings_parking_session"
         private const val TAG_INLINE_PLAYER = "inline_player"
+        private const val KEY_TIMELINE_MODE = "recordings_timeline_mode"
+        private const val TAG_TIMELINE = "timeline_screen"
         /** Cap on chips to avoid sprawl after a long road trip. */
         private const val MAX_PLACE_CHIPS = 8
         /** Debounce window for the landscape free-text place-search field. */
@@ -2047,13 +2461,84 @@ class RecordingsFragment : Fragment() {
         /** Max shift exponent for backoff doubling — saturates the cap. */
         private const val WARMING_POLL_MAX_ATTEMPTS_FOR_BACKOFF = 8
 
+        /** Library column weight in the two-pane body (preview card is 11). */
+        private const val LIBRARY_PANE_WEIGHT = 10f
+        private const val TYPE_BADGE_FILL_ALPHA = 0x24
+        private const val DISABLED_ACTION_ALPHA = 0.38f
+
         // Surface roles resolve against material's attr namespace here, not the
         // app's (nonTransitiveRClass).
         private val SURFACE_HIGHEST_ATTR =
             com.google.android.material.R.attr.colorSurfaceContainerHighest
         private val ON_SURFACE_VARIANT_ATTR =
             com.google.android.material.R.attr.colorOnSurfaceVariant
+        private val PRIMARY_ATTR = androidx.appcompat.R.attr.colorPrimary
+        private val ON_PRIMARY_ATTR = com.google.android.material.R.attr.colorOnPrimary
+        private val ON_PRIMARY_CONTAINER_ATTR =
+            com.google.android.material.R.attr.colorOnPrimaryContainer
     }
 }
 
 private fun View.themeColor(@AttrRes attr: Int): Int = MaterialColors.getColor(this, attr)
+
+/** Tints a shaped badge background so its corners survive; falls back to a flat fill. */
+private fun TextView.paintBadge(@ColorInt fill: Int, @ColorInt label: Int) {
+    if (background != null) {
+        backgroundTintList = ColorStateList.valueOf(fill)
+    } else {
+        setBackgroundColor(fill)
+    }
+    setTextColor(label)
+}
+
+/** Filled count pill drawn in place of its digits (the Filters button's active-filter count). */
+private class CountBadgeSpan(
+    @ColorInt private val fill: Int,
+    @ColorInt private val textColor: Int,
+    private val textSizePx: Float,
+    private val sizePx: Float
+) : ReplacementSpan() {
+
+    private val rect = RectF()
+
+    private fun badgePaint(base: Paint) = TextPaint(base).apply {
+        textSize = textSizePx
+        fontFeatureSettings = "tnum"
+        isAntiAlias = true
+    }
+
+    private fun badgeWidth(paint: TextPaint, text: CharSequence, start: Int, end: Int): Float =
+        maxOf(sizePx, paint.measureText(text, start, end) + sizePx * 0.5f)
+
+    override fun getSize(
+        paint: Paint,
+        text: CharSequence,
+        start: Int,
+        end: Int,
+        fm: Paint.FontMetricsInt?
+    ): Int = kotlin.math.ceil(badgeWidth(badgePaint(paint), text, start, end)).toInt()
+
+    override fun draw(
+        canvas: Canvas,
+        text: CharSequence,
+        start: Int,
+        end: Int,
+        x: Float,
+        top: Int,
+        y: Int,
+        bottom: Int,
+        paint: Paint
+    ) {
+        val p = badgePaint(paint)
+        val width = badgeWidth(p, text, start, end)
+        // Centre on the label's glyph box so the pill sits level with the text.
+        val centerY = y + (paint.ascent() + paint.descent()) / 2f
+        rect.set(x, centerY - sizePx / 2f, x + width, centerY + sizePx / 2f)
+        val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = fill }
+        canvas.drawRoundRect(rect, sizePx / 2f, sizePx / 2f, fillPaint)
+        p.color = textColor
+        val textWidth = p.measureText(text, start, end)
+        val baseline = centerY - (p.ascent() + p.descent()) / 2f
+        canvas.drawText(text, start, end, x + (width - textWidth) / 2f, baseline, p)
+    }
+}

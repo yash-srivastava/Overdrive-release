@@ -126,6 +126,9 @@
     "soh_frame_mismatch_title": "Kapacita baterie vyžaduje kontrolu"
   },
   "telegram": {
+    "deterrent_triggered": "Spuštěno odstrašení: {0}",
+    "deterrent_screen": "Obrazovka",
+    "deterrent_cloud": "Cloud",
     "recording_label": {
       "person": "Osoba",
       "bike": "kolo",
@@ -330,6 +333,7 @@
   },
   "vehicle_control": {
     "blocked_driving": "Tato akce není během jízdy k dispozici",
+    "blocked_unconfirmed": "Teď nelze potvrdit, že vůz stojí zaparkovaný. Zkuste to za chvíli znovu.",
     "cloud_required": "Pro použití tohoto ovládání připojte v nastavení účet BYD",
     "cloud_sent": "Odesláno přes cloud",
     "cloud_unavailable_used_local": "Cloud není k dispozici — použito přímé připojení",

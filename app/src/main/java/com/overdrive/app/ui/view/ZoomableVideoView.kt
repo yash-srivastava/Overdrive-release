@@ -100,6 +100,13 @@ class ZoomableVideoView @JvmOverloads constructor(
     // Holding it here keeps it alive for the full player lifetime;
     // releasePlayer() releases it explicitly.
     private var producerSurface: Surface? = null
+    // Non-null while this clip is dewarped at playback (raw CPU-engine clip
+    // with lens correction > 0). Owns the EGL stack feeding the TextureView.
+    private var dewarpSpec: PlaybackDewarp.Spec? = null
+    private var dewarp: PlaybackDewarp? = null
+    // A released dewarp whose GL teardown overran its wait still owns the output
+    // Surface; the next prepare waits for it (a second producer can't connect).
+    private var teardownPending = false
     private var pendingUri: Uri? = null
     private var surfaceReady: Boolean = false
     private var prepared: Boolean = false
@@ -289,6 +296,32 @@ class ZoomableVideoView @JvmOverloads constructor(
         hostSnapshotted = false
         // Tear down any prior player BEFORE we reset state — releasing
         // after-the-fact would race with the new prepare.
+        releasePlayer()
+        if (surfaceReady) startPreparing()
+    }
+
+    /** Next clip starts without lens correction; call before setVideoURI. */
+    fun resetLensDewarp() {
+        dewarpSpec = null
+    }
+
+    /** Per-clip lens tag (null = none). Usually lands after prepare began: the player restarts in place. */
+    fun setLensDewarp(spec: PlaybackDewarp.Spec?) {
+        if (spec == dewarpSpec) return
+        dewarpSpec = spec
+        if (mediaPlayer != null) restartInPlace()
+    }
+
+    /** Rebuilds the player on the same clip, keeping position and play/pause state. */
+    private fun restartInPlace() {
+        val mp = mediaPlayer
+        if (mp != null && prepared) {
+            try {
+                pendingSeekMs = mp.currentPosition
+                resumeOnPrepare = mp.isPlaying
+            } catch (_: IllegalStateException) {
+            }
+        }
         releasePlayer()
         if (surfaceReady) startPreparing()
     }
@@ -483,6 +516,7 @@ class ZoomableVideoView @JvmOverloads constructor(
     // --------- Internals ---------
 
     private fun startPreparing() {
+        if (teardownPending) return
         val uri = pendingUri ?: return
         val texture = surfaceTexture ?: return
         prepared = false
@@ -507,7 +541,25 @@ class ZoomableVideoView @JvmOverloads constructor(
             // comment for the the BYD head-unit (Android 10) ramifications).
             val surface = Surface(texture)
             producerSurface = surface
-            mp.setSurface(surface)
+            // Dewarp path for raw CPU clips: route MediaPlayer into an EGL
+            // pipeline whose output lands on `surface`. Any failure plays the
+            // clip uncorrected.
+            val spec = dewarpSpec
+            var mpSurface = surface
+            if (spec != null) {
+                val dewarpInput = buildDewarp(texture, surface, spec)
+                if (dewarpInput != null) {
+                    mpSurface = dewarpInput
+                } else {
+                    dewarpSpec = null
+                    if (teardownPending) {
+                        // EGL still holds `surface`; prepare again once it lets go.
+                        releasePlayer()
+                        return
+                    }
+                }
+            }
+            mp.setSurface(mpSurface)
             mp.setOnPreparedListener { player ->
                 prepared = true
                 // A RoadSense duck transition may have happened during prepareAsync.
@@ -596,8 +648,54 @@ class ZoomableVideoView @JvmOverloads constructor(
         // teardown doesn't touch a freed producer. Tracker field cleared
         // unconditionally so a partial-init failure doesn't leave a
         // dangling reference around.
+        releaseDewarp()
         try { producerSurface?.release() } catch (_: Exception) {}
         producerSurface = null
+    }
+
+    private fun buildDewarp(texture: SurfaceTexture, outputSurface: Surface, spec: PlaybackDewarp.Spec): Surface? {
+        return try {
+            // Frame-sized output keeps a zoomed quadrant at full detail.
+            texture.setDefaultBufferSize(spec.frameWidth, spec.frameHeight)
+            val d = PlaybackDewarp(outputSurface, spec) { failed -> post { onDewarpFailed(failed) } }
+            dewarp = d
+            d.start()
+        } catch (t: Throwable) {
+            Log.w(TAG, "dewarp init failed, playing uncorrected: ${t.message}")
+            releaseDewarp()
+            restoreViewBufferSize(texture)
+            null
+        }
+    }
+
+    private fun releaseDewarp() {
+        val d = dewarp ?: return
+        dewarp = null
+        val freed = try {
+            d.release(onReleased = { post { onDewarpTeardown() } })
+        } catch (_: Exception) {
+            true
+        }
+        if (!freed) teardownPending = true
+    }
+
+    private fun onDewarpTeardown() {
+        if (!teardownPending) return
+        teardownPending = false
+        if (pendingUri != null && mediaPlayer == null && surfaceReady) startPreparing()
+    }
+
+    /** Main thread: a dewarp that failed mid-clip; the player restarts uncorrected (released first, so no producer clash). */
+    private fun onDewarpFailed(failed: PlaybackDewarp) {
+        if (dewarp !== failed) return
+        dewarpSpec = null
+        restartInPlace()
+        surfaceTexture?.let { restoreViewBufferSize(it) }
+    }
+
+    private fun restoreViewBufferSize(texture: SurfaceTexture) {
+        if (width <= 0 || height <= 0) return
+        try { texture.setDefaultBufferSize(width, height) } catch (_: Exception) {}
     }
 
     /**
@@ -741,6 +839,11 @@ class ZoomableVideoView @JvmOverloads constructor(
 
     override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
         Log.d(TAG, "onSurfaceTextureSizeChanged: ${width}x${height}")
+        // TextureView just reset the buffer to the view size; the dewarp renders at frame size.
+        val spec = dewarpSpec
+        if (dewarp != null && spec != null) {
+            try { surface.setDefaultBufferSize(spec.frameWidth, spec.frameHeight) } catch (_: Exception) {}
+        }
         // Same first-frame gate — pre-frame setTransform breaks the texture
         // binding on the BYD head-unit (Android 10). After the first frame this is safe and
         // important (parent layout may resize the view at any time).
@@ -792,6 +895,11 @@ class ZoomableVideoView @JvmOverloads constructor(
         // swap; the current player can only have drawn once it is prepared.
         val refreshOnly = layerRefreshPending
         layerRefreshPending = false
+        // TextureView can reset the buffer size without a size callback (layer rebuilt after stop/start).
+        val spec = dewarpSpec
+        if (dewarp != null && spec != null) {
+            try { surface.setDefaultBufferSize(spec.frameWidth, spec.frameHeight) } catch (_: Exception) {}
+        }
         if (!firstFrameSeen && prepared && !refreshOnly) {
             firstFrameSeen = true
             Log.d(TAG, "first frame queued — applying transform")

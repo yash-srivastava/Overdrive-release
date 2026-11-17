@@ -65,7 +65,8 @@ public class VoiceEngineWakeTailContractTest {
     public void transcriptGuardIsConsultedOnlyForWakeTurnsThatMayCarryATail() throws Exception {
         String src = readProjectFile(ENGINE);
         assertTrue(block(src, "    private int understandLocally() {").contains("!turnManual && wakeTailPossible"));
-        assertTrue(block(src, "    private void reArm() {").contains("wakeTailPossible = true;"));
+        assertTrue(block(src, "    private void reArm(LocalCommandSpotter.Match wake) {")
+                .contains("wakeTailPossible = true;"));
     }
 
     @Test

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="web_state_retry_now">Nu opnieuw proberen</string>
+    <string name="web_state_retry_in">Automatisch opnieuw proberen · volgende poging over %1$d s</string>
+    <string name="web_state_retrying_now">Automatisch opnieuw proberen · bezig…</string>
+    <string name="web_state_sign_in_title">Aanmelden bij deze pagina is mislukt</string>
+    <string name="web_state_sign_in_body">De camera-daemon draait, maar heeft de aanmelding van de app niet geaccepteerd. OverDrive herstelt die automatisch zolang ADB verbonden is.</string>
+</resources>

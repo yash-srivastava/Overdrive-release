@@ -744,7 +744,12 @@ BYD.storagePage = {
         const previous = this.config[key];
         const ceiling = section === 'trips' ? this._tripMaxFor(this.config.tripsStorageType)
             : this._maxFor(section === 'surveillance' ? this.config.surveillanceStorageType : this.config.recordingsStorageType);
-        this.config[key] = enabled ? 0 : Math.max(100, Math.min(500, ceiling));
+        // Turning No Limit off must never shrink the cap below what was kept: back to the
+        // last finite value, else the volume maximum (a low default would reap on Apply).
+        this._lastFiniteMb = this._lastFiniteMb || {};
+        if (enabled && previous > 0) this._lastFiniteMb[section] = previous;
+        const restore = this._lastFiniteMb[section] || ceiling;
+        this.config[key] = enabled ? 0 : Math.max(100, Math.min(restore, ceiling));
         if (section === 'surveillance') this.renderSurveillance();
         else if (section === 'recordings') this.renderRecordings();
         else this.renderTrips();

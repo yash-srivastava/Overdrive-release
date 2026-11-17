@@ -77,14 +77,30 @@
   });
   const SHADOW = { night: [0xFF000000, 0.55], day: [0xFF12291F, 0.26] };
   const UNIT_WORDS = ['miles', 'dist_unit', 'speed_unit', 'near_unit', 'height_unit', 'consumption_unit', 'tyre_unit'];
-  const BUILTINS = new Set(['night', 'driving', 'parked', 'pi', 'true', 'false', 'null'].concat(UNIT_WORDS));
+  // currency: the trip's currency, else the charging session's; the car puts it in the data
+  const BUILTINS = new Set(['night', 'driving', 'parked', 'pi', 'true', 'false', 'null', 'currency'].concat(UNIT_WORDS));
+  // Home Assistant channels (automation triggers): mqtt('name') reads the data key "mqtt:name"
+  const MQTT_CHANNEL = /^[A-Za-z0-9._-]{1,64}$/;
+  const CONTROL_CHARS = /[\u0000-\u001F\u007F-\u009F]/g;
+  const PAYLOAD_NUMBER = /^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?$/;
+  /** A channel's latest payload: a number when it reads as one, else its text (no control characters, trimmed, ≤64 units, never half a pair). */
+  function mqttValue(raw) {
+    if (typeof raw === 'number') return isFinite(raw) ? raw : null;
+    if (typeof raw !== 'string') return null;
+    const t = raw.replace(CONTROL_CHARS, '').trim();
+    if (!t) return null;
+    if (PAYLOAD_NUMBER.test(t)) { const x = Number(t); if (isFinite(x)) return x; }
+    if (t.length <= 64) return t;
+    const c = t.charCodeAt(63);
+    return t.slice(0, c >= 0xD800 && c <= 0xDBFF ? 63 : 64);
+  }
   const KM_PER_MI = 1.609344, YD_PER_M = 1.0936133, FT_PER_M = 3.2808399, MAX_NUM = 1e9;
 
   // ── expressions ────────────────────────────────────────────────────────────
   const ARITY = dict({
     min: [1, 8], max: [1, 8], clamp: [3, 3], lerp: [3, 3], abs: [1, 1], round: [1, 1], floor: [1, 1], ceil: [1, 1], sqrt: [1, 1],
     pow: [2, 2], sin: [1, 1], cos: [1, 1], known: [1, 1], ifknown: [2, 2], fmt: [1, 2], ramp: [3, 31], mix: [3, 3], alpha: [2, 2],
-    dist: [1, 1], near: [1, 1], height: [1, 1], consumption: [1, 1], tyre: [1, 1],
+    dist: [1, 1], near: [1, 1], height: [1, 1], consumption: [1, 1], tyre: [1, 1], mqtt: [1, 1],
   });
   class ExprError extends Error {
     constructor(msg, at, code, arg) { super(msg); this.name = 'ExprError'; this.at = at; this.code = code; this.arg = arg; }
@@ -181,6 +197,9 @@
           const args = [];
           if (!isOp(')')) { args.push(cond()); while (isOp(',')) { p++; args.push(cond()); } }
           expect(')');
+          if (t.v === 'mqtt' && !(args.length === 1 && args[0].k === 'lit' && typeof args[0].v === 'string' && MQTT_CHANNEL.test(args[0].v))) {
+            throw new ExprError('mqtt() needs a channel name in quotes', t.i, 'mqtt');
+          }
           if (args.length < ar[0] || args.length > ar[1]) {
             throw new ExprError(t.v + '() takes ' + (ar[0] === ar[1] ? ar[0] : ar[0] + '–' + ar[1]) + ' values', t.i, 'arity', [t.v, ar[0], ar[1]]);
           }
@@ -252,6 +271,7 @@
   }
 
   function call(n, s) {
+    if (n.fn === 'mqtt') return mqttValue(s('mqtt:' + n.args[0].v));
     const v = n.args.map(a => evaluate(a, s));
     switch (n.fn) {
       case 'known': return v[0] != null;
@@ -320,6 +340,16 @@
     if (n.b) collect(n.b, out);
     if (n.c) collect(n.c, out);
     if (n.args) n.args.forEach(a => collect(a, out));
+  }
+  /** The Home Assistant channels a parsed expression reads. */
+  function collectMqtt(n, out) {
+    if (!n) return;
+    if (n.k === 'f' && n.fn === 'mqtt' && n.args[0] && n.args[0].k === 'lit') out.add(String(n.args[0].v));
+    // source order: a condition comes before its branches
+    if (n.c) collectMqtt(n.c, out);
+    if (n.a) collectMqtt(n.a, out);
+    if (n.b) collectMqtt(n.b, out);
+    if (n.args) n.args.forEach(a => collectMqtt(a, out));
   }
 
   // "Range {ev_range_km} km" or "{trip_km:1}": text with live holes
@@ -444,7 +474,7 @@
   function compileLayer(src, index) {
     const type = src && typeof src === 'object' ? src.type : undefined;
     const def = TYPES[type];
-    const L = { src, index, type, def, props: {}, errors: {}, vals: {}, springs: {}, idents: new Set(), seen: false };
+    const L = { src, index, type, def, props: {}, errors: {}, vals: {}, springs: {}, idents: new Set(), mqtt: new Set(), seen: false };
     if (!def) { L.error = 'Unknown layer type “' + type + '”'; L.errorCode = 'type'; return L; }
     const kinds = Object.assign({}, def.props, COMMON);
     for (const key of Object.keys(kinds)) {
@@ -452,6 +482,8 @@
       if (raw === undefined || raw === null) continue;
       try { L.props[key] = compileProp(raw, kinds[key], L.idents); } catch (e) { L.errors[key] = e; continue; }
       const pr = L.props[key];
+      if (pr.node) collectMqtt(pr.node, L.mqtt);
+      if (pr.parts) pr.parts.forEach(x => { if (typeof x !== 'string') collectMqtt(x.node, L.mqtt); });
       if (!pr.bound && !pr.parts && typeof pr.k === 'string' && (isChoice(kinds[key]) || (type === 'car' && key === 'phase'))) pr.k = pr.k.trim().toLowerCase();
     }
     L.loop = type === 'pulse';
@@ -496,6 +528,13 @@
     signals() {
       const out = new Set();
       for (const L of this.layers) for (const id of L.idents) if (!BUILTINS.has(id) && TOKENS.night[id] === undefined) out.add(id);
+      return Array.from(out);
+    }
+
+    /** The Home Assistant channels the file reads. */
+    mqttChannels() {
+      const out = new Set();
+      for (const L of this.layers) for (const ch of L.mqtt) out.add(ch);
       return Array.from(out);
     }
 
@@ -1417,5 +1456,6 @@
     color, parse, template, collect, evaluate: safeEval, truthy, num, text, Widget, ExprError,
     PARTS: { names: CAR_PART_NAMES, of: partsOf },
     cleanDoc, docProblems, byteLength, carBytes, renderStill, sampleHistory, SAMPLE, now,
+    MQTT_CHANNEL, mqttValue,
   };
 })(window);

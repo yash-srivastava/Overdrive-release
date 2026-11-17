@@ -1,6 +1,7 @@
 package com.overdrive.app.navmap.google
 
 import android.util.Log
+import com.overdrive.app.navmap.glass.MapGlassBasemap
 import org.json.JSONArray
 import org.json.JSONObject
 import org.maplibre.android.maps.MapLibreMap
@@ -10,7 +11,6 @@ import org.maplibre.android.style.layers.PropertyFactory
 import org.maplibre.android.style.layers.RasterLayer
 import org.maplibre.android.style.sources.RasterSource
 import org.maplibre.android.style.sources.TileSet
-import java.util.Locale
 import java.util.WeakHashMap
 
 /** MapLibre style pieces for the Google raster basemap and the traffic overlay. Style/map calls run on the main thread. */
@@ -23,11 +23,6 @@ object GoogleMapStyle {
     const val GLYPHS_URL = "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf"
     const val TRAFFIC_REFRESH_MS = 180_000L
     const val TRAFFIC_REFRESH_PAID_MS = 60_000L
-
-    data class NightPalette(
-        val land: Int, val water: Int, val park: Int, val road: Int, val roadCasing: Int,
-        val highway: Int, val label: Int, val labelHalo: Int, val poi: Int
-    )
 
     private const val TAG = "GoogleMapStyle"
     private const val TILE_SIZE = 256
@@ -100,11 +95,12 @@ object GoogleMapStyle {
         }
     }
 
+    /** [basePrefetchDelta]: zoom levels below the view the basemap loads first, shown while the sharp tiles load. */
     @JvmStatic
-    fun tuneSources(style: Style, trafficRefreshMs: Long) {
+    fun tuneSources(style: Style, trafficRefreshMs: Long, basePrefetchDelta: Int) {
         if (!style.isFullyLoaded) return
         try {
-            style.getSource(BASE_SOURCE_ID)?.setPrefetchZoomDelta(0)
+            style.getSource(BASE_SOURCE_ID)?.setPrefetchZoomDelta(basePrefetchDelta)
             style.getSource(TRAFFIC_SOURCE_ID)?.let { src ->
                 src.setPrefetchZoomDelta(0)
                 src.setVolatile(true)
@@ -139,31 +135,41 @@ object GoogleMapStyle {
         }
     }
 
+    /** Map Tiles `styles` for the night roadmap, in the vector night basemap's colours so both maps look the same. */
     @JvmStatic
-    fun nightStylesJson(p: NightPalette): String {
+    fun nightStylesJson(): String = nightStyles
+
+    private val nightStyles: String by lazy {
         val rules = JSONArray()
-        fun rule(featureType: String?, elementType: String, color: Int) {
+        fun rule(featureType: String?, elementType: String, color: String) {
             val o = JSONObject()
             // No featureType selects every feature ("all").
             if (featureType != null) o.put("featureType", featureType)
             o.put("elementType", elementType)
-            o.put("stylers", JSONArray().put(JSONObject().put("color", hex(color))))
+            o.put("stylers", JSONArray().put(JSONObject().put("color", color)))
             rules.put(o)
         }
-        rule(null, "geometry", p.land)
-        rule("water", "geometry", p.water)
-        rule("poi.park", "geometry", p.park)
-        rule("landscape.natural", "geometry", p.park)
-        rule("road", "geometry", p.road)
-        rule("road", "geometry.stroke", p.roadCasing)
-        rule("road.highway", "geometry", p.highway)
-        rule("transit", "geometry", p.roadCasing)
-        rule(null, "labels.text.fill", p.label)
-        rule(null, "labels.text.stroke", p.labelHalo)
-        rule("poi", "labels.text.fill", p.poi)
-        rule("administrative", "geometry.stroke", p.roadCasing)
-        return rules.toString()
+        rule(null, "geometry", MapGlassBasemap.N_LAND)
+        rule("landscape.man_made", "geometry.fill", MapGlassBasemap.N_BLD)
+        rule("landscape.man_made", "geometry.stroke", MapGlassBasemap.N_BLD_LINE)
+        rule("landscape.natural", "geometry", MapGlassBasemap.N_PARK)
+        rule("poi.park", "geometry", MapGlassBasemap.N_PARK)
+        rule("water", "geometry", MapGlassBasemap.N_WATER)
+        rule("road", "geometry.fill", MapGlassBasemap.N_MINOR)
+        rule("road", "geometry.stroke", MapGlassBasemap.N_CASING)
+        rule("road.arterial", "geometry.fill", MapGlassBasemap.N_SEC)
+        rule("road.highway", "geometry.fill", MapGlassBasemap.N_PRIM)
+        rule("road.highway.controlled_access", "geometry.fill", MapGlassBasemap.N_MWAY)
+        rule("transit", "geometry", MapGlassBasemap.N_RAIL)
+        rule("administrative", "geometry.stroke", MapGlassBasemap.N_BLD_LINE)
+        rule("administrative.country", "geometry.stroke", MapGlassBasemap.N_BOUNDARY)
+        rule("administrative.province", "geometry.stroke", MapGlassBasemap.N_BOUNDARY)
+        rule(null, "labels.text.fill", MapGlassBasemap.N_LABEL)
+        rule(null, "labels.text.stroke", MapGlassBasemap.N_HALO)
+        rule("road.highway", "labels.text.fill", MapGlassBasemap.N_LABEL_MAJOR)
+        rule("administrative.locality", "labels.text.fill", MapGlassBasemap.N_PLACE)
+        rule("water", "labels.text.fill", MapGlassBasemap.N_WATER_LABEL)
+        rule("transit", "labels.text.fill", MapGlassBasemap.N_TRANSIT)
+        rules.toString()
     }
-
-    private fun hex(color: Int): String = String.format(Locale.ROOT, "#%06X", color and 0xFFFFFF)
 }

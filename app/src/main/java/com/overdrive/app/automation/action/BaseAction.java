@@ -120,6 +120,8 @@ public abstract class BaseAction implements Action {
         if ("autoOffMinutes".equals(variableId) && "setAc".equals(actionId)) return "0";
         if ("temp".equals(variableId) && "setAc".equals(actionId)) return Integer.valueOf(22);
         if ("remoteDurationMinutes".equals(variableId) && "setAc".equals(actionId)) return "20";
+        if ("ifPlaying".equals(variableId)
+                && ("playAudio".equals(actionId) || "speak".equals(actionId))) return "replace";
         if (!"zone".equals(variableId)) return null;
         if ("setAcTemp".equals(actionId) || "stepAcTemp".equals(actionId)) return "0";
         if ("setAmbient".equals(actionId) || "ambientBrightness".equals(actionId)

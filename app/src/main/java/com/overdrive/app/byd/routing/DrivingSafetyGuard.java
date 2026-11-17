@@ -133,6 +133,22 @@ public final class DrivingSafetyGuard {
         return isGuardEnabled(key) ? getMovementBlockReason() : null;
     }
 
+    /** True when a block reason means the parked state is unreadable, not that the car is moving. */
+    public static boolean isUnconfirmedReason(String reason) {
+        return "state_unknown".equals(reason) || "gear_unknown".equals(reason)
+                || "speed_unknown".equals(reason);
+    }
+
+    /**
+     * DiLink 5: true when the power state is confirmed fresh, so the movement gate is not relying on a
+     * Park + stationary read. Unattended actuators require it; every other platform returns true.
+     */
+    public static boolean isDiLink5PowerStateConfirmed() {
+        if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) return true;
+        AccMonitor.confirmDiLink5StateForSafety();
+        return AccMonitor.isAccStateAuthoritative() && AccMonitor.isAccStateFreshForSafety();
+    }
+
     /** Machine-readable live reason for a blocked movement gate, or {@code null} when allowed. */
     public static String getMovementBlockReason() {
         if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
@@ -161,7 +177,8 @@ public final class DrivingSafetyGuard {
                             ? scopedAccOn.booleanValue() : AccMonitor.isAccOn(),
                     scoped ? scopedStateValid : AccMonitor.isAccStateAuthoritative(),
                     scoped ? scopedStateValid : AccMonitor.isAccStateFreshForSafety(),
-                    speedKmh);
+                    speedKmh,
+                    !scoped || !VehicleActuatorBridge.isDiLink5RequestExpired());
         }
         boolean accAuthoritative = AccMonitor.isAccStateAuthoritative();
         if (!accAuthoritative) return "state_unknown";
@@ -181,6 +198,41 @@ public final class DrivingSafetyGuard {
                     && !AccMonitor.isAccOn();
         }
         return AccMonitor.isAccStateAuthoritative() && !AccMonitor.isAccOn();
+    }
+
+    /** DiLink 5 only: ACC freshly confirmed ON with a live Park + stationary read; ignores user guard switches. */
+    public static boolean isDiLink5AccOnAndParked() {
+        if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) return false;
+        boolean scoped = VehicleActuatorBridge.hasDiLink5RequestScope();
+        boolean accOn;
+        if (scoped) {
+            accOn = Boolean.TRUE.equals(VehicleActuatorBridge.currentDiLink5RequestAccOn())
+                    && !VehicleActuatorBridge.isDiLink5RequestExpired();
+        } else {
+            AccMonitor.confirmDiLink5StateForSafety();
+            // A live read must agree: the published ON can trail a switch-off by one probe period.
+            accOn = AccMonitor.isAccStateAuthoritative()
+                    && AccMonitor.isAccStateFreshForSafety()
+                    && AccMonitor.isAccOn()
+                    && Boolean.TRUE.equals(AccMonitor.probeDiLink5AccOnForTransition(null, true));
+        }
+        if (!accOn) return false;
+        GearReading gear = resolveGear();
+        double speedKmh = resolveSpeedKmh();
+        if (scoped) {
+            if (gear == GearReading.UNKNOWN) {
+                gear = gearReading(VehicleActuatorBridge.currentDiLink5RequestGear());
+            }
+            if (Double.isNaN(speedKmh)) {
+                speedKmh = VehicleActuatorBridge.currentDiLink5RequestSpeedKmh();
+            }
+        }
+        return isParkedAndStationary(gear, speedKmh);
+    }
+
+    static boolean isParkedAndStationary(GearReading gear, double speedKmh) {
+        return gear == GearReading.PARK
+                && speedKmh >= 0.0 && speedKmh <= PARKED_SPEED_THRESHOLD_KMH;
     }
 
     /**
@@ -262,11 +314,25 @@ public final class DrivingSafetyGuard {
             boolean accAuthoritative,
             boolean accFresh,
             double speedKmh) {
+        return blockReasonDiLink5(gear, accOn, accAuthoritative, accFresh, speedKmh, true);
+    }
+
+    /** With {@code parkProofAllowed}, a live Park + stationary read stands in for an unconfirmed power state. */
+    static String blockReasonDiLink5(
+            GearReading gear,
+            boolean accOn,
+            boolean accAuthoritative,
+            boolean accFresh,
+            double speedKmh,
+            boolean parkProofAllowed) {
         if (gear == GearReading.NOT_PARK) return "not_park";
         if (!Double.isNaN(speedKmh) && speedKmh > PARKED_SPEED_THRESHOLD_KMH) {
             return "moving";
         }
-        if (!accAuthoritative || !accFresh) return "state_unknown";
+        if (!accAuthoritative || !accFresh) {
+            return parkProofAllowed && gear == GearReading.PARK && speedKmh >= 0.0
+                    ? null : "state_unknown";
+        }
         if (!accOn) return null;
         if (gear == GearReading.UNKNOWN) return "gear_unknown";
         if (Double.isNaN(speedKmh)) return "speed_unknown";

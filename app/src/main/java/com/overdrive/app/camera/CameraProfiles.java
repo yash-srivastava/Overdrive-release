@@ -107,27 +107,6 @@ public final class CameraProfiles {
                 1920,
                 1080));
 
-        // Field-verified on a DiLink 100 New E2 GS X (Android 14): BYD's
-        // AVMCamera opens pano_h camera 0 at 5120x960 through bmmcameraserver.
-        // Slices left to right are front, right, left, rear (the same order the
-        // Camera2 360 HAL default names).
-        EnumMap<CameraRole, CameraSourceRef> dilink100Mappings = new EnumMap<>(CameraRole.class);
-        dilink100Mappings.put(CameraRole.PANO_FRONT, CameraSourceRef.panoramicSlice(PanoramicSlice.SLICE_1));
-        dilink100Mappings.put(CameraRole.PANO_RIGHT, CameraSourceRef.panoramicSlice(PanoramicSlice.SLICE_2));
-        dilink100Mappings.put(CameraRole.PANO_LEFT, CameraSourceRef.panoramicSlice(PanoramicSlice.SLICE_3));
-        dilink100Mappings.put(CameraRole.PANO_REAR, CameraSourceRef.panoramicSlice(PanoramicSlice.SLICE_4));
-        register(new CameraProfile(
-                PROFILE_DILINK100_AVM,
-                "BYD DiLink 100 (AVMCamera, field verified)",
-                DiLink100Platform.PANO_CAMERA_ID,
-                5120,
-                960,
-                0,
-                1280,
-                960,
-                dilink100Mappings,
-                FOV_DEG_DEFAULT));
-
         EnumMap<CameraRole, CameraSourceRef> tangMappings = new EnumMap<>(legacyMappings);
         tangMappings.put(CameraRole.WINDSHIELD, CameraSourceRef.direct(0));
         register(new CameraProfile(
@@ -180,6 +159,30 @@ public final class CameraProfiles {
                 PROFILE_CAMERA2_AVM,
                 "BYD 360 via Camera2 (DiLink 100)",
                 2,
+                5120,
+                960,
+                0,
+                1280,
+                960,
+                mappings,
+                FOV_DEG_DEFAULT);
+    }
+
+    /**
+     * BYD100F DiLink 100 in Default mode: BYD's AVMCamera camera 0 (pano_h) at 5120x960, slices
+     * front, right, left, rear (field verified on a New E2, #741). Not in {@link #PROFILES} for the
+     * same reason as {@link #camera2Avm}: only the head unit selects it.
+     */
+    public static CameraProfile dilink100Avm() {
+        EnumMap<CameraRole, CameraSourceRef> mappings = new EnumMap<>(CameraRole.class);
+        PanoramicSlice[] slices = PanoramicSlice.values();
+        for (int i = 0; i < 4; i++) {
+            mappings.put(CAMERA2_DEFAULT_SLICE_ROLES[i], CameraSourceRef.panoramicSlice(slices[i]));
+        }
+        return new CameraProfile(
+                PROFILE_DILINK100_AVM,
+                "BYD DiLink 100 (AVMCamera, field verified)",
+                DiLink100Platform.PANO_CAMERA_ID,
                 5120,
                 960,
                 0,

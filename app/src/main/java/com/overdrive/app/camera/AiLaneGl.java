@@ -261,23 +261,17 @@ public final class AiLaneGl {
 
     /**
      * Initialization may time out while its GL task is still executing.
-     * Queue cleanup behind that task so it cannot race EGL construction,
-     * then stop and join the worker.
+     * Queue cleanup behind that task so it cannot race EGL construction, and
+     * let quitSafely() run it: the caller is the camera GL thread, which must
+     * not wait past start()'s own 3 s (GL watchdog).
      */
     private void cleanupAfterFailedStart() {
         final android.os.Handler h = handler;
-        if (h != null && thread != null && thread.isAlive()) {
-            final java.util.concurrent.CountDownLatch cleaned =
-                    new java.util.concurrent.CountDownLatch(1);
-            if (h.post(() -> {
-                try { cleanupGlContextOnHandlerThread(); }
-                finally { cleaned.countDown(); }
-            })) {
-                try { cleaned.await(3, java.util.concurrent.TimeUnit.SECONDS); }
-                catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
-            }
-        }
-        stopFailedStartThread();
+        final android.os.HandlerThread worker = thread;
+        if (h != null) h.post(this::cleanupGlContextOnHandlerThread);
+        if (worker != null) worker.quitSafely();
+        handler = null;
+        thread = null;
     }
 
     /** Stops a worker created by start() when initialization did not succeed. */

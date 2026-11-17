@@ -429,7 +429,7 @@ public class AudioApiHandler {
             response.put("avasAvailable", available);
             if (!available) {
                 response.put("success", false);
-                response.put("error", "AVAS unreachable — 'auto' service null (car asleep or non-BYD build)");
+                response.put("error", Messages.get("errors.audio_avas_unreachable"));
                 HttpResponse.sendJson(out, response.toString());
                 return;
             }
@@ -506,7 +506,7 @@ public class AudioApiHandler {
             response.put("avasAvailable", available);
             if (!available) {
                 response.put("success", false);
-                response.put("error", "AVAS unreachable — 'auto' service null");
+                response.put("error", Messages.get("errors.audio_avas_unreachable"));
                 HttpResponse.sendJson(out, response.toString());
                 return;
             }

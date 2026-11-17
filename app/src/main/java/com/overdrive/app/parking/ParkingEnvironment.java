@@ -184,15 +184,17 @@ public interface ParkingEnvironment {
     com.overdrive.app.parking.signage.TextOcrBackend openSignageOcr();
 
     /**
-     * The most recent drive-mode recording that started shortly BEFORE the
-     * session began (the approach into the garage), or null. Only the file is
-     * returned; frame extraction is {@link #extractTailFrames}.
+     * The most recent drive-mode or proximity recording that started shortly
+     * BEFORE the session began (the approach into the garage), or null. Only
+     * the file is returned; frame extraction is {@link #extractTailFrames}.
      */
     File recentDriveClip(long sessionStartMs);
 
     /**
-     * Decode up to {@code count} JPEG frames evenly spread over the last
-     * {@code tailMs} of an MP4. Empty when the platform cannot decode.
+     * Decode up to {@code count} frames evenly spread over the last
+     * {@code tailMs} of an MP4, as JPEG camera views at native resolution (a
+     * 2×2 grid recording gives four per frame). Empty when the platform cannot
+     * decode.
      */
     List<byte[]> extractTailFrames(File mp4, int count, long tailMs);
 

@@ -169,6 +169,7 @@ object SavedPlacesStore {
                 arr.put(obj)
             }
             prefs(context).edit().putString(KEY_PLACES, arr.toString()).apply()
+            com.overdrive.app.briefing.app.TripBriefingSync.request(context)
         } catch (e: Throwable) {
             Log.w(TAG, "persist failed: ${e.message}")
         }

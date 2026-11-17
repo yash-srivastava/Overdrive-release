@@ -1,5 +1,7 @@
 package com.overdrive.app.overlay
 
+import com.overdrive.app.overlay.glass.gs
+import com.overdrive.app.overlay.glass.GlassStrings
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -41,6 +43,7 @@ import com.overdrive.app.overlay.glass.GlassFreeLayout
 import com.overdrive.app.overlay.glass.GlassPickerSheet
 import com.overdrive.app.overlay.glass.GlassPowerView
 import com.overdrive.app.overlay.glass.GlassRoadSenseView
+import com.overdrive.app.overlay.glass.GlassSeatsView
 import com.overdrive.app.overlay.glass.GlassShortcutsView
 import com.overdrive.app.overlay.glass.GlassSurface
 import com.overdrive.app.overlay.glass.GlassTheme
@@ -289,8 +292,26 @@ class GlassWidgetsOverlayService : Service() {
     private var customFrom: List<String> = emptyList()
     private var customLive: GlassWidgetsFeed.Live? = null
     private var customLiveAt = 0L
+    // the seats widget: core's saved positions (null until first read), and an apply under way or its outcome for a moment
+    private var seatsList: GlassWidgetsFeed.Seats? = null
+    private var seatsBusy: String? = null
+    private var seatsDone: String? = null
+    private var seatsFail: String? = null
+    private var seatsSeq = 0
+    // the last values of the MQTT channels shown custom widgets read, keyed "mqtt:<channel>"
+    private var mqttValues: Map<String, Any?> = emptyMap()
+    // car-off sleep: the start of an unbroken run of "off" summaries, the last summary that wasn't one,
+    // and the last ignition broadcast
+    private var offSince = 0L
+    private var onSeenAt = 0L
+    private var ignitionAt = 0L
+    private var wakeOn = false
 
     // io / feed threads
+    // the car is off: no windows, no polling but a slow summary (written on main)
+    @Volatile private var asleep = false
+    // asleep, a hint that the car may be on reads the summary at the parked rate until then
+    @Volatile private var hintUntil = 0L
     @Volatile private var running = false
     @Volatile private var readSettings: Settings? = null
     @Volatile private var lastOk = 0L
@@ -311,6 +332,12 @@ class GlassWidgetsOverlayService : Service() {
     private var docsList: List<String>? = null
     private var docsAsked: Set<String> = emptySet()
     private var docsFails = 0
+    // the seats widget is on screen: its list is read now, then every two minutes while parked (feed thread)
+    @Volatile private var wantSeats = false
+    private var lastSeats = 0L
+    // the MQTT channels to poll ("a,b"), every five seconds while a shown custom widget reads them (feed thread)
+    @Volatile private var mqttQuery: String? = null
+    private var mqttLoop = false
     private var lastVehicleState = 0L
     private var lastCalibrated = 0L
     private var lastAutos = 0L
@@ -333,6 +360,7 @@ class GlassWidgetsOverlayService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        GlassStrings.attach(this)
         createChannel()
         startForegroundCompat()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
@@ -341,9 +369,15 @@ class GlassWidgetsOverlayService : Service() {
         feedThread = HandlerThread("glass-widgets-feed").also { it.start(); feed = Handler(it.looper) }
         liveThread = HandlerThread("glass-widgets-live").also { it.start(); liveH = Handler(it.looper) }
         instance = this
+        val wakeFilter = IntentFilter().apply {
+            addAction(ACTION_ACC_ON); addAction(ACTION_IGN_ON); addAction(ACTION_ACC_MODE)
+            addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_USER_PRESENT)
+        }
+        wakeOn = try { registerReceiver(wakeReceiver, wakeFilter); true } catch (_: Exception) { false }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        GlassStrings.attach(this)
         val s = loadSettings(force = true)
         if (s == null || !s.enabled) {
             Log.i(TAG, "glass widgets disabled - stopping")
@@ -355,14 +389,17 @@ class GlassWidgetsOverlayService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        // asleep, only arranging wakes the widgets: keepalive restarts land here too
+        val arrangeAsked = intent?.getStringExtra("action") == "arrange"
+        if (arrangeAsked) wake("arrange")
         apply(withPending(s))
-        if (surface == null) {
+        if (surface == null && !asleep) {
             stopSelf()
             return START_NOT_STICKY
         }
         startPolling()
         // the Widgets page's "Arrange on screen": once there's data to show
-        if (intent?.getStringExtra("action") == "arrange") {
+        if (arrangeAsked) {
             if (snapshot != null && !offline) enterArrange() else { pendingArrange = true; pendingArrangeAt = SystemClock.elapsedRealtime() }
         }
         return START_STICKY
@@ -370,6 +407,7 @@ class GlassWidgetsOverlayService : Service() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        GlassStrings.attach(this)
         val s = settings ?: return
         applyTheme(s)
         val dm = realMetrics()
@@ -402,6 +440,7 @@ class GlassWidgetsOverlayService : Service() {
         writer.shutdown()
         closePicker()
         unregisterHomeKeys()
+        if (wakeOn) { wakeOn = false; try { unregisterReceiver(wakeReceiver) } catch (_: Exception) { } }
         arrange?.let { removeArrange(it) }
         arrange = null
         removeStack()
@@ -479,7 +518,7 @@ class GlassWidgetsOverlayService : Service() {
 
     /** The floating shortcuts button, when chosen: a window of its own, over every app. */
     private fun ensureOrb(s: Settings) {
-        if (!s.floating || destroyed) {
+        if (!s.floating || destroyed || asleep) {
             orb?.let { if (pickerFromOrb) closePicker(); it.release() }
             orb = null
             return
@@ -513,9 +552,9 @@ class GlassWidgetsOverlayService : Service() {
 
     // ── surfaces ─────────────────────────────────────────────────────────────
 
-    /** The stack until the user arranges the widgets, a window per widget after; never while arranging. */
+    /** The stack until the user arranges the widgets, a window per widget after; never while arranging or asleep. */
     private fun ensureSurface(s: Settings) {
-        if (arrange != null) return
+        if (arrange != null || asleep) return
         val wantFree = s.layout.isNotEmpty() && (s.layoutPortrait == null || s.layoutPortrait == portrait())
         if (wantFree && free == null) {
             closePicker()
@@ -762,7 +801,7 @@ class GlassWidgetsOverlayService : Service() {
     /** Every listed widget over a dimmed screen, to be dragged where it should live. */
     private fun enterArrange() {
         // with core unreachable nothing arranged could be saved
-        if (arrange != null || destroyed || offline) return
+        if (arrange != null || destroyed || offline || asleep) return
         val s = settings ?: return
         // arranging is a parked job: while driving or reversing the request is dropped
         if (env.driving || snapshot?.reversing == true) { pendingArrange = false; return }
@@ -987,6 +1026,7 @@ class GlassWidgetsOverlayService : Service() {
                 "charging" -> !(s.chargingAuto && !charging)
                 "battery" -> seenBattery
                 "trip", "drive" -> seenTrip
+                "seats" -> seatsList != null
                 else -> true
             }
         }
@@ -1025,7 +1065,23 @@ class GlassWidgetsOverlayService : Service() {
         val liveCustom = (need and NEED_LIVE) != 0
         liveMs = if (liveDynamics) LIVE_DYNAMICS_MS else if ("drive" in ids || (liveCustom && !("power" in ids && s.showBs))) LIVE_MS else LIVE_BS_MS
         setWantLive(("drive" in ids || liveDynamics || ("power" in ids && s.showBs) || liveCustom) && !hidden && env.driving)
+        // the seats widget's list: read as it comes on screen, then every two minutes from the feed loop
+        val seatsOn = "seats" in s.widgets && !hidden
+        if (seatsOn && !wantSeats) askSeats()
+        wantSeats = seatsOn
+        setMqtt(customChannels(s, ids), paused = hidden)
         wire()
+    }
+
+    // the MQTT channels the shown custom widgets read, as the poll asks for them ("a,b"); null for none
+    private fun customChannels(s: Settings, ids: List<String>): String? {
+        if (s.custom.isEmpty() || !GlassWidgets.hasDocs()) return null
+        var channels: java.util.TreeSet<String>? = null
+        for (id in ids) {
+            val d = GlassWidgets.doc(id) ?: continue
+            for (c in d.mqttChannels) if (MQTT_CHANNEL.matches(c)) (channels ?: java.util.TreeSet<String>().also { channels = it }).add(c)
+        }
+        return channels?.take(MQTT_MAX)?.joinToString(",")
     }
 
     // what the shown custom widgets read beyond the summary: live samples, the pedals, RoadSense, the learned range
@@ -1065,6 +1121,10 @@ class GlassWidgetsOverlayService : Service() {
         sf.widget<GlassShortcutsView>("shortcuts")?.let { v ->
             v.onRun = ::runShortcut
             v.onEdit = ::openPicker
+        }
+        sf.widget<GlassSeatsView>("seats")?.let { v ->
+            v.onApply = ::applySeat
+            v.onMore = ::openSeatsPicker
         }
     }
 
@@ -1153,6 +1213,8 @@ class GlassWidgetsOverlayService : Service() {
         bindRoad(animate, forceUnits)
         bindShortcuts(animate)
         bindCustom(animate, force = forcePower || forceUnits)
+        // arrange mode's tray can preview the seats widget before its list was ever read
+        if (seatsList != null) bindSeats(animate) else if (arrange != null && sf.widget<GlassSeatsView>("seats") != null) askSeats()
     }
 
     /**
@@ -1169,7 +1231,8 @@ class GlassWidgetsOverlayService : Service() {
         var values: Map<String, Any?>? = null
         for (id in ids) {
             val v = (customHost?.widget<GlassWidgetView>(id) ?: sf.widget<GlassWidgetView>(id)) as? GlassCustomView ?: continue
-            val m = values ?: CustomSignals.values(snapshot, road, freshLive(), calibratedKm).also { values = it }
+            val m = values ?: CustomSignals.values(snapshot, road, freshLive(), calibratedKm)
+                .let { if (mqttValues.isEmpty()) it else it + mqttValues }.also { values = it }
             if (sampleAt >= 0L) v.addSample(sampleAt, m)
             v.bind(m, animate, force)
         }
@@ -1304,6 +1367,36 @@ class GlassWidgetsOverlayService : Service() {
 
     private fun regenPct(): Int? = if (driveKwh >= 0.3) (regenKwh / driveKwh * 100.0).roundToInt().coerceIn(0, 99) else null
 
+    // ── MQTT channels in custom widgets ──────────────────────────────────────
+
+    // main thread: a new set of channels is read at once, then every five seconds; hidden, the poll pauses and
+    // the last values stay; no channels, they go
+    private fun setMqtt(channels: String?, paused: Boolean) {
+        if (channels == null && mqttValues.isNotEmpty()) { mqttValues = emptyMap(); bindCustom(animate = false) }
+        val q = if (paused) null else channels
+        if (q == mqttQuery) return
+        mqttQuery = q
+        if (q != null) feed?.post { if (!mqttLoop) { mqttLoop = true; mqttTick.run() } else pollMqtt(q) }
+    }
+
+    private val mqttTick = object : Runnable {
+        override fun run() {
+            val q = mqttQuery
+            if (!running || q == null) { mqttLoop = false; return }
+            pollMqtt(q)
+            feed?.postDelayed(this, MQTT_MS)
+        }
+    }
+
+    private fun pollMqtt(query: String) {
+        val (code, text) = http("GET", "/api/widgets/mqtt?channels=$query", "", readTimeoutMs = MQTT_TIMEOUT_MS)
+        if (code != 200) return
+        val vals = try { JSONObject(text).takeIf { !GlassWidgetsFeed.failed(it) }?.optJSONObject("values") } catch (_: Throwable) { null } ?: return
+        val out = HashMap<String, Any?>()
+        for (c in query.split(',')) out["mqtt:$c"] = GlassWidgetsFeed.mqttValue(vals, c)
+        main.post { if (!destroyed && query == mqttQuery && out != mqttValues) { mqttValues = out; bindCustom(animate = true) } }
+    }
+
     // ── shortcuts ────────────────────────────────────────────────────────────
 
     private fun runShortcut(slot: Int, id: String, done: (Boolean?) -> Unit) {
@@ -1404,16 +1497,21 @@ class GlassWidgetsOverlayService : Service() {
             shell = sf.shells()["shortcuts"] ?: return
             view = sf.widget<GlassShortcutsView>("shortcuts") ?: return
         }
-        val k = resources.displayMetrics.density * env.scale
         val failed = autos == null && autosFailed && autosInFlight == 0
-        val sheet = GlassPickerSheet(this, env, ticker, "Shortcut ${slot + 1}", autos, failed,
+        val sheet = GlassPickerSheet(this, env, ticker, gs(R.string.glass_shortcut_n, slot + 1), autos, failed,
             s.shortcuts.getOrNull(slot)?.id,
             onPick = { item -> setShortcut(slot, Shortcut(item.id, item.name, item.glyph)); closePicker() },
             onRemove = { setShortcut(slot, null); closePicker() })
+        if (!placePicker(sheet, shell, shell.left + view.slotCenterFraction(slot) * shell.width())) return
+        pickerFailed = failed
+    }
+
+    /** Opens [sheet] centred on [cx] by the widget glass [shell] (screen px): above it if there's room, else below. */
+    private fun placePicker(sheet: GlassPickerSheet, shell: RectF, cx: Float): Boolean {
+        val k = resources.displayMetrics.density * env.scale
         val dm = realMetrics()
         val w = sheet.baseW * k; val h = sheet.baseH * k
         val margin = 12f * resources.displayMetrics.density
-        val cx = shell.left + view.slotCenterFraction(slot) * shell.width()
         val left = (cx - w / 2f).coerceIn(margin, max(margin, dm.widthPixels - margin - w))
         val above = shell.top - margin - h
         // below the widget it stays clear of a navigation bar or a car's dock, which draw over it
@@ -1439,11 +1537,11 @@ class GlassWidgetsOverlayService : Service() {
         } catch (e: Exception) {
             Log.w(TAG, "picker addView: ${e.message}")
             sheet.release()
-            return
+            return false
         }
         picker = frame
-        pickerFailed = failed
         sheet.enter(0L)
+        return true
     }
 
     /** Holds the sheet at its screen spot (px); a press anywhere off the sheet's glass closes it. */
@@ -1558,6 +1656,77 @@ class GlassWidgetsOverlayService : Service() {
     private fun background(block: () -> Unit) {
         if (destroyed) return
         try { net.execute(block) } catch (_: RejectedExecutionException) { }
+    }
+
+    // ── saved seats ──────────────────────────────────────────────────────────
+
+    // the list as the widget comes on screen, unless it was read just now
+    private fun askSeats() {
+        feed?.post { if (SystemClock.elapsedRealtime() - lastSeats > SEATS_SHOW_MS) refreshSeats() }
+    }
+
+    // feed thread: core's saved positions, and whether the car lets one be applied now
+    private fun refreshSeats() {
+        lastSeats = SystemClock.elapsedRealtime()
+        val (code, text) = http("GET", "/api/positions", "")
+        val list = if (code == 200) try { GlassWidgetsFeed.seats(JSONObject(text)) } catch (_: Throwable) { null } else null
+        if (list == null) return
+        main.post {
+            if (destroyed) return@post
+            val first = seatsList == null
+            seatsList = list
+            // the widget shows once its first list is in
+            if (first) refreshStack()
+            bindSeats(animate = !first)
+        }
+    }
+
+    private fun bindSeats(animate: Boolean) {
+        val list = seatsList ?: return
+        val v = surface?.widget<GlassSeatsView>("seats") ?: return
+        // moving a seat is a parked job: while driving every pill rests dimmed under the usual hint
+        val blocked = list.blocked || env.driving
+        v.bind(GlassSeatsView.State(list.entries, blocked, if (list.blocked) list.reason else null, seatsBusy, seatsDone, seatsFail), animate)
+    }
+
+    // a pill tapped, or a position picked under More: one move at a time, parked, and only when the car allows it
+    private fun applySeat(id: String) {
+        val list = seatsList ?: return
+        if (list.blocked || env.driving || offline || destroyed || seatsBusy != null) return
+        seatsBusy = id; seatsDone = null; seatsFail = null
+        val seq = ++seatsSeq
+        bindSeats(true)
+        val enc = try { URLEncoder.encode(id, "UTF-8").replace("+", "%20") } catch (_: Throwable) { id }
+        background {
+            val (code, text) = http("POST", "/api/positions/apply?id=$enc", "{}", readTimeoutMs = SEAT_TIMEOUT_MS)
+            val fail = GlassWidgetsFeed.seatFailure(code, text)
+            main.post {
+                if (destroyed || seq != seatsSeq) return@post
+                seatsBusy = null
+                if (fail == null) seatsDone = id else seatsFail = fail
+                bindSeats(true)
+                // the tick, or the reason it failed, shows for a moment
+                main.postDelayed({
+                    if (!destroyed && seq == seatsSeq) { seatsDone = null; seatsFail = null; bindSeats(true) }
+                }, if (fail == null) SEAT_DONE_MS else SEAT_FAIL_MS)
+            }
+            // the list again after an apply
+            feed?.post { refreshSeats() }
+        }
+    }
+
+    // More: every saved position in the chooser over the widget; a pick applies it as a tap would
+    private fun openSeatsPicker() {
+        val list = seatsList ?: return
+        if (env.driving || destroyed || offline || list.blocked) return
+        val shell = surface?.shells()?.get("seats") ?: return
+        closePicker()
+        val items = list.entries.map { GlassPickerSheet.Item(it.id, it.name, "manual", GlassPickerSheet.SEAT) }
+        val sheet = GlassPickerSheet(this, env, ticker, "Seat positions", items, false, null,
+            onPick = { item -> closePicker(); applySeat(item.id) },
+            onRemove = { closePicker() },
+            subtitle = "Tap one to move the seat", badges = false, icon = GlassPickerSheet.SEAT)
+        placePicker(sheet, shell, shell.centerX())
     }
 
     // ── commands ─────────────────────────────────────────────────────────────
@@ -1770,24 +1939,103 @@ class GlassWidgetsOverlayService : Service() {
     private fun startPolling() {
         if (running) return
         running = true
-        io?.post(object : Runnable {
-            override fun run() {
-                if (!running) return
-                ioTick()
-                io?.postDelayed(this, POLL_MS)
+        io?.post(ioLoop)
+        feed?.post(feedLoop)
+    }
+
+    // asleep, the io loop stops; waking starts it again
+    private val ioLoop = object : Runnable {
+        override fun run() {
+            if (!running || asleep) return
+            ioTick()
+            io?.postDelayed(this, POLL_MS)
+        }
+    }
+
+    private val feedLoop = object : Runnable {
+        override fun run() {
+            if (!running) return
+            pollSummary()
+            // asleep, only the summary, slowly: it still tells the car is on should no ignition broadcast come
+            if (asleep) {
+                feed?.postDelayed(this, if (SystemClock.elapsedRealtime() < hintUntil) POLL_PARKED_MS else ASLEEP_POLL_MS)
+                return
             }
-        })
-        feed?.post(object : Runnable {
-            override fun run() {
-                if (!running) return
-                pollSummary()
-                val now = SystemClock.elapsedRealtime()
-                if (wantVehicleState && !feedDriving && now - lastVehicleState > VEHICLE_STATE_MS) refreshVehicleState()
-                if (wantCalibrated && !feedHidden && now - lastCalibrated > CALIBRATED_MS) refreshCalibrated()
-                if (wantAutos && !feedHidden) main.post { refreshAutos() }
-                feed?.postDelayed(this, if (feedHidden) POLL_HIDDEN_MS else if (feedDriving) POLL_DRIVING_MS else POLL_PARKED_MS)
+            val now = SystemClock.elapsedRealtime()
+            if (wantVehicleState && !feedDriving && now - lastVehicleState > VEHICLE_STATE_MS) refreshVehicleState()
+            if (wantCalibrated && !feedHidden && now - lastCalibrated > CALIBRATED_MS) refreshCalibrated()
+            if (wantSeats && !feedHidden && !feedDriving && now - lastSeats > SEATS_MS) refreshSeats()
+            if (wantAutos && !feedHidden) main.post { refreshAutos() }
+            feed?.postDelayed(this, if (feedHidden) POLL_HIDDEN_MS else if (feedDriving) POLL_DRIVING_MS else POLL_PARKED_MS)
+        }
+    }
+
+    /** Runs [loop] now, on its own thread and in place of its pending turn, so it never runs as two chains. */
+    private fun kick(h: Handler?, loop: Runnable) {
+        h?.post { h.removeCallbacks(loop); loop.run() }
+    }
+
+    // ── car-off sleep ────────────────────────────────────────────────────────
+
+    // the ignition wakes the widgets at once; the vendor's both-ways ACC broadcast or a screen coming on asks core
+    private val wakeReceiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context?, i: Intent?) {
+            when (i?.action) {
+                ACTION_ACC_ON, ACTION_IGN_ON -> { ignitionAt = SystemClock.elapsedRealtime(); offSince = 0L; wake("ignition") }
+                // core can learn of the change a moment after the broadcast
+                else -> if (asleep) { hintUntil = SystemClock.elapsedRealtime() + HINT_MS; kick(feed, feedLoop) }
             }
-        })
+        }
+    }
+
+    /**
+     * Main thread, per summary: core reading the car as off for [SLEEP_AFTER_MS] puts the widgets to sleep, any
+     * other reading wakes them. Core's state can trail an ignition broadcast, so after one an "off" counts only
+     * once core has read the car on.
+     */
+    private fun updateSleep(snap: GlassWidgetsFeed.Snapshot) {
+        if (destroyed) return
+        val now = SystemClock.elapsedRealtime()
+        if (!snap.carOff || snap.charging || snap.driving || snap.reversing) {
+            onSeenAt = now
+            offSince = 0L
+            wake("car on")
+            return
+        }
+        if (asleep) return
+        // arranging or a command under way counts as use: the wait starts after it
+        if (offSince == 0L || arrange != null || pendingArrange || commandsInFlight.isNotEmpty()) offSince = now
+        val doubted = ignitionAt > onSeenAt && now - ignitionAt < IGNITION_HOLD_MS
+        if (now - offSince >= SLEEP_AFTER_MS && !doubted) sleep()
+    }
+
+    private fun sleep() {
+        asleep = true
+        Log.i(TAG, "car off: widgets asleep")
+        closePicker()
+        removeStack()
+        free?.release(); free = null
+        orb?.release(); orb = null
+        surface = null
+        ticker.stop()
+        wantVehicleState = false
+        wantCalibrated = false
+        wantAutos = false
+        wantSeats = false
+        setWantLive(false)
+        setMqtt(null, paused = true)
+    }
+
+    private fun wake(why: String) {
+        if (!asleep || destroyed) return
+        asleep = false
+        offSince = 0L
+        Log.i(TAG, "widgets awake: $why")
+        settings?.let { ensureSurface(it); ensureOrb(it); refreshStack() }
+        // as at start, a window the system refuses ends the service
+        if (surface == null) { stopSelf(); return }
+        kick(io, ioLoop)
+        kick(feed, feedLoop)
     }
 
     private fun ioTick() {
@@ -1830,10 +2078,14 @@ class GlassWidgetsOverlayService : Service() {
         snap?.let { lastPhev = it.phev }
         if (snap != null) {
             lastOk = now
-            main.post { onSnapshot(snap) }
-        } else if (lastOk > 0L && now - lastOk > OFFLINE_AFTER_MS) {
-            val minutes = ((now - lastOk) / 60_000L).toInt().coerceAtLeast(1)
-            main.post { onOffline(minutes) }
+            main.post { onSnapshot(snap); updateSleep(snap) }
+        } else {
+            // a failed read breaks a run of "off" readings: core restarting reads off until it knows
+            main.post { offSince = 0L }
+            if (lastOk > 0L && now - lastOk > OFFLINE_AFTER_MS) {
+                val minutes = ((now - lastOk) / 60_000L).toInt().coerceAtLeast(1)
+                main.post { onOffline(minutes) }
+            }
         }
     }
 
@@ -2029,7 +2281,7 @@ class GlassWidgetsOverlayService : Service() {
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(CHANNEL, "Widgets overlay", NotificationManager.IMPORTANCE_LOW)
+            val ch = NotificationChannel(CHANNEL, gs(R.string.glass_channel_name), NotificationManager.IMPORTANCE_LOW)
             ch.setShowBadge(false)
             getSystemService(NotificationManager::class.java)?.createNotificationChannel(ch)
         }
@@ -2038,8 +2290,8 @@ class GlassWidgetsOverlayService : Service() {
     private fun buildNotification(): Notification {
         val b = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.Builder(this, CHANNEL)
         else @Suppress("DEPRECATION") Notification.Builder(this)
-        return b.setContentTitle("Widgets")
-            .setContentText("Widgets overlay active")
+        return b.setContentTitle(gs(R.string.glass_notif_title))
+            .setContentText(gs(R.string.glass_notif_text))
             .setSmallIcon(R.drawable.ic_widgets)
             .setOngoing(true)
             .setGroup(DaemonKeepaliveService.NOTIFICATION_GROUP_KEY)
@@ -2060,6 +2312,17 @@ class GlassWidgetsOverlayService : Service() {
         private const val POLL_PARKED_MS = 4000L
         private const val POLL_DRIVING_MS = 2000L
         private const val POLL_HIDDEN_MS = 10_000L
+        /** Core must read the car as off this long, unbroken, before the widgets sleep: a starting core reads off until its ACC probe. */
+        private const val SLEEP_AFTER_MS = 180_000L
+        /** Asleep, the summary is read this often: the fallback for a firmware without the ignition broadcast. */
+        private const val ASLEEP_POLL_MS = 30_000L
+        /** After an ignition broadcast, how long core's "off" is doubted while it hasn't read the car on. */
+        private const val IGNITION_HOLD_MS = 10 * 60_000L
+        /** Asleep, how long after a power or screen broadcast the summary is read at the parked rate. */
+        private const val HINT_MS = 30_000L
+        private const val ACTION_ACC_ON = "com.byd.action.ACC_ON"
+        private const val ACTION_IGN_ON = "com.byd.action.IGN_ON"
+        private const val ACTION_ACC_MODE = "com.byd.accmode.ACC_MODE_CHANGED"
         private const val LIVE_MS = 1000L
         private const val LIVE_DYNAMICS_MS = 250L
         private const val LIVE_BS_MS = 500L
@@ -2115,8 +2378,33 @@ class GlassWidgetsOverlayService : Service() {
         private const val NEED_RANGE = 8
         /** Signals the live poll carries only when it asks for the pedals too. */
         private val PEDAL_KEYS = setOf("accel_pct", "brake_pct", "motor_front_rpm", "motor_rear_rpm")
+        /** The seats list is read this often while it shows parked, and again on showing if older than [SEATS_SHOW_MS]. */
+        private const val SEATS_MS = 120_000L
+        private const val SEATS_SHOW_MS = 10_000L
+        private const val SEAT_TIMEOUT_MS = 20_000
+        private const val SEAT_DONE_MS = 2_000L
+        private const val SEAT_FAIL_MS = 3_000L
+        private const val MQTT_MS = 5_000L
+        private const val MQTT_TIMEOUT_MS = 3_000
+        /** Channels one poll asks for at most, as core answers. */
+        private const val MQTT_MAX = 16
+        private val MQTT_CHANNEL = Regex("[A-Za-z0-9._-]{1,64}")
 
         @Volatile private var instance: GlassWidgetsOverlayService? = null
+
+        /** The app's language pick reaches activities only: re-resolve the widgets' strings now.
+         *  Labels fed by live data pick the new language up on the next poll. */
+        fun relocalizeIfRunning() {
+            val s = instance ?: return
+            s.main.post {
+                if (s.destroyed) return@post
+                GlassStrings.attach(s)
+                s.surface?.themeChanged()
+                s.customRow { it.themeChanged() }
+                s.orb?.themeChanged()
+                (s.picker?.getChildAt(0) as? GlassWidgetView)?.themeChanged()
+            }
+        }
 
         /** The app's theme pick reaches activities only: re-resolve the widgets' theme now. */
         fun refreshThemeIfRunning() {

@@ -56,9 +56,15 @@ public final class ClusterMapProjector {
     // the panel exactly. Fullscreen is also what blind-spot uses on this display.
     private static final String WINDOWING_MODE_FULLSCREEN = "1";
 
-    // Poll budget for the fission display to appear after the projection opens.
+    // The open's opcode sequence runs first; the display then gets the car-proven 20 s window,
+    // and a display that arrives within the following minute retries the map once.
     private static final int READY_POLL_MS = 250;
-    private static final int READY_TIMEOUT_MS = 8000;
+    private static final long OPEN_WAIT_MS = 60_000L;
+    private static final long DISPLAY_WAIT_MS = 20_000L;
+    private static final long LATE_DISPLAY_WATCH_MS = 60_000L;
+    private static final long LATE_DISPLAY_POLL_MS = 2_000L;
+    private static final long QUEUED_START_SETTLE_MS = 45_000L;
+    private static final long SETTLE_POLL_MS = 200L;
 
     // Post-launch verify+retry budget. `am start` exits 0 on ACCEPT, not on RESUMED-
     // on-display, so we confirm the Activity actually reached the foreground of the
@@ -110,8 +116,57 @@ public final class ClusterMapProjector {
     // start() replaces this reference with the new thread; each loop bails the moment it
     // is no longer the current launchThread, so only the latest session's watchdog lives.
     private static volatile Thread launchThread;
+    // Bumped by every start()/stop(); a late-display retry only fires if neither happened since.
+    private static volatile long intentEpoch;
 
     private ClusterMapProjector() {}
+
+    /** Non-blocking start; a cast stop or gauge restore still running is waited out on its own thread. */
+    public static void startWhenSettled() {
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()
+                || !legacyStartSettling()) {
+            start();
+            return;
+        }
+        final long intent = intentEpoch;
+        try {
+            Thread queued = new Thread(() -> {
+                long deadline = android.os.SystemClock.elapsedRealtime() + QUEUED_START_SETTLE_MS;
+                while (legacyStartSettling()
+                        && android.os.SystemClock.elapsedRealtime() < deadline) {
+                    try {
+                        Thread.sleep(SETTLE_POLL_MS);
+                    } catch (InterruptedException interrupted) {
+                        return;
+                    }
+                }
+                // Dropped if the user acted since, the car went off, or another mode took the cluster.
+                if (intentEpoch != intent
+                        || (com.overdrive.app.monitor.AccMonitor.isAccStateAuthoritative()
+                                && !com.overdrive.app.monitor.AccMonitor.isAccOn())
+                        || com.overdrive.app.launcher.ClusterCast.isActive()
+                        || com.overdrive.app.launcher.ClusterLayouts.isActive()) {
+                    logger.info("queued cluster map start dropped (superseded)");
+                    return;
+                }
+                start();
+            }, "ClusterMapQueued");
+            queued.setDaemon(true);
+            queued.start();
+            logger.info("cluster map projection queued behind the running stop/restore");
+        } catch (Throwable t) {
+            start();
+        }
+    }
+
+    private static boolean legacyStartSettling() {
+        try {
+            return ClusterProjectionController.isLegacyRestoreInFlight()
+                    || com.overdrive.app.launcher.ClusterLayouts.isBusy();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
 
     /** Publish the cluster-map-active coordination flag the launched Activity polls
      *  to self-finish (see {@link #K_CLUSTER_MAP_ACTIVE}). Best-effort; a missed
@@ -141,6 +196,20 @@ public final class ClusterMapProjector {
      * map Activity onto it. Runs the wait+launch off the caller's thread.
      */
     public static synchronized void start() {
+        com.overdrive.app.launcher.layout.LayoutModeGate.StandardStart admission =
+                com.overdrive.app.launcher.layout.LayoutModeGate.enterStandard();
+        if (admission == null) {
+            logger.warn("cluster map: stop Layouts before starting the full cluster map");
+            return;
+        }
+        try {
+            startAdmitted();
+        } finally {
+            admission.close();
+        }
+    }
+
+    private static void startAdmitted() {
         if (active) {
             if (!com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()
                     || com.overdrive.app.launcher.DiLink5ClusterCast.isMapActive()) {
@@ -150,6 +219,7 @@ public final class ClusterMapProjector {
             publishActiveFlag(false);
         }
         active = true;
+        intentEpoch++;
         logger.info("cluster map projection: start");
         // Mark active BEFORE launch so the Activity's first poll sees true and
         // doesn't immediately self-finish on a fast startup.
@@ -199,6 +269,7 @@ public final class ClusterMapProjector {
      *  and re-surfaces under the blind-spot card on the next turn-signal projection
      *  open — the "map shows on the cluster even when disabled" bug. */
     public static synchronized boolean stop() {
+        intentEpoch++;
         if (!active) return true;
         active = false;
         logger.info("cluster map projection: stop");
@@ -251,30 +322,41 @@ public final class ClusterMapProjector {
 
     private static void waitAndLaunch() {
         final Thread self = Thread.currentThread();
-        // Wait for the OEM projection to actually establish the fission display.
-        int waited = 0;
+        // Wait for the open sequence to commit, then for a POSITIVE fission displayId (never 0 =
+        // the built-in head unit). The VirtualDisplay materialises after 16→35.
         int displayId = -1;
-        // Keep polling until a POSITIVE fission displayId appears. The fission
-        // VirtualDisplay materialises ~1-3s AFTER the open opcodes (31→16→35), so
-        // an early resolve transiently returns -1; and it's NEVER display 0 (that's
-        // the built-in head unit). Requiring >0 means we wait for the real cluster
-        // display instead of aborting on a transient/misparse 0.
-        while (active && launchThread == self
-                && waited < READY_TIMEOUT_MS) {
-            int id = resolveFissionDisplayId();
-            if (id > 0) { displayId = id; break; }
+        boolean timedOut = false;
+        long openDeadline = android.os.SystemClock.elapsedRealtime() + OPEN_WAIT_MS;
+        while (active && launchThread == self) {
+            int progress = ClusterProjectionController.legacyOpenProgress();
+            if (progress > 0) break;
+            if (progress < 0 || android.os.SystemClock.elapsedRealtime() >= openDeadline) {
+                openDeadline = -1L;
+                break;
+            }
             try { Thread.sleep(READY_POLL_MS); } catch (InterruptedException e) { return; }
-            waited += READY_POLL_MS;
+        }
+        if (openDeadline > 0) {
+            long displayDeadline = android.os.SystemClock.elapsedRealtime() + DISPLAY_WAIT_MS;
+            while (active && launchThread == self) {
+                int id = resolveFissionDisplayId();
+                if (id > 0) { displayId = id; break; }
+                if (android.os.SystemClock.elapsedRealtime() >= displayDeadline) {
+                    timedOut = true;
+                    break;
+                }
+                try { Thread.sleep(READY_POLL_MS); } catch (InterruptedException e) { return; }
+            }
         }
         if (!active || launchThread != self) return;
         if (displayId <= 0) {
-            // No fission display ever materialised within the budget (non-fission /
-            // Atto-class cluster, or the OEM projection never established). Do NOT
-            // blind-fall back to displayId 1 — on such a model display 1 may be the
-            // HEAD UNIT, so launching there would clobber the infotainment screen.
+            // No fission display (non-fission trim, or the projection never established). Do NOT
+            // blind-fall back to displayId 1 — on such a model display 1 may be the HEAD UNIT.
             // Abort + RELEASE the sustained hold so the controller restores gauges.
-            logger.warn("fission display not resolved (>0) in " + READY_TIMEOUT_MS
-                    + "ms — aborting cluster map projection (no clobber of display 0)");
+            logger.warn((timedOut
+                    ? "fission display not resolved (>0) in " + DISPLAY_WAIT_MS + "ms"
+                    : "cluster projection did not open")
+                    + " — aborting cluster map projection (no clobber of display 0)");
             synchronized (ClusterMapProjector.class) {
                 if (launchThread != self) return;
                 active = false;
@@ -283,6 +365,7 @@ public final class ClusterMapProjector {
             publishActiveFlag(false);   // dismiss any Activity that did come up
             try { com.overdrive.app.surveillance.ClusterProjectionController.getInstance().releaseSustained(); }
             catch (Throwable ignored) {}
+            if (timedOut) armLateDisplayRetry(intentEpoch);
             return;
         }
         // Final race guard: a stop() may have fired during the resolve above. Don't
@@ -567,6 +650,12 @@ public final class ClusterMapProjector {
 
     /** Issue one {@code am start --display N}. Returns true iff the command exited 0. */
     private static boolean issueLaunch(int displayId, int attempt) {
+        final Thread densityOwner = Thread.currentThread();
+        // A previous cast's optional density must not become RoadSense's density.
+        if (!com.overdrive.app.launcher.ClusterAppDensity.restoreForDisplay(
+                displayId, () -> active && launchThread == densityOwner
+                        && isSustainedProjectionHeld())) return false;
+        if (!active || launchThread != densityOwner || !isSustainedProjectionHeld()) return false;
         try {
             // A docked app cast left on this display would resolve the map launch into
             // split-screen-secondary; no-op when nothing is docked.
@@ -579,6 +668,7 @@ public final class ClusterMapProjector {
                 "--ez", "cluster", "true",   // RoadSenseMapActivity reads this → cluster view
                 "-n", MAP_ACTIVITY
             };
+            if (!active || launchThread != densityOwner || !isSustainedProjectionHeld()) return false;
             logger.info("launching map onto displayId " + displayId + " (attempt " + attempt + ")");
             Process proc = Runtime.getRuntime().exec(cmd);
             // Bounded wait (mirrors ClusterProjectionController.sendInfoShell's 2s cap): an
@@ -665,6 +755,36 @@ public final class ClusterMapProjector {
             // (the pre-change behaviour), which is strictly safer than blanking the gauges.
             logger.warn("isSustainedProjectionHeld check failed: " + t.getMessage());
             return false;
+        }
+    }
+
+    /** One retry when the fission display shows up after the map gave up on it. */
+    private static void armLateDisplayRetry(long intent) {
+        try {
+            Thread watcher = new Thread(() -> {
+                long deadline = android.os.SystemClock.elapsedRealtime() + LATE_DISPLAY_WATCH_MS;
+                while (android.os.SystemClock.elapsedRealtime() < deadline) {
+                    try {
+                        Thread.sleep(LATE_DISPLAY_POLL_MS);
+                    } catch (InterruptedException interrupted) {
+                        return;
+                    }
+                    if (active || intentEpoch != intent) return;
+                    if (!com.overdrive.app.monitor.AccMonitor.isAccStateAuthoritative()
+                            || !com.overdrive.app.monitor.AccMonitor.isAccOn()) return;
+                    if (com.overdrive.app.launcher.ClusterCast.isActive()
+                            || com.overdrive.app.launcher.ClusterLayouts.isActive()
+                            || com.overdrive.app.launcher.ClusterLayouts.isBusy()) return;
+                    if (resolveFissionDisplayId() <= 0) continue;
+                    logger.info("cluster display appeared late — retrying the cluster map");
+                    startWhenSettled();
+                    return;
+                }
+            }, "ClusterMapLateDisplay");
+            watcher.setDaemon(true);
+            watcher.start();
+        } catch (Throwable t) {
+            logger.warn("late display watch failed: " + t.getMessage());
         }
     }
 

@@ -93,6 +93,7 @@ public class BluetoothPhoneReconnectControllerTest {
         int cancels;
         int pendingBindings;
         int lifecycleCloses;
+        long recoveryGeneration;
         List<BluetoothPhoneReconnectController.ProfileListener> listeners = new ArrayList<>();
         List<BluetoothPhoneReconnectController.Profile> closed = new ArrayList<>();
 
@@ -125,6 +126,7 @@ public class BluetoothPhoneReconnectControllerTest {
             closed.add(profile);
         }
         @Override public void close() { lifecycleCloses++; }
+        @Override public long recoveryGeneration() { return recoveryGeneration; }
         void ready(FakeProfile profile) {
             pendingBindings = 0;
             listeners.get(listeners.size() - 1).connected(16, profile);
@@ -173,6 +175,61 @@ public class BluetoothPhoneReconnectControllerTest {
         assertEquals("phone_not_paired", f.controller.snapshot(PHONE).reason);
         f.controller.tick("AA:BB:CC:DD:EE:03", false);
         assertEquals(0, f.platform.opens);
+    }
+
+    @Test public void unpairedPhoneCannotCancelAnotherPhonesPendingBinding() {
+        Fixture f = new Fixture();
+        f.platform.bonded.remove(PHONE);
+        f.controller.tick(PHONE, false);
+        f.controller.tick(OTHER, false);
+        assertEquals(1, f.platform.pendingBindings);
+        int cancels = f.platform.cancels;
+        f.controller.tick(PHONE, false);
+        assertEquals(cancels, f.platform.cancels);
+        assertEquals(1, f.platform.pendingBindings);
+        f.platform.ready(f.profile);
+        f.controller.tick(OTHER, false);
+        assertEquals("connecting", f.controller.snapshot(OTHER).state);
+    }
+
+    @Test public void unpairedPhoneCannotCancelAnotherPhonesAcceptedConnection() {
+        Fixture f = new Fixture();
+        f.platform.bonded.remove(PHONE);
+        f.controller.tick(PHONE, false);
+        f.controller.tick(OTHER, false);
+        f.platform.ready(f.profile);
+        f.controller.tick(OTHER, false);
+        assertEquals("connecting", f.controller.snapshot(OTHER).state);
+        f.clock.now = 1_000;
+        f.controller.tick(PHONE, false);
+        assertTrue(f.platform.closed.isEmpty());
+        f.controller.tick(OTHER, false);
+        assertEquals("connecting", f.controller.snapshot(OTHER).state);
+        assertEquals(1, f.profile.connects);
+    }
+
+    @Test public void unpairingStillCancelsThatPhonesOwnPendingBinding() {
+        Fixture f = new Fixture();
+        f.controller.tick(PHONE, false);
+        assertEquals(1, f.platform.pendingBindings);
+        f.platform.bonded.remove(PHONE);
+        f.controller.tick(PHONE, false);
+        assertEquals(0, f.platform.pendingBindings);
+        assertEquals("phone_not_paired", f.controller.snapshot(PHONE).reason);
+        f.platform.ready(f.profile);
+        assertTrue(f.platform.closed.contains(f.profile));
+        assertEquals(0, f.profile.connects);
+    }
+
+    @Test public void unpairingStillCancelsThatPhonesOwnAcceptedConnection() {
+        Fixture f = new Fixture();
+        f.ready();
+        f.controller.tick(PHONE, false);
+        assertEquals("connecting", f.controller.snapshot(PHONE).state);
+        f.platform.bonded.remove(PHONE);
+        f.controller.tick(PHONE, false);
+        assertTrue(f.platform.closed.contains(f.profile));
+        assertEquals("phone_not_paired", f.controller.snapshot(PHONE).reason);
     }
 
     @Test public void consentIsRecheckedBeforeOpeningTheNativeProfile() {
@@ -1013,9 +1070,10 @@ public class BluetoothPhoneReconnectControllerTest {
         assertEquals(3_000, f.controller.snapshot(PHONE).retryInMs);
     }
 
-    @Test public void presentPhoneGetsItsTurnWhileTheAbsentPhoneIsInBackoff() {
+    /** 6 Nov: with no roster phone connected the backoff is waived; once another phone connects it applies. */
+    @Test public void backoffIsWaivedUntilAnotherPhoneIsConnected() {
         Fixture f = new Fixture();
-        // OTHER is temporarily unpaired, so PHONE takes two consecutive turns and times out twice.
+        // OTHER is temporarily unpaired, so PHONE takes consecutive turns and times out twice.
         f.platform.bonded.remove(OTHER);
         f.controller.tick(OTHER, false);
         assertEquals("phone_not_paired", f.controller.snapshot(OTHER).reason);
@@ -1024,32 +1082,32 @@ public class BluetoothPhoneReconnectControllerTest {
         f.clock.now = 15_000;
         f.controller.tick(PHONE, false);
         assertEquals(2, f.profile.connects);
+        // Failure 2 would back off 15 s, but no phone is connected: PHONE retries at once.
         f.clock.now = 30_000;
         f.controller.tick(PHONE, false);
-        assertEquals(2, f.profile.connects);
-        assertEquals("retry_backoff", f.controller.snapshot(PHONE).reason);
-        assertEquals(15_000, f.controller.snapshot(PHONE).retryInMs);
-        // OTHER is paired again and gets the turn at once instead of waiting behind PHONE's next 15 s attempt.
+        assertEquals(3, f.profile.connects);
+        assertEquals("attempt_accepted", f.controller.snapshot(PHONE).reason);
+        assertEquals(3_000, f.controller.snapshot(PHONE).retryInMs);
+        // OTHER is paired again and connects while PHONE's attempt is pending ...
         f.platform.bonded.add(OTHER);
-        f.controller.tick(OTHER, false);
-        assertEquals(3, f.profile.connects);
-        assertEquals(OTHER, f.profile.lastAddress);
-        assertEquals("attempt_accepted", f.controller.snapshot(OTHER).reason);
-        // PHONE's own ticks make no request while OTHER's attempt is pending ...
-        f.clock.now = 33_000;
-        f.controller.tick(PHONE, false);
-        assertEquals(3, f.profile.connects);
-        assertEquals("profile_busy", f.controller.snapshot(PHONE).reason);
         f.platform.connected.add(OTHER);
-        f.clock.now = 34_000;
+        f.clock.now = 40_000;
         f.controller.tick(OTHER, true);
         assertEquals("connected", f.controller.snapshot(OTHER).state);
-        // ... nor after it connected, until PHONE's own backoff has elapsed.
-        f.clock.now = 44_999;
+        // ... so PHONE's next timeout (failure 3) is backed off 30 s.
+        f.clock.now = 45_000;
         f.controller.tick(PHONE, false);
         assertEquals(3, f.profile.connects);
         assertEquals("retry_backoff", f.controller.snapshot(PHONE).reason);
-        attempt(f, PHONE, 45_000, 4);
+        assertEquals(30_000, f.controller.snapshot(PHONE).retryInMs);
+        // OTHER leaves: it takes the next turn, and PHONE's 30 s backoff is waived again.
+        f.platform.connected.remove(OTHER);
+        f.clock.now = 48_000;
+        f.controller.tick(OTHER, false);
+        assertEquals(OTHER, f.profile.lastAddress);
+        assertEquals(4, f.profile.connects);
+        f.controller.tick(PHONE, false);
+        assertEquals("profile_busy", f.controller.snapshot(PHONE).reason);
         assertEquals(3_000, f.controller.snapshot(PHONE).retryInMs);
     }
 
@@ -1138,6 +1196,170 @@ public class BluetoothPhoneReconnectControllerTest {
         }
     }
 
+
+    private static void refuseTwice(Fixture f) {
+        f.profile.connectFailure = new BluetoothPhoneReconnectController.Failure("profile_connect",
+                new InvocationTargetException(new SecurityException("Private native refusal")));
+        f.ready();
+        f.controller.tick(PHONE, false);
+        f.clock.now = 3_000;
+        f.controller.tick(PHONE, false);
+        f.platform.ready(f.profile);
+        f.controller.tick(PHONE, false);
+    }
+
+    @Test public void repeatedPermissionRefusalGetsOneFreshBindingThenNoFurtherRequests() {
+        Fixture f = new Fixture(Collections.singletonList(PHONE));
+        refuseTwice(f);
+        assertEquals(2, f.platform.opens);
+        assertEquals(2, f.profile.connects);
+        assertEquals("unsupported", f.controller.snapshot(PHONE).state);
+        assertEquals("permission_denied", f.controller.snapshot(PHONE).reason);
+        assertEquals(0, f.controller.snapshot(PHONE).retryInMs);
+        assertEquals(0, f.controller.failures(PHONE));
+        for (f.clock.now = 6_000; f.clock.now <= 3_600_000; f.clock.now += 3_000)
+            f.controller.tick(PHONE, false);
+        assertEquals(2, f.platform.opens);
+        assertEquals(2, f.profile.connects);
+        assertFailure(f.controller.snapshot(PHONE), "profile_connect", "SecurityException");
+    }
+
+    @Test public void nativeServiceOrPermissionGenerationRearmsABoundedRecoveryBudget() {
+        Fixture f = new Fixture(Collections.singletonList(PHONE));
+        refuseTwice(f);
+        f.platform.recoveryGeneration++;
+        f.clock.now = 10_000;
+        f.controller.tick(PHONE, false);
+        assertEquals("recovery_context_changed", f.controller.snapshot(PHONE).reason);
+        f.controller.tick(PHONE, false);
+        f.platform.ready(f.profile);
+        f.controller.tick(PHONE, false);
+        assertEquals(3, f.profile.connects);
+        f.clock.now = 13_000;
+        f.controller.tick(PHONE, false);
+        f.platform.ready(f.profile);
+        f.controller.tick(PHONE, false);
+        assertEquals(4, f.profile.connects);
+        f.clock.now = 100_000;
+        f.controller.tick(PHONE, false);
+        assertEquals(4, f.profile.connects);
+        assertEquals("permission_denied", f.controller.snapshot(PHONE).reason);
+    }
+
+    @Test public void observedRadioRestartRearmsSuppressionWithoutCountingDeparture() {
+        Fixture f = new Fixture(Collections.singletonList(PHONE));
+        refuseTwice(f);
+        f.platform.on = false;
+        f.clock.now = 8_000;
+        f.controller.tick(PHONE, false);
+        assertEquals("radio_off", f.controller.snapshot(PHONE).reason);
+        f.platform.on = true;
+        f.clock.now = 11_000;
+        f.controller.tick(PHONE, false);
+        assertEquals("profile_loading", f.controller.snapshot(PHONE).reason);
+        f.platform.ready(f.profile);
+        f.controller.tick(PHONE, false);
+        assertEquals(3, f.profile.connects);
+        assertEquals(0, f.controller.failures(PHONE));
+    }
+
+    @Test public void OEMReconnectIsRecognizedWhileActiveConnectIsSuppressed() {
+        Fixture f = new Fixture(Collections.singletonList(PHONE));
+        refuseTwice(f);
+        f.platform.connected.add(PHONE);
+        f.clock.now = 10_000;
+        f.controller.tick(PHONE, true);
+        assertEquals("connected", f.controller.snapshot(PHONE).state);
+        assertEquals(0, f.controller.snapshot(PHONE).attemptCount);
+        assertNoFailure(f.controller.snapshot(PHONE));
+        assertEquals(2, f.profile.connects);
+    }
+
+    @Test public void callerConnectedHintCannotRearmWithoutIndependentNativeConnection() {
+        Fixture f = new Fixture(Collections.singletonList(PHONE));
+        refuseTwice(f);
+        f.clock.now = 10_000;
+        f.controller.tick(PHONE, true);
+        assertEquals("permission_denied", f.controller.snapshot(PHONE).reason);
+        assertEquals(2, f.profile.connects);
+        assertEquals(2, f.platform.opens);
+    }
+
+    @Test public void freshBondAfterAnObservedUnpairRearmsOnlyThatPhonesBudget() {
+        Fixture f = new Fixture(Collections.singletonList(PHONE));
+        refuseTwice(f);
+        f.platform.bonded.remove(PHONE);
+        f.clock.now = 9_000;
+        f.controller.tick(PHONE, false);
+        assertEquals("phone_not_paired", f.controller.snapshot(PHONE).reason);
+        f.platform.bonded.add(PHONE);
+        f.clock.now = 12_000;
+        f.controller.tick(PHONE, false);
+        f.platform.ready(f.profile);
+        f.controller.tick(PHONE, false);
+        assertEquals(3, f.profile.connects);
+    }
+
+    @Test public void staleProfileCallbacksCannotRearmPermissionSuppression() {
+        Fixture f = new Fixture(Collections.singletonList(PHONE));
+        refuseTwice(f);
+        for (BluetoothPhoneReconnectController.ProfileListener listener : f.platform.listeners) {
+            listener.connected(16, f.profile);
+            listener.disconnected(16);
+        }
+        f.clock.now = 30_000;
+        f.controller.tick(PHONE, false);
+        assertEquals("permission_denied", f.controller.snapshot(PHONE).reason);
+        assertEquals(2, f.platform.opens);
+        assertEquals(2, f.profile.connects);
+    }
+
+    @Test public void refusedPhoneCannotCancelOrStarveAnotherPhonesBindingOrAcceptedRequest() {
+        Fixture f = new Fixture();
+        f.profile.connectFailure = new SecurityException("Private native refusal");
+        f.ready();
+        f.controller.tick(PHONE, false);
+        f.clock.now = 3_000;
+        f.controller.tick(OTHER, false);
+        f.platform.ready(f.profile);
+        f.controller.tick(OTHER, false);
+        f.clock.now = 6_000;
+        f.controller.tick(PHONE, false);
+        f.platform.ready(f.profile);
+        f.controller.tick(PHONE, false);
+        assertEquals("permission_denied", f.controller.snapshot(PHONE).reason);
+        f.clock.now = 9_000;
+        f.controller.tick(OTHER, false);
+        int closes = f.platform.closed.size();
+        int cancels = f.platform.cancels;
+        f.controller.tick(PHONE, false);
+        assertEquals(closes, f.platform.closed.size());
+        assertEquals(cancels, f.platform.cancels);
+        f.platform.ready(f.profile);
+        f.profile.connectFailure = null;
+        f.controller.tick(OTHER, false);
+        assertEquals("attempt_accepted", f.controller.snapshot(OTHER).reason);
+        f.controller.tick(PHONE, false);
+        assertEquals("attempt_accepted", f.controller.snapshot(OTHER).reason);
+        assertEquals(4, f.profile.connects);
+    }
+
+    @Test public void transientNativeFailuresDoNotOpenThePermissionCircuit() {
+        Fixture f = new Fixture(Collections.singletonList(PHONE));
+        f.profile.connectFailure = new IllegalStateException("Service restarting");
+        f.ready();
+        for (int i = 0; i < 5; i++) {
+            if (i > 0) {
+                f.clock.now += 3_000;
+                f.controller.tick(PHONE, false);
+                f.platform.ready(f.profile);
+            }
+            f.controller.tick(PHONE, false);
+        }
+        assertEquals(5, f.profile.connects);
+        assertEquals("profile_unavailable", f.controller.snapshot(PHONE).reason);
+        assertEquals(0, f.controller.failures(PHONE));
+    }
 
     private static void assertFailure(BluetoothPhoneReconnectController.Snapshot snapshot,
             String stage, String errorClass) {

@@ -202,8 +202,12 @@ public class BatterySocMonitor extends BaseDeviceMonitor<BatterySocData> {
     }
 
     private void pollCarSvcSocOnce() {
-        double percentage = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.socPercentValue();
-        if (Double.isNaN(percentage) || percentage < 0.0 || percentage > 100.0) {
+        // Vehicle-SoC rule: status-0 rows only (no held value), and on DI5 below 1% is
+        // "no reading", never an empty pack. Only fresh readings reach the cutoff.
+        com.overdrive.app.byd.CarSvcTelemetry.ChargingSignals signals =
+                com.overdrive.app.byd.CarSvcTelemetry.readChargingSignals();
+        double percentage = signals == null ? Double.NaN : signals.healthySocPercent;
+        if (Double.isNaN(percentage) || percentage < 1.0 || percentage > 100.0) {
             return;
         }
         BatterySocData oldData = cachedData.get();

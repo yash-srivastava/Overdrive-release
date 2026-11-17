@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Location pin sized for 12sp row text (compound drawable). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:width="14dp"
+        android:height="14dp"
+        android:drawable="@drawable/ic_location_pin" />
+</layer-list>

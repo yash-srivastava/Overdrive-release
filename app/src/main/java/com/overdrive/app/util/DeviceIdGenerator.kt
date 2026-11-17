@@ -18,6 +18,11 @@ import java.io.FileReader
 object DeviceIdGenerator {
     
     private const val TAG = "DeviceIdGenerator"
+
+    /** The ID seeds the credential cipher, so logs only show its last 4 characters. */
+    @JvmStatic
+    fun forLog(id: String?): String =
+        if (id.isNullOrEmpty() || id.length <= 8) "****" else "…" + id.takeLast(4)
     private val ID_FILE: String get() = com.overdrive.app.util.ScratchRoot.path(".overdrive_device_id")
     private const val ID_PREFIX = "byd-"
     private const val PREFS_NAME = "device_id_prefs"
@@ -179,7 +184,7 @@ object DeviceIdGenerator {
             command = "echo '$id' > $ID_FILE",
             callback = object : AdbShellExecutor.ShellCallback {
                 override fun onSuccess(output: String) {
-                    Log.d(TAG, "Device ID saved to file via ADB: " + redactDeviceIdForLog(id))
+                    Log.d(TAG, "Device ID saved to file via ADB: ${forLog(id)}")
                 }
                 override fun onError(error: String) {
                     Log.w(TAG, "Failed to save device ID via ADB: $error")
@@ -205,7 +210,7 @@ object DeviceIdGenerator {
         return try {
             val result = executor.executeSync("echo '$id' > $ID_FILE")
             if (result.exitCode == 0) {
-                Log.i(TAG, "Device ID synced to file (sync): " + redactDeviceIdForLog(id))
+                Log.i(TAG, "Device ID synced to file (sync): ${forLog(id)}")
                 true
             } else {
                 Log.w(TAG, "Failed to sync device ID: ${result.output}")
@@ -226,7 +231,3 @@ object DeviceIdGenerator {
         }
     }
 }
-
-/** SECURITY (V60-05): never log the raw device ID — it is the credential-cipher key seed. */
-fun redactDeviceIdForLog(did: String?): String =
-    if (did.isNullOrEmpty() || did.length <= 8) "****" else did.take(4) + "…" + did.takeLast(4) + " (redacted)"

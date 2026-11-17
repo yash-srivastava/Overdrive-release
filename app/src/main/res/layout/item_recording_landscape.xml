@@ -1,282 +1,232 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Landscape library row: 96x54 thumbnail, time/type/severity, place, detail line, share + delete.
+     RecordingAdapter tints the active row and the badges. -->
 <com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/recordingCard"
     android:layout_width="match_parent"
-    android:layout_height="136dp"
-    android:layout_marginHorizontal="4dp"
-    android:layout_marginVertical="4dp"
-    android:foreground="?attr/selectableItemBackground"
-    app:cardBackgroundColor="?attr/colorSurfaceContainer"
-    app:cardCornerRadius="@dimen/card_radius_standard"
+    android:layout_height="@dimen/rec_row_height"
+    android:layout_marginVertical="@dimen/od_space_2"
+    app:cardBackgroundColor="@android:color/transparent"
+    app:cardCornerRadius="@dimen/od_radius_card"
     app:cardElevation="0dp"
-    app:strokeColor="@color/recording_card_stroke"
-    app:strokeWidth="1dp">
+    app:strokeWidth="0dp">
 
-    <FrameLayout
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent">
+        android:layout_height="match_parent"
+        android:baselineAligned="false"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="@dimen/rec_row_padding_start">
 
-        <View
-            android:id="@+id/activeIndicator"
-            android:layout_width="4dp"
-            android:layout_height="match_parent"
-            android:layout_gravity="start"
-            android:background="?attr/colorPrimary"
-            android:elevation="2dp"
-            android:visibility="gone" />
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="@dimen/rec_thumb_width"
+            android:layout_height="@dimen/rec_thumb_height"
+            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+            app:cardCornerRadius="@dimen/rec_thumb_radius"
+            app:cardElevation="0dp"
+            app:strokeWidth="0dp">
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
+            <ImageView
+                android:id="@+id/ivThumbnail"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:contentDescription="@string/cd_video_thumbnail"
+                android:scaleType="centerCrop" />
 
-            <FrameLayout
-                android:layout_width="180dp"
-                android:layout_height="match_parent">
+            <View
+                android:id="@+id/severityStripe"
+                android:layout_width="@dimen/rec_severity_stripe"
+                android:layout_height="match_parent"
+                android:layout_gravity="start"
+                android:visibility="gone" />
 
-                <ImageView
-                    android:id="@+id/ivThumbnail"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:background="?attr/colorSurfaceContainerHigh"
-                    android:contentDescription="@string/cd_video_thumbnail"
-                    android:scaleType="centerCrop" />
-
-                <View
-                    android:id="@+id/severityStripe"
-                    android:layout_width="match_parent"
-                    android:layout_height="3dp"
-                    android:layout_gravity="top"
-                    android:background="?attr/colorTertiary"
-                    android:visibility="gone" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="@dimen/od_space_6"
+                android:paddingTop="3dp"
+                android:paddingEnd="3dp">
 
                 <TextView
                     android:id="@+id/tvCameraId"
-                    android:layout_width="wrap_content"
+                    style="@style/Widget.Overdrive.Rec.ThumbLabel"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_gravity="top|start"
-                    android:layout_margin="8dp"
-                    android:background="@drawable/calendar_day_bg_selected"
-                    android:fontFamily="sans-serif-medium"
-                    android:paddingHorizontal="7dp"
-                    android:paddingVertical="3dp"
-                    android:textColor="?attr/colorOnPrimaryContainer"
-                    android:textSize="10sp"
+                    android:layout_weight="1"
                     tools:text="C0" />
 
-                <CheckBox
-                    android:id="@+id/cbSelect"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
-                    android:layout_gravity="top|start"
-                    android:buttonTint="?attr/colorPrimary"
-                    android:visibility="gone" />
-
-                <ImageView
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
-                    android:layout_gravity="center"
-                    android:alpha="0.92"
-                    android:contentDescription="@string/cd_play"
-                    android:src="@drawable/ic_play_circle" />
-
-                <TextView
-                    android:id="@+id/tvDuration"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="bottom|end"
-                    android:layout_margin="8dp"
-                    android:background="@color/recording_thumb_scrim"
-                    android:fontFamily="sans-serif-medium"
-                    android:paddingHorizontal="7dp"
-                    android:paddingVertical="3dp"
-                    android:textColor="@android:color/white"
-                    android:textSize="11sp"
-                    tools:text="0:10" />
-
-                <!-- SafeKeep backup state; bound only while SafeKeep is on. -->
                 <TextView
                     android:id="@+id/tvSafeKeepBadge"
+                    style="@style/Widget.Overdrive.Rec.SafeKeepBadge"
+                    android:layout_width="wrap_content"
+                    android:visibility="gone"
+                    tools:visibility="visible" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tvDuration"
+                style="@style/Widget.Overdrive.Rec.ThumbDuration"
+                android:layout_width="wrap_content"
+                android:layout_gravity="bottom|end"
+                android:layout_margin="@dimen/od_space_4"
+                tools:text="1:00" />
+
+            <CheckBox
+                android:id="@+id/cbSelect"
+                android:layout_width="@dimen/od_touch_min"
+                android:layout_height="@dimen/od_touch_min"
+                android:layout_gravity="bottom|start"
+                android:background="@drawable/rec_check_box"
+                android:button="@null"
+                android:visibility="gone" />
+        </com.google.android.material.card.MaterialCardView>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <!-- Time, then badges: the type badge collapses first, the severity badge ellipsizes last. -->
+            <com.overdrive.app.ui.widget.BadgeLine
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <TextView
+                    android:id="@+id/tvRecordingTime"
+                    style="@style/Widget.Overdrive.Rec.RowTime"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_gravity="top|end"
-                    android:layout_margin="8dp"
-                    android:ellipsize="end"
-                    android:fontFamily="sans-serif-medium"
-                    android:gravity="center_vertical"
-                    android:maxWidth="120dp"
-                    android:paddingHorizontal="7dp"
-                    android:paddingVertical="3dp"
-                    android:singleLine="true"
-                    android:textColor="@android:color/white"
-                    android:textSize="10sp"
+                    tools:text="08:12" />
+
+                <com.overdrive.app.ui.widget.FitOrHideTextView
+                    android:id="@+id/tvTypeBadge"
+                    style="@style/Widget.Overdrive.Rec.Badge"
+                    android:layout_width="wrap_content"
+                    android:layout_marginStart="@dimen/od_space_6"
+                    tools:text="EVENT" />
+
+                <TextView
+                    android:id="@+id/tvSeverity"
+                    style="@style/Widget.Overdrive.Rec.Badge"
+                    android:layout_width="wrap_content"
+                    android:layout_marginStart="@dimen/od_space_6"
                     android:visibility="gone"
-                    tools:text="SAVED"
+                    tools:text="Alert"
                     tools:visibility="visible" />
-            </FrameLayout>
+            </com.overdrive.app.ui.widget.BadgeLine>
+
+            <TextView
+                android:id="@+id/tvLocation"
+                style="@style/Widget.Overdrive.Rec.RowMeta"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:drawableStart="@drawable/rec_ic_pin_14"
+                android:drawablePadding="@dimen/od_space_4"
+                android:drawableTint="?attr/colorOnSurfaceVariant"
+                android:gravity="center_vertical"
+                android:visibility="invisible"
+                tools:text="Orchard Rd"
+                tools:visibility="visible" />
 
             <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
                 android:gravity="center_vertical"
-                android:orientation="vertical"
-                android:paddingStart="12dp"
-                android:paddingEnd="8dp"
-                android:paddingVertical="8dp">
+                android:orientation="horizontal">
 
-                <LinearLayout
-                    android:layout_width="match_parent"
+                <TextView
+                    android:id="@+id/tvEventTitle"
+                    style="@style/Widget.Overdrive.Rec.RowMeta"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
-
-                    <TextView
-                        android:id="@+id/tvEventTitle"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:ellipsize="end"
-                        android:fontFamily="sans-serif-medium"
-                        android:maxLines="1"
-                        android:textColor="?attr/colorOnSurface"
-                        android:textSize="17sp"
-                        tools:text="Person detected" />
-
-                    <TextView
-                        android:id="@+id/tvSeverity"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:fontFamily="sans-serif-medium"
-                        android:paddingHorizontal="8dp"
-                        android:paddingVertical="3dp"
-                        android:ellipsize="end"
-                        android:singleLine="true"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        android:textSize="10sp"
-                        android:visibility="gone"
-                        tools:text="CRITICAL"
-                        tools:visibility="visible" />
-
-                    <TextView
-                        android:id="@+id/tvTypeBadge"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="6dp"
-                        android:background="?attr/colorSurfaceContainerHighest"
-                        android:fontFamily="sans-serif-medium"
-                        android:paddingHorizontal="8dp"
-                        android:paddingVertical="3dp"
-                        android:ellipsize="end"
-                        android:singleLine="true"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        android:textSize="10sp"
-                        tools:text="EVENT" />
-                </LinearLayout>
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="5dp"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
-
-                    <TextView
-                        android:id="@+id/tvRecordingTime"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:ellipsize="end"
-                        android:singleLine="true"
-                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        tools:text="4:39 PM" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginHorizontal="8dp"
-                        android:text="·"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
-
-                    <TextView
-                        android:id="@+id/tvSize"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        tools:text="6.0 MB" />
-
-                    <TextView
-                        android:id="@+id/tvStorageBadge"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="10dp"
-                        android:background="?attr/colorSurfaceContainerHighest"
-                        android:fontFamily="sans-serif-medium"
-                        android:paddingHorizontal="7dp"
-                        android:paddingVertical="2dp"
-                        android:ellipsize="end"
-                        android:singleLine="true"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        android:textSize="10sp"
-                        android:visibility="gone"
-                        tools:text="INT"
-                        tools:visibility="visible" />
-                </LinearLayout>
+                    android:layout_weight="1"
+                    android:visibility="gone"
+                    tools:text="Motion detected" />
 
                 <TextView
                     android:id="@+id/tvActorSummary"
-                    android:layout_width="match_parent"
+                    style="@style/Widget.Overdrive.Rec.RowMeta"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="3dp"
-                    android:ellipsize="end"
-                    android:maxLines="1"
-                    android:minLines="1"
-                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                    android:textColor="?attr/colorOnSurfaceVariant"
-                    android:visibility="invisible"
-                    tools:text="1 person · Very close"
+                    android:layout_weight="1"
+                    android:visibility="gone"
+                    tools:text="1 person · Close"
                     tools:visibility="visible" />
 
                 <TextView
-                    android:id="@+id/tvLocation"
-                    android:layout_width="match_parent"
+                    style="@style/Widget.Overdrive.Rec.RowMeta"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
-                    android:ellipsize="end"
-                    android:maxLines="1"
-                    android:minLines="1"
-                    android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
-                    android:textColor="?attr/colorOnSurfaceVariant"
-                    android:visibility="invisible"
-                    tools:text="Saved place"
-                    tools:visibility="visible" />
+                    android:importantForAccessibility="no"
+                    android:text="@string/rec_meta_separator" />
 
                 <TextView
-                    android:id="@+id/tvFilename"
-                    android:layout_width="match_parent"
+                    android:id="@+id/tvSize"
+                    style="@style/Widget.Overdrive.Rec.RowMeta"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
-                    android:ellipsize="middle"
-                    android:maxLines="1"
-                    android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
-                    android:textColor="?attr/colorOnSurfaceVariant"
-                    tools:text="event_20260802_163016.mp4" />
+                    tools:text="48 MB" />
+
+                <TextView
+                    android:id="@+id/tvStorageBadge"
+                    style="@style/Widget.Overdrive.Rec.Badge.Small"
+                    android:layout_width="wrap_content"
+                    android:layout_marginStart="@dimen/od_space_6"
+                    android:visibility="gone"
+                    tools:text="SD"
+                    tools:visibility="visible" />
             </LinearLayout>
 
+            <TextView
+                android:id="@+id/tvFilename"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <ImageButton
+                android:id="@+id/btnShare"
+                style="@style/Widget.Overdrive.Rec.RowAction"
+                android:contentDescription="@string/cd_share"
+                android:src="@drawable/ic_share" />
+
+            <ImageButton
+                android:id="@+id/btnDelete"
+                style="@style/Widget.Overdrive.Rec.RowAction"
+                android:contentDescription="@string/cd_delete"
+                android:src="@drawable/ic_delete" />
+
+            <!-- Kept for RecordingAdapter; landscape rows leave extra actions to the preview menu. -->
             <ImageButton
                 android:id="@+id/btnMore"
-                android:layout_width="56dp"
-                android:layout_height="match_parent"
-                android:background="?attr/selectableItemBackgroundBorderless"
+                style="@style/Widget.Overdrive.Rec.RowAction"
                 android:contentDescription="@string/cd_recording_more_actions"
-                android:padding="16dp"
                 android:src="@drawable/ic_more_vert"
-                app:tint="?attr/colorOnSurfaceVariant" />
+                android:visibility="gone" />
         </LinearLayout>
-    </FrameLayout>
+    </LinearLayout>
+
+    <View
+        android:id="@+id/activeIndicator"
+        android:layout_width="@dimen/rec_active_marker_width"
+        android:layout_height="@dimen/rec_active_marker_height"
+        android:layout_gravity="start|center_vertical"
+        android:background="@drawable/rec_active_marker"
+        android:visibility="gone" />
 </com.google.android.material.card.MaterialCardView>

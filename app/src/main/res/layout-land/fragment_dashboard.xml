@@ -7,6 +7,7 @@
     android:background="?android:attr/colorBackground">
 
     <androidx.core.widget.NestedScrollView
+        android:id="@+id/dashScroll"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:clipToPadding="false"
@@ -16,771 +17,871 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:paddingStart="@dimen/page_padding_horizontal"
-        android:paddingTop="@dimen/page_padding_top"
-        android:paddingEnd="@dimen/page_padding_horizontal"
-        android:paddingBottom="@dimen/page_padding_bottom">
+        android:paddingStart="@dimen/od_page_padding_h"
+        android:paddingTop="@dimen/od_page_padding_top"
+        android:paddingEnd="@dimen/od_page_padding_h"
+        android:paddingBottom="@dimen/od_space_24">
 
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/heroCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="@dimen/dashboard_modern_gap"
+            android:minHeight="@dimen/dash_hero_min_height_land"
             app:cardBackgroundColor="?attr/colorSurfaceContainer"
-            app:cardCornerRadius="@dimen/dashboard_modern_radius"
-            app:cardElevation="0dp">
+            app:cardCornerRadius="@dimen/od_radius_card"
+            app:cardElevation="0dp"
+            app:strokeWidth="0dp">
 
-                <!-- Ribbon backdrop. Declared before the content, with the
-                     render, so metricVehicle's ripple still covers the whole
-                     card. -->
-                <ImageView
-                    android:layout_width="@dimen/dashboard_hero_ribbon_width"
-                    android:layout_height="match_parent"
-                    android:layout_gravity="bottom|end"
-                    android:adjustViewBounds="true"
-                    android:alpha="@dimen/dashboard_hero_ribbon_alpha"
-                    android:contentDescription="@null"
-                    android:maxHeight="@dimen/dashboard_hero_backdrop_measure_cap"
-                    android:scaleType="centerCrop"
-                    android:src="@drawable/dashboard_hero_ribbon" />
+            <!-- Drawn first so metricVehicle's ripple covers it. The code fades its
+                 start edge and mirrors it in RTL. -->
+            <ImageView
+                android:id="@+id/dashHeroRibbon"
+                android:layout_width="@dimen/dash_hero_ribbon_width_land"
+                android:layout_height="match_parent"
+                android:layout_gravity="end"
+                android:layout_marginEnd="-60dp"
+                android:adjustViewBounds="true"
+                android:alpha="@dimen/dashboard_hero_ribbon_alpha"
+                android:contentDescription="@null"
+                android:importantForAccessibility="no"
+                android:maxHeight="@dimen/dash_hero_ribbon_measure_cap"
+                android:scaleType="centerCrop"
+                android:src="@drawable/dashboard_hero_ribbon" />
 
-                <!-- Vehicle render. wrap_content + maxHeight so the nodpi
-                     bitmap does not measure at 338dp and stretch the card. -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="bottom"
-                    android:orientation="horizontal">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical">
 
-                    <Space
-                        android:layout_width="0dp"
-                        android:layout_height="1dp"
-                        android:layout_weight="1" />
-
-                    <ImageView
-                        android:id="@+id/vehicleArt"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:adjustViewBounds="true"
-                        android:contentDescription="@null"
-                        android:maxHeight="@dimen/dashboard_hero_art_max_height"
-                        android:src="@drawable/vehicle_fallback" />
-
-                    <Space
-                        android:layout_width="@dimen/dashboard_hero_art_inset"
-                        android:layout_height="1dp" />
-                </LinearLayout>
-
-                <!-- The card's touch target, and the only child that sets its
-                     height. match_parent so the ripple reaches the card's edges
-                     even when the backdrop behind it is shorter. -->
+                <!-- Text column and render; opens the vehicle capacity dialog. -->
                 <LinearLayout
                     android:id="@+id/metricVehicle"
                     android:layout_width="match_parent"
-                    android:layout_height="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
                     android:background="?attr/selectableItemBackground"
                     android:clickable="true"
                     android:focusable="true"
-                    android:minHeight="@dimen/dashboard_modern_touch_target"
-                    android:orientation="vertical"
-                    android:padding="@dimen/dashboard_modern_card_padding">
+                    android:minHeight="@dimen/od_touch_min"
+                    android:orientation="vertical">
 
-                    <LinearLayout
+                    <FrameLayout
                         android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
+                        android:layout_height="match_parent">
+
+                        <!-- match_parent height so the glow never sets the hero height. -->
+                        <com.overdrive.app.ui.widget.FillOnlyView
+                            android:layout_width="200dp"
+                            android:layout_height="match_parent"
+                            android:layout_gravity="end"
+                            android:layout_marginEnd="81dp"
+                            android:alpha="@dimen/dash_hero_glow_alpha"
+                            android:forceHasOverlappingRendering="false"
+                            android:background="@drawable/dash_hero_glow"
+                            android:importantForAccessibility="no"
+                            android:scaleX="2.24"
+                            android:translationY="29dp" />
+
+                        <View
+                            android:layout_width="30dp"
+                            android:layout_height="30dp"
+                            android:layout_gravity="bottom|end"
+                            android:layout_marginEnd="186dp"
+                            android:layout_marginBottom="1dp"
+                            android:alpha="@dimen/dash_hero_floor_alpha"
+                            android:forceHasOverlappingRendering="false"
+                            android:background="@drawable/dash_hero_floor"
+                            android:importantForAccessibility="no"
+                            android:scaleX="9.67" />
+
+                        <ImageView
+                            android:id="@+id/vehicleArt"
+                            android:layout_width="@dimen/dash_hero_car_width_land"
+                            android:layout_height="@dimen/dash_hero_car_height_land"
+                            android:layout_gravity="bottom|end"
+                            android:layout_marginEnd="@dimen/dash_hero_car_margin_end_land"
+                            android:layout_marginBottom="7dp"
+                            android:contentDescription="@null"
+                            android:importantForAccessibility="no"
+                            android:scaleType="fitCenter"
+                            android:src="@drawable/vehicle_fallback" />
 
                         <LinearLayout
-                            android:layout_width="0dp"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:orientation="vertical">
+                            android:layout_marginEnd="@dimen/dash_hero_car_reserve_land"
+                            android:orientation="vertical"
+                            android:paddingStart="@dimen/dash_hero_pad_start_land"
+                            android:paddingTop="@dimen/od_space_12"
+                            android:paddingBottom="@dimen/od_space_12">
 
                             <TextView
                                 android:id="@+id/heroGreeting"
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
                                 android:text="@string/dashboard_modern_vehicle_status"
-                                android:textAppearance="@style/TextAppearance.Material3.TitleLarge"
-                                android:textColor="?attr/colorOnSurface"
-                                android:textStyle="bold" />
+                                android:textAppearance="@style/TextAppearance.Overdrive.CardTitle"
+                                android:visibility="gone" />
 
                             <TextView
-                                android:id="@+id/heroSubtitle"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="2dp"
-                                android:text="@string/dashboard_modern_updating"
-                                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                                android:textColor="?attr/colorOnSurfaceVariant" />
-                        </LinearLayout>
-
-                        <TextView
-                            android:id="@+id/metricVehicleValue"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="12dp"
-                            android:gravity="end"
-                            android:maxWidth="176dp"
-                            android:maxLines="2"
-                            android:text="@string/placeholder_dash"
-                            android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                            android:textColor="?attr/colorPrimary" />
-
-                        <ImageView
-                            android:layout_width="18dp"
-                            android:layout_height="18dp"
-                            android:layout_marginStart="2dp"
-                            android:contentDescription="@null"
-                            android:src="@drawable/ic_chevron_right"
-                            app:tint="?attr/colorPrimary" />
-                    </LinearLayout>
-
-                    <!-- Panels are a fixed width so they do not stretch with the
-                         full-bleed card. -->
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal">
-
-                        <LinearLayout
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:orientation="vertical">
-
-                            <LinearLayout
+                                android:id="@+id/metricVehicleValue"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:layout_marginTop="14dp"
-                                android:baselineAligned="false"
-                                android:orientation="horizontal">
+                                android:drawableEnd="@drawable/dash_chevron_18"
+                                android:drawablePadding="@dimen/od_space_4"
+                                android:ellipsize="end"
+                                android:gravity="center_vertical"
+                                android:maxLines="1"
+                                android:minHeight="32dp"
+                                android:text="@string/rail_vehicle"
+                                android:textAppearance="@style/TextAppearance.Overdrive.Overline" />
 
-                                <!-- match_parent so the pair stays level when the
-                                     range panel takes its second line. -->
-                                <LinearLayout
-                                    android:layout_width="@dimen/dashboard_hero_metric_width"
-                                    android:layout_height="match_parent"
-                                    android:background="@drawable/dashboard_metric_box"
-                                    android:minHeight="@dimen/dashboard_hero_metric_min_height"
-                                    android:orientation="vertical"
-                                    android:padding="16dp">
-
-                                    <TextView
-                                        android:layout_width="match_parent"
-                                        android:layout_height="wrap_content"
-                                        android:text="@string/dashboard_modern_battery"
-                                        android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-                                        android:textColor="?attr/colorOnSurfaceVariant" />
-
-                                    <FrameLayout
-                                        android:layout_width="match_parent"
-                                        android:layout_height="wrap_content"
-                                        android:layout_marginTop="4dp">
-
-                                        <TextView
-                                            android:id="@+id/vehicleSocValue"
-                                            android:layout_width="match_parent"
-                                            android:layout_height="wrap_content"
-                                            android:text="@string/dashboard_metric_value_pending"
-                                            android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
-                                            android:textColor="?attr/colorOnSurface"
-                                            android:textStyle="bold" />
-
-                                        <View
-                                            android:id="@+id/vehicleSocSkeleton"
-                                            android:layout_width="72dp"
-                                            android:layout_height="20dp"
-                                            android:layout_gravity="start|center_vertical"
-                                            android:background="@drawable/skeleton_block"
-                                            android:visibility="gone" />
-                                    </FrameLayout>
-                                </LinearLayout>
-
-                                <LinearLayout
-                                    android:layout_width="@dimen/dashboard_hero_metric_width"
-                                    android:layout_height="match_parent"
-                                    android:layout_marginStart="@dimen/dashboard_modern_metric_gap"
-                                    android:background="@drawable/dashboard_metric_box"
-                                    android:minHeight="@dimen/dashboard_hero_metric_min_height"
-                                    android:orientation="vertical"
-                                    android:padding="16dp">
-
-                                    <TextView
-                                        android:id="@+id/vehicleRangeLabel"
-                                        android:layout_width="match_parent"
-                                        android:layout_height="wrap_content"
-                                        android:text="@string/dashboard_modern_range"
-                                        android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-                                        android:textColor="?attr/colorOnSurfaceVariant" />
-
-                                    <FrameLayout
-                                        android:layout_width="match_parent"
-                                        android:layout_height="wrap_content"
-                                        android:layout_marginTop="4dp">
-
-                                        <TextView
-                                            android:id="@+id/vehicleRangeValue"
-                                            android:layout_width="match_parent"
-                                            android:layout_height="wrap_content"
-                                            android:text="@string/dashboard_metric_value_pending"
-                                            android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
-                                            android:textColor="?attr/colorOnSurface"
-                                            android:textStyle="bold" />
-
-                                        <View
-                                            android:id="@+id/vehicleRangeSkeleton"
-                                            android:layout_width="88dp"
-                                            android:layout_height="20dp"
-                                            android:layout_gravity="start|center_vertical"
-                                            android:background="@drawable/skeleton_block"
-                                            android:visibility="gone" />
-                                    </FrameLayout>
-
-                                    <!-- Vehicle's own (HAL) range — visible only
-                                         when a personalized figure headlines this
-                                         panel. Bound null-safely by
-                                         DashboardFragment. -->
-                                    <LinearLayout
-                                        android:id="@+id/vehicleHalRangeColumn"
-                                        android:layout_width="match_parent"
-                                        android:layout_height="wrap_content"
-                                        android:layout_marginTop="8dp"
-                                        android:orientation="vertical"
-                                        android:visibility="gone">
-
-                                        <TextView
-                                            android:layout_width="match_parent"
-                                            android:layout_height="wrap_content"
-                                            android:text="@string/dashboard_modern_vehicle_range"
-                                            android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
-                                            android:textColor="?attr/colorOnSurfaceVariant" />
-
-                                        <TextView
-                                            android:id="@+id/vehicleHalRangeValue"
-                                            android:layout_width="match_parent"
-                                            android:layout_height="wrap_content"
-                                            android:layout_marginTop="2dp"
-                                            android:text="@string/dashboard_metric_value_pending"
-                                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                            android:textColor="?attr/colorOnSurfaceVariant" />
-                                    </LinearLayout>
-                                </LinearLayout>
-                            </LinearLayout>
-
-                            <!-- SOC gauge — visual battery level under the numeric
-                                 SOC. Bound null-safely by
-                                 DashboardFragment.renderVehicleState: empty track
-                                 while loading/unavailable, colorError at ≤20%. -->
-                            <com.google.android.material.progressindicator.LinearProgressIndicator
-                                android:id="@+id/heroSocProgress"
+                            <!-- Digits have no descenders, so the range row may tuck into
+                                 the hero line's descent. -->
+                            <FrameLayout
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:layout_marginTop="12dp"
+                                android:layout_marginTop="-6dp"
+                                android:layout_marginBottom="-10dp">
+
+                                <TextView
+                                    android:id="@+id/vehicleSocValue"
+                                    style="@style/Widget.Overdrive.Metric.Hero"
+                                    android:layout_width="match_parent"
+                                    android:maxLines="1"
+                                    app:autoSizeTextType="uniform"
+                                    app:autoSizeMinTextSize="40sp"
+                                    app:autoSizeMaxTextSize="68sp"
+                                    android:layout_height="@dimen/dash_hero_soc_height"
+    android:gravity="start|center_vertical"
+                                    android:text="@string/dashboard_metric_value_pending" />
+
+                                <View
+                                    android:id="@+id/vehicleSocSkeleton"
+                                    android:layout_width="104dp"
+                                    android:layout_height="44dp"
+                                    android:layout_gravity="start|center_vertical"
+                                    android:background="@drawable/skeleton_block"
+                                    android:visibility="gone" />
+                            </FrameLayout>
+
+                            <!-- The caption sits on the number's baseline, or under it when it does not fit. -->
+                            <com.overdrive.app.ui.dashboard.DashboardBaselineFlow
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content">
+
+                                <com.overdrive.app.ui.dashboard.DashboardBaselineFrame
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content">
+
+                                    <TextView
+                                        android:id="@+id/vehicleRangeValue"
+                                        style="@style/Widget.Overdrive.Metric.Large"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="@string/dashboard_metric_value_pending" />
+
+                                    <View
+                                        android:id="@+id/vehicleRangeSkeleton"
+                                        android:layout_width="88dp"
+                                        android:layout_height="20dp"
+                                        android:layout_gravity="start|center_vertical"
+                                        android:background="@drawable/skeleton_block"
+                                        android:visibility="gone" />
+                                </com.overdrive.app.ui.dashboard.DashboardBaselineFrame>
+
+                                <TextView
+                                    android:id="@+id/vehicleRangeLabel"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="5dp"
+                                    android:ellipsize="end"
+                                    android:includeFontPadding="false"
+                                    android:maxLines="2"
+                                    android:text="@string/dash_range_caption"
+                                    android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
+                                    android:textColor="?attr/colorOnSurfaceVariant"
+                                    android:textSize="16sp" />
+                            </com.overdrive.app.ui.dashboard.DashboardBaselineFlow>
+
+                            <!-- Vehicle's own estimate, shown only beside a personalised range. -->
+                            <LinearLayout
+                                android:id="@+id/vehicleHalRangeColumn"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="@dimen/od_space_4"
+                                android:orientation="horizontal"
+                                android:visibility="gone">
+
+                                <TextView
+                                    android:id="@+id/vehicleHalRangeValue"
+                                    style="@style/Widget.Overdrive.Metric.Inline"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:ellipsize="end"
+                                    android:maxLines="2"
+                                    android:text="@string/dashboard_metric_value_pending"
+                                    android:textColor="?attr/colorOnSurfaceVariant" />
+                            </LinearLayout>
+
+                            <TextView
+                                android:id="@+id/heroRangeBreakdown"
+                                style="@style/Widget.Overdrive.Metric.Inline"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="@dimen/od_space_4"
+                                android:maxLines="2"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:visibility="gone" />
+
+                            <com.google.android.material.progressindicator.LinearProgressIndicator
+                                android:id="@+id/heroSocProgress"
+    app:indicatorDirectionLinear="startToEnd"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="@dimen/od_space_12"
                                 android:indeterminate="false"
                                 android:max="100"
                                 app:indicatorColor="?attr/colorPrimary"
+                                app:indicatorTrackGapSize="0dp"
                                 app:trackColor="?attr/colorSurfaceContainerHighest"
                                 app:trackCornerRadius="3dp"
                                 app:trackStopIndicatorSize="0dp"
                                 app:trackThickness="6dp" />
 
-                            <!-- PHEV range breakdown — resolved EV / petrol leg
-                                 split (personalized when learned, HAL otherwise)
-                                 plus fuel %. Bound null-safely; GONE on BEVs. -->
+                            <!-- Charging values replace the meta line while a charge snapshot exists.
+                                 ChipGroup is used only as a wrapping row. -->
+                            <com.google.android.material.card.MaterialCardView
+                                android:id="@+id/chargingCard"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="@dimen/od_space_8"
+                                android:visibility="gone"
+                                app:cardBackgroundColor="@android:color/transparent"
+                                app:cardCornerRadius="0dp"
+                                app:cardElevation="0dp"
+                                app:strokeWidth="0dp">
+
+                                <com.google.android.material.chip.ChipGroup
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    app:chipSpacingHorizontal="@dimen/od_space_6"
+                                    app:chipSpacingVertical="@dimen/od_space_2"
+                                    app:singleLine="false">
+
+                                    <ImageView
+                                        android:id="@+id/dashChargeIcon"
+                                        android:layout_width="16dp"
+                                        android:layout_height="16dp"
+                                        android:contentDescription="@null"
+                                        android:src="@drawable/ic_charging"
+                                        app:tint="?attr/colorPrimary" />
+
+                                    <TextView
+                                        android:id="@+id/chargingStateValue"
+                                        style="@style/Widget.Overdrive.Dashboard.ChargeValue"
+                                        android:fontFamily="sans-serif-medium"
+                                        android:text="@string/dashboard_modern_charging"
+                                        android:textColor="?attr/colorOnSurface" />
+
+                                    <LinearLayout
+                                        android:id="@+id/chargingPowerGroup"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:gravity="center_vertical"
+                                        android:orientation="horizontal">
+
+                                        <ImageView
+                                            android:id="@+id/dashChargePowerSep"
+                                            style="@style/Widget.Overdrive.Dashboard.ChargeDot" />
+
+                                        <TextView
+                                            android:id="@+id/chargingPowerValue"
+                                            style="@style/Widget.Overdrive.Dashboard.ChargeValue"
+                                            android:fontFamily="sans-serif-medium"
+                                            android:textColor="?attr/colorOnSurface" />
+                                    </LinearLayout>
+
+                                    <LinearLayout
+                                        android:id="@+id/chargingEtaGroup"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:gravity="center_vertical"
+                                        android:orientation="horizontal">
+
+                                        <ImageView
+                                            android:id="@+id/dashChargeEtaSep"
+                                            style="@style/Widget.Overdrive.Dashboard.ChargeDot" />
+
+                                        <TextView
+                                            android:id="@+id/chargingEtaValue"
+                                            style="@style/Widget.Overdrive.Dashboard.ChargeValue" />
+                                    </LinearLayout>
+
+                                    <LinearLayout
+                                        android:id="@+id/chargingSessionGroup"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:gravity="center_vertical"
+                                        android:orientation="horizontal">
+
+                                        <ImageView
+                                            android:id="@+id/dashChargeSessionSep"
+                                            style="@style/Widget.Overdrive.Dashboard.ChargeDot" />
+
+                                        <TextView
+                                            android:id="@+id/chargingSessionValue"
+                                            style="@style/Widget.Overdrive.Dashboard.ChargeValue" />
+                                    </LinearLayout>
+                                </com.google.android.material.chip.ChipGroup>
+                            </com.google.android.material.card.MaterialCardView>
+
                             <TextView
-                                android:id="@+id/heroRangeBreakdown"
+                                android:id="@+id/heroSubtitle"
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:layout_marginTop="8dp"
-                                android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:layout_marginTop="@dimen/od_space_8"
+                                android:ellipsize="end"
+                                android:maxLines="1"
+                                android:textAppearance="@style/TextAppearance.Overdrive.Dashboard.Meta"
+                                android:text="@string/dashboard_modern_updating" />
+                        </LinearLayout>
+                    </FrameLayout>
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/od_hairline"
+                    android:background="?attr/colorOutlineVariant" />
+
+                <!-- Status strip: dot + label per item; refreshHeroChips sets text and tone. -->
+                <FrameLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="?attr/colorSurfaceContainer"
+                    android:minHeight="@dimen/dash_strip_height"
+                    android:paddingStart="@dimen/dash_hero_pad_start_land"
+                    android:paddingEnd="@dimen/dash_hero_pad_start_land">
+
+                    <com.google.android.material.chip.ChipGroup
+                        android:id="@+id/heroChipGroup"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center_vertical"
+                        app:chipSpacingHorizontal="@dimen/dash_strip_gap_land"
+                        app:chipSpacingVertical="0dp"
+                        app:singleLine="false">
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/heroChipTunnel"
+                            style="@style/Widget.Overdrive.Dashboard.StatusChip"
+                            android:text="@string/dash_status_remote_off" />
+
+                        <!-- One flow item, so the action never wraps away from its status. -->
+                        <LinearLayout
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <com.google.android.material.chip.Chip
+                                android:id="@+id/heroChipServices"
+                                style="@style/Widget.Overdrive.Dashboard.StatusChip"
+                                android:text="@string/dashboard_metric_services" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/dashServicesAction"
+                                style="@style/Widget.Overdrive.Dashboard.StatusAction"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="@dimen/od_space_4"
+                                android:text="@string/dash_status_view"
                                 android:visibility="gone" />
-
-                            <!-- Resting tone only. refreshHeroChips repaints
-                                 each chip from the status it reports. -->
-                            <com.google.android.material.chip.ChipGroup
-                                android:id="@+id/heroChipGroup"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="12dp"
-                                app:chipSpacingHorizontal="8dp"
-                                app:chipSpacingVertical="4dp"
-                                app:singleLine="false">
-
-                                <com.google.android.material.chip.Chip
-                                    android:id="@+id/heroChipTunnel"
-                                    style="@style/Widget.Overdrive.HeroChip"
-                                    android:text="@string/dashboard_tunnel_offline"
-                                    android:textColor="?attr/colorPrimary"
-                                    app:chipBackgroundColor="?attr/colorPrimaryContainer" />
-
-                                <com.google.android.material.chip.Chip
-                                    android:id="@+id/heroChipServices"
-                                    style="@style/Widget.Overdrive.HeroChip"
-                                    android:text="@string/dashboard_daemons_running_default"
-                                    android:textColor="?attr/colorPrimary"
-                                    app:chipBackgroundColor="?attr/colorPrimaryContainer" />
-
-                                <com.google.android.material.chip.Chip
-                                    android:id="@+id/heroChipRecording"
-                                    style="@style/Widget.Overdrive.HeroChip"
-                                    android:text="@string/dashboard_chip_recording_idle"
-                                    android:textColor="?attr/colorPrimary"
-                                    app:chipBackgroundColor="?attr/colorPrimaryContainer" />
-                            </com.google.android.material.chip.ChipGroup>
                         </LinearLayout>
 
-                        <Space
-                            android:layout_width="0dp"
-                            android:layout_height="1dp"
-                            android:layout_weight="1" />
-                    </LinearLayout>
-                </LinearLayout>
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/heroChipRecording"
+                            style="@style/Widget.Overdrive.Dashboard.StatusChip"
+                            android:text="@string/dash_status_recording_idle" />
+                    </com.google.android.material.chip.ChipGroup>
+                </FrameLayout>
+            </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/od_space_12"
             android:baselineAligned="false"
             android:orientation="horizontal">
 
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginEnd="8dp"
-                android:layout_weight="1.08"
+                android:layout_weight="1"
                 android:orientation="vertical">
 
-            <include layout="@layout/include_dashboard_ai_insight" />
-
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/chargingCard"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="@dimen/dashboard_modern_gap"
-                android:visibility="gone"
-                app:cardBackgroundColor="?attr/colorPrimaryContainer"
-                app:cardCornerRadius="@dimen/dashboard_modern_radius"
-                app:cardElevation="0dp">
-
-                <LinearLayout
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/quickActionsCard"
+                    style="@style/Widget.Overdrive.Revamp.Card"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="@dimen/dashboard_modern_card_padding">
+                    android:layout_height="wrap_content">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
-
-                        <ImageView
-                            android:layout_width="24dp"
-                            android:layout_height="24dp"
-                            android:contentDescription="@null"
-                            android:src="@drawable/ic_charging"
-                            app:tint="?attr/colorOnPrimaryContainer" />
+                        android:orientation="vertical">
 
                         <TextView
-                            android:id="@+id/chargingStateValue"
-                            android:layout_width="0dp"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginStart="12dp"
-                            android:layout_weight="1"
-                            android:text="@string/dashboard_modern_charging"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="?attr/colorOnPrimaryContainer"
-                            android:textStyle="bold" />
+                            android:layout_marginBottom="@dimen/od_space_12"
+                            android:text="@string/dashboard_modern_quick_actions"
+                            android:textAppearance="@style/TextAppearance.Overdrive.CardTitle" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:baselineAligned="false"
+                            android:orientation="horizontal">
+
+                            <com.google.android.material.card.MaterialCardView
+                                android:id="@+id/quickLive"
+    android:minHeight="@dimen/dashboard_modern_action_min_height"
+                                style="@style/Widget.Overdrive.Revamp.Tile"
+                                android:layout_width="0dp"
+                                android:layout_height="match_parent"
+                                android:layout_marginEnd="@dimen/od_space_4"
+                                android:layout_weight="1">
+
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent"
+                                    android:gravity="center_vertical"
+                                    android:minHeight="@dimen/od_touch_primary"
+                                    android:orientation="horizontal"
+                                    android:paddingStart="@dimen/od_space_16"
+                                    android:paddingTop="@dimen/od_space_8"
+                                    android:paddingEnd="@dimen/od_space_12"
+                                    android:paddingBottom="@dimen/od_space_8">
+
+                                    <ImageView
+                                        android:layout_width="@dimen/od_icon_md"
+                                        android:layout_height="@dimen/od_icon_md"
+                                        android:contentDescription="@null"
+                                        android:src="@drawable/ic_live"
+                                        app:tint="?attr/colorPrimary" />
+
+                                    <com.overdrive.app.ui.widget.WordFitTextView
+                                        android:layout_width="0dp"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="14dp"
+                                        android:layout_weight="1"
+                                        android:text="@string/dashboard_action_live"
+                                        android:textAppearance="@style/TextAppearance.Overdrive.Dashboard.Tile" />
+                                </LinearLayout>
+                            </com.google.android.material.card.MaterialCardView>
+
+                            <com.google.android.material.card.MaterialCardView
+                                android:id="@+id/cardDaemons"
+    android:minHeight="@dimen/dashboard_modern_action_min_height"
+                                style="@style/Widget.Overdrive.Revamp.Tile"
+                                android:layout_width="0dp"
+                                android:layout_height="match_parent"
+                                android:layout_marginStart="@dimen/od_space_4"
+                                android:layout_weight="1">
+
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent"
+                                    android:gravity="center_vertical"
+                                    android:minHeight="@dimen/od_touch_primary"
+                                    android:orientation="horizontal"
+                                    android:paddingStart="@dimen/od_space_16"
+                                    android:paddingTop="@dimen/od_space_8"
+                                    android:paddingEnd="@dimen/od_space_12"
+                                    android:paddingBottom="@dimen/od_space_8">
+
+                                    <ImageView
+                                        android:layout_width="@dimen/od_icon_md"
+                                        android:layout_height="@dimen/od_icon_md"
+                                        android:contentDescription="@null"
+                                        android:src="@drawable/ic_services"
+                                        app:tint="?attr/colorPrimary" />
+
+                                    <LinearLayout
+                                        android:layout_width="0dp"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="14dp"
+                                        android:layout_weight="1"
+                                        android:orientation="vertical">
+
+                                        <com.overdrive.app.ui.widget.WordFitTextView
+                                            android:layout_width="match_parent"
+                                            android:layout_height="wrap_content"
+                                            android:text="@string/dashboard_metric_services"
+                                            android:textAppearance="@style/TextAppearance.Overdrive.Dashboard.Tile" />
+
+                                        <TextView
+                                            android:id="@+id/tvDaemonsStatus"
+                                            android:layout_width="match_parent"
+                                            android:layout_height="wrap_content"
+                                            android:layout_marginTop="@dimen/od_space_2"
+                                            android:fontFeatureSettings="tnum"
+                                            android:maxLines="2"
+                                            android:text="@string/dashboard_metric_value_pending"
+                                            android:textAppearance="@style/TextAppearance.Overdrive.Dashboard.Meta" />
+                                    </LinearLayout>
+                                </LinearLayout>
+                            </com.google.android.material.card.MaterialCardView>
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="@dimen/od_space_8"
+                            android:baselineAligned="false"
+                            android:orientation="horizontal">
+
+                            <com.google.android.material.card.MaterialCardView
+                                android:id="@+id/quickTrips"
+    android:minHeight="@dimen/dashboard_modern_action_min_height"
+                                style="@style/Widget.Overdrive.Revamp.Tile"
+                                android:layout_width="0dp"
+                                android:layout_height="match_parent"
+                                android:layout_marginEnd="@dimen/od_space_4"
+                                android:layout_weight="1">
+
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent"
+                                    android:gravity="center_vertical"
+                                    android:minHeight="@dimen/od_touch_primary"
+                                    android:orientation="horizontal"
+                                    android:paddingStart="@dimen/od_space_16"
+                                    android:paddingTop="@dimen/od_space_8"
+                                    android:paddingEnd="@dimen/od_space_12"
+                                    android:paddingBottom="@dimen/od_space_8">
+
+                                    <ImageView
+                                        android:layout_width="@dimen/od_icon_md"
+                                        android:layout_height="@dimen/od_icon_md"
+                                        android:contentDescription="@null"
+                                        android:src="@drawable/ic_trips"
+                                        app:tint="?attr/colorPrimary" />
+
+                                    <com.overdrive.app.ui.widget.WordFitTextView
+                                        android:layout_width="0dp"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="14dp"
+                                        android:layout_weight="1"
+                                        android:text="@string/dashboard_action_trips"
+                                        android:textAppearance="@style/TextAppearance.Overdrive.Dashboard.Tile" />
+                                </LinearLayout>
+                            </com.google.android.material.card.MaterialCardView>
+
+                            <com.google.android.material.card.MaterialCardView
+                                android:id="@+id/quickVehicleControl"
+    android:minHeight="@dimen/dashboard_modern_action_min_height"
+                                style="@style/Widget.Overdrive.Revamp.Tile"
+                                android:layout_width="0dp"
+                                android:layout_height="match_parent"
+                                android:layout_marginStart="@dimen/od_space_4"
+                                android:layout_weight="1">
+
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent"
+                                    android:gravity="center_vertical"
+                                    android:minHeight="@dimen/od_touch_primary"
+                                    android:orientation="horizontal"
+                                    android:paddingStart="@dimen/od_space_16"
+                                    android:paddingTop="@dimen/od_space_8"
+                                    android:paddingEnd="@dimen/od_space_12"
+                                    android:paddingBottom="@dimen/od_space_8">
+
+                                    <ImageView
+                                        android:layout_width="@dimen/od_icon_md"
+                                        android:layout_height="@dimen/od_icon_md"
+                                        android:contentDescription="@null"
+                                        android:src="@drawable/ic_vehicle_control"
+                                        app:tint="?attr/colorPrimary" />
+
+                                    <com.overdrive.app.ui.widget.WordFitTextView
+                                        android:layout_width="0dp"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="14dp"
+                                        android:layout_weight="1"
+                                        android:text="@string/dashboard_action_vehicle_control"
+                                        android:textAppearance="@style/TextAppearance.Overdrive.Dashboard.Tile" />
+                                </LinearLayout>
+                            </com.google.android.material.card.MaterialCardView>
+                        </LinearLayout>
                     </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
 
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:baselineAligned="false"
-                        android:orientation="horizontal">
-
-                        <LinearLayout
-                            android:id="@+id/chargingPowerGroup"
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_weight="1"
-                            android:orientation="vertical">
-
-                            <TextView
-                                android:id="@+id/chargingPowerValue"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                android:textColor="?attr/colorOnPrimaryContainer"
-                                android:textStyle="bold" />
-
-                            <TextView
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:text="@string/dashboard_modern_charge_power_label"
-                                android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-                                android:textColor="?attr/colorOnPrimaryContainer" />
-                        </LinearLayout>
-
-                        <LinearLayout
-                            android:id="@+id/chargingEtaGroup"
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_marginStart="@dimen/dashboard_modern_metric_gap"
-                            android:layout_weight="1"
-                            android:orientation="vertical">
-
-                            <TextView
-                                android:id="@+id/chargingEtaValue"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                android:textColor="?attr/colorOnPrimaryContainer"
-                                android:textStyle="bold" />
-
-                            <TextView
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:text="@string/dashboard_modern_charge_eta_label"
-                                android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-                                android:textColor="?attr/colorOnPrimaryContainer" />
-                        </LinearLayout>
-
-                        <LinearLayout
-                            android:id="@+id/chargingSessionGroup"
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_marginStart="@dimen/dashboard_modern_metric_gap"
-                            android:layout_weight="1"
-                            android:orientation="vertical">
-
-                            <TextView
-                                android:id="@+id/chargingSessionValue"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                android:textColor="?attr/colorOnPrimaryContainer"
-                                android:textStyle="bold" />
-
-                            <TextView
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:text="@string/dashboard_modern_charge_session_label"
-                                android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-                                android:textColor="?attr/colorOnPrimaryContainer" />
-                        </LinearLayout>
-                    </LinearLayout>
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/quickActionsCard"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="@dimen/dashboard_modern_gap"
-                app:cardBackgroundColor="?attr/colorSurfaceContainer"
-                app:cardCornerRadius="@dimen/dashboard_modern_radius"
-                app:cardElevation="0dp">
-
-                <LinearLayout
+                <!-- The whole card toggles; DashboardFragment rotates btnExpandRemote. -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/metricTunnel"
+                    style="@style/Widget.Overdrive.Revamp.Card"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="@dimen/dashboard_modern_card_padding">
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginBottom="10dp"
-                        android:text="@string/dashboard_modern_quick_actions"
-                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                        android:textColor="?attr/colorOnSurface"
-                        android:textStyle="bold" />
+                    android:layout_marginTop="@dimen/od_space_12"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:minHeight="@dimen/od_touch_min"
+                    app:contentPadding="0dp">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginBottom="@dimen/dashboard_modern_gap"
-                        android:baselineAligned="false"
-                        android:orientation="horizontal">
+                        android:orientation="vertical">
 
-                        <com.google.android.material.card.MaterialCardView
-                            android:id="@+id/quickLive"
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_marginEnd="6dp"
-                            android:layout_weight="1"
-                            android:clickable="true"
-                            android:focusable="true"
-                            android:minHeight="@dimen/dashboard_modern_action_min_height"
-                            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                            app:cardCornerRadius="@dimen/dashboard_modern_radius"
-                            app:cardElevation="0dp">
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:minHeight="@dimen/od_touch_standard"
+                            android:orientation="horizontal"
+                            android:paddingStart="@dimen/od_space_16"
+                            android:paddingTop="@dimen/od_space_8"
+                            android:paddingEnd="@dimen/od_space_16"
+                            android:paddingBottom="@dimen/od_space_8">
+
+                            <View
+                                android:id="@+id/tunnelStateDot"
+                                android:layout_width="10dp"
+                                android:layout_height="10dp"
+                                android:layout_marginStart="@dimen/od_space_2"
+                                android:background="@drawable/status_dot_offline" />
 
                             <LinearLayout
-                                android:layout_width="match_parent"
-                                android:layout_height="match_parent"
-                                android:background="?attr/selectableItemBackground"
-                                android:gravity="center_vertical"
-                                android:minHeight="@dimen/dashboard_modern_action_min_height"
-                                android:orientation="horizontal"
-                                android:padding="12dp">
-
-                                <ImageView
-                                    android:layout_width="24dp"
-                                    android:layout_height="24dp"
-                                    android:contentDescription="@null"
-                                    android:src="@drawable/ic_live"
-                                    app:tint="?attr/colorOnSurfaceVariant" />
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="14dp"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
 
                                 <TextView
-                                    android:layout_width="0dp"
+                                    android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
-                                    android:layout_marginStart="8dp"
-                                    android:layout_weight="1"
-                                    android:text="@string/dashboard_action_live"
-                                    android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
-                                    android:textColor="?attr/colorOnSurface"
-                                    android:textStyle="bold" />
+                                    android:text="@string/dashboard_metric_tunnel"
+                                    android:textAppearance="@style/TextAppearance.Overdrive.CardTitle" />
+
+                                <TextView
+                                    android:id="@+id/metricTunnelValue"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:ellipsize="end"
+                                    android:maxLines="1"
+                                    android:text="@string/dashboard_tunnel_offline"
+                                    android:textAppearance="@style/TextAppearance.Overdrive.Dashboard.Meta" />
                             </LinearLayout>
-                        </com.google.android.material.card.MaterialCardView>
 
-                        <com.google.android.material.card.MaterialCardView
-                            android:id="@+id/cardDaemons"
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_marginStart="6dp"
-                            android:layout_weight="1"
-                            android:clickable="true"
-                            android:focusable="true"
-                            android:minHeight="@dimen/dashboard_modern_action_min_height"
-                            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                            app:cardCornerRadius="@dimen/dashboard_modern_radius"
-                            app:cardElevation="0dp">
+                            <ImageView
+                                android:id="@+id/btnExpandRemote"
+                                android:layout_width="@dimen/od_icon_md"
+                                android:layout_height="@dimen/od_icon_md"
+                                android:layout_marginStart="@dimen/od_space_12"
+                                android:contentDescription="@null"
+                                android:src="@drawable/ic_expand"
+                                app:tint="?attr/colorOnSurfaceVariant" />
+                        </LinearLayout>
 
-                            <LinearLayout
+                        <LinearLayout
+                            android:id="@+id/remoteDetails"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:paddingStart="@dimen/od_space_16"
+                            android:paddingTop="@dimen/od_space_4"
+                            android:paddingEnd="@dimen/od_space_16"
+                            android:paddingBottom="@dimen/od_space_16"
+                            android:visibility="gone">
+
+                            <TextView
                                 android:layout_width="match_parent"
-                                android:layout_height="match_parent"
-                                android:background="?attr/selectableItemBackground"
-                                android:gravity="center_vertical"
-                                android:minHeight="@dimen/dashboard_modern_action_min_height"
-                                android:orientation="horizontal"
-                                android:padding="12dp">
+                                android:layout_height="wrap_content"
+                                android:text="@string/dashboard_modern_remote_details"
+                                android:textAppearance="@style/TextAppearance.Overdrive.Overline" />
 
-                                <ImageView
-                                    android:layout_width="24dp"
-                                    android:layout_height="24dp"
-                                    android:contentDescription="@null"
-                                    android:src="@drawable/ic_services"
-                                    app:tint="?attr/colorOnSurfaceVariant" />
+                            <TextView
+                                android:id="@+id/tvDeviceId"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="@dimen/od_space_4"
+                                android:fontFamily="monospace"
+                                android:text="@string/dashboard_device_id_loading"
+                                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                                android:textColor="?attr/colorOnSurface"
+                                android:textIsSelectable="true" />
+
+                            <com.google.android.material.chip.ChipGroup
+                                android:id="@+id/chipGroupTunnels"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="@dimen/od_space_12"
+                                android:visibility="gone"
+                                app:chipSpacingHorizontal="@dimen/od_space_6"
+                                app:chipSpacingVertical="@dimen/od_space_4"
+                                app:selectionRequired="true"
+                                app:singleLine="false"
+                                app:singleSelection="true" />
+
+                            <!-- Shown with the QR; renderQr and showPlaceholder keep it in step. -->
+                            <LinearLayout
+                                android:id="@+id/dashQrRow"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="@dimen/od_space_12"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:visibility="gone">
+
+                                <FrameLayout
+                                    android:id="@+id/qrContainer"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:background="@drawable/dash_qr_bg"
+                                    android:padding="@dimen/od_space_8"
+                                    android:visibility="gone">
+
+                                    <ImageView
+                                        android:id="@+id/ivQrCode"
+                                        android:layout_width="@dimen/dash_qr_size"
+                                        android:layout_height="@dimen/dash_qr_size"
+                                        android:contentDescription="@string/cd_qr_code"
+                                        android:scaleType="fitCenter" />
+                                </FrameLayout>
 
                                 <LinearLayout
                                     android:layout_width="0dp"
                                     android:layout_height="wrap_content"
-                                    android:layout_marginStart="8dp"
+                                    android:layout_marginStart="@dimen/od_space_16"
                                     android:layout_weight="1"
                                     android:orientation="vertical">
 
                                     <TextView
                                         android:layout_width="match_parent"
                                         android:layout_height="wrap_content"
-                                        android:text="@string/dashboard_metric_services"
-                                        android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
-                                        android:textColor="?attr/colorOnSurface"
-                                        android:textStyle="bold" />
+                                        android:text="@string/dashboard_scan_to_connect"
+                                        android:textAppearance="@style/TextAppearance.Overdrive.Overline" />
 
-                                    <TextView
-                                        android:id="@+id/tvDaemonsStatus"
-                                        android:layout_width="match_parent"
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/dashCopyUrl"
+                                        style="@style/Widget.Material3.Button.TextButton.Icon"
+                                        android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:maxLines="2"
-                                        android:text="@string/dashboard_daemons_running_default"
-                                        android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-                                        android:textColor="?attr/colorOnSurfaceVariant" />
+                                        android:layout_marginStart="-12dp"
+                                        android:layout_marginTop="@dimen/od_space_4"
+                                        android:minHeight="@dimen/od_touch_min"
+                                        android:text="@string/cd_copy_url"
+                                        android:textAllCaps="false"
+                                        app:icon="@drawable/ic_copy" />
                                 </LinearLayout>
                             </LinearLayout>
-                        </com.google.android.material.card.MaterialCardView>
-                    </LinearLayout>
-
-                    <!-- Quick actions, second row: Trips + Vehicle Controls. Same
-                         tile pattern as Live/Services above; wired null-safely by
-                         DashboardFragment.wireClicks to the existing nav-graph
-                         destinations (tripsFragment / vehicleControlFragment). -->
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:baselineAligned="false"
-                        android:orientation="horizontal">
-
-                        <com.google.android.material.card.MaterialCardView
-                            android:id="@+id/quickTrips"
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_marginEnd="6dp"
-                            android:layout_weight="1"
-                            android:clickable="true"
-                            android:focusable="true"
-                            android:minHeight="@dimen/dashboard_modern_action_min_height"
-                            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                            app:cardCornerRadius="@dimen/dashboard_modern_radius"
-                            app:cardElevation="0dp">
-
-                            <LinearLayout
-                                android:layout_width="match_parent"
-                                android:layout_height="match_parent"
-                                android:background="?attr/selectableItemBackground"
-                                android:gravity="center_vertical"
-                                android:minHeight="@dimen/dashboard_modern_action_min_height"
-                                android:orientation="horizontal"
-                                android:padding="12dp">
-
-                                <ImageView
-                                    android:layout_width="24dp"
-                                    android:layout_height="24dp"
-                                    android:contentDescription="@null"
-                                    android:src="@drawable/ic_trips"
-                                    app:tint="?attr/colorOnSurfaceVariant" />
-
-                                <TextView
-                                    android:layout_width="0dp"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginStart="8dp"
-                                    android:layout_weight="1"
-                                    android:text="@string/dashboard_action_trips"
-                                    android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
-                                    android:textColor="?attr/colorOnSurface"
-                                    android:textStyle="bold" />
-                            </LinearLayout>
-                        </com.google.android.material.card.MaterialCardView>
-
-                        <com.google.android.material.card.MaterialCardView
-                            android:id="@+id/quickVehicleControl"
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_marginStart="6dp"
-                            android:layout_weight="1"
-                            android:clickable="true"
-                            android:focusable="true"
-                            android:minHeight="@dimen/dashboard_modern_action_min_height"
-                            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                            app:cardCornerRadius="@dimen/dashboard_modern_radius"
-                            app:cardElevation="0dp">
-
-                            <LinearLayout
-                                android:layout_width="match_parent"
-                                android:layout_height="match_parent"
-                                android:background="?attr/selectableItemBackground"
-                                android:gravity="center_vertical"
-                                android:minHeight="@dimen/dashboard_modern_action_min_height"
-                                android:orientation="horizontal"
-                                android:padding="12dp">
-
-                                <ImageView
-                                    android:layout_width="24dp"
-                                    android:layout_height="24dp"
-                                    android:contentDescription="@null"
-                                    android:src="@drawable/ic_vehicle_control"
-                                    app:tint="?attr/colorOnSurfaceVariant" />
-
-                                <TextView
-                                    android:layout_width="0dp"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginStart="8dp"
-                                    android:layout_weight="1"
-                                    android:text="@string/dashboard_action_vehicle_control"
-                                    android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
-                                    android:textColor="?attr/colorOnSurface"
-                                    android:textStyle="bold" />
-                            </LinearLayout>
-                        </com.google.android.material.card.MaterialCardView>
-                    </LinearLayout>
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/metricTunnel"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:clickable="true"
-                android:focusable="true"
-                android:minHeight="@dimen/dashboard_modern_touch_target"
-                app:cardBackgroundColor="?attr/colorSurfaceContainer"
-                app:cardCornerRadius="@dimen/dashboard_modern_radius"
-                app:cardElevation="0dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:minHeight="64dp"
-                        android:orientation="horizontal"
-                        android:paddingStart="@dimen/dashboard_modern_card_padding"
-                        android:paddingEnd="@dimen/dashboard_modern_card_padding">
-
-                        <View
-                            android:id="@+id/tunnelStateDot"
-                            android:layout_width="10dp"
-                            android:layout_height="10dp"
-                            android:background="@drawable/status_dot_offline" />
-
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="12dp"
-                            android:layout_weight="1"
-                            android:orientation="vertical">
 
                             <TextView
+                                android:id="@+id/tvQrPlaceholder"
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:text="@string/dashboard_metric_tunnel"
-                                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                android:textColor="?attr/colorOnSurface"
-                                android:textStyle="bold" />
-
-                            <TextView
-                                android:id="@+id/metricTunnelValue"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:text="@string/dashboard_tunnel_offline"
+                                android:layout_marginTop="@dimen/od_space_12"
+                                android:text="@string/dashboard_qr_waiting"
                                 android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
                                 android:textColor="?attr/colorOnSurfaceVariant" />
-                        </LinearLayout>
 
-                        <!-- Expansion state indicator, not a tap target. The card
-                             itself toggles; DashboardFragment rotates this. -->
-                        <ImageView
-                            android:id="@+id/btnExpandRemote"
-                            android:layout_width="24dp"
-                            android:layout_height="24dp"
-                            android:contentDescription="@null"
-                            android:src="@drawable/ic_expand"
-                            app:tint="?attr/colorOnSurfaceVariant" />
+                            <TextView
+                                android:id="@+id/tvUrl"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="@dimen/od_space_8"
+                                android:ellipsize="middle"
+                                android:fontFamily="monospace"
+                                android:maxLines="2"
+                                android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                                android:textColor="?attr/colorPrimary"
+                                android:textIsSelectable="true"
+                                android:visibility="gone" />
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="@dimen/od_space_16"
+                                android:text="@string/dashboard_access_code"
+                                android:textAppearance="@style/TextAppearance.Overdrive.Overline" />
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:gravity="center_vertical"
+                                android:minHeight="@dimen/od_touch_min"
+                                android:orientation="horizontal">
+
+                                <TextView
+                                    android:id="@+id/tvDeviceToken"
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:fontFamily="monospace"
+                                    android:letterSpacing="0.2"
+                                    android:maxLines="1"
+                                    android:text="@string/dashboard_token_masked"
+                                    android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                                    android:textColor="?attr/colorOnSurface" />
+
+                                <ImageButton
+                                    android:id="@+id/btnToggleToken"
+    android:layout_width="@dimen/dashboard_modern_touch_target"
+    android:layout_height="@dimen/dashboard_modern_touch_target"
+                                    style="@style/Widget.Overdrive.Dashboard.TokenButton"
+                                    android:contentDescription="@string/cd_show_hide_token"
+                                    android:src="@android:drawable/ic_menu_view" />
+
+                                <ImageButton
+                                    android:id="@+id/btnCopyToken"
+    android:layout_width="@dimen/dashboard_modern_touch_target"
+    android:layout_height="@dimen/dashboard_modern_touch_target"
+                                    style="@style/Widget.Overdrive.Dashboard.TokenButton"
+                                    android:layout_marginStart="@dimen/od_space_8"
+                                    android:contentDescription="@string/cd_copy_token"
+                                    android:src="@drawable/ic_copy" />
+                            </LinearLayout>
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnRegenerateToken"
+                                style="@style/Widget.Material3.Button.OutlinedButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="@dimen/od_space_12"
+                                android:minHeight="@dimen/od_touch_min"
+                                android:text="@string/dashboard_regenerate_token"
+                                android:textAllCaps="false" />
+                        </LinearLayout>
                     </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/od_space_12"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <include layout="@layout/include_dashboard_ai_insight" />
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/metricRecordings"
+                    style="@style/Widget.Overdrive.Revamp.Card"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:clickable="true"
+                    android:focusable="true">
 
                     <LinearLayout
-                        android:id="@+id/remoteDetails"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:paddingStart="@dimen/dashboard_modern_card_padding"
-                        android:paddingEnd="@dimen/dashboard_modern_card_padding"
-                        android:paddingBottom="@dimen/dashboard_modern_card_padding"
-                        android:visibility="gone">
-
-                        <View
-                            android:layout_width="match_parent"
-                            android:layout_height="1dp"
-                            android:layout_marginBottom="10dp"
-                            android:background="?attr/colorOutlineVariant" />
+                        android:orientation="vertical">
 
                         <LinearLayout
                             android:layout_width="match_parent"
@@ -788,375 +889,206 @@
                             android:gravity="center_vertical"
                             android:orientation="horizontal">
 
+                            <ImageView
+                                android:layout_width="@dimen/od_icon_md"
+                                android:layout_height="@dimen/od_icon_md"
+                                android:contentDescription="@null"
+                                android:src="@drawable/ic_recording"
+                                app:tint="?attr/colorOnSurfaceVariant" />
+
                             <TextView
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
+                                android:layout_marginStart="@dimen/od_space_12"
                                 android:layout_weight="1"
-                                android:text="@string/dashboard_modern_remote_details"
-                                android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
-                                android:textColor="?attr/colorOnSurface" />
-
-                            <TextView
-                                android:id="@+id/tvDeviceId"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginStart="8dp"
-                                android:fontFamily="monospace"
-                                android:text="@string/dashboard_device_id_loading"
-                                android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-                                android:textColor="?attr/colorOnSurfaceVariant"
-                                android:textIsSelectable="true" />
-                        </LinearLayout>
-
-                        <com.google.android.material.chip.ChipGroup
-                            android:id="@+id/chipGroupTunnels"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
-                            android:visibility="gone"
-                            app:chipSpacingHorizontal="8dp"
-                            app:chipSpacingVertical="4dp"
-                            app:selectionRequired="true"
-                            app:singleLine="false"
-                            app:singleSelection="true" />
-
-                        <FrameLayout
-                            android:id="@+id/qrContainer"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_gravity="center_horizontal"
-                            android:layout_marginTop="10dp"
-                            android:background="@android:color/white"
-                            android:padding="8dp"
-                            android:visibility="gone">
+                                android:text="@string/dashboard_metric_recordings"
+                                android:textAppearance="@style/TextAppearance.Overdrive.CardTitle" />
 
                             <ImageView
-                                android:id="@+id/ivQrCode"
-                                android:layout_width="@dimen/dashboard_modern_qr_size"
-                                android:layout_height="@dimen/dashboard_modern_qr_size"
-                                android:contentDescription="@string/cd_qr_code"
-                                android:scaleType="fitCenter" />
-                        </FrameLayout>
-
-                        <TextView
-                            android:id="@+id/tvQrPlaceholder"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="10dp"
-                            android:gravity="center"
-                            android:text="@string/dashboard_qr_waiting"
-                            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                            android:textColor="?attr/colorOnSurfaceVariant" />
-
-                        <TextView
-                            android:id="@+id/tvUrl"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="6dp"
-                            android:ellipsize="middle"
-                            android:fontFamily="monospace"
-                            android:gravity="center"
-                            android:maxLines="2"
-                            android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-                            android:textColor="?attr/colorPrimary"
-                            android:textIsSelectable="true"
-                            android:visibility="gone" />
-
-                        <TextView
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="12dp"
-                            android:text="@string/dashboard_access_code"
-                            android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                            android:textColor="?attr/colorOnSurfaceVariant" />
-
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="4dp"
-                            android:background="?attr/colorSurfaceContainerHigh"
-                            android:gravity="center_vertical"
-                            android:minHeight="@dimen/dashboard_modern_touch_target"
-                            android:orientation="horizontal"
-                            android:paddingStart="12dp">
-
-                            <TextView
-                                android:id="@+id/tvDeviceToken"
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:fontFamily="monospace"
-                                android:maxLines="1"
-                                android:text="@string/dashboard_token_masked"
-                                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                android:textColor="?attr/colorOnSurface" />
-
-                            <ImageButton
-                                android:id="@+id/btnToggleToken"
-                                android:layout_width="@dimen/dashboard_modern_touch_target"
-                                android:layout_height="@dimen/dashboard_modern_touch_target"
-                                android:background="?attr/selectableItemBackgroundBorderless"
-                                android:contentDescription="@string/cd_show_hide_token"
-                                android:padding="12dp"
-                                android:src="@android:drawable/ic_menu_view"
-                                app:tint="?attr/colorOnSurfaceVariant" />
-
-                            <ImageButton
-                                android:id="@+id/btnCopyToken"
-                                android:layout_width="@dimen/dashboard_modern_touch_target"
-                                android:layout_height="@dimen/dashboard_modern_touch_target"
-                                android:background="?attr/selectableItemBackgroundBorderless"
-                                android:contentDescription="@string/cd_copy_token"
-                                android:padding="12dp"
-                                android:src="@drawable/ic_copy"
+                                android:layout_width="@dimen/od_icon_md"
+                                android:layout_height="@dimen/od_icon_md"
+                                android:contentDescription="@null"
+                                android:src="@drawable/ic_arrow_outward"
                                 app:tint="?attr/colorOnSurfaceVariant" />
                         </LinearLayout>
 
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/btnRegenerateToken"
-                            style="@style/Widget.Material3.Button.TextButton"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_gravity="end"
-                            android:layout_marginTop="4dp"
-                            android:minHeight="@dimen/dashboard_modern_touch_target"
-                            android:text="@string/dashboard_regenerate_token"
-                            android:textAllCaps="false" />
-                    </LinearLayout>
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:layout_weight="0.92"
-            android:orientation="vertical">
-
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/metricRecordings"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="@dimen/dashboard_modern_gap"
-                android:clickable="true"
-                android:focusable="true"
-                android:minHeight="@dimen/dashboard_modern_action_min_height"
-                app:cardBackgroundColor="?attr/colorSurfaceContainer"
-                app:cardCornerRadius="@dimen/dashboard_modern_radius"
-                app:cardElevation="0dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:background="?attr/selectableItemBackground"
-                    android:orientation="vertical"
-                    android:padding="@dimen/dashboard_modern_card_padding">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
-
-                        <ImageView
-                            android:layout_width="24dp"
-                            android:layout_height="24dp"
-                            android:contentDescription="@null"
-                            android:src="@drawable/ic_recording"
-                            app:tint="?attr/colorPrimary" />
-
                         <FrameLayout
-                            android:layout_width="0dp"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginStart="12dp"
-                            android:layout_weight="1">
+                            android:layout_marginTop="@dimen/od_space_12">
 
                             <TextView
                                 android:id="@+id/metricRecordingsValue"
+                                style="@style/Widget.Overdrive.Metric.Medium"
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:text="@string/dashboard_metric_value_pending"
-                                android:textAppearance="@style/TextAppearance.Material3.TitleLarge"
-                                android:textColor="?attr/colorOnSurface"
-                                android:textStyle="bold" />
+                                android:ellipsize="end"
+                                android:text="@string/dashboard_metric_value_pending" />
 
                             <View
                                 android:id="@+id/metricRecordingsSkeleton"
-                                android:layout_width="64dp"
-                                android:layout_height="18dp"
+                                android:layout_width="96dp"
+                                android:layout_height="24dp"
                                 android:layout_gravity="start|center_vertical"
                                 android:background="@drawable/skeleton_block"
                                 android:visibility="gone" />
                         </FrameLayout>
 
-                        <ImageView
-                            android:layout_width="24dp"
-                            android:layout_height="24dp"
-                            android:contentDescription="@null"
-                            android:src="@drawable/ic_arrow_outward"
-                            app:tint="?attr/colorOnSurfaceVariant" />
-                    </LinearLayout>
-
-                    <FrameLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp">
-
-                        <TextView
-                            android:id="@+id/metricStorageValue"
+                        <com.google.android.material.progressindicator.LinearProgressIndicator
+                            android:id="@+id/recordingStorageProgress"
+    app:indicatorDirectionLinear="startToEnd"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="@string/dashboard_metric_value_pending"
-                            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                            android:textColor="?attr/colorOnSurfaceVariant" />
+                            android:layout_marginTop="@dimen/od_space_12"
+                            android:indeterminate="false"
+                            android:max="100"
+                            android:visibility="invisible"
+                            app:indicatorColor="?attr/colorPrimary"
+                            app:indicatorTrackGapSize="0dp"
+                            app:trackColor="?attr/colorSurfaceContainerHighest"
+                            app:trackCornerRadius="3dp"
+                            app:trackStopIndicatorSize="0dp"
+                            app:trackThickness="6dp" />
 
-                        <View
-                            android:id="@+id/metricStorageSkeleton"
-                            android:layout_width="164dp"
-                            android:layout_height="12dp"
-                            android:layout_gravity="start|center_vertical"
-                            android:background="@drawable/skeleton_block"
-                            android:visibility="gone" />
-                    </FrameLayout>
+                        <FrameLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="@dimen/od_space_8">
 
-                    <com.google.android.material.progressindicator.LinearProgressIndicator
-                        android:id="@+id/recordingStorageProgress"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:indeterminate="false"
-                        android:max="100"
-                        android:visibility="invisible"
-                        app:indicatorColor="?attr/colorPrimary"
-                        app:trackColor="?attr/colorSurfaceContainerHighest"
-                        app:trackStopIndicatorSize="0dp"
-                        app:trackThickness="4dp" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
+                            <TextView
+                                android:id="@+id/metricStorageValue"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:fontFeatureSettings="tnum"
+                                android:text="@string/dashboard_metric_value_pending"
+                                android:textAppearance="@style/TextAppearance.Overdrive.Dashboard.Meta" />
 
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                app:cardBackgroundColor="?attr/colorSurfaceContainer"
-                app:cardCornerRadius="@dimen/dashboard_modern_radius"
-                app:cardElevation="0dp">
+                            <View
+                                android:id="@+id/metricStorageSkeleton"
+                                android:layout_width="164dp"
+                                android:layout_height="12dp"
+                                android:layout_gravity="start|center_vertical"
+                                android:background="@drawable/skeleton_block"
+                                android:visibility="gone" />
+                        </FrameLayout>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
 
-                <LinearLayout
+                <com.google.android.material.card.MaterialCardView
+                    style="@style/Widget.Overdrive.Revamp.Card"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="@dimen/dashboard_modern_card_padding">
+                    android:layout_marginTop="@dimen/od_space_12">
 
-                    <TextView
+                    <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="@string/dashboard_modern_recent_activity"
-                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                        android:textColor="?attr/colorOnSurface"
-                        android:textStyle="bold" />
+                        android:orientation="vertical">
 
-                    <!-- One row per insight. Empty copy (no icon) starts on
-                         the same edge as the card title. -->
-                    <FrameLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp">
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="@dimen/od_space_4"
+                            android:text="@string/dashboard_modern_recent_activity"
+                            android:textAppearance="@style/TextAppearance.Overdrive.CardTitle" />
+
+                        <!-- One row per insight. Placeholder copy (no icon) starts at the title edge. -->
+                        <FrameLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content">
+
+                            <LinearLayout
+                                android:id="@+id/activityItem1"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:baselineAligned="false"
+                                android:gravity="center_vertical"
+                                android:minHeight="@dimen/od_touch_min"
+                                android:orientation="horizontal">
+
+                                <ImageView
+                                    android:id="@+id/activityIcon1"
+                                    android:layout_width="20dp"
+                                    android:layout_height="20dp"
+                                    android:contentDescription="@null"
+                                    app:tint="?attr/colorOnSurfaceVariant" />
+
+                                <TextView
+                                    android:id="@+id/activityRow1"
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="@dimen/od_space_12"
+                                    android:layout_weight="1"
+                                    android:text="@string/dashboard_modern_activity_loading"
+                                    android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                                    android:textColor="?attr/colorOnSurface" />
+                            </LinearLayout>
+
+                            <View
+                                android:id="@+id/activityRow1Skeleton"
+                                android:layout_width="match_parent"
+                                android:layout_height="12dp"
+                                android:layout_gravity="start|center_vertical"
+                                android:background="@drawable/skeleton_block"
+                                android:visibility="gone" />
+                        </FrameLayout>
 
                         <LinearLayout
-                            android:id="@+id/activityItem1"
+                            android:id="@+id/activityItem2"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:baselineAligned="false"
                             android:gravity="center_vertical"
-                            android:minHeight="32dp"
-                            android:orientation="horizontal">
+                            android:minHeight="@dimen/od_touch_min"
+                            android:orientation="horizontal"
+                            android:visibility="gone">
 
                             <ImageView
-                                android:id="@+id/activityIcon1"
+                                android:id="@+id/activityIcon2"
                                 android:layout_width="20dp"
                                 android:layout_height="20dp"
                                 android:contentDescription="@null"
-                                app:tint="?attr/colorPrimary" />
+                                app:tint="?attr/colorOnSurfaceVariant" />
 
                             <TextView
-                                android:id="@+id/activityRow1"
+                                android:id="@+id/activityRow2"
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
-                                android:layout_marginStart="12dp"
+                                android:layout_marginStart="@dimen/od_space_12"
                                 android:layout_weight="1"
-                                android:text="@string/dashboard_modern_activity_loading"
                                 android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
                                 android:textColor="?attr/colorOnSurface" />
                         </LinearLayout>
 
-                        <View
-                            android:id="@+id/activityRow1Skeleton"
+                        <LinearLayout
+                            android:id="@+id/activityItem3"
                             android:layout_width="match_parent"
-                            android:layout_height="12dp"
-                            android:layout_gravity="start|center_vertical"
-                            android:background="@drawable/skeleton_block"
-                            android:visibility="gone" />
-                    </FrameLayout>
-
-                    <LinearLayout
-                        android:id="@+id/activityItem2"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:baselineAligned="false"
-                        android:gravity="center_vertical"
-                        android:minHeight="32dp"
-                        android:orientation="horizontal"
-                        android:visibility="gone">
-
-                        <ImageView
-                            android:id="@+id/activityIcon2"
-                            android:layout_width="20dp"
-                            android:layout_height="20dp"
-                            android:contentDescription="@null"
-                            app:tint="?attr/colorPrimary" />
-
-                        <TextView
-                            android:id="@+id/activityRow2"
-                            android:layout_width="0dp"
                             android:layout_height="wrap_content"
-                            android:layout_marginStart="12dp"
-                            android:layout_weight="1"
-                            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                            android:textColor="?attr/colorOnSurface" />
+                            android:baselineAligned="false"
+                            android:gravity="center_vertical"
+                            android:minHeight="@dimen/od_touch_min"
+                            android:orientation="horizontal"
+                            android:visibility="gone">
+
+                            <ImageView
+                                android:id="@+id/activityIcon3"
+                                android:layout_width="20dp"
+                                android:layout_height="20dp"
+                                android:contentDescription="@null"
+                                app:tint="?attr/colorOnSurfaceVariant" />
+
+                            <TextView
+                                android:id="@+id/activityRow3"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="@dimen/od_space_12"
+                                android:layout_weight="1"
+                                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                                android:textColor="?attr/colorOnSurface" />
+                        </LinearLayout>
                     </LinearLayout>
-
-                    <LinearLayout
-                        android:id="@+id/activityItem3"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:baselineAligned="false"
-                        android:gravity="center_vertical"
-                        android:minHeight="32dp"
-                        android:orientation="horizontal"
-                        android:visibility="gone">
-
-                        <ImageView
-                            android:id="@+id/activityIcon3"
-                            android:layout_width="20dp"
-                            android:layout_height="20dp"
-                            android:contentDescription="@null"
-                            app:tint="?attr/colorPrimary" />
-
-                        <TextView
-                            android:id="@+id/activityRow3"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="12dp"
-                            android:layout_weight="1"
-                            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                            android:textColor="?attr/colorOnSurface" />
-                    </LinearLayout>
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-        </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+            </LinearLayout>
         </LinearLayout>
     </LinearLayout>
     </androidx.core.widget.NestedScrollView>

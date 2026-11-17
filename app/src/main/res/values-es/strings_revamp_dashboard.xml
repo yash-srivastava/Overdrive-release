@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="dash_vehicle_line">%1$s · %2$.1f kWh</string>
+    <string name="dash_range_caption">de autonomía</string>
+    <string name="dash_status_remote_on">Acceso remoto activado</string>
+    <string name="dash_status_remote_off">Acceso remoto desactivado</string>
+    <string name="dash_status_remote_state">Acceso remoto · %1$s</string>
+    <string name="dash_status_services">%1$d de %2$d servicios</string>
+    <string name="dash_status_view">Ver</string>
+    <string name="dash_status_recording_idle">Grabación inactiva</string>
+    <string name="dash_services_running">%1$d de %2$d activos</string>
+    <string name="dash_charge_eta_left">faltan %1$s</string>
+    <string name="dash_charge_session_inline">%1$s en esta sesión</string>
+    <plurals name="dash_clip_count">
+        <item quantity="one">%1$d clip</item>
+        <item quantity="many">%1$d clips</item>
+        <item quantity="other">%1$d clips</item>
+    </plurals>
+</resources>

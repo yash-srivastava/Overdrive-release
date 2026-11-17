@@ -11,8 +11,7 @@ import java.util.TimeZone;
  *
  * <p>The sampler and HTTP handler use separate threads. Each gets its own
  * formatter because {@link SimpleDateFormat} is mutable and not thread-safe.
- * Every call updates the formatter's time zone so a boot-time timezone correction
- * does not leave existing daemon threads formatting dates in an obsolete zone.
+ * Callers pass the zone, so the key uses whatever zone they read.
  */
 final class DataUsageDayKeys {
 

@@ -322,7 +322,7 @@ func errToReply(err error) byte {
 // pipeIdle bounds how long the second direction of a pipe may stay silent
 // once the first one has finished. Without it a peer that vanished after
 // half-closing would keep both sockets and both goroutines forever.
-var pipeIdle = exposeIdle
+const pipeIdle = exposeIdle
 
 // Reuse transfer buffers across SOCKS sessions to reduce allocation churn.
 var pipeBuffers = sync.Pool{New: func() interface{} {
@@ -333,7 +333,9 @@ var pipeBuffers = sync.Pool{New: func() interface{} {
 // connections. A finished direction half-closes its destination when
 // possible. A write error means the destination is gone, so both conns are
 // closed at once to unblock the other direction.
-func pipe(a, b net.Conn) {
+func pipe(a, b net.Conn) { pipeWithIdle(a, b, pipeIdle) }
+
+func pipeWithIdle(a, b net.Conn, idle time.Duration) {
 	defer a.Close()
 	defer b.Close()
 	var (
@@ -360,7 +362,7 @@ func pipe(a, b net.Conn) {
 				break
 			}
 			if halfClosed.Load() {
-				_ = src.SetReadDeadline(time.Now().Add(pipeIdle))
+				_ = src.SetReadDeadline(time.Now().Add(idle))
 			}
 		}
 		if cw, ok := dst.(interface{ CloseWrite() error }); ok {
@@ -371,7 +373,7 @@ func pipe(a, b net.Conn) {
 		}
 		// Reads of the opposite direction are on dst; start its idle clock.
 		halfClosed.Store(true)
-		_ = dst.SetReadDeadline(time.Now().Add(pipeIdle))
+		_ = dst.SetReadDeadline(time.Now().Add(idle))
 	}
 	go cp(a, b)
 	go cp(b, a)

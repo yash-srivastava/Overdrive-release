@@ -1,5 +1,6 @@
 package com.overdrive.app.surveillance;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -111,6 +112,20 @@ public class ProjectionGeometryTest {
         assertEquals(1599.0,
                 ProjectionGeometry.destinationToSource(1289.0, 320, 1280, 10, 1280),
                 0.0001);
+    }
+
+    @Test
+    public void hostedInputRemovesPanelOffsetAndAppliesInverseBufferScale() {
+        assertEquals(0.0,
+                ClusterInputRelay.mapPanelToInput(480f, 480, 960, 1920), 0.0001);
+        assertEquals(960.0,
+                ClusterInputRelay.mapPanelToInput(960f, 480, 960, 1920), 0.0001);
+        assertEquals(1918.0,
+                ClusterInputRelay.mapPanelToInput(1439f, 480, 960, 1920), 0.0001);
+        assertArrayEquals(
+                new int[] { 960, 540 },
+                ClusterInputRelay.mapPanelPointToInput(
+                        960f, 450f, 480, 180, 960, 540, 1920, 1080));
     }
 
     @Test

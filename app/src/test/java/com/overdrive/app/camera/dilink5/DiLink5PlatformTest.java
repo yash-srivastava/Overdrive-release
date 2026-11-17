@@ -2,6 +2,7 @@ package com.overdrive.app.camera.dilink5;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -24,6 +25,15 @@ public class DiLink5PlatformTest {
         assertTrue(DiLink5Platform.isSelected("dilink5", "auto"));
         assertFalse(DiLink5Platform.isSelected(
                 "default", CameraProfiles.PROFILE_DILINK5_SEALION7));
+    }
+
+    @Test
+    public void pendingSelectionRequiresMatchingStagedAndDurableDiLink5Modes() {
+        assertTrue(DiLink5Platform.isPendingDiLink5Selection("dilink5", "dilink5"));
+        assertTrue(DiLink5Platform.isPendingDiLink5Selection(" DILINK5 ", "DiLink5"));
+        assertFalse(DiLink5Platform.isPendingDiLink5Selection("dilink5", "default"));
+        assertFalse(DiLink5Platform.isPendingDiLink5Selection("dilink4", "dilink5"));
+        assertFalse(DiLink5Platform.isPendingDiLink5Selection(null, "dilink5"));
     }
 
     @Test
@@ -169,5 +179,92 @@ public class DiLink5PlatformTest {
                 ("default\n" + generation + "\n").getBytes(StandardCharsets.UTF_8));
         assertFalse(legacy.matches(DiLink5Platform.parseActiveModeMarker(
                 ("dilink5\n" + generation + "\n").getBytes(StandardCharsets.UTF_8))));
+    }
+
+    @Test
+    public void manualSetupDistinguishesAbsentMarkersFromInvalidPresentMarkers() {
+        DiLink5Platform.ManualAdbModeSnapshot fresh =
+                DiLink5Platform.parseManualAdbModeSnapshot(null, null, "default");
+        assertNotNull(fresh);
+        assertNull(fresh.active);
+        assertNull(fresh.pending);
+        assertEquals("default", fresh.configuredMode);
+
+        for (byte[] corrupt : new byte[][]{
+                new byte[0],
+                "dilink5\n".getBytes(StandardCharsets.UTF_8),
+                "default\nnot-a-uuid\n".getBytes(StandardCharsets.UTF_8),
+                new byte[1_025]}) {
+            assertNull(DiLink5Platform.parseManualAdbModeSnapshot(corrupt, null, "default"));
+            assertNull(DiLink5Platform.parseManualAdbModeSnapshot(null, corrupt, "default"));
+        }
+        assertNull(DiLink5Platform.parseManualAdbModeSnapshot(null, null, "unknown"));
+        assertNull(DiLink5Platform.parseManualAdbModeSnapshot(null, null, null));
+    }
+
+    @Test
+    public void manualScopeSupportsEveryCommittedModeWithoutSelectingABackend() {
+        boolean selectedBefore = DiLink5Platform.isSelected();
+        String generation = UUID.randomUUID().toString();
+        for (String mode : new String[]{"default", "dilink4", "camera2", "dilink5"}) {
+            DiLink5Platform.ManualAdbModeSnapshot scope =
+                    DiLink5Platform.parseManualAdbModeSnapshot(
+                            marker(mode, generation), null, mode);
+            assertNotNull(scope);
+            assertEquals(mode, scope.active.mode);
+            assertEquals(generation, scope.active.generation);
+            assertNull(scope.pending);
+            assertEquals(mode, scope.configuredMode);
+        }
+        assertEquals(selectedBefore, DiLink5Platform.isSelected());
+    }
+
+    @Test
+    public void manualScopeIncludesPendingTransitionsForEveryMode() {
+        byte[] active = marker("default", UUID.randomUUID().toString());
+        String generation = UUID.randomUUID().toString();
+        for (String mode : new String[]{"default", "dilink4", "camera2", "dilink5"}) {
+            DiLink5Platform.ManualAdbModeSnapshot scope =
+                    DiLink5Platform.parseManualAdbModeSnapshot(
+                            active, marker(mode, generation), mode);
+            assertNotNull(scope);
+            assertEquals("default", scope.active.mode);
+            assertEquals(mode, scope.pending.mode);
+            assertEquals(generation, scope.pending.generation);
+        }
+    }
+
+    @Test
+    public void manualAuthorityCannotSurviveARealModeOrMarkerTransition() {
+        byte[] active = marker("default", UUID.randomUUID().toString());
+        byte[] pending = marker("dilink4", UUID.randomUUID().toString());
+        DiLink5Platform.ManualAdbModeSnapshot captured =
+                DiLink5Platform.parseManualAdbModeSnapshot(active, null, "default");
+        assertTrue(captured.matches(
+                DiLink5Platform.parseManualAdbModeSnapshot(active, null, "default")));
+        assertFalse(captured.matches(
+                DiLink5Platform.parseManualAdbModeSnapshot(
+                        marker("default", UUID.randomUUID().toString()), null, "default")));
+        assertFalse(captured.matches(
+                DiLink5Platform.parseManualAdbModeSnapshot(active, pending, "dilink4")));
+        assertFalse(captured.matches(
+                DiLink5Platform.parseManualAdbModeSnapshot(active, null, "dilink4")));
+        assertFalse(captured.matches(
+                DiLink5Platform.parseManualAdbModeSnapshot(null, null, "default")));
+        assertFalse(captured.matches(null));
+
+        DiLink5Platform.ManualAdbModeSnapshot staged =
+                DiLink5Platform.parseManualAdbModeSnapshot(active, pending, "dilink4");
+        assertTrue(staged.matches(
+                DiLink5Platform.parseManualAdbModeSnapshot(active, pending, "dilink4")));
+        assertFalse(staged.matches(
+                DiLink5Platform.parseManualAdbModeSnapshot(
+                        active, marker("dilink4", UUID.randomUUID().toString()), "dilink4")));
+        assertFalse(staged.matches(
+                DiLink5Platform.parseManualAdbModeSnapshot(active, null, "dilink4")));
+    }
+
+    private static byte[] marker(String mode, String generation) {
+        return (mode + "\n" + generation + "\n").getBytes(StandardCharsets.UTF_8);
     }
 }

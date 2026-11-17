@@ -5,23 +5,13 @@ import androidx.navigation.NavOptions
 import com.overdrive.app.R
 
 /**
- * Shared NavOptions presets so every navigation call across the app uses
- * the same M3-Expressive motion vocabulary instead of accidentally falling
- * back to the platform default (no animation).
- *
- * Two presets:
- *  - [m3SharedAxisZ] — drill-down. Use for parent → child screens (e.g.
- *    Settings → Appearance, Integrations → Telegram, Recordings → Video).
- *  - [m3FadeThrough] — peer destinations. Already wired into MainActivity's
- *    rail navigation; exposed here for the rare callsite that needs it
- *    outside the rail (e.g. a tile tap on Dashboard that switches tabs).
+ * Shared NavOptions presets so every navigation uses the app's motion vocabulary.
+ *  - [m3SharedAxisZ]: drill-down (parent → child), a directional push from the trailing edge.
+ *  - [m3FadeThrough]: peer destinations, a plain crossfade (the rail uses the same anims).
  */
 object NavOptionsExt {
 
-    /**
-     * Drill-down nav options. Incoming child grows from 0.85x with fade-up;
-     * outgoing parent dollies backward (1.1x) with fade-out. Pop reverses.
-     */
+    /** Drill-down: the child slides in from the trailing edge, the parent eases back; pop reverses. */
     fun m3SharedAxisZ(): NavOptions = NavOptions.Builder()
         .setLaunchSingleTop(true)
         .setEnterAnim(R.anim.m3_shared_z_enter)
@@ -30,11 +20,7 @@ object NavOptionsExt {
         .setPopExitAnim(R.anim.m3_shared_z_pop_exit)
         .build()
 
-    /**
-     * Peer-destination nav options. Incoming destination fades up + scales
-     * from 0.92x; outgoing fades out fast. Used by MainActivity's rail
-     * navigation; exposed here for callers that need the same motion.
-     */
+    /** Peer destinations: a short crossfade with no scale. */
     fun m3FadeThrough(): NavOptions = NavOptions.Builder()
         .setLaunchSingleTop(true)
         .setEnterAnim(R.anim.m3_fade_through_enter)
@@ -44,7 +30,7 @@ object NavOptionsExt {
         .build()
 }
 
-/** Convenience: navigate(destinationId) with M3 shared-axis-Z drill-down anims. */
+/** Convenience: navigate(destinationId) with the drill-down anims. */
 fun NavController.navigateDrillDown(destinationId: Int, args: android.os.Bundle? = null) {
     try {
         navigate(destinationId, args, NavOptionsExt.m3SharedAxisZ())

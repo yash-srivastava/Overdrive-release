@@ -1,7 +1,9 @@
 package com.overdrive.app.ui.adapter
 
+import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.media.MediaMetadataRetriever
 import android.util.LruCache
 import android.view.LayoutInflater
@@ -12,8 +14,10 @@ import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.PopupMenu
 import android.widget.TextView
+import androidx.annotation.ColorInt
 import androidx.annotation.ColorRes
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
@@ -72,6 +76,9 @@ class RecordingAdapter(
 
     fun safeKeepState(name: String): SafeKeepClipClient.ClipState? =
         if (safeKeepEnabled) safeKeepStates[name] else null
+
+    /** When set, a row's ⋮ goes through the host, which may refresh SafeKeep state before calling show. */
+    var actionsMenuGate: ((anchor: View, recording: RecordingFile, show: () -> Unit) -> Unit)? = null
     
     // Cache for thumbnails — size-bounded LRU. The cap is set in BYTES so a
     // mix of small sidecar JPEGs (~50 KB decoded) and full-res
@@ -85,9 +92,7 @@ class RecordingAdapter(
     private val thumbnailLock = Any()
     private var disposed = false
     private val thumbnailScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    // The shared IO dispatcher is not a decoder concurrency limit: when several
-    // rows become visible together, each can start a native video-frame decode.
-    // Keep at most two thumbnail pipelines active on memory-constrained units.
+    // At most two thumbnail decodes/fetches at once; Dispatchers.IO alone would start one per visible row.
     private val thumbnailSlots = Semaphore(2)
     
     // Multi-select state
@@ -165,7 +170,84 @@ class RecordingAdapter(
     }
     
     val selectedCount: Int get() = selectedItems.size
-    
+
+    /** Evidence pack (indexed clips) or SafeKeep actions are available for [recording]. */
+    fun hasExtraActions(recording: RecordingFile): Boolean =
+        (onEvidencePack != null && !recording.recordingId.isNullOrEmpty()) ||
+            (onSafeKeepAction != null && safeKeepEnabled)
+
+    /**
+     * Per-recording actions menu anchored to [anchor]. Share and delete are left out when the
+     * caller already shows them as buttons.
+     */
+    fun showActionsMenu(
+        anchor: View,
+        recording: RecordingFile,
+        includeDirectActions: Boolean = true,
+        includeDelete: Boolean = includeDirectActions,
+    ) {
+        val shareTitle = anchor.context.getString(R.string.action_share)
+        val evidenceTitle = anchor.context.getString(
+            R.string.action_create_evidence_pack
+        )
+        val deleteTitle = anchor.context.getString(R.string.action_delete)
+        // SafeKeep entries only while it is on; state comes from the last pill refresh.
+        val skOn = onSafeKeepAction != null && safeKeepEnabled
+        val sk = if (skOn) safeKeepState(recording.file.name) else null
+        val skLocked = sk?.locked == true
+        val uploadTitle = anchor.context.getString(R.string.action_safekeep_upload_now)
+        val lockTitle = anchor.context.getString(
+            if (skLocked) R.string.action_safekeep_unlock else R.string.action_safekeep_lock
+        )
+        val cloudTitle = anchor.context.getString(R.string.action_safekeep_open_cloud)
+        PopupMenu(anchor.context, anchor).apply {
+            if (includeDirectActions && onShare != null) menu.add(shareTitle)
+            if (onEvidencePack != null && !recording.recordingId.isNullOrEmpty()) {
+                menu.add(evidenceTitle)
+            }
+            if (skOn) {
+                if (sk?.link != null) menu.add(cloudTitle)
+                if (sk?.state != "saved" && sk?.state != "uploading") menu.add(uploadTitle)
+                menu.add(lockTitle)
+            }
+            if (includeDelete) menu.add(deleteTitle)
+            if (menu.size() == 0) return
+            setOnMenuItemClickListener { item ->
+                when (item.title?.toString()) {
+                    cloudTitle -> {
+                        onSafeKeepAction?.invoke(recording, SafeKeepAction.OPEN_CLOUD)
+                        true
+                    }
+                    uploadTitle -> {
+                        onSafeKeepAction?.invoke(recording, SafeKeepAction.UPLOAD_NOW)
+                        true
+                    }
+                    lockTitle -> {
+                        onSafeKeepAction?.invoke(
+                            recording,
+                            if (skLocked) SafeKeepAction.UNLOCK else SafeKeepAction.LOCK
+                        )
+                        true
+                    }
+                    shareTitle -> {
+                        onShare?.invoke(recording)
+                        true
+                    }
+                    evidenceTitle -> {
+                        onEvidencePack?.invoke(recording)
+                        true
+                    }
+                    deleteTitle -> {
+                        onDelete(recording)
+                        true
+                    }
+                    else -> false
+                }
+            }
+            show()
+        }
+    }
+
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecordingViewHolder {
         val layout = if (landscapeRows) {
             R.layout.item_recording_landscape
@@ -187,7 +269,9 @@ class RecordingAdapter(
         payloads: MutableList<Any>
     ) {
         if (payloads.isNotEmpty() && payloads.all { it === PAYLOAD_SAFEKEEP }) {
-            holder.bindSafeKeep(getItem(position))
+            val recording = getItem(position)
+            holder.bindSafeKeep(recording)
+            holder.renderOverflow(recording)
             return
         }
         super.onBindViewHolder(holder, position, payloads)
@@ -220,6 +304,7 @@ class RecordingAdapter(
         private val tvLocation: TextView? = itemView.findViewById(R.id.tvLocation)
         private val tvSafeKeepBadge: TextView? = itemView.findViewById(R.id.tvSafeKeepBadge)
         private var thumbnailJob: Job? = null
+        // Share and delete sit on the row; the overflow then carries only the extra actions.
 
         fun bind(recording: RecordingFile) {
             val ctx = itemView.context
@@ -240,9 +325,8 @@ class RecordingAdapter(
             tvEventTitle?.text = RecordingUiText.headline(itemView.context, recording)
             renderActiveState(recording)
 
-            // Type badge — short prefix label corresponding to the on-disk
-            // filename group. Always visible so the user can map a tile back
-            // to its file group at a glance (cam_/event_/dvr_/proximity_).
+            // Type badge — short prefix label for the on-disk filename group (cam_/event_/dvr_/proximity_).
+            // Shown on every row; on a line too narrow for the whole label it collapses rather than read "…".
             tvTypeBadge?.let { badge ->
                 val ctx = badge.context
                 badge.text = when (recording.type) {
@@ -257,6 +341,7 @@ class RecordingAdapter(
                     RecordingFile.RecordingType.REPLAY ->
                         ctx.getString(R.string.recording_lib_type_replay)
                 }
+                badge.tintAsTypeBadge()
                 badge.visibility = View.VISIBLE
             }
 
@@ -332,15 +417,17 @@ class RecordingAdapter(
                 }
             }
 
-            // Actor + proximity summary (v3 only). Mid-dot prefix reads cleanly
-            // without leaning on emoji glyphs that don't render at SOTA quality
-            // on the head-unit font stack.
+            // Actor + proximity summary (v3 only); rows with a headline slot show the
+            // headline on the detail line instead when there is no summary.
             val actorSummary = RecordingUiText.actorAndDistance(itemView.context, recording)
             if (actorSummary != null) {
                 tvActorSummary?.visibility = View.VISIBLE
                 tvActorSummary?.text = actorSummary
+                tvEventTitle?.visibility = View.GONE
             } else {
-                tvActorSummary?.visibility = View.INVISIBLE
+                tvActorSummary?.visibility =
+                    if (tvEventTitle != null) View.GONE else View.INVISIBLE
+                tvEventTitle?.visibility = View.VISIBLE
             }
 
             // Place chip — geocoded location from the v3 sidecar's geo.place
@@ -385,9 +472,7 @@ class RecordingAdapter(
                 cbSelect.setOnCheckedChangeListener(null)
                 cbSelect.visibility = View.GONE
                 cbSelect.contentDescription = null
-                val usesOverflow = btnMore != null
-                btnDelete?.visibility = if (usesOverflow) View.GONE else View.VISIBLE
-                btnMore?.visibility = View.VISIBLE
+                btnDelete?.visibility = View.GONE
                 itemView.contentDescription = itemView.context.getString(
                     R.string.recording_item_description,
                     recording.formattedTime,
@@ -396,17 +481,29 @@ class RecordingAdapter(
                 )
 
                 btnDelete?.setOnClickListener { onDelete(recording) }
-                // Per-tile share — only wired when the host fragment opted
-                // into the share callback. Hidden otherwise so the tile
-                // footer doesn't show a dead button.
-                if (!usesOverflow && onShare != null) {
+                // Share is wired only when the host opted into the share callback.
+                if (onShare != null) {
                     btnShare?.visibility = View.VISIBLE
                     btnShare?.setOnClickListener { onShare.invoke(recording) }
                 } else {
                     btnShare?.visibility = View.GONE
                     btnShare?.setOnClickListener(null)
                 }
-                btnMore?.setOnClickListener { showMoreMenu(it, recording) }
+                renderOverflow(recording)
+                btnMore?.setOnClickListener { anchor ->
+                    val show = {
+                        // A delayed menu opens only if this row still shows the same clip.
+                        val pos = bindingAdapterPosition
+                        if (pos != RecyclerView.NO_POSITION && getItem(pos).path == recording.path) {
+                            showActionsMenu(
+                                anchor, recording,
+                                includeDirectActions = btnShare?.visibility != View.VISIBLE,
+                                includeDelete = true,
+                            )
+                        }
+                    }
+                    actionsMenuGate?.invoke(anchor, recording, show) ?: show()
+                }
                 // Tile body opens the player. Long-press = enter multi-select.
                 itemView.setOnClickListener {
                     setActiveRecording(recording.path)
@@ -423,7 +520,7 @@ class RecordingAdapter(
             }
         }
 
-        /** SafeKeep pill: same tonal status treatment as the storage tag, lock glyph when locked. */
+        /** SafeKeep pill: cloud glyph (lock when locked) in the state's tone; saved shows the glyph alone. */
         fun bindSafeKeep(recording: RecordingFile) {
             val badge = tvSafeKeepBadge ?: return
             val st = safeKeepState(recording.file.name)
@@ -453,89 +550,50 @@ class RecordingAdapter(
                     R.color.overdrive_status_danger_container, R.color.overdrive_status_danger)
                 else -> badge.tintAsNeutralBadge()
             }
-            badge.text = text
-            val glyph = if (st.locked) {
-                ContextCompat.getDrawable(ctx, R.drawable.ic_security_lock)?.mutate()?.also {
-                    val px = (badge.textSize * 1.15f).toInt()
-                    it.setBounds(0, 0, px, px)
-                    it.setTint(badge.currentTextColor)
-                }
-            } else {
-                null
+            // Thumbnail-sized pill: the glyph carries "SafeKeep", uploading shows just the progress.
+            val glyphOnly = st.state == "saved" && !st.locked
+            badge.text = when {
+                glyphOnly -> ""
+                st.state == "uploading" ->
+                    java.text.NumberFormat.getPercentInstance().format(st.progress / 100.0)
+                else -> text
+            }
+            val glyph = ContextCompat.getDrawable(
+                ctx,
+                if (st.locked) R.drawable.ic_security_lock else R.drawable.ic_cloud
+            )?.mutate()?.also {
+                val px = (badge.textSize * 1.3f).toInt()
+                it.setBounds(0, 0, px, px)
+                it.setTint(badge.currentTextColor)
             }
             badge.setCompoundDrawablesRelative(glyph, null, null, null)
             badge.compoundDrawablePadding =
-                if (glyph != null) (3 * badge.resources.displayMetrics.density).toInt() else 0
+                if (glyphOnly) 0 else (3 * badge.resources.displayMetrics.density).toInt()
             badge.contentDescription = ctx.getString(R.string.cd_recording_safekeep_state, text)
             badge.visibility = View.VISIBLE
+        }
+
+        /** The ⋮ menu holds Delete plus the evidence and SafeKeep actions on every row. */
+        fun renderOverflow(recording: RecordingFile) {
+            val more = btnMore ?: return
+            // Delete and the clip actions always live here, in both orientations.
+            more.visibility = if (selectMode) View.GONE else View.VISIBLE
         }
 
         private fun renderActiveState(recording: RecordingFile) {
             val active = !selectMode && recording.path == activeRecordingPath
             activeIndicator?.visibility = if (active) View.VISIBLE else View.GONE
             card?.isSelected = active
-        }
-
-        private fun showMoreMenu(anchor: View, recording: RecordingFile) {
-            val shareTitle = anchor.context.getString(R.string.action_share)
-            val evidenceTitle = anchor.context.getString(
-                R.string.action_create_evidence_pack
+            card?.setCardBackgroundColor(
+                if (active) {
+                    MaterialColors.getColor(
+                        itemView,
+                        com.google.android.material.R.attr.colorSurfaceContainerHigh
+                    )
+                } else {
+                    Color.TRANSPARENT
+                }
             )
-            val deleteTitle = anchor.context.getString(R.string.action_delete)
-            // SafeKeep entries only while it is on; state comes from the last pill refresh.
-            val skOn = onSafeKeepAction != null && safeKeepEnabled
-            val sk = if (skOn) safeKeepState(recording.file.name) else null
-            val skLocked = sk?.locked == true
-            val uploadTitle = anchor.context.getString(R.string.action_safekeep_upload_now)
-            val lockTitle = anchor.context.getString(
-                if (skLocked) R.string.action_safekeep_unlock else R.string.action_safekeep_lock
-            )
-            val cloudTitle = anchor.context.getString(R.string.action_safekeep_open_cloud)
-            PopupMenu(anchor.context, anchor).apply {
-                if (onShare != null) menu.add(shareTitle)
-                if (onEvidencePack != null && !recording.recordingId.isNullOrEmpty()) {
-                    menu.add(evidenceTitle)
-                }
-                if (skOn) {
-                    if (sk?.link != null) menu.add(cloudTitle)
-                    if (sk?.state != "saved" && sk?.state != "uploading") menu.add(uploadTitle)
-                    menu.add(lockTitle)
-                }
-                menu.add(deleteTitle)
-                setOnMenuItemClickListener { item ->
-                    when (item.title?.toString()) {
-                        cloudTitle -> {
-                            onSafeKeepAction?.invoke(recording, SafeKeepAction.OPEN_CLOUD)
-                            true
-                        }
-                        uploadTitle -> {
-                            onSafeKeepAction?.invoke(recording, SafeKeepAction.UPLOAD_NOW)
-                            true
-                        }
-                        lockTitle -> {
-                            onSafeKeepAction?.invoke(
-                                recording,
-                                if (skLocked) SafeKeepAction.UNLOCK else SafeKeepAction.LOCK
-                            )
-                            true
-                        }
-                        shareTitle -> {
-                            onShare?.invoke(recording)
-                            true
-                        }
-                        evidenceTitle -> {
-                            onEvidencePack?.invoke(recording)
-                            true
-                        }
-                        deleteTitle -> {
-                            onDelete(recording)
-                            true
-                        }
-                        else -> false
-                    }
-                }
-                show()
-            }
         }
 
         fun recycle() {
@@ -593,13 +651,12 @@ class RecordingAdapter(
                 // Prefer the hero JPEG written by ThumbnailBuffer next to the MP4.
                 // Falls back to MediaMetadataRetriever for legacy clips with no
                 // sidecar.
-                val thumbnail = thumbnailSlots.withPermit {
-                    recording.heroThumbnailFile?.let { decodeJpeg(it) }
-                        ?: recording.file.takeIf { it.canRead() }?.let {
-                            extractThumbnail(it.absolutePath)
-                        }
-                        ?: recording.thumbnailUrl?.let { decodeRemoteThumbnail(it) }
-                } ?: return@launch
+                val thumbnail = recording.heroThumbnailFile?.let { thumbnailSlots.withPermit { decodeJpeg(it) } }
+                    ?: recording.file.takeIf { it.canRead() }?.let {
+                        thumbnailSlots.withPermit { extractThumbnail(it.absolutePath) }
+                    }
+                    ?: recording.thumbnailUrl?.let { decodeRemoteThumbnail(it) }
+                    ?: return@launch
                 val accepted = synchronized(thumbnailLock) {
                     if (disposed || !isActive) {
                         false
@@ -630,13 +687,18 @@ class RecordingAdapter(
             }
         }
 
+        // Each attempt takes its own slot so the retry wait never holds one.
         private suspend fun decodeRemoteThumbnail(url: String): Bitmap? {
-            val first = com.overdrive.app.ui.util.RecordingsApiClient.fetchThumbnail(url)
+            val first = thumbnailSlots.withPermit {
+                com.overdrive.app.ui.util.RecordingsApiClient.fetchThumbnail(url)
+            }
             val bytes = first ?: run {
                 delay(1_200L)
-                com.overdrive.app.ui.util.RecordingsApiClient.fetchThumbnail(url)
+                thumbnailSlots.withPermit {
+                    com.overdrive.app.ui.util.RecordingsApiClient.fetchThumbnail(url)
+                }
             } ?: return null
-            return decodeScaled(bytes)
+            return thumbnailSlots.withPermit { decodeScaled(bytes) }
         }
 
         private fun decodeScaled(path: String): Bitmap? {
@@ -677,7 +739,7 @@ class RecordingAdapter(
                     MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
                     THUMBNAIL_WIDTH_PX,
                     THUMBNAIL_HEIGHT_PX,
-                )
+                )?.let { com.overdrive.app.surveillance.LensTag.dewarpFrameForClip(it, java.io.File(path)) }
             } catch (e: Exception) {
                 null
             } finally {
@@ -727,8 +789,7 @@ private fun View.resolveColor(@ColorRes colorRes: Int): Int =
  * matching status colour the label.
  */
 private fun TextView.tintAsStatusBadge(@ColorRes fill: Int, @ColorRes label: Int) {
-    setBackgroundColor(resolveColor(fill))
-    setTextColor(resolveColor(label))
+    paintBadge(resolveColor(fill), resolveColor(label))
 }
 
 /**
@@ -736,13 +797,32 @@ private fun TextView.tintAsStatusBadge(@ColorRes fill: Int, @ColorRes label: Int
  * resolve against material's attr namespace, not the app's (nonTransitiveRClass).
  */
 private fun TextView.tintAsNeutralBadge() {
-    setBackgroundColor(
+    paintBadge(
         MaterialColors.getColor(
             this,
             com.google.android.material.R.attr.colorSurfaceContainerHighest
-        )
-    )
-    setTextColor(
+        ),
         MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSurfaceVariant)
     )
 }
+
+/** Recording type tag on a faint primary fill; on-primary-container keeps 4.5:1 in both themes. */
+private fun TextView.tintAsTypeBadge() {
+    val primary = MaterialColors.getColor(this, androidx.appcompat.R.attr.colorPrimary)
+    paintBadge(
+        ColorUtils.setAlphaComponent(primary, TYPE_BADGE_FILL_ALPHA),
+        MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnPrimaryContainer)
+    )
+}
+
+/** Tints a shaped background so its corners survive; falls back to a flat fill. */
+private fun TextView.paintBadge(@ColorInt fill: Int, @ColorInt label: Int) {
+    if (background != null) {
+        backgroundTintList = ColorStateList.valueOf(fill)
+    } else {
+        setBackgroundColor(fill)
+    }
+    setTextColor(label)
+}
+
+private const val TYPE_BADGE_FILL_ALPHA = 0x24

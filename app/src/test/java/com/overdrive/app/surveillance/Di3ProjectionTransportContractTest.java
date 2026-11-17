@@ -21,39 +21,43 @@ public class Di3ProjectionTransportContractTest {
                         + "ClusterProjectionController.java");
         String dispatch = section(
                 source,
-                "private static LegacyCommandResult sendInfoMarkedResult(",
+                "private static LegacyCommandResult sendLegacyInfo(",
                 "public enum DiLink5CommandResult");
 
         assertOrdered(
                 dispatch,
-                "markLegacyCommandInFlight()",
+                "legacyCommandStillBlocked()",
                 "runLegacyBinderAttempt(",
                 "attempt.completion.await(",
                 "watchLateLegacyBinderAttempt(attempt, op)",
                 "if (attempt.result == LegacyTransportResult.UNAVAILABLE)",
-                "sendInfoShellMarkedResult(service, op)");
+                "sendLegacyInfoShell(service, op)");
         assertTrue(dispatch.contains(
                 "sendInfoBinderTransportResult(String service, int op)"));
         assertTrue(dispatch.contains(
                 "scheduleRecoveryAfterLateLegacyCommand()"));
         assertTrue(dispatch.contains(
                 "retryRecoveryAfterLegacyCommandResolution()"));
+        assertTrue(dispatch.contains("return LegacyTransportResult.FAILED;"));
         assertFalse(dispatch.contains("destroyForcibly"));
+        // A command never waits on config I/O.
+        assertFalse(dispatch.contains("updateValues"));
 
         String shellFallback = section(
                 source,
-                "private static LegacyCommandResult sendInfoShellMarkedResult(",
+                "private static LegacyCommandResult sendLegacyInfoShell(",
                 "static boolean isAcceptedLegacyServiceCallResult(");
         assertOrdered(
                 shellFallback,
                 "process.waitFor(",
                 "watchLateLegacyShellCommand(process, service, op)",
-                "LegacyCommandResult.INDETERMINATE");
+                "LegacyTransportResult.INDETERMINATE");
         assertFalse(shellFallback.contains("destroyForcibly"));
+        assertFalse(shellFallback.contains("updateValues"));
     }
 
     @Test
-    public void unknownLegacyCommandStopsRecoveryRetriesAndDuplicateDispatch()
+    public void blockedLegacyCommandStopsRecoveryRetriesAndDuplicateDispatch()
             throws IOException {
         String source = readRepositoryFile(
                 "app/src/main/java/com/overdrive/app/surveillance/"
@@ -87,68 +91,18 @@ public class Di3ProjectionTransportContractTest {
                 "private static void runBootGaugeRestore(");
         assertOrdered(
                 bootAdmission,
-                "legacyIndeterminateCommandMayStillComplete(",
+                "legacyCommandStillBlocked()",
                 "isLegacyProjectionBlockedByDiLink5Recovery())",
-                "ensureLegacyBootRecoveryOwnership(marker)",
                 "new BootRestoreTicket()");
-
-        String promotion = section(
-                source,
-                "private static boolean ensureLegacyBootRecoveryOwnership(",
-                "private boolean writeGateFlags(");
-        assertOrdered(
-                promotion,
-                "ownership.put(GATE_FORCE_STOP, true)",
-                "ownership.put(GATE_ACTIVE_UNTIL, 0L)",
-                "ownership.put(GATE_COMMAND_INDETERMINATE, false)",
-                "ownership.put(GATE_COMMAND_BOOT_ID, \"\")",
-                "UnifiedConfigManager.updateValues(",
-                "promoted.forceStop",
-                "promoted.activeUntilMs == 0L",
-                "!promoted.commandIndeterminate",
-                "promoted.commandBootId.isEmpty()");
-
-        String marker = section(
-                source,
-                "private static LegacyCommandMarkerResult\n"
-                        + "            markLegacyCommandInFlight()",
-                "private static boolean "
-                        + "rollbackLegacyCommandMarkerBeforeDispatch()");
-        assertOrdered(
-                marker,
-                "readDurableConfigStrict()",
-                "legacyIndeterminateCommandMayStillComplete(",
-                "refusing a second legacy projection command",
-                "if (!existing.forceStop)",
-                "UnifiedConfigManager.updateValues(");
-        assertTrue(source.contains(
-                "rollbackLegacyCommandMarkerBeforeDispatch()"));
-        assertTrue(source.contains(
-                "clearLegacyCommandInFlightAfterDispatch()"));
-
-        String markerClear = section(
-                source,
-                "private static boolean "
-                        + "rollbackLegacyCommandMarkerBeforeDispatch()",
-                "static boolean isLegacyCommandMarkerClearVerified(");
-        assertOrdered(
-                markerClear,
-                "clearLegacyCommandMarker(false)",
-                "clearLegacyCommandMarker(true)",
-                "if (retainRecoveryOwnership)",
-                "markerValues.put(GATE_FORCE_STOP, true)",
-                "markerValues.put(GATE_COMMAND_INDETERMINATE, false)",
-                "markerValues.put(GATE_COMMAND_BOOT_ID, \"\")");
 
         String gateClear = section(
                 source,
                 "private static boolean clearGateFlagsStatic()",
-                "private static LegacyCommandMarkerResult");
+                "static LegacyGateSnapshot parseLegacyGateSnapshot(");
         assertOrdered(
                 gateClear,
-                "synchronized (LEGACY_COMMAND_DISPATCH_LOCK)",
-                "clearGateFlagsUnderCommandLock()",
-                "legacyIndeterminateCommandMayStillComplete(",
+                "GATE_IO.submit(",
+                "legacyCommandStillBlocked()",
                 "UnifiedConfigManager.updateValues(");
     }
 

@@ -12,6 +12,8 @@ const TRIPS = {
     pageSize: 20,
     trips: [],
     currentTripId: null,
+    _pagerTripId: null,
+    _tripNavBusy: false,
     _detailRequestSequence: 0,
     _activeDetailRequest: null,
     _detailAbortController: null,
@@ -314,6 +316,7 @@ const TRIPS = {
         if (BYD.utils && BYD.utils.unlockSettingsHydration) {
             BYD.utils.unlockSettingsHydration();
         }
+        this._openRangeCalibrationFromLink();
         // CDR status can recursively scan a slow or unhealthy SD card. Keep
         // its controls gated by _cdrReady instead of holding the whole page.
         this.loadCdrInfo();
@@ -326,6 +329,9 @@ const TRIPS = {
             window.addEventListener('byd:units-changed', function (event) {
                 self._repaintForUnitChange(
                     event && event.detail ? event.detail.mode : null);
+            });
+            window.addEventListener('byd:clock-changed', function () {
+                if (self.trips && self.trips.length > 0) self.renderTripList(self.trips);
             });
         }
         try {
@@ -753,6 +759,7 @@ const TRIPS = {
             if (this.rangeFromMs == null && this._lastSummaryPayload) {
                 this._applySummaryPayload(this._lastSummaryPayload);
             }
+            if (this._lastRangePayload) this._applyRangePayload(this._lastRangePayload);
             this.updateCostHero();
         } catch (e) {
             console.warn('[Trips] Unit repaint failed:', e);
@@ -2003,19 +2010,88 @@ const TRIPS = {
     },
 
     loadMore() {
-        if (this._listLoadMoreInFlight) return;
+        if (this._listLoadMoreInFlight) return Promise.resolve();
         // Paginate through the same time window — don't widen `currentDays`,
         // that would re-fetch the same head rows under a larger cutoff and
         // produce duplicates relative to what we already have. When a custom
         // range is active, page through it instead of the days window.
         if (this.rangeFromMs != null) {
-            this.loadTripsBetween(
+            return this.loadTripsBetween(
                 this.rangeFromMs, this.rangeToMs,
                 this.currentOffset, this.currentCursor);
-        } else {
-            this.loadTrips(
-                this.currentDays, this.currentOffset, this.currentCursor);
         }
+        return this.loadTrips(
+            this.currentDays, this.currentOffset, this.currentCursor);
+    },
+
+    /** The trips in the order renderTripList shows them (grouped by day). */
+    _displayedTrips() {
+        const groups = {};
+        (this.trips || []).forEach(t => {
+            const day = new Date(t.startTime || t.start_time).toLocaleDateString(BYD.i18n.getLang(), {
+                weekday: 'long', month: 'short', day: 'numeric'
+            });
+            if (!groups[day]) groups[day] = [];
+            groups[day].push(t);
+        });
+        const ordered = [];
+        Object.keys(groups).forEach(day => { groups[day].forEach(t => ordered.push(t)); });
+        return ordered;
+    },
+
+    _tripPagerIndex(list) {
+        const key = this._pagerTripId == null ? null : this._tripIdKey({ id: this._pagerTripId });
+        if (key == null) return -1;
+        for (let i = 0; i < list.length; i++) {
+            if (this._tripIdKey(list[i]) === key) return i;
+        }
+        return -1;
+    },
+
+    _moreTrips() {
+        const btn = document.getElementById('loadMoreBtn');
+        return !!btn && btn.style.display === 'block';
+    },
+
+    // Previous / next follow the list as shown, loading more trips at its end.
+    _paintTripPager() {
+        const prev = document.getElementById('tripPrevBtn');
+        const next = document.getElementById('tripNextBtn');
+        if (!prev || !next) return;
+        const list = this._displayedTrips();
+        const i = this._tripPagerIndex(list);
+        prev.disabled = this._tripNavBusy || i <= 0;
+        next.disabled = this._tripNavBusy || i < 0 || (i + 1 >= list.length && !this._moreTrips());
+    },
+
+    async navigateTrip(step) {
+        const list = this._displayedTrips();
+        const i = this._tripPagerIndex(list);
+        if (i < 0 || this._tripNavBusy) return;
+        const target = list[i + step];
+        if (target) {
+            this.showDetail(target.id);
+            return;
+        }
+        if (step < 0 || !this._moreTrips()) return;
+        const id = this._pagerTripId;
+        this._tripNavBusy = true;
+        this._paintTripPager();
+        try {
+            await this.loadMore();
+        } catch (e) {
+            // The list keeps its error handling; the pager just re-enables.
+        }
+        this._tripNavBusy = false;
+        if (this._pagerTripId == null || String(this._pagerTripId) !== String(id)) {
+            this._paintTripPager();
+            return;
+        }
+        const after = this._displayedTrips();
+        const j = this._tripPagerIndex(after);
+        const following = j >= 0 ? after[j + 1] : null;
+        if (following) this.showDetail(following.id);
+        else this._paintTripPager();
     },
 
     renderTripList(trips) {
@@ -2052,6 +2128,7 @@ const TRIPS = {
         this.updatePeriodSummary();
         this.updateCostHero();
         this.decorateParkingGaps(trips);
+        if (this._pagerTripId != null) this._paintTripPager();
     },
 
     /**
@@ -2170,7 +2247,7 @@ const TRIPS = {
         card.onclick = () => this.showDetail(trip.id);
 
         const startTime = new Date(trip.startTime || trip.start_time);
-        const timeStr = startTime.toLocaleTimeString(BYD.i18n.getLang(), { hour: '2-digit', minute: '2-digit' });
+        const timeStr = BYD.clock.time(startTime, BYD.i18n.getLang());
         const dist = (trip.distanceKm || trip.distance_km || 0).toFixed(2);
         const dur = this.formatDuration(trip.durationSeconds || trip.duration_seconds || 0);
         const avgScore = this.getAvgScore(trip);
@@ -2858,6 +2935,7 @@ const TRIPS = {
         try {
             const content = document.getElementById('rangeHeroContent');
             if (!content) return;
+            this._lastRangePayload = data || null;
 
             if (data && data.range && data.range !== null) {
                 const r = data.range;
@@ -2900,107 +2978,21 @@ const TRIPS = {
                     capsule.style.display = '';
                 }
 
-                // Build hover tooltip matching score-hero-tooltip design
                 const tooltip = document.getElementById('rangeHeroTooltip');
                 if (tooltip) {
                     tooltip.style.display = '';
-                    let tt = '<div class="range-tooltip-title">' + BYD.i18n.t('trip.range_tooltip_title') + '</div>';
-
-                    tt += '<div class="range-tooltip-row"><span class="range-tooltip-label">' + BYD.i18n.t('trip.range_confidence') + '</span><span class="range-tooltip-value">' + lower + ' – ' + upper + ' ' + distLbl + '</span></div>';
-
-                    // Conditions pills.
-                    // Backend bucketKey formats (see RangeEstimator.java):
-                    //   "suburban_mild_low"          — exact bucket: 3 pills
-                    //   "suburban_mild_low(blend)"   — neighbor blend: 3 pills + mode note
-                    //   "city(profile)"              — speed-profile fallback: 1 pill + mode note
-                    //   "overall"                    — global average: no pills, mode note only
-                    const bucketKey = r.bucketKey || r.bucket_key || '';
-                    const samples = r.sampleCount || r.sample_count || 0;
-                    if (bucketKey) {
-                        const modeMatch = bucketKey.match(/\(([^)]+)\)$/);
-                        const mode = modeMatch ? modeMatch[1] : (bucketKey === 'overall' ? 'overall' : 'exact');
-                        const cleanKey = bucketKey.replace(/\([^)]+\)$/, '');
-                        const parts = cleanKey === 'overall' ? [] : cleanKey.split('_');
-
-                        // Canonical category sets — must match RangeEstimator.computeBucketKey().
-                        // The bucket key is always English in the DB (e.g. "city_mild_low");
-                        // we look up display strings here at render time so the same row
-                        // localises per user.
-                        const SPEEDS = { city: 1, suburban: 1, highway: 1 };
-                        const TEMPS  = { cold: 1, mild: 1, hot: 1 };
-                        const STYLES = { low: 1, mid: 1, high: 1 };
-
-                        const speedLabels = {
-                            city: BYD.i18n.t('trip.speed_label.city'),
-                            suburban: BYD.i18n.t('trip.speed_label.suburban'),
-                            highway: BYD.i18n.t('trip.speed_label.highway')
-                        };
-                        const tempLabels = { cold: BYD.i18n.t('trip.temp_label.cold'), mild: BYD.i18n.t('trip.temp_label.mild'), hot: BYD.i18n.t('trip.temp_label.hot') };
-                        const styleLabels = { low: BYD.i18n.t('trip.style_label.low'), mid: BYD.i18n.t('trip.style_label.mid'), high: BYD.i18n.t('trip.style_label.high') };
-                        const speedColors = { city: 'rgba(99,102,241,0.15);color:#6366F1', suburban: 'rgba(0,212,170,0.15);color:var(--brand-primary)', highway: 'rgba(245,158,11,0.15);color:var(--warning)' };
-                        const tempColors = { cold: 'rgba(14,165,233,0.15);color:#0EA5E9', mild: 'rgba(34,197,94,0.15);color:#22C55E', hot: 'rgba(239,68,68,0.15);color:var(--danger)' };
-                        const styleColors = { low: 'rgba(34,197,94,0.15);color:#22C55E', mid: 'rgba(245,158,11,0.15);color:var(--warning)', high: 'rgba(239,68,68,0.15);color:var(--danger)' };
-                        const neutralPill = 'rgba(148,163,184,0.18);color:var(--text-muted)';
-
-                        // Pull the speed/temp/style tokens out of the cleaned key. The
-                        // canonical layout is "<speed>_<temp>_<style>" but legacy or
-                        // partial data could have fewer/non-canonical tokens; we slot
-                        // each token into the dimension whose vocabulary it matches.
-                        // Anything that doesn't match a known category is dropped so
-                        // we never render the literal string "undefined".
-                        let sp = '', tp = '', st = '';
-                        for (let i = 0; i < parts.length; i++) {
-                            const p = parts[i];
-                            if (!p) continue;
-                            if (!sp && SPEEDS[p]) sp = p;
-                            else if (!tp && TEMPS[p]) tp = p;
-                            else if (!st && STYLES[p]) st = p;
-                        }
-
-                        tt += '<div class="range-tooltip-conditions">';
-                        tt += '<div class="range-tooltip-conditions-label">' + BYD.i18n.t('trip.range_current_conditions') + '</div>';
-                        tt += '<div class="range-tooltip-pills">';
-
-                        if (sp) {
-                            tt += '<span class="range-tooltip-pill" style="background:' + speedColors[sp] + ';">' + speedLabels[sp] + '</span>';
-                        }
-                        if (tp) {
-                            tt += '<span class="range-tooltip-pill" style="background:' + tempColors[tp] + ';">' + tempLabels[tp] + '</span>';
-                        }
-                        if (st) {
-                            tt += '<span class="range-tooltip-pill" style="background:' + styleColors[st] + ';">' + styleLabels[st] + '</span>';
-                        }
-                        // Surface non-canonical bucket keys so we can spot stale
-                        // rows without having to scrape the DB. Quiet for the
-                        // overall/profile/blend forms which legitimately have
-                        // fewer than 3 dimensions.
-                        if (cleanKey !== 'overall' && parts.length >= 1
-                                && (!sp || (parts.length >= 3 && (!tp || !st)))) {
-                            console.warn('[Trips] Range bucket key has unexpected tokens:', bucketKey);
-                        }
-
-                        tt += '</div>';
-
-                        // Explain how the estimate was produced when we fell back
-                        let modeNote = '';
-                        if (mode === 'blend') modeNote = BYD.i18n.t('trip.range_mode_blend');
-                        else if (mode === 'profile') modeNote = BYD.i18n.t('trip.range_mode_profile');
-                        else if (mode === 'overall') modeNote = BYD.i18n.t('trip.range_mode_overall');
-                        if (modeNote) {
-                            tt += '<div class="range-tooltip-samples" style="color:var(--text-muted);font-style:italic;">' + modeNote + '</div>';
-                        }
-
-                        tt += '<div class="range-tooltip-samples">' + BYD.i18n.t('trip.range_based_on', {count: samples}) + '</div>';
-                        tt += '</div>';
-                    }
-
-                    tooltip.innerHTML = tt;
+                    tooltip.innerHTML = this._rangeTooltipHtml(r, lower, upper, distLbl);
                 }
+                this._renderRangeCalibrateRow(r);
             } else {
                 content.innerHTML = '<div class="range-hero-no-data"><div>' + BYD.i18n.t('trip.drive_more_unlock') + '</div></div>';
                 this.renderCircleGauge('rangeCircleCanvas', 0, 'rgba(14,165,233,0.2)');
                 const capsule = document.getElementById('rangeDeltaCapsule');
                 if (capsule) capsule.style.display = 'none';
+                const tooltip = document.getElementById('rangeHeroTooltip');
+                if (tooltip) tooltip.style.display = 'none';
+                this._renderRangeCalibrateRow(null);
+                this._closeRangeCalibration();
             }
 
             // PHEV petrol leg — data.fuelRange is the LEARNED estimate (needs
@@ -3011,11 +3003,302 @@ const TRIPS = {
             this.renderPetrolRange((data && data.fuelRange) || null,
                                    data && data.totalRangeKm,
                                    data && data.halFuelRangeKm);
+            // Until hydration unlocks, the page swallows the Stats tab click.
+            if (this._hydrated) this._openRangeCalibrationFromLink();
         } catch (e) {
             console.warn('[Trips] Range apply failed:', e);
             this.renderCircleGauge('rangeCircleCanvas', 0, 'rgba(14,165,233,0.2)');
             this.renderPetrolRange(null);
         }
+    },
+
+    // ==================== RANGE CALIBRATION ====================
+
+    _rangeT(key, vars) {
+        const v = BYD.i18n.t(key, vars);
+        return (v && v !== key) ? v : '';
+    },
+
+    /** Keeps "320 km" reading left to right inside Hebrew and Arabic sentences. */
+    _rangeLtr(s) {
+        return '\u200E' + s + '\u200E';
+    },
+
+    _rangeEsc(s) {
+        const d = document.createElement('div');
+        d.textContent = s == null ? '' : String(s);
+        return d.innerHTML;
+    },
+
+    /** Range card tooltip: the band, the consumption behind it, and what it rests on. */
+    _rangeTooltipHtml(r, lower, upper, distLbl) {
+        const esc = (s) => this._rangeEsc(s);
+        const row = (label, value) => '<div class="range-tooltip-row"><span class="range-tooltip-label">'
+            + esc(label) + '</span><span class="range-tooltip-value">' + esc(value) + '</span></div>';
+        let tt = '<div class="range-tooltip-title">' + esc(this._rangeT('trip.range_tooltip_title')) + '</div>';
+        tt += row(this._rangeT('trip.range_confidence'), this._rangeLtr(lower + ' – ' + upper + ' ' + distLbl));
+        const kwh = Number(r.kwhPer100Km);
+        if (isFinite(kwh) && kwh > 0) {
+            tt += row(this._rangeT('trip.range_cal.expected_use'),
+                this._rangeLtr(BYD.units.per100Val(kwh).toFixed(1) + ' ' + BYD.units.consumptionLabel()));
+        }
+        const cal = r.calibration;
+        if (cal && cal.sharePct > 0) tt += row(this._rangeT('trip.range_cal.calibration_row'), cal.sharePct + '%');
+        if (r.liveSharePct > 0) tt += row(this._rangeT('trip.range_cal.live_row'), r.liveSharePct + '%');
+        const notes = [];
+        const tf = Number(r.tempFactor);
+        const temp = Number(r.tempC);
+        if (isFinite(tf) && isFinite(temp) && Math.abs(tf - 1) >= 0.01) {
+            notes.push(this._rangeT('trip.range_cal.temp_adjust', { temp: this._rangeLtr(Math.round(temp) + ' °C') }));
+        }
+        const count = Number(r.sampleCount);
+        const basisKm = Number(r.basisKm);
+        if (count > 0 && basisKm > 0) {
+            notes.push(this._rangeT('trip.range_cal.basis', { km: this._rangeLtr(BYD.units.dist(basisKm)), count: count }));
+        }
+        if (notes.length) {
+            tt += '<div class="range-tooltip-conditions">';
+            notes.forEach((n) => { if (n) tt += '<div class="range-tooltip-samples">' + esc(n) + '</div>'; });
+            tt += '</div>';
+        }
+        return tt;
+    },
+
+    _rangeSliderInfo(r) {
+        const sl = r && r.calibrate;
+        const usable = r ? Number(r.usableKwh) : NaN;
+        if (!sl || !(usable > 0) || !(sl.minRangeKm > 0) || !(sl.maxRangeKm > sl.minRangeKm)) return null;
+        return { sl: sl, usable: usable };
+    },
+
+    _renderRangeCalibrateRow(r) {
+        const row = document.getElementById('rangeCalibrateRow');
+        if (!row) return;
+        if (!this._rangeSliderInfo(r)) {
+            row.style.display = 'none';
+            row.innerHTML = '';
+            return;
+        }
+        const cal = r.calibration;
+        const active = !!(cal && cal.sharePct > 0);
+        let html = '';
+        if (active) {
+            html += '<span class="range-cal-chip">' + this._rangeEsc(this._rangeT('trip.range_cal.chip', { pct: cal.sharePct })) + '</span>';
+        }
+        html += '<button type="button" class="range-cal-btn" id="rangeCalibrateBtn">'
+            + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">'
+            + '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>'
+            + '<span>' + this._rangeEsc(this._rangeT(active ? 'trip.range_cal.adjust' : 'trip.range_cal.button')) + '</span></button>';
+        row.innerHTML = html;
+        row.style.display = '';
+        const btn = document.getElementById('rangeCalibrateBtn');
+        if (btn) {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.openRangeCalibration();
+            });
+        }
+    },
+
+    /** trips.html#calibrate-range opens the sheet once the range has loaded. */
+    _openRangeCalibrationFromLink() {
+        if (this._rangeLinkHandled || window.location.hash !== '#calibrate-range') return;
+        const r = this._lastRangePayload && this._lastRangePayload.range;
+        if (!this._rangeSliderInfo(r)) return;
+        this._rangeLinkHandled = true;
+        try {
+            history.replaceState(null, '', window.location.pathname + window.location.search);
+        } catch (e) { /* keep the hash */ }
+        // The range card lives on the Stats tab; land there under the sheet.
+        const statsTab = document.querySelector('.bottom-tab[data-tab-target="stats"]');
+        if (statsTab && statsTab.getAttribute('aria-selected') !== 'true') statsTab.click();
+        this.openRangeCalibration();
+    },
+
+    _closeRangeCalibration() {
+        const open = document.getElementById('rangeCalBackdrop');
+        if (open && open.parentNode) open.parentNode.removeChild(open);
+        if (this._rangeCalKeyHandler) {
+            document.removeEventListener('keydown', this._rangeCalKeyHandler);
+            this._rangeCalKeyHandler = null;
+        }
+    },
+
+    openRangeCalibration() {
+        const r = this._lastRangePayload && this._lastRangePayload.range;
+        const info = this._rangeSliderInfo(r);
+        if (!info) return;
+        this._closeRangeCalibration();
+        const sl = info.sl;
+        const usable = info.usable;
+        const mi = BYD.units.mode === 'mi';
+        const toDisp = (km) => (mi ? km * BYD.units.KM_TO_MI : km);
+        const toKm = (v) => (mi ? v / BYD.units.KM_TO_MI : v);
+        const minD = Math.ceil(toDisp(sl.minRangeKm));
+        const maxD = Math.floor(toDisp(sl.maxRangeKm));
+        if (!(maxD > minD)) return;
+        const distLbl = BYD.units.distLabel();
+        const cal = r.calibration;
+        const active = !!(cal && cal.sharePct > 0);
+        const tripsD = Math.min(maxD, Math.max(minD, Math.round(toDisp(sl.tripsRangeKm))));
+        const startKm = active ? Number(r.predictedRangeKm) : sl.tripsRangeKm;
+        const startD = Math.min(maxD, Math.max(minD, Math.round(toDisp(startKm))));
+        const t = (k, v) => this._rangeT(k, v);
+        const el = (tag, cls, text) => {
+            const n = document.createElement(tag);
+            if (cls) n.className = cls;
+            if (text != null) n.textContent = text;
+            return n;
+        };
+
+        const backdrop = el('div', 'modal-backdrop');
+        backdrop.id = 'rangeCalBackdrop';
+        backdrop.style.display = 'flex';
+        const card = el('div', 'modal-card range-cal-card');
+        card.setAttribute('role', 'dialog');
+        card.setAttribute('aria-modal', 'true');
+        card.setAttribute('aria-labelledby', 'rangeCalTitle');
+        const title = el('h3', 'soh-modal-title', t('trip.range_cal.title'));
+        title.id = 'rangeCalTitle';
+        card.appendChild(title);
+        const soc = Number(r.socPercent);
+        if (isFinite(soc) && soc > 0) card.appendChild(el('p', 'range-cal-prompt', t('trip.range_cal.prompt', { soc: Math.round(soc) })));
+
+        const readout = el('div', 'range-cal-readout');
+        const valueEl = el('span', 'range-cal-value', String(startD));
+        readout.appendChild(valueEl);
+        readout.appendChild(el('span', 'range-cal-unit', distLbl));
+        card.appendChild(readout);
+        const rateEl = el('div', 'range-cal-rate');
+        card.appendChild(rateEl);
+
+        const wrap = el('div', 'range-cal-slider-wrap');
+        wrap.setAttribute('dir', 'ltr');
+        const track = el('div', 'range-cal-track');
+        const input = document.createElement('input');
+        input.type = 'range';
+        input.className = 'slider range-cal-slider';
+        input.min = String(minD);
+        input.max = String(maxD);
+        input.step = '1';
+        input.value = String(startD);
+        input.setAttribute('aria-label', t('trip.range_cal.aria_slider'));
+        track.appendChild(input);
+        const tick = el('div', 'range-cal-tick');
+        tick.setAttribute('aria-hidden', 'true');
+        const pct = (tripsD - minD) / (maxD - minD);
+        tick.style.left = 'calc(9px + (100% - 18px) * ' + pct.toFixed(4) + ')';
+        track.appendChild(tick);
+        wrap.appendChild(track);
+        const ends = el('div', 'range-cal-ends');
+        ends.appendChild(el('span', null, minD + ' ' + distLbl));
+        ends.appendChild(el('span', null, maxD + ' ' + distLbl));
+        wrap.appendChild(ends);
+        card.appendChild(wrap);
+        const ltr = (v) => this._rangeLtr(v);
+        card.appendChild(el('p', 'range-cal-trips', t('trip.range_cal.your_trips', { value: ltr(tripsD + ' ' + distLbl) })));
+
+        const carKm = Number(r.builtInRangeKm);
+        if (carKm > 0) {
+            const carD = Math.round(toDisp(carKm));
+            const outside = carD < minD || carD > maxD;
+            card.appendChild(el('p', 'range-cal-note', t(outside ? 'trip.range_cal.car_outside' : 'trip.range_cal.car_shows',
+                { value: ltr(carD + ' ' + distLbl) })));
+        }
+        if (Number(r.liveSharePct) > 0) card.appendChild(el('p', 'range-cal-note', t('trip.range_cal.driving_note')));
+        card.appendChild(el('p', 'range-cal-explain', t('trip.range_cal.explain', { km: BYD.units.dist(300) })));
+        if (active) card.appendChild(el('p', 'range-cal-share', t('trip.range_cal.share', { pct: cal.sharePct })));
+
+        const actions = el('div', 'soh-modal-actions');
+        let removeBtn = null;
+        if (active) {
+            removeBtn = el('button', 'btn btn-secondary range-cal-remove', t('trip.range_cal.remove'));
+            removeBtn.type = 'button';
+            actions.appendChild(removeBtn);
+        }
+        const cancelBtn = el('button', 'btn btn-secondary', t('common.cancel'));
+        cancelBtn.type = 'button';
+        const saveBtn = el('button', 'btn btn-primary', t('common.save'));
+        saveBtn.type = 'button';
+        actions.appendChild(cancelBtn);
+        actions.appendChild(saveBtn);
+        card.appendChild(actions);
+        backdrop.appendChild(card);
+
+        const update = () => {
+            const v = Math.min(maxD, Math.max(minD, Number(input.value) || startD));
+            valueEl.textContent = String(v);
+            const kwh100 = usable / toKm(v) * 100;
+            rateEl.textContent = this._rangeLtr('≈ ' + BYD.units.per100Val(kwh100).toFixed(1) + ' ' + BYD.units.consumptionLabel());
+            input.setAttribute('aria-valuetext', v + ' ' + distLbl);
+        };
+        input.addEventListener('input', update);
+        input.addEventListener('change', update);
+        update();
+
+        const close = () => this._closeRangeCalibration();
+        const setBusy = (busy) => {
+            [saveBtn, cancelBtn, removeBtn, input].forEach((b) => { if (b) b.disabled = busy; });
+        };
+        backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+        cancelBtn.addEventListener('click', close);
+        this._rangeCalKeyHandler = (e) => { if (e.key === 'Escape' || e.keyCode === 27) close(); };
+        document.addEventListener('keydown', this._rangeCalKeyHandler);
+
+        saveBtn.addEventListener('click', async () => {
+            const v = Math.min(maxD, Math.max(minD, Number(input.value) || startD));
+            const km = toKm(v);
+            setBusy(true);
+            const res = await this._sendRangeCalibration('POST', { kwhPer100Km: usable / km * 100, rangeKm: km });
+            setBusy(false);
+            this._finishRangeCalibration(res, 'trip.range_cal.saved');
+        });
+        if (removeBtn) {
+            removeBtn.addEventListener('click', async () => {
+                setBusy(true);
+                const res = await this._sendRangeCalibration('DELETE', null);
+                setBusy(false);
+                this._finishRangeCalibration(res, 'trip.range_cal.removed');
+            });
+        }
+        document.body.appendChild(backdrop);
+        card.tabIndex = -1;
+        try { card.focus(); } catch (e) { /* focus is best effort */ }
+    },
+
+    async _sendRangeCalibration(method, body) {
+        try {
+            const opts = { method: method };
+            if (body) {
+                opts.headers = { 'Content-Type': 'application/json' };
+                opts.body = JSON.stringify(body);
+            }
+            const resp = await fetch('/api/trips/range/calibration', opts);
+            let data = null;
+            try { data = await resp.json(); } catch (e) { data = null; }
+            return { ok: resp.ok && !!data && data.success === true, status: resp.status, data: data };
+        } catch (e) {
+            console.warn('[Trips] Range calibration failed:', e);
+            return { ok: false, status: 0, data: null };
+        }
+    },
+
+    _finishRangeCalibration(res, doneKey) {
+        const toast = (msg, kind) => { if (msg && BYD.utils && BYD.utils.toast) BYD.utils.toast(msg, kind); };
+        if (res.ok) {
+            this._closeRangeCalibration();
+            this._applyRangePayload(res.data);
+            toast(this._rangeT(doneKey), 'success');
+            return;
+        }
+        const reason = res.data && res.data.reason;
+        if (res.status === 409 && (reason === 'out_of_band' || reason === 'no_model')) {
+            this._closeRangeCalibration();
+            toast(this._rangeT('trip.range_cal.stale'), 'info');
+            this.loadRange();
+            return;
+        }
+        toast(this._rangeT('trip.range_cal.failed') || BYD.i18n.t('common.error'), 'error');
     },
 
     /**
@@ -3286,8 +3569,35 @@ const TRIPS = {
         return true;
     },
 
+    // Recordings Timeline for this trip's window; ES5 because this page runs in the in-car WebView.
+    _showWatchDrive: function (trip) {
+        var sub = document.getElementById('detailSubtitle');
+        if (!sub || !sub.parentNode) return;
+        var link = document.getElementById('tripWatchDriveLink');
+        var start = new Date(trip.startTime || trip.start_time).getTime();
+        var end = new Date(trip.endTime || trip.end_time || 0).getTime();
+        if (!isFinite(start) || start <= 0) {
+            if (link) link.style.display = 'none';
+            return;
+        }
+        if (!link) {
+            link = document.createElement('a');
+            link.id = 'tripWatchDriveLink';
+            link.className = 'detail-back-btn';
+            link.style.cssText = 'display:inline-flex;margin-top:12px;text-decoration:none;';
+            link.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg><span></span>';
+            sub.parentNode.insertBefore(link, sub.nextSibling);
+        }
+        var label = (window.BYD && BYD.i18n && BYD.i18n.t) ? BYD.i18n.t('tlview.watchDrive') : null;
+        link.lastChild.textContent = (label && label !== 'tlview.watchDrive') ? label : 'Watch this drive';
+        link.href = 'events.html?view=timeline&t=' + start + (isFinite(end) && end > start ? '&end=' + end : '');
+        link.style.display = 'inline-flex';
+    },
+
     async showDetail(tripId) {
         const detailRequest = this._beginDetailRequest(tripId);
+        this._pagerTripId = tripId;
+        this._paintTripPager();
         let summaryBound = false;
         document.getElementById('tripListView').classList.add('hidden');
         document.getElementById('tripDetail').classList.add('active');
@@ -3313,8 +3623,9 @@ const TRIPS = {
             const start = new Date(trip.startTime || trip.start_time);
             const lang = BYD.i18n.getLang();
             this.setEl('detailTitle', start.toLocaleDateString(lang, { weekday: 'long', month: 'long', day: 'numeric' }));
-            this.setEl('detailSubtitle', start.toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit' }) +
-                ' – ' + new Date(trip.endTime || trip.end_time).toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit' }));
+            this.setEl('detailSubtitle', BYD.clock.time(start, lang) +
+                ' – ' + BYD.clock.time(new Date(trip.endTime || trip.end_time), lang));
+            this._showWatchDrive(trip);
             this.setEl('detailDuration', this.formatDuration(trip.durationSeconds || trip.duration_seconds || 0));
             this.setEl('detailSocDelta', socPair ? ((trip.socStart || trip.soc_start || 0) - (trip.socEnd || trip.soc_end || 0)).toFixed(2) + '%' : '--');
             // Show energy kWh or efficiency
@@ -3584,6 +3895,7 @@ const TRIPS = {
     },
 
     hideDetail() {
+        this._pagerTripId = null;
         this._cancelDetailRequest();
         this._resetDetailViewState();
         const detail = document.getElementById('tripDetail');
@@ -3905,7 +4217,7 @@ const TRIPS = {
             html += '<div class="td-eyebrow rc-list-head">' + esc(tr('trip.route_compare.trips_on_route', 'Trips on this route ({count})', { count: data.count })) + '</div>';
             const bestLabel = tr('trip.route_legend_best', 'Best');
             similar.slice(0, 5).forEach(function(t) {
-                var date = new Date(t.startTime || t.start_time).toLocaleDateString(BYD.i18n.getLang(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                var date = new Date(t.startTime || t.start_time).toLocaleDateString(BYD.i18n.getLang(), BYD.clock.options({ month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }));
                 var energy = (t.energyUsedKwh || t.energy_used_kwh || 0);
                 var cost = t.tripCost || t.trip_cost || 0;
                 var isBest = t.id === stats.bestTripId;
@@ -5131,11 +5443,12 @@ const TRIPS = {
 
             const summaryEl = document.getElementById('speedHistSummary');
             if (summaryEl) {
+                const tRC = (k, fb) => (window.BYD && BYD.i18n && BYD.i18n.t(k) && BYD.i18n.t(k) !== k) ? BYD.i18n.t(k) : fb;
                 summaryEl.innerHTML =
-                    '<span class="speed-hist-stat">Avg: <span class="shval">' + BYD.units.speed(avg) + '</span></span>' +
-                    '<span class="speed-hist-stat">Max: <span class="shval">' + BYD.units.speed(max) + '</span></span>' +
-                    '<span class="speed-hist-stat">Low speed: <span class="shval">' + lowPct + '%</span></span>' +
-                    '<span class="speed-hist-stat">High speed: <span class="shval">' + highPct + '%</span></span>';
+                    '<span class="speed-hist-stat">' + tRC('trip.speed_hist_avg', 'Avg:') + ' <span class="shval">' + BYD.units.speed(avg) + '</span></span>' +
+                    '<span class="speed-hist-stat">' + tRC('trip.speed_hist_max', 'Max:') + ' <span class="shval">' + BYD.units.speed(max) + '</span></span>' +
+                    '<span class="speed-hist-stat">' + tRC('trip.speed_hist_low', 'Low speed:') + ' <span class="shval">' + lowPct + '%</span></span>' +
+                    '<span class="speed-hist-stat">' + tRC('trip.speed_hist_high', 'High speed:') + ' <span class="shval">' + highPct + '%</span></span>';
             }
         }
     },
@@ -5485,9 +5798,10 @@ const TRIPS = {
     },
 
     _formatCdrRelativeTime(ts) {
-        if (!ts || ts <= 0) return 'Never';
+        const tRC = (k, fb) => (window.BYD && BYD.i18n && BYD.i18n.t(k) && BYD.i18n.t(k) !== k) ? BYD.i18n.t(k) : fb;
+        if (!ts || ts <= 0) return tRC('recording.never', 'Never');
         const diffSec = Math.floor((Date.now() - ts) / 1000);
-        if (diffSec < 0) return 'Just now';
+        if (diffSec < 0) return tRC('recording.just_now', 'Just now');
         if (diffSec < 60) {
             var secsAgo = diffSec;
             var secPhrase = (window.BYD && BYD.i18n && BYD.i18n.t)

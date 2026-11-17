@@ -106,6 +106,17 @@ object DeferredNavManager {
         }
     }
 
+    /** True while a target is queued and unexpired, i.e. the next ACC-on prompt will offer it. Read-only. */
+    @JvmStatic
+    fun hasPendingTarget(): Boolean = try {
+        val d = UnifiedConfigManager.getDeferredNav()
+        val receivedAt = d.optLong("receivedAt", 0L)
+        d.optBoolean("pending", false) && receivedAt > 0L &&
+            System.currentTimeMillis() - receivedAt <= UnifiedConfigManager.getDeferredNavExpiryHours() * 3_600_000L
+    } catch (t: Throwable) {
+        false
+    }
+
     private fun onAccOn() {
         if (!promptInFlight.compareAndSet(false, true)) return
         // Off the ACC transition thread; this waits and does IPC.

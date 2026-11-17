@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Quadrant segment: highlighted while selected (VideoPlayerFragment sets isSelected). -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="@color/rec_player_quad_selected">
+    <item>
+        <selector>
+            <item android:state_selected="true">
+                <inset
+                    android:insetLeft="2dp"
+                    android:insetTop="8dp"
+                    android:insetRight="2dp"
+                    android:insetBottom="8dp">
+                    <shape android:shape="rectangle">
+                        <corners android:radius="16dp" />
+                        <solid android:color="@color/rec_player_quad_selected" />
+                    </shape>
+                </inset>
+            </item>
+            <item android:drawable="@android:color/transparent" />
+        </selector>
+    </item>
+</ripple>

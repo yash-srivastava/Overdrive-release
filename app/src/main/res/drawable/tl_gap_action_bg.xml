@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Press state for the gap card's "Next event in" line. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="@color/rec_player_quad_selected">
+    <item android:id="@android:id/mask">
+        <shape android:shape="rectangle">
+            <corners android:radius="14dp" />
+            <solid android:color="@android:color/white" />
+        </shape>
+    </item>
+</ripple>

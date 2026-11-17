@@ -9,7 +9,21 @@ import java.util.Map;
  * HTTP Response utilities - shared by all handlers.
  */
 public class HttpResponse {
-    
+
+    // File streaming chunk: fewer reads and socket writes per clip.
+    private static final int FILE_STREAM_BUFFER = 64 * 1024;
+
+    /**
+     * No fetch directives: live view (JMuxer from jsDelivr, Broadway and Draco blob workers,
+     * WebAssembly) must keep loading on the head unit's Chrome 58 WebView.
+     */
+    public static final String CSP =
+            "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+    public static final String SECURITY_HEADERS =
+            "Content-Security-Policy: " + CSP + "\r\n" +
+            "X-Frame-Options: DENY\r\n" +
+            "X-Content-Type-Options: nosniff\r\n";
+
     public static void sendError(OutputStream out, int code, String message) throws Exception {
         String response = "HTTP/1.1 " + code + " " + message + "\r\n" +
                          "Content-Type: text/plain\r\n" +
@@ -24,6 +38,7 @@ public class HttpResponse {
         String headers = "HTTP/1.1 200 OK\r\n" +
                         "Content-Type: text/html; charset=utf-8\r\n" +
                         "Content-Length: " + body.length + "\r\n" +
+                        SECURITY_HEADERS +
                         "Connection: close\r\n\r\n";
         out.write(headers.getBytes());
         out.write(body);
@@ -60,7 +75,7 @@ public class HttpResponse {
                     .append("Access-Control-Allow-Headers: Content-Type, Authorization\r\n");
         }
         headers.append("Cache-Control: no-cache, no-store\r\n")
-                .append("X-Content-Type-Options: nosniff\r\n")
+                .append(SECURITY_HEADERS)
                 .append("Content-Length: ").append(body.length).append("\r\n")
                 .append("Connection: close\r\n\r\n");
         out.write(headers.toString().getBytes(StandardCharsets.UTF_8));
@@ -270,7 +285,7 @@ public class HttpResponse {
                .append("Connection: close\r\n\r\n");
         out.write(headers.toString().getBytes());
         try (java.io.FileInputStream fis = new java.io.FileInputStream(file)) {
-            byte[] buffer = new byte[64 * 1024];
+            byte[] buffer = new byte[FILE_STREAM_BUFFER];
             int count;
             while ((count = fis.read(buffer)) != -1) {
                 out.write(buffer, 0, count);
@@ -328,7 +343,7 @@ public class HttpResponse {
 
         try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(file, "r")) {
             raf.seek(start);
-            byte[] buffer = new byte[64 * 1024];
+            byte[] buffer = new byte[FILE_STREAM_BUFFER];
             long remaining = contentLength;
             while (remaining > 0) {
                 int toRead = (int) Math.min(buffer.length, remaining);
@@ -420,7 +435,7 @@ public class HttpResponse {
 
         // Stream file in chunks
         try (java.io.FileInputStream fis = new java.io.FileInputStream(file)) {
-            byte[] buffer = new byte[64 * 1024];
+            byte[] buffer = new byte[FILE_STREAM_BUFFER];
             int count;
             while ((count = fis.read(buffer)) != -1) {
                 out.write(buffer, 0, count);
@@ -474,7 +489,7 @@ public class HttpResponse {
 
         try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(file, "r")) {
             raf.seek(start);
-            byte[] buffer = new byte[64 * 1024];
+            byte[] buffer = new byte[FILE_STREAM_BUFFER];
             long remaining = contentLength;
             while (remaining > 0) {
                 int toRead = (int) Math.min(buffer.length, remaining);

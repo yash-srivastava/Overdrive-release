@@ -268,10 +268,10 @@ public class LocationSidecarService extends Service implements LocationListener 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
                 CHANNEL_ID,
-                "Location Service",
+                com.overdrive.app.util.AppLocaleContext.INSTANCE.of(this).getString(com.overdrive.app.R.string.notif_channel_location),
                 NotificationManager.IMPORTANCE_LOW
             );
-            channel.setDescription("GPS tracking for surveillance");
+            channel.setDescription(com.overdrive.app.util.AppLocaleContext.INSTANCE.of(this).getString(com.overdrive.app.R.string.notif_channel_location_desc));
             channel.setShowBadge(false);
             
             NotificationManager manager = getSystemService(NotificationManager.class);
@@ -294,8 +294,8 @@ public class LocationSidecarService extends Service implements LocationListener 
         // Android still requires this FGS notification to exist and remain
         // user-visible; grouping just changes how the shade renders it.
         return builder
-            .setContentTitle("Location Active")
-            .setContentText("GPS tracking running")
+            .setContentTitle(com.overdrive.app.util.AppLocaleContext.INSTANCE.of(this).getString(com.overdrive.app.R.string.notif_location_title))
+            .setContentText(com.overdrive.app.util.AppLocaleContext.INSTANCE.of(this).getString(com.overdrive.app.R.string.notif_location_text))
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setOngoing(true)
             .setGroup(com.overdrive.app.services.DaemonKeepaliveService.NOTIFICATION_GROUP_KEY)

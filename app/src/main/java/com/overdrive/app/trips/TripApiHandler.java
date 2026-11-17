@@ -1,7 +1,6 @@
 package com.overdrive.app.trips;
 
 import com.overdrive.app.logging.DaemonLogger;
-import com.overdrive.app.monitor.GpsMonitor;
 import com.overdrive.app.monitor.VehicleDataMonitor;
 import com.overdrive.app.storage.StorageManager;
 
@@ -90,6 +89,13 @@ public class TripApiHandler {
             // Route: GET /api/trips/range
             if (path.equals("/api/trips/range") && "GET".equals(method)) {
                 return handleGetRange();
+            }
+
+            // Route: POST/DELETE /api/trips/range/calibration
+            if (path.equals("/api/trips/range/calibration")) {
+                if ("POST".equals(method)) return handleSetRangeCalibration(body);
+                if ("DELETE".equals(method)) return handleClearRangeCalibration();
+                return errorResponse("Method not allowed", 405);
             }
 
             // Route: GET/POST /api/trips/config
@@ -375,7 +381,7 @@ public class TripApiHandler {
         if (!recoverRunning.compareAndSet(false, true)) {
             JSONObject busy = new JSONObject();
             try { busy.put("started", false); busy.put("running", true);
-                  busy.put("message", "Recovery is already running…"); } catch (Exception ignored) {}
+                  busy.put("message", com.overdrive.app.server.Messages.get("errors.trips_recovery_running")); } catch (Exception ignored) {}
             return busy;
         }
         lastRecoverResult = null;
@@ -399,7 +405,7 @@ public class TripApiHandler {
                 logger.error("Trips recovery worker failed", t);
                 JSONObject err = new JSONObject();
                 try { err.put("success", false); err.put("done", true);
-                      err.put("message", "Recovery failed: " + t.getMessage()); } catch (Exception ignored) {}
+                      err.put("message", com.overdrive.app.server.Messages.get("errors.trips_recovery_failed", String.valueOf(t.getMessage()))); } catch (Exception ignored) {}
                 lastRecoverResult = err;
             } finally {
                 recoverRunning.set(false);
@@ -761,9 +767,8 @@ public class TripApiHandler {
     }
 
     /**
-     * GET /api/trips/range — personalized range estimate.
-     * Reads current SoC from VehicleDataMonitor, speed from GpsMonitor,
-     * temp from VehicleDataMonitor, DNA from database.
+     * GET /api/trips/range — personalized range estimate from the current SoC, the outside
+     * temperature and the drive in progress.
      */
     private JSONObject handleGetRange() {
         RangeEstimator estimator = manager.getRangeEstimator();
@@ -792,74 +797,16 @@ public class TripApiHandler {
         }
 
         try {
-            // Read current conditions from existing monitors
-            double currentSoc = 0;
+            double currentSoc = readSocPercent();
+            double tempC = readOutsideTempC();
+            TripRecord liveTrip = null;
             try {
-                com.overdrive.app.monitor.BatterySocData socData =
-                        VehicleDataMonitor.getInstance().getBatterySoc();
-                if (socData != null) {
-                    currentSoc = socData.socPercent;
-                }
+                liveTrip = manager.getLiveTripSnapshot();
             } catch (Exception e) {
-                logger.debug("Could not read SoC: " + e.getMessage());
+                logger.debug("Live trip unavailable: " + e.getMessage());
             }
 
-            double currentSpeed = 0;
-            try {
-                currentSpeed = GpsMonitor.getInstance().getSpeed() * 3.6; // m/s to km/h
-            } catch (Exception e) {
-                logger.debug("Could not read speed: " + e.getMessage());
-            }
-
-            int extTemp = 20; // Default mild temperature
-            boolean extTempFromSnapshot = false;
-            try {
-                // NORMALIZED TELEMETRY FIRST (R25). The previous code linked
-                // android.hardware.bydauto.instrument.BYDAutoInstrumentDevice
-                // as a DIRECT compile-time reference: on firmware without the
-                // class the first execution throws NoClassDefFoundError — an
-                // Error, not an Exception — straight through the old catch and
-                // out of this handler. The snapshot read has no SDK linkage,
-                // and the legacy fallback below is reflection-based so it can
-                // only fail with catchable exceptions.
-                com.overdrive.app.byd.BydDataCollector collector =
-                        com.overdrive.app.byd.BydDataCollector.getInstance();
-                if (collector.isInitialized()) {
-                    com.overdrive.app.byd.BydVehicleData data = collector.getData();
-                    if (data != null && !Double.isNaN(data.outsideTempC)) {
-                        extTemp = (int) Math.round(data.outsideTempC);
-                        extTempFromSnapshot = true;
-                    }
-                }
-            } catch (Throwable t) {
-                logger.debug("Could not read external temp from snapshot: " + t.getMessage());
-            }
-            if (!extTempFromSnapshot) {
-                try {
-                    // Legacy fallback: same source as before, linkage-safe.
-                    Class<?> instrumentClass = Class.forName("android.hardware.bydauto.instrument.BYDAutoInstrumentDevice");
-                    java.lang.reflect.Method getInst = instrumentClass.getMethod("getInstance", android.content.Context.class);
-                    Object instrumentDevice = getInst.invoke(null, (android.content.Context) null);
-                    if (instrumentDevice != null) {
-                        java.lang.reflect.Method getTemp = instrumentClass.getMethod("getOutCarTemperature");
-                        extTemp = (Integer) getTemp.invoke(instrumentDevice);
-                    }
-                } catch (Throwable t) {
-                    logger.debug("Could not read external temp: " + t.getMessage());
-                }
-            }
-
-            int dnaOverall = 50; // Default mid-range
-            try {
-                DnaScores dna = db.getAverageDna(30);
-                if (dna != null) {
-                    dnaOverall = dna.getOverall();
-                }
-            } catch (Exception e) {
-                logger.debug("Could not read DNA scores: " + e.getMessage());
-            }
-
-            RangeEstimate estimate = estimator.estimate(currentSoc, currentSpeed, extTemp, dnaOverall);
+            RangeEstimate estimate = estimator.estimate(currentSoc, tempC, liveTrip);
 
             JSONObject response = new JSONObject();
             response.put("success", true);
@@ -881,11 +828,9 @@ public class TripApiHandler {
             }
 
             // PHEV — petrol leg. The LEARNED estimate needs a user-set tank
-            // capacity AND enough fuel-mode trips to seed a bucket, so the
-            // vehicle's own HAL fuel range ships alongside it as an immediate
-            // fallback. Without it a PHEV shows no petrol range at all until
-            // both preconditions are met — same precedence the dashboard uses.
-            // Keys are simply absent on BEVs.
+            // capacity AND enough fuel-mode trips, so the vehicle's own HAL
+            // fuel range ships alongside it as an immediate fallback. Keys are
+            // simply absent on BEVs.
             try {
                 com.overdrive.app.monitor.VehicleDataMonitor vdm =
                         com.overdrive.app.monitor.VehicleDataMonitor.getInstance();
@@ -902,8 +847,7 @@ public class TripApiHandler {
                     if (rangeData != null && rangeData.hasFuelPercent()
                             && cfg != null && cfg.getTankCapacityL() > 0) {
                         fuelEst = estimator.estimateFuelRange(
-                                rangeData.fuelPercent, cfg.getTankCapacityL(),
-                                currentSpeed, extTemp, dnaOverall);
+                                rangeData.fuelPercent, cfg.getTankCapacityL(), tempC);
                         if (fuelEst != null) {
                             fuelEst.builtInRangeKm = rangeData.fuelRangeKm;
                             response.put("fuelRange", fuelEst.toJson());
@@ -938,6 +882,123 @@ public class TripApiHandler {
             }
             return response;
         }
+    }
+
+    /**
+     * POST /api/trips/range/calibration — the driver's pick of their real range, sent as the
+     * consumption it implies ({@code kwhPer100Km}, plus {@code rangeKm} for display). Replies
+     * with the fresh range payload; 409 ({@code reason} out_of_band / no_model) when the pick no
+     * longer fits the trips-only band.
+     */
+    private JSONObject handleSetRangeCalibration(String body) {
+        RangeEstimator estimator = manager.getRangeEstimator();
+        if (estimator == null || manager.getDatabase() == null) {
+            return errorResponse("Trip analytics is disabled", 503);
+        }
+        JSONObject in;
+        try {
+            in = new JSONObject(body != null && !body.trim().isEmpty() ? body : "{}");
+        } catch (Exception e) {
+            return errorResponse("Invalid JSON", 400);
+        }
+        if (in.optBoolean("clear", false)) return handleClearRangeCalibration();
+        double kwhPer100Km = in.optDouble("kwhPer100Km", Double.NaN);
+        double rangeKm = in.optDouble("rangeKm", Double.NaN);
+        if (!Double.isFinite(kwhPer100Km)) return errorResponse("kwhPer100Km is required", 400);
+
+        RangeEstimator.CalibrationOutcome outcome = estimator.calibrate(
+                kwhPer100Km, rangeKm, readSocPercent(), readOutsideTempC());
+        switch (outcome) {
+            case SAVED: {
+                JSONObject response = handleGetRange();
+                try { response.put("calibrated", true); } catch (Exception ignored) {}
+                return response;
+            }
+            case OUT_OF_BAND:
+                return withReason(errorResponse("The pick is outside the range your trips support", 409),
+                        "out_of_band");
+            case NO_MODEL:
+                return withReason(errorResponse("Not enough data", 409), "no_model");
+            case INVALID:
+                return errorResponse("kwhPer100Km is out of range", 400);
+            default:
+                return errorResponse("The calibration could not be saved", 500);
+        }
+    }
+
+    /** DELETE /api/trips/range/calibration — back to trips alone. */
+    private JSONObject handleClearRangeCalibration() {
+        RangeEstimator estimator = manager.getRangeEstimator();
+        if (estimator == null || manager.getDatabase() == null) {
+            return errorResponse("Trip analytics is disabled", 503);
+        }
+        if (!estimator.clearCalibration()) {
+            return errorResponse("The calibration could not be removed", 500);
+        }
+        JSONObject response = handleGetRange();
+        try { response.put("cleared", true); } catch (Exception ignored) {}
+        return response;
+    }
+
+    private static JSONObject withReason(JSONObject error, String reason) {
+        try { error.put("reason", reason); } catch (Exception ignored) {}
+        return error;
+    }
+
+    private static double readSocPercent() {
+        try {
+            com.overdrive.app.monitor.BatterySocData socData =
+                    VehicleDataMonitor.getInstance().getBatterySoc();
+            if (socData != null) return socData.socPercent;
+        } catch (Exception e) {
+            logger.debug("Could not read SoC: " + e.getMessage());
+        }
+        return 0;
+    }
+
+    /** Outside temperature in °C, NaN when no source answers. */
+    private static double readOutsideTempC() {
+        int extTemp = 20; // Default mild temperature
+        boolean extTempFromSnapshot = false;
+        boolean extTempKnown = false;
+        try {
+            // NORMALIZED TELEMETRY FIRST (R25). The previous code linked
+            // android.hardware.bydauto.instrument.BYDAutoInstrumentDevice
+            // as a DIRECT compile-time reference: on firmware without the
+            // class the first execution throws NoClassDefFoundError — an
+            // Error, not an Exception — straight through the old catch and
+            // out of this handler. The snapshot read has no SDK linkage,
+            // and the legacy fallback below is reflection-based so it can
+            // only fail with catchable exceptions.
+            com.overdrive.app.byd.BydDataCollector collector =
+                    com.overdrive.app.byd.BydDataCollector.getInstance();
+            if (collector.isInitialized()) {
+                com.overdrive.app.byd.BydVehicleData data = collector.getData();
+                if (data != null && !Double.isNaN(data.outsideTempC)) {
+                    extTemp = (int) Math.round(data.outsideTempC);
+                    extTempFromSnapshot = true;
+                    extTempKnown = extTemp >= -50 && extTemp <= 60;
+                }
+            }
+        } catch (Throwable t) {
+            logger.debug("Could not read external temp from snapshot: " + t.getMessage());
+        }
+        if (!extTempFromSnapshot) {
+            try {
+                // Legacy fallback: same source as before, linkage-safe.
+                Class<?> instrumentClass = Class.forName("android.hardware.bydauto.instrument.BYDAutoInstrumentDevice");
+                java.lang.reflect.Method getInst = instrumentClass.getMethod("getInstance", android.content.Context.class);
+                Object instrumentDevice = getInst.invoke(null, (android.content.Context) null);
+                if (instrumentDevice != null) {
+                    java.lang.reflect.Method getTemp = instrumentClass.getMethod("getOutCarTemperature");
+                    extTemp = (Integer) getTemp.invoke(instrumentDevice);
+                    extTempKnown = extTemp >= -50 && extTemp <= 60;
+                }
+            } catch (Throwable t) {
+                logger.debug("Could not read external temp: " + t.getMessage());
+            }
+        }
+        return extTempKnown ? extTemp : Double.NaN;
     }
 
     /**

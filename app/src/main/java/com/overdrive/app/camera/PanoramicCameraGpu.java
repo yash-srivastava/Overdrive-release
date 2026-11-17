@@ -116,6 +116,10 @@ public class PanoramicCameraGpu {
     private final boolean USE_OEM_SURFACE_TEXTURE_PATH = CAMERA_LAYOUT_MODE != 0;
     private final boolean USE_DILINK4_AVM_PATH =
         USE_OEM_SURFACE_TEXTURE_PATH && !USE_DILINK5_QCARCAM_PATH;
+    // Legacy strip path only: Camera2 paces at acquisition and DiLink 4/5 own their rate.
+    private final boolean PACE_LEGACY_RECORDER =
+        !USE_DILINK5_QCARCAM_PATH && !USE_CAMERA2_AVM_PATH && !USE_OEM_SURFACE_TEXTURE_PATH;
+    private final RecorderFramePacer recorderPacer = new RecorderFramePacer();
     // DiLink 4-only compatibility path: leave the OEM panorama output untouched
     // and consume preview port 0 exactly as supplied by the HAL.
     private final boolean USE_PASSIVE_APA_MODE =
@@ -144,6 +148,8 @@ public class PanoramicCameraGpu {
         !USE_OEM_SURFACE_TEXTURE_PATH
         && !USE_DILINK5_QCARCAM_PATH
         && !USE_CAMERA2_AVM_PATH
+        // The CPU recording engine never waits on the encoder: no lane needed.
+        && !com.overdrive.app.surveillance.RecordingEngine.isCpuEngineEnabled()
         && resolveDecoupledEncoderLaneFromConfig();
 
     private static boolean resolveDecoupledEncoderLaneFromConfig() {
@@ -161,6 +167,60 @@ public class PanoramicCameraGpu {
      *  camera sampler variant rides the existing {@link #isTexture2D()}. */
     public boolean isDecoupledEncoderLane() {
         return USE_DECOUPLED_ENCODER_LANE;
+    }
+
+    // CPU recording engine: the legacy/Camera2 ImageReader can hand the same
+    // frame to the GPU and the CPU. Requested before start(); applies to every
+    // reader created afterwards.
+    private volatile boolean cpuRecordingFramesRequested;
+    private volatile boolean cpuFrameReaderActive;
+    private boolean cpuReaderCreated;       // GL thread
+    private volatile boolean cpuReaderFramesSeen;
+
+    /** Ask for CPU-readable camera frames (CPU recording engine). Call before start(). */
+    public void setCpuRecordingFrames(boolean enabled) {
+        cpuRecordingFramesRequested = enabled;
+    }
+
+    /** True when the active camera reader delivers CPU-readable YUV frames. */
+    public boolean isCpuFrameReader() {
+        return cpuFrameReaderActive;
+    }
+
+    /** Why this instance's camera path can't feed the CPU engine (RecordingEngine.WHY_*), or null. */
+    public String cpuFrameBlocker() {
+        if (USE_DILINK5_QCARCAM_PATH || USE_OEM_SURFACE_TEXTURE_PATH) {
+            return com.overdrive.app.surveillance.RecordingEngine.WHY_CAMERA_MODE;
+        }
+        if (USE_DECOUPLED_ENCODER_LANE) {
+            return com.overdrive.app.surveillance.RecordingEngine.WHY_DECOUPLED_LANE;
+        }
+        return null;
+    }
+
+    /** True when config asks for the decoupled lane on this camera path (ignores the CPU engine). */
+    public static boolean decoupledLaneConfigured() {
+        try {
+            return !com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                && resolveCameraLayoutModeFromConfig() == 0
+                && !com.overdrive.app.camera.camera2.Camera2Platform.isSelected()
+                && resolveDecoupledEncoderLaneFromConfig();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** Same check from config, before a camera instance exists. */
+    public static String cpuRecordingFrameBlocker() {
+        try {
+            if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                    || resolveCameraLayoutModeFromConfig() != 0) {
+                return com.overdrive.app.surveillance.RecordingEngine.WHY_CAMERA_MODE;
+            }
+            return null;
+        } catch (Throwable t) {
+            return com.overdrive.app.surveillance.RecordingEngine.WHY_CAMERA_MODE;
+        }
     }
 
     private static int resolveCameraLayoutModeFromConfig() {
@@ -189,6 +249,12 @@ public class PanoramicCameraGpu {
      *  3 = DiLink 4 four-corner remap. */
     public int getCameraLayoutMode() {
         return CAMERA_LAYOUT_MODE;
+    }
+
+    /** Legacy AVMCamera strip path (not DiLink 4/5 or Camera2). */
+    public boolean isLegacyAvmPath() {
+        return !USE_OEM_SURFACE_TEXTURE_PATH && !USE_DILINK5_QCARCAM_PATH
+            && !USE_CAMERA2_AVM_PATH;
     }
     
     // Camera ID override — set via setCameraId() before start()
@@ -312,6 +378,7 @@ public class PanoramicCameraGpu {
     private boolean windshieldFrameReady = false;
     private Image windshieldBoundImage;
     private HardwareBuffer windshieldBoundHwBuffer;
+    private com.overdrive.app.surveillance.CpuFrameSource windshieldBoundCpuSource;  // GL thread
     private long windshieldFrameCount = 0;
     // GL-thread-confined: fps last pushed to the legacy windshield HAL; 0 = untracked path.
     private int windshieldAppliedFps = 0;
@@ -445,9 +512,6 @@ public class PanoramicCameraGpu {
     // requested (HAL clamp; e.g. user requests 30, HAL emits ~26).
     private volatile float measuredFps = 0f;
     private long lastFrameTime = 0;
-    // Monotonic timestamp of an actual newly bound camera frame. Keep this
-    // separate from lastFrameTime, which also has watchdog/open-path writes.
-    private volatile long lastCameraFrameElapsedMs = 0L;
     private volatile long lastCameraStartTime = 0;
     // DiLink 4: track last error-restart so we can throttle tight reopen
     // loops when the HAL keeps emitting event=8. oem-parity: 60 s, not 30 s.
@@ -1076,6 +1140,8 @@ public class PanoramicCameraGpu {
     // Snapshot of frameCounter at the start of the current open. If frameCounter
     // hasn't advanced past this by the next restart, that open delivered nothing.
     private volatile long frameCounterAtOpen = 0;
+    // Bumped on every successful open; a queued legacy restart is stale once it changes.
+    private volatile long cameraOpenSeq = 0;
     // Set true while an escalation is in flight so the watchdog stops posting
     // bare restartCameraAfterError() until the full rebuild completes (and
     // resets it via notePipelineRestarted()).
@@ -1775,6 +1841,8 @@ public class PanoramicCameraGpu {
                     // as a benign HAL lifecycle notification. Restarting on it causes an infinite loop.
                     // Guard: ignore error events within 3 seconds of camera start — the HAL is still
                     // settling. If it's a real error, the frame stall watchdog will catch it.
+                    // Read before lastCameraStartTime: startCamera writes them in the other order.
+                    final long errorOpenSeq = cameraOpenSeq;
                     long timeSinceStart = System.currentTimeMillis() - lastCameraStartTime;
                     if (timeSinceStart < 3000) {
                         logger.warn("CAMERA ERROR: event=" + eventType + " — IGNORED (camera started " +
@@ -1805,9 +1873,7 @@ public class PanoramicCameraGpu {
                         return;
                     }
                     logger.error("CAMERA ERROR: event=" + eventType + " — restarting camera");
-                    if (glHandler != null) {
-                        glHandler.post(() -> restartCameraAfterError());
-                    }
+                    postLegacyErrorRestart(errorOpenSeq);
                 }
             });
             if (USE_CAMERA2_AVM_PATH) {
@@ -4844,21 +4910,49 @@ public class PanoramicCameraGpu {
         // USAGE_GPU_SAMPLED_IMAGE tells the gralloc allocator we want a
         // GPU-friendly memory layout.
         final int poolSize = 6;
-        try {
-            long usage = HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE;
-            cameraImageReader = ImageReader.newInstance(
-                width, height,
-                ImageFormat.PRIVATE,
-                poolSize,
-                usage);
-        } catch (Throwable t) {
-            // Some BYD HAL builds may reject PRIVATE — fall back to YUV_420_888.
-            logger.warn("ImageReader PRIVATE init failed: " + t.getMessage()
-                + " — falling back to YUV_420_888");
-            cameraImageReader = ImageReader.newInstance(
-                width, height,
-                ImageFormat.YUV_420_888,
-                poolSize);
+        boolean cpuReader = false;
+        if (cpuRecordingFramesRequested && cpuReaderCreated && !cpuReaderFramesSeen) {
+            // The HAL may not feed this format; recording then falls back to the GPU engine.
+            cpuRecordingFramesRequested = false;
+            logger.warn("CPU-readable camera reader delivered no frames — using the GPU-only reader");
+        }
+        if (cpuRecordingFramesRequested && cpuFrameBlocker() == null) {
+            // CPU recording engine: one linear YUV buffer the GPU samples and
+            // the CPU copies into the encoder (no extra copy for either).
+            try {
+                cameraImageReader = ImageReader.newInstance(
+                    width, height,
+                    ImageFormat.YUV_420_888,
+                    poolSize,
+                    HardwareBuffer.USAGE_CPU_READ_OFTEN
+                        | HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE);
+                cpuReader = true;
+                cpuReaderCreated = true;
+                cpuReaderFramesSeen = false;
+                logger.info("Camera reader: YUV with CPU+GPU access (CPU recording engine)");
+            } catch (Throwable t) {
+                logger.warn("CPU-readable camera reader refused (" + t.getMessage()
+                    + ") — using the GPU-only reader");
+            }
+        }
+        cpuFrameReaderActive = cpuReader;
+        if (!cpuReader) {
+            try {
+                long usage = HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE;
+                cameraImageReader = ImageReader.newInstance(
+                    width, height,
+                    ImageFormat.PRIVATE,
+                    poolSize,
+                    usage);
+            } catch (Throwable t) {
+                // Some BYD HAL builds may reject PRIVATE — fall back to YUV_420_888.
+                logger.warn("ImageReader PRIVATE init failed: " + t.getMessage()
+                    + " — falling back to YUV_420_888");
+                cameraImageReader = ImageReader.newInstance(
+                    width, height,
+                    ImageFormat.YUV_420_888,
+                    poolSize);
+            }
         }
         cameraImageReader.setOnImageAvailableListener(
             this::onHalImageAvailable, imageReaderHandler);
@@ -4867,6 +4961,8 @@ public class PanoramicCameraGpu {
 
     /** Idempotent teardown of whichever consumer is active. */
     private void releaseCameraConsumer() {
+        // CPU recording thread first: it may still be copying from this reader.
+        boolean cpuFramesIdle = awaitCpuFramesIdle(currentBoundCpuSource, parkedCpuFrames, "camera");
         // Crash-fix (gap-closer): this runs on the GL render thread via
         // recreateCameraSurface during live reacquire/auto-probe/restart while the
         // AI lane is STILL alive — freeing the bound gralloc / releasing the
@@ -4882,14 +4978,18 @@ public class PanoramicCameraGpu {
         // Release the held Image + HardwareBuffer FIRST so the gralloc slots
         // go back to the ImageReader pool before we close the reader.
         releasePreviousBoundImage();
+        closeIdleCpuFrames(parkedCpuFrames);
         if (cameraSurface != null) {
             try { cameraSurface.release(); } catch (Throwable ignored) {}
             cameraSurface = null;
         }
         if (cameraImageReader != null) {
-            try { cameraImageReader.close(); } catch (Throwable ignored) {}
+            if (cpuFramesIdle) {
+                try { cameraImageReader.close(); } catch (Throwable ignored) {}
+            }
             cameraImageReader = null;
         }
+        if (!cpuFramesIdle) parkedCpuFrames.clear();  // closed with their reader by the finalizer
         if (cameraSurfaceTexture != null) {
             SurfaceTexture retired = retireCameraSurfaceTextureConsumer();
             if (retired != null) {
@@ -4976,7 +5076,23 @@ public class PanoramicCameraGpu {
             imageReaderThread.start();
             imageReaderHandler = new Handler(imageReaderThread.getLooper());
         }
-        try {
+        windshieldImageReader = null;
+        if (cpuFrameReaderActive) {
+            // CPU recording engine draws the dashcam top band from this frame too.
+            try {
+                windshieldImageReader = ImageReader.newInstance(
+                    1920, 1080,
+                    ImageFormat.YUV_420_888,
+                    4,
+                    HardwareBuffer.USAGE_CPU_READ_OFTEN
+                        | HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE);
+            } catch (Throwable t) {
+                logger.warn("CPU-readable windshield reader refused (" + t.getMessage()
+                    + ") — using the GPU-only reader");
+                windshieldImageReader = null;
+            }
+        }
+        if (windshieldImageReader == null) try {
             windshieldImageReader = ImageReader.newInstance(
                 1920, 1080,
                 ImageFormat.PRIVATE,
@@ -5383,15 +5499,21 @@ public class PanoramicCameraGpu {
             }
             windshieldCameraObj = null;
         }
+        boolean cpuFramesIdle = awaitCpuFramesIdle(
+            windshieldBoundCpuSource, parkedCpuWindshieldFrames, "windshield");
         releasePreviousBoundWindshieldImage();
+        closeIdleCpuFrames(parkedCpuWindshieldFrames);
         if (windshieldSurface != null) {
             try { windshieldSurface.release(); } catch (Throwable ignored) {}
             windshieldSurface = null;
         }
         if (windshieldImageReader != null) {
-            try { windshieldImageReader.close(); } catch (Throwable ignored) {}
+            if (cpuFramesIdle) {
+                try { windshieldImageReader.close(); } catch (Throwable ignored) {}
+            }
             windshieldImageReader = null;
         }
+        if (!cpuFramesIdle) parkedCpuWindshieldFrames.clear();  // closed with their reader by the finalizer
         if (windshieldStarted || windshieldFrameReady) {
             logger.info("Windshield camera stopped (frames=" + windshieldFrameCount + ")");
         }
@@ -5471,11 +5593,6 @@ public class PanoramicCameraGpu {
             logger.info("Camera handle already active — skipping duplicate cold open");
             return;
         }
-
-        // A new handle must prove that it has delivered a frame of its own;
-        // never let a timestamp from the previous camera session satisfy the
-        // live-secondary fast path during a later ACC transition.
-        lastCameraFrameElapsedMs = 0L;
 
         // Cold-open invariant: every path that creates the primary AVMCamera
         // handle (initial start, ACC reopen, HAL-error restart, yield
@@ -5580,6 +5697,7 @@ public class PanoramicCameraGpu {
             // Snapshot the frame counter at this open so the next restart can tell
             // whether THIS open ever delivered a frame (zero-frame-reopen escalation).
             frameCounterAtOpen = frameCounter;
+            cameraOpenSeq++;
             logger.info("Camera started (" + width + "x" + height +
                 ", id=" + cameraId + ", surfaceMode=" + cameraSurfaceMode + ")");
 
@@ -5595,10 +5713,9 @@ public class PanoramicCameraGpu {
     }
 
     /**
-     * DiLink 100: opens the pano_h AVMCamera without the static factory's
-     * BmmCameraInfo id validation (see {@link DiLink100Platform}). Uses
-     * {@code new AVMCamera(id, camDevType=0)} plus the instance {@code open()},
-     * which is exactly what the static factory does after validation.
+     * BYD100F DiLink 100: opens the pano_h AVMCamera without the static factory's BmmCameraInfo id
+     * check (see {@link DiLink100Platform}), using {@code new AVMCamera(id, camDevType=0)} plus the
+     * instance {@code open()}, which is what the factory does after that check.
      *
      * @return the open AVMCamera, or null when bmmcameraserver refused it
      */
@@ -5606,15 +5723,13 @@ public class PanoramicCameraGpu {
         final int id = DiLink100Platform.PANO_CAMERA_ID;
         Object candidate = null;
         try {
-            Constructor<?> constructor =
-                    avmClass.getDeclaredConstructor(int.class, int.class);
+            Constructor<?> constructor = avmClass.getDeclaredConstructor(int.class, int.class);
             constructor.setAccessible(true);
             candidate = constructor.newInstance(id, 0);
             Method mOpen = avmClass.getDeclaredMethod("open");
             mOpen.setAccessible(true);
             if ((boolean) mOpen.invoke(candidate)) {
-                logger.info("DiLink 100 camera opened via AVMCamera(int,int) + open() (id="
-                        + id + ")");
+                logger.info("DiLink 100 camera opened via AVMCamera(int,int) + open() (id=" + id + ")");
                 return candidate;
             }
             logger.warn("DiLink 100 AVMCamera(" + id + ", 0).open() returned false");
@@ -5829,13 +5944,10 @@ public class PanoramicCameraGpu {
                             }
                         }
                     }
-                    if (cameraObj == null && DiLink100Platform.isDiLink100()) {
-                        // === ATTEMPT 3 (DiLink 100): AVMCamera(int,int) + open() ===
-                        // The static factory validates ids through BmmCameraInfo,
-                        // which reads a vendor property the shell daemon cannot
-                        // see, so every id looks invalid. The constructor plus
-                        // the instance open() skip that check. Only pano_h
-                        // (camera 0) is tried: unvalidated ids are never probed.
+                    if (cameraObj == null && cameraId == DiLink100Platform.PANO_CAMERA_ID
+                            && isLegacyAvmPath() && DiLink100Platform.isAvmPathActive()) {
+                        // === ATTEMPT 3 (BYD100F DiLink 100): AVMCamera(int,int) + open() ===
+                        // Only the requested pano_h id 0; unvalidated ids are never probed.
                         cameraObj = openDiLink100Camera(avmClass);
                         if (cameraObj != null) {
                             cameraIdOverride = DiLink100Platform.PANO_CAMERA_ID;
@@ -5948,6 +6060,14 @@ public class PanoramicCameraGpu {
     // these from another thread will leak the gralloc slot and stall the HAL.
     private Image currentBoundImage;             // @GuardedBy(GL thread)
     private HardwareBuffer currentBoundHwBuffer; // @GuardedBy(GL thread)
+    // CPU recording engine: the bound image as lent to the CPU recording thread, and
+    // images that thread still reads after the camera moved on (closed once it's done).
+    private com.overdrive.app.surveillance.CpuFrameSource currentBoundCpuSource;  // GL thread
+    private final java.util.ArrayList<com.overdrive.app.surveillance.CpuFrameSource>
+        parkedCpuFrames = new java.util.ArrayList<>();                            // GL thread
+    private final java.util.ArrayList<com.overdrive.app.surveillance.CpuFrameSource>
+        parkedCpuWindshieldFrames = new java.util.ArrayList<>();                  // GL thread
+    private static final long CPU_FRAME_DRAIN_TIMEOUT_MS = 1000L;
     // HAL-provided sensor timestamp (ns) of the currently bound image,
     // captured from Image.getTimestamp() inside consumeLatestImageAndBind.
     // Fed to eglPresentationTimeANDROID so MediaCodec produces honest PTS.
@@ -5975,6 +6095,7 @@ public class PanoramicCameraGpu {
     private static final int PTS_DOMAIN_NANO = 2;
 
     private boolean consumeLatestImageAndBind() {
+        closeIdleCpuFrames(parkedCpuFrames);
         ImageReader reader = cameraImageReader;
         if (reader == null) return false;
         Image image = null;
@@ -5987,6 +6108,7 @@ public class PanoramicCameraGpu {
                 return false;
             }
             irAcquireOkCount++;
+            if (cpuFrameReaderActive) cpuReaderFramesSeen = true;
             // SOTA cross-vehicle sanity: log once per session if HAL-emitted
             // dims differ from the configured strip. Mosaic offsets, foveated
             // crop math, and encoder geometry all assume the configured size.
@@ -6689,13 +6811,88 @@ public class PanoramicCameraGpu {
             try { currentBoundHwBuffer.close(); } catch (Throwable ignored) {}
             currentBoundHwBuffer = null;
         }
-        if (currentBoundImage != null) {
-            try { currentBoundImage.close(); } catch (Throwable ignored) {}
-            currentBoundImage = null;
+        Image image = currentBoundImage;
+        com.overdrive.app.surveillance.CpuFrameSource source = currentBoundCpuSource;
+        currentBoundImage = null;
+        currentBoundCpuSource = null;
+        if (image != null) {
+            if (source != null && source.inUse()) {
+                parkedCpuFrames.add(source);  // the CPU recording thread still reads it
+            } else {
+                try { image.close(); } catch (Throwable ignored) {}
+            }
         }
     }
 
+    /** The bound camera frame, lent to the CPU recording thread (one source per image). */
+    private com.overdrive.app.surveillance.CpuFrameSource boundCpuFrame() {
+        if (currentBoundImage == null) return null;
+        if (currentBoundCpuSource == null) {
+            currentBoundCpuSource = new com.overdrive.app.surveillance.CpuFrameSource(currentBoundImage);
+        }
+        return currentBoundCpuSource;
+    }
+
+    /** The bound windshield frame, lent to the CPU recording thread. */
+    private com.overdrive.app.surveillance.CpuFrameSource boundCpuWindshieldFrame() {
+        if (windshieldBoundImage == null) return null;
+        if (windshieldBoundCpuSource == null) {
+            windshieldBoundCpuSource =
+                new com.overdrive.app.surveillance.CpuFrameSource(windshieldBoundImage);
+        }
+        return windshieldBoundCpuSource;
+    }
+
+    /** Closes parked images the CPU recording thread has finished with. GL thread only. */
+    private static void closeIdleCpuFrames(
+            java.util.ArrayList<com.overdrive.app.surveillance.CpuFrameSource> parked) {
+        for (int i = parked.size() - 1; i >= 0; i--) {
+            com.overdrive.app.surveillance.CpuFrameSource source = parked.get(i);
+            if (!source.inUse()) {
+                parked.remove(i);
+                try { source.image().close(); } catch (Throwable ignored) {}
+            }
+        }
+    }
+
+    /**
+     * Before a reader closes: drops a frame still waiting for the CPU recording
+     * thread and waits for the one it is copying. False if a copy still reads
+     * this reader's images; the reader must then be left to its finalizer, which
+     * runs only after that thread lets go.
+     */
+    private boolean awaitCpuFramesIdle(com.overdrive.app.surveillance.CpuFrameSource bound,
+            java.util.ArrayList<com.overdrive.app.surveillance.CpuFrameSource> parked, String which) {
+        if ((bound == null || !bound.inUse()) && !anyCpuFrameInUse(parked)) return true;
+        GpuMosaicRecorder r = recorder;
+        if (r != null) r.dropPendingCpuFrame();
+        long deadline = android.os.SystemClock.uptimeMillis() + CPU_FRAME_DRAIN_TIMEOUT_MS;
+        while ((bound != null && bound.inUse()) || anyCpuFrameInUse(parked)) {
+            if (android.os.SystemClock.uptimeMillis() >= deadline) {
+                logger.error("CPU recording thread still reading " + which + " frames after "
+                    + CPU_FRAME_DRAIN_TIMEOUT_MS + " ms; leaving that reader unclosed");
+                return false;
+            }
+            try {
+                Thread.sleep(2);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean anyCpuFrameInUse(
+            java.util.ArrayList<com.overdrive.app.surveillance.CpuFrameSource> parked) {
+        for (int i = 0; i < parked.size(); i++) {
+            if (parked.get(i).inUse()) return true;
+        }
+        return false;
+    }
+
     private boolean consumeLatestWindshieldImageAndBind() {
+        closeIdleCpuFrames(parkedCpuWindshieldFrames);
         ImageReader reader = windshieldImageReader;
         if (reader == null || windshieldTextureId == 0) return false;
         Image image = null;
@@ -6737,9 +6934,16 @@ public class PanoramicCameraGpu {
             try { windshieldBoundHwBuffer.close(); } catch (Throwable ignored) {}
             windshieldBoundHwBuffer = null;
         }
-        if (windshieldBoundImage != null) {
-            try { windshieldBoundImage.close(); } catch (Throwable ignored) {}
-            windshieldBoundImage = null;
+        Image image = windshieldBoundImage;
+        com.overdrive.app.surveillance.CpuFrameSource source = windshieldBoundCpuSource;
+        windshieldBoundImage = null;
+        windshieldBoundCpuSource = null;
+        if (image != null) {
+            if (source != null && source.inUse()) {
+                parkedCpuWindshieldFrames.add(source);  // the CPU recording thread still reads it
+            } else {
+                try { image.close(); } catch (Throwable ignored) {}
+            }
         }
     }
 
@@ -6871,7 +7075,7 @@ public class PanoramicCameraGpu {
             }
         }
 
-        if (recorderGateOpen) {
+        if (recorderGateOpen && (recorderFrameStride > 1 || admitRecorderFrame())) {
             EncoderLane lane = encoderLane;
             if (lane != null) {
                 boolean wsUsable = windshieldStarted && windshieldFrameReady
@@ -6883,7 +7087,6 @@ public class PanoramicCameraGpu {
                     camRing.generationOf(camSlot),
                     wsUsable ? decoupledLastWsSlot : -1,
                     wsUsable ? decoupledWsRing.textureOf(decoupledLastWsSlot) : 0,
-                    wsUsable ? decoupledWsRing.generationOf(decoupledLastWsSlot) : -1,
                     wsUsable,
                     currentFrameTimestampNs,
                     cameraFrameSeq.get()));
@@ -6908,6 +7111,7 @@ public class PanoramicCameraGpu {
             try { currentBoundImage.close(); } catch (Throwable ignored) { }
             currentBoundImage = null;
         }
+        currentBoundCpuSource = null;  // never lent here: the CPU engine runs without this lane
         if (wsCopiedThisFrame) {
             if (windshieldBoundHwBuffer != null) {
                 try { windshieldBoundHwBuffer.close(); } catch (Throwable ignored) { }
@@ -6917,6 +7121,7 @@ public class PanoramicCameraGpu {
                 try { windshieldBoundImage.close(); } catch (Throwable ignored) { }
                 windshieldBoundImage = null;
             }
+            windshieldBoundCpuSource = null;
         }
     }
 
@@ -7109,10 +7314,12 @@ public class PanoramicCameraGpu {
             long stageAfterAcquireNs = System.nanoTime();
             frameCounter++;
             lastFrameTime = System.currentTimeMillis();
-            lastCameraFrameElapsedMs = android.os.SystemClock.elapsedRealtime();
             firstFrameReceived = true;
             consecutiveContentionStalls = 0;  // Frames flowing — clear stall counter
             consecutiveZeroFrameRestarts = 0; // Real frame arrived — reopen succeeded; clear escalation counter
+            if (isLegacyAvmPath()) {
+                AvcHalWarmup.cancelRecoveryLaunch();
+            }
             if (deadSlotResumePending) {
                 deadSlotResumePending = false;
                 postDeadSlotResume();
@@ -7304,6 +7511,8 @@ public class PanoramicCameraGpu {
             GpuMosaicRecorder localRecorder = recorder;
             HardwareEventRecorderGpu localEncoder = encoder;
             long stageBeforeMosaicNs = System.nanoTime();
+            // CPU recording engine: set in PASS 1A, copied after PASS 1B/1C (below).
+            GpuMosaicRecorder deferredCpuRecorder = null;
             // DECOUPLED LANE (camera.decoupledEncoderLane): PASS 1A is replaced
             // by copy-into-ring + EncoderLane submit — the encoder-blocking
             // makeCurrent/draw/eglSwap now happen on the lane thread, so this
@@ -7414,11 +7623,19 @@ public class PanoramicCameraGpu {
                 // skipped frames MediaCodec gets no input, lowering the effective
                 // recording rate. Stride 1 = every frame (default).
                 int stride = recorderFrameStride;
-                boolean drawThisFrame = stride <= 1 || (recorderStrideCounter % stride) == 0;
+                boolean drawThisFrame = stride <= 1
+                        ? admitRecorderFrame()
+                        : (recorderStrideCounter % stride) == 0;
                 recorderStrideCounter++;
                 if (drawThisFrame) {
-                    localRecorder.drawFrame(cameraTextureId, windshieldTextureId,
-                        windshieldStarted && windshieldFrameReady, currentFrameTimestampNs);
+                    if (localRecorder.isCpuEngine()) {
+                        // Handed to the CPU recording thread after the stream and blind-spot
+                        // views are queued on the GPU (below).
+                        deferredCpuRecorder = localRecorder;
+                    } else {
+                        localRecorder.drawFrame(cameraTextureId, windshieldTextureId,
+                            windshieldStarted && windshieldFrameReady, currentFrameTimestampNs);
+                    }
                 }
                 // NOTE: encoder draining now runs on HardwareEventRecorderGpu's
                 // dedicated drainer thread; the old inline drainEncoder() calls
@@ -7432,6 +7649,7 @@ public class PanoramicCameraGpu {
                 // this.recorder/this.encoder concurrently; re-reading the fields
                 // here would NPE.
                 if (localRecorder.needsReinit() && localEncoder != null) {
+                    deferredCpuRecorder = null;  // no copy into the codec being rebuilt
                     logger.warn("Encoder surface lost - reinitializing encoder...");
                     // Extend the GL watchdog window: encoder.release() joins
                     // the drainer (up to 2s) plus MediaCodec stop/release —
@@ -7607,12 +7825,18 @@ public class PanoramicCameraGpu {
                         && (bsDiagFrames > 0 || bsDiagSkipScaler > 0 || bsDiagSkipHidden > 0)) {
                     boolean odReady = false;
                     try { odReady = com.overdrive.app.od.Od.INSTANCE.isReady(); } catch (Throwable ignored) {}
-                    logger.info("BS render diag: drawn=" + bsDiagFrames
+                    String bsDiag = "BS render diag: drawn=" + bsDiagFrames
                             + " skipNoScaler=" + bsDiagSkipScaler
                             + " skipHidden=" + bsDiagSkipHidden
                             + " camTex=" + cameraTextureId
                             + " bsVisible=" + bsLayerVisible
-                            + " odReady=" + odReady);
+                            + " odReady=" + odReady;
+                    // Healthy windows are DEBUG; any black-card cause above stays INFO.
+                    if (bsDiagSkipScaler == 0 && cameraTextureId != 0 && odReady) {
+                        logger.debug(bsDiag);
+                    } else {
+                        logger.info(bsDiag);
+                    }
                     bsDiagLastLogMs = nowDiagMs;
                     bsDiagFrames = 0; bsDiagSkipScaler = 0; bsDiagSkipHidden = 0;
                 }
@@ -7676,6 +7900,13 @@ public class PanoramicCameraGpu {
                 localAiLane.notifyFrame(cameraFrameSeq.get());
             }
 
+            // CPU recording, last: the frame goes to the CPU recording thread, which
+            // copies it into the encoder while the GPU draws the views queued above.
+            if (deferredCpuRecorder != null) {
+                deferredCpuRecorder.submitCpuFrame(boundCpuFrame(), boundCpuWindshieldFrame(),
+                    windshieldStarted && windshieldFrameReady, currentFrameTimestampNs);
+            }
+
             // Per-stage timing roll-up. Track only the worst frame per 30 s
             // window so the log line stays bounded; the worst frame is what
             // crosses the encoder backpressure threshold. AI readback/submit
@@ -7727,6 +7958,13 @@ public class PanoramicCameraGpu {
                         windowFrames, fps, targetFps, uptimeS, aiProc, aiDrop));
                 if (aiLaneWorker != null) {
                     aiLaneWorker.resetCounters();
+                }
+                if (PACE_LEGACY_RECORDER) {
+                    long[] paced = recorderPacer.drainCounts();
+                    if (paced[0] < paced[1]) {
+                        logger.info("Recorder pacing: drew " + paced[0] + " of " + paced[1]
+                            + " camera frames (target=" + targetFps + ")");
+                    }
                 }
 
                 lastStatsTime = now;
@@ -8143,6 +8381,8 @@ public class PanoramicCameraGpu {
                     // lastFrameTime a true arrival signal there.
                     boolean usesRealArrivalStallClock =
                             USE_DILINK4_AVM_PATH || USE_DILINK5_QCARCAM_PATH;
+                    // Read before the frame/start clocks: startCamera writes them first.
+                    final long stallOpenSeq = cameraOpenSeq;
                     long stallClock = usesRealArrivalStallClock
                         ? lastRealFrameTimeSt : lastFrameTime;
                     // dilink4: releaseCameraConsumer() zeroes lastRealFrameTimeSt on
@@ -8340,16 +8580,11 @@ public class PanoramicCameraGpu {
                                 } else {
                                     // No native app — this is a HAL issue, restart camera
                                     consecutiveContentionStalls = 0;
-                                    logger.info("Frame stall is HAL issue — restarting camera");
-                                    if (glHandler != null) {
-                                        glHandler.post(() -> restartCameraAfterError());
-                                    }
+                                    postLegacyStallRestart(stallOpenSeq);
                                 }
                             } else {
                                 // No coordinator — just restart
-                                if (glHandler != null) {
-                                    glHandler.post(() -> restartCameraAfterError());
-                                }
+                                postLegacyStallRestart(stallOpenSeq);
                             }
                         } else if (nativeActive && timeSinceFrame < 500) {
                             // Frames are flowing despite native app — reset stall counter
@@ -9307,6 +9542,11 @@ public class PanoramicCameraGpu {
         return backoffMs;
     }
 
+    /** GL thread: recorder admission at stride 1; true everywhere except a legacy HAL that overshoots targetFps. */
+    private boolean admitRecorderFrame() {
+        return !PACE_LEGACY_RECORDER || recorderPacer.admit(System.nanoTime(), targetFps);
+    }
+
     /** GL thread: paces frames to targetFps; an early frame goes straight back to the HAL. */
     private boolean camera2FrameDue() {
         long now = System.nanoTime();
@@ -9507,6 +9747,40 @@ public class PanoramicCameraGpu {
     }
 
     /**
+     * Legacy stall restart: none while a restart runs, and none once the camera has
+     * reopened since {@code openSeq} (read when the stall was observed).
+     */
+    private void postLegacyStallRestart(final long openSeq) {
+        Handler handler = glHandler;
+        if (handler == null) return;
+        if (restartInProgress.get()) {
+            logger.info("Frame stall during a camera restart — not queueing another");
+            return;
+        }
+        logger.info("Frame stall is HAL issue — restarting camera");
+        handler.post(() -> {
+            if (cameraOpenSeq != openSeq) {
+                logger.info("Skipping queued stall restart — the camera reopened since");
+                return;
+            }
+            restartCameraAfterError();
+        });
+    }
+
+    /** Legacy HAL-error restart; dropped if the camera reopened after {@code openSeq}. */
+    private void postLegacyErrorRestart(final long openSeq) {
+        Handler handler = glHandler;
+        if (handler == null) return;
+        handler.post(() -> {
+            if (cameraOpenSeq != openSeq) {
+                logger.info("Skipping queued error restart — the camera reopened since");
+                return;
+            }
+            restartCameraAfterError();
+        });
+    }
+
+    /**
      * SOTA: Restarts the camera after a HAL error event or frame stall.
      *
      * Called on GL thread. Does a full close→reopen cycle with proper cleanup.
@@ -9590,6 +9864,9 @@ public class PanoramicCameraGpu {
             logger.error("Frame-stall restart loop: " + consecutiveZeroFrameRestarts
                 + " consecutive reopens delivered ZERO frames — bare reopen cannot "
                 + "recover the AVM producer. Escalating to a full camera/GL rebuild.");
+            if (isLegacyAvmPath()) {
+                AvcHalWarmup.requestRecoveryLaunch("zero-frame reopens");
+            }
             // Release the CAS so the full-rebuild restart (which does its own
             // close/open) isn't blocked by our in-flight flag, then hand off.
             restartInProgress.set(false);
@@ -10305,34 +10582,6 @@ public class PanoramicCameraGpu {
     // Sticky stop verdict — see stop(). Never cleared; only a process restart
     // (which replaces the instance) lifts it.
     private volatile boolean stopVerdictWedged = false;
-
-    /**
-     * Returns true only when the OEM camera service reports another camera
-     * owner AND this instance is still receiving recent frames as a secondary
-     * consumer. In that state, releasing the handle again would unnecessarily
-     * interrupt a working feed and repeat the ACC-ON handover.
-     */
-    public boolean hasLiveNativeSharedCamera() {
-        if (!running || cameraObj == null || cameraCoordinator == null) {
-            return false;
-        }
-
-        long frameTimeMs = lastCameraFrameElapsedMs;
-        long frameAgeMs = android.os.SystemClock.elapsedRealtime() - frameTimeMs;
-        if (frameTimeMs <= 0L || frameAgeMs < 0L || frameAgeMs > 2000L) {
-            return false;
-        }
-
-        String nativeCameraUser = cameraCoordinator.queryCurrentCameraUser();
-        if (nativeCameraUser == null) {
-            return false;
-        }
-
-        logger.info("Live shared AVM feed confirmed (native owner="
-                + nativeCameraUser + ", frameAge=" + frameAgeMs + "ms)");
-        return true;
-    }
-
     /**
      * Releases and reopens the AVMCamera without tearing down the GL pipeline.
      *
@@ -10454,16 +10703,15 @@ public class PanoramicCameraGpu {
             // GL watchdog heartbeat — otherwise a long single sleep on this
             // (daemon) thread can race the GL thread mid-updateTexImage and
             // make timeSinceHeartbeat exceed the threshold.
-            // Do not spend a fixed three seconds before the first ownership
-            // probe. Poll immediately; retain the full bounded wait for devices
-            // whose native camera startup is slower or whose service is absent.
-            logger.info("Polling fallback immediately (maxWait=" + maxWaitMs + "ms)");
+            logger.info("Polling fallback (maxWait=" + maxWaitMs + "ms)");
+            final long minWaitMs = 3000;
+            sleepWithHeartbeat(minWaitMs);
 
             if (cameraCoordinator != null && cameraCoordinator.isRegistered()) {
                 long deadline = (legacyOpenAttempt
                         ? android.os.SystemClock.elapsedRealtime()
                         : System.currentTimeMillis())
-                        + maxWaitMs;
+                        + (maxWaitMs - minWaitMs);
                 boolean nativeAppDetected = false;
 
                 while ((legacyOpenAttempt
@@ -10482,7 +10730,7 @@ public class PanoramicCameraGpu {
                     logger.info("Native app not detected after polling — reopening");
                 }
             } else {
-                long remainingWait = maxWaitMs;
+                long remainingWait = maxWaitMs - minWaitMs;
                 logger.info("No service available — fixed delay (" + remainingWait + "ms)");
                 sleepWithHeartbeat(remainingWait);
             }

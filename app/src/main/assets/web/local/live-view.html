@@ -10,9 +10,9 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#00876C">
-    <script src="../shared/theme.js?v=11"></script>
+    <script src="../shared/theme.js?v=12"></script>
     <script src="../shared/skeleton.js?v=4"></script>
-    <script src="../shared/app-shell.js?v=19"></script>
+    <script src="../shared/app-shell.js?v=23"></script>
     <script>
         if (typeof window.AndroidBridge !== 'undefined') {
             document.documentElement.classList.add('is-app-webview');
@@ -34,7 +34,7 @@
 <body class="live-view-page">
     <div class="app-layout">
         <!-- Sidebar -->
-        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=19) -->
+        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=23) -->
         <div id="app-shell-mount"></div>
         <!-- Main Content -->
         <main class="main-content">
@@ -115,6 +115,14 @@
                                             <path d="m6 9 6 6 6-6"/>
                                         </svg>
                                         <span data-i18n="liveview.actions">Actions</span>
+                                    </button>
+                                    <button type="button" class="top-bar-btn" id="liveRewindBtn"
+                                            onclick="location.href='events.html?view=timeline&amp;t='+(new Date().getTime()-60000)"
+                                            data-i18n-attr="title:tlview.rewind;aria-label:tlview.rewind"
+                                            title="Rewind" aria-label="Rewind">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>
+                                        </svg>
                                     </button>
                                     <button class="top-bar-btn" onclick="BYD.stream.toggleFullscreen()" aria-label="Fullscreen" data-i18n-attr="aria-label:events.player_fullscreen;title:events.player_fullscreen" title="Fullscreen">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -198,34 +206,22 @@
                                     </button>
                                     <button type="button" class="deterrent-btn" id="vehiclePowerOnBtn" style="display:none;"
                                             onclick="BYD.stream.fireLiveAction('powerOn')">
-                                        <!-- Lucide power -->
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                            <path d="M12 2v10"/><path d="M18.4 6.6a8 8 0 1 1-12.8 0"/>
-                                        </svg>
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></svg>
                                         <span class="deterrent-label" data-i18n="vehicle.power_on">Power on</span>
                                     </button>
                                     <button type="button" class="deterrent-btn" id="vehiclePowerOffBtn" style="display:none;"
                                             onclick="BYD.stream.fireLiveAction('powerOff')">
-                                        <!-- Lucide power-off -->
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                            <path d="M18.4 6.6a8 8 0 1 1-12.8 0"/><path d="M12 2v10"/><path d="m2 2 20 20"/>
-                                        </svg>
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18.36 6.64A9 9 0 0 1 20.77 15"/><path d="M6.16 6.16a9 9 0 1 0 12.68 12.68"/><path d="M12 2v4"/><line x1="2" y1="2" x2="22" y2="22"/></svg>
                                         <span class="deterrent-label" data-i18n="vehicle.power_off">Power off</span>
                                     </button>
                                     <button type="button" class="deterrent-btn" id="vehicleTrunkOpenBtn"
                                             onclick="BYD.stream.fireLiveAction('trunkOpen')">
-                                        <!-- Open trunk: rear of a car with the hatch raised -->
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                            <path d="M4 13v4h16v-4l-2-5H6z"/><path d="M7 8l-2-4h9l3 4"/><path d="M4 13h16"/><path d="M7 17v2m10-2v2"/>
-                                        </svg>
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 21H2"/><path d="M10 4a2 2 0 0 1 2.36-1.968l5.41.992A1.5 1.5 0 0 1 19 4.5V21l-7.876.992A1 1 0 0 1 10 21z"/><path d="M10.268 3H7a2 2 0 0 0-2 2v16"/><path d="M14 12h.01"/><path d="M22 21h-3"/></svg>
                                         <span class="deterrent-label" data-i18n="dashboard.cmd_trunk_open">Open trunk</span>
                                     </button>
                                     <button type="button" class="deterrent-btn" id="vehicleTrunkCloseBtn"
                                             onclick="BYD.stream.fireLiveAction('trunkClose')">
-                                        <!-- Closed trunk: rear of a car with the hatch shut -->
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                            <path d="M4 13v4h16v-4l-2-5H6z"/><path d="M7 8l1-3h8l1 3"/><path d="M4 13h16"/><path d="M7 17v2m10-2v2"/>
-                                        </svg>
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v16"/><path d="M2 21h20"/><path d="M9 12h.01"/></svg>
                                         <span class="deterrent-label" data-i18n="dashboard.cmd_trunk_close">Close trunk</span>
                                     </button>
                                 </div>
@@ -1748,12 +1744,12 @@
 
     <script src="../shared/auth.js"></script>
     <script src="../shared/pwa-init.js?v=index1"></script>
-    <script src="../shared/core.js?v=24"></script>
+    <script src="../shared/core.js?v=27"></script>
     <script src="../shared/update-flow.js?v=3"></script>
-    <script src="../shared/cabin-audio.js?v=1"></script>
-    <script src="../shared/stream.js?v=index5"></script>
-    <script src="../shared/map.js?v=8"></script>
-    <script src="../shared/surveillance.js?v=survtoggle16"></script>
+    <script src="../shared/cabin-audio.js?v=2"></script>
+    <script src="../shared/stream.js?v=index7"></script>
+    <script src="../shared/map.js?v=9"></script>
+    <script src="../shared/surveillance.js?v=survtoggle20"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
@@ -1786,19 +1782,22 @@
                 var active = status.state === 'live';
                 var paused = status.state === 'paused';
                 var connecting = status.state === 'connecting';
+                var waiting = status.state === 'waiting';
                 button.classList.toggle('is-active', active);
                 button.classList.toggle('is-paused', paused);
-                button.classList.toggle('is-connecting', connecting);
+                button.classList.toggle('is-connecting', connecting || waiting);
                 button.setAttribute(
                     'aria-pressed',
-                    active || paused || connecting ? 'true' : 'false');
+                    active || paused || connecting || waiting ? 'true' : 'false');
                 var key = active
                     ? 'liveview.stop_listening'
                     : paused
                         ? 'liveview.listening_paused'
                         : connecting
                             ? 'liveview.listener_starting'
-                            : 'liveview.listen_cabin';
+                            : waiting
+                                ? 'liveview.listener_waiting'
+                                : 'liveview.listen_cabin';
                 var label = BYD.i18n.t(key);
                 if (label && label !== key) {
                     button.title = label;
@@ -2761,13 +2760,10 @@
             }
         })();
         
-        // Gate the vehicle controls on availability: horn + flash (issue #118) need
-        // BYD Cloud; lock + unlock need cloud OR the local remote key.
-        // The horn (find-car) and flash commands are CLOUD_ONLY on this BYD
-        // generation — there is no SDK fallback — so if the cloud account
-        // isn't configured + verified the buttons would only ever produce a
-        // "cloud required" toast. Hiding them until the probe confirms cloud
-        // is up keeps the camera view honest: a visible button always works.
+        // Gate the car controls on a path to the car: Horn / Flash (issue #118) on
+        // BYD Cloud, Lock / Unlock on cloud or the local remote key. Hiding a row
+        // until the probe confirms its path keeps the camera view honest: a
+        // visible button always works.
         // One-shot probe on load, mirroring the OEM-dashcam gate below (the
         // user re-enters the live view after configuring cloud, so a
         // perpetual poll would just burn cycles). Cluster defaults to

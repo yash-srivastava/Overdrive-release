@@ -35,13 +35,13 @@ window.SafeKeepBadges = (function () {
                     if (!r.ok && j.success === true) j.success = false;
                     return j;
                 }, function () {
-                    return { success: false, httpStatus: r.status, error: 'invalid_response' };
+                    return { success: false, httpStatus: r.status };
                 });
             })
             .catch(function () {
                 // Keep callers on their normal failure path when the daemon is
                 // temporarily unreachable; do not leave action sheets hanging.
-                return { success: false, httpStatus: 0, error: 'network_error' };
+                return { success: false, httpStatus: 0, message: t('errors.network', 'Network error') };
             });
     }
 

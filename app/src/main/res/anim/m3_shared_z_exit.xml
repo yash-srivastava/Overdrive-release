@@ -1,20 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  Material 3 Shared-Axis (Z) EXIT. Parent destination slides backward in Z
-  (scales down to 1.1x) and fades out, leaving the incoming destination as
-  the only thing on screen.
--->
+<!-- Drill-down exit: the parent page eases toward the leading edge. -->
 <set xmlns:android="http://schemas.android.com/apk/res/android"
-    android:interpolator="@android:interpolator/accelerate_quad"
-    android:duration="180">
+    android:duration="220"
+    android:interpolator="@android:interpolator/decelerate_quad">
+    <translate
+        android:fromXDelta="0"
+        android:toXDelta="-4%p" />
     <alpha
         android:fromAlpha="1.0"
         android:toAlpha="0.0" />
-    <scale
-        android:fromXScale="1.0"
-        android:toXScale="1.1"
-        android:fromYScale="1.0"
-        android:toYScale="1.1"
-        android:pivotX="50%"
-        android:pivotY="50%" />
 </set>

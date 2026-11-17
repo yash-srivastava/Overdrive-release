@@ -1,33 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Category header for the navigation rail. Non-interactive.
-
-  MainActivity.applySectionForm cross-fades the label (expanded width) and the
-  hairline (compact width) across the slide; the fixed height keeps the swap
-  free of relayout.
+  Rail category header, non-interactive. MainActivity cross-fades the overline label (wide rail)
+  with the hairline (compact rail); the fixed height keeps the swap free of relayout.
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="28dp">
+    android:layout_height="@dimen/shell_rail_section_height">
 
     <View
         android:id="@+id/railSectionRule"
-        android:layout_width="40dp"
-        android:layout_height="1dp"
-        android:layout_gravity="center"
+        android:layout_width="@dimen/shell_rail_section_rule_width"
+        android:layout_height="@dimen/od_hairline"
+        android:layout_gravity="start|center_vertical"
+        android:layout_marginStart="@dimen/shell_rail_content_inset"
         android:background="?attr/colorOutlineVariant" />
 
     <TextView
         android:id="@+id/railSectionLabel"
+        android:accessibilityHeading="true"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_gravity="center_vertical"
+        android:layout_gravity="bottom"
         android:alpha="0"
         android:ellipsize="end"
         android:maxLines="1"
-        android:paddingStart="@dimen/rail_section_label_inset"
-        android:paddingEnd="@dimen/rail_item_pill_inset_horizontal"
-        android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-        android:textColor="?attr/colorOnSurfaceVariant"
+        android:paddingStart="@dimen/shell_rail_content_inset"
+        android:paddingEnd="@dimen/shell_rail_plate_inset_h"
+        android:paddingBottom="@dimen/shell_rail_section_label_bottom"
+        android:textAlignment="viewStart"
+        android:textAppearance="@style/TextAppearance.Overdrive.Overline"
         android:visibility="invisible" />
 </FrameLayout>

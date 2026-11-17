@@ -1,0 +1,464 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Timeline, portrait / narrow: full-width player, the filter + strip panel, then Moments.
+     The video view and the strip are added in code (TimelineFragment). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/tlRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:paddingStart="@dimen/od_page_padding_h"
+    android:paddingTop="@dimen/rec_body_padding_top"
+    android:paddingEnd="@dimen/od_page_padding_h"
+    android:paddingBottom="@dimen/rec_body_padding_bottom">
+
+    <LinearLayout
+        android:id="@+id/tlOfflineBanner"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="@dimen/od_space_12"
+        android:accessibilityLiveRegion="polite"
+        android:background="@drawable/tl_banner_bg"
+        android:gravity="center_vertical"
+        android:minHeight="56dp"
+        android:orientation="horizontal"
+        android:paddingStart="@dimen/od_space_16"
+        android:paddingEnd="@dimen/od_space_4"
+        android:visibility="gone"
+        tools:visibility="visible">
+
+        <ImageView
+            android:layout_width="@dimen/od_icon_md"
+            android:layout_height="@dimen/od_icon_md"
+            android:importantForAccessibility="no"
+            android:src="@drawable/ic_signal_disconnected"
+            app:tint="?attr/colorOnSurfaceVariant" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/od_space_12"
+            android:layout_weight="1"
+            android:text="@string/timeline_offline"
+            android:textColor="?attr/colorOnSurface"
+            android:textSize="15sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/tlRetry"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="56dp"
+            android:text="@string/timeline_retry" />
+    </LinearLayout>
+
+    <com.overdrive.app.ui.timeline.TlPlayerBox
+        android:id="@+id/tlPlayerBox"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/tl_player_frame">
+
+        <com.overdrive.app.ui.timeline.TlCameraLabelsView
+            android:id="@+id/tlCameraLabels"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:importantForAccessibility="no" />
+
+        <TextView
+            android:id="@+id/tlEmptyDay"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:gravity="center"
+            android:padding="@dimen/od_space_24"
+            android:textColor="@color/rec_player_on_glass_variant"
+            android:textSize="16sp"
+            android:visibility="gone"
+            tools:text="No recordings on Sat 15 Nov"
+            tools:visibility="visible" />
+
+
+        <!-- One card for a gap: why there is no footage, then "Next event in" as its tappable second line. -->
+        <LinearLayout
+            android:id="@+id/tlGapBox"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_marginStart="@dimen/od_space_16"
+            android:layout_marginEnd="@dimen/od_space_16"
+            android:background="@drawable/tl_glass_chip"
+            android:minWidth="240dp"
+            android:orientation="vertical"
+            android:paddingTop="@dimen/od_space_4"
+            android:paddingBottom="@dimen/od_space_4"
+            android:visibility="gone"
+            tools:visibility="visible">
+
+            <TextView
+                android:id="@+id/tlGapCard"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:accessibilityLiveRegion="polite"
+                android:ellipsize="end"
+                android:gravity="center"
+                android:maxLines="2"
+                android:paddingStart="@dimen/od_space_20"
+                android:paddingTop="@dimen/od_space_8"
+                android:paddingEnd="@dimen/od_space_20"
+                android:paddingBottom="@dimen/od_space_8"
+                android:textColor="@color/rec_player_on_glass"
+                android:textSize="16sp"
+                android:visibility="gone"
+                tools:text="No footage · 45 min · sentry off"
+                tools:visibility="visible" />
+
+            <TextView
+                android:id="@+id/tlGapHint"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginStart="@dimen/od_space_4"
+                android:layout_marginEnd="@dimen/od_space_4"
+                android:background="@drawable/tl_gap_action_bg"
+                android:drawableEnd="@drawable/tl_ic_skip_next"
+                android:drawablePadding="@dimen/od_space_8"
+                android:drawableTint="@color/tl_accent_on_glass"
+                android:ellipsize="end"
+                android:focusable="true"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:maxLines="1"
+                android:minHeight="56dp"
+                android:paddingStart="@dimen/od_space_16"
+                android:paddingEnd="@dimen/od_space_12"
+                android:textColor="@color/tl_accent_on_glass"
+                android:textSize="16sp"
+                android:visibility="gone"
+                tools:text="Next event in 45 min"
+                tools:visibility="visible" />
+        </LinearLayout>
+
+        <com.google.android.material.progressindicator.CircularProgressIndicator
+            android:id="@+id/tlBuffering"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:indeterminate="true"
+            android:visibility="gone"
+            app:indicatorColor="@color/rec_player_on_glass" />
+
+        <TextView
+            android:id="@+id/tlSourceChip"
+            android:layout_width="wrap_content"
+            android:layout_height="56dp"
+            android:layout_gravity="top|end"
+            android:layout_margin="@dimen/od_space_8"
+            android:background="@drawable/tl_glass_chip"
+            android:contentDescription="@string/timeline_source_switch"
+            android:drawablePadding="@dimen/od_space_6"
+            android:ellipsize="end"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:maxLines="1"
+            android:maxWidth="240dp"
+            android:paddingStart="@dimen/od_space_16"
+            android:paddingEnd="@dimen/od_space_16"
+            android:textColor="@color/rec_player_on_glass"
+            android:textSize="15sp"
+            android:visibility="gone"
+            tools:text="360°"
+            tools:visibility="visible" />
+
+        <TextView
+            android:id="@+id/tlObjectChip"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:layout_gravity="bottom|end"
+            android:layout_margin="@dimen/od_space_12"
+            android:background="@drawable/tl_glass_chip"
+            android:drawablePadding="@dimen/od_space_6"
+            android:ellipsize="end"
+            android:fontFeatureSettings="tnum"
+            android:gravity="center_vertical"
+            android:maxLines="1"
+            android:maxWidth="220dp"
+            android:paddingStart="@dimen/od_space_12"
+            android:paddingEnd="@dimen/od_space_12"
+            android:textColor="@color/rec_player_on_glass"
+            android:textSize="15sp"
+            android:visibility="gone"
+            tools:text="Person · 91%"
+            tools:visibility="visible" />
+
+        <!-- Transport: 64 dp buttons, a larger play / pause disc. -->
+        <LinearLayout
+            android:id="@+id/tlControls"
+            android:layout_width="wrap_content"
+            android:layout_height="84dp"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="@dimen/od_space_12"
+            android:background="@drawable/tl_glass_pill"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/od_space_8"
+            android:paddingEnd="@dimen/od_space_8">
+
+            <ImageButton
+                android:id="@+id/tlPrev"
+                android:layout_width="64dp"
+                android:layout_height="64dp"
+                android:background="@drawable/tl_glass_ripple"
+                android:contentDescription="@string/timeline_cd_prev_event"
+                android:padding="17dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/tl_ic_skip_prev" />
+
+            <ImageButton
+                android:id="@+id/tlPlayPause"
+                android:layout_width="76dp"
+                android:layout_height="76dp"
+                android:layout_marginStart="@dimen/od_space_6"
+                android:layout_marginEnd="@dimen/od_space_6"
+                android:background="@drawable/tl_play_disc"
+                android:contentDescription="@string/timeline_cd_play"
+                android:padding="20dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/rec_ic_play" />
+
+            <ImageButton
+                android:id="@+id/tlNext"
+                android:layout_width="64dp"
+                android:layout_height="64dp"
+                android:background="@drawable/tl_glass_ripple"
+                android:contentDescription="@string/timeline_cd_next_event"
+                android:padding="17dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/tl_ic_skip_next" />
+
+            <TextView
+                android:id="@+id/tlSpeed"
+                android:layout_width="wrap_content"
+                android:layout_height="64dp"
+                android:layout_marginStart="@dimen/od_space_4"
+                android:background="@drawable/tl_glass_ripple"
+                android:ellipsize="end"
+                android:focusable="true"
+                android:fontFamily="sans-serif-medium"
+                android:fontFeatureSettings="tnum"
+                android:gravity="center"
+                android:maxLines="1"
+                android:maxWidth="132dp"
+                android:minWidth="64dp"
+                android:paddingStart="@dimen/od_space_12"
+                android:paddingEnd="@dimen/od_space_12"
+                android:textColor="@color/rec_player_on_glass"
+                android:textSize="17sp"
+                tools:text="1×" />
+        </LinearLayout>
+    </com.overdrive.app.ui.timeline.TlPlayerBox>
+
+    <LinearLayout
+        android:id="@+id/tlPanel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/od_space_12"
+        android:accessibilityTraversalAfter="@id/tlPlayerBox"
+        android:background="@drawable/tl_panel_bg"
+        android:orientation="vertical"
+        android:paddingStart="@dimen/od_space_8"
+        android:paddingTop="@dimen/od_space_4"
+        android:paddingEnd="@dimen/od_space_8"
+        android:paddingBottom="@dimen/od_space_8">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:baselineAligned="false"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <HorizontalScrollView
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:fadingEdgeLength="@dimen/od_space_16"
+                android:overScrollMode="never"
+                android:requiresFadingEdge="horizontal"
+                android:scrollbars="none">
+
+                <com.google.android.material.button.MaterialButtonToggleGroup
+                    android:id="@+id/tlFilterGroup"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:spacing="2dp"
+                    android:theme="@style/ThemeOverlay.Overdrive.Rec.Segments"
+                    app:checkedButton="@+id/tlFilterAll"
+                    app:innerCornerSize="50%"
+                    app:selectionRequired="true"
+                    app:singleSelection="true">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/tlFilterAll"
+                        style="@style/Widget.Overdrive.Rec.Segment"
+                        android:layout_width="wrap_content"
+                        android:layout_height="56dp"
+                        android:textSize="15sp"
+                        android:text="@string/timeline_filter_all" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/tlFilterPeople"
+                        style="@style/Widget.Overdrive.Rec.Segment"
+                        android:layout_width="wrap_content"
+                        android:layout_height="56dp"
+                        android:textSize="15sp"
+                        android:text="@string/timeline_filter_people" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/tlFilterVehicles"
+                        style="@style/Widget.Overdrive.Rec.Segment"
+                        android:layout_width="wrap_content"
+                        android:layout_height="56dp"
+                        android:textSize="15sp"
+                        android:text="@string/timeline_filter_vehicles" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/tlFilterAlerts"
+                        style="@style/Widget.Overdrive.Rec.Segment"
+                        android:layout_width="wrap_content"
+                        android:layout_height="56dp"
+                        android:textSize="15sp"
+                        android:text="@string/timeline_filter_alerts" />
+                </com.google.android.material.button.MaterialButtonToggleGroup>
+            </HorizontalScrollView>
+
+            <com.google.android.material.button.MaterialButtonToggleGroup
+                android:id="@+id/tlZoomGroup"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:layout_marginStart="@dimen/od_space_4"
+                android:spacing="2dp"
+                android:theme="@style/ThemeOverlay.Overdrive.Rec.Segments"
+                app:innerCornerSize="50%"
+                app:singleSelection="true">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/tlZoomDay"
+                    style="@style/Widget.Overdrive.Rec.Segment"
+                    android:layout_width="wrap_content"
+                    android:layout_height="56dp"
+                    android:textSize="15sp"
+                    android:text="@string/timeline_zoom_day" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/tlZoom6h"
+                    style="@style/Widget.Overdrive.Rec.Segment"
+                    android:layout_width="wrap_content"
+                    android:layout_height="56dp"
+                    android:textSize="15sp"
+                    android:text="@string/timeline_zoom_6h" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/tlZoom1h"
+                    style="@style/Widget.Overdrive.Rec.Segment"
+                    android:layout_width="wrap_content"
+                    android:layout_height="56dp"
+                    android:textSize="15sp"
+                    android:text="@string/timeline_zoom_1h" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/tlZoom10m"
+                    style="@style/Widget.Overdrive.Rec.Segment"
+                    android:layout_width="wrap_content"
+                    android:layout_height="56dp"
+                    android:textSize="15sp"
+                    android:text="@string/timeline_zoom_10m" />
+            </com.google.android.material.button.MaterialButtonToggleGroup>
+        </LinearLayout>
+
+        <FrameLayout
+            android:id="@+id/tlStripHost"
+            android:layout_width="match_parent"
+            android:layout_height="104dp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/tlMomentsPane"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="@dimen/od_space_8"
+        android:layout_weight="1"
+        android:accessibilityTraversalAfter="@id/tlPanel"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/od_space_8"
+            android:paddingEnd="@dimen/od_space_8">
+
+            <TextView
+                android:id="@+id/tlMomentsTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:accessibilityHeading="true"
+                android:fontFamily="sans-serif-medium"
+                android:text="@string/timeline_moments"
+                android:textColor="?attr/colorOnSurface"
+                android:textSize="17sp" />
+
+            <TextView
+                android:id="@+id/tlMomentsCount"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/od_space_8"
+                android:fontFeatureSettings="tnum"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:textSize="15sp"
+                tools:text="15 moments" />
+        </LinearLayout>
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/tlMoments"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:fadingEdgeLength="@dimen/od_space_24"
+                android:overScrollMode="never"
+                android:requiresFadingEdge="vertical"
+                android:scrollbars="none" />
+
+            <LinearLayout
+                android:id="@+id/tlMomentsSkeleton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:importantForAccessibility="noHideDescendants"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <include layout="@layout/skeleton_line" android:layout_width="match_parent" android:layout_height="64dp" android:layout_marginBottom="@dimen/od_space_8" />
+                <include layout="@layout/skeleton_line" android:layout_width="match_parent" android:layout_height="64dp" android:layout_marginBottom="@dimen/od_space_8" />
+                <include layout="@layout/skeleton_line" android:layout_width="match_parent" android:layout_height="64dp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tlMomentsEmpty"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:gravity="center"
+                android:padding="@dimen/od_space_24"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:textSize="15sp"
+                android:visibility="gone"
+                tools:text="No recordings on Sat 15 Nov" />
+        </FrameLayout>
+    </LinearLayout>
+</LinearLayout>

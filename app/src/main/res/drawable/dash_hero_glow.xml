@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Primary halo behind the vehicle render. Strength comes from the view's alpha. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:endColor="@android:color/transparent"
+        android:gradientRadius="50%"
+        android:startColor="?attr/colorPrimary"
+        android:type="radial" />
+</shape>

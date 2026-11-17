@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_section_adb">ADB</string>
+    <string name="settings_adb_subtitle">Bağlantı, etkinleştirme ve otomatik geri yükleme.</string>
+    <string name="settings_adb_connection_title">Bağlantı</string>
+    <string name="settings_adb_automatic_title">Otomatik geri yükleme</string>
+    <string name="settings_adb_automatic_restore">ADB’yi otomatik geri yükle</string>
+    <string name="settings_adb_automatic_description">Başlangıçta ve kapatıldığında ADB ayarını geri yükler. Ayarlar izni önceden verilmiş olmalıdır; Wi-Fi gerekmez. DiLink 5, doğrulanmış Wi-Fi ve önceden yetkilendirilmiş bir anahtarla kablosuz kurtarmayı da destekler.</string>
+    <string name="settings_adb_recover">ADB’yi şimdi geri yükle</string>
+    <string name="settings_adb_cancel_recovery">Geri yüklemeyi iptal et</string>
+    <string name="settings_adb_manual_title">Manuel etkinleştirme</string>
+    <string name="settings_adb_manual_description">ADB erişimi istemek için uyumlu BYD araçlarını kullanın. Wi-Fi bağlantısı gerekmez.</string>
+    <string name="settings_adb_enable">ADB’yi etkinleştir</string>
+    <string name="settings_adb_advanced_tools">Gelişmiş araçlar</string>
+    <string name="settings_adb_hide_advanced">Gelişmiş araçları gizle</string>
+    <string name="settings_adb_advanced_description">Sorunları teşhis edin, BYD araçlarını açın veya manuel bir denemeyi geri alın.</string>
+    <string name="settings_adb_open_developer">Geliştirici seçeneklerini aç</string>
+    <string name="settings_adb_developer_page">BYD geliştirici sayfasını iste</string>
+    <string name="settings_adb_diagnostics">Uyumluluğu ve bağlantıyı kontrol et</string>
+    <string name="settings_adb_restore">Manuel etkinleştirme değişikliklerini geri al</string>
+    <string name="settings_adb_export">BYD geliştirici araçları APK’sını dışa aktar</string>
+    <string name="settings_adb_dialog_confirm">Bu ağda kablosuz hata ayıklamayı onayla</string>
+    <string name="settings_adb_dialog_confirm_description">Önce doğrulanmış bir Wi-Fi ağına bağlanın. OverDrive’ın kablosuz hata ayıklama iletişim kutusunu yalnızca bu ağ için onaylamasına izin verin.</string>
+    <string name="settings_adb_tools_unavailable">Manuel etkinleştirme mevcut mod veya yüklü BYD araçları için kullanılamıyor.</string>
+    <string name="settings_adb_recovery_availability">Yerel kurtarma, ADB kurulumu sırasında verilen ayarlar iznini gerektirir. Wi-Fi veya DiLink 5 modu gerekmez.</string>
+    <string name="settings_adb_details_title">Son denemenin ayrıntıları</string>
+    <string name="settings_adb_recovery_confirm_body">Yerel kurtarma, önceden verilmiş ayarlar iznini Wi-Fi gerektirmeden kullanır. DiLink 5 ayrıca doğrulanmış Wi-Fi ve önceden yetkilendirilmiş bir anahtar kullanabilir. Bu, araç ağındaki diğer cihazların erişebileceği 5555 portundaki ağ ADB erişimini açabilir veya geri yükleyebilir. Yalnızca güvendiğiniz ağda devam edin. ADB anahtar doğrulaması açık kalır.</string>
+    <string name="settings_adb_recovery_permission_missing">Ayarlar izni yok. ADB de kullanılamıyorsa önce ADB’yi etkinleştir veya Geliştirici seçeneklerini kullanın, ardından ADB kurulumunu yeniden tamamlayın.</string>
+    <string name="settings_adb_recovery_setting_enabled">ADB ayarı etkin. Kimliği doğrulanmış bir ADB bağlantısı teyit edilmedi.</string>
+    <string name="settings_adb_recovery_setting_failed">ADB ayarı etkinleştirilip doğrulanamadı. Donanım yazılımı değişikliği reddediyor olabilir.</string>
+    <string name="settings_adb_recovery_save_failed">Otomatik kurtarma tercihi kaydedilemedi. ADB’yi kontrol edip tekrar deneyin.</string>
+</resources>

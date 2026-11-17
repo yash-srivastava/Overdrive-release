@@ -1,11 +1,11 @@
 package com.overdrive.app.byd;
 
 /**
- * A local write was no longer authorized. Unlike a HAL refusal, this must not start a
- * cloud fallback for the same command.
+ * A local write was no longer authorized or its execution outcome became uncertain. Unlike a
+ * definite HAL refusal, this must not start a cloud fallback for the same command.
  */
 public final class LocalActuationAbort extends RuntimeException {
-    public enum Kind { BLOCKED_DRIVING, CANCELLED, REQUEST_EXPIRED }
+    public enum Kind { BLOCKED_DRIVING, CANCELLED, REQUEST_EXPIRED, UNCERTAIN }
 
     public final Kind kind;
 

@@ -169,12 +169,12 @@ public class ParkingHooksContractTest {
         assertEquals("TFL3", new String(magic, 4, 4, StandardCharsets.US_ASCII));
         java.util.List<String> lines = new java.util.ArrayList<>();
         for (String l : Files.readAllLines(dict, StandardCharsets.UTF_8)) if (!l.isEmpty()) lines.add(l);
-        // PaddleOCR en_dict: 95 symbols; the model has 97 classes = blank + 95 + space.
-        assertEquals(95, lines.size());
-        String[] cs = com.overdrive.app.parking.signage.CtcDecoder.charsetFromLines(lines, 97);
+        // PaddleOCR ppocr_keys_v1: 6623 symbols; the model has 6625 classes = blank + 6623 + space.
+        assertEquals(6623, lines.size());
+        String[] cs = com.overdrive.app.parking.signage.CtcDecoder.charsetFromLines(lines, 6625);
         assertEquals("", cs[0]);
-        assertEquals("0", cs[1]);
-        assertEquals(" ", cs[96]);
+        assertEquals("'", cs[1]);
+        assertEquals(" ", cs[6624]);
         // The loader's asset names must match what ships.
         String backend = read("app/src/main/java/com/overdrive/app/parking/signage/TfliteTextOcrBackend.java");
         assertTrue(backend.contains("DET_FILE = \"signage_det.tflite\""));

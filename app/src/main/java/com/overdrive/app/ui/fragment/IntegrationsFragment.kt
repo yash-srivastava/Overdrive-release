@@ -1,6 +1,7 @@
 package com.overdrive.app.ui.fragment
 
 import android.content.Context
+import android.content.res.ColorStateList
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -10,8 +11,9 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
 import androidx.annotation.AttrRes
-import androidx.annotation.DrawableRes
-import androidx.annotation.StringRes
+import androidx.annotation.ColorInt
+import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
 import androidx.fragment.app.Fragment
 import androidx.navigation.fragment.findNavController
 import com.google.android.material.card.MaterialCardView
@@ -75,6 +77,8 @@ class IntegrationsFragment : Fragment() {
     private var mqttConnected: Boolean = false
     private var bydCloudConfigured: Boolean = false
     private var safeKeepOn: Boolean = false
+    // The hero count waits for the first daemon probe so it never contradicts the cards.
+    private var daemonStatusesKnown = false
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -130,6 +134,8 @@ class IntegrationsFragment : Fragment() {
         pollInFlight = AtomicBoolean(false)
         executor?.shutdownNow()
         executor = null
+        // The next view re-inflates the cards with their defaults, so the hero waits for a probe too.
+        daemonStatusesKnown = false
         super.onDestroyView()
     }
 
@@ -141,6 +147,7 @@ class IntegrationsFragment : Fragment() {
         telegramConfigured = isTelegramConfigured(ctx)
         bindStatus(
             view,
+            pillId = R.id.pillTelegram,
             dotId = R.id.dotTelegram,
             labelId = R.id.tvTelegramStatus,
             configured = telegramConfigured
@@ -182,11 +189,12 @@ class IntegrationsFragment : Fragment() {
                         mqttConnected = mqtt
                         bydCloudConfigured = bydCloud
                         safeKeepOn = safeKeep
-                        bindStatus(v, R.id.dotTelegram, R.id.tvTelegramStatus, telegramConfigured)
-                        bindStatus(v, R.id.dotAbrp, R.id.tvAbrpStatus, abrpConnected)
-                        bindStatus(v, R.id.dotMqtt, R.id.tvMqttStatus, mqttConnected)
-                        bindStatus(v, R.id.dotBydCloud, R.id.tvBydCloudStatus, bydCloudConfigured)
-                        bindStatus(v, R.id.dotSafeKeep, R.id.tvSafeKeepStatus, safeKeepOn)
+                        daemonStatusesKnown = true
+                        bindStatus(v, R.id.pillTelegram, R.id.dotTelegram, R.id.tvTelegramStatus, telegramConfigured)
+                        bindStatus(v, R.id.pillAbrp, R.id.dotAbrp, R.id.tvAbrpStatus, abrpConnected)
+                        bindStatus(v, R.id.pillMqtt, R.id.dotMqtt, R.id.tvMqttStatus, mqttConnected)
+                        bindStatus(v, R.id.pillBydCloud, R.id.dotBydCloud, R.id.tvBydCloudStatus, bydCloudConfigured)
+                        bindStatus(v, R.id.pillSafeKeep, R.id.dotSafeKeep, R.id.tvSafeKeepStatus, safeKeepOn)
                         bindHero(v)
                     }
                 } finally {
@@ -282,52 +290,69 @@ class IntegrationsFragment : Fragment() {
 
     private fun bindStatus(
         root: View,
+        pillId: Int,
         dotId: Int,
         labelId: Int,
         configured: Boolean
     ) {
         val dot = root.findViewById<View>(dotId) ?: return
         val label = root.findViewById<TextView>(labelId) ?: return
+        val tone = statusTone(label.context, configured)
 
-        @StringRes val labelRes: Int
-        @DrawableRes val dotRes: Int
-        @AttrRes val labelAttr: Int
-
-        if (configured) {
-            labelRes = R.string.integrations_status_configured
-            dotRes = R.drawable.status_dot_online
-            labelAttr = androidx.appcompat.R.attr.colorPrimary
-        } else {
-            labelRes = R.string.integrations_status_not_set_up
-            dotRes = R.drawable.status_dot_offline
-            labelAttr = com.google.android.material.R.attr.colorOnSurfaceVariant
-        }
-
-        label.setText(labelRes)
-        label.setTextColor(resolveAttrColor(label.context, labelAttr))
-        dot.setBackgroundResource(dotRes)
+        label.setText(
+            if (configured) R.string.integrations_status_configured
+            else R.string.integrations_status_not_set_up
+        )
+        label.setTextColor(tone.text)
+        dot.backgroundTintList = ColorStateList.valueOf(tone.dot)
+        root.findViewById<View>(pillId)?.backgroundTintList = ColorStateList.valueOf(tone.fill)
     }
 
     private fun bindHero(root: View) {
         val pill = root.findViewById<MaterialCardView>(R.id.heroStatusPill) ?: return
         val label = root.findViewById<TextView>(R.id.tvHeroStatus) ?: return
 
-        val allReady = telegramConfigured && abrpConnected && mqttConnected && bydCloudConfigured
-        @AttrRes val bgAttr: Int
-        @AttrRes val fgAttr: Int
-        @StringRes val textRes: Int
-        if (allReady) {
-            bgAttr = com.google.android.material.R.attr.colorPrimaryContainer
-            fgAttr = com.google.android.material.R.attr.colorOnPrimaryContainer
-            textRes = R.string.integrations_status_configured
-        } else {
-            bgAttr = com.google.android.material.R.attr.colorSecondaryContainer
-            fgAttr = com.google.android.material.R.attr.colorOnSecondaryContainer
-            textRes = R.string.integrations_status_unknown
+        if (!daemonStatusesKnown) {
+            val tone = statusTone(label.context, false)
+            pill.setCardBackgroundColor(tone.fill)
+            label.setText(R.string.dashboard_metric_value_pending)
+            label.setTextColor(tone.text)
+            root.findViewById<View>(R.id.heroStatusDot)?.backgroundTintList =
+                ColorStateList.valueOf(tone.dot)
+            return
         }
-        pill.setCardBackgroundColor(resolveAttrColor(label.context, bgAttr))
-        label.setText(textRes)
-        label.setTextColor(resolveAttrColor(label.context, fgAttr))
+        val connected = listOf(
+            telegramConfigured, abrpConnected, mqttConnected, bydCloudConfigured, safeKeepOn
+        ).count { it }
+        // Colour and count describe the same set: "on" only when every card is connected.
+        val tone = statusTone(label.context, connected == INTEGRATION_COUNT)
+        pill.setCardBackgroundColor(tone.fill)
+        label.text = label.context.getString(
+            R.string.integrations_hero_connected_count, connected, INTEGRATION_COUNT
+        )
+        label.setTextColor(tone.text)
+        root.findViewById<View>(R.id.heroStatusDot)?.backgroundTintList =
+            ColorStateList.valueOf(tone.dot)
+    }
+
+    private class StatusTone(@ColorInt val fill: Int, @ColorInt val text: Int, @ColorInt val dot: Int)
+
+    // On: primary-tinted fill, colorOnPrimaryContainer text (primary text on the tint is under 4.5:1 in light).
+    private fun statusTone(ctx: Context, on: Boolean): StatusTone {
+        val primary = resolveAttrColor(ctx, androidx.appcompat.R.attr.colorPrimary)
+        return if (on) {
+            StatusTone(
+                fill = ColorUtils.setAlphaComponent(primary, PILL_ON_FILL_ALPHA),
+                text = resolveAttrColor(ctx, com.google.android.material.R.attr.colorOnPrimaryContainer),
+                dot = primary,
+            )
+        } else {
+            StatusTone(
+                fill = resolveAttrColor(ctx, com.google.android.material.R.attr.colorSurfaceContainerHigh),
+                text = resolveAttrColor(ctx, com.google.android.material.R.attr.colorOnSurfaceVariant),
+                dot = ContextCompat.getColor(ctx, R.color.status_stopped),
+            )
+        }
     }
 
     private fun resolveAttrColor(ctx: Context, @AttrRes attr: Int): Int {
@@ -338,5 +363,7 @@ class IntegrationsFragment : Fragment() {
 
     companion object {
         private const val POLL_INTERVAL_MS = 3000L
+        private const val INTEGRATION_COUNT = 5
+        private const val PILL_ON_FILL_ALPHA = 41 // 16 %
     }
 }

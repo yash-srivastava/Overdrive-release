@@ -85,7 +85,12 @@ public final class AudioPlaybackController {
      * Any current playback is replaced app-side (single-player).
      */
     public static boolean play(String path, String channel, boolean loop) {
-        return dispatchPlay(path, channel, loop, false);
+        return dispatchPlay(path, channel, loop, false, false);
+    }
+
+    /** {@link #play(String, String, boolean)}; {@code queue} plays after the current sound instead of replacing it. */
+    public static boolean play(String path, String channel, boolean loop, boolean queue) {
+        return dispatchPlay(path, channel, loop, false, queue);
     }
 
     /**
@@ -104,7 +109,7 @@ public final class AudioPlaybackController {
      * doesn't appear. False is returned only for an unusable path.
      */
     public static boolean playVideoOnScreen(String path, boolean loop) {
-        return dispatchPlay(path, "media", loop, true);
+        return dispatchPlay(path, "media", loop, true, false);
     }
 
     /**
@@ -159,6 +164,11 @@ public final class AudioPlaybackController {
      * dispatches to the app-process {@link #AUDIO_SERVICE} via the same `am` bridge.
      */
     public static boolean speak(String text, String channel) {
+        return speak(text, channel, false);
+    }
+
+    /** {@link #speak(String, String)}; {@code queue} speaks after the current sound instead of replacing it. */
+    public static boolean speak(String text, String channel, boolean queue) {
         if (text == null || text.trim().isEmpty()) {
             logger.warn("speak: empty text");
             return false;
@@ -167,7 +177,8 @@ public final class AudioPlaybackController {
         exec("am start-foreground-service -n " + AUDIO_SERVICE
                 + " --es action speak"
                 + " --es text " + q(text)
-                + " --es channel " + q(ch));
+                + " --es channel " + q(ch)
+                + (queue ? " --ez queue true" : ""));
         logger.info("speak: dispatched to MediaPlaybackService (channel=" + ch + ")");
         return true;
     }
@@ -188,7 +199,8 @@ public final class AudioPlaybackController {
      * read the library dir, so a library file rides as a name (streamed from the raw
      * endpoint); an external-storage file rides as a path (the app reads it directly).
      */
-    private static boolean dispatchPlay(String path, String channel, boolean loop, boolean onScreen) {
+    private static boolean dispatchPlay(String path, String channel, boolean loop, boolean onScreen,
+                                        boolean queue) {
         if (path == null || path.trim().isEmpty()) {
             logger.warn("play: empty path");
             return false;
@@ -257,8 +269,10 @@ public final class AudioPlaybackController {
                     + " --es action play"
                     + " " + srcArgs
                     + " --es channel " + q(ch)
-                    + " --ez loop " + loop);
-            logger.info("play: dispatched to MediaPlaybackService (channel=" + ch + " loop=" + loop + ")");
+                    + " --ez loop " + loop
+                    + (queue ? " --ez queue true" : ""));
+            logger.info("play: dispatched to MediaPlaybackService (channel=" + ch + " loop=" + loop
+                    + (queue ? " queue=true" : "") + ")");
         }
         return true;
     }

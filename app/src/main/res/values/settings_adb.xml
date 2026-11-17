@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_section_adb">ADB</string>
+    <string name="settings_adb_subtitle">Connection, enablement and automatic recovery.</string>
+    <string name="settings_adb_connection_title">Connection</string>
+    <string name="settings_adb_automatic_title">Automatic recovery</string>
+    <string name="settings_adb_automatic_restore">Automatically restore ADB</string>
+    <string name="settings_adb_automatic_description">Restore the ADB setting at startup and whenever it is turned off. Works without Wi-Fi when the settings permission is already granted. DiLink 5 can also use wireless recovery on validated Wi-Fi with a previously authorized key.</string>
+    <string name="settings_adb_recover">Recover ADB now</string>
+    <string name="settings_adb_cancel_recovery">Cancel recovery</string>
+    <string name="settings_adb_manual_title">Manual enablement</string>
+    <string name="settings_adb_manual_description">Use compatible BYD tools to request ADB access. A Wi-Fi connection isn\'t required.</string>
+    <string name="settings_adb_enable">Enable ADB</string>
+    <string name="settings_adb_advanced_tools">Advanced tools</string>
+    <string name="settings_adb_hide_advanced">Hide advanced tools</string>
+    <string name="settings_adb_advanced_description">Diagnose problems, open BYD tools or undo a manual attempt.</string>
+    <string name="settings_adb_open_developer">Open Developer options</string>
+    <string name="settings_adb_developer_page">Request BYD developer page</string>
+    <string name="settings_adb_diagnostics">Check compatibility and connection</string>
+    <string name="settings_adb_restore">Undo manual enablement changes</string>
+    <string name="settings_adb_export">Export BYD developer-tools APK</string>
+    <string name="settings_adb_dialog_confirm">Approve wireless debugging on this network</string>
+    <string name="settings_adb_dialog_confirm_description">Connect to a validated Wi-Fi network first. Allow OverDrive to confirm the wireless debugging dialog only for this network.</string>
+    <string name="settings_adb_tools_unavailable">Manual enablement isn\'t available for the current mode or installed BYD tools.</string>
+    <string name="settings_adb_recovery_availability">Local recovery needs the settings permission granted during ADB setup. It does not need Wi-Fi or DiLink 5 mode.</string>
+    <string name="settings_adb_recovery_confirm_body">OverDrive will restore the ADB setting using its previously granted settings permission, without needing Wi-Fi. On DiLink 5, wireless recovery can also use validated Wi-Fi and your previously authorized key. ADB on port 5555 may be reachable from other devices on the vehicle network. Use a network you trust. ADB key authentication remains enabled.</string>
+    <string name="settings_adb_recovery_permission_missing">Settings permission is missing. If ADB is also unavailable, use Enable ADB or Developer options first, then complete ADB setup again.</string>
+    <string name="settings_adb_recovery_setting_enabled">The ADB setting is enabled. An authenticated ADB connection has not been confirmed.</string>
+    <string name="settings_adb_recovery_setting_failed">The ADB setting could not be enabled and verified. This firmware may reject the change.</string>
+    <string name="settings_adb_recovery_save_failed">The automatic recovery preference could not be saved. Check ADB and try again.</string>
+    <string name="settings_adb_details_title">Last attempt details</string>
+</resources>

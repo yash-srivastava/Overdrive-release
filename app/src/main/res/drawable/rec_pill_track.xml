@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 40dp pill painted inside a 48dp touch row (segments, date control). -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:insetTop="@dimen/rec_pill_inset"
+    android:insetBottom="@dimen/rec_pill_inset">
+    <shape android:shape="rectangle">
+        <corners android:radius="@dimen/od_radius_pill_40" />
+        <solid android:color="?attr/colorSurfaceContainerHigh" />
+    </shape>
+</inset>

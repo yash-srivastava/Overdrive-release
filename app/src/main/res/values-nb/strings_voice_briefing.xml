@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Trip Briefing voice turn: said once the driver answered the briefing question. -->
+    <string name="voice_brief_starting">Starter navigasjonen.</string>
+    <string name="voice_brief_opening_waze">Åpner Waze.</string>
+    <string name="voice_brief_opening_gmaps">Åpner Google Maps.</string>
+    <string name="voice_brief_starting_car">Starter bilnavigasjonen.</string>
+    <string name="voice_brief_app_missing">Den appen er ikke installert. Velg en på skjermen.</string>
+</resources>

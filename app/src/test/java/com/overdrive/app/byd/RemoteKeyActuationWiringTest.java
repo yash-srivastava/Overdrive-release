@@ -13,17 +13,18 @@ public class RemoteKeyActuationWiringTest {
     @Test public void registrationIsOptInSoAnOldDaemonSeesOneFinalReply() throws Exception {
         String service = source("services/VehicleActuatorService.java");
         String submit = method(service, "private boolean submitDiLink5Bridge(");
-        assertTrue(submit.contains("LocalActuationCancellation.registrationAllowed("));
-        assertTrue(submit.contains("VehicleActuatorBridge.DILINK5_FRAME_CANCELLATION_OPT_IN, false"));
-        int negotiated = submit.indexOf("registrationAllowed(");
+        assertTrue(submit.contains("createDiLink5Cancellation("));
+        assertTrue(submit.contains("VehicleActuatorBridge.DILINK5_FRAME_CANCELLATION_OPT_IN"));
+        int negotiated = submit.indexOf("createDiLink5Cancellation(");
         int registered = submit.indexOf("if (cancellation != null)");
         int reply = submit.indexOf("DILINK5_CANCELLATION_REGISTERED, registration");
         assertTrue(negotiated >= 0 && registered > negotiated && reply > registered);
+        assertTrue(service.contains("LocalActuationCancellation.registrationAllowed("));
         String bridge = source("byd/VehicleActuatorBridge.java");
         assertTrue(bridge.contains(
                 "if (genericFrameCommand) intent.putExtra(DILINK5_FRAME_CANCELLATION_OPT_IN, true);"));
         assertTrue(bridge.contains("resultCode == DILINK5_CANCELLATION_REGISTERED"));
-        assertTrue(bridge.contains("cancellation.onRemoteCancellation(() -> cancelRemote.send(0, null));"));
+        assertTrue(bridge.contains("registerDiLink5CancellationOwner("));
     }
 
     @Test public void bothNewRoutingEntryPointsResetAttemptStateButCloudFollowupDoesNot()

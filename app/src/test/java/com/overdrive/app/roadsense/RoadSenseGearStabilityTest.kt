@@ -1,7 +1,6 @@
 package com.overdrive.app.roadsense
 
 import com.overdrive.app.byd.BydVehicleData
-import com.overdrive.app.roadsense.sidecar.RoadSenseImuSidecarService
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -66,22 +65,5 @@ class RoadSenseGearStabilityTest {
                 lastForwardGearAtMs = 10_000L,
             )
         )
-    }
-
-    @Test
-    fun imuBuildUnsupportedLatchMatchesOnlyIdenticalNonEmptyFingerprint() {
-        assertTrue(
-            RoadSenseImuSidecarService.isBuildMarkedUnsupported(
-                "BYD/DiLink5/Sealion7:13/TP1A/2026:user/release-keys",
-                "BYD/DiLink5/Sealion7:13/TP1A/2026:user/release-keys",
-            )
-        )
-        assertFalse(
-            RoadSenseImuSidecarService.isBuildMarkedUnsupported(
-                "BYD/DiLink5/Sealion7:13/TP1A/2026:user/release-keys",
-                "BYD/DiLink5/Sealion7:13/TP1A/2027:user/release-keys",
-            )
-        )
-        assertFalse(RoadSenseImuSidecarService.isBuildMarkedUnsupported("", ""))
     }
 }

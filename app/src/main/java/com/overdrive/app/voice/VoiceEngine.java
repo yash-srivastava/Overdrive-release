@@ -11,6 +11,7 @@ import com.overdrive.app.util.DaemonHttpClient;
 import com.overdrive.app.voice.audio.PcmSink;
 import com.overdrive.app.voice.audio.Resampler;
 import com.overdrive.app.voice.genai.VoiceSessionClient;
+import com.overdrive.app.voice.local.BriefingAnswers;
 import com.overdrive.app.voice.local.CommandTranscriber;
 import com.overdrive.app.voice.local.CommandVad;
 import com.overdrive.app.voice.local.LocalCommandSpotter;
@@ -24,6 +25,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -63,6 +65,18 @@ final class VoiceEngine implements PcmSink {
     private static final long MAX_UTTERANCE_MS = 8000;
     private static final long TRAILING_SPEECH_FOR_CLOUD_MS = 700;
     private static final long LEADING_SPEECH_FOR_CLOUD_MS = 1600;
+    /** How far before a command's start the negation check listens (from the wake word's end at most). */
+    private static final int NEGATION_LOOKBACK_SAMPLES = RATE * 7 / 10;
+    /** Less speech than this before a command can't be a negation: no check. */
+    private static final int NEGATION_MIN_SAMPLES = RATE * 15 / 100;
+    /** Wake-word audio kept ahead of a run-on negation as lead-in. */
+    private static final int NEGATION_CONTEXT_SAMPLES = RATE * 3 / 10;
+    /** The wake word is still loud this long after its last token. */
+    private static final int WAKE_TAIL_SAMPLES = RATE * 15 / 100;
+    /** A speech onset this close after the wake word's end means the driver ran straight on. */
+    private static final int RUN_ON_ONSET_SAMPLES = RATE / 4;
+    /** Music held this close before a command can hide a "don't" said over it. */
+    private static final int MUSIC_LEAD_SAMPLES = RATE / 4;
     private static final long WORD_MS = 350;
     private static final long CLOUD_NO_SPEECH_MS = 6000;
     private static final long CLOUD_STALL_MS = 12000;
@@ -184,6 +198,8 @@ final class VoiceEngine implements PcmSink {
     private static final int MEDIA_HOLD_CONFIRMING = 2;
     private int mediaHoldPhase = MEDIA_HOLD_NONE;
     private long mediaHoldUntilSample = -1;
+    /** End (turn samples) of the audio heard during a media hold this turn (-1: none); speech there went untracked. */
+    private long holdAudioUntilSample = -1;
     private long mediaHoldDeadline;
     private long mediaConfirmStartedAt;
     private long mediaConfirmDueAt;
@@ -251,12 +267,17 @@ final class VoiceEngine implements PcmSink {
     // The spotter loses recall when its stream starts long before the command, so a pause after
     // the wake word restarts it just ahead of the speech.
     private static final int PAUSE_RESTART_SAMPLES = RATE / 2;
-    private final short[] recent = new short[RATE];
+    // 4 s: the negation check reads back to before a command's start
+    private final short[] recent = new short[RATE * 4];
     private long wakeIgnoreUntilSample;
     private int recentPos;
     private boolean recentFull;
     private long turnSamples;
     private long wakeEndTurnSample;
+    /** Where the last "OverDrive" ended (its last token), turn samples; 0 when unknown (the replay holds it). */
+    private long wakeWordEndSample;
+    /** How long the word still sounds after that token: shorter for the verifier's end than for a window's report. */
+    private long wakeTailSamples = RATE / 20;
     /** Turn audio still to drop before the Moonshine/cloud copy starts (the spotter sees all of it). */
     private long utteranceSkipSamples;
     /** The utterance may begin with the end of "OverDrive" (STT-timed or re-armed wake). */
@@ -320,6 +341,14 @@ final class VoiceEngine implements PcmSink {
     // RMS chunk started; both feed the clean-hit gate, so they stay RMS-based for one-chunk latency.
     private long speechOnsetSample = -1;
     private long lastLoudSample = -1;
+    /** turnSamples at the command window's last spotter restart (one per second of silence before speech). */
+    private long commandSpotterRestartAt;
+    /** A negation was heard before a command in this window: none runs on the instant path; hybrid asks the AI. */
+    private boolean negationHeard;
+    /** Held only because music masked what came before them: they run unless the transcript says otherwise. */
+    private final List<LocalCommandSpotter.Match> musicHeld = new ArrayList<>();
+    /** The last transcript understandLocally() heard, or null. */
+    private String lastTranscript;
     // Spotted phrases held back for utterance validation at window close instead of running now.
     private final List<LocalCommandSpotter.Match> held = new ArrayList<>();
     private int heldCount;
@@ -395,14 +424,97 @@ final class VoiceEngine implements PcmSink {
     private long lastCloudActivityAt;
     private final CloudDeadline deadline = new CloudDeadline();
 
+    // Trip Briefing turn (askBriefing): engine thread only.
+    private static final int BRIEF = 4;
+    /** GenAI: the session dials; Local takes over when it is not live in time. */
+    private static final int BRIEF_CONNECT = 1;
+    /** GenAI: the AI asks the question and hears the reply. */
+    private static final int BRIEF_AI = 2;
+    /** Local/Hybrid: the question is rendered and played. */
+    private static final int BRIEF_SPEAK = 3;
+    /** The closed answer set's listen window. */
+    private static final int BRIEF_LISTEN = 4;
+    /** Hybrid: the AI has the reply that was not in the set. */
+    private static final int BRIEF_CLOUD = 5;
+    /** The answer is known and confirmed out loud before it is returned. */
+    private static final int BRIEF_CONFIRM = 6;
+    private static final long BRIEF_LIVE_MS = 3000;
+    // When the local fallback can't speak either: it would only open a silent window.
+    private static final long BRIEF_LIVE_NO_VOICE_MS = 8000;
+    private static final long BRIEF_LISTEN_MS = 6000;
+    private static final long BRIEF_RENDER_MS = 5000;
+    private static final long BRIEF_AI_ASK_MS = 6000;
+    private static final long BRIEF_REPLY_WAIT_MS = 8000;
+    private static final long BRIEF_CLOUD_IDLE_MS = 10_000;
+    private static final long BRIEF_CONFIRM_MS = 4000;
+    /** Silence that ends a reply: long enough for "okay… actually, no"; a spotted no ends it sooner. */
+    private static final long BRIEF_END_OF_SPEECH_SAMPLES = 900L * RATE / 1000;
+    /** A spotted line's last syllable, from its last token's time. */
+    private static final long BRIEF_FINAL_SAMPLES = 220L * RATE / 1000;
+    private static final long BRIEF_AI_CONFIRM_START_MS = 2500;
+    /** Time left for the local question and its window after a GenAI fallback. */
+    private static final long BRIEF_LOCAL_MIN_MS = 5000;
+    private static final long BRIEF_DEFAULT_MS = 20_000;
+    private TripBriefingAsk brief;
+    private BriefSink briefSink;
+    private int briefStep;
+    private boolean briefHybrid;
+    private long briefDeadline;
+    private long briefStepUntil;
+    private BriefingSpeech briefSpeech;
+    private int briefRenderKey;
+    /** When the rendered line (question or confirmation) ends playing; 0 while none plays. */
+    private long briefPlayEndsAt;
+    private VoiceSessionClient briefSession;
+    private int briefSessionGen;
+    private boolean briefSessionLive;
+    private boolean briefReplySpeaking;
+    private boolean briefAiAsked;
+    /** The AI finished generating a turn; it is handled once its audio has drained. */
+    private boolean briefTurnDone;
+    private long briefAiActivityAt;
+    /** Mic audio goes to the briefing session (GenAI reply, or hybrid after the hand-over). */
+    private boolean briefStreaming;
+    /** The spotter has the answer lines open. */
+    private boolean briefSpotting;
+    private String briefKeywords;
+    private boolean briefWindowOpen;
+    private long briefWindowFrom;
+    private long briefWindowSamples;
+    private final List<long[]> briefHitSpans = new ArrayList<>();
+    /** The reply's loud stretches (turn samples, RMS-based: no VAD hangover), for the speech no hit explains. */
+    private final List<long[]> briefLoudRuns = new ArrayList<>();
+    /** turnSamples at the spotter stream's last restart; restarted each second of silence before a reply. */
+    private long briefSpotterRestartAt;
+    private final List<String> briefHitTags = new ArrayList<>();
+    /** GenAI: what the driver's last reply said by the local rules, read when the AI started answering. */
+    private BriefingAnswers.Answer briefHeard;
+    /** The driver's last reply as speech-to-text heard it, for vetoing an AI yes to a hedge. */
+    private String briefLastText;
+    /** The driver spoke after the AI asked; an AI "yes" without it is not accepted. */
+    private boolean briefDriverSpoke;
+    /** A spotted 不 or 可能 in the reply to the current question: an AI "yes" to it is not accepted. */
+    private boolean briefHedged;
+    /** Some reply this turn named another place (回家, "take me home"): hybrid's AI, not told the destination, can't take a yes. */
+    private boolean briefNamedPlace;
+    private String briefAnswer;
+    private String briefApp;
+    /** The AI confirms its own answer (GenAI and hybrid hand-over); else the confirmation is ours. */
+    private boolean briefAiConfirms;
+    private boolean briefAnswerSpoke;
+    private long briefAnsweredAt;
+
+    /** Where a briefing answer goes; called once on the engine thread (not after cancelBriefing). */
+    interface BriefSink {
+        void onBriefAnswer(String answer, String app, String via);
+    }
+
     VoiceEngine(Context context, VoiceAssistantConfig config, Host host) {
         this.app = context.getApplicationContext();
         this.config = config;
         this.host = host;
         this.overlay = new VoiceOverlay(app);
         this.prompts = new VoicePrompts(app);
-        // Hebrew prompts are spoken by text-to-speech; start it now so the first reply is ready.
-        this.prompts.prepare(locale());
         this.audioManager = (AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
         this.io = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "VoiceIO");
@@ -434,11 +546,34 @@ final class VoiceEngine implements PcmSink {
         post(() -> {
             if (phase == ARMED) {
                 beginTurn(true, micGain);
+            } else if (phase == BRIEF) {
+                briefPushToTalk();
             } else if (phase == CLOUD && replySpeaking && session != null) {
                 session.stopPlayback();
             } else {
                 cancelTurn();
             }
+        });
+    }
+
+    /** The engine thread is still running (it stops for good after a crash). */
+    boolean alive() {
+        return thread.isAlive();
+    }
+
+    /** Asks a Trip Briefing question; the answer, or busy, comes back on {@code sink}. */
+    void askBriefing(TripBriefingAsk ask, boolean aiReady, BriefSink sink) {
+        // The ask's own clock: the engine may still be loading its models when the car starts.
+        long askedAt = SystemClock.elapsedRealtime();
+        post(() -> startBrief(ask, aiReady, sink, askedAt));
+    }
+
+    /** The card was answered: ends the briefing turn quietly, with no answer. */
+    void cancelBriefing(BriefSink sink) {
+        post(() -> {
+            if (phase != BRIEF || briefSink != sink) return;
+            briefSink = null;
+            endBrief(null, null, "brief_card", -1, null, 0, 0);
         });
     }
 
@@ -689,7 +824,7 @@ final class VoiceEngine implements PcmSink {
         if (wake != null) wake.setSensitivity(cfg.sensitivity);
         if (cfg.usesLocal() || wake != null) {
             loadSpotter();
-        } else if (spotter != null && phase != LOCAL) {
+        } else if (spotter != null && phase != LOCAL && phase != BRIEF) {
             spotter.close();
             spotter = null;
             spotterTried = false;
@@ -716,7 +851,7 @@ final class VoiceEngine implements PcmSink {
     // ── Audio + timers ────────────────────────────────────────────────────
 
     private void onAudio(short[] chunk, int n, long now) {
-        boolean muted = now < mutedUntil || replySpeaking;
+        boolean muted = now < mutedUntil || replySpeaking || briefReplySpeaking;
         float rms = rms(chunk, 0, n);
         if (!muted) trackNoiseFloor(rms, n);
         noteMic(rms);
@@ -754,6 +889,10 @@ final class VoiceEngine implements PcmSink {
             onEnrollAudio(chunk, n, rms, now, muted);
             return;
         }
+        if (phase == BRIEF) {
+            if (!muted) onBriefAudio(chunk, n, now);
+            return;
+        }
         if (muted) return;
         // Raw peaks of the cue span and of the listen span, so the turn log shows what the mic heard.
         if (phase == LOCAL && !localWindowClosed && listenFromSample >= 0) {
@@ -769,6 +908,7 @@ final class VoiceEngine implements PcmSink {
         // Until the media pause is confirmed (plus speaker decay) the audio is still heard by the
         // spotter and kept for the cloud, but it is not speech: the window must not open on music.
         boolean mediaHold = turnSamples < mediaHoldUntilSample;
+        if (mediaHold) holdAudioUntilSample = turnSamples + n;
         onTurnAudio(gained, 0, n, now, !mediaHold);
     }
 
@@ -804,6 +944,12 @@ final class VoiceEngine implements PcmSink {
             if (spotter != null) {
                 LocalCommandSpotter.Match m = spotter.process(pcm, off, n);
                 if (m != null) onLocalMatch(m);
+                // The model restarts its timestamps by itself after ~1.5 s of silence, unseen, which would
+                // misplace a command's start (and so its lead gate): restart it ourselves while all is quiet.
+                if (quietBeforeSpeech() && turnSamples - commandSpotterRestartAt >= RATE) {
+                    spotter.restartIdle();
+                    commandSpotterRestartAt = turnSamples;
+                }
             }
         } else if (phase == CLOUD) {
             if (uLen > 0 && session != null && sessionStreaming) session.sendPcm16k(pcm, uOff, uLen);
@@ -849,6 +995,8 @@ final class VoiceEngine implements PcmSink {
             }
         } else if (phase == CLOUD) {
             tickCloud(now);
+        } else if (phase == BRIEF) {
+            tickBrief(now);
         }
     }
 
@@ -959,6 +1107,8 @@ final class VoiceEngine implements PcmSink {
         beginTurn(false, gain);
         wakeEndTurnSample = end == LocalCommandSpotter.WAKE_END_UNKNOWN
                 ? speechFrom - start : Math.max(0, end - start);
+        wakeWordEndSample = end == LocalCommandSpotter.WAKE_END_UNKNOWN ? 0 : wakeEndTurnSample;
+        wakeTailSamples = RATE / 20;
         utteranceSkipSamples = end == LocalCommandSpotter.WAKE_END_UNKNOWN
                 ? 0 : Math.max(0, Math.min(end, n) - UTTERANCE_LEAD_SAMPLES - start);
         wakeTailPossible = end == LocalCommandSpotter.WAKE_END_UNKNOWN;
@@ -1010,9 +1160,17 @@ final class VoiceEngine implements PcmSink {
         applyGain(recent, 0, recent.length, ratio, recent);
         if (phase == LOCAL && spotter != null && !localWindowClosed && matches.isEmpty()) {
             spotter.begin(config.resolvedCommandLanguage(locale()));
+            commandSpotterRestartAt = turnSamples;
             short[] lead = recentTail(COMMAND_LEAD_SAMPLES);
             LocalCommandSpotter.Match m = spotter.process(lead, 0, lead.length);
             if (m != null && !LocalCommandSpotter.INTENT_WAKE.equals(m.intent)) onLocalMatch(m);
+        }
+        if (phase == BRIEF && briefSpotting && spotter != null && briefHitTags.isEmpty()) {
+            spotter.beginPhrases(briefKeywords);
+            briefSpotterRestartAt = turnSamples;
+            short[] lead = recentTail(COMMAND_LEAD_SAMPLES);
+            LocalCommandSpotter.Match m = spotter.process(lead, 0, lead.length);
+            if (m != null) onBriefHit(m);
         }
     }
 
@@ -1042,17 +1200,26 @@ final class VoiceEngine implements PcmSink {
      * streams keep running, because the phrase is reported up to ~0.5 s after the word and a
      * command run straight on has already started; speech-to-text keeps the last 1 s for the same reason.
      */
-    private void reArm() {
+    private void reArm(LocalCommandSpotter.Match wake) {
         if (phase != LOCAL || localWindowClosed || spotter == null || !matches.isEmpty()) return;
         if (turnSamples < wakeIgnoreUntilSample) return;
         rewakes.incrementAndGet();
+        // The wake is reported up to ~0.5 s after the word: speech already going on by then ("…OverDrive, don't
+        // open…") started where the word ended, and must count before the command that follows.
+        long wakeEnd = wake != null && wake.phraseEndOffset >= 0
+                ? turnSamples - wake.phraseEndOffset + BRIEF_FINAL_SAMPLES : -1;
+        boolean spokeOn = wakeEnd >= 0 && lastLoudSample > wakeEnd + RATE / 10;
+        negationHeard = false;
         speechStartAt = 0;
         lastSpeechAt = 0;
         lastSpeechSample = 0;
         speechMs = 0;
         speechRun = 0;
-        speechOnsetSample = -1;
+        speechOnsetSample = spokeOn ? wakeEnd : -1;
         wakeEndTurnSample = turnSamples;
+        wakeWordEndSample = wake != null && wake.phraseEndOffset >= 0
+                ? turnSamples - wake.phraseEndOffset : Math.max(0, turnSamples - RATE);
+        wakeTailSamples = BRIEF_FINAL_SAMPLES;
         listenFromSample = turnSamples;
         wakeTailPossible = true;
         wakeIgnoreUntilSample = turnSamples + RATE;
@@ -1180,7 +1347,9 @@ final class VoiceEngine implements PcmSink {
         speechOnsetSample = -1;
         lastLoudSample = -1;
         held.clear();
+        musicHeld.clear();
         heldCount = 0;
+        negationHeard = false;
         speechStartAt = 0;
         lastSpeechAt = 0;
         turnStartedAt = now;
@@ -1189,6 +1358,7 @@ final class VoiceEngine implements PcmSink {
         recentFull = false;
         turnSamples = 0;
         wakeEndTurnSample = 0;
+        wakeWordEndSample = 0;
         cueBacklogSamples = 0;
         cueStartSample = 0;
         listenFromSample = -1;
@@ -1207,6 +1377,7 @@ final class VoiceEngine implements PcmSink {
         pauseMs = MediaTurnPolicy.PAUSE_NONE;
         mediaHoldPhase = MEDIA_HOLD_NONE;
         mediaHoldUntilSample = -1;
+        holdAudioUntilSample = -1;
         turnReplyHeard = false;
         wakeIgnoreUntilSample = 0;
         lastSpeechSample = 0;
@@ -1263,6 +1434,7 @@ final class VoiceEngine implements PcmSink {
             startCloud(false);
         } else if (spotter != null) {
             spotter.begin(config.resolvedCommandLanguage(locale()));
+            commandSpotterRestartAt = turnSamples;
             phase = LOCAL;
             if (hybrid) openSession();
         } else {
@@ -1272,9 +1444,78 @@ final class VoiceEngine implements PcmSink {
         }
     }
 
+    // No speech yet, and nothing loud for a quarter second (the voice detector declares speech late) of audio
+    // heard after any media hold (speech isn't tracked during one, so "quiet" there would be blind).
+    private boolean quietBeforeSpeech() {
+        if (speechStartAt != 0 || mediaHoldPhase != MEDIA_HOLD_NONE || turnSamples < mediaHoldUntilSample) return false;
+        // a hold released unconfirmed leaves mediaHoldUntilSample at -1: its audio's end still counts
+        long last = Math.max(lastLoudSample, Math.max(mediaHoldUntilSample, holdAudioUntilSample));
+        return last < 0 || turnSamples - last > RATE / 4;
+    }
+
+    // Speech heard before m's phrase, from its timestamp; a phrase "starting" well before any speech means a misplaced
+    // timestamp: the word estimate then.
+    private long leadingMsOf(LocalCommandSpotter.Match m, long phraseStartSample) {
+        long onset = speechOnsetSample;
+        // run straight on from "OverDrive": speech is only counted from a moment after the word, so from its end
+        if (onset >= 0 && onset <= wakeWordEndSample + RUN_ON_ONSET_SAMPLES) onset = Math.min(onset, wakeWordEndSample + wakeTailSamples);
+        if (phraseStartSample >= 0 && onset >= 0 && phraseStartSample + RATE / 10 >= onset) {
+            return Math.max(0, (phraseStartSample - onset) * 1000 / RATE);
+        }
+        return Math.max(0, speechMsAtFirstMatch - firstMatchWords * WORD_MS);
+    }
+
+    /** Whether the speech just before {@code m} (since the wake word's end, up to 0.7 s) holds a negation. */
+    private boolean negationBefore(LocalCommandSpotter.Match m) {
+        if (spotter == null || m.phraseStartOffset < 0) return false;
+        long phraseStart = turnSamples - m.phraseStartOffset;
+        long wordEnd = Math.max(0L, wakeWordEndSample);
+        // a little of the wake word rides along as lead-in: the check hears a run-on "…don't" better with it
+        long from = Math.max(Math.max(0L, wordEnd - NEGATION_CONTEXT_SAMPLES), phraseStart - NEGATION_LOOKBACK_SAMPLES);
+        long to = Math.min(turnSamples, phraseStart + RATE / 10);
+        short[] seg = recentBetween(from, to);
+        long segFrom = to - seg.length;
+        int phraseAt = (int) Math.max(0L, Math.min(seg.length, phraseStart - segFrom));
+        int endAt = (int) Math.max(0L, Math.min(seg.length, wordEnd - segFrom));
+        // where speech began after the wake word (its last token stays loud a while), by level: the tracked onset
+        // isn't kept before the window's speech start, nor during a media hold. Nothing said before the phrase, no check.
+        int scanFrom = Math.min(phraseAt, endAt + WAKE_TAIL_SAMPLES);
+        int began = firstLoud(seg, scanFrom, phraseAt);
+        if (began < 0) return false;
+        // run straight on from the wake word: speech since its end, checked with the context; after a pause: from
+        // just before the speech (silence hurts)
+        boolean runOn = began - scanFrom < RATE * 3 / 100;
+        if ((runOn ? endAt : began) >= phraseAt - NEGATION_MIN_SAMPLES) return false;
+        int start = runOn ? 0 : Math.max(0, began - RATE / 10);
+        // a negation starts before the command; one at its very start is its own first syllable (把, 播)
+        return spotter.hearsNegation(seg, start, seg.length - start, config.resolvedCommandLanguage(locale()),
+                phraseAt - start - RATE / 20);
+    }
+
+    // Start of the first two loud 20 ms frames in pcm[from, end) by the speech tracker's level rule; -1 if none.
+    private int firstLoud(short[] pcm, int from, int end) {
+        float f = noiseFloor * turnGain;
+        float threshold = Math.max(Math.max(f * 2.0f, f + 400f), 350f);
+        int frame = RATE / 50;
+        int run = 0;
+        for (int i = from; i + frame <= end; i += frame) {
+            run = rms(pcm, i, frame) > threshold ? run + 1 : 0;
+            if (run >= 2) return i - frame;
+        }
+        return -1;
+    }
+
+    /** Turn audio [from, to), as much of it as the recent ring still holds. */
+    private short[] recentBetween(long from, long to) {
+        long oldest = turnSamples - (recentFull ? recent.length : recentPos);
+        from = Math.max(from, oldest);
+        if (to <= from) return new short[0];
+        return java.util.Arrays.copyOf(recentTail((int) (turnSamples - from)), (int) (to - from));
+    }
+
     private void onLocalMatch(LocalCommandSpotter.Match m) {
         if (LocalCommandSpotter.INTENT_WAKE.equals(m.intent)) {
-            reArm();
+            reArm(m);
             return;
         }
         if ("assistant.cancel".equals(m.intent)) {
@@ -1294,16 +1535,15 @@ final class VoiceEngine implements PcmSink {
         }
         speechMsAtLastMatch = speechMs;
         matches.add(m);
-        if (!VoiceAssistantConfig.MODE_LOCAL.equals(config.mode)) return;
+        if (!VoiceAssistantConfig.MODE_LOCAL.equals(config.mode)) {
+            // hybrid: a negation before it sends the turn to the AI at window close
+            if (!negationHeard && negationBefore(m)) negationHeard = true;
+            return;
+        }
         // A bare phrase runs at once; one inside a sentence waits for the whole utterance, since
         // only the transcript can tell "turn on the AC" from "do not turn on the AC".
-        long leadingMs;
-        if (m.phraseStartOffset >= 0 && speechOnsetSample >= 0) {
-            long phraseStartSample = turnSamples - m.phraseStartOffset;
-            leadingMs = Math.max(0, (phraseStartSample - speechOnsetSample) * 1000 / RATE);
-        } else {
-            leadingMs = Math.max(0, speechMsAtFirstMatch - firstMatchWords * WORD_MS);
-        }
+        long phraseStartSample = m.phraseStartOffset >= 0 ? turnSamples - m.phraseStartOffset : -1;
+        long leadingMs = leadingMsOf(m, phraseStartSample);
         boolean trailingLoud = lastLoudSample >= 0
                 && turnSamples - lastLoudSample < CommandWindowGate.TRAILING_LOUD_FOR_HOLD_SAMPLES;
         // Holding only pays off when understandLocally() can confirm the hit at window close;
@@ -1313,6 +1553,19 @@ final class VoiceEngine implements PcmSink {
         CommandWindowGate.Decision gate =
                 CommandWindowGate.decide(config.resolvedCommandLanguage(locale()), leadingMs,
                         trailingLoud, !held.isEmpty(), canValidate);
+        // a short preface can be "please" or "don't" (不要, 别): only a negation check tells them apart
+        if (gate == CommandWindowGate.Decision.DISPATCH_NOW && negationBefore(m)) {
+            negationHeard = true;
+            gate = CommandWindowGate.Decision.HOLD;
+        }
+        // Spoken over music still being paused, "don't" goes untimed and the check hears it poorly: with a transcript
+        // to hand it decides at window close, and music that garbles it doesn't stop the command. Not once the
+        // pause has failed: the music plays on, a transcript wouldn't help.
+        if (gate == CommandWindowGate.Decision.DISPATCH_NOW && canValidate && phraseStartSample >= 0
+                && mediaHoldUntilSample != -1 && holdAudioUntilSample > phraseStartSample - MUSIC_LEAD_SAMPLES) {
+            gate = CommandWindowGate.Decision.HOLD;
+            musicHeld.add(m);
+        }
         if (gate == CommandWindowGate.Decision.DISPATCH_NOW) {
             dispatch(m);
         } else {
@@ -1357,7 +1610,15 @@ final class VoiceEngine implements PcmSink {
             } else {
                 long trailing = speechMs - speechMsAtLastMatch;
                 long leading = Math.max(0, speechMsAtFirstMatch - firstMatchWords * WORD_MS);
-                cloud = trailing > TRAILING_SPEECH_FOR_CLOUD_MS || leading > LEADING_SPEECH_FOR_CLOUD_MS;
+                // a negation heard before it: without a transcript only the AI can tell "don't open the windows"
+                cloud = negationHeard || trailing > TRAILING_SPEECH_FOR_CLOUD_MS || leading > LEADING_SPEECH_FOR_CLOUD_MS;
+                // Something said before the phrase, or music over it: nothing runs before window close here anyway,
+                // so a transcript that says "don't" (or "not", "never" …) hands the turn to the AI too.
+                // Nothing runs before window close here anyway: a transcript that says "don't" (or "not", "never" …)
+                // anywhere — before the phrase, run straight on, or a "no, don't" after it — hands the turn to the AI.
+                if (!cloud && CommandTranscriber.saysNegation(transcriptOnly())) {
+                    cloud = true;
+                }
             }
             if (cloud) {
                 startCloud(true);
@@ -1383,15 +1644,29 @@ final class VoiceEngine implements PcmSink {
         // The held hits leave the list; only what the transcript confirms comes back.
         List<LocalCommandSpotter.Match> executed = new ArrayList<>(matches);
         executed.removeAll(held);
+        List<LocalCommandSpotter.Match> late = new ArrayList<>(held);
+        late.retainAll(musicHeld);
+        musicHeld.clear();
         matches.clear();
         matches.addAll(executed);
         held.clear();
+        lastTranscript = null;
         boolean transcribed = understandLocally() >= 0;
         if (phase != LOCAL) return;
         turnBy = "kwsasr";
         if (!transcribed) {
             if (hybrid) {
                 startCloud(true);
+                return;
+            }
+            // held only for the music: nothing usable heard (or no transcript at all) and no "don't" in it, they run
+            if (!late.isEmpty() && !CommandTranscriber.saysNegation(lastTranscript)) {
+                for (LocalCommandSpotter.Match m : late) {
+                    if (sameMeaningIn(matches, m)) continue;
+                    matches.add(m);
+                    dispatch(m);
+                }
+                if (pendingResults == 0) completeLocalTurn();
                 return;
             }
             if (executed.isEmpty()) {
@@ -1428,6 +1703,21 @@ final class VoiceEngine implements PcmSink {
         return false;
     }
 
+    /** The turn's transcript (English only), or null; nothing is matched or dispatched from it. */
+    private String transcriptOnly() {
+        CommandTranscriber t = transcriber;
+        if (t == null || utteranceLen < RATE / 4 || !config.commandSttAllowed(locale())) return null;
+        float level = speechLevel(utterance, utteranceLen);
+        float gain = Math.max(MIN_GAIN, Math.min(MAX_GAIN, TARGET_SPEECH_RMS / Math.max(level, 1f)));
+        if (gain < 0.91f || gain > 1.1f) applyGain(utterance, 0, utteranceLen, gain, utterance);
+        long started = SystemClock.elapsedRealtime();
+        String text = t.transcript(utterance, 0, utteranceLen);
+        // in the turn log, like the other transcript passes
+        turnAsrMs = (int) (SystemClock.elapsedRealtime() - started);
+        turnText = CommandTranscriber.logSafe(text, 60);
+        return text;
+    }
+
     /**
      * Speech-to-text over the turn's audio (English only): when no phrase was spotted, or to
      * validate held ones. Appends the matched phrases and returns the leftover word count, or -1
@@ -1447,6 +1737,7 @@ final class VoiceEngine implements PcmSink {
         if (u == null || u.matches.isEmpty()) {
             // The transcript is the only way to tell "misheard" from "not in the catalog".
             turnText = u == null ? null : CommandTranscriber.logSafe(u.text, 60);
+            lastTranscript = u == null ? null : u.text;
             return -1;
         }
         for (LocalCommandSpotter.Match m : u.matches) {
@@ -1764,6 +2055,11 @@ final class VoiceEngine implements PcmSink {
             endEnroll(null, "cancelled");
             return;
         }
+        if (phase == BRIEF) {
+            endBrief(TripBriefingAsk.ANSWER_NONE, null, "brief_cancelled", Earcons.CLOSE, null,
+                    VoiceOrbView.STATE_ERROR, R.string.voice_overlay_cancelled);
+            return;
+        }
         closeSessionQuietly();
         if (spotter != null && phase == LOCAL && !localWindowClosed) spotter.end();
         promptQueue.clear();
@@ -1803,6 +2099,917 @@ final class VoiceEngine implements PcmSink {
             captureOff();
         }
         host.onActivity();
+    }
+
+    // ── Trip Briefing ─────────────────────────────────────────────────────
+
+    /**
+     * One briefing question as a turn of its own, only when the engine is idle. GenAI: the AI asks
+     * and answers through its tool (Local takes over when the session is not live in 3 s). Local and
+     * Hybrid: the line is spoken, then a closed answer set is heard; Hybrid hands anything else to the AI.
+     */
+    private void startBrief(TripBriefingAsk ask, boolean aiReady, BriefSink sink, long askedAt) {
+        long now = SystemClock.elapsedRealtime();
+        VoiceAssistantConfig c = config;
+        // The destination goes to the AI only when the driver lets the assistant share where the car is.
+        boolean ai = aiReady && c.usesGenAi() && c.shareLocationWithAi;
+        // The local ear knows English and Chinese; a question in another language is the AI's, or the card's.
+        boolean localSpeaks = localLanguageMatches(c);
+        // With no speech engine on the head unit an AI that can ask says the line; without one the cue opens the window.
+        boolean sayLocally = localSpeaks && localSpeechAvailable();
+        long timeout = ask.timeoutMs > 0 ? ask.timeoutMs : BRIEF_DEFAULT_MS;
+        long deadline = askedAt + Math.max(3000L, Math.min(60_000L, timeout));
+        boolean clip = ask.promptClip != null && prompts.has(ask.promptClip, locale());
+        // (a follow-up nothing can say would only open a silent window: the screen asks it alone)
+        boolean unsaid = ask.followUp && !ai && !sayLocally && !clip;
+        boolean busy = phase != ARMED || now < promptEndsAt || !promptQueue.isEmpty() || session != null
+                || AppAudioCaptureController.fieldCaptureRunning() || (!(localEar() && localSpeaks) && !ai)
+                || deadline - now < BRIEF_LOCAL_MIN_MS || unsaid;
+        if (!busy && wake == null) {
+            wantsCapture = true;
+            if (!captureOn()) {
+                wantsCapture = false;
+                busy = true;
+            }
+        }
+        if (busy) {
+            sink.onBriefAnswer(TripBriefingAsk.ANSWER_NONE, null, TripBriefingAsk.VIA_BUSY);
+            return;
+        }
+        brief = ask;
+        briefSink = sink;
+        phase = BRIEF;
+        turn++;
+        verifyDueAt = -1;
+        turnManual = false;
+        turnIntents = null;
+        turnBy = null;
+        turnText = null;
+        turnAsrMs = 0;
+        turnIntentDetail = null;
+        turnWakeTail = 0;
+        heldCount = 0;
+        cueMs = 0;
+        cueVolume = -1;
+        cueFallback = null;
+        cuePeakRms = 0f;
+        listenPeakRms = 0f;
+        vadSpeechSamples = 0;
+        loudSamples = 0;
+        listenFromSample = -1;
+        localWindowClosed = false;
+        speechEndAt = 0;
+        firstDispatchAt = 0;
+        firstReplyAt = 0;
+        pauseMs = MediaTurnPolicy.PAUSE_NONE;
+        mediaHoldPhase = MEDIA_HOLD_NONE;
+        mediaHoldUntilSample = -1;
+        holdAudioUntilSample = -1;
+        unduckWhenQuiet = false;
+        turnSamples = 0;
+        turnStartedAt = now;
+        lastAudioAt = now;
+        resetBriefReply();
+        briefDriverSpoke = false;
+        briefHedged = false;
+        briefNamedPlace = false;
+        briefLastText = null;
+        briefDeadline = deadline;
+        // The cabin audio is held as for a command turn: paused or ducked, our sound kept audible.
+        turnMedia = mediaPlayingForTurn(now);
+        if (!cabinDucked) {
+            cabinDuckTurn = MediaTurnPolicy.cabinDuck(cabinDuckAvailable,
+                    c.pauseMediaWhileListening, c.resumeMediaAfterListening);
+            turnChannel = cabinDuckTurn ? duckedChannel() : null;
+        }
+        duck();
+        host.onActivity();
+        // (a follow-up has no reply mode: hybrid's AI would hear it as the directions question)
+        briefHybrid = !ask.followUp && ai && VoiceAssistantConfig.MODE_HYBRID.equals(c.mode) && sayLocally;
+        // The follow-up takes the same voice as the briefing: the AI's where it asked the briefing.
+        if (ai && (VoiceAssistantConfig.MODE_GENAI.equals(c.mode) || !sayLocally)) {
+            briefStep = BRIEF_CONNECT;
+            boolean fallbackSpeaks = sayLocally || (ask.followUp && clip);
+            briefStepUntil = now + (localSpeaks && !fallbackSpeaks ? BRIEF_LIVE_NO_VOICE_MS : BRIEF_LIVE_MS);
+            openBriefSession(ask.followUp ? com.overdrive.app.genai.GenAiTripBriefing.MODE_CLUSTER
+                    : com.overdrive.app.genai.GenAiTripBriefing.MODE_ASK);
+            overlay.show(VoiceOrbView.STATE_THINKING, overlay.text(R.string.voice_overlay_thinking));
+        } else {
+            // Hybrid dials while the question plays, so a reply outside the set is not kept waiting.
+            if (briefHybrid) openBriefSession(com.overdrive.app.genai.GenAiTripBriefing.MODE_REPLY);
+            speakBriefQuestion(now);
+        }
+    }
+
+    /** The button during a briefing: answer now while it asks, else a normal turn instead of the briefing. */
+    private void briefPushToTalk() {
+        long now = SystemClock.elapsedRealtime();
+        if (briefStep == BRIEF_SPEAK) {
+            if (briefSpeech != null) briefSpeech.stopPlayback();
+            prompts.stop();
+            briefRenderKey++;
+            mutedUntil = now;
+            openBriefWindow(now);
+            return;
+        }
+        if (briefStep == BRIEF_LISTEN) return;
+        endBrief(TripBriefingAsk.ANSWER_NONE, null, "brief_push_to_talk", -1, null, 0, 0);
+        beginTurn(true, micGain);
+    }
+
+    /** A TextToSpeech engine is installed and, once tried, started. */
+    private boolean localSpeechAvailable() {
+        if (briefSpeech != null && briefSpeech.unavailable()) return false;
+        return BriefingSpeech.engineInstalled(app);
+    }
+
+    /** The question is in a language the local answer set covers (the command language). */
+    private static boolean localLanguageMatches(VoiceAssistantConfig c) {
+        String ui = locale().toLowerCase(java.util.Locale.ROOT);
+        boolean zhCommands = c.resolvedCommandLanguage(locale()).toLowerCase(java.util.Locale.ROOT).startsWith("zh");
+        return zhCommands ? ui.startsWith("zh") : ui.startsWith("en");
+    }
+
+    /**
+     * A recogniser for the answer set exists: English speech-to-text (keywords alone misread English
+     * sentences), or the keyword spotter for Chinese, which has no speech-to-text.
+     */
+    private boolean localEar() {
+        if (chineseCommands()) return spotter != null;
+        return transcriber != null && config.commandSttAllowed(locale());
+    }
+
+    private boolean chineseCommands() {
+        return config.resolvedCommandLanguage(locale()).toLowerCase(java.util.Locale.ROOT).startsWith("zh");
+    }
+
+    private void speakBriefQuestion(long now) {
+        briefStep = BRIEF_SPEAK;
+        briefPlayEndsAt = 0;
+        briefStepUntil = now + BRIEF_RENDER_MS;
+        if (brief.promptClip != null && !localSpeechAvailable()) {
+            int ms = prompts.play(brief.promptClip, locale(), channel());
+            if (ms >= 0) {
+                briefPlayEndsAt = now + ms + 150;
+                mutedUntil = Math.max(mutedUntil, briefPlayEndsAt + ECHO_TAIL_MS);
+                overlay.show(VoiceOrbView.STATE_SPEAKING, overlay.text(R.string.voice_overlay_speaking));
+                return;
+            }
+        }
+        String line = brief.spokenLine == null ? "" : brief.spokenLine.trim();
+        if (line.isEmpty()) {
+            briefStepUntil = now;
+            return;
+        }
+        briefRenderKey = speech().render(line);
+    }
+
+    private BriefingSpeech speech() {
+        if (briefSpeech == null) {
+            briefSpeech = new BriefingSpeech(app, locale(), this::post, new BriefSpeechEvents());
+        }
+        return briefSpeech;
+    }
+
+    private void onBriefRendered(int key, File wav) {
+        if (phase != BRIEF || key != briefRenderKey || briefSpeech == null
+                || (briefStep != BRIEF_SPEAK && briefStep != BRIEF_CONFIRM)) {
+            return;
+        }
+        long now = SystemClock.elapsedRealtime();
+        int ms = briefSpeech.play(wav, channel());
+        if (ms < 0) {
+            onBriefRenderFailed(key);
+            return;
+        }
+        briefPlayEndsAt = now + ms + 150;
+        mutedUntil = Math.max(mutedUntil, briefPlayEndsAt + ECHO_TAIL_MS);
+        if (briefStep == BRIEF_SPEAK) {
+            overlay.show(VoiceOrbView.STATE_SPEAKING, overlay.text(R.string.voice_overlay_speaking));
+        }
+    }
+
+    /** No speech engine (or no voice for the line): the window opens on its cue, a yes ends on the success cue. */
+    private void onBriefRenderFailed(int key) {
+        if (phase != BRIEF || key != briefRenderKey) return;
+        long now = SystemClock.elapsedRealtime();
+        if (briefStep == BRIEF_SPEAK) {
+            briefStepUntil = now;
+        } else if (briefStep == BRIEF_CONFIRM && briefPlayEndsAt == 0) {
+            briefPlayEndsAt = now + briefCue(Earcons.SUCCESS) + 120;
+        }
+    }
+
+    /** A briefing cue on the turn's channel; its length in ms. */
+    private int briefCue(int cue) {
+        String out = channel();
+        return earcons.play(cue, out);
+    }
+
+    private void tickBrief(long now) {
+        if (brief == null) return;
+        if (briefStep != BRIEF_CONFIRM && now > briefDeadline) {
+            endBrief(TripBriefingAsk.ANSWER_NONE, null, "brief_timeout", Earcons.CLOSE, null, 0, 0);
+            return;
+        }
+        switch (briefStep) {
+            case BRIEF_CONNECT:
+                if (now > briefStepUntil) briefFallBack(now, "brief_ai_not_live");
+                break;
+            case BRIEF_AI:
+                if (!briefAiAsked && !briefReplySpeaking && now > briefStepUntil) {
+                    briefFallBack(now, "brief_ai_silent");
+                } else if (briefAiAsked && briefStreaming && speechStartAt == 0 && now > briefStepUntil) {
+                    endBrief(TripBriefingAsk.ANSWER_NONE, null, "brief_no_answer", Earcons.CLOSE, null, 0, 0);
+                }
+                break;
+            case BRIEF_SPEAK:
+                if (briefPlayEndsAt > 0 ? now >= briefPlayEndsAt : now > briefStepUntil) openBriefWindow(now);
+                break;
+            case BRIEF_LISTEN:
+                tickBriefWindow(now);
+                break;
+            case BRIEF_CLOUD:
+                if (!briefReplySpeaking && now - briefAiActivityAt > BRIEF_CLOUD_IDLE_MS) {
+                    endBrief(TripBriefingAsk.ANSWER_NONE, null, "brief_cloud_no_response", Earcons.FAILURE,
+                            VoicePrompts.NOT_UNDERSTOOD, VoiceOrbView.STATE_ERROR,
+                            R.string.voice_overlay_not_understood);
+                }
+                break;
+            case BRIEF_CONFIRM:
+                if (briefAiConfirms) {
+                    boolean quiet = !briefReplySpeaking;
+                    if (now > briefStepUntil || (quiet && briefAnswerSpoke)
+                            || (quiet && !briefAnswerSpoke && now - briefAnsweredAt > BRIEF_AI_CONFIRM_START_MS)) {
+                        finishBriefAnswer();
+                    }
+                } else if (briefPlayEndsAt > 0 ? now >= briefPlayEndsAt : now > briefStepUntil) {
+                    finishBriefAnswer();
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    /** GenAI could not ask: the local question and window take over while there is time and an ear for them. */
+    private void briefFallBack(long now, String outcome) {
+        closeBriefSession();
+        briefHybrid = false;
+        // a follow-up the car can't say either: the screen has it
+        if (brief.followUp && !localSpeechAvailable() && !(brief.promptClip != null && prompts.has(brief.promptClip, locale()))) {
+            endBrief(TripBriefingAsk.ANSWER_NONE, null, outcome, Earcons.CLOSE, null, 0, 0);
+            return;
+        }
+        if (!localEar() || !localLanguageMatches(config) || briefDeadline - now < BRIEF_LOCAL_MIN_MS) {
+            endBrief(TripBriefingAsk.ANSWER_NONE, null, outcome, Earcons.CLOSE, null, 0, 0);
+            return;
+        }
+        noteTurn(outcome);
+        overlay.hide();
+        speakBriefQuestion(now);
+    }
+
+    /** After the question: the listening cue (the mic is muted through it), then the window. */
+    private void openBriefWindow(long now) {
+        briefStep = BRIEF_LISTEN;
+        briefWindowOpen = false;
+        try {
+            cueVolume = audioManager == null ? -1 : audioManager.getStreamVolume(Earcons.streamFor(channel()));
+        } catch (Throwable ignored) {
+            cueVolume = -1;
+        }
+        cueFallback = cueVolume == 0 ? Earcons.audibleFallback(audioManager, channel()) : null;
+        // The listening cue moves to an audible stream like the wake cue does.
+        String cueChannel = cueFallback == null ? channel() : cueFallback;
+        cueMs = earcons.play(Earcons.WAKE, cueChannel);
+        mutedUntil = Math.max(mutedUntil, now + cueMs + CUE_SETTLE_MS);
+        overlay.show(VoiceOrbView.STATE_LISTENING, overlay.text(R.string.voice_overlay_listening));
+    }
+
+    /** Up to 6 s (and never past the ask's own timeout); closes at the end of speech like a command window. */
+    private void tickBriefWindow(long now) {
+        if (!briefWindowOpen) {
+            if (now < mutedUntil) return;
+            // Whatever was captured while the question and the cue played is not the answer.
+            ring.skipToLatest();
+            resetBriefReply();
+            briefWindowOpen = true;
+            briefWindowFrom = turnSamples;
+            briefWindowSamples = Math.min(BRIEF_LISTEN_MS, Math.max(0L, briefDeadline - now)) * RATE / 1000;
+            turnStartedAt = now;
+            lastAudioAt = now;
+            beginBriefSpotting();
+            return;
+        }
+        long listened = turnSamples - briefWindowFrom;
+        boolean stuck = (lastAudioAt > 0 && now - lastAudioAt > NO_AUDIO_CLOSE_MS)
+                || now - turnStartedAt > BRIEF_LISTEN_MS + 2000;
+        if (speechStartAt == 0) {
+            if (listened > briefWindowSamples || stuck) closeBriefWindow(now, false);
+        } else {
+            boolean ended = turnSamples - lastSpeechSample > briefHang();
+            if (ended || listened > briefWindowSamples || stuck) closeBriefWindow(now, !ended);
+        }
+    }
+
+    // A spotted no needs no more listening; anything else waits out a pause ("okay… actually, not now").
+    private long briefHang() {
+        if (chineseCommands()) {
+            for (String tag : briefHitTags) {
+                if (BriefingAnswers.isNo(tag)) return END_OF_SPEECH_AFTER_MATCH_SAMPLES;
+            }
+        }
+        return BRIEF_END_OF_SPEECH_SAMPLES;
+    }
+
+    /** [cut]: the window shut while the driver was still talking, so only a no in it counts. */
+    private void closeBriefWindow(long now, boolean cut) {
+        briefWindowOpen = false;
+        endBriefSpotting();
+        if (speechStartAt != 0 && speechEndAt == 0) speechEndAt = System.currentTimeMillis();
+        BriefingAnswers.Answer a = hearBrief();
+        if (cut && a != null && !isBriefNo(a.answer)) a = null;
+        if (a != null) {
+            briefAnswered(a, now);
+        } else if (speechStartAt == 0) {
+            endBrief(TripBriefingAsk.ANSWER_NONE, null, "brief_no_answer", Earcons.CLOSE, null, 0, 0);
+        } else if (!cut && briefHybrid && briefSession != null) {
+            startBriefCloud(now);
+        } else {
+            endBrief(TripBriefingAsk.ANSWER_NONE, null, "brief_not_understood", Earcons.FAILURE,
+                    VoicePrompts.NOT_UNDERSTOOD, VoiceOrbView.STATE_ERROR, R.string.voice_overlay_not_understood);
+        }
+    }
+
+    /** A fresh reply: speech tracking, the utterance copy and the spotted hits start over. */
+    private void resetBriefReply() {
+        speechStartAt = 0;
+        lastSpeechAt = 0;
+        lastSpeechSample = 0;
+        speechMs = 0;
+        speechRun = 0;
+        speechOnsetSample = -1;
+        lastLoudSample = -1;
+        recentPos = 0;
+        recentFull = false;
+        utteranceLen = 0;
+        utteranceFull = false;
+        briefHitTags.clear();
+        briefHitSpans.clear();
+        briefLoudRuns.clear();
+        briefHeard = null;
+        // As a button turn: seeded from the last measured gain, re-measured on the first speech.
+        turnGain = micGain;
+        turnGainMeasured = false;
+        if (vad != null) vad.reset();
+    }
+
+    private void beginBriefSpotting() {
+        briefSpotting = false;
+        if (spotter == null) return;
+        if (briefKeywords == null) briefKeywords = briefKeywordLines();
+        spotter.beginPhrases(briefKeywords);
+        briefSpotting = true;
+        briefSpotterRestartAt = turnSamples;
+    }
+
+    private void endBriefSpotting() {
+        if (briefSpotting && spotter != null) spotter.end();
+        briefSpotting = false;
+    }
+
+    /** The answer lines this model can spot, '/'-joined. */
+    private String briefKeywordLines() {
+        StringBuilder out = new StringBuilder();
+        for (String line : BriefingAnswers.keywordLines(config.resolvedCommandLanguage(locale()))) {
+            int hash = line.indexOf(" #");
+            if (hash <= 0 || !spotter.knowsTokens(java.util.Arrays.asList(line.substring(0, hash).trim().split("\\s+")))) {
+                continue;
+            }
+            if (out.length() > 0) out.append('/');
+            out.append(line);
+        }
+        return out.toString();
+    }
+
+    /** The answer window, or the reply streamed to the AI; both are kept for the local rules. */
+    private void onBriefAudio(short[] chunk, int n, long now) {
+        boolean listening = briefStep == BRIEF_LISTEN && briefWindowOpen;
+        boolean streaming = briefStreaming && briefSession != null;
+        if (!listening && !streaming) return;
+        if (gained.length < n) gained = new short[n];
+        if (applyGain(chunk, 0, n, turnGain, gained)) turnGain = Math.max(MIN_GAIN, turnGain * 0.7f);
+        float rms = rms(gained, 0, n);
+        overlay.setLevel(Math.min(1f, rms / 3000f));
+        if (listening && rms > listenPeakRms) listenPeakRms = rms;
+        // Until a media pause is confirmed the speakers still play: heard, but not speech.
+        boolean hold = mediaHoldPhase != MEDIA_HOLD_NONE || turnSamples < mediaHoldUntilSample;
+        if (hold) holdAudioUntilSample = turnSamples + n;
+        long loudBefore = lastLoudSample;
+        if (!hold) trackSpeech(gained, 0, n, rms, now);
+        if (lastLoudSample != loudBefore) noteBriefLoud(turnSamples, n);
+        if (streaming && briefAiAsked && speechStartAt != 0) briefDriverSpoke = true;
+        rememberRecent(gained, 0, n);
+        turnSamples += n;
+        if (streaming) briefSession.sendPcm16k(gained, 0, n);
+        if (!utteranceFull && utteranceLen + n <= utterance.length) {
+            System.arraycopy(gained, 0, utterance, utteranceLen, n);
+            utteranceLen += n;
+        } else {
+            utteranceFull = true;
+        }
+        if (briefSpotting && spotter != null) {
+            LocalCommandSpotter.Match m = spotter.process(gained, 0, n);
+            if (m != null) onBriefHit(m);
+            // Before the reply starts, a restart each second keeps the model from restarting unseen (after ~1.5 s).
+            if (quietBeforeSpeech() && turnSamples - briefSpotterRestartAt >= RATE) {
+                spotter.restartIdle();
+                briefSpotterRestartAt = turnSamples;
+            }
+        }
+    }
+
+    // A loud chunk at [at, at + n), and the chunk before it (a loud run counts from its second chunk).
+    private void noteBriefLoud(long at, int n) {
+        long from = Math.max(0L, at - n);
+        long to = at + n;
+        int last = briefLoudRuns.size() - 1;
+        if (last >= 0 && briefLoudRuns.get(last)[1] >= from) {
+            briefLoudRuns.get(last)[1] = Math.max(briefLoudRuns.get(last)[1], to);
+        } else {
+            briefLoudRuns.add(new long[] {from, to});
+        }
+    }
+
+    /** Loud reply time no spotted line covers (ms), each line ending a syllable after its last token; -1 when unknown. */
+    private long briefUncoveredMs() {
+        List<long[]> spans = new ArrayList<>();
+        for (long[] span : briefHitSpans) {
+            if (span[0] < 0 || span[1] < 0) return -1;
+            spans.add(new long[] {span[0], Math.max(span[0], span[1]) + BRIEF_FINAL_SAMPLES});
+        }
+        spans.sort((a, b) -> Long.compare(a[0], b[0]));
+        long uncovered = 0;
+        for (long[] run : briefLoudRuns) {
+            long from = run[0];
+            for (long[] sp : spans) {
+                if (sp[1] <= from) continue;
+                if (sp[0] >= run[1]) break;
+                if (sp[0] > from) uncovered += sp[0] - from;
+                from = Math.max(from, sp[1]);
+                if (from >= run[1]) break;
+            }
+            if (from < run[1]) uncovered += run[1] - from;
+        }
+        return uncovered * 1000 / RATE;
+    }
+
+    /** A spotted answer line and where it sits in the reply (turn samples: start, last token; -1 when unknown). */
+    private void onBriefHit(LocalCommandSpotter.Match m) {
+        if (!LocalCommandSpotter.INTENT_PHRASE.equals(m.intent) || m.phrase == null) return;
+        long start = m.phraseStartOffset >= 0 ? turnSamples - m.phraseStartOffset : -1;
+        long lastToken = m.phraseEndOffset >= 0 ? turnSamples - m.phraseEndOffset : -1;
+        // English hits only time the reply (speech-to-text answers it); 不 or 可能 heard in Chinese stands.
+        if (chineseCommands() && BriefingAnswers.isHedge(m.phrase)) briefHedged = true;
+        if (chineseCommands() && BriefingAnswers.isPlace(m.phrase)) briefNamedPlace = true;
+        briefHitTags.add(m.phrase);
+        briefHitSpans.add(new long[] {start, lastToken});
+    }
+
+    /**
+     * The current reply by the local rules: the transcript in English, the spotted lines in Chinese
+     * (no speech-to-text), and never keywords inside a transcribed sentence.
+     */
+    private BriefingAnswers.Answer hearBrief() {
+        if (speechStartAt == 0 || brief == null) return null;
+        boolean hitsCount = true;
+        CommandTranscriber t = transcriber;
+        if (t != null && utteranceLen >= RATE / 4 && config.commandSttAllowed(locale())) {
+            float level = speechLevel(utterance, utteranceLen);
+            float gain = Math.max(MIN_GAIN, Math.min(MAX_GAIN, TARGET_SPEECH_RMS / Math.max(level, 1f)));
+            if (gain < 0.91f || gain > 1.1f) applyGain(utterance, 0, utteranceLen, gain, utterance);
+            long started = SystemClock.elapsedRealtime();
+            String text = t.transcript(utterance, 0, utteranceLen);
+            turnAsrMs = (int) (SystemClock.elapsedRealtime() - started);
+            briefLastText = text;
+            if (BriefingAnswers.namesPlace(text, brief.destLabel)) briefNamedPlace = true;
+            BriefingAnswers.Answer a = BriefingAnswers.fromTranscript(text, brief.apps, brief.destLabel);
+            if (a != null) {
+                turnBy = "asr";
+                return a;
+            }
+            turnText = CommandTranscriber.logSafe(text, 60);
+            // Speech-to-text heard words that are not an answer ("not Waze"): a keyword in them isn't one either.
+            hitsCount = text == null || text.trim().isEmpty();
+        }
+        // English answers come from speech-to-text only.
+        if (!chineseCommands()) hitsCount = false;
+        if (!hitsCount || briefHitTags.isEmpty()) return null;
+        List<BriefingAnswers.Hit> hits = new ArrayList<>();
+        for (int i = 0; i < briefHitTags.size(); i++) {
+            long[] span = briefHitSpans.get(i);
+            long lead = span[0] >= 0 && speechOnsetSample >= 0
+                    ? Math.max(0L, span[0] - speechOnsetSample) * 1000 / RATE : -1;
+            long end = span[1] >= 0 ? span[1] + BRIEF_FINAL_SAMPLES : -1;
+            long tail = end >= 0 && lastLoudSample >= 0 ? Math.max(0L, lastLoudSample - end) * 1000 / RATE : -1;
+            hits.add(new BriefingAnswers.Hit(briefHitTags.get(i), lead, tail));
+        }
+        BriefingAnswers.Answer a = BriefingAnswers.fromHits(hits, brief.apps, briefUncoveredMs());
+        if (a != null) turnBy = "kws";
+        return a;
+    }
+
+    /**
+     * A local answer: a no ends at once, a yes is confirmed out loud first (a follow-up's isn't: what it
+     * does shows). A named app that is not offered goes back as named, so the card stays up for the driver to choose.
+     */
+    private void briefAnswered(BriefingAnswers.Answer a, long now) {
+        closeBriefSession();
+        turnIntents = a.named == null ? a.answer : a.answer + "," + a.named;
+        if (isBriefNo(a.answer)) {
+            endBrief(a.answer, null, "brief_" + a.answer, Earcons.CLOSE, null, 0, 0);
+            return;
+        }
+        if (brief.followUp) {
+            endBrief(TripBriefingAsk.ANSWER_YES, null, "brief_yes", Earcons.SUCCESS, null, VoiceOrbView.STATE_SUCCESS,
+                    R.string.voice_overlay_done);
+            return;
+        }
+        briefAnswer = TripBriefingAsk.ANSWER_YES;
+        briefApp = a.app != null ? a.app : a.named;
+        briefAiConfirms = false;
+        briefStep = BRIEF_CONFIRM;
+        briefPlayEndsAt = 0;
+        briefStepUntil = now + BRIEF_CONFIRM_MS;
+        String text = overlay.text(confirmationFor(a));
+        overlay.show(VoiceOrbView.STATE_SUCCESS, text);
+        briefRenderKey = speech().render(text);
+    }
+
+    private static int confirmationFor(BriefingAnswers.Answer a) {
+        if (a.named != null && a.app == null) return R.string.voice_brief_app_missing;
+        if (TripBriefingAsk.APP_WAZE.equals(a.app)) return R.string.voice_brief_opening_waze;
+        if (TripBriefingAsk.APP_GMAPS.equals(a.app)) return R.string.voice_brief_opening_gmaps;
+        if (TripBriefingAsk.APP_CAR.equals(a.app)) return R.string.voice_brief_starting_car;
+        return R.string.voice_brief_starting;
+    }
+
+    private void finishBriefAnswer() {
+        endBrief(briefAnswer, briefApp, "brief_" + briefAnswer, -1, null, VoiceOrbView.STATE_SUCCESS,
+                R.string.voice_overlay_done);
+    }
+
+    /** Hybrid: a reply outside the set goes to the AI with the briefing context; it answers through its tool. */
+    private void startBriefCloud(long now) {
+        briefStep = BRIEF_CLOUD;
+        turnBy = "cloud";
+        cloudTurns.incrementAndGet();
+        briefAiActivityAt = now;
+        if (utteranceLen > 0) briefSession.sendPcm16k(utterance, 0, utteranceLen);
+        briefDriverSpoke = speechStartAt != 0;
+        briefStreaming = true;
+        resetBriefReply();
+        beginBriefSpotting();
+        overlay.show(VoiceOrbView.STATE_THINKING, overlay.text(R.string.voice_overlay_thinking));
+    }
+
+    private void openBriefSession(String mode) {
+        closeBriefSession();
+        final int gen = ++briefSessionGen;
+        briefAiActivityAt = SystemClock.elapsedRealtime();
+        briefSession = VoiceSessionClient.open(app, locale(), channel(), config.uplinkFrameMs,
+                briefContext(mode), new BriefSessionEvents(gen));
+    }
+
+    /** What the daemon reads with GenAiTripBriefing.parse. */
+    private String briefContext(String mode) {
+        try {
+            JSONObject b = new JSONObject()
+                    .put("mode", mode)
+                    .put("apps", new JSONArray(brief.apps));
+            // Only an AI that asks the question itself gets the destination; a reply needs none of it.
+            if (com.overdrive.app.genai.GenAiTripBriefing.MODE_CLUSTER.equals(mode)) {
+                b.put("line", clipText(brief.spokenLine, 300));
+            } else if (com.overdrive.app.genai.GenAiTripBriefing.MODE_ASK.equals(mode)) {
+                b.put("dest", clipText(brief.destLabel, 60))
+                        .put("min", Math.max(0, brief.durationMin))
+                        .put("line", clipText(brief.spokenLine, 300));
+                String extra = clipText(brief.extraLine, 160);
+                if (!extra.isEmpty()) b.put("extra", extra);
+            }
+            return b.toString();
+        } catch (Exception e) {
+            return "{\"mode\":\"" + mode + "\"}";
+        }
+    }
+
+    private static String clipText(String s, int max) {
+        String t = s == null ? "" : s.trim();
+        return t.length() <= max ? t : t.substring(0, max);
+    }
+
+    /** Its later events are dropped by generation. */
+    private void closeBriefSession() {
+        VoiceSessionClient s = briefSession;
+        briefSession = null;
+        briefSessionLive = false;
+        briefReplySpeaking = false;
+        briefStreaming = false;
+        briefSessionGen++;
+        if (s != null) s.close();
+    }
+
+    private void onBriefLive() {
+        long now = SystemClock.elapsedRealtime();
+        briefSessionLive = true;
+        briefAiActivityAt = now;
+        if (briefStep == BRIEF_CONNECT) {
+            briefStep = BRIEF_AI;
+            briefStepUntil = now + BRIEF_AI_ASK_MS;
+        }
+    }
+
+    private void onBriefSpeaking(boolean speaking) {
+        long now = SystemClock.elapsedRealtime();
+        briefAiActivityAt = now;
+        if (speaking) {
+            // The driver's reply is complete once the AI answers it: read it for a plain "no".
+            if (!briefReplySpeaking && briefAnswer == null && briefHeard == null) briefHeard = hearBrief();
+            briefReplySpeaking = true;
+            // hybrid's AI asking again counts as asking: the reply to it can then be a yes
+            if (briefStep == BRIEF_AI || (briefStep == BRIEF_CLOUD && briefAnswer == null)) briefAiAsked = true;
+            // Each question from the AI needs its own reply before a yes counts.
+            if (briefAnswer == null) {
+                briefDriverSpoke = false;
+                briefHedged = false;
+            }
+            if (briefAnswer != null) briefAnswerSpoke = true;
+            endBriefSpotting();
+            overlay.show(VoiceOrbView.STATE_SPEAKING, overlay.text(R.string.voice_overlay_speaking));
+            return;
+        }
+        briefReplySpeaking = false;
+        mutedUntil = now + ECHO_TAIL_MS;
+        ring.skipToLatest();
+        if (briefAnswer != null) {
+            if (briefAnswerSpoke) finishBriefAnswer();
+            return;
+        }
+        if (briefTurnDone) {
+            afterBriefAiTurn();
+            if (phase != BRIEF) return;
+        }
+        if (briefStep == BRIEF_AI || briefStep == BRIEF_CLOUD) {
+            briefStreaming = true;
+            resetBriefReply();
+            beginBriefSpotting();
+            briefStepUntil = now + BRIEF_REPLY_WAIT_MS;
+            overlay.show(VoiceOrbView.STATE_LISTENING, overlay.text(R.string.voice_overlay_listening));
+        }
+    }
+
+    private void onBriefTurnComplete() {
+        briefAiActivityAt = SystemClock.elapsedRealtime();
+        briefTurnDone = true;
+        if (!briefReplySpeaking) afterBriefAiTurn();
+    }
+
+    /** The AI finished a turn and its audio drained: its tool answer ends the turn, or a plain "no". */
+    private void afterBriefAiTurn() {
+        briefTurnDone = false;
+        if (briefAnswer != null) {
+            finishBriefAnswer();
+            return;
+        }
+        if (briefHeard == null && speechStartAt != 0) briefHeard = hearBrief();
+        BriefingAnswers.Answer heard = briefHeard;
+        if (heard != null && isBriefNo(heard.answer)) {
+            turnIntents = heard.answer;
+            endBrief(heard.answer, null, "brief_ai_plain_no", Earcons.CLOSE, null, 0, 0);
+        }
+    }
+
+    // A no, or a "not now" (put off).
+    private static boolean isBriefNo(String answer) {
+        return TripBriefingAsk.ANSWER_NO.equals(answer) || TripBriefingAsk.ANSWER_LATER.equals(answer);
+    }
+
+    private void onBriefAiAnswer(String answer, String app) {
+        if (briefAnswer != null || brief == null) return;
+        boolean yes = TripBriefingAsk.ANSWER_YES.equals(answer);
+        if (!yes && !TripBriefingAsk.ANSWER_NO.equals(answer)) return;
+        if (yes) {
+            BriefingAnswers.Answer heard = briefHeard != null ? briefHeard : hearBrief();
+            if (heard != null && isBriefNo(heard.answer)) {
+                // the local rules heard a no: that's the answer, whatever the AI made of it
+                answer = heard.answer;
+                yes = false;
+            } else if (!briefDriverSpoke || briefHedged
+                    || (briefLastText != null && BriefingAnswers.hedges(briefLastText))
+                    || (briefHybrid && briefNamedPlace)) {
+                // A yes the driver didn't say, to a hedge ("maybe", 可能吧), or (hybrid's AI isn't told the
+                // destination) to another place: refused, and the AI is cut off before it confirms.
+                endBrief(TripBriefingAsk.ANSWER_NONE, null, "brief_ai_yes_refused", Earcons.FAILURE,
+                        VoicePrompts.NOT_UNDERSTOOD, VoiceOrbView.STATE_ERROR, R.string.voice_overlay_not_understood);
+                return;
+            }
+        }
+        if (!yes && TripBriefingAsk.ANSWER_NO.equals(answer)) {
+            BriefingAnswers.Answer heard = briefHeard != null ? briefHeard : hearBrief();
+            // put off rather than refused: the driver said "maybe later" / "not now"
+            if (heard != null && TripBriefingAsk.ANSWER_LATER.equals(heard.answer)) answer = TripBriefingAsk.ANSWER_LATER;
+        }
+        long now = SystemClock.elapsedRealtime();
+        briefAnswer = answer;
+        briefApp = yes && app != null && brief.apps.contains(app) ? app : null;
+        briefAiConfirms = true;
+        briefAnswerSpoke = false;
+        briefAnsweredAt = now;
+        briefStep = BRIEF_CONFIRM;
+        briefStepUntil = now + BRIEF_CONFIRM_MS;
+        briefStreaming = false;
+        endBriefSpotting();
+        turnBy = "ai";
+        turnIntents = briefApp == null ? answer : answer + "," + briefApp;
+    }
+
+    private void onBriefSessionEnded(String reason) {
+        briefSession = null;
+        briefSessionLive = false;
+        briefReplySpeaking = false;
+        briefStreaming = false;
+        long now = SystemClock.elapsedRealtime();
+        String why = reason != null && reason.matches("[a-z_]{1,20}") ? reason : "ended";
+        if (briefAnswer != null) {
+            if (briefAiConfirms) finishBriefAnswer();
+            return;
+        }
+        switch (briefStep) {
+            case BRIEF_CONNECT:
+                briefFallBack(now, "brief_ai_" + why);
+                break;
+            case BRIEF_AI:
+                if (!briefAiAsked) {
+                    briefFallBack(now, "brief_ai_" + why);
+                    break;
+                }
+                if (briefHeard == null && speechStartAt != 0) briefHeard = hearBrief();
+                if (briefHeard != null && isBriefNo(briefHeard.answer)) {
+                    endBrief(briefHeard.answer, null, "brief_ai_plain_no", Earcons.CLOSE, null, 0, 0);
+                } else {
+                    endBrief(TripBriefingAsk.ANSWER_NONE, null, "brief_ai_ended", Earcons.CLOSE, null, 0, 0);
+                }
+                break;
+            case BRIEF_CLOUD:
+                endBrief(TripBriefingAsk.ANSWER_NONE, null, "brief_cloud_ended", Earcons.FAILURE,
+                        VoicePrompts.NOT_UNDERSTOOD, VoiceOrbView.STATE_ERROR, R.string.voice_overlay_not_understood);
+                break;
+            default:
+                // The hybrid dial died while the question played: a reply outside the set is then not understood.
+                break;
+        }
+    }
+
+    /**
+     * Ends the briefing turn and returns to wake-word listening. {@code answer} (null: the card
+     * answered, no callback) goes to the sink last, once the mic window, TTS and session are released.
+     */
+    private void endBrief(String answer, String app, String outcome, int cue, String clipKey, int orbState,
+                          int textRes) {
+        long now = SystemClock.elapsedRealtime();
+        if (outcome != null) noteTurn(outcome);
+        BriefSink sink = briefSink;
+        releaseBrief();
+        phase = ARMED;
+        turn++;
+        utteranceLen = 0;
+        utteranceFull = false;
+        turnGain = 1f;
+        verifyDueAt = -1;
+        refractoryUntil = now + REFRACTORY_MS;
+        if (wake != null) wake.reset();
+        boolean spoke = clipKey != null && speak(clipKey);
+        if (!spoke && cue >= 0) mutedUntil = Math.max(mutedUntil, now + briefCue(cue) + 120);
+        if (textRes != 0) {
+            overlay.finish(orbState, overlay.text(textRes), Math.max(1400, promptEndsAt - now + 300));
+        } else {
+            overlay.hide();
+        }
+        if (now < promptEndsAt || !promptQueue.isEmpty()) unduckWhenQuiet = true;
+        else unduck();
+        if (wake == null && wantsCapture) {
+            wantsCapture = false;
+            captureOff();
+        }
+        host.onActivity();
+        if (sink != null && answer != null) sink.onBriefAnswer(answer, app, TripBriefingAsk.VIA_VOICE);
+    }
+
+    /** Frees what a briefing turn holds, without a callback or a sound; safe when none runs. */
+    private void releaseBrief() {
+        brief = null;
+        briefSink = null;
+        closeBriefSession();
+        endBriefSpotting();
+        if (briefSpeech != null) {
+            briefSpeech.release();
+            briefSpeech = null;
+        }
+        briefWindowOpen = false;
+        briefKeywords = null;
+        briefHitTags.clear();
+        briefHitSpans.clear();
+        briefLoudRuns.clear();
+        briefHeard = null;
+        briefAnswer = null;
+        briefApp = null;
+        briefAiConfirms = false;
+        briefAnswerSpoke = false;
+        briefAiAsked = false;
+        briefTurnDone = false;
+        briefPlayEndsAt = 0;
+        briefRenderKey = 0;
+    }
+
+    private final class BriefSpeechEvents implements BriefingSpeech.Events {
+        @Override
+        public void onRendered(int key, File wav) {
+            onBriefRendered(key, wav);
+        }
+
+        @Override
+        public void onRenderFailed(int key) {
+            onBriefRenderFailed(key);
+        }
+    }
+
+    private final class BriefSessionEvents implements VoiceSessionClient.Listener {
+        private final int gen;
+
+        BriefSessionEvents(int gen) {
+            this.gen = gen;
+        }
+
+        private void deliver(Runnable r) {
+            post(() -> {
+                if (gen == briefSessionGen && phase == BRIEF) r.run();
+            });
+        }
+
+        @Override
+        public void onConnected(String provider) {
+        }
+
+        @Override
+        public void onLive() {
+            deliver(VoiceEngine.this::onBriefLive);
+        }
+
+        @Override
+        public void onUserSpeechStopped() {
+            deliver(() -> briefAiActivityAt = SystemClock.elapsedRealtime());
+        }
+
+        @Override
+        public void onResponding() {
+            deliver(() -> briefAiActivityAt = SystemClock.elapsedRealtime());
+        }
+
+        @Override
+        public void onSpeakingChanged(boolean speaking) {
+            deliver(() -> onBriefSpeaking(speaking));
+        }
+
+        @Override
+        public void onTurnComplete() {
+            deliver(VoiceEngine.this::onBriefTurnComplete);
+        }
+
+        @Override
+        public void onActionProposal(JSONObject proposal) {
+            // A briefing session offers no action tool; nothing it proposes may run.
+            deliver(() -> {
+                if (briefSession != null) briefSession.declineProposal(proposal);
+            });
+        }
+
+        @Override
+        public void onContextRequest(JSONObject request) {
+            deliver(() -> {
+                if (briefSession != null) briefSession.answerContext(request, false);
+            });
+        }
+
+        @Override
+        public void onBriefingAnswer(String answer, String app) {
+            deliver(() -> onBriefAiAnswer(answer, app));
+        }
+
+        @Override
+        public void onEnded(String reason) {
+            deliver(() -> onBriefSessionEnded(reason));
+        }
     }
 
     // ── Wake-word enrollment ──────────────────────────────────────────────
@@ -2394,6 +3601,15 @@ final class VoiceEngine implements PcmSink {
     private void releaseMediaHold() {
         mediaHoldPhase = MEDIA_HOLD_NONE;
         mediaHoldUntilSample = -1;
+        // nothing was paused after all: a transcript won't help the hits held for the music, they run now
+        // (not while the engine shuts down)
+        if (!musicHeld.isEmpty() && running && phase == LOCAL && !localWindowClosed) {
+            for (LocalCommandSpotter.Match m : new ArrayList<>(musicHeld)) {
+                held.remove(m);
+                dispatch(m);
+            }
+            musicHeld.clear();
+        }
     }
 
     /**
@@ -2524,6 +3740,7 @@ final class VoiceEngine implements PcmSink {
 
     private void releaseAll() {
         closeSessionQuietly();
+        releaseBrief();
         if (enrollDecoderLoad != null) {
             enrollDecoderLoad.abandon();
             enrollDecoderLoad = null;

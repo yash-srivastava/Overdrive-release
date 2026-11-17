@@ -31,9 +31,10 @@ object SafeKeepClipClient {
 
     const val MAX_FILES_PER_CALL = 200
 
-    /** On, with at least one storage linked. Null when the daemon can't be reached. */
+    /** On, with at least one storage linked. Null when the daemon can't be reached or answers an error. */
     fun isActive(): Boolean? {
-        val json = request("/api/safekeep/status", "GET", null)?.second ?: return null
+        val (code, json) = request("/api/safekeep/status", "GET", null) ?: return null
+        if (code !in 200..299 || json == null) return null
         if (!json.optBoolean("enabled", false)) return false
         return (json.optJSONArray("destinations")?.length() ?: 0) > 0
     }

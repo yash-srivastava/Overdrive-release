@@ -78,6 +78,7 @@ public final class UnifiedTelegramConfig {
     // turning off criticalAlerts, which also killed charging faults, proximity
     // and battery-health alerts.
     public static final String K_TYRE_ALERTS      = "tyreAlerts";
+    public static final String K_LOGIN_ALERTS     = "loginAlerts";
     // Parking Intelligence "Parked" / "Back at car" messages (INFO tier, with
     // the four-camera still). Own toggle so they never ride criticalAlerts.
     public static final String K_PARKING_MESSAGES = "parkingMessages";
@@ -263,6 +264,11 @@ public final class UnifiedTelegramConfig {
      */
     public static boolean isTyreAlerts() {
         return load().optBoolean(K_TYRE_ALERTS, true);
+    }
+
+    /** New web sign-ins on Telegram. Default ON, as they rode Critical alerts before; failed attempts still do. */
+    public static boolean isLoginAlerts() {
+        return load().optBoolean(K_LOGIN_ALERTS, true);
     }
 
     /**

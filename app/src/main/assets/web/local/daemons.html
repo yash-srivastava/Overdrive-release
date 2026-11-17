@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title data-i18n="daemons.page_title">Daemons — OverDrive</title>
+    <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
+    <script src="../shared/theme.js?v=12"></script>
+    <script src="../shared/app-shell.js?v=23"></script>
+    <link rel="stylesheet" href="../shared/styles.css?v=38">
+    <link rel="stylesheet" href="../shared/revamp.css?v=2">
+    <link rel="stylesheet" href="../shared/daemons.css?v=2">
+</head>
+<body class="r-settings">
+    <div class="app-layout">
+        <div id="app-shell-mount"></div>
+        <main class="main-content">
+            <div class="mobile-header">
+                <button class="menu-toggle" onclick="toggleSidebar()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
+                </button>
+                <span style="font-weight:600;" data-i18n="daemons.nav">Daemons</span>
+                <div style="width:40px;"></div>
+            </div>
+            <header class="page-header">
+                <h1 class="page-title" data-i18n="daemons.page_title">Daemons</h1>
+            </header>
+            <div class="page-body">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title"><span data-i18n="daemons.nav">Daemons</span></div>
+                        <span class="status-badge inactive" id="summaryBadge">—</span>
+                    </div>
+                    <div class="card-body">
+                        <p class="pr-note" data-i18n="daemons.subtitle">Background services that run the camera, sentry, tunnels and bots.</p>
+                        <p class="pr-note" id="parkedNote" hidden data-i18n="daemons.parked_shutdown">Vehicle ON only: the services are stopped while the car is parked and start again when it is switched on.</p>
+                        <div id="daemonList"></div>
+                        <p class="pr-note" id="loadError" hidden data-i18n="daemons.load_failed">Couldn't load the service status.</p>
+                        <button class="pr-btn" id="refreshBtn" type="button" data-i18n="daemons.refresh">Refresh</button>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title"><span data-i18n="daemons.tunnel_title">Remote access tunnel</span></div>
+                    </div>
+                    <div class="card-body">
+                        <div id="tunnelList"><p class="pr-note">—</p></div>
+                        <p class="pr-note" data-i18n="daemons.readonly_note">This page only shows status. To start, stop or set up a service, use Settings → Daemons in the OverDrive app in the car.</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+    <div id="toastContainer" class="toast-container"></div>
+    <script src="../shared/auth.js"></script>
+    <script src="../shared/core.js?v=27"></script>
+    <script src="../shared/update-flow.js?v=3"></script>
+    <script src="../shared/daemons.js?v=2"></script>
+    <script>
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('open');
+            document.getElementById('sidebarOverlay').classList.toggle('show');
+        }
+        var D = BYD.daemons, t = D.t;
+        var TUNNEL_NAMES = { cloudflared: 'Cloudflared', zrok: 'Zrok', tailscale: 'Tailscale', wireguard: 'WireGuard' };
+        function render(data) {
+            var list = document.getElementById('daemonList');
+            list.textContent = '';
+            document.getElementById('loadError').hidden = true;
+            document.getElementById('parkedNote').hidden = !data.parkedShutdown;
+            var badge = document.getElementById('summaryBadge');
+            var known = typeof data.running === 'number';
+            badge.textContent = known
+                ? t('daemons.summary_running', '{running}/{total} running', { running: data.running, total: data.total })
+                : t('daemons.summary_unknown', 'Status unavailable');
+            badge.className = 'status-badge ' + (known && data.running > 0 ? 'active' : 'inactive');
+            ['core', 'optional'].forEach(function (g) {
+                list.appendChild(D.el('div', 'pr-group', t('daemons.group_' + g, g === 'core' ? 'Core' : 'Optional')));
+                (data.daemons || []).filter(function (d) { return d.group === g; }).forEach(function (d) {
+                    var st = D.stateOf(d);
+                    var row = D.el('div', 'pr-row');
+                    row.appendChild(D.el('span', 'pr-dot ' + st));
+                    var info = D.el('div', 'pr-info');
+                    info.appendChild(D.el('span', 'pr-name', t('daemons.name_' + d.id, d.name)));
+                    info.appendChild(D.el('span', 'pr-meta', d.process));
+                    row.appendChild(info);
+                    row.appendChild(D.el('span', 'pr-state', t('daemons.state_' + st, st)));
+                    list.appendChild(row);
+                });
+            });
+            renderTunnels(data);
+        }
+        function renderTunnels(data) {
+            var box = document.getElementById('tunnelList');
+            box.textContent = '';
+            var tunnels = data.tunnels || [];
+            if (!tunnels.length) {
+                box.appendChild(D.el('p', 'pr-note', typeof data.running === 'number'
+                    ? t('daemons.tunnel_none', 'No tunnel running')
+                    : t('daemons.summary_unknown', 'Status unavailable')));
+                return;
+            }
+            tunnels.forEach(function (tun) {
+                var row = D.el('div', 'pr-row');
+                row.appendChild(D.el('span', 'pr-dot ' + (tun.running ? 'running' : 'starting')));
+                var info = D.el('div', 'pr-info');
+                info.appendChild(D.el('span', 'pr-name', TUNNEL_NAMES[tun.type] || tun.type));
+                if (tun.url) {
+                    var link = D.el('a', 'pr-url', tun.url);
+                    link.href = tun.url;
+                    link.target = '_blank';
+                    link.rel = 'noopener noreferrer';
+                    info.appendChild(link);
+                }
+                var note = D.tunnelNote(tun, data.urlsHidden);
+                if (note) info.appendChild(D.el('span', 'pr-sub', note));
+                row.appendChild(info);
+                box.appendChild(row);
+            });
+        }
+        var loading = false;
+        function refresh() {
+            if (loading) return;
+            loading = true;
+            D.load().then(render).catch(function () {
+                document.getElementById('loadError').hidden = false;
+            }).then(function () { loading = false; });
+        }
+        document.addEventListener('DOMContentLoaded', function () {
+            if (window.BYD && BYD.core && BYD.i18n) {
+                BYD.i18n.init().then(function () {
+                    BYD.core.init();
+                    refresh();
+                });
+            }
+            document.getElementById('refreshBtn').addEventListener('click', refresh);
+            setInterval(function () { if (!document.hidden) refresh(); }, 5000);
+        });
+    </script>
+</body>
+</html>

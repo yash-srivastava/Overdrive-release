@@ -1,5 +1,6 @@
 package com.overdrive.app.widgets
 
+import com.overdrive.app.server.Messages
 import com.overdrive.app.config.UnifiedConfigManager
 import com.overdrive.app.logging.DaemonLogger
 import com.overdrive.app.util.ScratchRoot
@@ -39,8 +40,8 @@ object CustomWidgetStore {
     private const val MAX_SET_ASIDE = 3
     private const val STALE_TMP_MS = 5 * 60_000L
     private const val ID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789"
-    private const val BUSY = "The car couldn't update its widget settings; try again"
-    private const val NOT_REFRESHED = "Saved, but the car didn't refresh; save again"
+    private val BUSY: String get() = Messages.get("errors.widgets_settings_busy")
+    private val NOT_REFRESHED: String get() = Messages.get("errors.widgets_saved_not_refreshed")
     private val ID = Regex("[a-z0-9-]{8,40}")
     private val logger = DaemonLogger.getInstance("CustomWidgetStore")
     private val lock = Any()
@@ -98,7 +99,7 @@ object CustomWidgetStore {
             }
             if (present) {
                 store.entries.removeAll { it.id == id }
-                write(store, version, "The car couldn't remove the widget; try again")
+                write(store, version, Messages.get("errors.widgets_remove_failed"))
             }
             return true
         }
@@ -152,13 +153,13 @@ object CustomWidgetStore {
         }
         // measured as the car parses it: re-serialised from the file, where Android escapes every '/'
         if (doc.toString().toByteArray(Charsets.UTF_8).size > MAX_BYTES) {
-            throw TooLarge("This widget is too big to save (${MAX_BYTES / 1024} KB at most)")
+            throw TooLarge(Messages.get("errors.widgets_too_big_kb", (MAX_BYTES / 1024).toString()))
         }
         val store = loadForChange()
         val at = store.entries.indexOfFirst { it.id == id }
         val prev = store.entries.getOrNull(at)
         if (prev == null && store.entries.size >= MAX_WIDGETS) {
-            throw Full("Up to $MAX_WIDGETS widgets can be kept; delete one first")
+            throw Full(Messages.get("errors.widgets_full", MAX_WIDGETS.toString()))
         }
         val (source, communityId) = origin(prev)
         require(source == SOURCE_LOCAL || source == SOURCE_COMMUNITY) { "invalid source" }
@@ -269,7 +270,7 @@ object CustomWidgetStore {
 
     /** A change never starts from a file that couldn't be read: it would drop what's in it. */
     private fun loadForChange(): Snapshot = load().also {
-        if (it.unreadable) throw Unavailable("The car couldn't read its stored widgets; try again")
+        if (it.unreadable) throw Unavailable(Messages.get("errors.widgets_read_failed"))
     }
 
     private fun entry(o: JSONObject?): Entry? {
@@ -283,7 +284,7 @@ object CustomWidgetStore {
     }
 
     /** tmp + fsync + rename: a reader sees the old file or the new one, never a torn write. */
-    private fun write(store: Snapshot, version: Int, failure: String = "The car couldn't save the widget; try again") {
+    private fun write(store: Snapshot, version: Int, failure: String = Messages.get("errors.widgets_save_failed")) {
         val arr = JSONArray()
         for (e in store.entries) {
             arr.put(JSONObject().put("id", e.id).put("doc", e.doc).put("updatedMs", e.updatedMs)

@@ -1,26 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  Material 3 fade-through ENTER. Incoming destination starts slightly small
-  + transparent and settles to full opacity at scale 1.0 over 220ms with
-  M3 standard (decelerate) easing. Pairs with m3_fade_through_exit.xml.
-
-  Spec: M3 expressive Fade-Through — used for peer destinations that don't
-  share a consistent layout (e.g. Dashboard ↔ Recordings ↔ Settings).
--->
+<!-- Peer navigation enter: plain crossfade, no scale. Pairs with m3_fade_through_exit. -->
 <set xmlns:android="http://schemas.android.com/apk/res/android"
     android:interpolator="@android:interpolator/decelerate_quad">
     <alpha
+        android:duration="120"
         android:fromAlpha="0.0"
-        android:toAlpha="1.0"
-        android:startOffset="60"
-        android:duration="220" />
-    <scale
-        android:fromXScale="0.92"
-        android:toXScale="1.0"
-        android:fromYScale="0.92"
-        android:toYScale="1.0"
-        android:pivotX="50%"
-        android:pivotY="50%"
-        android:startOffset="60"
-        android:duration="220" />
+        android:startOffset="30"
+        android:toAlpha="1.0" />
 </set>

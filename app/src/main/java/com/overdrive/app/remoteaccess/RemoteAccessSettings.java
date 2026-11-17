@@ -108,12 +108,17 @@ public final class RemoteAccessSettings {
      */
     public static final String KEY_FOB_LOCK_EXPLICIT_KEY = "keyFobLockExplicit";
     private static final long LEGACY_KEY_FOB_LOCK_WINDOW_MS = 10_000L;
+    /** Opt-in: a trusted phone confirmed Near vetoes keyfob departure locking. Needs keyfob detection. */
+    public static final String PHONE_PRIORITY_KEY = "phonePriority";
+    /** Opt-in: a phone departure may lock with the key detected inside; the key then cannot unlock. */
+    public static final String LOCK_WITH_KEY_INSIDE_KEY = "lockWithKeyInside";
     private static final String[] BOOLEAN_KEYS = {
             "enabled", "unlockEnabled", "lockEnabled", "dryRun", "keepBluetoothOn", "notifyPush", "notifyTelegram",
             "advancedMode", "keyFobEnabled", "keyFobLockEnabled",
             "restrictLockToOutsideSafeZones", "restrictUnlockToOutsideSafeZones", CLOUD_FALLBACK_KEY,
             DI5_LOCK_SETTINGS_EXPLICIT_KEY, CONFIRM_WITH_VEHICLE_KEY, TIMING_EXPLICIT_KEY,
-            UNLOCK_TRIGGER_EXPLICIT_KEY, LOCK_WAITS_FOR_KEY_ABSENCE_KEY, KEY_FOB_LOCK_EXPLICIT_KEY
+            UNLOCK_TRIGGER_EXPLICIT_KEY, LOCK_WAITS_FOR_KEY_ABSENCE_KEY, KEY_FOB_LOCK_EXPLICIT_KEY,
+            PHONE_PRIORITY_KEY, LOCK_WITH_KEY_INSIDE_KEY
     };
     private static final String[] NUMBER_KEYS = {
             "nearThreshold", "awayThreshold", "windowMs", "dwellMs", "nearWindowMs", "nearDwellMs",
@@ -136,6 +141,7 @@ public final class RemoteAccessSettings {
                     .put("keyFobLockWindowMs", KEY_FOB_LOCK_WINDOW_MS_DEFAULT)
                     .put(KEY_FOB_LOCK_SAMPLES_KEY, KEY_FOB_LOCK_SAMPLES_DEFAULT)
                     .put(LOCK_WAITS_FOR_KEY_ABSENCE_KEY, LOCK_WAITS_FOR_KEY_ABSENCE_DEFAULT)
+                    .put(PHONE_PRIORITY_KEY, false).put(LOCK_WITH_KEY_INSIDE_KEY, false)
                     .put("nearThreshold", -12).put("awayThreshold", -24)
                     // 18 Oct snappy defaults: a 1 Hz collector delivers the two confirming readings
                     // (ProximityEvaluator.MIN_CONFIRMING_SAMPLES) inside these windows.
@@ -190,6 +196,18 @@ public final class RemoteAccessSettings {
     public static boolean lockWaitsForKeyAbsence(JSONObject settings) {
         return settings == null
                 || settings.optBoolean(LOCK_WAITS_FOR_KEY_ABSENCE_KEY, LOCK_WAITS_FOR_KEY_ABSENCE_DEFAULT);
+    }
+
+    /** Phone priority over keyfob departure locking; only with keyfob detection on. */
+    public static boolean phonePriority(JSONObject settings) {
+        return settings != null && settings.optBoolean("keyFobEnabled")
+                && settings.optBoolean(PHONE_PRIORITY_KEY, false);
+    }
+
+    /** Lock-with-key-inside consent; only with keyfob detection on. */
+    public static boolean lockWithKeyInside(JSONObject settings) {
+        return settings != null && settings.optBoolean("keyFobEnabled")
+                && settings.optBoolean(LOCK_WITH_KEY_INSIDE_KEY, false);
     }
 
     /** 20 Oct: completed Absent key searches that confirm absence (1-3); the default for anything odd. */

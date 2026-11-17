@@ -39,12 +39,18 @@ public class VoiceEngineDispatchContractTest {
 
     @Test
     public void leadingSpeechUsesSpotterTimestampWithHeuristicFallback() throws Exception {
-        String body = block(readProjectFile(ENGINE),
+        String src = readProjectFile(ENGINE);
+        String body = block(src,
                 "    private void onLocalMatch(LocalCommandSpotter.Match m) {");
         assertTrue(body.contains("m.phraseStartOffset >= 0"));
-        assertTrue(body.contains("speechOnsetSample"));
-        assertTrue(body.contains("speechMsAtFirstMatch - firstMatchWords * WORD_MS"));
+        assertTrue(body.contains("leadingMsOf(m, phraseStartSample)"));
         assertTrue(body.contains("lastLoudSample"));
+        String leading = block(src,
+                "    private long leadingMsOf(LocalCommandSpotter.Match m, long phraseStartSample) {");
+        assertTrue(leading.contains("speechOnsetSample"));
+        assertTrue(leading.contains("phraseStartSample >= 0 && onset >= 0"));
+        assertTrue(leading.contains("(phraseStartSample - onset) * 1000 / RATE"));
+        assertTrue(leading.contains("speechMsAtFirstMatch - firstMatchWords * WORD_MS"));
     }
 
     @Test
@@ -83,7 +89,7 @@ public class VoiceEngineDispatchContractTest {
         int notTranscribed = validate.indexOf("if (!transcribed) {");
         int executedEmpty = validate.indexOf("if (executed.isEmpty()) {");
         int error = validate.indexOf("noteTurn(\"held_unverified\")");
-        int complete = validate.indexOf("if (pendingResults == 0) completeLocalTurn();");
+        int complete = validate.indexOf("if (pendingResults == 0) completeLocalTurn();", error);
         assertTrue(notTranscribed >= 0);
         // The error path is reached only when nothing ran on the instant path ...
         assertTrue(executedEmpty > notTranscribed && error > executedEmpty);
@@ -122,8 +128,14 @@ public class VoiceEngineDispatchContractTest {
         assertTrue(src.contains("result.getTimestamps()"));
         String decode = block(src, "    private Match decode(OnlineStream s, boolean isAhead) {");
         assertTrue(decode.contains("phraseStartOffset(result, fed)"));
-        // Timestamps restart after a reset, so the fed count must restart with them.
-        assertTrue(decode.indexOf("spotter.reset(s)") < decode.indexOf("fed = 0;"));
+        // After reset, timestamps restart at the consumed audio boundary. Retain the
+        // unconsumed backlog instead of treating it as already decoded.
+        int reset = decode.indexOf("spotter.reset(s)");
+        int rebase = decode.indexOf("fed = Math.max(0L, fed - decodes * SAMPLES_PER_DECODE);");
+        int resetDecodes = decode.indexOf("decodes = 0;", rebase);
+        assertTrue(reset >= 0 && rebase > reset);
+        assertTrue(resetDecodes > rebase);
+        assertTrue(decode.indexOf("toMatch(", resetDecodes) > resetDecodes);
         String verify = block(src,
                 "    private int verifyWith(short[] pcm, int offset, int length, String keywords) {");
         assertTrue(verify.contains("if (reset || times == null || times.length == 0) return WAKE_END_UNKNOWN;"));

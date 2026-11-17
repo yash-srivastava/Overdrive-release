@@ -1,11 +1,16 @@
 package com.overdrive.app.voice;
 
 import android.content.Context;
+import android.media.AudioManager;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
+import android.telephony.TelephonyManager;
 import android.util.Log;
 
 import com.overdrive.app.audio.AppAudioCaptureController;
 import com.overdrive.app.config.UnifiedConfigManager;
+import com.overdrive.app.genai.GenAiConfig;
 import com.overdrive.app.util.DaemonHttpClient;
 import com.overdrive.app.voice.local.LocalCommandSpotter;
 import com.overdrive.app.voice.wake.WakeWordDetector;
@@ -17,6 +22,8 @@ import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * App-process entry point, reconciled from the status overlay's poll tick. Disabled costs a
@@ -38,6 +45,13 @@ public final class VoiceAssistantRuntime {
     private static Context appContext;
     private static volatile Boolean wakeModelPresent;
     private static volatile Boolean localEnginePresent;
+    // Trip Briefing: what the poll tick last saw (read on the main thread without a config read).
+    private static volatile boolean accOnSeen;
+    private static volatile boolean aiReadySeen;
+    private static final AtomicReference<BriefCall> PENDING_BRIEF = new AtomicReference<>();
+    // Past the engine's own bounds; only a dead engine leaves an ask unanswered this long.
+    private static final long BRIEF_WATCHDOG_SLACK_MS = 15_000;
+    private static volatile Handler mainHandler;
 
     private static final Object REPORT_LOCK = new Object();
     private static ExecutorService reporter;
@@ -65,7 +79,11 @@ public final class VoiceAssistantRuntime {
         }
         boolean enabled = VoiceAssistantConfig.isEnabled(root);
         enabledSeen = enabled;
+        accOnSeen = daemonReachable && accOn;
+        // The engine's own stop is debounced; a briefing turn ends on the first poll without ACC.
+        if (!accOnSeen) endPendingBrief();
         if (!enabled && engine == null && reportedState == null) return;
+        aiReadySeen = enabled && aiReady(root);
         synchronized (LOCK) {
             if (!enabled) {
                 stopLocked("off");
@@ -125,13 +143,140 @@ public final class VoiceAssistantRuntime {
         if (e != null) e.pushToTalk();
     }
 
+    /**
+     * Asks a Trip Briefing question by voice, following the assistant mode. Call on the main thread;
+     * [cb] gets exactly one answer, ANSWER_NONE with VIA_BUSY when the assistant can't ask now
+     * (disabled, ACC off, a call, or another voice turn or briefing running).
+     */
+    public static TripBriefingAsk.Handle askTripBriefing(TripBriefingAsk ask, TripBriefingAsk.Callback cb) {
+        BriefCall call = new BriefCall(cb);
+        VoiceEngine e = engine;
+        boolean ready = ask != null && cb != null && enabledSeen && accOnSeen && e != null && e.alive()
+                && !callActive(appContext) && PENDING_BRIEF.compareAndSet(null, call);
+        if (!ready) {
+            call.finish(TripBriefingAsk.ANSWER_NONE, null, TripBriefingAsk.VIA_BUSY);
+            return call;
+        }
+        call.engine = e;
+        call.arm(ask.timeoutMs);
+        e.askBriefing(ask, aiReadySeen, call);
+        return call;
+    }
+
     public static void shutdown() {
         synchronized (LOCK) {
             if (engine != null || reportedState != null) stopLocked("off");
         }
     }
 
+    /** ACC off or the assistant stopping: a briefing turn still running ends with no answer. */
+    private static void endPendingBrief() {
+        BriefCall call = PENDING_BRIEF.get();
+        if (call != null) call.abort();
+    }
+
+    /** A phone call (or its ringing) owns the cabin audio. */
+    private static boolean callActive(Context context) {
+        if (context == null) return false;
+        try {
+            AudioManager am = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+            int mode = am == null ? AudioManager.MODE_NORMAL : am.getMode();
+            if (mode == AudioManager.MODE_IN_CALL || mode == AudioManager.MODE_IN_COMMUNICATION
+                    || mode == AudioManager.MODE_RINGTONE) {
+                return true;
+            }
+            TelephonyManager tm = (TelephonyManager) context.getSystemService(Context.TELEPHONY_SERVICE);
+            return tm != null && tm.getCallState() != TelephonyManager.CALL_STATE_IDLE;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
+     * GenAI realtime voice looks set up: on, a realtime provider and model, a stored key. The daemon
+     * still decides (it decrypts the key); a session that is not live in time falls back to Local.
+     */
+    private static boolean aiReady(JSONObject root) {
+        JSONObject genAi = root == null ? null : root.optJSONObject(GenAiConfig.SECTION);
+        if (genAi == null || !genAi.optBoolean("enabled", false)) return false;
+        String provider = genAi.optString("provider", GenAiConfig.PROVIDER_OPENAI);
+        return (GenAiConfig.PROVIDER_OPENAI.equals(provider) || GenAiConfig.PROVIDER_GEMINI.equals(provider))
+                && !genAi.optString("realtimeModel", "").trim().isEmpty()
+                && !genAi.optString("apiKey", "").isEmpty();
+    }
+
+    private static Handler main() {
+        Handler h = mainHandler;
+        if (h == null) {
+            h = new Handler(Looper.getMainLooper());
+            mainHandler = h;
+        }
+        return h;
+    }
+
+    /** One briefing ask: at most one answer, on the main thread, and none once cancel() returned. */
+    private static final class BriefCall implements TripBriefingAsk.Handle, VoiceEngine.BriefSink {
+        private final TripBriefingAsk.Callback cb;
+        private final AtomicBoolean answered = new AtomicBoolean();
+        private final Runnable watchdog = this::abort;
+        private volatile boolean cancelled;
+        volatile VoiceEngine engine;
+
+        BriefCall(TripBriefingAsk.Callback cb) {
+            this.cb = cb;
+        }
+
+        @Override
+        public void onBriefAnswer(String answer, String app, String via) {
+            finish(answer, app, via);
+        }
+
+        /** Delivers once; false when an answer or a cancel came first. */
+        boolean finish(String answer, String app, String via) {
+            if (!answered.compareAndSet(false, true)) return false;
+            PENDING_BRIEF.compareAndSet(this, null);
+            Handler h = main();
+            h.removeCallbacks(watchdog);
+            Runnable deliver = () -> {
+                if (cancelled || cb == null) return;
+                try {
+                    cb.onAnswer(answer, app, via);
+                } catch (Throwable t) {
+                    Log.w(TAG, "briefing callback failed: " + t.getMessage());
+                }
+            };
+            if (Looper.myLooper() == Looper.getMainLooper()) deliver.run();
+            else h.post(deliver);
+            return true;
+        }
+
+        /** Ends a turn still running with no answer, and stops it. */
+        void abort() {
+            if (finish(TripBriefingAsk.ANSWER_NONE, null, TripBriefingAsk.VIA_VOICE)) stopEngineTurn();
+        }
+
+        void arm(long timeoutMs) {
+            long t = timeoutMs > 0 ? Math.min(timeoutMs, 60_000L) : 20_000L;
+            main().postDelayed(watchdog, t + BRIEF_WATCHDOG_SLACK_MS);
+        }
+
+        @Override
+        public void cancel() {
+            cancelled = true;
+            if (!answered.compareAndSet(false, true)) return;
+            PENDING_BRIEF.compareAndSet(this, null);
+            main().removeCallbacks(watchdog);
+            stopEngineTurn();
+        }
+
+        private void stopEngineTurn() {
+            VoiceEngine e = engine;
+            if (e != null) e.cancelBriefing(this);
+        }
+    }
+
     private static void stopLocked(String state) {
+        endPendingBrief();
         VoiceEngine e = engine;
         engine = null;
         if (e != null) {

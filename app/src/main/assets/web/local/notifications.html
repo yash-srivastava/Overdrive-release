@@ -9,8 +9,8 @@
     <link rel="apple-touch-icon" href="../shared/app-icon-dark.webp">
     <title data-i18n="app.notifications_title">Notifications - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
-    <script src="../shared/theme.js?v=11"></script>
-    <script src="../shared/app-shell.js?v=19"></script>
+    <script src="../shared/theme.js?v=12"></script>
+    <script src="../shared/app-shell.js?v=23"></script>
     <!--
       WebView detection MUST run before app-tabs.js builds the tab bar so
       we can filter OT_TABS to the Telegram-only flow on the head unit.
@@ -40,7 +40,7 @@
       entirely when only one tab remains).
       The Telegram block reuses the legacy IDs (v2TelegramSendStartPing,
       v2TelegramTierGroup, v2TelegramNotices/Alerts/Critical) so the
-      SurvSettings bindings in shared/surveillance.js?v=survtoggle16 keep firing.
+      SurvSettings bindings in shared/surveillance.js?v=survtoggle20 keep firing.
     -->
     <script>
         var __OT_LOG_TAB = { id: 'log', label: 'Log', i18n: 'notif.tab_log', svg: '<line x1="8" y1="7" x2="18" y2="7"/><line x1="8" y1="12" x2="18" y2="12"/><line x1="8" y1="17" x2="14" y2="17"/><circle cx="4.5" cy="7" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="17" r="1"/>' };
@@ -57,7 +57,7 @@
             ? __OT_ALL_TABS.filter(function (t) { return t.id === 'telegram' || t.id === 'log'; })
             : __OT_ALL_TABS;
     </script>
-    <script src="../shared/app-tabs.js?v=3"></script>
+    <script src="../shared/app-tabs.js?v=4"></script>
     <link rel="stylesheet" href="../shared/styles.css?v=38">
     <link rel="stylesheet" href="../shared/revamp.css?v=2">
     <link rel="manifest" href="/manifest.json">
@@ -984,7 +984,7 @@
 <body class="r-settings">
     <div class="app-layout">
         <!-- Sidebar -->
-        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=19) -->
+        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=23) -->
         <div id="app-shell-mount"></div>
         <!-- Main Content -->
         <main class="main-content">
@@ -1457,6 +1457,16 @@
                                     <span class="toggle-slider"></span>
                                 </label>
                             </div>
+                            <div class="notif-row">
+                                <div class="notif-row-text setting-stack">
+                                    <div class="notif-row-label" data-i18n="telegram.login_alerts">New sign-ins</div>
+                                    <div class="notif-row-note setting-desc" data-i18n="telegram.login_alerts_desc">Send a Telegram message when a browser signs in to the web app. Wrong access codes are still reported under Critical alerts.</div>
+                                </div>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="tgPrefLoginAlerts" onchange="TelegramPrefs.save()">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
                             <!-- Parking Intelligence "Parked" / "Back at car"
                                  messages. INFO-tier on purpose (a summary, not
                                  an alert), so they get their own toggle rather
@@ -1544,13 +1554,13 @@
 
     <script src="../shared/auth.js"></script>
     <script src="../shared/pwa-init.js?v=index1"></script>
-    <script src="../shared/core.js?v=24"></script>
+    <script src="../shared/core.js?v=27"></script>
     <script src="../shared/update-flow.js?v=3"></script>
     <!-- surveillance.js owns the SurvSettings module that backs the Telegram
          tier toggles. We load it here so the v2TelegramSendStartPing /
          v2TelegramTierGroup controls hooked into surveillance.js wiring
          keep firing without a per-page bridge. -->
-    <script src="../shared/surveillance.js?v=survtoggle16"></script>
+    <script src="../shared/surveillance.js?v=survtoggle20"></script>
     <script src="../shared/notif-log.js?v=3"></script>
     <script>
         function toggleSidebar() {
@@ -1607,7 +1617,7 @@
         }
 
         // ===== Telegram delivery preferences module =====
-        // Lives here (not in shared/surveillance.js?v=survtoggle16) because the four toggles
+        // Lives here (not in shared/surveillance.js?v=survtoggle20) because the four toggles
         // are notification-page-local — they don't bind to surveillance config
         // and don't need the heavier SurvSettings init flow. Load + save go
         // through /api/telegram/preferences (same endpoint telegram.html
@@ -1633,7 +1643,7 @@
             // visual state always matches what we just sent / what we're
             // reverting to.
             function _repaint(state) {
-                var ids = ['tgPrefCriticalAlerts','tgPrefConnectivity','tgPrefMotionText','tgPrefVideoUploads','tgPrefTyreAlerts','tgPrefParkingMessages'];
+                var ids = ['tgPrefCriticalAlerts','tgPrefConnectivity','tgPrefMotionText','tgPrefVideoUploads','tgPrefTyreAlerts','tgPrefLoginAlerts','tgPrefParkingMessages'];
                 ids.forEach(function (id) {
                     if (!(id in state)) return;
                     var el = $(id); if (!el) return;
@@ -1665,6 +1675,7 @@
                             // older daemon that omits the field doesn't paint
                             // the toggle off and imply alerts are disabled.
                             tgPrefTyreAlerts:     s.tyreAlerts !== false,
+                            tgPrefLoginAlerts:    s.loginAlerts !== false,
                             tgPrefParkingMessages: s.parkingMessages !== false
                         });
                     })
@@ -1680,6 +1691,7 @@
                     tgPrefMotionText:     $('tgPrefMotionText')     && $('tgPrefMotionText').checked,
                     tgPrefVideoUploads:   $('tgPrefVideoUploads')   && $('tgPrefVideoUploads').checked,
                     tgPrefTyreAlerts:     $('tgPrefTyreAlerts')     && $('tgPrefTyreAlerts').checked,
+                    tgPrefLoginAlerts:    $('tgPrefLoginAlerts')    && $('tgPrefLoginAlerts').checked,
                     tgPrefParkingMessages: $('tgPrefParkingMessages') && $('tgPrefParkingMessages').checked
                 };
                 var body = {
@@ -1688,6 +1700,7 @@
                     motionText:          pending.tgPrefMotionText,
                     videoUploads:        pending.tgPrefVideoUploads,
                     tyreAlerts:          pending.tgPrefTyreAlerts,
+                    loginAlerts:         pending.tgPrefLoginAlerts,
                     parkingMessages:     pending.tgPrefParkingMessages
                 };
                 fetch('/api/telegram/preferences', {
@@ -2423,6 +2436,14 @@
                   defaultEnabled: true, severity: 'auto',
                   defaultClickUrl: '/vehicle-control.html',
                   note: 'Slow or fast leak detected by TPMS sensor' },
+                { id: 'vehicle.security.login.success', label: 'New sign-in', group: 'Security',
+                  defaultEnabled: true, severity: 'warn',
+                  defaultClickUrl: '/sessions.html',
+                  note: 'A browser signed in to the web app with the access code (shows the browser and address)' },
+                { id: 'vehicle.security.login.failed', label: 'Failed sign-in', group: 'Security',
+                  defaultEnabled: true, severity: 'auto',
+                  defaultClickUrl: '/notifications.html',
+                  note: 'Wrong access code or too many attempts. At most one alert a minute; 10 or more attempts send a critical alert' },
                 { id: 'vehicle.security.door.opened', label: 'Door opened', group: 'Security',
                   defaultEnabled: false, severity: 'warn',
                   defaultClickUrl: '/vehicle-control.html',
@@ -2513,6 +2534,8 @@
                 'surveillance.recording.finalized': 'Fires after a recording is written to disk and is ready to view. Off by default.',
                 'vehicle.health.tyre.pressure': 'Fires when the TPMS reports underpressure or overpressure on any wheel.',
                 'vehicle.health.tyre.leak': 'Fires when the TPMS detects a slow or fast leak. Fast leaks are pushed as critical.',
+                'vehicle.security.login.success': 'Fires when a browser signs in to the web app with the access code.',
+                'vehicle.security.login.failed': 'Fires when a sign-in uses the wrong access code or is paused for too many attempts. At most one alert a minute, plus a critical one for 10 or more attempts.',
                 'vehicle.security.door.opened': 'Fires when a door, hood, or trunk is opened while the car is parked (ACC OFF).',
                 'vehicle.security.door.closed': 'Fires when a door, hood, or trunk is closed while the car is parked (ACC OFF).'
             };

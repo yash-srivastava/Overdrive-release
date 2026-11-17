@@ -111,6 +111,9 @@ public final class RecordingsIndex {
             Pattern.compile("proximity_(\\d{8})_(\\d{6})(?:_\\d+)?\\.mp4");
     private static final Pattern DVR_PATTERN =
             Pattern.compile("dvr_(\\d{8})_(\\d{6})(?:_\\d+)?\\.mp4");
+    // OEM dashcam clips that parked Surveillance opened (OemDashcamPipeline names them dvr_p_).
+    private static final Pattern DVR_PARKED_PATTERN =
+            Pattern.compile("dvr_p_(\\d{8})_(\\d{6})(?:_\\d+)?\\.mp4");
 
     // Filename-stamp format. Locale.US for the same reason as everywhere
     // else: the writer formats with Locale.US, and parsing under e.g. Thai
@@ -130,6 +133,8 @@ public final class RecordingsIndex {
     //            Migration is a data UPDATE, not a column change — see
     //            createSchema().
     private static final int SCHEMA_VERSION = RecordingsIndexSchema.VERSION;
+    static final int DETERRENT_FLAG_CLOUD = 1;
+    static final int DETERRENT_FLAG_SCREEN = 2;
 
     // Singleton — one index per daemon process.
     private static volatile RecordingsIndex INSTANCE;
@@ -348,6 +353,7 @@ public final class RecordingsIndex {
                 }
                 storeOpened = true;
                 createSchema();
+                restoreCarriedWatched();
                 initialized = true;
                 everInitialized = true;
                 logger.info("RecordingsIndex initialized (schema v" + SCHEMA_VERSION + ")");
@@ -391,6 +397,8 @@ public final class RecordingsIndex {
                     logger.error("Index DB " + (corruptErr ? "corrupted" : "schema migration failed")
                             + " (attempt " + attempt + "/" + maxRetries
                             + "), wiping store to rebuild from filesystem: " + msg, e);
+                    // The watched badges are user state, not derived from disk: best effort before any wipe.
+                    if (storeOpened && (carriedWatchedIds == null || carriedWatchedIds.isEmpty())) carryWatched();
                     // A partially-opened connection can hold an OS handle on the
                     // file — close it before deleting so the unlink actually frees
                     // the inode and the reopen sees a clean directory.
@@ -584,7 +592,8 @@ public final class RecordingsIndex {
             return result;
         } catch (Exception e) {
             if (isClosedStoreError(e)) {
-                logger.warn(op + ": store was closed mid-statement — reconnecting");
+                logger.warn(op + ": store was closed mid-statement — reconnecting"
+                        + com.overdrive.app.storage.H2StoreFaults.detail(e));
                 if (reopen("closed store during " + op)) {
                     try {
                         T result = body.run();
@@ -617,6 +626,73 @@ public final class RecordingsIndex {
     /** SQL body for {@link #withRetry}. */
     private interface SqlBody<T> {
         T run() throws Exception;
+    }
+
+    /** Timeline SQL against the shared connection; runs under this monitor and may run twice. */
+    public interface TimelineSqlBody<T> {
+        T run(Connection connection) throws Exception;
+    }
+
+    private long timelineFailLogAtMs;
+    private List<long[]> carriedWatchedNums;
+    private List<String> carriedWatchedIds;
+
+    private void carryWatched() {
+        List<String> ids = new ArrayList<>();
+        List<long[]> nums = new ArrayList<>();
+        try (Statement st = connection.createStatement();
+             ResultSet rs = st.executeQuery("SELECT recording_id, size_bytes, mp4_mtime, watched_at"
+                     + " FROM recordings_watched")) {
+            while (rs.next() && ids.size() < 200_000) {
+                ids.add(rs.getString(1));
+                nums.add(new long[]{rs.getLong(2), rs.getLong(3), rs.getLong(4)});
+            }
+        } catch (Throwable ignored) {
+            // A torn store may not give them back; the rebuild still runs.
+        }
+        carriedWatchedIds = ids;
+        carriedWatchedNums = nums;
+    }
+
+    private void restoreCarriedWatched() {
+        List<String> ids = carriedWatchedIds;
+        List<long[]> nums = carriedWatchedNums;
+        carriedWatchedIds = null;
+        carriedWatchedNums = null;
+        if (ids == null || ids.isEmpty()) return;
+        try (PreparedStatement ps = connection.prepareStatement("MERGE INTO recordings_watched"
+                + " (recording_id, size_bytes, mp4_mtime, watched_at) KEY(recording_id) VALUES (?, ?, ?, ?)")) {
+            for (int i = 0; i < ids.size(); i++) {
+                ps.setString(1, ids.get(i));
+                ps.setLong(2, nums.get(i)[0]);
+                ps.setLong(3, nums.get(i)[1]);
+                ps.setLong(4, nums.get(i)[2]);
+                ps.addBatch();
+                if (i % 500 == 499) ps.executeBatch();
+            }
+            ps.executeBatch();
+            logger.info("Watched state carried across the index rebuild: " + ids.size());
+        } catch (Throwable t) {
+            logger.warn("Watched state not restored after rebuild: " + t.getMessage());
+        }
+    }
+
+    /**
+     * Timeline SQL on the shared connection; {@code fail} when unavailable or the body failed.
+     * Never reopens or latches the store: a timeline-table fault must not take the index down.
+     */
+    public synchronized <T> T timelineSql(String op, T fail, TimelineSqlBody<T> body) {
+        if (!ensureOpen()) return fail;
+        try {
+            return body.run(connection);
+        } catch (Exception e) {
+            long now = System.currentTimeMillis();
+            if (now - timelineFailLogAtMs > 60_000L) {
+                timelineFailLogAtMs = now;
+                logger.warn(op + " failed: " + e.getMessage());
+            }
+            return fail;
+        }
     }
 
     /**
@@ -773,6 +849,16 @@ public final class RecordingsIndex {
 
     private void createSchema() throws Exception {
         RecordingsIndexSchema.ensure(connection);
+        try {
+            com.overdrive.app.server.timeline.TimelineSchema.ensure(connection);
+        } catch (Throwable t) {
+            // A store that died under the timeline DDL is the index's own failure (at start-up init() wipes it).
+            if (t instanceof Exception && isClosedStoreError((Exception) t)) {
+                if (!everInitialized) carryWatched();
+                throw (Exception) t;
+            }
+            logger.warn("Timeline schema unavailable: " + t.getMessage());
+        }
         sortIndexAvailable = RecordingsIndexSchema.sortIndexExists(connection);
         invalidateQueryMemos();
     }
@@ -839,24 +925,9 @@ public final class RecordingsIndex {
      * @return true if the row was inserted/updated, false on parse failure or
      *         when the file was removed while we were parsing.
      */
-    /**
-     * SECURITY (run-2 fix): only filenames from the known recording grammar are
-     * indexable, so arbitrary on-disk names never reach the web UI (XSS vector).
-     */
-    static boolean isIndexableName(String name) {
-        return name != null && SAFE_MP4_NAME.matcher(name).matches();
-    }
-
-    private static final java.util.regex.Pattern SAFE_MP4_NAME =
-            java.util.regex.Pattern.compile("[A-Za-z0-9_\\-]+\\.mp4");
-
     public boolean upsert(File mp4) {
         if (mp4 == null || !mp4.isFile() || !mp4.canRead()) return false;
         if (!mp4.getName().endsWith(".mp4")) return false;
-        // SECURITY (run-2 fix): only index filenames from the known recording
-        // grammar. Arbitrary on-disk names must never reach the web UI, where a
-        // crafted name would be an HTML/JS injection vector (events.js XSS).
-        if (!isIndexableName(mp4.getName())) return false;
 
         // Sample BEFORE parsing so any remove() landing during the parse is
         // detected by upsertRow and the stale MERGE is refused.
@@ -905,9 +976,10 @@ public final class RecordingsIndex {
                 + " person_count, vehicle_count, bike_count, animal_count, hero_thumb,"
                 + " actor_classes, place_short, place_medium, place_display, place_country,"
                 + " place_source, start_lat, start_lng, ymd, storage,"
-                + " parking_session_id, event_cameras, peak_confidence) KEY(recording_id) VALUES ("
+                + " parking_session_id, event_cameras, peak_confidence, deterrent_flags)"
+                + " KEY(recording_id) VALUES ("
                 + "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-                + " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                + " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
             try (PreparedStatement ps = connection.prepareStatement(sql)) {
                 ps.setString(1, r.recordingId);
                 ps.setString(2, r.filename);
@@ -944,8 +1016,10 @@ public final class RecordingsIndex {
                 setNullableString(ps, 33, r.parkingSessionId);
                 setNullableString(ps, 34, r.eventCameras);
                 setNullableDouble(ps, 35, r.peakConfidence);
+                setNullableInt(ps, 36, r.deterrentFlags);
                 ps.executeUpdate();
                 invalidateQueryMemos();   // row counts/bytes changed
+                try { com.overdrive.app.server.timeline.TimelineEnricher.kick(r.recordingId); } catch (Throwable ignored) { }
                 return Boolean.TRUE;
             }
         });
@@ -1051,6 +1125,7 @@ public final class RecordingsIndex {
         noteRemoval(recordingId);
         final String id = recordingId;
         return withRetry("removeById(" + recordingId + ")", Boolean.FALSE, () -> {
+            try { com.overdrive.app.server.timeline.TimelineLedger.onRowRemoving(connection, id); } catch (Throwable ignored) { }
             try (PreparedStatement ps = connection.prepareStatement(
                     "DELETE FROM recordings WHERE recording_id = ?")) {
                 ps.setString(1, id);
@@ -2330,6 +2405,7 @@ public final class RecordingsIndex {
         Matcher event = EVENT_PATTERN.matcher(name);
         Matcher prox = PROXIMITY_PATTERN.matcher(name);
         Matcher dvr = DVR_PATTERN.matcher(name);
+        Matcher dvrParked = DVR_PARKED_PATTERN.matcher(name);
         try {
             if (event.matches()) {
                 r.type = "sentry";
@@ -2350,6 +2426,10 @@ public final class RecordingsIndex {
             } else if (dvr.matches()) {
                 r.type = "oemDashcam";
                 r.tsMs = FMT_FILENAME.get().parse(dvr.group(1) + "_" + dvr.group(2)).getTime();
+            } else if (dvrParked.matches()) {
+                r.type = "sentry";
+                r.tsMs = FMT_FILENAME.get().parse(
+                        dvrParked.group(1) + "_" + dvrParked.group(2)).getTime();
             } else {
                 // Unknown filename grammar — fall back to mtime, tag as
                 // "normal" so it surfaces somewhere instead of vanishing.
@@ -2479,6 +2559,21 @@ public final class RecordingsIndex {
                     if (peakConf >= 0.0) r.peakConfidence = peakConf;
                 }
 
+                JSONArray deterrentMarks = side.optJSONArray("deterrents");
+                if (deterrentMarks != null) {
+                    int flags = 0;
+                    for (int k = 0; k < deterrentMarks.length(); k++) {
+                        JSONObject mark = deterrentMarks.optJSONObject(k);
+                        String kind = mark != null ? mark.optString("type", "") : "";
+                        if (com.overdrive.app.surveillance.EventTimelineCollector.DETERRENT_CLOUD.equals(kind)) {
+                            flags |= DETERRENT_FLAG_CLOUD;
+                        } else if (com.overdrive.app.surveillance.EventTimelineCollector.DETERRENT_SCREEN.equals(kind)) {
+                            flags |= DETERRENT_FLAG_SCREEN;
+                        }
+                    }
+                    if (flags != 0) r.deterrentFlags = flags;
+                }
+
                 JSONObject geo = side.optJSONObject("geo");
                 if (geo != null) {
                     JSONObject startObj = geo.optJSONObject("start");
@@ -2573,7 +2668,8 @@ public final class RecordingsIndex {
         rec.put("date", FMT_DATE_ISO.get().format(d));
         rec.put("time", FMT_TIME_ISO.get().format(d));
         rec.put("dateFormatted", FMT_DATE_DISPLAY.get().format(d));
-        rec.put("timeFormatted", FMT_TIME_DISPLAY.get().format(d));
+        rec.put("timeFormatted", (HeadUnitClock.is24h() ? FMT_TIME_DISPLAY_24 : FMT_TIME_DISPLAY)
+                .get().format(d));
 
         String recordingId = rs.getString("recording_id");
         rec.put("videoUrl", "/video/id/" + recordingId);
@@ -2650,6 +2746,8 @@ public final class RecordingsIndex {
         }
         double pconf = rs.getDouble("peak_confidence");
         if (!rs.wasNull()) rec.put("peakConfidence", Math.round(pconf * 100) / 100.0);
+        int deterrentFlags = rs.getInt("deterrent_flags");
+        if (!rs.wasNull() && deterrentFlags != 0) rec.put("deterrentFlags", deterrentFlags);
 
         // bucketLabel — used by the native fragment for sticky time-of-day
         // headers without needing the full list. Format: "Today", "Yesterday",
@@ -2702,6 +2800,8 @@ public final class RecordingsIndex {
             ThreadLocal.withInitial(() -> new SimpleDateFormat("MMM d, yyyy", Locale.US));
     private static final ThreadLocal<SimpleDateFormat> FMT_TIME_DISPLAY =
             ThreadLocal.withInitial(() -> new SimpleDateFormat("h:mm a", Locale.US));
+    private static final ThreadLocal<SimpleDateFormat> FMT_TIME_DISPLAY_24 =
+            ThreadLocal.withInitial(() -> new SimpleDateFormat("HH:mm", Locale.US));
 
     private static void setNullableString(PreparedStatement ps, int idx, String v) throws Exception {
         if (v == null) ps.setNull(idx, java.sql.Types.VARCHAR);
@@ -2711,6 +2811,11 @@ public final class RecordingsIndex {
     private static void setNullableDouble(PreparedStatement ps, int idx, Double v) throws Exception {
         if (v == null) ps.setNull(idx, java.sql.Types.DOUBLE);
         else ps.setDouble(idx, v);
+    }
+
+    private static void setNullableInt(PreparedStatement ps, int idx, Integer v) throws Exception {
+        if (v == null) ps.setNull(idx, java.sql.Types.INTEGER);
+        else ps.setInt(idx, v);
     }
 
     // =================================================================
@@ -2754,6 +2859,7 @@ public final class RecordingsIndex {
         String parkingSessionId;
         String eventCameras;      // CSV of quadrant names for non-static actors
         Double peakConfidence;    // max peakConfidence over non-static actors
+        Integer deterrentFlags;   // DETERRENT_FLAG_* bits; null when none fired
     }
 
     private static final class DirEntry {

@@ -144,7 +144,16 @@ public class HardwareEventRecorderGpu {
     // as savedFormat.
     private volatile MediaCodec encoder;
     private Surface inputSurface;
-    
+
+    // CPU recording engine: frames go into YUV input buffers, no input surface.
+    // cpuInput is requested before init(); cpuInputOpen is true only while a
+    // started codec accepts frames. cpuInputLock keeps a frame copy from
+    // writing into codec buffers that stop()/release() is freeing.
+    private volatile boolean cpuInput;
+    private volatile boolean cpuInputOpen;
+    private final java.util.concurrent.locks.ReentrantLock cpuInputLock =
+        new java.util.concurrent.locks.ReentrantLock();
+
     // Muxer
     // SOTA: All muxer operations (writeSampleData, addTrack, start, stop, release,
     // and reassignment of the `muxer` reference) MUST be performed while holding
@@ -158,6 +167,11 @@ public class HardwareEventRecorderGpu {
     private volatile int trackIndex = -1;
     private volatile int audioTrackIndex = -1;
     private volatile boolean muxerStarted = false;
+    // Recovery journal of the live segment (video-only segments); guarded by muxerLock.
+    // Opened lazily by the disk writer's first write so no other thread does journal I/O.
+    private SegmentJournal activeJournal;
+    private File journalPendingTmp;
+    private MediaFormat journalPendingFormat;
 
     // Audio muxing: enabled at recording-start time when (a) the user has
     // turned audioEnabled on in UnifiedConfigManager, and (b) the app
@@ -202,6 +216,16 @@ public class HardwareEventRecorderGpu {
     // segments are guaranteed to have audio so long as the app keeps
     // pushing packets.
     private volatile long audioPacketCountSinceConfigSet = 0;
+    // One rotation per audio session/recording once cabin audio is flowing into a video-only segment.
+    private volatile boolean audioUpgradeRotationRequested = false;
+    private static final long AUDIO_UPGRADE_MIN_PACKETS = 25;
+    private static final long AUDIO_UPGRADE_MIN_SEGMENT_AGE_MS = 1_500;
+    private static final long AUDIO_UPGRADE_MIN_SPACING_MS = 60_000;
+    private volatile long lastAudioUpgradeElapsedMs = 0L;
+    // Latest ring PTS at the Surveillance -> ACC ON edge: the next start's pre-roll begins after it (one-shot).
+    private volatile long preRecordFencePtsUs = Long.MIN_VALUE;
+    private volatile long preRecordFenceSetAtElapsedMs = 0L;
+    private static final long PRE_RECORD_FENCE_TTL_MS = 120_000L;
     // Audio PTS rebasing. Audio packets share the muxer's monotonic timeline
     // with video — both are rebased against the SAME ptsOriginUs so A/V
     // remain time-aligned in the output mp4. Audio packets that arrive
@@ -340,11 +364,28 @@ public class HardwareEventRecorderGpu {
     // read as stale and cancel an accepted replay. The wall-clock field stays
     // untouched for the RMM wedge ticker's existing consumers.
     private volatile long lastEncodedFrameElapsedMs = 0L;
+    // Legacy ACC ON camera reopen: the next start waits for a frame encoded after this
+    // instant. Opened on the dark camera, a clip sat empty and was then cut to <1 s by
+    // the audio-upgrade rotation the moment video resumed (#543). 0 = no barrier.
+    private final java.util.concurrent.atomic.AtomicLong freshFrameBarrierElapsedMs =
+        new java.util.concurrent.atomic.AtomicLong(0L);
+    private static final long FRESH_FRAME_BARRIER_TTL_MS = 90_000L;
+    // Coded-frame count barrier (0 frames = the time-based rule above).
+    private volatile long codedFrameCount = 0L;
+    private volatile long freshFrameBarrierCodedCount = 0L;
+    private volatile int freshFrameBarrierMinFrames = 0;
+    private final java.util.concurrent.atomic.AtomicReference<FreshFrameListener>
+        freshFrameListener = new java.util.concurrent.atomic.AtomicReference<>();
 
-    // One-shot ACC ON barrier for the next cam_* file. It remains armed until
-    // a coded frame arrives after the surveillance-to-drive transition.
-    private final java.util.concurrent.atomic.AtomicLong driveFrameBarrierMs =
-            new java.util.concurrent.atomic.AtomicLong(0L);
+    private static final class FreshFrameListener {
+        final long targetCodedCount;
+        final Runnable action;
+
+        FreshFrameListener(long targetCodedCount, Runnable action) {
+            this.targetCodedCount = targetCodedCount;
+            this.action = action;
+        }
+    }
 
     // FIX (false-GREEN: "REC/MIC green but no video file"): timestamp of the
     // last VIDEO sample actually written to the muxer (disk). Distinct from
@@ -413,6 +454,8 @@ public class HardwareEventRecorderGpu {
      *  KEY_BIT_RATE is informational, the actual encoder bitrate lives in
      *  the app process). */
     private static final int AUDIO_PRE_RECORD_BITRATE_BPS = 64_000;
+    /** Event pre-roll audio never reaches further back than the video span plus this, from the youngest AAC. */
+    private static final long AUDIO_PRE_ROLL_CLOCK_SLACK_US = 2_000_000L;
     private static final AacCircularBuffer aacRing =
         new AacCircularBuffer(AUDIO_PRE_RECORD_SECONDS, AUDIO_PRE_RECORD_BITRATE_BPS);
     // The dense byte ring replaces the old hundreds-of-slots pool that could
@@ -441,6 +484,8 @@ public class HardwareEventRecorderGpu {
     // two-second GOP beyond the user-visible duration so exact 30/60-second
     // requests do not intermittently start at the next keyframe and fail.
     private static final int MANUAL_CLIP_GOP_HEADROOM_SECONDS = 2;
+    // A selected pre-roll this much shorter than requested is logged as a shortfall.
+    private static final long PRE_RECORD_SHORTFALL_TOLERANCE_MS = 2_000L;
 
     // Floor for a start-truncated manual-clip export (see the
     // allowStartTruncation overload of exportManualClip): if adopting the
@@ -571,6 +616,11 @@ public class HardwareEventRecorderGpu {
         // stale (recording closed / retriggered while the ticket was in
         // flight). Only meaningful when trackKind == TRACK_KIND_ROTATE.
         long rotateGeneration;
+        // ROTATE only: recordingSessionId at capture; -1 once the frame has
+        // been written (as the new segment's first sample or into the old one).
+        long sessionId = -1;
+        // System.nanoTime()/1000 when the drainer copied the frame; -1 if unknown.
+        long drainUs = -1;
 
         boolean isFlushHistory() {
             return historyCursor != null || historyAudio != null;
@@ -631,6 +681,14 @@ public class HardwareEventRecorderGpu {
     private boolean writeRebased(android.media.MediaMuxer mux, int trackIdx,
                                  java.nio.ByteBuffer data,
                                  android.media.MediaCodec.BufferInfo info) {
+        return writeRebased(mux, trackIdx, data, info, -1L);
+    }
+
+    /** @param drainUs the packet's drain stamp ({@link MuxerPacket#drainUs}); -1 if unknown. */
+    private boolean writeRebased(android.media.MediaMuxer mux, int trackIdx,
+                                 java.nio.ByteBuffer data,
+                                 android.media.MediaCodec.BufferInfo info,
+                                 long drainUs) {
         if (ptsOriginUs < 0) {
             ptsOriginUs = info.presentationTimeUs;
         }
@@ -652,9 +710,11 @@ public class HardwareEventRecorderGpu {
         // frame continues one nominal frame-interval after the last written
         // one. The resulting clip has a small (sub-frame-interval) seam at the
         // transition instead of a 55-min cliff, and stays fully playable.
+        // A long gap that matches the drain clock is real and kept, so video
+        // stays aligned with audio across a delivery pause.
         if (lastSourcePtsUs >= 0) {
             long sourceGap = info.presentationTimeUs - lastSourcePtsUs;
-            if (sourceGap < 0 || sourceGap > MAX_PLAUSIBLE_INTERFRAME_GAP_US) {
+            if (isPtsDiscontinuity(sourceGap, drainUs, lastSourceDrainUs)) {
                 long frameIntervalUs = fps > 0 ? (1_000_000L / fps) : 33_333L;
                 // New origin places info.presentationTimeUs at
                 // (lastRebased + frameInterval): rebasedPts below becomes that
@@ -670,6 +730,7 @@ public class HardwareEventRecorderGpu {
             }
         }
         lastSourcePtsUs = info.presentationTimeUs;
+        lastSourceDrainUs = drainUs;
         long rebasedPts = info.presentationTimeUs - ptsOriginUs;
         // Defensive: a packet with a PTS earlier than origin would produce
         // a negative rebased PTS, which MediaMuxer rejects with
@@ -751,7 +812,37 @@ public class HardwareEventRecorderGpu {
         // is just lastFramePtsUs (since firstFramePtsUs == 0).
         if (firstFramePtsUs < 0) firstFramePtsUs = rebasedPts;
         lastFramePtsUs = rebasedPts;
+        if (mux == muxer) {
+            if (lensRawAt(absolutePts)) segLensRawFrames++;
+            else segLensOtherFrames++;
+            SegmentJournal journal = activeJournal;
+            if (journal == null && journalPendingTmp != null) {
+                journal = SegmentJournal.open(journalPendingTmp, journalPendingFormat);
+                activeJournal = journal;
+                journalPendingTmp = null;
+                journalPendingFormat = null;
+            }
+            if (journal != null) journal.append(info.flags, info.size, rebasedPts);
+        }
         return true;
+    }
+
+    /** Caller holds muxerLock. Video-only segments get a recovery journal on their first write. */
+    private void openJournalLocked(File tmp, MediaFormat format) {
+        SegmentJournal previous = activeJournal;
+        activeJournal = null;
+        if (previous != null) previous.abandon();
+        journalPendingTmp = (tmp != null && audioTrackIndex < 0) ? tmp : null;
+        journalPendingFormat = journalPendingTmp != null ? format : null;
+    }
+
+    /** Caller holds muxerLock. Hands the live journal to the caller; no I/O here. */
+    private SegmentJournal takeJournalLocked() {
+        SegmentJournal journal = activeJournal;
+        activeJournal = null;
+        journalPendingTmp = null;
+        journalPendingFormat = null;
+        return journal;
     }
 
     /**
@@ -843,6 +934,10 @@ public class HardwareEventRecorderGpu {
             }
             return false;
         }
+        AudioConfig gapCfg = audioConfig;
+        if (gapCfg != null && AacGapFill.hasGap(lastAudioPtsUs, rebasedPts, gapCfg.sampleRate)) {
+            fillAudioGapLocked(mux, trackIdx, gapCfg, rebasedPts);
+        }
         long absolutePts = info.presentationTimeUs;
         info.presentationTimeUs = rebasedPts;
         try {
@@ -861,6 +956,45 @@ public class HardwareEventRecorderGpu {
         }
         info.presentationTimeUs = absolutePts;
         return true;
+    }
+
+    /** Longest audio hole refilled at once: every MediaMuxer write (~0.2 ms) runs under muxerLock. */
+    private static final long AUDIO_GAP_FILL_MAX_US = 10_000_000L;
+    private final java.util.concurrent.atomic.AtomicLong audioGapFillCount =
+        new java.util.concurrent.atomic.AtomicLong(0);
+
+    /**
+     * Caller holds muxerLock. Closes the live track's hole before {@code rebasedPts} with AAC the
+     * ring still holds (refused at a gate or by a full queue), then silence. Never throws.
+     */
+    private void fillAudioGapLocked(MediaMuxer mux, int trackIdx, AudioConfig cfg, long rebasedPts) {
+        long last = lastAudioPtsUs;
+        long gapUs = rebasedPts - Math.max(0L, last);
+        long n = audioGapFillCount.incrementAndGet();
+        if (gapUs > AUDIO_GAP_FILL_MAX_US
+                || rebasedPts > Math.max(0L, lastFramePtsUs) + AUDIO_GAP_FILL_MAX_US) {
+            if (n <= 20 || n % 50 == 0) {
+                logger.warn("Audio gap of " + gapUs / 1000 + " ms before " + rebasedPts / 1000
+                    + " ms left open (fill bound " + AUDIO_GAP_FILL_MAX_US / 1000 + " ms, #" + n + ")");
+            }
+            return;
+        }
+        AacGapFill fill = new AacGapFill(mux, trackIdx,
+            AacGapFill.silentFrame(cfg.csd0, cfg.channelCount), cfg.sampleRate, last);
+        try {
+            long fromUs = ptsOriginUs + Math.max(0L, last + 1);
+            for (AacCircularBuffer.Packet p : aacRing.snapshotRange(fromUs, ptsOriginUs + rebasedPts - 1)) {
+                fill.writeRecovered(p.data, p.ptsUs - ptsOriginUs);
+            }
+            fill.fillSilenceBefore(rebasedPts);
+        } catch (Exception e) {
+            logger.warn("Audio gap fill stopped: " + e.getMessage());
+        }
+        lastAudioPtsUs = fill.lastPtsUs;
+        if (n <= 20 || n % 50 == 0) {
+            logger.info("Audio gap of " + gapUs / 1000 + " ms before " + rebasedPts / 1000 + " ms: "
+                + fill.recoveredFrames + " frames recovered, " + fill.silentFrames + " silent (#" + n + ")");
+        }
     }
 
     private final java.util.concurrent.atomic.AtomicLong audioWriteFailureCount =
@@ -1038,7 +1172,10 @@ public class HardwareEventRecorderGpu {
         // set trackKind before offer cannot accidentally route a video
         // frame to audio.
         MuxerPacket fresh = new MuxerPacket();
-        int cap = Math.max(requiredSize, Math.min(MUXER_PACKET_CEILING, requiredSize * 2));
+        // A backed-up queue holds every packet on the Java heap: no 2x headroom then.
+        int cap = muxerWriteQueue.size() >= HEAP_GUARD_MIN_QUEUED
+                ? (requiredSize + 4095) & ~4095
+                : Math.max(requiredSize, Math.min(MUXER_PACKET_CEILING, requiredSize * 2));
         fresh.data = ByteBuffer.allocateDirect(cap);
         fresh.trackKind = TRACK_KIND_VIDEO;
         return fresh;
@@ -1061,7 +1198,10 @@ public class HardwareEventRecorderGpu {
     }
 
     private void releaseMuxerPacket(MuxerPacket p) {
-        if (p == null || p.data == null) return;
+        if (p == null) return;
+        p.sessionId = -1;
+        p.drainUs = -1;
+        if (p.data == null) return;
         p.data.clear();
         p.payloadSize = 0;
         p.info.set(0, 0, 0, 0);
@@ -1107,10 +1247,11 @@ public class HardwareEventRecorderGpu {
         dst.data.flip();
         dst.payloadSize = srcInfo.size;
         dst.info.set(0, srcInfo.size, srcInfo.presentationTimeUs, srcInfo.flags);
+        dst.drainUs = System.nanoTime() / 1000L;
     }
 
-    // Use Deque for drop-oldest semantics. Bounded capacity prevents unbounded
-    // growth under SD-card backpressure. take() in the disk writer wakes
+    // Bounded capacity prevents unbounded growth under SD-card backpressure
+    // (drop policy: offerMuxerPacket). take() in the disk writer wakes
     // immediately on push — no 4 ms poll-loop latency.
     private final java.util.concurrent.LinkedBlockingDeque<MuxerPacket> muxerWriteQueue =
         new java.util.concurrent.LinkedBlockingDeque<>(MUXER_WRITE_QUEUE_CAPACITY);
@@ -1140,135 +1281,46 @@ public class HardwareEventRecorderGpu {
     private final Object finalizerJoinLock = new Object();
 
     /**
-     * Add a packet to the muxer write queue. If the queue is full, drop the
-     * oldest non-keyframe packet to make room. If the queue is full and
-     * everything in it is a keyframe (extreme stall), drop the new packet
-     * unless it's also a keyframe (in which case drop the oldest keyframe).
+     * Add a packet to the muxer write queue. On a full queue only audio is
+     * ever removed: queued video is never evicted, because every P-frame
+     * behind an evicted picture would reference a frame the file never got.
+     * Incoming video/control may displace the oldest queued audio packet;
+     * otherwise the incoming packet is refused (released back to the pool)
+     * and the drainer skips video until the next keyframe.
      *
-     * <p>Drop preference: among non-keyframes, prefer evicting VIDEO
-     * P-frames over audio frames. Both are non-keyframe but a P-frame
-     * loss is a single visual hiccup whereas under sustained SD stall
-     * audio (50 pps) dominates the queue versus video (30 pps), so a
-     * naive head-evict would drop audio first. Walk the queue once and
-     * track BOTH the oldest non-keyframe AND the oldest video
-     * non-keyframe; if any video non-keyframe exists, drop that first.
-     * Only fall through to audio drops if no video P-frame is in the
-     * queue.
-     *
-     * <p>Drop counts are split per track-kind ({@link #muxerDropCount}
-     * for video, {@link #audioDropCount} for audio) so chronic SD stall
-     * vs audio-producer-outpaces-consumer can be distinguished in logs.
-     * Logged every 30 drops per kind.
-     *
-     * @return true if the packet entered the queue; false if it was dropped
-     *         (released back to the pool). Most callers may ignore this; the
-     *         initial-live-keyframe gate MUST NOT be cleared on a refused
-     *         IDR, so that call site checks it.
+     * @return true if the packet entered the queue; false if it was dropped.
+     *         The drainer's keyframe gates must not clear on a refusal.
      */
     private boolean offerMuxerPacket(MuxerPacket packet) {
+        if (packet.trackKind == TRACK_KIND_VIDEO && heapGuardRefuses()) {
+            releaseMuxerPacket(packet);
+            return false;
+        }
         if (muxerWriteQueue.offer(packet)) {
             return true;
         }
-        // Queue full. Walk once from the head, tracking:
-        //   - oldestNonKeyframe (any track) — fallback eviction target
-        //   - oldestVideoNonKeyframe — preferred eviction target
-        // Dropped packets are returned to the pool so their direct
-        // buffer is reused immediately by the packet trying to enter
-        // the queue.
-        java.util.Iterator<MuxerPacket> it = muxerWriteQueue.iterator();
-        MuxerPacket oldestNonKf = null;
-        MuxerPacket oldestVideoNonKf = null;
-        while (it.hasNext()) {
-            MuxerPacket head = it.next();
-            if (head.isControl()) {
-                // Non-evictable control entry. A FLUSH_HISTORY job owns the
-                // pinned ring cursor (dropping it silently loses the whole
-                // pre-record window and leaks the pin); a ROTATE ticket owns
-                // the armed rotation (dropping it wedges the segment swap
-                // while rotationInFlight stays latched).
-                continue;
-            }
-            if (!head.isKeyFrame()) {
-                if (oldestNonKf == null) oldestNonKf = head;
-                if (head.trackKind == TRACK_KIND_VIDEO && oldestVideoNonKf == null) {
-                    oldestVideoNonKf = head;
-                    // Found our preferred target — but keep going only
-                    // until we have both anchors. Once oldestVideoNonKf
-                    // is set we have everything we need; the oldestNonKf
-                    // anchor was already captured (it was set before or
-                    // is this same packet).
-                    break;
-                }
-            }
+        if (packet.trackKind != TRACK_KIND_AUDIO && offerByDisplacingAudio(packet)) {
+            return true;
         }
-        MuxerPacket evicted = (oldestVideoNonKf != null) ? oldestVideoNonKf : oldestNonKf;
-        if (evicted != null && !muxerWriteQueue.remove(evicted)) {
-            // OWNERSHIP GATE: the disk writer dequeued this exact packet
-            // between our iterator scan and the remove — the writer owns it
-            // now (possibly mid-writeSampleData on its bytes). Recycling it
-            // here would hand the pool a buffer another producer could
-            // overwrite UNDER the writer's in-flight write. Not ours — and
-            // the writer's dequeue just freed a slot, so try admission
-            // BEFORE falling into the eviction below (otherwise a lost race
-            // needlessly drops a second frame).
-            evicted = null;
+        noteQueueDrop(packet.trackKind);
+        releaseMuxerPacket(packet);
+        return false;
+    }
+
+    /** Evict-then-offer, retried a few times in case the audio thread takes the freed slot. */
+    private boolean offerByDisplacingAudio(MuxerPacket packet) {
+        for (int attempt = 0; attempt < 4 && evictOldestQueuedAudio(); attempt++) {
             if (muxerWriteQueue.offer(packet)) {
                 return true;
             }
         }
-        if (evicted == null) {
-            // All entries are keyframes (or our candidate vanished) — drop
-            // the oldest NON-CONTROL entry (FLUSH_HISTORY jobs and ROTATE
-            // tickets must survive). remove(head) is the same ownership
-            // gate as above. This only happens under multi-second SD
-            // stalls; the recording will have a gap but the daemon stays
-            // alive.
-            java.util.Iterator<MuxerPacket> it2 = muxerWriteQueue.iterator();
-            while (it2.hasNext()) {
-                MuxerPacket head = it2.next();
-                if (!head.isControl() && muxerWriteQueue.remove(head)) {
-                    evicted = head;
-                    break;
-                }
-            }
-        }
-        if (evicted != null) {
-            // Increment the per-kind counter for the evicted packet. Log
-            // every 30 to keep field debugging tractable.
-            if (evicted.trackKind == TRACK_KIND_AUDIO) {
-                long n = audioDropCount.incrementAndGet();
-                if (n % 30 == 1) {
-                    logger.warn("Audio drop count " + n
-                        + " — audio producer outpacing muxer queue (video healthy).");
-                }
-            } else {
-                long n = muxerDropCount.incrementAndGet();
-                if (n % 30 == 1) {
-                    logger.warn("Video drop count " + n
-                        + " — muxer write queue saturated, SD card likely stalled.");
-                }
-            }
-            releaseMuxerPacket(evicted);
-        }
-        // Now there's space (unless the queue is somehow all control jobs —
-        // at most one of each exists in practice; drop the incoming packet
-        // rather than leak its pooled buffer).
-        if (!muxerWriteQueue.offer(packet)) {
-            releaseMuxerPacket(packet);
-            return false;
-        }
-        return true;
+        return false;
     }
 
     /**
-     * Admission for control tickets (ROTATE). Unlike a data packet, a control
-     * ticket must never be silently released on a full queue — the caller
-     * retains ticket + arm and retries on the next video packet. Evicting ONE
-     * ordinary packet is the queue's normal drop-oldest policy applied at
-     * rotation time (preferring the oldest video non-keyframe, mirroring
-     * {@link #offerMuxerPacket}), so a full queue almost never refuses
-     * admission; refusal is only possible if the queue is somehow entirely
-     * control entries or an eviction race refills it.
+     * Admission for control tickets (ROTATE). A full queue admits the ticket
+     * only by displacing the oldest queued audio packet; on refusal the caller
+     * keeps the arm and the splice is retried on a later keyframe.
      *
      * @return true if the ticket entered the queue (ticket ownership
      *         transferred to the queue); false if admission failed (caller
@@ -1278,28 +1330,63 @@ public class HardwareEventRecorderGpu {
         if (muxerWriteQueue.offer(ctrl)) {
             return true;
         }
-        java.util.Iterator<MuxerPacket> it = muxerWriteQueue.iterator();
-        MuxerPacket victim = null;
-        MuxerPacket videoVictim = null;
-        while (it.hasNext()) {
-            MuxerPacket head = it.next();
-            if (head.isControl()) continue;
-            if (victim == null) victim = head;
-            if (head.trackKind == TRACK_KIND_VIDEO && !head.isKeyFrame()) {
-                videoVictim = head;
-                break;
+        return offerByDisplacingAudio(ctrl);
+    }
+
+    /**
+     * Removes the oldest queued audio packet. Returns true when a slot was
+     * freed (also when the disk writer dequeued the candidate first).
+     */
+    private boolean evictOldestQueuedAudio() {
+        for (MuxerPacket queued : muxerWriteQueue) {
+            if (queued.trackKind != TRACK_KIND_AUDIO || queued.isControl()) {
+                continue;
+            }
+            if (muxerWriteQueue.remove(queued)) {
+                noteQueueDrop(TRACK_KIND_AUDIO);
+                releaseMuxerPacket(queued);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private void noteQueueDrop(int trackKind) {
+        if (trackKind == TRACK_KIND_AUDIO) {
+            long n = audioDropCount.incrementAndGet();
+            if (n % 30 == 1) {
+                logger.warn("Audio drop count " + n
+                    + " — muxer write queue full; audio dropped ahead of video.");
+            }
+        } else {
+            long n = muxerDropCount.incrementAndGet();
+            if (n % 30 == 1) {
+                logger.warn("Video drop count " + n
+                    + " — muxer write queue saturated, SD card likely stalled.");
             }
         }
-        MuxerPacket evicted = (videoVictim != null) ? videoVictim : victim;
-        if (evicted != null && muxerWriteQueue.remove(evicted)) {
-            if (evicted.trackKind == TRACK_KIND_AUDIO) {
-                audioDropCount.incrementAndGet();
-            } else {
-                muxerDropCount.incrementAndGet();
-            }
-            releaseMuxerPacket(evicted);
+    }
+
+    // Queued packets are direct buffers on the Java heap; a writer that falls behind must not run it out.
+    private static final int HEAP_GUARD_MIN_QUEUED = 60;
+    private static final long HEAP_GUARD_RESERVE_BYTES = 32L * 1024 * 1024;
+    private final java.util.concurrent.atomic.AtomicLong heapGuardDropCount =
+        new java.util.concurrent.atomic.AtomicLong(0);
+
+    /** True when the queue is backed up and the Java heap is within the reserve of its limit. */
+    private boolean heapGuardRefuses() {
+        int queued = muxerWriteQueue.size();
+        if (queued < HEAP_GUARD_MIN_QUEUED) return false;
+        Runtime rt = Runtime.getRuntime();
+        long headroom = rt.maxMemory() - (rt.totalMemory() - rt.freeMemory());
+        if (headroom >= HEAP_GUARD_RESERVE_BYTES) return false;
+        long n = heapGuardDropCount.incrementAndGet();
+        if (n % 30 == 1) {
+            logger.warn("Video drop count " + n + " (heap guard) — " + queued
+                + " packets queued, " + headroom / (1024 * 1024) + " MB heap left of "
+                + rt.maxMemory() / (1024 * 1024) + " MB; storage is not keeping up");
         }
-        return muxerWriteQueue.offer(ctrl);
+        return true;
     }
     private volatile boolean diskWriterRunning = false;
     private Thread diskWriterThread;
@@ -1372,6 +1459,11 @@ public class HardwareEventRecorderGpu {
     // from preRecordDurationSeconds: surveillance events must still flush only
     // their configured window while the ring keeps enough history for replay.
     private volatile int manualClipRetentionSeconds = 0;
+    // Highest bitrate the pipeline may switch this encoder to inline (the parked
+    // surveillance tier). init() sizes the history arena for it: a live arena is
+    // never regrown, and one sized for a lower drive tier holds only part of the
+    // configured pre-roll once the surveillance profile is applied.
+    private volatile int preRecordBudgetBitrate = 0;
     
     // Pre-allocated BufferInfo — reused every drain cycle to avoid per-frame allocation
     private final MediaCodec.BufferInfo reusableBufferInfo = new MediaCodec.BufferInfo();
@@ -1428,6 +1520,8 @@ public class HardwareEventRecorderGpu {
     // time. Reset to -1 wherever ptsOriginUs is reset; (re)seeded on the
     // first write of each segment. See writeRebased + MAX_PLAUSIBLE_INTERFRAME_GAP_US.
     private long lastSourcePtsUs = -1;
+    // drainUs of the packet that set lastSourcePtsUs; -1 when unknown (history).
+    private long lastSourceDrainUs = -1;
     // Count of clock-domain re-anchors performed by writeRebased. Surfaced
     // for field diagnostics; logged every 50 to keep the log tractable.
     private final java.util.concurrent.atomic.AtomicLong ptsReanchorCount =
@@ -1443,6 +1537,16 @@ public class HardwareEventRecorderGpu {
     // 55-min-to-1-hr duration. 10 s is comfortably above any real gap and far
     // below the spurious one, so the guard never trips in normal operation.
     private static final long MAX_PLAUSIBLE_INTERFRAME_GAP_US = 10_000_000L;
+    // A longer gap is still real when the drain clock advanced by the same amount.
+    private static final long REAL_GAP_TOLERANCE_US = 2_000_000L;
+
+    /** True when consecutive video PTS must be re-anchored (backward step or clock-domain jump). */
+    private static boolean isPtsDiscontinuity(long sourceGapUs, long drainUs, long lastDrainUs) {
+        if (sourceGapUs < 0) return true;
+        if (sourceGapUs <= MAX_PLAUSIBLE_INTERFRAME_GAP_US) return false;
+        if (drainUs < 0 || lastDrainUs < 0) return true;
+        return Math.abs((drainUs - lastDrainUs) - sourceGapUs) > REAL_GAP_TOLERANCE_US;
+    }
     // Duration (seconds) of the most recently finalized clip, captured at
     // rename time before the PTS bookkeeping is reset for the next segment.
     // Read by SurveillanceEngineGpu to caption its gated Telegram video send.
@@ -1491,9 +1595,9 @@ public class HardwareEventRecorderGpu {
     // (drainer 2-min tick or forceSegmentRotation HTTP path) is a pure,
     // non-blocking ARM: it CASes rotationInFlight, stamps the arm clock and
     // requests a sync frame — no I/O, no muxerLock. The drainer then packages
-    // the next keyframe (or, past ROTATION_SPLICE_DEADLINE_MS, any video
-    // frame) as a TRACK_KIND_ROTATE control packet carrying the splice
-    // frame's bytes, and the DISK WRITER executes the swap when that ticket
+    // the next keyframe (never a P-frame) as a TRACK_KIND_ROTATE control
+    // packet carrying the splice frame's bytes, and the DISK WRITER executes
+    // the swap when that ticket
     // reaches the queue head. FIFO guarantees every old-segment packet has
     // already been written to the old muxer, so nothing is drained and
     // nothing is dropped at the seam. The old ROTATE_DRAIN_BUDGET_MS backlog
@@ -1518,27 +1622,22 @@ public class HardwareEventRecorderGpu {
     // this window (encoder hiccup / dropped setParameters). Paced by
     // rotationLastSyncReqMs, which resets on every re-request.
     private static final long ROTATION_SYNC_REREQUEST_MS = 5_000L;
-    // Hard deadline, measured from rotationArmedAtMs (which never moves
-    // during an arm): past this, the drainer splices on the NEXT video
-    // packet even if it is not a keyframe. The new segment then starts with
-    // P-frames referencing the previous file (degraded but bounded — an
-    // immediate re-request shortens the window to ~1 GOP) instead of the
-    // segment growing without bound behind an encoder that never honors the
-    // sync-frame request.
-    private static final long ROTATION_SPLICE_DEADLINE_MS = 10_000L;
     // After a failed writer-side rotation (muxer construct/start/first
     // write), push segmentStartTime forward so the drainer tick re-arms in
     // ~5 s instead of on every ~16 ms loop pass (field logs showed
     // back-to-back "Rotating segment 0" retries during an SD stall).
     private static final long ROTATION_RETRY_BACKOFF_MS = 5_000L;
     // Arm state. rotationAwaitingSplice is the drainer's cue to capture a
-    // splice frame; rotationArmedAtMs anchors the ABSOLUTE deadline;
+    // splice frame; rotationArmedAtMs is when the arm was raised;
     // rotationLastSyncReqMs paces sync-frame re-requests. Both timestamps
-    // are SystemClock.elapsedRealtime() (monotonic) — wall-clock corrections
-    // must not stretch the deadline.
+    // are SystemClock.elapsedRealtime() (monotonic).
     private volatile boolean rotationAwaitingSplice = false;
     private volatile long rotationArmedAtMs = 0;
     private volatile long rotationLastSyncReqMs = 0;
+    // Drainer: queue refused a video frame; skip video until a keyframe is admitted.
+    private volatile boolean videoResyncPending = false;
+    private volatile long lastResyncSyncReqMs = 0;
+    private static final long RESYNC_SYNC_REQUEST_INTERVAL_MS = 1_000L;
     // Set by forceSegmentRotation, consumed by the disk writer after a
     // successful swap: the "did the new segment actually get the audio
     // track" verification must read POST-swap state (the old synchronous
@@ -1553,6 +1652,9 @@ public class HardwareEventRecorderGpu {
     // (a blocked writer holding an already-dequeued ticket must not commit
     // a rotation into a closing/successor recording).
     private volatile long recordingGeneration = 0;
+    // Bumped only when a new recording commits (not at close): tells whether a
+    // ROTATE ticket's frame still belongs to the live recording.
+    private volatile long recordingSessionId = 0;
     // Single-owner guard for listenerGeneration during a close: true from
     // close entry until close performs its own post-wait bump (or aborts on
     // a wedged worker, bumping inline). The drainer's writer-abort branch
@@ -1784,6 +1886,12 @@ public class HardwareEventRecorderGpu {
         }
         try {
             initOnce();
+        } catch (CpuInputRejectedException rejected) {
+            // configure() refused YUV buffer input: this encoder records via the GPU.
+            logger.warn("Encoder refused CPU frames (" + rejected.getMessage()
+                + ") — using the GPU recording engine");
+            cpuInput = false;
+            initOnce();
         } catch (Exception hevcFailure) {
             if (!shouldRetryInitWithAvc()) throw hevcFailure;
             logger.warn("DI5 HEVC encoder init failed synchronously ("
@@ -1846,9 +1954,13 @@ public class HardwareEventRecorderGpu {
         // Create format with Surface input - use configured codec
         MediaFormat format = MediaFormat.createVideoFormat(codecMimeType, width, height);
         
-        // CRITICAL: Use COLOR_FormatSurface for GPU input
-        format.setInteger(MediaFormat.KEY_COLOR_FORMAT,
-                MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
+        // CRITICAL: Use COLOR_FormatSurface for GPU input (YUV buffers for the CPU engine)
+        boolean cpuFrames = cpuInput;
+        cpuInputOpen = false;
+        resetLensFlips();
+        format.setInteger(MediaFormat.KEY_COLOR_FORMAT, cpuFrames
+                ? MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible
+                : MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
         
         format.setInteger(MediaFormat.KEY_BIT_RATE, bitrate);
         format.setInteger(MediaFormat.KEY_FRAME_RATE, fps);
@@ -1982,7 +2094,21 @@ public class HardwareEventRecorderGpu {
         } catch (Exception ignored) {
             logger.info("MediaCodec encoder created");
         }
-        
+        if (cpuFrames && !acceptsFlexibleYuv(encoder, finalCodecMimeType)) {
+            logger.warn("Encoder lists no flexible YUV input — using the GPU recording engine");
+            cpuFrames = false;
+            cpuInput = false;
+            format.setInteger(MediaFormat.KEY_COLOR_FORMAT,
+                    MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
+        }
+        if (cpuFrames) {
+            // YUV input is untagged otherwise; match the GPU path's stream
+            // (BT.601 matrix, limited range) so players show the same colours.
+            format.setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT601_PAL);
+            format.setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_SDR_VIDEO);
+            format.setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED);
+        }
+
         // Configure encoder with timeout
         logger.info("Configuring encoder...");
         final boolean[] configDone = {false};
@@ -2010,42 +2136,52 @@ public class HardwareEventRecorderGpu {
                 throw new RuntimeException("Encoder configure timeout");
             }
             if (configError[0] != null) {
+                if (cpuFrames) {
+                    try { encoder.release(); } catch (Exception e) {}
+                    encoder = null;
+                    throw new CpuInputRejectedException(configError[0]);
+                }
                 throw configError[0];
             }
         }
         logger.info("Encoder configured");
         
-        // Create input surface with timeout
-        logger.info("Creating input surface...");
-        final Surface[] surfaceResult = {null};
-        final Exception[] surfaceError = {null};
-        Thread surfaceThread = new Thread(() -> {
+        // Create input surface with timeout (the CPU engine queues YUV buffers instead)
+        if (cpuFrames) {
+            inputSurface = null;
+            logger.info("CPU recording engine: YUV buffer input, no input surface");
+        } else {
+            logger.info("Creating input surface...");
+            final Surface[] surfaceResult = {null};
+            final Exception[] surfaceError = {null};
+            Thread surfaceThread = new Thread(() -> {
+                try {
+                    surfaceResult[0] = encoder.createInputSurface();
+                } catch (Exception e) {
+                    surfaceError[0] = e;
+                }
+            }, "EncoderSurface");
+            surfaceThread.start();
             try {
-                surfaceResult[0] = encoder.createInputSurface();
-            } catch (Exception e) {
-                surfaceError[0] = e;
+                surfaceThread.join(10000);
+            } catch (InterruptedException e) {
+                logger.warn("Surface create interrupted");
             }
-        }, "EncoderSurface");
-        surfaceThread.start();
-        try {
-            surfaceThread.join(10000);
-        } catch (InterruptedException e) {
-            logger.warn("Surface create interrupted");
+            if (surfaceResult[0] == null) {
+                if (surfaceThread.isAlive()) {
+                    logger.error("createInputSurface TIMEOUT - hardware encoder stuck");
+                    surfaceThread.interrupt();
+                    try { encoder.release(); } catch (Exception e) {}
+                    encoder = null;
+                    throw new RuntimeException("Surface create timeout");
+                }
+                if (surfaceError[0] != null) {
+                    throw surfaceError[0];
+                }
+            }
+            inputSurface = surfaceResult[0];
+            logger.info("Input surface created");
         }
-        if (surfaceResult[0] == null) {
-            if (surfaceThread.isAlive()) {
-                logger.error("createInputSurface TIMEOUT - hardware encoder stuck");
-                surfaceThread.interrupt();
-                try { encoder.release(); } catch (Exception e) {}
-                encoder = null;
-                throw new RuntimeException("Surface create timeout");
-            }
-            if (surfaceError[0] != null) {
-                throw surfaceError[0];
-            }
-        }
-        inputSurface = surfaceResult[0];
-        logger.info("Input surface created");
         
         // Start encoder with timeout
         logger.info("Starting encoder...");
@@ -2096,7 +2232,7 @@ public class HardwareEventRecorderGpu {
         // logic the slot pool needed.
         if (usePreRecordBuffer) {
             int desiredSec = effectivePreRecordRetentionSeconds();
-            int desiredBudget = computePreRecordBudgetBytes(desiredSec, bitrate);
+            int desiredBudget = computePreRecordBudgetBytes(desiredSec, preRecordBudgetBitrate());
             int arenaBudget = computeReplayArenaBytes(
                     desiredBudget, manualClipRetentionSeconds, bitrate);
             if (useInstancePreRecordBuffer) {
@@ -2113,7 +2249,7 @@ public class HardwareEventRecorderGpu {
                     logger.info("Allocated per-instance pre-record byte ring: budget="
                         + (preRecordBuffer.getBudgetBytes() / 1024 / 1024) + "MB, duration="
                         + (preRecordBuffer.getMaxDurationUs() / 1_000_000L)
-                        + "s, bitrate=" + (bitrate / 1_000_000) + "Mbps");
+                        + "s, bitrate=" + (preRecordBudgetBitrate() / 1_000_000) + "Mbps");
                 } else {
                     logger.error("Pre-record fallback allocation failed — running "
                             + "without pre-record. Live recording unaffected.");
@@ -2129,7 +2265,7 @@ public class HardwareEventRecorderGpu {
                     // native-memory spike that the byte-ring design removed.
                     logger.info("Allocating pre-record byte ring: budget="
                         + (arenaBudget / 1024 / 1024) + "MB, duration="
-                        + desiredSec + "s, bitrate=" + (bitrate / 1_000_000) + "Mbps");
+                        + desiredSec + "s, bitrate=" + (preRecordBudgetBitrate() / 1_000_000) + "Mbps");
                     sharedPreRecordBuffer = allocatePreRecordBufferWithFallback(
                             arenaBudget, desiredBudget, desiredSec, "shared");
                     sharedPreRecordBudgetBytes = sharedPreRecordBuffer != null
@@ -2167,7 +2303,7 @@ public class HardwareEventRecorderGpu {
                     if (regrown) {
                         logger.info("Pre-record byte ring regrown to "
                                 + (sharedPreRecordBudgetBytes / 1024 / 1024) + "MB for "
-                                + desiredSec + "s at " + (bitrate / 1_000_000)
+                                + desiredSec + "s at " + (preRecordBudgetBitrate() / 1_000_000)
                                 + "Mbps (encoder re-init, arena was idle)");
                     } else {
                         sharedPreRecordBuffer.setMaxDurationUs(desiredUs);
@@ -2191,6 +2327,7 @@ public class HardwareEventRecorderGpu {
 
         // SOTA: Start background drainer thread (moves SD card I/O off GL thread)
         startDrainerThread();
+        cpuInputOpen = cpuFrames;
 
         logger.info("Encoder initialized successfully"
                 + (usePreRecordBuffer ? " (event pre-record="
@@ -2257,13 +2394,31 @@ public class HardwareEventRecorderGpu {
                 ? manualClipRetentionSeconds + MANUAL_CLIP_GOP_HEADROOM_SECONDS
                 : 0;
         return Math.max(1, Math.min(62,
-                Math.max(preRecordDurationSeconds, manualRetention)));
+                Math.max(eventRetentionSeconds(), manualRetention)));
+    }
+
+    // An event flush starts on the IDR before its window, so the ring keeps that GOP too.
+    private int eventRetentionSeconds() {
+        return Math.min(62, Math.max(1, preRecordDurationSeconds) + MANUAL_CLIP_GOP_HEADROOM_SECONDS);
+    }
+
+    /**
+     * Size the history arena for the highest bitrate this encoder will be switched to
+     * inline, not just its start bitrate. Applies at the next init(); a live arena is
+     * never resized.
+     */
+    public void setPreRecordBudgetBitrate(int bitrateBps) {
+        preRecordBudgetBitrate = Math.max(0, bitrateBps);
+    }
+
+    private int preRecordBudgetBitrate() {
+        return Math.max(bitrate, preRecordBudgetBitrate);
     }
 
     private void applyPreRecordRetentionWindow(int retentionSeconds) {
         final int clamped = Math.max(1, Math.min(62, retentionSeconds));
         final long desiredUs = clamped * 1_000_000L;
-        final int desiredBudget = computePreRecordBudgetBytes(clamped, bitrate);
+        final int desiredBudget = computePreRecordBudgetBytes(clamped, preRecordBudgetBitrate());
 
         // Never replace a LIVE arena under its producer. The drainer thread is
         // appending to it and an event flush may hold a cursor on it, and a
@@ -2347,6 +2502,16 @@ public class HardwareEventRecorderGpu {
         return segmentDurationMs;
     }
 
+    /** Wall-clock start of the clip being written, or 0 while no clip is open. */
+    public long getSegmentStartWallMs() {
+        return isWritingToFile ? segmentStartTime : 0;
+    }
+
+    /** True from the rotation arm until the next clip has taken over. */
+    public boolean isSegmentRotationPending() {
+        return rotationInFlight.get();
+    }
+
     /**
      * Replace the idle shared pre-record arena with a larger one.
      *
@@ -2410,8 +2575,8 @@ public class HardwareEventRecorderGpu {
      */
     private H264ByteRingBuffer allocatePreRecordBufferWithFallback(
             int arenaBudget, int desiredBudget, int desiredSeconds, String owner) {
-        int eventSeconds = Math.max(1, Math.min(30, preRecordDurationSeconds));
-        int eventBudget = computePreRecordBudgetBytes(eventSeconds, bitrate);
+        int eventSeconds = eventRetentionSeconds();
+        int eventBudget = computePreRecordBudgetBytes(eventSeconds, preRecordBudgetBitrate());
         if (arenaBudget > desiredBudget) {
             long heapAvailable = availableHeapBytes();
             if (heapAvailable < (long) arenaBudget + SHARED_RING_REGROW_HEAP_MARGIN_BYTES) {
@@ -2656,6 +2821,7 @@ public class HardwareEventRecorderGpu {
         // "audio was flowing under the previous config" doesn't bleed
         // into the new config's track-add decision.
         this.audioPacketCountSinceConfigSet = 0;
+        this.audioUpgradeRotationRequested = false;
         logger.info(String.format(
             "Audio config set: %d Hz %d ch, %d kbps, csd0=%d bytes",
             sampleRate, channelCount, bitrate / 1000, csd0.length));
@@ -2762,6 +2928,17 @@ public class HardwareEventRecorderGpu {
             // tolerates a transient stale read since the next rotation
             // recovers.
             audioPacketCountSinceConfigSet++;
+            if (!audioUpgradeRotationRequested
+                    && audioPacketCountSinceConfigSet >= AUDIO_UPGRADE_MIN_PACKETS
+                    && isWritingToFile && audioTrackIndex < 0 && !awaitLiveMuxerKeyframe
+                    && !rotationInFlight.get() && segmentStartTime > 0
+                    && System.currentTimeMillis() - segmentStartTime >= AUDIO_UPGRADE_MIN_SEGMENT_AGE_MS
+                    && (lastAudioUpgradeElapsedMs == 0L || android.os.SystemClock.elapsedRealtime()
+                            - lastAudioUpgradeElapsedMs >= AUDIO_UPGRADE_MIN_SPACING_MS)) {
+                audioUpgradeRotationRequested = true;
+                lastAudioUpgradeElapsedMs = android.os.SystemClock.elapsedRealtime();
+                requestAudioUpgradeRotation(recordingGeneration);
+            }
         }
         if (!isWritingToFile || audioConfig == null || audioTrackIndex < 0
                 || awaitLiveMuxerKeyframe) {
@@ -2777,9 +2954,8 @@ public class HardwareEventRecorderGpu {
         pkt.data.flip();
         pkt.payloadSize = length;
         // No flags — AAC frames have no BUFFER_FLAG_KEY_FRAME concept the
-        // muxer cares about, and crucially we want them to be eligible for
-        // drop-oldest-non-keyframe under SD backpressure (audio gap is
-        // tolerable; video gap is not).
+        // muxer cares about. Under SD backpressure audio is the first to be
+        // dropped (audio gap is tolerable; a video gap breaks decoding).
         pkt.info.set(0, length, ptsUs, 0);
         pkt.trackKind = TRACK_KIND_AUDIO;
         // Re-check the gate under muxerLock and only offer if still valid.
@@ -2799,6 +2975,106 @@ public class HardwareEventRecorderGpu {
             offerMuxerPacket(pkt);
         }
         return true;
+    }
+
+    /** The camera was just reopened: hold the next recording start until it encodes a new frame. */
+    public void requireFreshFrameForNextStart() {
+        freshFrameListener.set(null);
+        armFreshFrameBarrier(0, codedFrameCount);
+    }
+
+    /**
+     * Same, but the start waits for {@code minFrames} frames encoded after this call: an
+     * image queued before the reopen is consumed once, so two frames prove a live camera.
+     * {@code onFresh} runs once on the drainer when they are encoded; keep it short.
+     */
+    public void requireFreshFrameForNextStart(int minFrames, Runnable onFresh) {
+        int frames = Math.max(1, minFrames);
+        long base = codedFrameCount;
+        freshFrameListener.set(onFresh != null
+            ? new FreshFrameListener(base + frames, onFresh) : null);
+        armFreshFrameBarrier(frames, base);
+    }
+
+    private void armFreshFrameBarrier(int minFrames, long baseCodedCount) {
+        freshFrameBarrierCodedCount = baseCodedCount;
+        freshFrameBarrierMinFrames = minFrames;
+        freshFrameBarrierElapsedMs.set(android.os.SystemClock.elapsedRealtime());
+        // The first new frame becomes an IDR, so the deferred clip can open on it.
+        requestSyncFrame();
+        logger.info("Next recording start waits for the reopened camera's first frame");
+    }
+
+    /** True while a start must wait for the reopened camera's first encoded frame. */
+    public boolean isAwaitingFreshFrame() {
+        while (true) {
+            long barrier = freshFrameBarrierElapsedMs.get();
+            if (barrier == 0L) return false;
+            int minFrames = freshFrameBarrierMinFrames;
+            boolean fresh = minFrames > 0
+                ? codedFrameCount - freshFrameBarrierCodedCount >= minFrames
+                : lastEncodedFrameElapsedMs > barrier;
+            if (!fresh && android.os.SystemClock.elapsedRealtime() - barrier
+                    <= FRESH_FRAME_BARRIER_TTL_MS) {
+                return true;
+            }
+            // A barrier re-armed meanwhile is judged on its own terms.
+            if (freshFrameBarrierElapsedMs.compareAndSet(barrier, 0L)) return false;
+        }
+    }
+
+    /** Drainer, after each coded frame: run a met fresh-frame listener once. */
+    private void dispatchFreshFrameListener() {
+        FreshFrameListener listener = freshFrameListener.get();
+        if (listener == null || codedFrameCount < listener.targetCodedCount
+                || !freshFrameListener.compareAndSet(listener, null)) {
+            return;
+        }
+        try {
+            listener.action.run();
+        } catch (Throwable t) {
+            logger.warn("FreshFrameListener error: " + t.getMessage());
+        }
+    }
+
+    /** Surveillance -> ACC ON: the next recording start must not replay frames encoded before this edge. */
+    public void fencePreRecordAtAccOn() {
+        H264ByteRingBuffer ring = preRecordBuffer;
+        long latest = ring != null ? ring.getLatestPtsUs() : Long.MIN_VALUE;
+        if (latest == Long.MIN_VALUE) return;
+        preRecordFenceSetAtElapsedMs = android.os.SystemClock.elapsedRealtime();
+        preRecordFencePtsUs = latest;
+        logger.info("Pre-record fenced at ACC ON (pts=" + latest + ")");
+    }
+
+    /** Surveillance re-armed: its events keep their full pre-roll. */
+    public void clearPreRecordFence() {
+        preRecordFencePtsUs = Long.MIN_VALUE;
+    }
+
+    private long takePreRecordFence() {
+        long fence = preRecordFencePtsUs;
+        if (fence == Long.MIN_VALUE) return Long.MIN_VALUE;
+        preRecordFencePtsUs = Long.MIN_VALUE;
+        long age = android.os.SystemClock.elapsedRealtime() - preRecordFenceSetAtElapsedMs;
+        return age >= 0 && age <= PRE_RECORD_FENCE_TTL_MS ? fence : Long.MIN_VALUE;
+    }
+
+    // forceSegmentRotation takes startStopLock, which a stop or trigger can hold; never block the ingest thread on it.
+    private void requestAudioUpgradeRotation(long generation) {
+        Thread rotate = new Thread(() -> {
+            try {
+                synchronized (startStopLock) {
+                    if (recordingGeneration != generation || !isWritingToFile || audioTrackIndex >= 0) return;
+                    logger.info("Cabin audio is live but this segment has no audio track — rotating once");
+                    forceSegmentRotation();
+                }
+            } catch (Throwable t) {
+                logger.warn("Audio upgrade rotation failed: " + t.getMessage());
+            }
+        }, "AudioUpgradeRotate");
+        rotate.setDaemon(true);
+        rotate.start();
     }
 
     /**
@@ -3017,6 +3293,182 @@ public class HardwareEventRecorderGpu {
     public Surface getInputSurface() {
         return inputSurface;
     }
+
+    /** Selects YUV buffer input (CPU recording engine); applies at the next init(). */
+    public void setCpuInput(boolean enabled) {
+        cpuInput = enabled;
+    }
+
+    // Recorder-side geometry for the playback lens tag; null = never tag.
+    private volatile java.util.function.Supplier<org.json.JSONObject> lensTagSupplier;
+
+    public void setLensTagSupplier(java.util.function.Supplier<org.json.JSONObject> supplier) {
+        lensTagSupplier = supplier;
+    }
+
+    // Lens state of queued CPU frames by source PTS, transitions only (lensFlipLock).
+    // Frames older than every entry use lensBaseRaw; surface (GPU) frames are never raw.
+    private static final int LENS_FLIPS_MAX = 16;
+    private final Object lensFlipLock = new Object();
+    private final long[] lensFlipPtsUs = new long[LENS_FLIPS_MAX];
+    private final boolean[] lensFlipRaw = new boolean[LENS_FLIPS_MAX];
+    private int lensFlipCount;
+    private boolean lensBaseRaw;
+    // Live segment's video frames by lens state (muxerLock).
+    private int segLensRawFrames;
+    private int segLensOtherFrames;
+    // PTS of a lens on/off change still waiting for its segment cut; MIN_VALUE = none.
+    private final java.util.concurrent.atomic.AtomicLong lensCutPendingPts =
+        new java.util.concurrent.atomic.AtomicLong(Long.MIN_VALUE);
+
+    private void resetLensFlips() {
+        synchronized (lensFlipLock) {
+            lensFlipCount = 0;
+            lensBaseRaw = false;
+        }
+    }
+
+    private boolean lensFlipped(boolean rawLens) {
+        synchronized (lensFlipLock) {
+            return lensFlipCount > 0 && lensFlipRaw[lensFlipCount - 1] != rawLens;
+        }
+    }
+
+    private void noteLensFrame(long ptsUs, boolean rawLens) {
+        synchronized (lensFlipLock) {
+            int n = lensFlipCount;
+            if (n > 0 && lensFlipRaw[n - 1] == rawLens) return;
+            if (n == LENS_FLIPS_MAX) {
+                lensBaseRaw = lensFlipRaw[0];
+                System.arraycopy(lensFlipPtsUs, 1, lensFlipPtsUs, 0, n - 1);
+                System.arraycopy(lensFlipRaw, 1, lensFlipRaw, 0, n - 1);
+                n--;
+            }
+            lensFlipPtsUs[n] = ptsUs;
+            lensFlipRaw[n] = rawLens;
+            lensFlipCount = n + 1;
+        }
+    }
+
+    private boolean lensRawAt(long ptsUs) {
+        synchronized (lensFlipLock) {
+            for (int i = lensFlipCount - 1; i >= 0; i--) {
+                if (lensFlipPtsUs[i] <= ptsUs) return lensFlipRaw[i];
+            }
+            return lensBaseRaw;
+        }
+    }
+
+    /** CPU input thread, every frame while a cut is pending; non-blocking arm like the drainer's. */
+    private void rotateForLensChange(boolean rawLens) {
+        long pending = lensCutPendingPts.get();
+        if (pending == Long.MIN_VALUE) return;
+        if (!isWritingToFile || segmentBasePath == null) {
+            lensCutPendingPts.compareAndSet(pending, Long.MIN_VALUE);
+            return;
+        }
+        if (rotationInFlight.get()) return;
+        long since = segmentStartTime > 0 ? System.currentTimeMillis() - segmentStartTime : Long.MAX_VALUE;
+        if (since < ROTATE_DEBOUNCE_MS) return;
+        logger.info("Lens correction " + (rawLens ? "on" : "off") + " — starting a new segment");
+        rotateSegment();
+    }
+
+    /** Majority of the segment's frames decides; minority frames only occur at an on/off edge. */
+    private void rememberLensTag(String finalPath, boolean raw) {
+        if (finalPath == null) return;
+        org.json.JSONObject tag = null;
+        java.util.function.Supplier<org.json.JSONObject> s = lensTagSupplier;
+        if (raw && s != null) {
+            try { tag = s.get(); } catch (Throwable ignored) {}
+        }
+        LensTag.remember(new File(finalPath), tag);
+    }
+
+    /** True when this encoder takes YUV buffers instead of an input surface. */
+    public boolean isCpuInput() {
+        return cpuInput;
+    }
+
+    /** Fills one codec input image; returns false to drop the frame. */
+    public interface CpuFrameWriter {
+        boolean write(android.media.Image input);
+    }
+
+    public static final int CPU_FRAME_QUEUED = 0;
+    public static final int CPU_FRAME_NO_BUFFER = 1;
+    public static final int CPU_FRAME_BUSY = 2;
+    public static final int CPU_FRAME_WRITE_FAILED = 3;
+    public static final int CPU_FRAME_CODEC_ERROR = 4;
+
+    /**
+     * Queues one CPU-built frame. Never waits: no free input buffer, a
+     * concurrent stop/release, or a closed codec drops the frame.
+     * {@code rawLens}: raw grid tiles, no overlay, for a player to dewarp.
+     */
+    public int queueCpuFrame(CpuFrameWriter writer, long ptsUs, boolean rawLens) {
+        if (!cpuInputOpen || !cpuInputLock.tryLock()) return CPU_FRAME_BUSY;
+        try {
+            MediaCodec codec = encoder;
+            if (!cpuInputOpen || codec == null) return CPU_FRAME_BUSY;
+            int index = codec.dequeueInputBuffer(0);
+            if (index < 0) return CPU_FRAME_NO_BUFFER;
+            ByteBuffer buffer = codec.getInputBuffer(index);
+            int size = buffer != null ? buffer.capacity() : 0;
+            android.media.Image image = size > 0 ? codec.getInputImage(index) : null;
+            boolean written;
+            try {
+                written = image != null && writer.write(image);
+            } catch (RuntimeException e) {
+                logger.warn("CPU frame write failed: " + e);
+                written = false;
+            }
+            // A slot left unqueued is handed back by stop()/release().
+            if (!written) return CPU_FRAME_WRITE_FAILED;
+            // Arm before queueing so the splice IDR lands on this frame; retried until a cut lands.
+            if (lensFlipped(rawLens)) lensCutPendingPts.set(ptsUs);
+            rotateForLensChange(rawLens);
+            noteLensFrame(ptsUs, rawLens);
+            codec.queueInputBuffer(index, 0, size, ptsUs, 0);
+            return CPU_FRAME_QUEUED;
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            return CPU_FRAME_CODEC_ERROR;
+        } finally {
+            cpuInputLock.unlock();
+        }
+    }
+
+    private void closeCpuInput() {
+        boolean locked = false;
+        try {
+            // A frame copy holds the lock ~10 ms. Waiting past the 3 s GL watchdog means
+            // either the copy finished or the process is already being restarted.
+            locked = cpuInputLock.tryLock(3500, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        cpuInputOpen = false;
+        if (locked) cpuInputLock.unlock();
+        else if (cpuInput) logger.warn("CPU input fence timed out; releasing anyway");
+    }
+
+    private static boolean acceptsFlexibleYuv(MediaCodec codec, String mime) {
+        try {
+            int[] formats = codec.getCodecInfo().getCapabilitiesForType(mime).colorFormats;
+            for (int f : formats) {
+                if (f == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible) return true;
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
+
+    /** configure() rejected flexible YUV input; init() retries with an input surface. */
+    private static final class CpuInputRejectedException extends Exception {
+        CpuInputRejectedException(Exception cause) {
+            super(String.valueOf(cause.getMessage()), cause);
+        }
+    }
     
     /**
      * Triggers event recording with pre-record buffer flush.
@@ -3065,6 +3517,10 @@ public class HardwareEventRecorderGpu {
         if (teardownWedged) {
             logger.error("triggerEventRecording REFUSED — encoder teardown wedged "
                 + "(terminal); awaiting trip-safe process restart");
+            return false;
+        }
+        if (isAwaitingFreshFrame()) {
+            logger.info("Recording start deferred — camera reopened, no new frame yet");
             return false;
         }
         if (savedFormat == null) {
@@ -3185,14 +3641,6 @@ public class HardwareEventRecorderGpu {
                 return true;
             }
 
-            final long driveBarrier = outputPath != null
-                    && new File(outputPath).getName().startsWith("cam_")
-                    ? driveFrameBarrierMs.get() : 0L;
-            if (driveBarrier > 0L && lastEncodedFrameElapsedMs <= driveBarrier) {
-                logger.info("ACC ON drive muxer deferred: waiting for first fresh encoded frame");
-                return false;
-            }
-
             // A manual replay may already own the ring's single range cursor.
             // Do not cancel it: the event muxer still starts immediately and
             // records live frames, while beginFlushRange below simply skips
@@ -3243,11 +3691,15 @@ public class HardwareEventRecorderGpu {
             // PTS/frame counters from a prior run would mislead the duration
             // computation in closeEventRecording.
             recordedFrames = 0;
+            segLensRawFrames = 0;
+            segLensOtherFrames = 0;
+            lensCutPendingPts.set(Long.MIN_VALUE);
             firstFramePtsUs = -1;
             lastFramePtsUs = -1;
             actualPreRecordDurationMs = 0L;
             ptsOriginUs = -1;
             lastSourcePtsUs = -1;
+            lastSourceDrainUs = -1;
             lastAudioPtsUs = -1L;
             awaitLiveMuxerKeyframe = false;
             // Seed the disk-write clock at segment open so the wedge ticker's
@@ -3316,6 +3768,7 @@ public class HardwareEventRecorderGpu {
                     audioTrackIndex = maybeAddAudioTrack(muxer);
                     muxer.start();
                     muxerStarted = true;
+                    openJournalLocked(tempFile, savedFormat);
                     logger.info("Muxer started with saved format (videoTrack="
                         + trackIndex + ", audioTrack=" + audioTrackIndex + ")");
                     muxerOk = true;
@@ -3338,16 +3791,8 @@ public class HardwareEventRecorderGpu {
                 return false;
             }
 
-            // Consume the one-shot barrier only after a valid muxer exists.
-            // A failed open must leave the barrier armed for the retry path.
-            final boolean firstPostSentryDriveClip = driveBarrier > 0L;
-            if (firstPostSentryDriveClip) {
-                driveFrameBarrierMs.compareAndSet(driveBarrier, 0L);
-                logger.info("First ACC ON drive muxer: starting live-only (no parked pre-roll)");
-            }
-
             boolean videoPreRecordCursorAcquired = false;
-            if (!firstPostSentryDriveClip && !manualClipExportInProgress
+            if (!manualClipExportInProgress
                     && savedFormat != null && preRecordBuffer != null) {
                 // SOTA: streaming flush. beginFlush() takes a seqlock-validated
                 // snapshot and pins the byte-arena read frontier. The drainer
@@ -3363,8 +3808,13 @@ public class HardwareEventRecorderGpu {
                 long requestedStartPtsUs = latestPtsUs == Long.MIN_VALUE
                         ? Long.MIN_VALUE
                         : latestPtsUs - Math.max(1, preRecordDurationSeconds) * 1_000_000L;
+                long fencePtsUs = takePreRecordFence();
+                boolean fenced = fencePtsUs != Long.MIN_VALUE;
                 H264ByteRingBuffer.Cursor cursor = latestPtsUs == Long.MIN_VALUE
+                        || (fenced && latestPtsUs <= fencePtsUs)
                         ? null
+                        : fenced
+                        ? preRecordBuffer.beginFlushRangeAfter(fencePtsUs, requestedStartPtsUs, latestPtsUs)
                         : preRecordBuffer.beginFlushRange(requestedStartPtsUs, latestPtsUs);
                 if (cursor != null) {
                     videoPreRecordCursorAcquired = true;
@@ -3375,6 +3825,21 @@ public class HardwareEventRecorderGpu {
                     logger.info(String.format(
                         "Pre-record flush armed: %d packets (%.1f sec, %.1f MB) — streaming via cursor",
                         cursor.remaining(), preRecordDuration, flushBytes / 1024.0 / 1024.0));
+                    if (actualPreRecordDurationMs + PRE_RECORD_SHORTFALL_TOLERANCE_MS
+                            < Math.max(1, preRecordDurationSeconds) * 1000L) {
+                        long oldestPtsUs = preRecordBuffer.getOldestPtsUs();
+                        double heldSec = oldestPtsUs == Long.MIN_VALUE ? 0.0
+                                : Math.max(0L, latestPtsUs - oldestPtsUs) / 1_000_000.0;
+                        logger.warn(String.format(
+                            "Pre-record shortfall: %.1f s of %d s requested — history held %.1f s "
+                                + "(%d MB arena, encoding at %.1f Mbps%s)",
+                            preRecordDuration, Math.max(1, preRecordDurationSeconds), heldSec,
+                            preRecordBuffer.getBudgetBytes() / 1024 / 1024,
+                            bitrate / 1_000_000.0,
+                            fenced ? ", trimmed at ACC on" : ""));
+                    }
+                } else if (fenced) {
+                    logger.info("Pre-record flush skipped — no keyframe since ACC ON");
                 } else {
                     logger.warn("Pre-record flush skipped — no keyframe in buffer");
                 }
@@ -3403,19 +3868,17 @@ public class HardwareEventRecorderGpu {
                     logger.info("Audio pre-record flush skipped: no matching video cursor "
                         + "(" + audioPackets.size() + " ring packets discarded)");
                 } else if (audioTrackIndex >= 0 && !audioPackets.isEmpty()) {
-                    // Use the youngest ring packet's PTS as the time anchor
-                    // for the pre-record window. This avoids the
-                    // cross-process clock-domain assumption (daemon's
-                    // System.nanoTime() vs app's System.nanoTime() — same
-                    // kernel CLOCK_MONOTONIC backing on Android, but no
-                    // contractual guarantee).
-                    //
-                    // Ring is FIFO insertion order; pushAudioPacket sends
-                    // PTSs monotonically, so the last packet is the
-                    // youngest.
+                    // Audio spans the video pre-roll, which starts at the keyframe before the
+                    // requested window; the youngest packet (ring is FIFO) bounds it if clocks disagree.
                     long anchorPtsUs = audioPackets.get(audioPackets.size() - 1).ptsUs;
                     long minPtsUs = anchorPtsUs
                         - Math.max(1, preRecordDurationSeconds) * 1_000_000L;
+                    if (historyCursor != null) {
+                        long videoStartPtsUs = historyCursor.getStartPtsUs();
+                        long videoSpanUs = Math.max(0L, historyCursor.getEndPtsUs() - videoStartPtsUs);
+                        minPtsUs = Math.max(videoStartPtsUs,
+                            anchorPtsUs - videoSpanUs - AUDIO_PRE_ROLL_CLOCK_SLACK_US);
+                    }
                     java.util.List<AacCircularBuffer.Packet> filteredPackets =
                             new java.util.ArrayList<>(audioPackets.size());
                     int filtered = 0;
@@ -3429,7 +3892,8 @@ public class HardwareEventRecorderGpu {
                     stagedHistoryAudio = filteredPackets;
                     logger.info("Audio pre-record staged: " + filteredPackets.size()
                         + " packets, " + filtered + " filtered as out-of-window"
-                        + " (window=" + preRecordDurationSeconds + "s, anchor="
+                        + " (window=" + preRecordDurationSeconds + "s, from="
+                        + (anchorPtsUs - minPtsUs) / 1000 + "ms before anchor="
                         + anchorPtsUs + "us)");
                 } else if (!audioPackets.isEmpty()) {
                     // Audio enabled but no muxer track — packets discarded.
@@ -3451,12 +3915,14 @@ public class HardwareEventRecorderGpu {
             // second history write (the GL-watchdog crash this fixes).
             // flushInProgress stays true until the writer completes the job;
             // it remains the manual-replay mutual-exclusion signal.
+            boolean tlHistoryQueued = false;
             if (historyCursor != null) {
                 MuxerPacket historyJob = new MuxerPacket();
                 historyJob.historyCursor = historyCursor;
                 historyJob.historyAudio = stagedHistoryAudio;
                 flushInProgress = true;
                 if (muxerWriteQueue.offerFirst(historyJob)) {
+                    tlHistoryQueued = true;
                     // Queue owns the cursor from here (drains close it).
                     historyCursor = null;
                     stagedHistoryAudio = null;
@@ -3475,6 +3941,7 @@ public class HardwareEventRecorderGpu {
             }
             startTimeNs = System.nanoTime();
             segmentStartTime = System.currentTimeMillis();
+            try { com.overdrive.app.server.timeline.RecordingSpanHints.open(outputPath, null, segmentStartTime - (tlHistoryQueued ? actualPreRecordDurationMs : 0L)); } catch (Throwable ignored) { }
             segmentNumber = 0;
             segmentBasePath = outputPath.replaceAll("\\.mp4$", "");
             dropPendingSegmentMove();
@@ -3486,12 +3953,15 @@ public class HardwareEventRecorderGpu {
             // never mutate this one's engine state.
             rotationAwaitingSplice = false;
             pendingForceAudioVerify = false;
+            audioUpgradeRotationRequested = false;
             rotationInFlight.set(false);
             recordingGeneration++;
+            recordingSessionId++;
             synchronized (listenerEpochLock) {
                 listenerGeneration++;
             }
             awaitLiveMuxerKeyframe = true;
+            videoResyncPending = false;
             isWritingToFile = true;
             recording = true;
 
@@ -3542,12 +4012,15 @@ public class HardwareEventRecorderGpu {
                     try { muxer.release(); } catch (Exception ignored) {}
                     muxer = null;
                 }
+                SegmentJournal stale = takeJournalLocked();
+                if (stale != null) stale.abandon();
                 muxerStarted = false;
                 trackIndex = -1;
                 audioTrackIndex = -1;
             }
             if (tempFile != null && tempFile.exists()) tempFile.delete();
             tempFile = null;
+            try { com.overdrive.app.server.timeline.RecordingSpanHints.close(outputPath); } catch (Throwable ignored) { }
             isWritingToFile = false;
             recording = false;
             return false;
@@ -3912,13 +4385,20 @@ public class HardwareEventRecorderGpu {
         synchronized (muxerLock) {
             MuxerPacket packet;
             while ((packet = muxerWriteQueue.poll()) != null) {
+                // An unexecuted ROTATE ticket's frame is the reference for the
+                // leftovers behind it: keep it, in order, as a plain sample.
+                if (packet.trackKind == TRACK_KIND_ROTATE && packet.sessionId >= 0
+                        && packet.sessionId == recordingSessionId) {
+                    packet.trackKind = TRACK_KIND_VIDEO;
+                    packet.sessionId = -1;
+                    seg.leftovers.add(packet);
+                    continue;
+                }
                 // Control entries: a still-queued FLUSH_HISTORY job (instant
                 // stop right after trigger) has its cursor closed safely —
                 // writing multi-seconds of history on this close path is
-                // exactly the stall the job design avoids. An unexecuted
-                // ROTATE ticket is moot (we're closing): recycle it; the arm
-                // flags are cleared below alongside isWritingToFile. Without
-                // this check a ROTATE ticket would be muxed as a sample.
+                // exactly the stall the job design avoids. The arm flags are
+                // cleared below alongside isWritingToFile.
                 if (packet.isControl()) {
                     discardQueuedPacket(packet);
                     continue;
@@ -3934,12 +4414,19 @@ public class HardwareEventRecorderGpu {
             seg.audioTrackIndex = audioTrackIndex;
             seg.tempFile = tempFile;
             seg.outputPath = outputPath;
+            rememberLensTag(outputPath, segLensRawFrames > segLensOtherFrames);
             seg.segmentNumber = segmentNumber;
             seg.ptsOriginUs = ptsOriginUs;
             seg.lastSourcePtsUs = lastSourcePtsUs;
+            seg.lastSourceDrainUs = lastSourceDrainUs;
             seg.firstFramePtsUs = firstFramePtsUs;
             seg.lastFramePtsUs = lastFramePtsUs;
             seg.lastAudioPtsUs = lastAudioPtsUs;
+            AudioConfig segAudio = audioConfig;
+            if (segAudio != null) {
+                seg.audioSilence = AacGapFill.silentFrame(segAudio.csd0, segAudio.channelCount);
+                seg.audioSampleRate = segAudio.sampleRate;
+            }
             seg.recordedFrames = recordedFrames;
             // SNAPSHOT the abort verdict BEFORE the drainer restart below:
             // startDrainerThread starts a FRESH disk writer, and
@@ -3962,14 +4449,15 @@ public class HardwareEventRecorderGpu {
             // isWritingToFile is cleared under the lock so the format-change
             // handler can't reopen the muxer.
             awaitLiveMuxerKeyframe = false;
+            videoResyncPending = false;
             isWritingToFile = false;
+            try { com.overdrive.app.server.timeline.RecordingSpanHints.close(outputPath); } catch (Throwable ignored) { }
 
             // Writer-owned rotation teardown: kill any outstanding arm and
-            // invalidate ROTATE tickets. A ticket still queued was recycled
-            // by the drain above; a ticket the writer already dequeued (and
-            // is blocked holding) fails its generation re-check under this
-            // same lock and abandons. pendingForceAudioVerify dies with the
-            // recording.
+            // invalidate ROTATE tickets. A ticket still queued became a
+            // leftover in the drain above; a ticket the writer already
+            // dequeued fails its generation re-check and abandons.
+            // pendingForceAudioVerify dies with the recording.
             rotationAwaitingSplice = false;
             pendingForceAudioVerify = false;
             rotationInFlight.set(false);
@@ -3978,6 +4466,7 @@ public class HardwareEventRecorderGpu {
             // The muxer now belongs to the finalizer. Nulling the live
             // reference under the lock is what makes it safe to stop() it
             // off-lock later (same contract as the rotation swap).
+            seg.journal = takeJournalLocked();
             muxerStarted = false;
             muxer = null;
             trackIndex = -1;
@@ -3988,10 +4477,14 @@ public class HardwareEventRecorderGpu {
             // the finalizer works on its own copies and a successor trigger
             // may re-seed these fields before it finishes.
             recordedFrames = 0;
+            segLensRawFrames = 0;
+            segLensOtherFrames = 0;
+            lensCutPendingPts.set(Long.MIN_VALUE);
             firstFramePtsUs = -1;
             lastFramePtsUs = -1;
             ptsOriginUs = -1;
             lastSourcePtsUs = -1;
+            lastSourceDrainUs = -1;
             lastAudioPtsUs = -1L;
             segmentStartTime = 0;
             segmentNumber = 0;
@@ -4057,11 +4550,15 @@ public class HardwareEventRecorderGpu {
         final java.util.ArrayList<MuxerPacket> leftovers = new java.util.ArrayList<>();
         long ptsOriginUs = -1;
         long lastSourcePtsUs = -1;
+        long lastSourceDrainUs = -1;
         long firstFramePtsUs = -1;
         long lastFramePtsUs = -1;
         long lastAudioPtsUs = -1L;
+        byte[] audioSilence;   // null = no gap fill
+        int audioSampleRate;
         int recordedFrames;
         boolean aborted;
+        SegmentJournal journal;
         // elapsedRealtime (waitForFinalizers' clock) at which closeEventRecording() stops waiting.
         long joinDeadlineMs;
         com.overdrive.app.geo.GeoSnapshot startGeo;   // null = no start fix
@@ -4086,7 +4583,7 @@ public class HardwareEventRecorderGpu {
         }
         if (seg.lastSourcePtsUs >= 0) {
             long sourceGap = info.presentationTimeUs - seg.lastSourcePtsUs;
-            if (sourceGap < 0 || sourceGap > MAX_PLAUSIBLE_INTERFRAME_GAP_US) {
+            if (isPtsDiscontinuity(sourceGap, packet.drainUs, seg.lastSourceDrainUs)) {
                 long frameIntervalUs = seg.fps > 0 ? (1_000_000L / seg.fps) : 33_333L;
                 long targetRebased = (seg.lastFramePtsUs >= 0 ? seg.lastFramePtsUs : 0)
                         + frameIntervalUs;
@@ -4094,6 +4591,7 @@ public class HardwareEventRecorderGpu {
             }
         }
         seg.lastSourcePtsUs = info.presentationTimeUs;
+        seg.lastSourceDrainUs = packet.drainUs;
         long rebasedPts = info.presentationTimeUs - seg.ptsOriginUs;
         if (rebasedPts < 0) rebasedPts = 0;
         if (seg.firstFramePtsUs >= 0 && rebasedPts <= seg.lastFramePtsUs) {
@@ -4122,6 +4620,19 @@ public class HardwareEventRecorderGpu {
         final MediaCodec.BufferInfo info = packet.info;
         long rebasedPts = info.presentationTimeUs - seg.ptsOriginUs;
         if (rebasedPts < 0 || rebasedPts <= seg.lastAudioPtsUs) return false;
+        if (seg.audioSilence != null
+                && AacGapFill.hasGap(seg.lastAudioPtsUs, rebasedPts, seg.audioSampleRate)
+                && rebasedPts - Math.max(0L, seg.lastAudioPtsUs) <= AUDIO_GAP_FILL_MAX_US
+                && rebasedPts <= Math.max(0L, seg.lastFramePtsUs) + AUDIO_GAP_FILL_MAX_US) {
+            AacGapFill fill = new AacGapFill(seg.muxer, seg.audioTrackIndex, seg.audioSilence,
+                seg.audioSampleRate, seg.lastAudioPtsUs);
+            try {
+                fill.fillSilenceBefore(rebasedPts);
+            } catch (Exception ignored) {
+                // The packet itself is still written below.
+            }
+            seg.lastAudioPtsUs = fill.lastPtsUs;
+        }
         long absolutePts = info.presentationTimeUs;
         info.presentationTimeUs = rebasedPts;
         try {
@@ -4267,6 +4778,7 @@ public class HardwareEventRecorderGpu {
     }
 
     private void finalizeClosedSegment(final ClosingSegment seg) {
+        if (seg.journal != null) seg.journal.close();
         // 1. Leftover flush — the packets the disk writer had not yet written
         //    when it was stopped, plus the close path's bounded final drain.
         int flushed = 0;
@@ -4324,6 +4836,7 @@ public class HardwareEventRecorderGpu {
         //    "60 MB file that won't play" symptom.
         final File tempFile = seg.tempFile;
         final String outputPath = seg.outputPath;
+        try { com.overdrive.app.server.timeline.RecordingSpanHints.close(outputPath); } catch (Throwable ignored) { }
         final boolean recordingBroken = !stopOk || seg.aborted;
         if (tempFile != null && outputPath != null && tempFile.exists()) {
             if (!recordingBroken && seg.recordedFrames > 0 && tempFile.length() > 1024) {
@@ -4445,6 +4958,7 @@ public class HardwareEventRecorderGpu {
                 // StorageManager may not be initialised in every process.
             }
         }
+        SegmentJournal.deleteFor(tempFile);
     }
 
     /**
@@ -4602,25 +5116,6 @@ public class HardwareEventRecorderGpu {
         return lastEncodedFrameElapsedMs;
     }
 
-    /** Keep the first drive file closed until coded video arrives after ACC ON. */
-    public void requireFreshFrameForNextDriveClip() {
-        driveFrameBarrierMs.set(android.os.SystemClock.elapsedRealtime());
-        logger.info("ACC ON drive frame barrier armed");
-    }
-
-    /**
-     * Returns true while the first post-ACC cam_* file must wait for a new
-     * encoded frame. The caller can defer the start without reporting a
-     * storage write fault or creating an empty MP4.
-     */
-    public boolean isWaitingForFreshDriveFrame(String outputPath) {
-        long barrier = driveFrameBarrierMs.get();
-        return barrier > 0L
-                && outputPath != null
-                && new File(outputPath).getName().startsWith("cam_")
-                && lastEncodedFrameElapsedMs <= barrier;
-    }
-
     /**
      * @return wall-clock ms (System.currentTimeMillis) of the last VIDEO
      *         sample actually written to the muxer (disk). Seeded at segment
@@ -4744,6 +5239,9 @@ public class HardwareEventRecorderGpu {
                                     long startPtsUs, long endPtsUs,
                                     boolean allowStartTruncation) {
         if (outputProvider == null || startPtsUs > endPtsUs) return false;
+        final long tlExportWallMs = System.currentTimeMillis();
+        // Ring's newest PTS and the wall time read with it: anchors the replay's last frame.
+        final long[] tlRingNow = {Long.MIN_VALUE, 0L};
 
         final H264ByteRingBuffer.Cursor cursor;
         final MediaFormat videoFormat;
@@ -4768,6 +5266,10 @@ public class HardwareEventRecorderGpu {
                 if (reservationAcquiredHere) manualClipExportInProgress = false;
                 return false;
             }
+            try {
+                tlRingNow[0] = ring.getLatestPtsUs();
+                tlRingNow[1] = System.currentTimeMillis();
+            } catch (Throwable ignored) { }
 
             cursor = ring.beginStrongFlushRange(startPtsUs, endPtsUs);
             if (cursor == null) {
@@ -4831,6 +5333,8 @@ public class HardwareEventRecorderGpu {
             boolean tempOwned = false;
             boolean stopOk = false;
             int videoFrames = 0;
+            int replayLensRaw = 0;
+            int replayLensOther = 0;
             long firstVideoPtsUs = -1L;
             long lastVideoPtsUs = -1L;
             long lastSourceVideoPtsUs = -1L;
@@ -4881,6 +5385,8 @@ public class HardwareEventRecorderGpu {
                     long sourcePtsUs = info.presentationTimeUs;
                     if (firstVideoPtsUs < 0L) firstVideoPtsUs = sourcePtsUs;
                     lastVideoPtsUs = sourcePtsUs;
+                    if (lensRawAt(sourcePtsUs)) replayLensRaw++;
+                    else replayLensOther++;
                     long muxedPtsUs;
                     if (lastSourceVideoPtsUs < 0L) {
                         muxedPtsUs = 0L;
@@ -4906,11 +5412,22 @@ public class HardwareEventRecorderGpu {
                 if (complete && clipAudioTrack >= 0 && firstVideoPtsUs >= 0L) {
                     MediaCodec.BufferInfo audioInfo = new MediaCodec.BufferInfo();
                     long lastWrittenAudioPtsUs = -1L;
+                    AudioConfig clipAudio = audioConfig;
+                    AacGapFill clipFill = clipAudio == null ? null : new AacGapFill(clipMuxer,
+                        clipAudioTrack, AacGapFill.silentFrame(clipAudio.csd0, clipAudio.channelCount),
+                        clipAudio.sampleRate, -1L);
                     for (AacCircularBuffer.Packet packet : audioPackets) {
                         if (packet.ptsUs < firstVideoPtsUs || packet.ptsUs > lastVideoPtsUs) continue;
                         long rebasedPtsUs = packet.ptsUs - firstVideoPtsUs;
                         if (rebasedPtsUs <= lastWrittenAudioPtsUs) {
                             rebasedPtsUs = lastWrittenAudioPtsUs + 1L;
+                        }
+                        if (clipFill != null
+                                && AacGapFill.hasGap(lastWrittenAudioPtsUs, rebasedPtsUs, clipAudio.sampleRate)
+                                && rebasedPtsUs - Math.max(0L, lastWrittenAudioPtsUs) <= AUDIO_GAP_FILL_MAX_US) {
+                            clipFill.lastPtsUs = lastWrittenAudioPtsUs;
+                            clipFill.fillSilenceBefore(rebasedPtsUs);
+                            lastWrittenAudioPtsUs = clipFill.lastPtsUs;
                         }
                         ByteBuffer audioData = ByteBuffer.wrap(packet.data);
                         audioInfo.set(0, packet.data.length, rebasedPtsUs, 0);
@@ -4948,12 +5465,22 @@ public class HardwareEventRecorderGpu {
                 if (tempOwned) temp.delete();
                 return false;
             }
+            // Before the rename, so the index's first look at the file already has its start.
+            try {
+                long tlLastWall = tlRingNow[0] != Long.MIN_VALUE && tlRingNow[0] >= lastVideoPtsUs
+                        ? tlRingNow[1] - (tlRingNow[0] - lastVideoPtsUs) / 1000L : tlExportWallMs;
+                com.overdrive.app.server.timeline.RecordingSpanHints.record(outputFile.getName(), "replay", tlLastWall - (lastVideoPtsUs - firstVideoPtsUs) / 1000L);
+            } catch (Throwable ignored) { }
             if (!temp.renameTo(outputFile)) {
                 logger.warn("Could not finalize manual clip: " + outputFile.getAbsolutePath());
                 if (tempOwned) temp.delete();
                 return false;
             }
 
+            // No sidecar writer runs for replays: the tag goes on disk here.
+            boolean replayRaw = replayLensRaw > replayLensOther;
+            rememberLensTag(outputFile.getAbsolutePath(), replayRaw);
+            if (replayRaw) LensTag.writeSidecarIfAbsent(outputFile);
             double durationSec = lastMuxedVideoPtsUs > 0L
                     ? lastMuxedVideoPtsUs / 1_000_000.0 : 0.0;
             logger.info(String.format(Locale.US,
@@ -5061,6 +5588,8 @@ public class HardwareEventRecorderGpu {
         // restarted it; we want the FINAL stop to stick.
         drainerRestartSuppressed = true;
         boolean drainerExited = stopDrainerThread();
+        // No CPU frame may write into codec buffers past this point.
+        closeCpuInput();
         // Combined verdict: this stop's result AND the terminal latch. release()
         // can be the FIRST discovery of a wedge (nothing was recording, so the
         // recording-close escalation never ran) — escalate HERE rather than
@@ -5604,7 +6133,7 @@ public class HardwareEventRecorderGpu {
                                 // mux them.
                             } else {
                                 writeRebased(muxer, trackIndex,
-                                    packet.data, packet.info);
+                                    packet.data, packet.info, packet.drainUs);
                                 // PTS tracking handled inside writeRebased.
                                 recordedFrames++;
                                 // FIX (false-GREEN): a VIDEO sample actually
@@ -5951,6 +6480,7 @@ public class HardwareEventRecorderGpu {
         if (writerAbortedCorrupt && isWritingToFile) {
             logger.warn("Writer aborted — stopping recording, no rotation");
             awaitLiveMuxerKeyframe = false;
+            videoResyncPending = false;
             // Kill any outstanding rotation arm: the writer that would have
             // executed the ROTATE ticket is dead (a queued ticket is recycled
             // by the writer's own abort drain via discardQueuedPacket).
@@ -5979,6 +6509,7 @@ public class HardwareEventRecorderGpu {
                 }
             }
             isWritingToFile = false;
+            try { com.overdrive.app.server.timeline.RecordingSpanHints.close(outputPath); } catch (Throwable ignored) { }
             recording = false;
             dropPendingSegmentMove();  // this abort bypasses close, which would drop it
             // FIX (audit R2): also propagate the abort up to the wrapper so
@@ -6005,16 +6536,23 @@ public class HardwareEventRecorderGpu {
         }
         // Two-phase rotation liveness: an arm is outstanding but the splice
         // keyframe hasn't arrived (encoder hiccup / dropped setParameters).
-        // Re-request on a ROTATION_SYNC_REREQUEST_MS cadence. The ABSOLUTE
-        // deadline that downgrades the splice to any-video-packet is checked
-        // at capture time against rotationArmedAtMs, which never moves
-        // during an arm.
+        // Re-request on a ROTATION_SYNC_REREQUEST_MS cadence; the current
+        // segment keeps recording until a keyframe arrives.
         if (rotationAwaitingSplice && isWritingToFile
                 && rotationClockMs() - rotationLastSyncReqMs
                     > ROTATION_SYNC_REREQUEST_MS) {
             rotationLastSyncReqMs = rotationClockMs();
-            logger.warn("Rotation splice keyframe not seen in "
-                + ROTATION_SYNC_REREQUEST_MS + "ms — re-requesting sync frame");
+            logger.warn("Rotation splice keyframe not seen "
+                + (rotationLastSyncReqMs - rotationArmedAtMs)
+                + "ms after arming — re-requesting sync frame");
+            requestSyncFrame();
+        }
+        // Video resync after a refused frame: one paced sync request once the
+        // queue has room again, instead of waiting out the natural GOP.
+        if (videoResyncPending && isWritingToFile
+                && muxerWriteQueue.remainingCapacity() * 4 >= MUXER_WRITE_QUEUE_CAPACITY
+                && rotationClockMs() - lastResyncSyncReqMs >= RESYNC_SYNC_REQUEST_INTERVAL_MS) {
+            lastResyncSyncReqMs = rotationClockMs();
             requestSyncFrame();
         }
         // Natural rotation tick. Gated on !rotationInFlight so an armed /
@@ -6090,7 +6628,7 @@ public class HardwareEventRecorderGpu {
                     savedFormat = format;
                     String mime = format.getString(MediaFormat.KEY_MIME);
                     logger.info("Saved encoder format for reuse (codec=" +
-                        (mime != null && mime.contains("hevc") ? "H.265" : "H.264") + ")");
+                        (mime != null && mime.contains("hevc") ? "H.265" : "H.264") + ", " + width + "x" + height + ", sps level_idc=" + spsLevelIdc(format, mime) + ")");
 
                     // Notify any waiter (one-shot). This is the canonical
                     // moment isFormatAvailable() flips false→true.
@@ -6109,6 +6647,7 @@ public class HardwareEventRecorderGpu {
                             audioTrackIndex = maybeAddAudioTrack(muxer);
                             muxer.start();
                             muxerStarted = true;
+                            openJournalLocked(tempFile, format);
                             logger.info("Muxer started (videoTrack=" + trackIndex
                                 + ", audioTrack=" + audioTrackIndex + ")");
                         }
@@ -6166,6 +6705,8 @@ public class HardwareEventRecorderGpu {
                     // already filtered above).
                     lastEncodedFrameMs = System.currentTimeMillis();
                     lastEncodedFrameElapsedMs = android.os.SystemClock.elapsedRealtime();
+                    codedFrameCount++;
+                    dispatchFreshFrameListener();
                     // ALWAYS add to circular buffer (for pre-record) - unless stream-only mode
                     if (usePreRecordBuffer && preRecordBuffer != null) {
                         preRecordBuffer.add(outputBuffer, bufferInfo);
@@ -6203,67 +6744,64 @@ public class HardwareEventRecorderGpu {
                         boolean isKeyFrame = (bufferInfo.flags
                                 & MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0;
                         // WRITER-OWNED ROTATION splice capture: an armed
-                        // rotation consumes this frame as the ROTATE ticket's
-                        // payload (swap command + the new segment's first
-                        // sample in ONE queue entry) instead of enqueueing it
-                        // as an ordinary packet. Keyframe preferred; past the
-                        // hard deadline ANY video frame is accepted so an
-                        // encoder that ignores sync-frame requests cannot
-                        // grow the segment without bound. Gated on
+                        // rotation consumes the next KEYFRAME as the ROTATE
+                        // ticket's payload (swap command + the new segment's
+                        // first sample in ONE queue entry) instead of
+                        // enqueueing it as an ordinary packet. Gated on
                         // diskWriterRunning: closeEventRecording runs this
                         // drain loop on the CLOSE thread after the writer
-                        // stopped — a ticket queued then would never execute
-                        // and would just be discarded by close's final flush.
+                        // stopped — a ticket queued then would never execute.
                         boolean spliceCaptured = false;
-                        if (rotationAwaitingSplice && !awaitLiveMuxerKeyframe
+                        if (rotationAwaitingSplice && isKeyFrame && !awaitLiveMuxerKeyframe
                                 && diskWriterRunning) {
-                            boolean deadlineHit = rotationClockMs()
-                                - rotationArmedAtMs > ROTATION_SPLICE_DEADLINE_MS;
-                            if (isKeyFrame || deadlineHit) {
-                                MuxerPacket rot = acquireMuxerPacket(bufferInfo.size);
-                                fillMuxerPacket(rot, outputBuffer, bufferInfo);
-                                rot.trackKind = TRACK_KIND_ROTATE;
-                                rot.rotateGeneration = recordingGeneration;
-                                if (offerControlToQueue(rot)) {
-                                    // Ownership of the arm transfers to the
-                                    // queued ticket; the disk writer (or a
-                                    // teardown drain) settles the gate.
-                                    rotationAwaitingSplice = false;
-                                    spliceCaptured = true;
-                                    if (!isKeyFrame) {
-                                        logger.warn("Rotation splice deadline ("
-                                            + ROTATION_SPLICE_DEADLINE_MS + "ms) hit"
-                                            + " without a keyframe — splicing on a"
-                                            + " P-frame (degraded start); re-requesting"
-                                            + " sync frame to bound the window");
-                                        requestSyncFrame();
-                                    }
-                                } else {
-                                    // Admission failed even with eviction
-                                    // (all-control queue — practically
-                                    // unreachable). Keep the arm; the next
-                                    // video packet retries.
-                                    releaseMuxerPacket(rot);
-                                }
+                            MuxerPacket rot = acquireMuxerPacket(bufferInfo.size);
+                            fillMuxerPacket(rot, outputBuffer, bufferInfo);
+                            rot.trackKind = TRACK_KIND_ROTATE;
+                            rot.rotateGeneration = recordingGeneration;
+                            rot.sessionId = recordingSessionId;
+                            if (offerControlToQueue(rot)) {
+                                // Ownership of the arm transfers to the
+                                // queued ticket; the disk writer (or a
+                                // teardown drain) settles the gate.
+                                rotationAwaitingSplice = false;
+                                spliceCaptured = true;
+                                videoResyncPending = false;
+                            } else {
+                                // Full queue with no audio to displace: keep
+                                // the arm; the frame is offered as an
+                                // ordinary packet below.
+                                releaseMuxerPacket(rot);
                             }
                         }
-                        if (!spliceCaptured && (!awaitLiveMuxerKeyframe || isKeyFrame)) {
+                        boolean videoGated = awaitLiveMuxerKeyframe || videoResyncPending;
+                        if (!spliceCaptured && (!videoGated || isKeyFrame)) {
                             MuxerPacket mp = acquireMuxerPacket(bufferInfo.size);
                             fillMuxerPacket(mp, outputBuffer, bufferInfo);
                             boolean admitted = offerMuxerPacket(mp);
-                            if (awaitLiveMuxerKeyframe && admitted) {
-                                // Enqueue FIRST, then clear the gate — NO
-                                // muxerLock (pre-record/slow-SD fix): taking
-                                // muxerLock here parked the codec-drain loop
-                                // behind the writer's blocking writeSampleData
-                                // on slow SD cards. FIFO ordering makes the
-                                // lock unnecessary: any audio admitted after
-                                // this gate-clear lands BEHIND the IDR already
-                                // in the queue; audio racing the clear still
-                                // observes the gate and is dropped (same as
-                                // before).
-                                awaitLiveMuxerKeyframe = false;
+                            if (admitted) {
+                                if (awaitLiveMuxerKeyframe) {
+                                    // Enqueue FIRST, then clear the gate — NO
+                                    // muxerLock (pre-record/slow-SD fix): taking
+                                    // muxerLock here parked the codec-drain loop
+                                    // behind the writer's blocking writeSampleData
+                                    // on slow SD cards. FIFO ordering makes the
+                                    // lock unnecessary: any audio admitted after
+                                    // this gate-clear lands BEHIND the IDR already
+                                    // in the queue; audio racing the clear still
+                                    // observes the gate and is dropped (same as
+                                    // before).
+                                    awaitLiveMuxerKeyframe = false;
+                                }
+                                if (isKeyFrame) {
+                                    videoResyncPending = false;
+                                }
+                            } else if (!awaitLiveMuxerKeyframe) {
+                                // Later P-frames reference the refused frame:
+                                // skip video until a keyframe is admitted.
+                                videoResyncPending = true;
                             }
+                        } else if (!spliceCaptured && videoResyncPending) {
+                            noteQueueDrop(TRACK_KIND_VIDEO);
                         }
                     }
                     
@@ -6317,7 +6855,7 @@ public class HardwareEventRecorderGpu {
     }
 
     /**
-     * Monotonic clock for the rotation arm/deadline timers. Package-private
+     * Monotonic clock for the rotation arm and sync re-request timers. Package-private
      * seam so unit tests can override it (the android.jar stub for
      * SystemClock throws in the JVM harness). Production behavior is exactly
      * {@code SystemClock.elapsedRealtime()}.
@@ -6359,7 +6897,7 @@ public class HardwareEventRecorderGpu {
         }
         // MONOTONIC clock (elapsedRealtime), not wall time: a GPS/NTP clock
         // correction stepping the wall clock backward must not postpone the
-        // splice deadline or the re-request cadence.
+        // re-request cadence.
         long now = rotationClockMs();
         rotationArmedAtMs = now;
         rotationLastSyncReqMs = now;
@@ -6387,7 +6925,9 @@ public class HardwareEventRecorderGpu {
      * as) the active write target and the drainer tick re-arms after
      * {@link #ROTATION_RETRY_BACKOFF_MS}.
      *
-     * <p>Always consumes the ticket (payload back to the pool). Clears
+     * <p>Always consumes the ticket (payload back to the pool). A ticket
+     * whose swap does not commit has its frame written to the segment it was
+     * cut from, which stays the target of the frames queued behind it. Clears
      * {@link #rotationInFlight} on every path except a stale-generation
      * ticket, where the arm flags are left untouched because they belong to
      * the successor recording (close already cleared the stale arm).
@@ -6402,8 +6942,9 @@ public class HardwareEventRecorderGpu {
             // gate latched forever.
             logger.error("Writer-side rotation failed unexpectedly: " + t.getMessage(), t);
             rotationInFlight.set(false);
-            try { releaseMuxerPacket(ticket); } catch (Throwable ignored) {}
         } finally {
+            try { writeTicketToItsSegment(ticket); } catch (Throwable ignored) {}
+            try { releaseMuxerPacket(ticket); } catch (Throwable ignored) {}
             SegmentMove move = takenSegmentMove;
             if (move != null) {
                 takenSegmentMove = null;
@@ -6412,15 +6953,40 @@ public class HardwareEventRecorderGpu {
         }
     }
 
+    /**
+     * Writes an unspliced ticket's frame into the live muxer, where the frames
+     * queued behind it go, as long as that is still the ticket's recording.
+     */
+    private void writeTicketToItsSegment(MuxerPacket ticket) {
+        if (ticket.sessionId < 0) return;
+        synchronized (muxerLock) {
+            if (ticket.sessionId != recordingSessionId || !muxerStarted || muxer == null
+                    || !isWritingToFile || trackIndex < 0 || ticket.data == null) {
+                ticket.sessionId = -1;
+                return;
+            }
+            try {
+                ticket.rewindForWrite();
+                writeRebased(muxer, trackIndex, ticket.data, ticket.info, ticket.drainUs);
+                recordedFrames++;
+                lastDiskWrittenMs = System.currentTimeMillis();
+            } catch (Exception e) {
+                logger.warn("Splice frame write to the continuing segment failed: "
+                    + e.getMessage());
+            } finally {
+                ticket.sessionId = -1;
+            }
+        }
+    }
+
     private void handleWriterRotatePacketInner(MuxerPacket ticket) {
         // Stale ticket from a previous recording (close + retrigger while the
-        // writer was blocked with this ticket already dequeued): drop the
-        // payload and DO NOT touch the arm flags — any current arm state
-        // belongs to the successor recording.
+        // writer was blocked with this ticket already dequeued): DO NOT touch
+        // the arm flags — any current arm state belongs to the successor
+        // recording.
         if (ticket.rotateGeneration != recordingGeneration) {
             logger.warn("Stale ROTATE ticket discarded (gen " + ticket.rotateGeneration
                 + " != live " + recordingGeneration + ")");
-            releaseMuxerPacket(ticket);
             return;
         }
         if (!isWritingToFile) {
@@ -6428,7 +6994,6 @@ public class HardwareEventRecorderGpu {
             // Same generation ⇒ this ticket's own arm is the one being
             // abandoned, so clearing the gate is safe.
             rotationInFlight.set(false);
-            releaseMuxerPacket(ticket);
             return;
         }
 
@@ -6474,7 +7039,7 @@ public class HardwareEventRecorderGpu {
             } else {
                 logger.error("Cannot rotate: savedFormat is null (encoder hasn't published format)");
                 try { newMuxer.release(); } catch (Exception ignored) {}
-                abortRotationKeepOldSegment(ticket, newTempFile, move == null);
+                abortRotationKeepOldSegment(newTempFile, move == null);
                 return;
             }
         } catch (Exception e) {
@@ -6493,7 +7058,7 @@ public class HardwareEventRecorderGpu {
                     // StorageManager may not be initialised in every process.
                 }
             }
-            abortRotationKeepOldSegment(ticket, newTempFile, move == null);
+            abortRotationKeepOldSegment(newTempFile, move == null);
             return;
         }
 
@@ -6505,12 +7070,16 @@ public class HardwareEventRecorderGpu {
         // muxer. Nothing is dropped at the seam.
         final MediaMuxer oldMuxer;
         final int oldRecordedFrames;
+        final int oldLensRawFrames;
+        final int oldLensOtherFrames;
         final long oldFirstPtsUs;
         final long oldLastPtsUs;
         final long listenerGenAtCommit;
         final SegmentListener listenerAtCommit;
         final com.overdrive.app.geo.GeoSnapshot closedGeoAtCommit;
-        final boolean spliceWasKeyframe = ticket.isKeyFrame();
+        SegmentJournal retiredJournal;
+        File retiredPendingTmp;
+        MediaFormat retiredPendingFormat;
         synchronized (muxerLock) {
             // COMMIT-POINT CAPTURE for the finalizer's callback fencing —
             // taken BEFORE the liveness re-check below, deliberately. The
@@ -6560,7 +7129,6 @@ public class HardwareEventRecorderGpu {
                     // abandoned; a stale ticket's flags belong to a successor.
                     rotationInFlight.set(false);
                 }
-                releaseMuxerPacket(ticket);
                 return;
             }
 
@@ -6571,12 +7139,15 @@ public class HardwareEventRecorderGpu {
             // new segment.
             oldMuxer = muxer;
             oldRecordedFrames = recordedFrames;
+            oldLensRawFrames = segLensRawFrames;
+            oldLensOtherFrames = segLensOtherFrames;
             oldFirstPtsUs = firstFramePtsUs;
             oldLastPtsUs = lastFramePtsUs;
             final int oldTrackIndexStash = trackIndex;
             final int oldAudioTrackIndexStash = audioTrackIndex;
             final long oldPtsOriginUs = ptsOriginUs;
             final long oldLastSourcePtsUs = lastSourcePtsUs;
+            final long oldLastSourceDrainUs = lastSourceDrainUs;
             final long oldLastAudioPtsUs = lastAudioPtsUs;
             final long oldSegmentStartTime = segmentStartTime;
             final long oldLastDiskWrittenMs = lastDiskWrittenMs;
@@ -6645,7 +7216,7 @@ public class HardwareEventRecorderGpu {
                 closedStartGeoAgeMs = prevClosedGeoAgeMs;
                 closedStartGeoCapturedAtMs = prevClosedGeoCapturedAtMs;
                 try { newMuxer.release(); } catch (Exception ignored) {}
-                abortRotationKeepOldSegment(ticket, newTempFile, move == null);
+                abortRotationKeepOldSegment(newTempFile, move == null);
                 return;
             }
 
@@ -6661,15 +7232,24 @@ public class HardwareEventRecorderGpu {
             outputPath = newPath;
             segmentNumber++;  // committed with the swap; rollback decrements
             recordedFrames = 0;
+            segLensRawFrames = 0;
+            segLensOtherFrames = 0;
             firstFramePtsUs = -1;
             lastFramePtsUs = -1;
             ptsOriginUs = -1;
             lastSourcePtsUs = -1;
+            lastSourceDrainUs = -1;
             lastAudioPtsUs = -1L;
             // Re-seed the disk-write clock on rotation so the new segment
             // gets a fresh grace window (mirrors the trigger-open seed).
             lastDiskWrittenMs = System.currentTimeMillis();
             segmentStartTime = System.currentTimeMillis();
+            retiredJournal = activeJournal;
+            retiredPendingTmp = journalPendingTmp;
+            retiredPendingFormat = journalPendingFormat;
+            activeJournal = null;
+            journalPendingTmp = newAudioTrackIndex < 0 ? newTempFile : null;
+            journalPendingFormat = journalPendingTmp != null ? savedFormat : null;
 
             // First write: the carried splice frame becomes the new file's
             // first sample. writeRebased THROWS on failure — roll the entire
@@ -6677,7 +7257,12 @@ public class HardwareEventRecorderGpu {
             // still un-stopped) and the old segment continues.
             try {
                 ticket.rewindForWrite();
-                writeRebased(muxer, trackIndex, ticket.data, ticket.info);
+                writeRebased(muxer, trackIndex, ticket.data, ticket.info, ticket.drainUs);
+                long lensCut = lensCutPendingPts.get();
+                if (lensCut != Long.MIN_VALUE && ticket.info.presentationTimeUs >= lensCut) {
+                    lensCutPendingPts.compareAndSet(lensCut, Long.MIN_VALUE);
+                }
+                ticket.sessionId = -1;  // spliced: the frame now belongs to the new segment
                 recordedFrames = 1;
                 lastDiskWrittenMs = System.currentTimeMillis();
                 if (movedBasePath != null) {
@@ -6695,10 +7280,13 @@ public class HardwareEventRecorderGpu {
                 outputPath = oldOutputPath;
                 segmentNumber--;  // back out the swap-committed bump
                 recordedFrames = oldRecordedFrames;
+                segLensRawFrames = oldLensRawFrames;
+                segLensOtherFrames = oldLensOtherFrames;
                 firstFramePtsUs = oldFirstPtsUs;
                 lastFramePtsUs = oldLastPtsUs;
                 ptsOriginUs = oldPtsOriginUs;
                 lastSourcePtsUs = oldLastSourcePtsUs;
+                lastSourceDrainUs = oldLastSourceDrainUs;
                 lastAudioPtsUs = oldLastAudioPtsUs;
                 segmentStartTime = oldSegmentStartTime;
                 lastDiskWrittenMs = oldLastDiskWrittenMs;
@@ -6712,20 +7300,29 @@ public class HardwareEventRecorderGpu {
                 closedStartGeoAccuracy = prevClosedGeoAccuracy;
                 closedStartGeoAgeMs = prevClosedGeoAgeMs;
                 closedStartGeoCapturedAtMs = prevClosedGeoCapturedAtMs;
+                if (activeJournal != null) activeJournal.abandon();
+                activeJournal = retiredJournal;
+                journalPendingTmp = retiredPendingTmp;
+                journalPendingFormat = retiredPendingFormat;
                 try { newMuxer.stop(); } catch (Exception ignored) {}
                 try { newMuxer.release(); } catch (Exception ignored) {}
-                abortRotationKeepOldSegment(ticket, newTempFile, move == null);
+                abortRotationKeepOldSegment(newTempFile, move == null);
                 return;
             }
         }
+        if (retiredJournal != null) retiredJournal.close();
 
         // Swap committed. Release the gate BEFORE the housekeeping below so
         // an exception in finalize/verify can never latch rotation shut.
         rotationInFlight.set(false);
-        releaseMuxerPacket(ticket);
+        // Splice frame's capture time: the writer runs behind by any SD backlog.
+        try {
+            com.overdrive.app.server.timeline.RecordingSpanHints.close(oldOutputPath);
+            long tlBacklogMs = ticket.drainUs > 0 ? Math.max(0L, System.nanoTime() / 1000L - ticket.drainUs) / 1000L : 0L;
+            com.overdrive.app.server.timeline.RecordingSpanHints.open(newPath, null, System.currentTimeMillis() - tlBacklogMs);
+        } catch (Throwable ignored) { }
         logger.info("Segment " + segmentNumber + " started: " + newTempFile.getName()
-            + (spliceWasKeyframe ? " (keyframe splice)"
-                                 : " (deadline splice — P-frame lead)"));
+            + " (keyframe splice)");
         if (move != null) {
             logger.info("Segment " + segmentNumber + " moved to " + newTempFile.getParent());
         }
@@ -6737,6 +7334,7 @@ public class HardwareEventRecorderGpu {
         // Snapshot writerAbortedCorrupt at rotation time (audit Finding R2:
         // the live volatile is shared across all in-flight finalizers; a
         // later transient hiccup must not poison this fine segment).
+        rememberLensTag(oldOutputPath, oldLensRawFrames > oldLensOtherFrames);
         finalizeOldSegmentAsync(oldMuxer, oldTemp, oldOutputPath,
                 oldSegmentNumber, oldRecordedFrames, oldFirstPtsUs, oldLastPtsUs,
                 writerAbortedCorrupt, new File(newPath),
@@ -6759,16 +7357,16 @@ public class HardwareEventRecorderGpu {
     /**
      * Common cleanup for a failed writer-side rotation where the OLD segment
      * remains (or was restored as) the active write target. Deletes the
-     * orphan tmp, releases the ticket payload to the pool, clears the
-     * rotation gate, and (optionally) pushes the drainer's re-arm out by
+     * orphan tmp, clears the rotation gate (the ticket's frame goes to the
+     * old segment via handleWriterRotatePacket), and (optionally) pushes the
+     * drainer's re-arm out by
      * {@link #ROTATION_RETRY_BACKOFF_MS} — field logs showed rotation
      * retries spinning at drainer-tick cadence during an SD stall without
      * this. segmentNumber is NOT touched here: the bump commits with the
      * swap, and only the first-write rollback (which restores the pre-swap
      * state inline) backs it out.
      */
-    private void abortRotationKeepOldSegment(MuxerPacket ticket, File newTempFile,
-                                             boolean applyBackoff) {
+    private void abortRotationKeepOldSegment(File newTempFile, boolean applyBackoff) {
         if (newTempFile != null && newTempFile.exists()) {
             try { newTempFile.delete(); } catch (Throwable ignored) {}
         }
@@ -6777,7 +7375,6 @@ public class HardwareEventRecorderGpu {
                 + ROTATION_RETRY_BACKOFF_MS;
         }
         rotationInFlight.set(false);
-        releaseMuxerPacket(ticket);
     }
 
     /**
@@ -6900,6 +7497,7 @@ public class HardwareEventRecorderGpu {
             // during this finalizer's stop() would also poison the next
             // finalizer's perfectly-fine segment. (Audit Finding R2.)
             boolean segmentBroken = !stopOk || wasAbortedAtRotation;
+            try { com.overdrive.app.server.timeline.RecordingSpanHints.close(oldOutputPath); } catch (Throwable ignored) { }
             File finalisedSegment = null;
             if (oldTemp != null && oldTemp.exists()) {
                 if (!segmentBroken && oldRecordedFrames > 0 && oldTemp.length() > 1024) {
@@ -6990,6 +7588,7 @@ public class HardwareEventRecorderGpu {
                     // StorageManager may not be initialised in every process.
                 }
             }
+            SegmentJournal.deleteFor(oldTemp);
 
             // Notify the engine after the rename so consumers can read the
             // finalised file. COMMIT-POINT listener + OWNERSHIP FENCE +
@@ -7180,6 +7779,9 @@ public class HardwareEventRecorderGpu {
                 logger.warn("Purged " + purged + " stale queued packet(s) from "
                     + "the aborted recording before starting the successor");
             }
+            SegmentJournal abandoned = takeJournalLocked();
+            if (abandoned != null) abandoned.abandon();
+            try { com.overdrive.app.server.timeline.RecordingSpanHints.close(outputPath); } catch (Throwable ignored) { }
             if (muxer == null) {
                 return;
             }
@@ -7390,7 +7992,8 @@ public class HardwareEventRecorderGpu {
         if (!directory.exists() || !directory.isDirectory()) return;
 
         File[] orphans = directory.listFiles((dir, name) ->
-                name.endsWith(".tmp") || name.endsWith(".broken"));
+                name.endsWith(".tmp") || name.endsWith(".broken")
+                        || name.endsWith(SegmentJournal.SUFFIX));
         if (orphans == null) {
             // FUSE-bridged SD/USB returns null under daemon UID 2000. Without this
             // fallback the external dir is skipped and .tmp/.broken partials pile up
@@ -7403,6 +8006,8 @@ public class HardwareEventRecorderGpu {
                 java.util.List<File> merged = new java.util.ArrayList<>();
                 java.util.Collections.addAll(merged, sm.listFilesWithFallback(directory, ".tmp"));
                 java.util.Collections.addAll(merged, sm.listFilesWithFallback(directory, ".broken"));
+                java.util.Collections.addAll(merged,
+                        sm.listFilesWithFallback(directory, SegmentJournal.SUFFIX));
                 orphans = merged.toArray(new File[0]);
             } catch (Throwable t) {
                 logger.warn("cleanupOrphanedTmpFiles: shell fallback failed for "
@@ -7423,6 +8028,13 @@ public class HardwareEventRecorderGpu {
         for (File f : orphans) {
             // A clip may wait under a FAT32 relief name (OD??????.TMP); StorageManager removes those itself.
             if (relief != null && relief.isFolderReliefHopFile(f)) continue;
+            String name = f.getName();
+            if (SegmentRecovery.isPending(f)) continue;
+            if (name.endsWith(SegmentJournal.SUFFIX)
+                    && new File(f.getPath().substring(0,
+                            f.getPath().length() - SegmentJournal.SUFFIX.length())).exists()) {
+                continue;  // goes with its .mp4.tmp
+            }
             long age = now - f.lastModified();
             if (age > 5 * 60 * 1000) { // Older than 5 minutes
                 long size = f.length();
@@ -7432,6 +8044,9 @@ public class HardwareEventRecorderGpu {
                     // way listFiles() does — fall back to a shell rm so the partial
                     // is actually freed.
                     ok = deleteViaShell(f);
+                }
+                if (ok && name.endsWith(".mp4.tmp")) {
+                    SegmentJournal.deleteFor(f);
                 }
                 if (ok) {
                     anyDeleted = true;
@@ -7633,5 +8248,41 @@ public class HardwareEventRecorderGpu {
             }
         }
         return freed;
+    }
+
+    /** level_idc the encoder wrote into its SPS (AVC 10×level, HEVC 30×level); -1 if unreadable. */
+    private static int spsLevelIdc(MediaFormat format, String mime) {
+        try {
+            ByteBuffer csd = format.getByteBuffer("csd-0");
+            return csd == null ? -1 : parseSpsLevelIdc(csd, mime != null && mime.contains("hevc"));
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    static int parseSpsLevelIdc(ByteBuffer csd, boolean hevc) {
+        ByteBuffer b = csd.duplicate();
+        byte[] a = new byte[b.remaining()];
+        b.get(a);
+        int n = a.length;
+        for (int i = 0; i + 3 < n; i++) {
+            if (a[i] != 0 || a[i + 1] != 0 || a[i + 2] != 1) continue;
+            int h = i + 3;
+            int type = hevc ? (a[h] >> 1) & 0x3F : a[h] & 0x1F;
+            if (type != (hevc ? 33 : 7)) continue;
+            // level_idc byte index in the unescaped NAL: AVC 3; HEVC 14 (2-byte header + 12 PTL bytes).
+            int want = hevc ? 14 : 3;
+            int zeros = 0;
+            int k = 0;
+            for (int j = h; j < n; j++) {
+                int v = a[j] & 0xFF;
+                if (zeros >= 2 && v == 3) { zeros = 0; continue; }
+                if (k == want) return v;
+                zeros = v == 0 ? zeros + 1 : 0;
+                k++;
+            }
+            return -1;
+        }
+        return -1;
     }
 }

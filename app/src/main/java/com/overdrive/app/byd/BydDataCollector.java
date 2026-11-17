@@ -159,6 +159,7 @@ public class BydDataCollector {
     private volatile Boolean acChargingCurrentLimitSupported;
     private static final int DILINK5_PRESSURE_UNIT_FEATURE_ID = 4208;
     private static final long DILINK5_TYRE_MAX_AGE_MS = 15_000L;
+    // Tyre temperature changes slowly and DI5 reports it only one wheel at a time, so a reading stays usable longer.
     private static final long DILINK5_TYRE_TEMPERATURE_MAX_AGE_MS = 600_000L;
     private static final long DILINK5_COMMAND_CONFIRM_TIMEOUT_MS = 2_500L;
     private volatile int dilink5PressureUnit = BydVehicleData.UNAVAILABLE;
@@ -380,7 +381,7 @@ public class BydDataCollector {
 
     private BydDataCollector() {}
 
-    public static boolean isDiLink5Vehicle() {
+    private static boolean isDiLink5Vehicle() {
         return com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();
     }
 
@@ -640,30 +641,12 @@ public class BydDataCollector {
         BydVehicleData current = snapshot.get();
         if (!isDiLink5BridgeConsumer()) return current;
         long nowElapsed = SystemClock.elapsedRealtime();
-        boolean bridgeFresh = isDiLink5AutomationSnapshotFresh(nowElapsed, diLink5BridgeReceivedAtElapsedMs);
-        if (!bridgeFresh) {
-            return withDiLink5CarSvcDaemonOverlay(
-                    withDiLink5CarSvcCpd(
-                            withDiLink5CarSvcSoc(clearStaleDiLink5VehicleFields(current), nowElapsed)),
-                    nowElapsed,
-                    false);
+        if (!isDiLink5AutomationSnapshotFresh(nowElapsed, diLink5BridgeReceivedAtElapsedMs)) {
+            return withDiLink5CarSvcCpd(
+                    withDiLink5CarSvcSoc(clearStaleDiLink5VehicleFields(current), nowElapsed));
         }
-        return withDiLink5CarSvcDaemonOverlay(
-                withDiLink5CarSvcCpd(current != null && !isUsablePolledSoc(current.socPercent, true)
-                        ? withDiLink5CarSvcSoc(current, nowElapsed) : current),
-                nowElapsed,
-                true);
-    }
-
-    private BydVehicleData withDiLink5CarSvcDaemonOverlay(
-            BydVehicleData data, long nowElapsedMs, boolean bridgeFresh) {
-        if (data == null) return null;
-        int fallbackLock = bridgeFresh
-                && (diLink5DoorLockState == DOOR_STATE_UNLOCK || diLink5DoorLockState == DOOR_STATE_LOCK)
-                        ? diLink5DoorLockState
-                        : BydVehicleData.UNAVAILABLE;
-        return CarSvcTelemetry.applyCachedDaemonOverlay(
-                data, nowElapsedMs, DILINK5_CARSVC_CHARGING_MAX_AGE_MS, fallbackLock);
+        return withDiLink5CarSvcCpd(current != null && !isUsablePolledSoc(current.socPercent, true)
+                ? withDiLink5CarSvcSoc(current, nowElapsed) : current);
     }
 
     /**
@@ -3239,6 +3222,39 @@ public class BydDataCollector {
     }
 
     /**
+     * Cluster warning lamps on legacy (non-DiLink 5) cars, read on demand: field name to the raw
+     * result (1 = on, 0 = off). {@code MALFUNCTION_*} use {@code getMalfunctionInfo};
+     * {@code B_MALFUNCTION_*} use {@code getMalfunctionInfo2}, the table that covers ADAS,
+     * brakes and lights (on DiLink 3 the first table's ADAS types are dead ids, always -10011).
+     * Names or getters this firmware doesn't expose are left out.
+     */
+    public java.util.Map<String, Integer> readMalfunctionLamps(String... fieldNames) {
+        java.util.LinkedHashMap<String, Integer> out = new java.util.LinkedHashMap<>();
+        Object device = instrumentDevice;
+        if (device == null || isDiLink5Vehicle()) return out;
+        java.lang.reflect.Method lampGetter = null;
+        java.lang.reflect.Method faultGetter = null;
+        try {
+            lampGetter = device.getClass().getMethod("getMalfunctionInfo", int.class);
+        } catch (Throwable ignored) { }
+        try {
+            faultGetter = device.getClass().getMethod("getMalfunctionInfo2", int.class);
+        } catch (Throwable ignored) { }
+        for (String name : fieldNames) {
+            java.lang.reflect.Method getter = name.startsWith("B_MALFUNCTION_") ? faultGetter : lampGetter;
+            if (getter == null) continue;
+            try {
+                int type = device.getClass().getField(name).getInt(null);
+                Object value = getter.invoke(device, type);
+                if (value instanceof Integer) out.put(name, (Integer) value);
+            } catch (Throwable ignored) {
+                // Not on this firmware: reported as unavailable, never as clear.
+            }
+        }
+        return out;
+    }
+
+    /**
      * Detect the raw distance and speed unit contracts exposed by this firmware.
      *
      * <p>Known mappings:
@@ -3328,6 +3344,11 @@ public class BydDataCollector {
      */
     public double getRawDistanceToKmFactor() {
         return distanceHwUnitDetected ? distanceHwFactor : distanceToKmFactor;
+    }
+
+    /** True once the cluster itself reported its distance unit. */
+    public boolean isRawDistanceUnitDetected() {
+        return distanceHwUnitDetected;
     }
 
     /**
@@ -4185,6 +4206,55 @@ public class BydDataCollector {
     /** The ADAS handle as it is, without the re-acquire (and its warning) a missing one triggers. */
     Object adasDeviceIfAny() {
         return adasDevice;
+    }
+
+    /** Debug (read-only): raw reads of every SLW/ISLA status id this firmware declares, plus the two polled ids. */
+    public org.json.JSONObject dumpSpeedLimitWarningRaw() {
+        org.json.JSONObject out = new org.json.JSONObject();
+        try {
+            Object device = adasDevice;
+            out.put("adasDevice", device != null);
+            out.put("polledSlwId", BydFeatureIds.ADAS_SLW_FUNC_SWITCH_STATE);
+            out.put("polledIslaId", BydFeatureIds.ADAS_ISLA_SWITCH_STATUS);
+            if (device != null) {
+                out.put("polledSlwRaw", BydDeviceHelper.callGetSingle(device, BydFeatureIds.ADAS_SLW_FUNC_SWITCH_STATE));
+                out.put("polledIslaRaw", BydDeviceHelper.callGetSingle(device, BydFeatureIds.ADAS_ISLA_SWITCH_STATUS));
+            }
+            BydVehicleData data = getData();
+            if (data != null) {
+                out.put("speedLimitWarning", data.speedLimitWarning);
+                out.put("speedLimitWarningKnown", data.speedLimitWarningKnown);
+            }
+            Class<?> adas = null;
+            for (Class<?> inner : Class.forName("android.hardware.bydauto.BYDAutoFeatureIds").getDeclaredClasses()) {
+                if ("Adas".equals(inner.getSimpleName())) {
+                    adas = inner;
+                    break;
+                }
+            }
+            out.put("adasClassFound", adas != null);
+            org.json.JSONArray ids = new org.json.JSONArray();
+            if (adas != null) {
+                for (java.lang.reflect.Field field : adas.getFields()) {
+                    String name = field.getName();
+                    if (field.getType() != int.class || !(name.contains("SLW") || name.contains("ISLA"))) continue;
+                    int id = field.getInt(null);
+                    org.json.JSONObject row = new org.json.JSONObject().put("name", name).put("id", id)
+                            .put("hex", "0x" + Integer.toHexString(id));
+                    // Setter ids are listed but never read.
+                    if (device != null && !name.endsWith("_SET")) row.put("raw", BydDeviceHelper.callGetSingle(device, id));
+                    ids.put(row);
+                }
+            }
+            out.put("firmwareIds", ids);
+        } catch (Throwable t) {
+            try {
+                out.put("error", String.valueOf(t));
+            } catch (Exception ignored) {
+                // Best effort.
+            }
+        }
+        return out;
     }
 
     // which ENGINE_POWER read answers on this car: 0 not known yet, 1 the feature id, 2 the getter
@@ -5670,6 +5740,7 @@ public class BydDataCollector {
                 com.overdrive.app.automation.condition.BydEvent.PM25_OUTSIDE)) {
             collectPm25(b);
         }
+        if (!isDiLink5Vehicle()) refreshSpeedLimitWarning(b);
         if (isDiLink5ProducerActive()) {
             collectAdas(b);
             if (!diLink5FastRefresh) collectSettings(b);
@@ -7246,6 +7317,8 @@ public class BydDataCollector {
                         + asDouble + " — type/field mismatch, discarding");
                 return;
             }
+            // DiLink 5 answers an id its manager doesn't handle with an all-zero value.
+            if (isDiLink5Vehicle()) return;
         }
         double tempC = raw - 40;
         switch (which) {
@@ -7313,37 +7386,16 @@ public class BydDataCollector {
 
     /** @return the cell voltage in V, or NaN if unavailable/out-of-range. */
     private double collectStatVoltage(BydVehicleData.Builder b, int featureId, String which) {
-        // Try INT-FIRST ladder first (mV integers on legacy trims), then fall back to
-        // float/double EventValue extraction on DiLink 5 trims where get(int[], double/float)
-        // populates doubleValue in either V (1.0..5.0) or mV (1000.0..5000.0).
-        double volts = Double.NaN;
+        // Same as collectStatTemp, including the INT-FIRST ladder — getIntValue below reads
+        // BYDAutoEventValue.intValue, so the probe must request the width it will extract.
+        // (This method already rejects raw <= 0, so it degraded safely even before that fix.)
         Object val = BydDeviceHelper.callGetProbing(statisticDevice, featureId, true);
-        if (val != null) {
-            int raw = BydDeviceHelper.getIntValue(val);
-            if (raw != BydFeatureIds.BMS_UNAVAILABLE
-                    && raw != BydFeatureIds.INVALID_VALUE
-                    && raw != BydFeatureIds.INVALID_VALUE_2
-                    && raw != Integer.MIN_VALUE
-                    && raw > 0) {
-                double candidate = raw / 1000.0;
-                if (candidate >= 1.0 && candidate <= 5.0) {
-                    volts = candidate;
-                }
-            }
-        }
-        if (Double.isNaN(volts)) {
-            Object dblVal = BydDeviceHelper.callGetProbing(statisticDevice, featureId, false);
-            if (dblVal != null) {
-                double rawDbl = BydDeviceHelper.getDoubleValue(dblVal);
-                if (Double.isFinite(rawDbl) && rawDbl > 0.0) {
-                    double candidate = rawDbl >= 100.0 ? rawDbl / 1000.0 : rawDbl;
-                    if (candidate >= 1.0 && candidate <= 5.0) {
-                        volts = candidate;
-                    }
-                }
-            }
-        }
-        if (Double.isNaN(volts)) return Double.NaN;
+        if (val == null) return Double.NaN;
+        int raw = BydDeviceHelper.getIntValue(val);
+        if (raw == BydFeatureIds.BMS_UNAVAILABLE || raw == BydFeatureIds.INVALID_VALUE
+            || raw == BydFeatureIds.INVALID_VALUE_2 || raw == Integer.MIN_VALUE || raw <= 0) return Double.NaN;
+        double volts = raw / 1000.0;
+        if (volts < 1.0 || volts > 5.0) return Double.NaN;
         switch (which) {
             case "high": b.highCellVoltage(volts); break;
             case "low": b.lowCellVoltage(volts); break;
@@ -8882,8 +8934,7 @@ public class BydDataCollector {
                         .chargingRestTimeMinutes(BydVehicleData.UNAVAILABLE);
             }
             if (carSvcCharging && Double.isFinite(observation.powerKw)) {
-                b.chargingPowerKw(observation.powerKw)
-                        .chargingPowerAtMs(System.currentTimeMillis());
+                b.chargingPowerKw(observation.powerKw);
             }
             if (carSvcCharging
                     && observation.restHours != BydVehicleData.UNAVAILABLE) {
@@ -9627,6 +9678,10 @@ public class BydDataCollector {
                         + " — type/field mismatch, discarding");
                 return cabinReadFailed("type-mismatch", "intValue=0 doubleValue=" + asDouble);
             }
+            // DiLink 5 answers an id its manager doesn't handle with an all-zero value.
+            if (isDiLink5Vehicle()) {
+                return cabinReadFailed("dilink5-zero", "AC_TEMP_INSIDE answered an all-zero value");
+            }
         }
         return isPlausibleCabinTempC(raw) ? raw : cabinReadFailed("implausible", "raw=" + raw);
     }
@@ -9822,6 +9877,17 @@ public class BydDataCollector {
 
     private void collectAdas(BydVehicleData.Builder b) {
         if (isDiLink5Vehicle()) {
+            // DiPilot per-frame readback (0 off / 1 on); the plain ISLA getter is a constant 0 on DI5.
+            Object dp = ensureDiLink5DiPilotDevice();
+            if (dp != null && BydDeviceHelper.isDiLink5AdapterReady(
+                    context, dp, "getCarAssistAdapterManager")) {
+                int isla = readDiLink5SpeedLimitState(dp,
+                        "getIntelligentSpeedLimitAlert2B4State", "getIntelligentSpeedLimitAlert2D5State");
+                if (isla == 0 || isla == 1) {
+                    b.speedLimitWarning(isla == 1);
+                    return;
+                }
+            }
             b.speedLimitWarningKnown(false);
         }
         if (adasDevice == null) return;
@@ -9848,6 +9914,21 @@ public class BydDataCollector {
             }
         } catch (Exception e) {
             logger.debug("collectAdas error: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Legacy cars: re-read the SLW switch every poll. Its event alone can be lost to a poll that
+     * publishes an older copy, and the full collection runs only at start and ACC on (#379).
+     * Only the SLW id is read here: on some trims ISLA reads 1 whatever SLW is set to.
+     */
+    private void refreshSpeedLimitWarning(BydVehicleData.Builder b) {
+        if (adasDevice == null) return;
+        try {
+            int slw = BydDeviceHelper.callGetSingle(adasDevice, BydFeatureIds.ADAS_SLW_FUNC_SWITCH_STATE);
+            if (slw == 1 || slw == 2) b.speedLimitWarning(slw == 2);
+        } catch (Exception e) {
+            logger.debug("refreshSpeedLimitWarning error: " + e.getMessage());
         }
     }
 
@@ -9953,14 +10034,7 @@ public class BydDataCollector {
             ensureDeviceContext(powerDevice);
             
             Object mcu = BydDeviceHelper.callGetter(powerDevice, "getMcuStatus");
-            if (mcu instanceof Number) {
-                int mcuVal = ((Number) mcu).intValue();
-                if (mcuVal >= 0 && mcuVal < 65535
-                        && mcuVal != BydFeatureIds.INVALID_VALUE
-                        && mcuVal != BydFeatureIds.INVALID_VALUE_2) {
-                    b.mcuStatus(mcuVal);
-                }
-            }
+            if (mcu instanceof Number) b.mcuStatus(((Number) mcu).intValue());
             // NOTE: getBatteryRemainPowerEV() intentionally NOT called here.
             // On PHEVs (Sealion 6 DM-i), the PowerDevice EV subsystem returns stale kWh
             // values when the ICE is running. We rely on Statistic/Bodywork paths for
@@ -11227,6 +11301,29 @@ public class BydDataCollector {
         diLink5TyreTemperatureStateAt.set(0L);
     }
 
+    private long lastTyreProbeLogMs;
+    private String lastTyreProbeKey = "";
+
+    /** #456 diagnostic: log the legacy kPa beside the ByType getter (first read, then on change at most every 10 min). */
+    private void logLegacyTyreProbe(int[] legacyKpa) {
+        try {
+            for (int kpa : legacyKpa) if (kpa <= 0 || kpa >= 1000) return;
+            long now = SystemClock.elapsedRealtime();
+            String key = java.util.Arrays.toString(legacyKpa);
+            if (key.equals(lastTyreProbeKey)
+                    || (lastTyreProbeLogMs != 0L && now - lastTyreProbeLogMs < 600_000L)) return;
+            Object[] byType = new Object[4];
+            for (int i = 0; i < 4; i++) {
+                byType[i] = BydDeviceHelper.callGetter(tyreDevice, "getTyrePressureValueByType", i + 1);
+            }
+            lastTyreProbeKey = key;
+            lastTyreProbeLogMs = now;
+            logger.info("Tyre probe: legacy kPa=" + key + " byType=" + java.util.Arrays.toString(byType));
+        } catch (Throwable ignored) {
+            // Diagnostic only.
+        }
+    }
+
     private void collectTyre(BydVehicleData.Builder b) {
         if (tyreDevice == null) {
             if (isDiLink5Vehicle()) {
@@ -11337,14 +11434,12 @@ public class BydDataCollector {
                 // is a no-op on firmwares that don't expose the getter.
                 if (!dilink5) pollPerWheelTyreTemp(i);
             }
-            if (dilink5 && adapterReady) {
-                pollDiLink5TyreTemperatureOnce(
-                        tyreDevice, tyreTemperatureCache, diLink5TyreTemperatureAt, nowElapsed);
-            }
             b.tyrePressure(pressures);
+            if (!dilink5) logLegacyTyreProbe(pressures);
             b.tyrePressureState(pressureStates);
             b.tyreAirLeakState(airLeakStates);
             b.tyreSignalState(signalStates);
+            if (dilink5 && adapterReady) pollDiLink5TyreTemperature();
             b.tyreTemperature(snapshotTyreTemperatures());
 
             Object sys = !dilink5 || adapterReady
@@ -11383,10 +11478,9 @@ public class BydDataCollector {
                 b.tyreTemperatureState(temperatureState);
             }
 
-            // DI5 per-wheel temperature uses 1-based wheel areas (1..4) via
-            // getTyreArea() + getTyreTemperatureValue(area) and
-            // onTyreTemperatureValueChanged. Older SDKs additionally use the
-            // battery callback/getter and instrument IDs.
+            // DI5 per-wheel temperature: onTyreTemperatureValueChanged(area 1-4, value) plus the poll above
+            // (one shared value and the wheel it belongs to). Older SDKs use the battery callback/getter
+            // and instrument IDs.
 
             logTyreAlertsIfChanged(pressures, pressureStates, airLeakStates, signalStates,
                     dilink5 || sys instanceof Number ? systemState : Integer.MIN_VALUE,
@@ -11395,44 +11489,6 @@ public class BydDataCollector {
         } catch (Exception e) {
             logger.debug("collectTyre error: " + e.getMessage());
         }
-    }
-
-    /**
-     * On DiLink 5, {@code getTyreTemperatureValue(area)} ignores {@code area} and
-     * returns the shared temperature of whichever wheel {@code getTyreArea()} (1..4)
-     * last reported. Read {@code getTyreArea()} and the value together once per
-     * refresh (confirming {@code getTyreArea()} did not rotate mid-call) instead of
-     * looping 1..4, which would copy one wheel's reading onto all four tyres.
-     */
-    static boolean pollDiLink5TyreTemperatureOnce(
-            Object tyreDevice,
-            int[] cache,
-            java.util.concurrent.atomic.AtomicLongArray timestamps,
-            long nowElapsed) {
-        if (tyreDevice == null || cache == null || cache.length < 4 || timestamps == null) {
-            return false;
-        }
-        Object areaObj = BydDeviceHelper.callGetter(tyreDevice, "getTyreArea");
-        if (!(areaObj instanceof Number)) return false;
-        int area = ((Number) areaObj).intValue();
-        if (area < 1 || area > 4) return false;
-
-        Object wheelTemp = BydDeviceHelper.callGetter(
-                tyreDevice, "getTyreTemperatureValue", area);
-        Object areaAfter = BydDeviceHelper.callGetter(tyreDevice, "getTyreArea");
-        if (areaAfter instanceof Number && ((Number) areaAfter).intValue() != area) {
-            return false;
-        }
-        if (!(wheelTemp instanceof Number)) return false;
-        int tempC = (int) Math.round(((Number) wheelTemp).doubleValue());
-        if (!isValidTyreTemperatureC(tempC) || tempC == 0) return false;
-
-        int idx = area - 1;
-        synchronized (cache) {
-            cache[idx] = tempC;
-        }
-        timestamps.set(idx, nowElapsed);
-        return true;
     }
 
     // Last-seen tyre alert state — change-only logging so a developing slow leak
@@ -12096,6 +12152,45 @@ public class BydDataCollector {
         return NO_TYRE_TEMP_GETTER;
     }
 
+    private final boolean[] loggedDiLink5TyreTemp = new boolean[5];
+    private volatile boolean loggedDiLink5TyreArea;
+
+    /** DI5 reports one tyre temperature at a time plus the wheel it belongs to; sample both. */
+    private void pollDiLink5TyreTemperature() {
+        try {
+            Object area = BydDeviceHelper.callGetter(tyreDevice, "getTyreArea");
+            if (!loggedDiLink5TyreArea) {
+                // One line that says whether the getter exists and what it returns (0 = no data yet).
+                loggedDiLink5TyreArea = true;
+                logger.info("Tyre temp DI5 poll: getTyreArea=" + area);
+            }
+            if (!(area instanceof Number)) return;
+            int a = ((Number) area).intValue();
+            if (a < 1 || a > 4) return;
+            Object value = BydDeviceHelper.callGetter(tyreDevice, "getTyreTemperatureValue", a);
+            if (value instanceof Number) recordDiLink5TyreTemperature(a, ((Number) value).intValue(), "poll");
+        } catch (Throwable ignored) {
+            // The event path still applies.
+        }
+    }
+
+    /** Stores a DI5 tyre temperature for area 1-4; false when the area or value is unusable. */
+    private boolean recordDiLink5TyreTemperature(int area, int tempC, String source) {
+        boolean ok = area >= 1 && area <= 4 && isValidTyreTemperatureC(tempC);
+        int slot = ok ? area : 0;
+        if (!loggedDiLink5TyreTemp[slot]) {
+            loggedDiLink5TyreTemp[slot] = true;
+            logger.info("Tyre temp DI5 " + (ok ? "FIRST" : "rejected") + " (" + source + "): area="
+                    + area + " value=" + tempC);
+        }
+        if (!ok) return false;
+        synchronized (tyreTemperatureCache) {
+            tyreTemperatureCache[area - 1] = tempC;
+        }
+        diLink5TyreTemperatureAt.set(area - 1, SystemClock.elapsedRealtime());
+        return true;
+    }
+
     private int[] snapshotTyreTemperatures() {
         boolean dilink5 = isDiLink5Vehicle();
         long nowElapsed = dilink5 ? SystemClock.elapsedRealtime() : 0L;
@@ -12238,15 +12333,9 @@ public class BydDataCollector {
             if (isDiLink5Vehicle()
                     && "onTyreTemperatureValueChanged".equals(method)
                     && args.length >= 2) {
-                int wheel = ((Number) args[0]).intValue();
-                int tempC = ((Number) args[1]).intValue();
-                if (wheel < 1 || wheel > 4 || !isValidTyreTemperatureC(tempC)) return;
-                int wheelIdx = wheel - 1;
-                synchronized (tyreTemperatureCache) {
-                    tyreTemperatureCache[wheelIdx] = tempC;
-                }
-                diLink5TyreTemperatureAt.set(
-                        wheelIdx, SystemClock.elapsedRealtime());
+                // The first argument is the SDK's 1-4 tyre area, as on every other DI5 tyre event.
+                if (!recordDiLink5TyreTemperature(((Number) args[0]).intValue(),
+                        ((Number) args[1]).intValue(), "event")) return;
                 BydVehicleData current = snapshot.get();
                 if (current != null) {
                     publishNonChargingSnapshot(current.toBuilder()
@@ -12864,15 +12953,11 @@ public class BydDataCollector {
             logger.debug("collectStatisticExtended drivingTime error: " + e.getMessage());
         }
 
-        // Key battery level (on DiLink 5, 0 indicates key not sampled / out of range,
-        // not a depleted CR2032 cell)
+        // Key battery level
         try {
             Object keyBatt = BydDeviceHelper.callGetter(statisticDevice, "getKeyBatteryLevel");
             if (keyBatt instanceof Number) {
-                int keyVal = ((Number) keyBatt).intValue();
-                if ((isDiLink5Vehicle() ? keyVal > 0 : keyVal >= 0) && keyVal < 255) {
-                    b.keyBatteryLevel(keyVal);
-                }
+                b.keyBatteryLevel(((Number) keyBatt).intValue());
             }
         } catch (Exception e) {
             logger.debug("collectStatisticExtended keyBattery error: " + e.getMessage());
@@ -13153,9 +13238,14 @@ public class BydDataCollector {
             logger.debug("collectBodyworkExtended autoSystemState error: " + e.getMessage());
         }
 
-        // 12V battery voltage level (LOW/NORMAL/INVALID)
+        // 12V battery voltage level (LOW/NORMAL/INVALID). DI5 reports 0 (LOW) until its car
+        // adapter connects, so read it there only once the adapter is ready.
         try {
-            Object battLevel = BydDeviceHelper.callGetter(bodyworkDevice, "getBatteryVoltageLevel");
+            boolean levelReady = !isDiLink5Vehicle()
+                    || BydDeviceHelper.isDiLink5AdapterReady(
+                            context, bodyworkDevice, "getCarBodyManager");
+            Object battLevel = levelReady
+                    ? BydDeviceHelper.callGetter(bodyworkDevice, "getBatteryVoltageLevel") : null;
             if (battLevel instanceof Number) {
                 b.battery12vLevel(((Number) battLevel).intValue());
             }
@@ -15877,7 +15967,88 @@ public class BydDataCollector {
 
     // --- Climate Control ---
 
+    private static final int DILINK5_ADAPTER_ATTEMPTS = 10;
+    private static final long DILINK5_ADAPTER_RETRY_MS = 200L;
+
+    private DiLink5VehicleReadiness.Outcome dispatchDiLink5SdkWrite(
+            Object device,
+            String adapterGetter,
+            String adapterKey,
+            DiLink5VehicleReadiness.SafetyCheck safety,
+            DiLink5VehicleReadiness.Setter<Object> setter) {
+        if (device == null) return DiLink5VehicleReadiness.Outcome.NOT_DISPATCHED;
+        DiLink5VehicleReadiness.Outcome outcome =
+                DiLink5VehicleReadiness.awaitAndDispatch(
+                        DILINK5_ADAPTER_ATTEMPTS,
+                        DILINK5_ADAPTER_RETRY_MS,
+                        VehicleActuatorBridge.currentDiLink5RequestDeadline(),
+                        SystemClock::elapsedRealtime,
+                        () -> Thread.currentThread().isInterrupted()
+                                || VehicleActuatorBridge.isRemoteKeyRequestCancelled(),
+                        VehicleActuatorBridge::isDiLink5WriteRequestCurrent,
+                        () -> BydDeviceHelper.acquireDiLink5CarAdapter(
+                                context, device, adapterGetter, adapterKey),
+                        adapter -> BydDeviceHelper.isDiLink5BinderServiceAlive(adapter)
+                                && BydDeviceHelper.isDiLink5AdapterReady(
+                                        context, device, adapterGetter),
+                        safety,
+                        VehicleActuatorBridge::confirmDiLink5WriteSafety,
+                        adapter -> VehicleActuatorBridge.dispatchWhileRemoteKeyRequestActive(
+                                () -> setter.dispatch(adapter),
+                                DiLink5VehicleReadiness.Outcome.NOT_DISPATCHED),
+                        SystemClock::sleep);
+        LocalActuationAbort uncertainAbort = diLink5SdkAbortForOutcome(outcome);
+        if (uncertainAbort != null) {
+            RemoteKeyControl.noteAbort(uncertainAbort);
+        } else if (outcome == DiLink5VehicleReadiness.Outcome.NOT_DISPATCHED
+                && !VehicleActuatorBridge.isDiLink5WriteRequestCurrent()) {
+            VehicleActuatorBridge.noteDiLink5WriteRequestAbort(
+                    "vehicle request changed before SDK write");
+        }
+        return outcome;
+    }
+
+    public static DiLink5VehicleReadiness.Outcome classifyDiLink5SdkResult(Object result) {
+        if (!(result instanceof Number)) {
+            return DiLink5VehicleReadiness.Outcome.UNCERTAIN;
+        }
+        int code = ((Number) result).intValue();
+        if (code == 0) {
+            return DiLink5VehicleReadiness.Outcome.ACCEPTED;
+        }
+        if (code == 2 || code == -10 ||
+                code == com.byd.datasource.feature.Status.STATUS_TIMEOUT) {
+            return DiLink5VehicleReadiness.Outcome.UNCERTAIN;
+        }
+        return DiLink5VehicleReadiness.Outcome.REJECTED;
+    }
+
+    public static LocalActuationAbort diLink5SdkAbortForOutcome(
+            DiLink5VehicleReadiness.Outcome outcome) {
+        return outcome == DiLink5VehicleReadiness.Outcome.UNCERTAIN
+                ? new LocalActuationAbort(
+                        LocalActuationAbort.Kind.UNCERTAIN,
+                        "local SDK write outcome is uncertain")
+                : null;
+    }
+
     public boolean setAcPower(boolean on) {
+        if (isDiLink5Vehicle()) {
+            String methodName = on ? "start" : "stop";
+            final Object[] rawResult = new Object[1];
+            DiLink5VehicleReadiness.Outcome outcome = dispatchDiLink5SdkWrite(
+                    acDevice,
+                    "getHvacAdapterManager",
+                    "hvac",
+                    () -> true,
+                    adapter -> {
+                        rawResult[0] = BydDeviceHelper.callGetter(adapter, methodName, 0);
+                        return classifyDiLink5SdkResult(rawResult[0]);
+                    });
+            logger.info("AC " + methodName + " -> result=" + rawResult[0]
+                    + " outcome=" + outcome);
+            return outcome == DiLink5VehicleReadiness.Outcome.ACCEPTED;
+        }
         // Use the named start()/stop() methods on BYDAutoAcDevice — these actually
         // turn the AC system on/off. The previous implementation used AC_AUTO_MODE_SET
         // which only toggles AUTO mode (automatic climate control) without stopping the
@@ -16206,7 +16377,13 @@ public class BydDataCollector {
         return target;
     }
 
+    /** SDK AC_WINDMODE_FACE .. AC_WINDMODE_FACEDEFROST. */
+    public static final int AC_WIND_MODE_MIN = 1, AC_WIND_MODE_MAX = 7;
+
     public boolean setAcWindMode(int mode) {
+        if (mode < AC_WIND_MODE_MIN || mode > AC_WIND_MODE_MAX) return false;
+        // No wind-mode setter is confirmed on the DiLink 5 HVAC adapter.
+        if (isDiLink5Vehicle()) return false;
         try {
             // SDK method: acDevice.setAcWindMode(0, mode)
             Object result = BydDeviceHelper.callMethod(acDevice, "setAcWindMode", 0, mode);
@@ -16866,9 +17043,28 @@ public class BydDataCollector {
             // SDK command: 1=open, 2=close, 3=half, 4=stop, (5=breath only for sunroof)
             int voiceCommand = sunWindowVoiceCommand(command);
             if (voiceCommand < 0) return false;
-            // SDK method: bodyworkDevice.voiceCtlMoonRoof(cmd) or bodyworkDevice.voiceCtlSunshadePanel(cmd)
-            String cmd = area == 5 ? "voiceCtlMoonRoof" : "voiceCtlSunshadePanel";
-            Object result = BydDeviceHelper.callMethod(bodyworkDevice, cmd, voiceCommand);
+            String facadeCommand = area == 5 ? "voiceCtlMoonRoof" : "voiceCtlSunshadePanel";
+            if (isDiLink5Vehicle()) {
+                // The acquired CarBodyManager lower adapter exposes these exact int setters.
+                String adapterCommand = area == 5
+                        ? "setVoiceCtlMoonRoofS" : "setVoiceCtlSunshadePanelS";
+                final Object[] rawResult = new Object[1];
+                DiLink5VehicleReadiness.Outcome outcome = dispatchDiLink5SdkWrite(
+                        bodyworkDevice,
+                        "getCarBodyManager",
+                        "body",
+                        () -> true,
+                        adapter -> {
+                            rawResult[0] = BydDeviceHelper.callMethod(
+                                    adapter, adapterCommand, voiceCommand);
+                            return classifyDiLink5SdkResult(rawResult[0]);
+                        });
+                logger.info("setSunWindow " + (area == 5 ? "Sunroof" : "Sunshade")
+                        + " cmd=" + command + " via " + adapterCommand + "(" + voiceCommand + ")"
+                        + " -> result=" + rawResult[0] + " outcome=" + outcome);
+                return outcome == DiLink5VehicleReadiness.Outcome.ACCEPTED;
+            }
+            Object result = BydDeviceHelper.callMethod(bodyworkDevice, facadeCommand, voiceCommand);
             boolean ok = result instanceof Integer && ((Integer) result).intValue() == 0;
             // Log the ACTUAL HAL return at info level so the field-reported "sunroof is
             // hit and miss" is diagnosable: distinguishes a rejected write (non-zero /
@@ -16877,7 +17073,7 @@ public class BydDataCollector {
             // success contract on this firmware, so we surface the raw result rather than
             // guessing a retry that could double-actuate a moving roof.
             logger.info("setSunWindow " + (area == 5 ? "Sunroof" : "Sunshade")
-                    + " cmd=" + command + " via " + cmd + "(" + voiceCommand + ")"
+                    + " cmd=" + command + " via " + facadeCommand + "(" + voiceCommand + ")"
                     + " -> result=" + result + " (ok=" + ok + ")");
             return ok;
         } catch (Exception e) {
@@ -18779,16 +18975,23 @@ public class BydDataCollector {
     private boolean diLink5BackDoorCommand(int cmd, String action) {
         if (settingDevice == null) return false;
         if (cmd != 2 && drivingSafetyBlocked(DrivingSafetyGuard.GUARD_TRUNK)) return false;
-        if (!BydDeviceHelper.isDiLink5AdapterReady(
-                context, settingDevice, "getSettingAdapterManager")) {
-            logger.warn("tailgate " + action + ": setting adapter is not ready");
-            return false;
-        }
-        Object result = BydDeviceHelper.callMethod(settingDevice, "voiceCtlBackDoor", cmd);
-        boolean accepted = result instanceof Integer && ((Integer) result).intValue() == 0;
-        logger.info("tailgate " + action + ": voiceCtlBackDoor(" + cmd + ") -> " + result
-                + (accepted ? " ACCEPTED" : " REFUSED"));
-        return accepted;
+        final Object[] rawResult = new Object[1];
+        DiLink5VehicleReadiness.Outcome outcome = dispatchDiLink5SdkWrite(
+                settingDevice,
+                "getSettingAdapterManager",
+                "setting",
+                () -> (cmd == 2
+                                || !drivingSafetyBlocked(DrivingSafetyGuard.GUARD_TRUNK))
+                        && (cmd != 1 || readDoorLockState() == DOOR_STATE_UNLOCK
+                                || DrivingSafetyGuard.isDiLink5AccOnAndParked()),
+                adapter -> {
+                    rawResult[0] = BydDeviceHelper.callMethod(
+                            adapter, "voiceCtlBackDoor", cmd);
+                    return classifyDiLink5SdkResult(rawResult[0]);
+                });
+        logger.info("tailgate " + action + ": voiceCtlBackDoor(" + cmd + ") -> "
+                + rawResult[0] + " outcome=" + outcome);
+        return outcome == DiLink5VehicleReadiness.Outcome.ACCEPTED;
     }
 
     // --- AVAS / Exterior Speaker ---
@@ -19012,7 +19215,7 @@ public class BydDataCollector {
     public static final int AC_CHARGE_CURRENT_16A = 4;
     public static final int AC_CHARGE_CURRENT_MAX = 5;
 
-    private static boolean isValidAcChargingCurrentLimitState(int state) {
+    static boolean isValidAcChargingCurrentLimitState(int state) {
         return state >= AC_CHARGE_CURRENT_6A && state <= AC_CHARGE_CURRENT_MAX;
     }
 
@@ -19113,45 +19316,184 @@ public class BydDataCollector {
                 supported, available, config, state);
     }
 
-    /** DiLink 5 has no config id for this setting; a valid 1..5 typed readback proves it. */
-    private AcChargingCurrentLimitStatus getDiLink5AcChargingCurrentLimitStatus() {
-        int rawState = readDiLink5AcChargingLimit();
+    /**
+     * Normalize DiLink 5 {@code StudyAdapterManager.getSupportAcChargingLimit()} /
+     * {@code BYDAutoStudy.getSupportAcChargingLimit()} ({@code 0x2140416a}): OEM {@code BydCarSettings}
+     * treats {@code 2} as supported and {@code 1} as unsupported; {@code 0} or negative sentinels mean
+     * the study property has not been populated yet.
+     */
+    static int normalizeDiLink5AcChargingLimitConfig(int rawConfig) {
+        return rawConfig == 1 || rawConfig == 2 ? rawConfig : BydVehicleData.UNAVAILABLE;
+    }
+
+    static AcChargingCurrentLimitStatus evaluateDiLink5AcChargingCurrentLimitStatus(
+            int rawConfig, int rawState, Boolean previousVerdict) {
+        int configState = normalizeDiLink5AcChargingLimitConfig(rawConfig);
         boolean valid = isValidAcChargingCurrentLimitState(rawState);
+        // configState is reported only: its encoding is unverified across trims, so it never
+        // makes the control unsupported. A parked car answers 0: unknown, not unsupported.
+        // Offer the control; the command's readback decides, and only a real 1..5 read latches.
         Boolean supported = resolveAcChargingCurrentLimitSupport(
-                BydVehicleData.UNAVAILABLE, rawState, acChargingCurrentLimitSupported);
-        if (supported == null) {
-            supported = Boolean.TRUE;
-            acChargingCurrentLimitSupported = Boolean.TRUE;
-        } else if (valid) {
-            acChargingCurrentLimitSupported = supported;
-        }
-        // In the daemon process that serves the web UI / status API, chargingDevice is null
-        // because BYD HAL singletons are only acquired in the main app process. On DiLink 5,
-        // availability must remain true so driver selection controls are unblocked.
-        boolean available = Boolean.TRUE.equals(supported);
+                BydVehicleData.UNAVAILABLE, rawState, previousVerdict);
+        if (supported == null) supported = Boolean.TRUE;
         return new AcChargingCurrentLimitStatus(
-                supported, available, BydVehicleData.UNAVAILABLE,
+                supported, Boolean.TRUE.equals(supported), configState,
                 valid ? rawState : BydVehicleData.UNAVAILABLE);
+    }
+
+    private AcChargingCurrentLimitStatus getDiLink5AcChargingCurrentLimitStatus() {
+        int[] sample = pollDiLink5AcChargingLimitSample();
+        int rawState = sample[0];
+        int configState = normalizeDiLink5AcChargingLimitConfig(sample[1]);
+        AcChargingCurrentLimitStatus status = evaluateDiLink5AcChargingCurrentLimitStatus(
+                configState, rawState, acChargingCurrentLimitSupported);
+        if (isValidAcChargingCurrentLimitState(rawState)) {
+            acChargingCurrentLimitSupported = Boolean.TRUE;
+        }
+        return status;
     }
 
     // Daemon cache: every bridge read starts the app's foreground service, and the UI polls 15 s.
     private volatile int diLink5AcLimitCached = BydVehicleData.UNAVAILABLE;
+    private volatile int diLink5AcLimitConfigCached = BydVehicleData.UNAVAILABLE;
     private volatile long diLink5AcLimitCachedAtElapsedMs;
+    private volatile int lastDiLink5AcLimitReadBack = BydVehicleData.UNAVAILABLE;
+    private volatile int lastDiLink5AcLimitConfig = BydVehicleData.UNAVAILABLE;
+
+    public int lastDiLink5AcChargingLimitReadBack() {
+        return lastDiLink5AcLimitReadBack;
+    }
+
+    public int lastDiLink5AcChargingLimitConfig() {
+        return lastDiLink5AcLimitConfig;
+    }
+
+    public void updateDiLink5AcChargingLimitCache(int state, int configState) {
+        int normalizedConfig = normalizeDiLink5AcChargingLimitConfig(configState);
+        diLink5AcLimitCached = state;
+        if (normalizedConfig != BydVehicleData.UNAVAILABLE) {
+            diLink5AcLimitConfigCached = normalizedConfig;
+        }
+        diLink5AcLimitCachedAtElapsedMs = SystemClock.elapsedRealtime();
+        if (isValidAcChargingCurrentLimitState(state)) {
+            acChargingCurrentLimitSupported = Boolean.TRUE;
+        }
+    }
+
+    private int[] pollDiLink5AcChargingLimitSample() {
+        if (isDiLink5DaemonProcess()) {
+            long now = SystemClock.elapsedRealtime();
+            long cachedAt = diLink5AcLimitCachedAtElapsedMs;
+            if (cachedAt > 0L && now - cachedAt < 60_000L) {
+                return new int[] {diLink5AcLimitCached, diLink5AcLimitConfigCached};
+            }
+            VehicleActuatorBridge.DiLink5AcChargeLimitSample sample =
+                    VehicleActuatorBridge.readDiLink5AcChargeLimitSample(getRuntimeContext());
+            int normalizedConfig = normalizeDiLink5AcChargingLimitConfig(sample.configState);
+            diLink5AcLimitCached = sample.state;
+            if (normalizedConfig != BydVehicleData.UNAVAILABLE) {
+                diLink5AcLimitConfigCached = normalizedConfig;
+            }
+            diLink5AcLimitCachedAtElapsedMs = now;
+            return new int[] {sample.state, diLink5AcLimitConfigCached};
+        }
+        Object chargingAdapter = BydDeviceHelper.awaitDiLink5CarAdapter(
+                context, chargingDevice, "getChargingAdapterManager", "charging", 10, 200L);
+        int state = readDiLink5AcChargingLimitWithAdapter(chargingAdapter);
+        int config = readDiLink5AcChargingLimitConfig();
+        return new int[] {state, config};
+    }
 
     /** Raw DiLink 5 AC limit (same 1..5 domain); only the app process can read the SDK. */
     public int readDiLink5AcChargingLimit() {
         if (isDiLink5DaemonProcess()) {
-            long now = SystemClock.elapsedRealtime();
-            long cachedAt = diLink5AcLimitCachedAtElapsedMs;
-            if (cachedAt > 0L && now - cachedAt < 60_000L) return diLink5AcLimitCached;
-            int value = VehicleActuatorBridge.readDiLink5AcChargeLimit(getRuntimeContext());
-            diLink5AcLimitCached = value;
-            diLink5AcLimitCachedAtElapsedMs = now;
-            return value;
+            return pollDiLink5AcChargingLimitSample()[0];
         }
-        Object value = BydDeviceHelper.callGetter(chargingDevice, "getACChargingLimit");
-        return value instanceof Number
-                ? ((Number) value).intValue() : BydVehicleData.UNAVAILABLE;
+        Object chargingAdapter = BydDeviceHelper.awaitDiLink5CarAdapter(
+                context, chargingDevice, "getChargingAdapterManager", "charging", 10, 200L);
+        return readDiLink5AcChargingLimitWithAdapter(chargingAdapter);
+    }
+
+    /** DiLink 5 OEM capability config ({@code 0x2140416a}: {@code 2}=supported, {@code 1}=unsupported). */
+    public int readDiLink5AcChargingLimitConfig() {
+        if (isDiLink5DaemonProcess()) {
+            return pollDiLink5AcChargingLimitSample()[1];
+        }
+        // Diagnostic only and fixed per car: one non-blocking attempt, then cached.
+        int known = lastDiLink5AcLimitConfig;
+        if (known != BydVehicleData.UNAVAILABLE) return known;
+        Object studyAdapter = BydDeviceHelper.awaitDiLink5CarAdapter(
+                context, chargingDevice, "getStudyAdapterManager", "selfstudy", 1, 0L);
+        int normalized = BydVehicleData.UNAVAILABLE;
+        if (studyAdapter != null) {
+            Object raw = BydDeviceHelper.callGetter(studyAdapter, "getSupportAcChargingLimit");
+            if (raw instanceof Number) {
+                normalized = normalizeDiLink5AcChargingLimitConfig(((Number) raw).intValue());
+            }
+        }
+        lastDiLink5AcLimitConfig = normalized;
+        return normalized;
+    }
+
+    static int readDiLink5AcChargingLimitFromHandles(
+            Object chargingDeviceHandle, Object chargingAdapterHandle) {
+        int deviceState = BydVehicleData.UNAVAILABLE;
+        if (chargingDeviceHandle != null) {
+            Object value = BydDeviceHelper.callGetter(chargingDeviceHandle, "getACChargingLimit");
+            if (value == null) {
+                value = BydDeviceHelper.callGetter(chargingDeviceHandle, "getAcChargingLimit");
+            }
+            if (value instanceof Number) {
+                deviceState = ((Number) value).intValue();
+            }
+        }
+        if (isValidAcChargingCurrentLimitState(deviceState)) {
+            return deviceState;
+        }
+        if (chargingAdapterHandle != null) {
+            Object adapterValue = BydDeviceHelper.callGetter(
+                    chargingAdapterHandle, "getAcChargingLimit");
+            if (adapterValue instanceof Number) {
+                int adapterState = ((Number) adapterValue).intValue();
+                if (adapterState != BydVehicleData.UNAVAILABLE) {
+                    return adapterState;
+                }
+            }
+        }
+        return deviceState;
+    }
+
+    private int readDiLink5AcChargingLimitWithAdapter(Object chargingAdapter) {
+        int state = readDiLink5AcChargingLimitFromHandles(chargingDevice, chargingAdapter);
+        lastDiLink5AcLimitReadBack = state;
+        return state;
+    }
+
+    static Object writeDiLink5AcChargingLimitToHandles(
+            Object chargingDeviceHandle, Object chargingAdapterHandle, int state, String[] viaOut) {
+        Object rc = null;
+        String via = "none";
+        if (chargingDeviceHandle != null) {
+            via = "BYDAutoChargingDevice";
+            rc = BydDeviceHelper.callMethod(chargingDeviceHandle, "setACChargingLimit", state);
+        }
+        if (!(rc instanceof Number) || ((Number) rc).intValue() < 0) {
+            if (chargingAdapterHandle != null) {
+                Object prevRc = rc;
+                Object fallbackRc = BydDeviceHelper.callMethod(
+                        chargingAdapterHandle, "setAcChargingLimit", state);
+                if (fallbackRc != null) {
+                    rc = fallbackRc;
+                    via = chargingDeviceHandle != null
+                            ? "ChargingAdapterManager(afterDeviceRc=" + prevRc + ")"
+                            : "ChargingAdapterManager";
+                }
+            }
+        }
+        if (viaOut != null && viaOut.length > 0) {
+            viaOut[0] = via;
+        }
+        return rc;
     }
 
     /** A DI5 AC-limit command was sent; the next daemon read must ask the car again. */
@@ -19161,40 +19503,83 @@ public class BydDataCollector {
 
     /** DiLink 5: typed setter (STATE_AC_LIMIT_6A=1 … MAX=5), success only on matching readback. */
     private boolean setDiLink5AcChargingCurrentLimit(int state) {
-        if (!isMainAppProcess() || chargingDevice == null) {
-            logger.warn("setAcChargingCurrentLimitState: DI5 charging device unavailable");
+        if (isDiLink5DaemonProcess()) {
+            return VehicleActuatorBridge.dispatchDiLink5Command(
+                    getRuntimeContext(),
+                    new com.overdrive.app.byd.routing.VehicleCommandRouter
+                            .AcChargeCurrentLimitCommand(state));
+        }
+        if (!isMainAppProcess()) {
+            logger.warn("setAcChargingCurrentLimitState: DI5 app process required");
             return false;
         }
-        int before = readDiLink5AcChargingLimit();
+        Object chargingAdapter = BydDeviceHelper.awaitDiLink5CarAdapter(
+                context, chargingDevice, "getChargingAdapterManager", "charging", 10, 200L);
+        boolean adapterReady = chargingAdapter != null;
+        int configState = readDiLink5AcChargingLimitConfig();
+        if (chargingDevice == null && chargingAdapter == null) {
+            logger.warn("setAcChargingCurrentLimitState: DI5 charging device and adapter unavailable"
+                    + " (configState=" + configState + ")");
+            return false;
+        }
+        int before = readDiLink5AcChargingLimitWithAdapter(chargingAdapter);
         if (isValidAcChargingCurrentLimitState(before)) {
             acChargingCurrentLimitSupported = Boolean.TRUE;
-            if (before == state) return true;
+            if (before == state) {
+                logger.info("DI5 AC charge current limit already at requested=" + state
+                        + " (" + acChargingCurrentLimitLabel(state) + ") configState=" + configState
+                        + " adapterReady=" + adapterReady);
+                return true;
+            }
         } else {
-            logger.debug("setAcChargingCurrentLimitState: DI5 limit initially unreadable (" + before + "), proceeding with command");
+            logger.info("setAcChargingCurrentLimitState: DI5 limit unreadable (" + before
+                    + "), sending; readback decides");
         }
-        if (VehicleActuatorBridge.isDiLink5RequestExpired()) return false;
-        Object rc = BydDeviceHelper.callMethod(chargingDevice, "setACChargingLimit", state);
-        if (rc == null) {
-            rc = BydDeviceHelper.callMethod(chargingDevice, "setAcChargingLimit", state);
+        if (VehicleActuatorBridge.isDiLink5RequestExpired()) {
+            logger.warn("setAcChargingCurrentLimitState: DI5 request expired before write"
+                    + " (requested=" + state + ", adapterReady=" + adapterReady
+                    + ", configState=" + configState + ")");
+            return false;
         }
+        String[] via = new String[] {"none"};
+        if (chargingAdapter == null) {
+            chargingAdapter = BydDeviceHelper.acquireDiLink5CarAdapter(
+                    context, chargingDevice, "getChargingAdapterManager", "charging");
+            adapterReady = chargingAdapter != null;
+        }
+        Object rc = writeDiLink5AcChargingLimitToHandles(
+                chargingDevice, chargingAdapter, state, via);
         if (!(rc instanceof Number) || ((Number) rc).intValue() < 0) {
-            logger.warn("setACChargingLimit(" + state + ") refused: rc=" + rc);
+            logger.warn("setACChargingLimit(" + state + ") refused: rc=" + rc
+                    + " via=" + via[0] + " adapterReady=" + adapterReady
+                    + " configState=" + configState + " before=" + before);
             return false;
         }
         int readBack = BydVehicleData.UNAVAILABLE;
         for (int attempt = 0; attempt < 10
                 && !VehicleActuatorBridge.isDiLink5RequestExpired(); attempt++) {
             SystemClock.sleep(200L);
-            readBack = readDiLink5AcChargingLimit();
+            if (chargingAdapter == null) {
+                chargingAdapter = BydDeviceHelper.acquireDiLink5CarAdapter(
+                        context, chargingDevice, "getChargingAdapterManager", "charging");
+            }
+            readBack = readDiLink5AcChargingLimitWithAdapter(chargingAdapter);
             if (readBack == state) break;
         }
         boolean confirmed = readBack == state;
         if (confirmed) {
             acChargingCurrentLimitSupported = Boolean.TRUE;
         }
-        logger.info("DI5 AC charge current limit: requested=" + state
-                + " (" + acChargingCurrentLimitLabel(state) + ") rc=" + rc
-                + " before=" + before + " readBack=" + readBack + " confirmed=" + confirmed);
+        String summary = "DI5 AC charge current limit: requested=" + state
+                + " (" + acChargingCurrentLimitLabel(state) + ") via=" + via[0]
+                + " adapterReady=" + adapterReady + " configState=" + configState
+                + " rc=" + rc + " before=" + before + " readBack=" + readBack
+                + " confirmed=" + confirmed;
+        if (confirmed) {
+            logger.info(summary);
+        } else {
+            logger.warn(summary);
+        }
         return confirmed;
     }
 
@@ -21771,10 +22156,21 @@ public class BydDataCollector {
         try {
             if (isDiLink5Vehicle()) {
                 // No DiLink 5 feature-id fallback: its set() would return 0 for a refusal.
-                Object result = BydDeviceHelper.callMethod(
-                        lightDevice, "setTurnLightsFlashState",
-                        diLink5HazardCommand(enable));
-                return result instanceof Number && ((Number) result).intValue() == 0;
+                final Object[] rawResult = new Object[1];
+                DiLink5VehicleReadiness.Outcome outcome = dispatchDiLink5SdkWrite(
+                        lightDevice,
+                        "getCarBodyManager",
+                        "body",
+                        () -> true,
+                        adapter -> {
+                            rawResult[0] = BydDeviceHelper.callMethod(
+                                    adapter, "setTurnLightsFlashState",
+                                    diLink5HazardCommand(enable));
+                            return classifyDiLink5SdkResult(rawResult[0]);
+                        });
+                logger.info("setHazardLights enable=" + enable + " -> result="
+                        + rawResult[0] + " outcome=" + outcome);
+                return outcome == DiLink5VehicleReadiness.Outcome.ACCEPTED;
             }
             int code = BydDeviceHelper.sendSetCommandRaw(
                     lightDevice, HazardLightProbe.LIGHT_CMD_DOUBLE_FLASH, enable ? 1 : 2);
@@ -21836,6 +22232,10 @@ public class BydDataCollector {
      * (0 = accepted).
      */
     public boolean setSpeedLimitWarning(boolean enable) {
+        if (isDiLink5Vehicle()) {
+            return setDiLink5SpeedLimitSwitch("setIntelligentSpeedLimitAlertState", enable,
+                    "getIntelligentSpeedLimitAlert2B4State", "getIntelligentSpeedLimitAlert2D5State");
+        }
         int v = enable ? 2 : 1;
         try {
             // Route through setAdasFeature → sendSetCommand (success = code >= 0), the SAME
@@ -22140,6 +22540,47 @@ public class BydDataCollector {
                 ? ((Number) value).intValue() : BydVehicleData.UNAVAILABLE;
     }
 
+    /**
+     * DI5 speed-limit warning/control. Their own getters are a constant 0 on DI5 and the per-frame
+     * variants have no setter, so the plain setter is confirmed through the per-frame getters. It
+     * always writes: a getter stuck at 0 would otherwise turn an "off" into a success with no write.
+     */
+    private boolean setDiLink5SpeedLimitSwitch(String setter, boolean on, String... getters) {
+        Object dp = ensureDiLink5DiPilotDevice();
+        if (dp == null || !BydDeviceHelper.isDiLink5AdapterReady(
+                context, dp, "getCarAssistAdapterManager")) {
+            logger.warn(setter + ": DiPilot assist adapter is not ready");
+            return false;
+        }
+        int want = on ? 1 : 0;
+        int before = readDiLink5SpeedLimitState(dp, getters);
+        if (VehicleActuatorBridge.isDiLink5RequestExpired()) return false;
+        Object rc = BydDeviceHelper.callMethod(dp, setter, on ? 2 : 1);
+        if (!(rc instanceof Number) || ((Number) rc).intValue() < 0) {
+            logger.warn(setter + "(" + (on ? 2 : 1) + ") refused: rc=" + rc);
+            return false;
+        }
+        int after = readDiLink5SpeedLimitState(dp, getters);
+        for (int attempt = 0; attempt < 10 && after != want
+                && !VehicleActuatorBridge.isDiLink5RequestExpired(); attempt++) {
+            SystemClock.sleep(200L);
+            after = readDiLink5SpeedLimitState(dp, getters);
+        }
+        boolean confirmed = after == want;
+        logger.info(setter + "(" + (on ? 2 : 1) + ") rc=" + rc + " before=" + before
+                + " after=" + after + " confirmed=" + confirmed);
+        return confirmed;
+    }
+
+    /** First per-frame getter that reads 0 (off) or 1 (on); UNAVAILABLE when none does. */
+    private static int readDiLink5SpeedLimitState(Object dp, String... getters) {
+        for (String getter : getters) {
+            int v = readDiLink5DiPilotSwitch(dp, getter);
+            if (v == 0 || v == 1) return v;
+        }
+        return BydVehicleData.UNAVAILABLE;
+    }
+
     /** [adas, body, seat] raw getter values as key=value tokens. */
     private String[] diLink5CalibrationGroups() {
         Object dp = ensureDiLink5DiPilotDevice();
@@ -22313,6 +22754,10 @@ public class BydDataCollector {
 
     /** Speed Limit Control (ISLC) on/off (on=2/off=1, per OEM convention). */
     public boolean setSpeedLimitControl(boolean enabled) {
+        if (isDiLink5Vehicle()) {
+            return setDiLink5SpeedLimitSwitch("setIntelligentSpeedLimitControlState", enabled,
+                    "getIntelligentSpeedLimitControl2D5State", "getIntelligentSpeedLimitControl32FState");
+        }
         return setAdasFeature(BydFeatureIds.ADAS_ISLC_SWITCH_SET, enabled ? 2 : 1);
     }
 
@@ -23948,7 +24393,10 @@ public class BydDataCollector {
     public boolean setOperationMode(int mode) {
         if (!invokeModeSetterForReadback(energyDevice, "setOperationMode", mode)) return false;
 
-        long deadline = SystemClock.elapsedRealtime() + getDriveModeApplyTimeoutMs();
+        long started = SystemClock.elapsedRealtime();
+        boolean diLink5 = com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();
+        long deadline = started + (diLink5
+                ? DILINK5_OPERATION_MODE_TIMEOUT_MS : DRIVE_MODE_APPLY_TIMEOUT_MS);
         boolean answered = false;
         int raw = -1;
         int surface = -1;
@@ -23964,6 +24412,10 @@ public class BydDataCollector {
                 if (operationModeMatchesSetter(mode, raw, surface, target)) {
                     if (mode == 3 && raw == 1 && surface != 2 && target < 1) {
                         logger.info("setOperationMode(3) accepted on shared Normal/Eco readback");
+                    }
+                    if (diLink5) {
+                        logger.info("setOperationMode(" + mode + ") confirmed after "
+                                + (SystemClock.elapsedRealtime() - started) + " ms");
                     }
                     return true;
                 }
@@ -23988,13 +24440,10 @@ public class BydDataCollector {
         return false;
     }
 
-    private static final long DRIVE_MODE_APPLY_TIMEOUT_MS_LEGACY = 1500L;
-    private static final long DRIVE_MODE_APPLY_TIMEOUT_MS_DILINK5 = 4000L;
-    private static long getDriveModeApplyTimeoutMs() {
-        return isDiLink5Vehicle()
-                ? DRIVE_MODE_APPLY_TIMEOUT_MS_DILINK5
-                : DRIVE_MODE_APPLY_TIMEOUT_MS_LEGACY;
-    }
+    private static final long DRIVE_MODE_APPLY_TIMEOUT_MS = 1500L;
+    // DiLink 5's energy readback is reported to settle 3-4 s after the write (#495); only this
+    // first leg waits longer, so the fallbacks stay inside the 10 s DI5 bridge budget.
+    private static final long DILINK5_OPERATION_MODE_TIMEOUT_MS = 4000L;
     private static final long DRIVE_MODE_APPLY_POLL_MS = 50L;
 
     /** Public setter enum -> the same normalized live axis used by triggers. */
@@ -24003,6 +24452,9 @@ public class BydDataCollector {
             int rawOperationMode,
             int roadSurfaceMode,
             int targetDrivingMode) {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            return rawOperationMode == setterMode;
+        }
         // This head unit reports the same live operation value for Normal and Eco. A successful
         // Normal setter followed by that shared value is the strongest acknowledgement available.
         if (setterMode == 3
@@ -24092,6 +24544,9 @@ public class BydDataCollector {
      * The SDK remaps these setter values onto a different getter axis.
      */
     static int energyOperationModeForDriveConfig(int configMode) {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            return configMode >= 1 && configMode <= 4 ? configMode : -1;
+        }
         switch (configMode) {
             case 1: return 3; // ENERGY_OPERATION_NORMAL
             case 2: return 1; // ENERGY_OPERATION_ECONOMY
@@ -24205,7 +24660,7 @@ public class BydDataCollector {
     }
 
     private boolean awaitDriveMode(int configMode) {
-        long deadline = SystemClock.elapsedRealtime() + getDriveModeApplyTimeoutMs();
+        long deadline = SystemClock.elapsedRealtime() + DRIVE_MODE_APPLY_TIMEOUT_MS;
         do {
             int energyMode = readEnergyAxisDriveMode();
             int settingMode = readDriveConfigRaw();
@@ -24239,7 +24694,7 @@ public class BydDataCollector {
             if (VehicleActuatorBridge.isDiLink5RequestExpired()) return false;
             Object r = m.invoke(energyDevice, mode);
             logger.info("setRoadSurfaceMode(" + mode + ") return=" + r);
-            long deadline = SystemClock.elapsedRealtime() + getDriveModeApplyTimeoutMs();
+            long deadline = SystemClock.elapsedRealtime() + DRIVE_MODE_APPLY_TIMEOUT_MS;
             int seen;
             do {
                 seen = readRoadSurfaceMode(energyDevice);
@@ -24443,6 +24898,14 @@ public class BydDataCollector {
     static int driveModeFromEnergyAxis(
             int rawOperationMode, int roadSurfaceMode, int targetDrivingMode) {
         if (roadSurfaceMode == 2 || rawOperationMode == 4) return 4;
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            switch (rawOperationMode) {
+                case 1: return 1; // NORMAL
+                case 2: return 2; // ECO
+                case 3: return 3; // SPORT
+                default: return -1;
+            }
+        }
         switch (rawOperationMode) {
             case 1: return targetDrivingMode == 3 ? 1 : 2; // NORMAL or ECO
             case 2: return 3; // SPORT

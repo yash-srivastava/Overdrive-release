@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="projection_app_density">App DPI</string>
+    <string name="projection_app_keyboard">Keyboard</string>
+    <string name="projection_app_guidance">App tools</string>
+    <string name="projection_tools_select_app">Select a cast app first.</string>
+    <string name="projection_tools_daemon_unavailable">The cluster daemon is unavailable. Try again when it is connected.</string>
+    <string name="projection_tools_save">Save</string>
+    <string name="projection_tools_save_failed">Could not save the setting. Please try again.</string>
+    <string name="projection_density_description">Density for %1$s on its next cast. Use 0 to keep the display density, or 96–480 DPI.\n\nDensity affects every map and overlay on that display during the cast. After stopping, the previous override is restored when the display is safely available.</string>
+    <string name="projection_density_range">Enter 0 or an integer from 96 to 480.</string>
+    <string name="projection_density_saved">Saved. Stop and cast the app again to apply its density.</string>
+    <string name="projection_density_not_applied">The last cast could not apply this density: %1$s</string>
+    <string name="projection_guidance_di3">DI3 cluster strip and windshield guidance (needs an in-car check)</string>
+    <string name="projection_guidance_di5">Experimental DI5 cluster strip</string>
+    <string name="projection_guidance_notifications">Map notification access</string>
+    <string name="projection_guidance_setup">Save, then start navigation in RoadSense. Google Maps or Waze also need Map notification access.\n\nKeep the DI3 HUD on and stop any built-in navigation. If your car offers a HUD setting for navigation content, enable it; not every model has one. This toggle does not power the HUD, and arrow rendering still needs an in-car check.</string>
+    <string name="projection_guidance_setup_di5">Save, then start navigation in RoadSense. Google Maps or Waze also need Map notification access.\n\nThe DI5 cluster strip is experimental. Stop any full-screen cluster cast or map before testing it. Windshield guidance is unavailable on DI5.</string>
+    <string name="projection_keyboard_auto">Automatically open the DI5 keyboard on cluster text fields</string>
+    <string name="projection_guidance_saved">Saved. Windshield guidance is DI3 only; DI5 strip rendering still needs an in-car check.</string>
+    <string name="projection_tools_title">Tools</string>
+    <string name="projection_tools_dialog_title">Projection tools</string>
+    <string name="projection_tools_description">Set up navigation, app size and text input for the cluster.</string>
+    <string name="projection_tools_navigation">Navigation guidance</string>
+    <string name="projection_tools_navigation_description">Choose where directions from RoadSense or map notifications appear.</string>
+    <string name="projection_tools_density">App display size</string>
+    <string name="projection_tools_density_description">Adjust the selected app’s display density on its next cast.</string>
+    <string name="projection_tools_keyboard_description">Enter text into a cast app and manage automatic prompts. DI5 only.</string>
+    <string name="projection_tools_density_value">Display density (DPI)</string>
+    <string name="projection_tools_density_default">0 keeps the display density · 96–480 sets a custom size</string>
+    <string name="projection_tools_di3_title">DI3 HUD and cluster</string>
+    <string name="projection_tools_di3_description">Send directions to the windshield HUD and cluster strip. Confirm arrow rendering in the car.</string>
+    <string name="projection_tools_di3_only">Available in DI3 mode.</string>
+    <string name="projection_tools_di5_title">DI5 cluster strip</string>
+    <string name="projection_tools_di5_description">Experimental directions on the cluster strip. Windshield guidance is unavailable in DI5.</string>
+    <string name="projection_tools_di5_only">Available in DI5 mode.</string>
+    <string name="projection_tools_setup">Getting started</string>
+</resources>

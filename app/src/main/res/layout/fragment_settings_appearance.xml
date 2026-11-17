@@ -1,89 +1,53 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  SOTA Settings → Appearance pane.
-
-  Composition (vertical):
-    HERO HEADER : "Appearance" + 1-line subtitle
-    THEME CARD  : 3 tile-style preview toggles (Auto / Light / Dark) + an
-                  active-state caption beneath
-    LANGUAGE    : full-width card with prominent value + "X of N langs"
-                  context line
-
-  Theme tiles:
-    Each tile = MaterialCardView (selectable=true). Inside the card,
-    stacked rectangles show "surface tier" swatches:
-      - top half  = surface
-      - bottom    = surfaceContainer (with a small primary-accent pill)
-    The Auto tile uses a single diagonal gradient drawable instead of
-    stacked surfaces to communicate "switches between light & dark".
-    The selected tile gets a 2dp colorPrimary stroke + colorSurfaceContainerHigh
-    fill via theme_preview_tile_bg.xml; non-selected tiles get a 1dp
-    colorOutlineVariant stroke + colorSurfaceContainer fill.
-
-  Preserved IDs (existing Kotlin code reads these):
-    themeAuto, themeLight, themeDark   → tile click targets
-    themeToggleGroup                   → outer LinearLayout (was MBTG;
-                                          now a host container — Kotlin
-                                          rewired to per-tile click handlers)
-    cardLanguage, tvLanguageValue      → language picker
--->
+<!-- Settings › Appearance. The pin grid column count follows the window width (@integer/set_nav_columns). -->
 <androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:clipToPadding="false"
     android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:paddingHorizontal="@dimen/page_padding_horizontal"
-        android:paddingTop="@dimen/page_padding_top"
-        android:paddingBottom="@dimen/page_padding_bottom">
+        android:paddingHorizontal="@dimen/od_page_padding_h"
+        android:paddingTop="18dp"
+        android:paddingBottom="@dimen/od_space_24">
 
-        <!-- ============== HERO HEADER ============== -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:accessibilityHeading="true"
             android:text="@string/settings_section_appearance"
-            android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
-            android:textColor="?attr/colorOnSurface"
-            android:textStyle="bold" />
+            android:textAppearance="@style/TextAppearance.Overdrive.PageTitle" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:layout_marginBottom="@dimen/page_padding_top"
+            android:layout_marginTop="@dimen/od_space_2"
             android:text="@string/settings_appearance_subtitle"
-            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-            android:textColor="?attr/colorOnSurfaceVariant" />
+            android:textAppearance="@style/TextAppearance.Overdrive.Settings.Lede" />
 
-        <!-- ============== THEME CARD ============== -->
+        <!-- Theme -->
         <com.google.android.material.card.MaterialCardView
+            style="@style/Widget.Overdrive.Revamp.Card"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="@dimen/card_gap_vertical"
-            app:cardBackgroundColor="?attr/colorSurfaceContainer"
-            app:cardCornerRadius="@dimen/card_radius_standard"
-            app:cardElevation="0dp">
+            android:layout_marginTop="14dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="@dimen/card_padding_standard">
+                android:orientation="vertical">
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:accessibilityHeading="true"
                     android:text="@string/settings_theme_label"
-                    android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                    android:textColor="?attr/colorOnSurface" />
+                    android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle" />
 
-                <!-- Tile row. Equal-weight, 8dp inter-margin. The id
-                     "themeToggleGroup" is preserved for backwards-compat
-                     even though this is now a plain LinearLayout. -->
                 <LinearLayout
                     android:id="@+id/themeToggleGroup"
                     android:layout_width="match_parent"
@@ -92,14 +56,13 @@
                     android:baselineAligned="false"
                     android:orientation="horizontal">
 
-                    <!-- AUTO tile -->
                     <FrameLayout
                         android:id="@+id/themeAuto"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:layout_marginEnd="4dp"
+                        android:layout_marginEnd="@dimen/set_theme_gap_half"
                         android:layout_weight="1"
-                        android:background="@drawable/theme_preview_tile_bg"
+                        android:background="@drawable/set_theme_tile_bg"
                         android:clickable="true"
                         android:focusable="true">
 
@@ -107,41 +70,36 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:orientation="vertical"
-                            android:padding="12dp">
+                            android:paddingHorizontal="10dp"
+                            android:paddingTop="10dp"
+                            android:paddingBottom="@dimen/od_space_12">
 
-                            <!-- Diagonal-gradient swatch (light → dark) -->
-                            <FrameLayout
+                            <View
                                 android:layout_width="match_parent"
-                                android:layout_height="68dp"
-                                android:background="@drawable/theme_preview_auto">
-
-                                <View
-                                    android:layout_width="32dp"
-                                    android:layout_height="6dp"
-                                    android:layout_gravity="center"
-                                    android:background="@drawable/theme_preview_accent_chip" />
-                            </FrameLayout>
+                                android:layout_height="@dimen/set_theme_preview_height"
+                                android:background="@drawable/set_theme_pv_auto"
+                                android:importantForAccessibility="no" />
 
                             <TextView
-                                android:layout_width="wrap_content"
+                                android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:layout_gravity="center_horizontal"
                                 android:layout_marginTop="10dp"
-                                android:text="@string/settings_theme_auto"
-                                android:textAlignment="center"
-                                android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-                                android:textColor="?attr/colorOnSurface" />
+                                android:ellipsize="end"
+                                android:gravity="center"
+                                android:maxLines="1"
+                                android:text="@string/settings_theme_auto_short"
+                                android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle"
+                                android:textSize="14sp" />
                         </LinearLayout>
                     </FrameLayout>
 
-                    <!-- LIGHT tile -->
                     <FrameLayout
                         android:id="@+id/themeLight"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:layout_marginHorizontal="4dp"
+                        android:layout_marginHorizontal="@dimen/set_theme_gap_half"
                         android:layout_weight="1"
-                        android:background="@drawable/theme_preview_tile_bg"
+                        android:background="@drawable/set_theme_tile_bg"
                         android:clickable="true"
                         android:focusable="true">
 
@@ -149,54 +107,36 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:orientation="vertical"
-                            android:padding="12dp">
+                            android:paddingHorizontal="10dp"
+                            android:paddingTop="10dp"
+                            android:paddingBottom="@dimen/od_space_12">
 
-                            <!-- Two-tier light surface stack -->
-                            <LinearLayout
+                            <View
                                 android:layout_width="match_parent"
-                                android:layout_height="68dp"
-                                android:orientation="vertical">
-
-                                <View
-                                    android:layout_width="match_parent"
-                                    android:layout_height="0dp"
-                                    android:layout_weight="1.2"
-                                    android:background="@drawable/theme_preview_light_surface" />
-
-                                <FrameLayout
-                                    android:layout_width="match_parent"
-                                    android:layout_height="0dp"
-                                    android:layout_weight="1"
-                                    android:background="@drawable/theme_preview_light_container">
-
-                                    <View
-                                        android:layout_width="32dp"
-                                        android:layout_height="6dp"
-                                        android:layout_gravity="center"
-                                        android:background="@drawable/theme_preview_accent_chip" />
-                                </FrameLayout>
-                            </LinearLayout>
+                                android:layout_height="@dimen/set_theme_preview_height"
+                                android:background="@drawable/set_theme_pv_light"
+                                android:importantForAccessibility="no" />
 
                             <TextView
-                                android:layout_width="wrap_content"
+                                android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:layout_gravity="center_horizontal"
                                 android:layout_marginTop="10dp"
+                                android:ellipsize="end"
+                                android:gravity="center"
+                                android:maxLines="1"
                                 android:text="@string/settings_theme_light"
-                                android:textAlignment="center"
-                                android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-                                android:textColor="?attr/colorOnSurface" />
+                                android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle"
+                                android:textSize="14sp" />
                         </LinearLayout>
                     </FrameLayout>
 
-                    <!-- DARK tile -->
                     <FrameLayout
                         android:id="@+id/themeDark"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="4dp"
+                        android:layout_marginStart="@dimen/set_theme_gap_half"
                         android:layout_weight="1"
-                        android:background="@drawable/theme_preview_tile_bg"
+                        android:background="@drawable/set_theme_tile_bg"
                         android:clickable="true"
                         android:focusable="true">
 
@@ -204,88 +144,72 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:orientation="vertical"
-                            android:padding="12dp">
+                            android:paddingHorizontal="10dp"
+                            android:paddingTop="10dp"
+                            android:paddingBottom="@dimen/od_space_12">
 
-                            <!-- Two-tier dark surface stack -->
-                            <LinearLayout
+                            <View
                                 android:layout_width="match_parent"
-                                android:layout_height="68dp"
-                                android:orientation="vertical">
-
-                                <View
-                                    android:layout_width="match_parent"
-                                    android:layout_height="0dp"
-                                    android:layout_weight="1.2"
-                                    android:background="@drawable/theme_preview_dark_surface" />
-
-                                <FrameLayout
-                                    android:layout_width="match_parent"
-                                    android:layout_height="0dp"
-                                    android:layout_weight="1"
-                                    android:background="@drawable/theme_preview_dark_container">
-
-                                    <View
-                                        android:layout_width="32dp"
-                                        android:layout_height="6dp"
-                                        android:layout_gravity="center"
-                                        android:background="@drawable/theme_preview_accent_chip" />
-                                </FrameLayout>
-                            </LinearLayout>
+                                android:layout_height="@dimen/set_theme_preview_height"
+                                android:background="@drawable/set_theme_pv_dark"
+                                android:importantForAccessibility="no" />
 
                             <TextView
-                                android:layout_width="wrap_content"
+                                android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:layout_gravity="center_horizontal"
                                 android:layout_marginTop="10dp"
+                                android:ellipsize="end"
+                                android:gravity="center"
+                                android:maxLines="1"
                                 android:text="@string/settings_theme_dark"
-                                android:textAlignment="center"
-                                android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-                                android:textColor="?attr/colorOnSurface" />
+                                android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle"
+                                android:textSize="14sp" />
                         </LinearLayout>
                     </FrameLayout>
                 </LinearLayout>
 
-                <!-- Active-state caption — populated by Kotlin per selection. -->
+                <!-- Text set per mode by SettingsAppearanceFragment. -->
                 <TextView
                     android:id="@+id/tvThemeActiveCaption"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
+                    android:layout_marginTop="@dimen/od_space_12"
                     android:text="@string/settings_theme_active_auto_caption"
-                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                    android:textColor="?attr/colorOnSurfaceVariant" />
+                    android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowMeta" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- ============== LANGUAGE CARD ============== -->
+        <!-- Display language -->
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/cardLanguage"
+            style="@style/Widget.Overdrive.Revamp.Card"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
             android:clickable="true"
             android:focusable="true"
-            app:cardBackgroundColor="?attr/colorSurfaceContainer"
-            app:cardCornerRadius="@dimen/card_radius_standard"
-            app:cardElevation="0dp">
+            app:contentPaddingBottom="@dimen/od_space_2"
+            app:contentPaddingTop="@dimen/od_space_2">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:padding="@dimen/card_padding_standard"
-                android:gravity="center_vertical">
+                android:gravity="center_vertical"
+                android:minHeight="@dimen/set_row_link_min_height"
+                android:orientation="horizontal">
 
                 <ImageView
-                    android:layout_width="@dimen/card_icon_service"
-                    android:layout_height="@dimen/card_icon_service"
+                    android:layout_width="@dimen/od_icon_md"
+                    android:layout_height="@dimen/od_icon_md"
                     android:contentDescription="@null"
                     android:src="@drawable/ic_language"
-                    app:tint="?attr/colorPrimary" />
+                    app:tint="?attr/colorOnSurfaceVariant" />
 
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="16dp"
+                    android:layout_marginStart="14dp"
+                    android:layout_marginEnd="14dp"
                     android:layout_weight="1"
                     android:orientation="vertical">
 
@@ -293,91 +217,106 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/settings_language_card_title"
-                        android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle" />
 
-                    <TextView
-                        android:id="@+id/tvLanguageValue"
-                        android:layout_width="wrap_content"
+                    <LinearLayout
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:textAppearance="@style/TextAppearance.Material3.TitleLarge"
-                        android:textColor="?attr/colorOnSurface" />
+                        android:layout_marginTop="1dp"
+                        android:baselineAligned="false"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
 
-                    <TextView
-                        android:id="@+id/tvLanguageCount"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
+                        <TextView
+                            android:id="@+id/tvLanguageValue"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:ellipsize="end"
+                            android:maxLines="1"
+                            android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowMeta" />
+
+                        <TextView
+                            android:id="@+id/tvLanguageCount"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="@dimen/od_space_6"
+                            android:layout_weight="1"
+                            android:drawableStart="@drawable/set_meta_dot"
+                            android:drawablePadding="@dimen/od_space_6"
+                            android:ellipsize="end"
+                            android:maxLines="1"
+                            android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowMeta" />
+                    </LinearLayout>
                 </LinearLayout>
 
                 <ImageView
-                    android:layout_width="20dp"
-                    android:layout_height="20dp"
+                    android:layout_width="@dimen/od_icon_md"
+                    android:layout_height="@dimen/od_icon_md"
                     android:contentDescription="@null"
                     android:src="@drawable/ic_chevron_right"
                     app:tint="?attr/colorOnSurfaceVariant" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/section_overline_top"
-            android:accessibilityHeading="true"
-            android:text="@string/settings_navigation_title"
-            android:textAppearance="@style/TextAppearance.Material3.TitleLarge"
-            android:textColor="?attr/colorOnSurface" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="@string/settings_navigation_subtitle"
-            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-            android:textColor="?attr/colorOnSurfaceVariant" />
-
+        <!-- Navigation pinning -->
         <com.google.android.material.card.MaterialCardView
+            style="@style/Widget.Overdrive.Revamp.Card"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            app:cardBackgroundColor="?attr/colorSurfaceContainer"
-            app:cardCornerRadius="@dimen/card_radius_standard"
-            app:cardElevation="0dp">
+            android:layout_marginTop="14dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical">
 
-                <LinearLayout
-                    android:id="@+id/navigationOptionsContainer"
-                    android:layout_width="match_parent"
+                <TextView
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical" />
+                    android:accessibilityHeading="true"
+                    android:text="@string/settings_navigation_title"
+                    android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle" />
 
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:paddingHorizontal="16dp"
-                    android:paddingTop="8dp"
-                    android:text="@string/settings_navigation_fixed_hint"
-                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                    android:textColor="?attr/colorOnSurfaceVariant" />
+                    android:layout_marginTop="@dimen/od_space_4"
+                    android:text="@string/settings_navigation_subtitle"
+                    android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowMeta" />
 
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/navigationResetButton"
-                    style="@style/Widget.Overdrive.M3.Button.Text"
-                    android:layout_width="wrap_content"
-                    android:layout_height="48dp"
-                    android:layout_gravity="end"
-                    android:layout_marginHorizontal="8dp"
-                    android:layout_marginVertical="8dp"
-                    android:text="@string/settings_navigation_reset"
-                    android:textAllCaps="false"
-                    app:icon="@drawable/ic_update" />
+                <!-- Rows are added by SettingsAppearanceFragment. -->
+                <GridLayout
+                    android:id="@+id/navigationOptionsContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/od_space_4"
+                    android:columnCount="@integer/set_nav_columns"
+                    android:orientation="horizontal"
+                    android:useDefaultMargins="false" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/od_space_8"
+                    android:baselineAligned="false"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/settings_navigation_fixed_hint"
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowMeta" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/navigationResetButton"
+                        style="@style/Widget.Overdrive.M3.Button.Text"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="@dimen/od_space_12"
+                        android:text="@string/settings_navigation_reset" />
+                </LinearLayout>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
     </LinearLayout>

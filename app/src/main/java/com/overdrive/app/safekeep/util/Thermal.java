@@ -30,6 +30,7 @@ public final class Thermal {
         private final LongSupplier elapsedMs;
         private String zoneTempPath;
         private long lastScanAt;
+        private long firstFailureAt = -1L;
         private boolean scanned;
 
         Sampler(File zonesDirectory, LongSupplier elapsedMs) {
@@ -42,10 +43,22 @@ public final class Thermal {
             long now = elapsedMs.getAsLong();
             if (!scanned) scan(now);
             float temp = zoneTempPath == null ? Float.NaN : readTemp(zoneTempPath);
-            if (Float.isNaN(temp) && (now < lastScanAt
-                    || now - lastScanAt >= RESCAN_INTERVAL_MS)) {
+            if (!Float.isNaN(temp)) {
+                firstFailureAt = -1L;
+                return temp;
+            }
+            if (firstFailureAt < 0L || now < firstFailureAt) firstFailureAt = now;
+            // A chosen zone must fail for a whole interval before it is replaced: one bad
+            // read must not switch the SoC sensor for a cooler one.
+            boolean due = zoneTempPath == null
+                    ? (now < lastScanAt || now - lastScanAt >= RESCAN_INTERVAL_MS)
+                    : now - firstFailureAt >= RESCAN_INTERVAL_MS;
+            if (due) {
+                String previous = zoneTempPath;
                 scan(now);
+                if (zoneTempPath == null) zoneTempPath = previous;
                 temp = zoneTempPath == null ? Float.NaN : readTemp(zoneTempPath);
+                firstFailureAt = Float.isNaN(temp) ? now : -1L;
             }
             return temp;
         }

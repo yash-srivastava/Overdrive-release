@@ -86,7 +86,7 @@ public final class HighResPreviewSampler {
             : "uniform samplerExternalOES uCameraTex;\n";
         return String.format(Locale.US,
                 extension +
-                "precision mediump float;\n" +
+                "precision highp float;\n" +
                 cameraSampler +
                 "uniform float uApaMode;\n" +
                 "uniform float uRedMaskStrength;\n" +
@@ -135,7 +135,7 @@ public final class HighResPreviewSampler {
             ? "uniform sampler2D uCameraTex;\n"
             : "uniform samplerExternalOES uCameraTex;\n";
         return extension +
-            "precision mediump float;\n" +
+            "precision highp float;\n" +
             cameraSampler +
             "uniform float uStripOffsetX;\n" +
             "uniform vec2 uCorner;\n" +
@@ -211,8 +211,8 @@ public final class HighResPreviewSampler {
 
     // SurfaceTexture transform matrix + layout selector. Cross-thread
     // (HTTP worker writes via setTextureMatrix → sampler thread reads
-    // inside renderAndEncode), so the writer holds the lock and the
-    // reader snapshots into a local before uploading.
+    // inside renderAndRead), so the writer holds the lock and the
+    // reader snapshots into renderTexMatrix before uploading.
     private final float[] currentTexMatrix = {
         1f, 0f, 0f, 0f,
         0f, 1f, 0f, 0f,
@@ -447,7 +447,7 @@ public final class HighResPreviewSampler {
         return runOnSamplerThread(textureId, () -> {
             ensureFbo(outW, outH);
             if (fbo < 0 || !ensureMosaicProgram(offsets)) return null;
-            return renderAndEncode(textureId, mosaicProgram, mosaicAPos, mosaicATex, mosaicUTex,
+            return renderAndRead(textureId, mosaicProgram, mosaicAPos, mosaicATex, mosaicUTex,
                     -1, 0f, mosaicUTexMatrix, mosaicUApaMode, outW, outH);
         });
     }
@@ -509,7 +509,7 @@ public final class HighResPreviewSampler {
             ensureFbo(finalW, finalH);
             if (fbo < 0 || !ensureQuadrantProgram()) return null;
             // Bind once for both corner and flip uniforms. Each location may
-            // be optimized out by the driver; renderAndEncode still binds the
+            // be optimized out by the driver; renderAndRead still binds the
             // program for the draw, including when both are absent.
             if (quadUCorner >= 0 || quadUFlip >= 0) {
                 GLES20.glUseProgram(quadProgram);
@@ -520,15 +520,27 @@ public final class HighResPreviewSampler {
             if (quadUFlip >= 0) {
                 GLES20.glUniform2f(quadUFlip, fx, fy);
             }
-            // renderAndEncode handles uApaMode upload via the location arg.
-            return renderAndEncode(textureId, quadProgram, quadAPos, quadATex, quadUTex,
+            // renderAndRead handles uApaMode upload via the location arg.
+            return renderAndRead(textureId, quadProgram, quadAPos, quadATex, quadUTex,
                     quadUOffset, stripOffsetX, quadUTexMatrix,
                     quadUApaMode, finalW, finalH, apaMode);
         });
     }
 
+    /** Draws and reads back one frame; the pixels stay in the sampler's own buffers. */
     private interface GlJob {
-        byte[] run();
+        Readback run();
+    }
+
+    /** Dimensions of the frame left in {@code readBuffer} by {@link #renderAndRead}. */
+    private static final class Readback {
+        final int width;
+        final int height;
+
+        Readback(int width, int height) {
+            this.width = width;
+            this.height = height;
+        }
     }
 
     private byte[] runOnSamplerThread(int textureId, GlJob job) {
@@ -556,16 +568,22 @@ public final class HighResPreviewSampler {
                 if (abandoned.get()) return;
                 Object activeSourceLock = sourceLock;
                 SourceGuard activeSourceGuard = sourceGuard;
+                Readback readback = null;
                 if (activeSourceLock != null) {
                     synchronized (activeSourceLock) {
                         if (!abandoned.get() && (activeSourceGuard == null
                                 || activeSourceGuard.isSourceValid(textureId))) {
-                            result.set(job.run());
+                            readback = job.run();
                         }
                     }
                 } else if (!abandoned.get() && (activeSourceGuard == null
                         || activeSourceGuard.isSourceValid(textureId))) {
-                    result.set(job.run());
+                    readback = job.run();
+                }
+                // The camera texture is no longer read: convert and compress outside its lock.
+                // Jobs and release() run serially on this thread, so the buffers stay ours.
+                if (readback != null && !abandoned.get()) {
+                    result.set(encodeReadback(readback.width, readback.height));
                 }
             } catch (Throwable t) {
                 logger.warn("GL job failed: " + t.getMessage());
@@ -607,13 +625,13 @@ public final class HighResPreviewSampler {
     }
 
     /** Caller has bound the FBO + program; we render, read, encode. */
-    private byte[] renderAndEncode(int textureId, int program,
+    private Readback renderAndRead(int textureId, int program,
                                    int aPosLoc, int aTexLoc, int uTexLoc,
                                    int uOffsetLoc, float offsetValue,
                                    int uTexMatrixLoc, int uApaModeLoc,
                                    int width, int height) {
         // Default apaMode = persisted cameraLayout (used by mosaic sampler).
-        return renderAndEncode(textureId, program, aPosLoc, aTexLoc, uTexLoc,
+        return renderAndRead(textureId, program, aPosLoc, aTexLoc, uTexLoc,
             uOffsetLoc, offsetValue, uTexMatrixLoc, uApaModeLoc,
             width, height, cameraLayout);
     }
@@ -621,7 +639,7 @@ public final class HighResPreviewSampler {
     /** Variant that accepts an explicit apaMode override (per-call, e.g.
      *  per-quadrant sampler decides 0 vs 3 based on whether corner offsets
      *  were supplied, regardless of the persisted layout). */
-    private byte[] renderAndEncode(int textureId, int program,
+    private Readback renderAndRead(int textureId, int program,
                                    int aPosLoc, int aTexLoc, int uTexLoc,
                                    int uOffsetLoc, float offsetValue,
                                    int uTexMatrixLoc, int uApaModeLoc,
@@ -694,7 +712,19 @@ public final class HighResPreviewSampler {
             readBuffer.clear();
             GLES20.glReadPixels(0, 0, width, height,
                     GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, readBuffer);
+            return new Readback(width, height);
+        } catch (Throwable t) {
+            logger.warn("renderAndRead failed " + width + "x" + height
+                    + ": " + t.getMessage());
+            return null;
+        } finally {
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+        }
+    }
 
+    /** Flips, converts and JPEG-encodes the frame {@link #renderAndRead} left in readBuffer. */
+    private byte[] encodeReadback(int width, int height) {
+        try {
             // The native-order IntBuffer views the same direct RGBA memory.
             // Bulk-read directly into the reusable pixel array, avoiding a
             // second full-frame byte[] and its extra copy on every preview.
@@ -719,7 +749,7 @@ public final class HighResPreviewSampler {
             }
 
             // Reuse the mutable bitmap instead of allocating one per preview.
-            // All renderAndEncode calls run serially on the sampler thread.
+            // All preview jobs run serially on the sampler thread.
             jpegBitmap.setPixels(argbPixels, 0, width, 0, 0, width, height);
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             if (!jpegBitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)) {
@@ -727,11 +757,9 @@ public final class HighResPreviewSampler {
             }
             return out.toByteArray();
         } catch (Throwable t) {
-            logger.warn("renderAndEncode failed " + width + "x" + height
+            logger.warn("encodeReadback failed " + width + "x" + height
                     + ": " + t.getMessage());
             return null;
-        } finally {
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
         }
     }
 

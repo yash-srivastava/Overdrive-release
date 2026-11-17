@@ -78,16 +78,17 @@ public class AccSentryDiLink5PanelContractTest {
                 "isLoopbackPortOpen(ADB_TCP_PORT)", adbRecovery);
         int adbBackoff = source.indexOf(
                 "DILINK5_ADB_RECOVERY_RETRY_MS", adbPortCheck);
-        int adbSettings = source.indexOf(
-                "settings put global adb_enabled 1", adbBackoff);
+        int adbObservation = source.indexOf(
+                "waiting for coordinated app-process recovery", adbBackoff);
         assertTrue(adbRecovery >= 0);
         assertTrue(adbPortCheck > adbRecovery);
         assertTrue(adbBackoff > adbPortCheck);
-        assertTrue(adbSettings > adbBackoff);
-        assertTrue(source.contains(
-                "settings put global adb_wifi_enabled 1"));
-        assertTrue(source.contains(
-                "settings put global adb_allowed_connection_time 0"));
+        assertTrue(adbObservation > adbBackoff);
+        String adbRecoveryBody = source.substring(adbRecovery,
+                source.indexOf("private static String lastAdbRecoveryLeaseDeferral", adbRecovery));
+        assertFalse(adbRecoveryBody.contains("settings put global adb_enabled"));
+        assertFalse(adbRecoveryBody.contains("settings put global adb_wifi_enabled"));
+        assertFalse(adbRecoveryBody.contains("settings put global adb_allowed_connection_time"));
         assertFalse(source.contains(
                 "settings put global development_settings_enabled"));
         assertFalse(source.contains("persist.sys.usb.config"));

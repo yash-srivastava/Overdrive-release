@@ -103,8 +103,10 @@ public class DrivingSafetyGuardTest {
                 GearReading.NOT_PARK, false, true, false, 0.0));
         assertEquals("moving", DrivingSafetyGuard.blockReasonDiLink5(
                 GearReading.PARK, false, true, false, 3.0));
-        assertEquals("state_unknown", DrivingSafetyGuard.blockReasonDiLink5(
+        assertNull(DrivingSafetyGuard.blockReasonDiLink5(
                 GearReading.PARK, false, true, false, 0.0));
+        assertEquals("state_unknown", DrivingSafetyGuard.blockReasonDiLink5(
+                GearReading.PARK, false, true, false, 0.0, false));
         assertNull(DrivingSafetyGuard.blockReasonDiLink5(
                 GearReading.PARK, false, true, true, 0.0));
     }

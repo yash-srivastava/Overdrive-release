@@ -180,9 +180,12 @@ public class TripAnalyticsManager {
             int currentGear = GearMonitor.getInstance().getCurrentGear();
             if (GearMonitor.isValidGearMode(currentGear)
                     && currentGear != GearMonitor.GEAR_P
-                    && detector != null && !detector.isTripActive()) {
-                logger.info("ACC ON + gear already " + GearMonitor.gearToString(currentGear)
-                        + " — auto-starting trip");
+                    && detector != null) {
+                if (!detector.isTripActive()) {
+                    logger.info("ACC ON + gear already " + GearMonitor.gearToString(currentGear)
+                            + " — auto-starting trip");
+                }
+                // ACTIVE ignores a driving gear; PARK_PENDING needs it to cancel its park debounce.
                 detector.onGearChanged(currentGear);
             }
         } catch (Exception e) {
@@ -460,6 +463,9 @@ public class TripAnalyticsManager {
             @Override
             public void onTripEnded(TripRecord trip) {
                 handleTripEnded(trip);
+                try {
+                    com.overdrive.app.briefing.daemon.TripBriefingService.get().onTripEnded();
+                } catch (Throwable ignored) {}
             }
 
             @Override
@@ -737,7 +743,6 @@ public class TripAnalyticsManager {
         try {
             com.overdrive.app.monitor.GpsMonitor gps =
                     com.overdrive.app.monitor.GpsMonitor.getInstance();
-            gps.ensureTripRecordingFeed();
             if (!gps.getFixSnapshot().hasLocation()) {
                 logger.warn("Trip started with no GPS fix in GpsMonitor — "
                         + "LocationSidecar may be down or location permission missing; "

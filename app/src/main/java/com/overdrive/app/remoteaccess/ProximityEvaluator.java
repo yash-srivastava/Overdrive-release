@@ -235,6 +235,7 @@ public final class ProximityEvaluator {
     private int candidateSamples;
     private boolean armed;
     private boolean confirmedNearVisit;
+    private boolean carriedNearVisit;
     private String reason = "waiting_for_signal";
     private String connectionModeGeneration, evidenceKind = "unknown";
     private boolean trustedConnectionSeen, confirmedDisconnection;
@@ -366,7 +367,8 @@ public final class ProximityEvaluator {
 
         Event event = Event.NONE;
         if (zone == State.AWAY) {
-            lockEpisodeEligible = stableState == State.NEAR && confirmedNearVisit;
+            lockEpisodeEligible = stableState == State.NEAR && confirmedNearVisit
+                    || carriedNearVisit && stableState == State.UNKNOWN;
             arrivalEpisodeEligible = false;
             if (lockEpisodeEligible) {
                 event = Event.DEPARTURE;
@@ -380,6 +382,7 @@ public final class ProximityEvaluator {
             armed = false;
             confirmedNearVisit = true;
         }
+        carriedNearVisit = false;
         stableState = zone;
         episodeId = ++nextEpisodeId;
         clearCandidate();
@@ -398,6 +401,7 @@ public final class ProximityEvaluator {
         samples.clear();
         arrivalSamples.clear();
         nearRunSamples.clear();
+        carriedNearVisit = false;
         rawRssi = null;
         medianRssi = arrivalMedianRssi = null;
         nearSinceMs = lastSampleMs = -1;
@@ -459,6 +463,7 @@ public final class ProximityEvaluator {
                     ? Event.ARRIVAL : Event.NONE;
             armed = false;
             confirmedNearVisit = true;
+            carriedNearVisit = false;
             stableState = State.NEAR;
             episodeId = ++nextEpisodeId;
             clearCandidate();
@@ -489,12 +494,14 @@ public final class ProximityEvaluator {
             reason = "stabilizing_away";
             return result(nowMs, Event.NONE, reason, true);
         }
-        lockEpisodeEligible = stableState == State.NEAR && confirmedNearVisit;
+        lockEpisodeEligible = stableState == State.NEAR && confirmedNearVisit
+                || carriedNearVisit && stableState == State.UNKNOWN;
         arrivalEpisodeEligible = false;
         Event event = lockEpisodeEligible
                 ? Event.DEPARTURE : Event.NONE;
         armed = true;
         confirmedNearVisit = false;
+        carriedNearVisit = false;
         stableState = State.AWAY;
         episodeId = ++nextEpisodeId;
         clearCandidate();
@@ -519,6 +526,32 @@ public final class ProximityEvaluator {
         clearSignal("waiting_for_signal");
         address = null;
         lastNowMs = -1;
+    }
+
+    /**
+     * Counts a connection the caller proved before a car-side radio restart as this phone's
+     * connection history, so a later confirmed disconnection can depart. Any reset forgets it.
+     */
+    public synchronized void adoptConnectionHistory(String selectedAddress) {
+        String normalized = normalizeAddress(selectedAddress);
+        if (normalized == null) return;
+        // A status-read revoke resets the address; the reading being adopted selects it again.
+        if (address == null) address = normalized;
+        if (normalized.equals(address)) trustedConnectionSeen = true;
+    }
+
+    /**
+     * Counts a Near visit the caller proved with the car on as this phone's last confirmed zone, so
+     * the first Away confirmation since a wipe can depart. Emits nothing; any wipe or zone forgets it.
+     */
+    public synchronized void adoptNearVisit(String selectedAddress) {
+        String normalized = normalizeAddress(selectedAddress);
+        if (normalized != null && normalized.equals(address) && stableState == State.UNKNOWN)
+            carriedNearVisit = true;
+    }
+
+    public int nearThreshold() {
+        return config.nearThreshold;
     }
 
     private Snapshot unknown(long nowMs, String unknownReason) {
@@ -546,6 +579,7 @@ public final class ProximityEvaluator {
         clearCandidate();
         armed = false;
         confirmedNearVisit = false;
+        carriedNearVisit = false;
         reason = clearReason;
     }
 
@@ -570,6 +604,7 @@ public final class ProximityEvaluator {
         medianRssi = arrivalMedianRssi = null;
         stableState = State.UNKNOWN;
         confirmedNearVisit = false;
+        carriedNearVisit = false;
         arrivalEpisodeEligible = lockEpisodeEligible = false;
         evidenceKind = "unknown";
         clearCandidate();

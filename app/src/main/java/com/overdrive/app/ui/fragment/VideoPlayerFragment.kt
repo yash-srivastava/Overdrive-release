@@ -1,5 +1,6 @@
 package com.overdrive.app.ui.fragment
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.media.MediaPlayer
 import android.net.Uri
@@ -7,7 +8,9 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.accessibility.AccessibilityManager
 import android.widget.ImageButton
@@ -55,6 +58,8 @@ class VideoPlayerFragment : Fragment() {
         const val ARG_PLAYLIST_PATHS = "playlist_paths"
         const val ARG_PLAYLIST_TITLES = "playlist_titles"
         const val ARG_PLAYLIST_INDEX = "playlist_index"
+        /** Clip not written by OverDrive: no event sidecar and no camera-mosaic quadrants. */
+        const val ARG_EXTERNAL_SOURCE = "external_source"
         private const val SEEK_UPDATE_MS = 250L
         // SharedPreferences-backed persistence for the mute toggle.
         private const val PREFS_PLAYER = "video_player_prefs"
@@ -72,6 +77,7 @@ class VideoPlayerFragment : Fragment() {
     }
 
     private var inlineMode: Boolean = false
+    private var externalSource: Boolean = false
     private var playlistPaths: Array<String> = emptyArray()
     private var playlistTitles: Array<String> = emptyArray()
     private var playlistIndex: Int = -1
@@ -155,6 +161,8 @@ class VideoPlayerFragment : Fragment() {
     private var isUserSeeking = false
     private var timelineExecutor: ExecutorService? = null
     private var timelineGeneration: Int = 0
+    /** Event markers are loaded for the current clip, so scrubber taps can snap to them. */
+    private var timelineHasEvents = false
 
     // Auto-hide overlay controls
     private var topBar: View? = null
@@ -242,7 +250,12 @@ class VideoPlayerFragment : Fragment() {
         // paint (width/height==0). [ZoomableVideoView.onSizeChanged]
         // picks up the stored quadrant once layout completes and paints
         // the matching matrix on the first frame, so no flash.
-        currentQuadrant = runCatching {
+        externalSource = arguments?.getBoolean(ARG_EXTERNAL_SOURCE, false) ?: false
+        if (externalSource) {
+            quadrantBar?.visibility = View.GONE
+            quadrantBar = null
+        }
+        currentQuadrant = if (externalSource) ZoomableVideoView.Quadrant.ALL else runCatching {
             val raw = prefs.getString(PREF_QUADRANT, ZoomableVideoView.Quadrant.ALL.name)
             ZoomableVideoView.Quadrant.valueOf(raw ?: ZoomableVideoView.Quadrant.ALL.name)
         }.getOrDefault(ZoomableVideoView.Quadrant.ALL)
@@ -267,6 +280,7 @@ class VideoPlayerFragment : Fragment() {
         if (inlineMode &&
             parentFragment?.view?.findViewById<View>(R.id.twoPaneBody) == null) {
             btnBack.visibility = View.GONE
+            btnPlayPause.visibility = View.GONE
             playerLoadingContainer?.visibility = View.GONE
             quadrantBar?.visibility = View.GONE
             topBar?.visibility = View.GONE
@@ -324,6 +338,8 @@ class VideoPlayerFragment : Fragment() {
             tvMeta.text = ""
         }
 
+        // The clip's lens tag arrives with its sidecar (loadEventTimeline).
+        videoView.resetLensDewarp()
         setupVideoPlayer(path)
         loadEventTimeline(path)
     }
@@ -335,6 +351,10 @@ class VideoPlayerFragment : Fragment() {
      */
     private fun refreshFullscreenButton() {
         val btn = btnFullscreen ?: return
+        // Inline, the preview header carries the title; maximised or full screen, the overlay does.
+        val titleVisibility = if (!inlineMode || isFullscreen) View.VISIBLE else View.GONE
+        tvTitle.visibility = titleVisibility
+        tvMeta.visibility = titleVisibility
         if (onFullscreenToggle == null) {
             btn.visibility = View.GONE
             return
@@ -405,7 +425,7 @@ class VideoPlayerFragment : Fragment() {
         currentQuadrant = resolved
         videoView.setQuadrant(resolved, animate = true)
         refreshQuadrantSelection()
-        runCatching {
+        if (!externalSource) runCatching {
             requireContext()
                 .getSharedPreferences(PREFS_PLAYER, Context.MODE_PRIVATE)
                 .edit()
@@ -509,10 +529,14 @@ class VideoPlayerFragment : Fragment() {
         }
     }
 
+    /** Position in the clip while it plays, else -1 (the List hands a playing clip on to the timeline). */
+    fun playingPositionMs(): Long =
+        if (::videoView.isInitialized && view != null && videoView.isPlaying) videoView.currentPosition.toLong() else -1L
+
     private fun refreshPlayPauseButton(isPlaying: Boolean) {
         btnPlayPause.setImageResource(
-            if (isPlaying) android.R.drawable.ic_media_pause
-            else android.R.drawable.ic_media_play
+            if (isPlaying) R.drawable.rec_ic_pause
+            else R.drawable.rec_ic_play
         )
         btnPlayPause.contentDescription = getString(
             if (isPlaying) R.string.cd_pause else R.string.cd_play
@@ -685,6 +709,7 @@ class VideoPlayerFragment : Fragment() {
                 tvCurrentTime.text = formatTime(target)
             }
         }
+        installTimelineTapRouting()
         eventTimeline.setOnEventSelectedListener { event ->
             tvEventInfo.text = getString(
                 R.string.video_timeline_selected,
@@ -692,6 +717,77 @@ class VideoPlayerFragment : Fragment() {
                 formatTime(event.startMs.toInt())
             )
         }
+    }
+
+    /**
+     * The scrubber sits over the event band. Drags scrub; taps go to the band, which snaps to a
+     * nearby event or else seeks to the tapped point, as a scrubber tap would.
+     */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun installTimelineTapRouting() {
+        val touchSlop = ViewConfiguration.get(requireContext()).scaledTouchSlop
+        var downX = 0f
+        var dragging = false
+        var routed = false
+        seekBar.setOnTouchListener { bar, event ->
+            // Routing is fixed per gesture so a timeline load mid-touch cannot split it.
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                routed = timelineHasEvents
+                downX = event.x
+                dragging = false
+            }
+            if (!routed) return@setOnTouchListener false
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> Unit
+                MotionEvent.ACTION_MOVE -> {
+                    if (!dragging && kotlin.math.abs(event.x - downX) > touchSlop) {
+                        dragging = true
+                        val down = MotionEvent.obtain(event)
+                        down.action = MotionEvent.ACTION_DOWN
+                        down.setLocation(downX, event.y)
+                        bar.onTouchEvent(down)
+                        down.recycle()
+                    }
+                    if (dragging) bar.onTouchEvent(event)
+                }
+                MotionEvent.ACTION_UP -> {
+                    when {
+                        dragging -> bar.onTouchEvent(event)
+                        eventTimeline.hasEventNear(event.x + bar.left - eventTimeline.left) ->
+                            forwardTapToTimeline(bar, event)
+                        // No event nearby: the scrubber seeks on the media's own time scale.
+                        else -> tapSeekBar(bar, event)
+                    }
+                    dragging = false
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    if (dragging) bar.onTouchEvent(event)
+                    dragging = false
+                }
+                else -> {
+                    if (dragging) bar.onTouchEvent(event)
+                }
+            }
+            true
+        }
+    }
+
+    private fun tapSeekBar(bar: View, up: MotionEvent) {
+        val down = MotionEvent.obtain(up.downTime, up.downTime, MotionEvent.ACTION_DOWN, up.x, up.y, 0)
+        bar.onTouchEvent(down)
+        bar.onTouchEvent(up)
+        down.recycle()
+    }
+
+    private fun forwardTapToTimeline(bar: View, up: MotionEvent) {
+        val x = up.x + bar.left - eventTimeline.left
+        val y = eventTimeline.height / 2f
+        val down = MotionEvent.obtain(up.downTime, up.downTime, MotionEvent.ACTION_DOWN, x, y, 0)
+        val release = MotionEvent.obtain(up.downTime, up.eventTime, MotionEvent.ACTION_UP, x, y, 0)
+        eventTimeline.onTouchEvent(down)
+        eventTimeline.onTouchEvent(release)
+        down.recycle()
+        release.recycle()
     }
 
     private fun setupOverlayAutoHide() {
@@ -722,7 +818,12 @@ class VideoPlayerFragment : Fragment() {
         // bottom controls. quadrantBar joining this group is intentional:
         // the user shouldn't see "switch camera" handles floating over a
         // playing-but-controls-hidden video.
-        val chrome = listOfNotNull(topBar, quadrantBar, bottomControls)
+        val chrome = listOfNotNull(
+            topBar,
+            quadrantBar,
+            bottomControls,
+            btnPlayPause.takeIf { !visible || playButtonAllowed() }
+        )
         if (visible) {
             for (v in chrome) {
                 v.animate().cancel()
@@ -758,11 +859,25 @@ class VideoPlayerFragment : Fragment() {
     private fun showBuffering() {
         playerLoadingContainer?.visibility = View.VISIBLE
         playerErrorContainer?.visibility = View.GONE
+        syncPlayButton()
     }
 
     private fun hidePlaybackState() {
         playerLoadingContainer?.visibility = View.GONE
         playerErrorContainer?.visibility = View.GONE
+        syncPlayButton()
+    }
+
+    /** The centred play button gives way to the buffering spinner and the error card. */
+    private fun playButtonAllowed(): Boolean =
+        playerLoadingContainer?.visibility != View.VISIBLE &&
+            playerErrorContainer?.visibility != View.VISIBLE
+
+    private fun syncPlayButton() {
+        btnPlayPause.animate().cancel()
+        btnPlayPause.alpha = 1f
+        btnPlayPause.visibility =
+            if (overlayVisible && playButtonAllowed()) View.VISIBLE else View.GONE
     }
 
     private fun showPlaybackError() {
@@ -771,6 +886,7 @@ class VideoPlayerFragment : Fragment() {
         currentMediaPlayer = null
         playerLoadingContainer?.visibility = View.GONE
         playerErrorContainer?.visibility = View.VISIBLE
+        syncPlayButton()
         tvPlayerError?.text = getString(R.string.video_player_error_title)
         val canAdvance = playlistIndex >= 0 && playlistIndex < playlistPaths.lastIndex
         btnPlayerErrorNext?.visibility = if (canAdvance) View.VISIBLE else View.GONE
@@ -783,10 +899,14 @@ class VideoPlayerFragment : Fragment() {
      */
     private fun loadEventTimeline(videoPath: String) {
         val generation = ++timelineGeneration
+        timelineHasEvents = false
         val executor = timelineExecutor ?: return
         executor.execute {
             val result = try {
-                val jsonText = if (videoPath.startsWith("http://") ||
+                // The sidecar lookup below would read a non-.mp4 external clip itself as JSON.
+                val jsonText = if (externalSource) {
+                    null
+                } else if (videoPath.startsWith("http://") ||
                     videoPath.startsWith("https://")
                 ) {
                     com.overdrive.app.ui.util.RecordingsApiClient
@@ -810,8 +930,10 @@ class VideoPlayerFragment : Fragment() {
                     return@post
                 }
                 videoView.setLayout(result.layout)
+                videoView.setLensDewarp(result.lens)
                 applyQuadrantLayoutIcons(result.layout)
                 eventTimeline.setEvents(result.events, result.durationMs)
+                timelineHasEvents = result.events.isNotEmpty() && result.durationMs > 0
                 tvEventInfo.text = if (result.legend.isNotEmpty()) {
                     result.legend
                 } else {
@@ -845,6 +967,7 @@ class VideoPlayerFragment : Fragment() {
                 )
             }
         }
+        val lens = com.overdrive.app.ui.view.PlaybackDewarp.specFor(json)
         val stats = json.optJSONObject("stats")
         val legend = buildString {
             if (stats != null) {
@@ -856,7 +979,7 @@ class VideoPlayerFragment : Fragment() {
                 append(parts.joinToString(" · "))
             }
         }
-        return TimelineResult(layout, events, durationMs, legend)
+        return TimelineResult(layout, events, durationMs, legend, lens)
     }
 
     private data class TimelineResult(
@@ -864,6 +987,7 @@ class VideoPlayerFragment : Fragment() {
         val events: List<EventTimelineView.TimelineEvent>,
         val durationMs: Long,
         val legend: String,
+        val lens: com.overdrive.app.ui.view.PlaybackDewarp.Spec? = null,
     ) {
         companion object {
             fun empty() = TimelineResult(

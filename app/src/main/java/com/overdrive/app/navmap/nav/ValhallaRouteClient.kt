@@ -113,8 +113,9 @@ object ValhallaRouteClient {
      * on failure / missing key / fewer than 2 points.
      *
      * @param points ordered [origin, stop1, stop2, …, destination]; ≥2 required
+     * @param startHeading the way the car is going at the origin (a reroute), or null
      */
-    fun routeVia(points: List<GeoPoint>): List<NavRoute> {
+    fun routeVia(points: List<GeoPoint>, startHeading: Double? = null): List<NavRoute> {
         if (points.size < 2) return emptyList()
         return try {
             val cfg = NavMapConfig.fromUnifiedConfig()
@@ -125,7 +126,7 @@ object ValhallaRouteClient {
                 return emptyList()
             }
             val url = buildRouteUrl(cfg.routingEndpoint, key)
-            val body = buildRequestBodyVia(points)
+            val body = buildRequestBodyVia(points, startHeading)
             val req = Request.Builder().url(url).post(body.toRequestBody(JSON)).build()
             http.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) {
@@ -292,9 +293,17 @@ object ValhallaRouteClient {
      * break, which is what we want — the route stops/continues at each). Pure
      * function — exposed for unit testing.
      */
-    internal fun buildRequestBodyVia(points: List<GeoPoint>): String {
+    internal fun buildRequestBodyVia(points: List<GeoPoint>, startHeading: Double? = null): String {
         val locations = JSONArray()
-        points.forEach { p -> locations.put(JSONObject().put("lat", p.lat).put("lon", p.lng)) }
+        points.forEachIndexed { i, p ->
+            val loc = JSONObject().put("lat", p.lat).put("lon", p.lng)
+            // (as for a single destination: the new route leaves the way the car is going)
+            if (i == 0 && startHeading != null && !startHeading.isNaN()) {
+                loc.put("heading", ((startHeading % 360.0) + 360.0) % 360.0)
+                loc.put("heading_tolerance", 45)
+            }
+            locations.put(loc)
+        }
         return JSONObject()
             .put("locations", locations)
             .put("costing", "auto")

@@ -37,7 +37,7 @@ public class AutomationExecutionHistoryTest {
 
 
     @Test
-    public void failedRuleEvaluationDoesNotPreventFollowingRules() {
+    public void failedRuleEvaluationDoesNotPreventFollowingRules() throws Exception {
         AutomationExecutionHistory.clearForTest();
         final boolean[] laterRuleRan = {false};
         Automations.runIsolatedAutomationEvaluation("broken-rule", () -> {

@@ -167,6 +167,9 @@
     "tyre_wheel_pressure": "{0} ({1})"
   },
   "telegram": {
+    "deterrent_triggered": "เปิดใช้การป้องปราม: {0}",
+    "deterrent_screen": "หน้าจอ",
+    "deterrent_cloud": "คลาวด์",
     "recording_caption": "วิดีโอ ({0}) - {1} วิ",
     "recording_caption_no_label": "วิดีโอ - {0} วิ",
     "proximity_alert": "เตือนเข้าใกล้: {0} บริเวณ: {1} ({2}) กำลังเริ่มบันทึก...",
@@ -476,6 +479,7 @@
   },
   "vehicle_control": {
     "blocked_driving": "การดำเนินการนี้ไม่สามารถใช้งานได้ขณะรถกำลังเคลื่อนที่",
+    "blocked_unconfirmed": "ขณะนี้ยังยืนยันไม่ได้ว่ารถจอดอยู่ โปรดลองอีกครั้งในอีกสักครู่",
     "cloud_required": "เชื่อมต่อบัญชี BYD ในหน้าตั้งค่าเพื่อใช้งานแผงควบคุมนี้",
     "cloud_sent": "ยิงคำสั่งผ่านระบบคลาวด์แล้ว",
     "cloud_unavailable_used_local": "ระบบคลาวด์ไม่ตอบสนอง — เปลี่ยนมาส่งสัญญาณตรงเข้ารลแทนแล้ว",

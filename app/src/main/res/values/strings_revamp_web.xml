@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Web page state strings (service-down card). -->
+<resources>
+    <!-- Tonal button on the service-down card; skips the automatic retry wait. -->
+    <string name="web_state_retry_now">Retry now</string>
+    <!-- Status line under the card body; %1$d = seconds until the next automatic retry. -->
+    <string name="web_state_retry_in">Retrying automatically · next try in %1$d s</string>
+    <!-- Status line while an automatic retry is loading. -->
+    <string name="web_state_retrying_now">Retrying automatically · trying now…</string>
+    <!-- Card title when the daemon is up but refused the in-app session. -->
+    <string name="web_state_sign_in_title">Couldn\'t sign in to this page</string>
+    <string name="web_state_sign_in_body">The camera daemon is running but didn\'t accept the app\'s sign-in. OverDrive restores it automatically while ADB is connected.</string>
+</resources>

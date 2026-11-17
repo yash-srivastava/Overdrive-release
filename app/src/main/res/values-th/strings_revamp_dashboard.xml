@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="dash_vehicle_line">%1$s · %2$.1f kWh</string>
+    <string name="dash_range_caption">ระยะทางวิ่ง</string>
+    <string name="dash_status_remote_on">การเข้าถึงระยะไกล เปิด</string>
+    <string name="dash_status_remote_off">การเข้าถึงระยะไกล ปิด</string>
+    <string name="dash_status_remote_state">การเข้าถึงระยะไกล · %1$s</string>
+    <string name="dash_status_services">บริการ %1$d จาก %2$d</string>
+    <string name="dash_status_view">ดู</string>
+    <string name="dash_status_recording_idle">ไม่ได้บันทึก</string>
+    <string name="dash_services_running">ทำงาน %1$d จาก %2$d</string>
+    <string name="dash_charge_eta_left">เหลือ %1$s</string>
+    <string name="dash_charge_session_inline">%1$s ในรอบนี้</string>
+    <plurals name="dash_clip_count">
+        <item quantity="other">%1$d คลิป</item>
+    </plurals>
+</resources>

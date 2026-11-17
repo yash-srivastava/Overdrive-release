@@ -1,509 +1,651 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  SOTA Integrations — portrait (1080×1920 / ~540dp × 960dp).
-
-  Composition (vertical):
-    HERO ROW   : "Integrations" + neutral status pill
-    Three full-width service cards, stacked, content-driven height (no min):
-      - Telegram, ABRP, MQTT
-      - status dot + label, large icon + headline title, description,
-        full-width "Configure" tonal button at the bottom.
-
-  Click target: the entire card (preserves R.id.cardTelegram / cardAbrp /
-  cardMqtt for IntegrationsFragment.kt). The tonal button delegates its
-  click via duplicateParentState + clickable=false.
+  Integrations, portrait: header (subtitle | heroStatusPill), then the five cards in a 2-column grid.
+  Each card is the touch target; Configure is visual only. Keep in sync with layout-land/fragment_integrations.xml.
 -->
 <androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="?android:attr/colorBackground"
-    android:fillViewport="true"
-    android:clipToPadding="false">
+    android:clipToPadding="false"
+    android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:paddingHorizontal="@dimen/page_padding_horizontal"
-        android:paddingTop="@dimen/page_padding_top"
-        android:paddingBottom="@dimen/page_padding_bottom">
+        android:paddingHorizontal="@dimen/od_page_padding_h"
+        android:paddingTop="@dimen/od_page_padding_top"
+        android:paddingBottom="@dimen/od_space_24">
 
-        <!-- ================== HERO ROW ================== -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="@dimen/page_padding_top"
+            android:layout_marginBottom="@dimen/od_space_12"
+            android:baselineAligned="false"
             android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:baselineAligned="false">
+            android:minHeight="@dimen/int_header_min_height"
+            android:orientation="horizontal">
 
-            <LinearLayout
+            <TextView
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:orientation="vertical">
+                android:text="@string/integrations_hero_subtitle"
+                android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:textSize="15sp" />
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/integrations_hero_subtitle"
-                    android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                    android:textColor="?attr/colorOnSurfaceVariant" />
-            </LinearLayout>
-
+            <!-- Guided-tour anchor. Fill, dot and text are set by IntegrationsFragment.bindHero. -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/heroStatusPill"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                app:cardBackgroundColor="?attr/colorSecondaryContainer"
-                app:cardCornerRadius="999dp"
+                android:layout_marginStart="@dimen/od_space_12"
+                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                app:cardCornerRadius="@dimen/od_radius_card"
                 app:cardElevation="0dp">
 
-                <TextView
-                    android:id="@+id/tvHeroStatus"
+                <LinearLayout
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:paddingHorizontal="14dp"
-                    android:paddingVertical="8dp"
-                    android:text="@string/integrations_status_unknown"
-                    android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-                    android:textColor="?attr/colorOnSecondaryContainer" />
+                    android:gravity="center_vertical"
+                    android:minHeight="@dimen/int_pill_height"
+                    android:orientation="horizontal"
+                    android:paddingHorizontal="10dp"
+                    android:paddingVertical="@dimen/od_space_4">
+
+                    <View
+                        android:id="@+id/heroStatusDot"
+                        android:layout_width="@dimen/od_status_dot"
+                        android:layout_height="@dimen/od_status_dot"
+                        android:background="@drawable/od_status_dot"
+                        android:backgroundTint="@color/status_stopped" />
+
+                    <TextView
+                        android:id="@+id/tvHeroStatus"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="@dimen/od_space_6"
+                        android:maxLines="1"
+                        android:text="@string/integrations_status_unknown"
+                        android:textAppearance="@style/TextAppearance.Overdrive.Integrations.Pill"
+                        android:textColor="?attr/colorOnSurfaceVariant" />
+                </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
         </LinearLayout>
 
-        <!-- ===== TELEGRAM CARD ===== -->
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/cardTelegram"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="@dimen/card_gap_vertical"
-            android:clickable="true"
-            android:focusable="true"
-            app:cardBackgroundColor="?attr/colorSurfaceContainer"
-            app:cardCornerRadius="@dimen/card_radius_hero"
-            app:cardElevation="0dp">
+            android:baselineAligned="false"
+            android:orientation="horizontal">
 
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="@dimen/card_padding_hero">
-
-                <LinearLayout
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
-
-                    <View
-                        android:id="@+id/dotTelegram"
-                        android:layout_width="8dp"
-                        android:layout_height="8dp"
-                        android:background="@drawable/status_dot_neutral" />
-
-                    <TextView
-                        android:id="@+id/tvTelegramStatus"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:letterSpacing="0.06"
-                        android:text="@string/integrations_status_unknown"
-                        android:textAllCaps="true"
-                        android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
-                </LinearLayout>
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cardTelegram"
+                style="@style/Widget.Overdrive.Revamp.Card"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_marginEnd="@dimen/int_grid_gap_half"
+                android:clickable="true"
+                android:focusable="true">
 
                 <LinearLayout
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
+                    android:layout_height="match_parent"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:baselineAligned="false"
+                        android:orientation="vertical">
+
+                        <FrameLayout
+                            android:layout_width="@dimen/od_icon_tile"
+                            android:layout_height="@dimen/od_icon_tile"
+                            android:background="@drawable/int_icon_tile">
+
+                            <ImageView
+                                android:layout_width="@dimen/int_icon_glyph"
+                                android:layout_height="@dimen/int_icon_glyph"
+                                android:layout_gravity="center"
+                                android:contentDescription="@null"
+                                android:src="@drawable/ic_telegram"
+                                app:tint="?attr/colorPrimary" />
+                        </FrameLayout>
+
+                        <FrameLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="@dimen/od_space_12">
+
+                            <LinearLayout
+                                android:id="@+id/pillTelegram"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_gravity="start"
+                                android:background="@drawable/int_status_pill"
+                                android:backgroundTint="?attr/colorSurfaceContainerHigh"
+                                android:gravity="center_vertical"
+                                android:minHeight="@dimen/int_pill_height"
+                                android:orientation="horizontal"
+                                android:paddingHorizontal="@dimen/int_pill_padding_h"
+                                android:paddingVertical="@dimen/od_space_4">
+
+                                <View
+                                    android:id="@+id/dotTelegram"
+                                    android:layout_width="@dimen/od_status_dot"
+                                    android:layout_height="@dimen/od_status_dot"
+                                    android:background="@drawable/od_status_dot"
+                                    android:backgroundTint="@color/status_stopped" />
+
+                                <TextView
+                                    android:id="@+id/tvTelegramStatus"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="@dimen/od_space_6"
+                                    android:ellipsize="end"
+                                    android:maxLines="2"
+                                    android:text="@string/integrations_status_unknown"
+                                    android:textAppearance="@style/TextAppearance.Overdrive.Integrations.Pill"
+                                    android:textColor="?attr/colorOnSurfaceVariant" />
+                            </LinearLayout>
+                        </FrameLayout>
+                    </LinearLayout>
 
                     <TextView
-                        android:layout_width="0dp"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
+                        android:layout_marginTop="@dimen/od_space_12"
+                        android:ellipsize="end"
+                        android:maxLines="1"
                         android:text="@string/nav_page_telegram"
-                        android:textAppearance="@style/TextAppearance.Overdrive.HeadlineSmall"
-                        android:textColor="?attr/colorOnSurface"
-                        android:textStyle="bold" />
-
-                    <ImageView
-                        android:layout_width="@dimen/card_icon_hero"
-                        android:layout_height="@dimen/card_icon_hero"
-                        android:contentDescription="@null"
-                        android:src="@drawable/ic_telegram"
-                        app:tint="?attr/colorPrimary" />
-                </LinearLayout>
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="@string/integrations_telegram_desc"
-                    android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                    android:textColor="?attr/colorOnSurfaceVariant" />
-
-                <com.google.android.material.button.MaterialButton
-                    style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="18dp"
-                    android:clickable="false"
-                    android:duplicateParentState="true"
-                    android:focusable="false"
-                    android:text="@string/integrations_configure_button"
-                    app:cornerRadius="14dp" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- ===== ABRP CARD ===== -->
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/cardAbrp"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="@dimen/card_gap_vertical"
-            android:clickable="true"
-            android:focusable="true"
-            app:cardBackgroundColor="?attr/colorSurfaceContainer"
-            app:cardCornerRadius="@dimen/card_radius_hero"
-            app:cardElevation="0dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="@dimen/card_padding_hero">
-
-                <LinearLayout
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
-
-                    <View
-                        android:id="@+id/dotAbrp"
-                        android:layout_width="8dp"
-                        android:layout_height="8dp"
-                        android:background="@drawable/status_dot_neutral" />
+                        android:textAppearance="@style/TextAppearance.Overdrive.Integrations.CardTitle" />
 
                     <TextView
-                        android:id="@+id/tvAbrpStatus"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/od_space_8"
+                        android:text="@string/integrations_telegram_desc"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                        android:textColor="?attr/colorOnSurfaceVariant" />
+
+                    <Space
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1" />
+
+                    <com.google.android.material.button.MaterialButton
+                        style="@style/Widget.Overdrive.Integrations.Configure"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:letterSpacing="0.06"
-                        android:text="@string/integrations_status_unknown"
-                        android:textAllCaps="true"
-                        android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
+                        android:layout_marginTop="14dp"
+                        android:clickable="false"
+                        android:duplicateParentState="true"
+                        android:focusable="false"
+                        android:text="@string/integrations_configure_button" />
                 </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cardAbrp"
+                style="@style/Widget.Overdrive.Revamp.Card"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_marginStart="@dimen/int_grid_gap_half"
+                android:clickable="true"
+                android:focusable="true">
 
                 <LinearLayout
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
+                    android:layout_height="match_parent"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:baselineAligned="false"
+                        android:orientation="vertical">
+
+                        <FrameLayout
+                            android:layout_width="@dimen/od_icon_tile"
+                            android:layout_height="@dimen/od_icon_tile"
+                            android:background="@drawable/int_icon_tile">
+
+                            <ImageView
+                                android:layout_width="@dimen/int_icon_glyph"
+                                android:layout_height="@dimen/int_icon_glyph"
+                                android:layout_gravity="center"
+                                android:contentDescription="@null"
+                                android:src="@drawable/ic_route"
+                                app:tint="?attr/colorPrimary" />
+                        </FrameLayout>
+
+                        <FrameLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="@dimen/od_space_12">
+
+                            <LinearLayout
+                                android:id="@+id/pillAbrp"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_gravity="start"
+                                android:background="@drawable/int_status_pill"
+                                android:backgroundTint="?attr/colorSurfaceContainerHigh"
+                                android:gravity="center_vertical"
+                                android:minHeight="@dimen/int_pill_height"
+                                android:orientation="horizontal"
+                                android:paddingHorizontal="@dimen/int_pill_padding_h"
+                                android:paddingVertical="@dimen/od_space_4">
+
+                                <View
+                                    android:id="@+id/dotAbrp"
+                                    android:layout_width="@dimen/od_status_dot"
+                                    android:layout_height="@dimen/od_status_dot"
+                                    android:background="@drawable/od_status_dot"
+                                    android:backgroundTint="@color/status_stopped" />
+
+                                <TextView
+                                    android:id="@+id/tvAbrpStatus"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="@dimen/od_space_6"
+                                    android:ellipsize="end"
+                                    android:maxLines="2"
+                                    android:text="@string/integrations_status_unknown"
+                                    android:textAppearance="@style/TextAppearance.Overdrive.Integrations.Pill"
+                                    android:textColor="?attr/colorOnSurfaceVariant" />
+                            </LinearLayout>
+                        </FrameLayout>
+                    </LinearLayout>
 
                     <TextView
-                        android:layout_width="0dp"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
+                        android:layout_marginTop="@dimen/od_space_12"
+                        android:ellipsize="end"
+                        android:maxLines="1"
                         android:text="@string/nav_page_abrp"
-                        android:textAppearance="@style/TextAppearance.Overdrive.HeadlineSmall"
-                        android:textColor="?attr/colorOnSurface"
-                        android:textStyle="bold" />
-
-                    <ImageView
-                        android:layout_width="@dimen/card_icon_hero"
-                        android:layout_height="@dimen/card_icon_hero"
-                        android:contentDescription="@null"
-                        android:src="@drawable/ic_route"
-                        app:tint="?attr/colorPrimary" />
-                </LinearLayout>
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="@string/integrations_abrp_desc"
-                    android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                    android:textColor="?attr/colorOnSurfaceVariant" />
-
-                <com.google.android.material.button.MaterialButton
-                    style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="18dp"
-                    android:clickable="false"
-                    android:duplicateParentState="true"
-                    android:focusable="false"
-                    android:text="@string/integrations_configure_button"
-                    app:cornerRadius="14dp" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- ===== MQTT CARD ===== -->
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/cardMqtt"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="@dimen/card_gap_vertical"
-            android:clickable="true"
-            android:focusable="true"
-            app:cardBackgroundColor="?attr/colorSurfaceContainer"
-            app:cardCornerRadius="@dimen/card_radius_hero"
-            app:cardElevation="0dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="@dimen/card_padding_hero">
-
-                <LinearLayout
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
-
-                    <View
-                        android:id="@+id/dotMqtt"
-                        android:layout_width="8dp"
-                        android:layout_height="8dp"
-                        android:background="@drawable/status_dot_neutral" />
+                        android:textAppearance="@style/TextAppearance.Overdrive.Integrations.CardTitle" />
 
                     <TextView
-                        android:id="@+id/tvMqttStatus"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/od_space_8"
+                        android:text="@string/integrations_abrp_desc"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                        android:textColor="?attr/colorOnSurfaceVariant" />
+
+                    <Space
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1" />
+
+                    <com.google.android.material.button.MaterialButton
+                        style="@style/Widget.Overdrive.Integrations.Configure"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:letterSpacing="0.06"
-                        android:text="@string/integrations_status_unknown"
-                        android:textAllCaps="true"
-                        android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
+                        android:layout_marginTop="14dp"
+                        android:clickable="false"
+                        android:duplicateParentState="true"
+                        android:focusable="false"
+                        android:text="@string/integrations_configure_button" />
                 </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/od_space_12"
+            android:baselineAligned="false"
+            android:orientation="horizontal">
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cardMqtt"
+                style="@style/Widget.Overdrive.Revamp.Card"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_marginEnd="@dimen/int_grid_gap_half"
+                android:clickable="true"
+                android:focusable="true">
 
                 <LinearLayout
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
+                    android:layout_height="match_parent"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:baselineAligned="false"
+                        android:orientation="vertical">
+
+                        <FrameLayout
+                            android:layout_width="@dimen/od_icon_tile"
+                            android:layout_height="@dimen/od_icon_tile"
+                            android:background="@drawable/int_icon_tile">
+
+                            <ImageView
+                                android:layout_width="@dimen/int_icon_glyph"
+                                android:layout_height="@dimen/int_icon_glyph"
+                                android:layout_gravity="center"
+                                android:contentDescription="@null"
+                                android:src="@drawable/ic_mqtt"
+                                app:tint="?attr/colorPrimary" />
+                        </FrameLayout>
+
+                        <FrameLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="@dimen/od_space_12">
+
+                            <LinearLayout
+                                android:id="@+id/pillMqtt"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_gravity="start"
+                                android:background="@drawable/int_status_pill"
+                                android:backgroundTint="?attr/colorSurfaceContainerHigh"
+                                android:gravity="center_vertical"
+                                android:minHeight="@dimen/int_pill_height"
+                                android:orientation="horizontal"
+                                android:paddingHorizontal="@dimen/int_pill_padding_h"
+                                android:paddingVertical="@dimen/od_space_4">
+
+                                <View
+                                    android:id="@+id/dotMqtt"
+                                    android:layout_width="@dimen/od_status_dot"
+                                    android:layout_height="@dimen/od_status_dot"
+                                    android:background="@drawable/od_status_dot"
+                                    android:backgroundTint="@color/status_stopped" />
+
+                                <TextView
+                                    android:id="@+id/tvMqttStatus"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="@dimen/od_space_6"
+                                    android:ellipsize="end"
+                                    android:maxLines="2"
+                                    android:text="@string/integrations_status_unknown"
+                                    android:textAppearance="@style/TextAppearance.Overdrive.Integrations.Pill"
+                                    android:textColor="?attr/colorOnSurfaceVariant" />
+                            </LinearLayout>
+                        </FrameLayout>
+                    </LinearLayout>
 
                     <TextView
-                        android:layout_width="0dp"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
+                        android:layout_marginTop="@dimen/od_space_12"
+                        android:ellipsize="end"
+                        android:maxLines="1"
                         android:text="@string/nav_page_mqtt"
-                        android:textAppearance="@style/TextAppearance.Overdrive.HeadlineSmall"
-                        android:textColor="?attr/colorOnSurface"
-                        android:textStyle="bold" />
-
-                    <ImageView
-                        android:layout_width="@dimen/card_icon_hero"
-                        android:layout_height="@dimen/card_icon_hero"
-                        android:contentDescription="@null"
-                        android:src="@drawable/ic_mqtt"
-                        app:tint="?attr/colorPrimary" />
-                </LinearLayout>
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="@string/integrations_mqtt_desc"
-                    android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                    android:textColor="?attr/colorOnSurfaceVariant" />
-
-                <com.google.android.material.button.MaterialButton
-                    style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="18dp"
-                    android:clickable="false"
-                    android:duplicateParentState="true"
-                    android:focusable="false"
-                    android:text="@string/integrations_configure_button"
-                    app:cornerRadius="14dp" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- ===== BYD CLOUD CARD ===== -->
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/cardBydCloud"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:clickable="true"
-            android:focusable="true"
-            app:cardBackgroundColor="?attr/colorSurfaceContainer"
-            app:cardCornerRadius="@dimen/card_radius_hero"
-            app:cardElevation="0dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="@dimen/card_padding_hero">
-
-                <LinearLayout
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
-
-                    <View
-                        android:id="@+id/dotBydCloud"
-                        android:layout_width="8dp"
-                        android:layout_height="8dp"
-                        android:background="@drawable/status_dot_neutral" />
+                        android:textAppearance="@style/TextAppearance.Overdrive.Integrations.CardTitle" />
 
                     <TextView
-                        android:id="@+id/tvBydCloudStatus"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/od_space_8"
+                        android:text="@string/integrations_mqtt_desc"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                        android:textColor="?attr/colorOnSurfaceVariant" />
+
+                    <Space
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1" />
+
+                    <com.google.android.material.button.MaterialButton
+                        style="@style/Widget.Overdrive.Integrations.Configure"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:letterSpacing="0.06"
-                        android:text="@string/integrations_status_unknown"
-                        android:textAllCaps="true"
-                        android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
+                        android:layout_marginTop="14dp"
+                        android:clickable="false"
+                        android:duplicateParentState="true"
+                        android:focusable="false"
+                        android:text="@string/integrations_configure_button" />
                 </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cardBydCloud"
+                style="@style/Widget.Overdrive.Revamp.Card"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_marginStart="@dimen/int_grid_gap_half"
+                android:clickable="true"
+                android:focusable="true">
 
                 <LinearLayout
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
+                    android:layout_height="match_parent"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:baselineAligned="false"
+                        android:orientation="vertical">
+
+                        <FrameLayout
+                            android:layout_width="@dimen/od_icon_tile"
+                            android:layout_height="@dimen/od_icon_tile"
+                            android:background="@drawable/int_icon_tile">
+
+                            <ImageView
+                                android:layout_width="@dimen/int_icon_glyph"
+                                android:layout_height="@dimen/int_icon_glyph"
+                                android:layout_gravity="center"
+                                android:contentDescription="@null"
+                                android:src="@drawable/ic_cloud"
+                                app:tint="?attr/colorPrimary" />
+                        </FrameLayout>
+
+                        <FrameLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="@dimen/od_space_12">
+
+                            <LinearLayout
+                                android:id="@+id/pillBydCloud"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_gravity="start"
+                                android:background="@drawable/int_status_pill"
+                                android:backgroundTint="?attr/colorSurfaceContainerHigh"
+                                android:gravity="center_vertical"
+                                android:minHeight="@dimen/int_pill_height"
+                                android:orientation="horizontal"
+                                android:paddingHorizontal="@dimen/int_pill_padding_h"
+                                android:paddingVertical="@dimen/od_space_4">
+
+                                <View
+                                    android:id="@+id/dotBydCloud"
+                                    android:layout_width="@dimen/od_status_dot"
+                                    android:layout_height="@dimen/od_status_dot"
+                                    android:background="@drawable/od_status_dot"
+                                    android:backgroundTint="@color/status_stopped" />
+
+                                <TextView
+                                    android:id="@+id/tvBydCloudStatus"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="@dimen/od_space_6"
+                                    android:ellipsize="end"
+                                    android:maxLines="2"
+                                    android:text="@string/integrations_status_unknown"
+                                    android:textAppearance="@style/TextAppearance.Overdrive.Integrations.Pill"
+                                    android:textColor="?attr/colorOnSurfaceVariant" />
+                            </LinearLayout>
+                        </FrameLayout>
+                    </LinearLayout>
 
                     <TextView
-                        android:layout_width="0dp"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
+                        android:layout_marginTop="@dimen/od_space_12"
+                        android:ellipsize="end"
+                        android:maxLines="1"
                         android:text="@string/nav_page_byd_cloud"
-                        android:textAppearance="@style/TextAppearance.Overdrive.HeadlineSmall"
-                        android:textColor="?attr/colorOnSurface"
-                        android:textStyle="bold" />
-
-                    <ImageView
-                        android:layout_width="@dimen/card_icon_hero"
-                        android:layout_height="@dimen/card_icon_hero"
-                        android:contentDescription="@null"
-                        android:src="@drawable/ic_cloud"
-                        app:tint="?attr/colorPrimary" />
-                </LinearLayout>
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="@string/integrations_byd_cloud_desc"
-                    android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                    android:textColor="?attr/colorOnSurfaceVariant" />
-
-                <com.google.android.material.button.MaterialButton
-                    style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="18dp"
-                    android:clickable="false"
-                    android:duplicateParentState="true"
-                    android:focusable="false"
-                    android:text="@string/integrations_configure_button"
-                    app:cornerRadius="14dp" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- ===== SAFEKEEP CARD (own-storage backup) ===== -->
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/cardSafeKeep"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/card_gap_vertical"
-            android:clickable="true"
-            android:focusable="true"
-            app:cardBackgroundColor="?attr/colorSurfaceContainer"
-            app:cardCornerRadius="@dimen/card_radius_hero"
-            app:cardElevation="0dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="@dimen/card_padding_hero">
-
-                <LinearLayout
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
-
-                    <View
-                        android:id="@+id/dotSafeKeep"
-                        android:layout_width="8dp"
-                        android:layout_height="8dp"
-                        android:background="@drawable/status_dot_neutral" />
+                        android:textAppearance="@style/TextAppearance.Overdrive.Integrations.CardTitle" />
 
                     <TextView
-                        android:id="@+id/tvSafeKeepStatus"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/od_space_8"
+                        android:text="@string/integrations_byd_cloud_desc"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                        android:textColor="?attr/colorOnSurfaceVariant" />
+
+                    <Space
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1" />
+
+                    <com.google.android.material.button.MaterialButton
+                        style="@style/Widget.Overdrive.Integrations.Configure"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:letterSpacing="0.06"
-                        android:text="@string/integrations_status_unknown"
-                        android:textAllCaps="true"
-                        android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
+                        android:layout_marginTop="14dp"
+                        android:clickable="false"
+                        android:duplicateParentState="true"
+                        android:focusable="false"
+                        android:text="@string/integrations_configure_button" />
                 </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/od_space_12"
+            android:baselineAligned="false"
+            android:orientation="horizontal">
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cardSafeKeep"
+                style="@style/Widget.Overdrive.Revamp.Card"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_marginEnd="@dimen/int_grid_gap_half"
+                android:clickable="true"
+                android:focusable="true">
 
                 <LinearLayout
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
+                    android:layout_height="match_parent"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:baselineAligned="false"
+                        android:orientation="vertical">
+
+                        <FrameLayout
+                            android:layout_width="@dimen/od_icon_tile"
+                            android:layout_height="@dimen/od_icon_tile"
+                            android:background="@drawable/int_icon_tile">
+
+                            <ImageView
+                                android:layout_width="@dimen/int_icon_glyph"
+                                android:layout_height="@dimen/int_icon_glyph"
+                                android:layout_gravity="center"
+                                android:contentDescription="@null"
+                                android:src="@drawable/ic_backup_export"
+                                app:tint="?attr/colorPrimary" />
+                        </FrameLayout>
+
+                        <FrameLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="@dimen/od_space_12">
+
+                            <LinearLayout
+                                android:id="@+id/pillSafeKeep"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_gravity="start"
+                                android:background="@drawable/int_status_pill"
+                                android:backgroundTint="?attr/colorSurfaceContainerHigh"
+                                android:gravity="center_vertical"
+                                android:minHeight="@dimen/int_pill_height"
+                                android:orientation="horizontal"
+                                android:paddingHorizontal="@dimen/int_pill_padding_h"
+                                android:paddingVertical="@dimen/od_space_4">
+
+                                <View
+                                    android:id="@+id/dotSafeKeep"
+                                    android:layout_width="@dimen/od_status_dot"
+                                    android:layout_height="@dimen/od_status_dot"
+                                    android:background="@drawable/od_status_dot"
+                                    android:backgroundTint="@color/status_stopped" />
+
+                                <TextView
+                                    android:id="@+id/tvSafeKeepStatus"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="@dimen/od_space_6"
+                                    android:ellipsize="end"
+                                    android:maxLines="2"
+                                    android:text="@string/integrations_status_unknown"
+                                    android:textAppearance="@style/TextAppearance.Overdrive.Integrations.Pill"
+                                    android:textColor="?attr/colorOnSurfaceVariant" />
+                            </LinearLayout>
+                        </FrameLayout>
+                    </LinearLayout>
 
                     <TextView
-                        android:layout_width="0dp"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
+                        android:layout_marginTop="@dimen/od_space_12"
+                        android:ellipsize="end"
+                        android:maxLines="1"
                         android:text="@string/nav_page_safekeep"
-                        android:textAppearance="@style/TextAppearance.Overdrive.HeadlineSmall"
-                        android:textColor="?attr/colorOnSurface"
-                        android:textStyle="bold" />
+                        android:textAppearance="@style/TextAppearance.Overdrive.Integrations.CardTitle" />
 
-                    <ImageView
-                        android:layout_width="@dimen/card_icon_hero"
-                        android:layout_height="@dimen/card_icon_hero"
-                        android:contentDescription="@null"
-                        android:src="@drawable/ic_backup_export"
-                        app:tint="?attr/colorPrimary" />
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/od_space_8"
+                        android:text="@string/integrations_safekeep_desc"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                        android:textColor="?attr/colorOnSurfaceVariant" />
+
+                    <Space
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1" />
+
+                    <com.google.android.material.button.MaterialButton
+                        style="@style/Widget.Overdrive.Integrations.Configure"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="14dp"
+                        android:clickable="false"
+                        android:duplicateParentState="true"
+                        android:focusable="false"
+                        android:text="@string/integrations_configure_button" />
                 </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
 
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="@string/integrations_safekeep_desc"
-                    android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                    android:textColor="?attr/colorOnSurfaceVariant" />
-
-                <com.google.android.material.button.MaterialButton
-                    style="@style/Widget.Material3.Button.TonalButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="18dp"
-                    android:clickable="false"
-                    android:duplicateParentState="true"
-                    android:focusable="false"
-                    android:text="@string/integrations_configure_button"
-                    app:cornerRadius="14dp" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
+            <!-- Empty grid cell. match_parent keeps the row as tall as its cards: one shorter child (a 0dp Space)
+                 makes LinearLayout size the row by that child, collapsing the cards to 0. Measures 0 itself. -->
+            <com.overdrive.app.ui.widget.FillOnlyView
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_marginStart="@dimen/int_grid_gap_half"
+                android:importantForAccessibility="no" />
+        </LinearLayout>
     </LinearLayout>
 </androidx.core.widget.NestedScrollView>

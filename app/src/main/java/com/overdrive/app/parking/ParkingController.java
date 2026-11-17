@@ -341,6 +341,8 @@ public final class ParkingController implements ParkingHooks.Listener, Detection
             worker = null;
         }
         boolean terminated = true;
+        // A store the stop interrupt kills is healed by this thread below, not the dying worker.
+        if (s != null) s.setHealingEnabled(false);
         if (w != null) {
             w.shutdownNow();
             try { terminated = w.awaitTermination(2, TimeUnit.SECONDS); } catch (InterruptedException ignored) {
@@ -353,6 +355,7 @@ public final class ParkingController implements ParkingHooks.Listener, Detection
             // touch the store (which fails closed) — leave its in-memory state alone.
             env.log("Parking worker did not stop within 2 s; skipping in-memory teardown");
         } else {
+            if (s != null) s.setHealingEnabled(true);
             ParkingSession open = current;
             if (closeOpenSession && open != null && open.isOpen() && s != null && s.isOpen()) {
                 try { closeSession(open, ParkingSession.END_DISABLED, false); }
@@ -510,12 +513,39 @@ public final class ParkingController implements ParkingHooks.Listener, Detection
         return submitChecked(() -> {
             ParkingStore st = store;
             if (st == null) return;
+            ParkingSession live = current;
+            if (live != null && live.sessionId.equals(sessionId) && live.isOpen()) {
+                // The queue skips the live session and the close path writes this object back.
+                live.signageState = ParkingSession.SIGNAGE_PENDING;
+                if (isEventRecording()) {
+                    st.updateSession(live);
+                    cancel(signageTask);
+                    signageTask = schedule(() -> retryOpenSessionSignage(sessionId, 1), SIGNAGE_BUSY_RETRY_MS);
+                    return;
+                }
+                readSignageNow(live);
+                st.updateSession(live);
+                return;
+            }
             ParkingSession s = st.getSession(sessionId);
             if (s == null) return;
             s.signageState = ParkingSession.SIGNAGE_PENDING;
             st.updateSession(s);
+            if (isEventRecording()) {
+                schedule(() -> retryRequestedSignage(2), SIGNAGE_BUSY_RETRY_MS);
+                return;
+            }
             runSignageQueue(true);
         });
+    }
+
+    /** A requested read of a closed session that a sentry clip deferred: retry while parked too. */
+    void retryRequestedSignage(int attempt) {
+        if (isEventRecording()) {
+            if (attempt < SIGNAGE_ARRIVAL_MAX_ATTEMPTS) schedule(() -> retryRequestedSignage(attempt + 1), SIGNAGE_BUSY_RETRY_MS);
+            return;
+        }
+        runSignageQueue(true);
     }
 
     // ==================== WORKER: ACC EDGES ====================
@@ -1364,7 +1394,10 @@ public final class ParkingController implements ParkingHooks.Listener, Detection
         List<File> live = new ArrayList<>();
         for (File d : dirs) {
             if (d.getName().equals(keep)) { live.add(d); continue; }
-            if (st.getSession(d.getName()) == null) deleteRecursively(d);
+            Boolean exists = st.sessionExists(d.getName());
+            // A store that cannot answer must not turn every session into an orphan; retry next prune.
+            if (exists == null) return;
+            if (!exists) deleteRecursively(d);
             else live.add(d);
         }
         // Storage cap: oldest assets first, never the open session.

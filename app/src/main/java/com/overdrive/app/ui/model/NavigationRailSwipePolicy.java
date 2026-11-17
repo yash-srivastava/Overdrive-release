@@ -27,4 +27,21 @@ public final class NavigationRailSwipePolicy {
         }
         return deltaX > 0f ? Action.EXPAND : Action.COLLAPSE;
     }
+
+    /**
+     * Release target of a drag: a fling faster than {@code flingVelocity} decides by its
+     * direction (positive = towards expanded), anything slower settles to the nearer width.
+     */
+    public static boolean settleExpanded(
+            float width,
+            float compactWidth,
+            float expandedWidth,
+            float velocity,
+            float flingVelocity
+    ) {
+        if (Math.abs(velocity) > flingVelocity) {
+            return velocity > 0f;
+        }
+        return width > (compactWidth + expandedWidth) / 2f;
+    }
 }

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="web_state_retry_now">ลองใหม่ตอนนี้</string>
+    <string name="web_state_retry_in">ลองใหม่อัตโนมัติ · ครั้งถัดไปในอีก %1$d วินาที</string>
+    <string name="web_state_retrying_now">ลองใหม่อัตโนมัติ · กำลังลอง…</string>
+    <string name="web_state_sign_in_title">ไม่สามารถลงชื่อเข้าใช้หน้านี้ได้</string>
+    <string name="web_state_sign_in_body">ระบบกล้องทำงานอยู่ แต่ไม่ยอมรับการลงชื่อเข้าใช้ของแอป OverDrive จะกู้คืนให้อัตโนมัติขณะที่ ADB เชื่อมต่ออยู่</string>
+</resources>

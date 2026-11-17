@@ -536,6 +536,7 @@ public final class Di5ParkedPowerHold {
             hardware.log("Di5 keep-alive: 12V CUTOFF — " + voltageGuard.latchReason()
                     + "; releasing every lever and latching off until ACC ON or charging");
             releaseLocked("voltage cutoff", true);
+            try { com.overdrive.app.server.timeline.TimelineJournal.note("power", "stopped", "lv_low", null); } catch (Throwable ignored) { }
             writeStatusLocked();
             return;
         }

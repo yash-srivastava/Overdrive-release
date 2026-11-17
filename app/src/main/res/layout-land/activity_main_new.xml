@@ -1,24 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Modern M3 shell — LANDSCAPE variant.
-
-  Target device: BYD Seal 15.6" rotatable infotainment.
-    Landscape = 1920x1080 px ≈ 960dp x 540dp (at 320dpi).
-    The OS reserves a TOP system bar and a BOTTOM system bar (BYD launcher
-    bars). The app gets only the strip in between.
-
-  fitsSystemWindows="true" on the root makes the framework pad the root by
-  the system-bar insets, so our content automatically lives between the two
-  bars without having to know their exact heights.
-
-  Layout = navigation rail (left, scrollable) + main stage on the right.
-  The right side stacks: MaterialToolbar → nav host. The toolbar takes
-  @dimen/app_bar_height, not ?actionBarSize, which the platform drops to 48dp
-  in landscape.
-
-  ID `drawerLayout` was historically referenced; the rail-based shell does
-  not use a drawer. MainActivity tolerates its absence (findViewById
-  fallback).
+  Shell, landscape: docked rail + stage. The rail pushes the stage while it slides; the stage
+  shows the sub-page header only on nested destinations. fitsSystemWindows keeps both between
+  the head unit's system bars.
 -->
 <androidx.coordinatorlayout.widget.CoordinatorLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
@@ -36,50 +20,58 @@
         android:layout_height="match_parent"
         android:orientation="horizontal">
 
-        <!-- ============================================================== -->
-        <!--  Navigation rail — wordmark, scrolling destinations, pinned    -->
-        <!--  collapse row. The middle scrolls because the strip between    -->
-        <!--  BYD's two system bars clips the last destinations.            -->
-        <!-- ============================================================== -->
         <LinearLayout
             android:id="@+id/navigationRailContainer"
-            android:layout_width="80dp"
+            android:layout_width="@dimen/shell_rail_compact_width"
             android:layout_height="match_parent"
             android:background="?attr/colorSurfaceContainerLow"
             android:orientation="vertical">
 
-            <!-- Wordmark. Auto-sizes so it reads at both rail widths;
-                 MainActivity only moves its gravity. -->
-            <TextView
-                android:id="@+id/railBrand"
+            <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:gravity="center"
-                android:maxLines="1"
-                android:text="@string/app_name"
-                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                android:textColor="?attr/colorPrimary"
-                android:textStyle="bold"
-                app:autoSizeMaxTextSize="18sp"
-                app:autoSizeMinTextSize="11sp"
-                app:autoSizeTextType="uniform" />
+                android:layout_height="@dimen/shell_rail_brand_height"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:id="@+id/shellBrandMark"
+                    android:layout_width="@dimen/shell_rail_mark_width"
+                    android:layout_height="@dimen/shell_rail_mark_height"
+                    android:layout_marginStart="@dimen/shell_rail_brand_inset"
+                    android:contentDescription="@string/app_name"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_brand_od" />
+
+                <TextView
+                    android:id="@+id/railBrand"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/shell_rail_wordmark_gap"
+                    android:importantForAccessibility="no"
+                    android:maxLines="1"
+                    android:text="@string/app_name"
+                    android:textAppearance="@style/TextAppearance.Overdrive.Shell.Wordmark"
+                    android:visibility="gone" />
+            </LinearLayout>
 
             <com.overdrive.app.ui.widget.SwipeExpandableRailScrollView
                 android:id="@+id/navigationRailScroll"
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_weight="1"
+                android:fadingEdgeLength="@dimen/shell_rail_fading_edge"
                 android:fillViewport="true"
-                android:scrollbars="none"
-                android:overScrollMode="ifContentScrolls">
+                android:overScrollMode="ifContentScrolls"
+                android:requiresFadingEdge="vertical"
+                android:scrollbars="none">
 
                 <LinearLayout
                     android:id="@+id/navigationRail"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:gravity="center_horizontal"
                     android:orientation="vertical"
-                    android:paddingBottom="12dp">
+                    android:paddingTop="@dimen/od_space_2"
+                    android:paddingBottom="@dimen/od_space_8">
 
                     <include
                         android:id="@+id/railDestDashboard"
@@ -91,9 +83,8 @@
                         layout="@layout/item_rail_destination"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content" />
-                    <!-- Category headers group the rows from here down. Each one
-                         hides when every row under it is unpinned — see
-                         MainActivity.applyNavigationRailVisibility. -->
+                    <!-- Each header hides when every row under it is unpinned
+                         (MainActivity.applyNavigationRailVisibility). -->
                     <include
                         android:id="@+id/railSectionCameras"
                         layout="@layout/item_rail_section" />
@@ -209,27 +200,13 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content" />
 
-                    <!-- Fill any spare height before the secondary actions. When
-                         destinations exceed the viewport this collapses to zero
-                         and the whole rail remains vertically scrollable. -->
-                    <Space
-                        android:layout_width="1dp"
-                        android:layout_height="0dp"
-                        android:layout_weight="1" />
-
                     <View
-                        android:layout_width="40dp"
-                        android:layout_height="1dp"
-                        android:layout_marginVertical="4dp"
-                        android:background="?attr/colorOutlineVariant" />
-
-                    <!-- Secondary actions use the same compact/expanded row
-                         treatment as destinations and stay grouped at the end. -->
-                    <include
-                        android:id="@+id/railLanguageButton"
-                        layout="@layout/item_rail_destination"
+                        android:id="@+id/shellRailDivider"
                         android:layout_width="match_parent"
-                        android:layout_height="wrap_content" />
+                        android:layout_height="@dimen/od_hairline"
+                        android:layout_marginHorizontal="@dimen/shell_rail_content_inset"
+                        android:layout_marginVertical="@dimen/od_space_8"
+                        android:background="?attr/colorOutlineVariant" />
 
                     <include
                         android:id="@+id/railHelpButton"
@@ -239,145 +216,178 @@
                 </LinearLayout>
             </com.overdrive.app.ui.widget.SwipeExpandableRailScrollView>
 
-            <!-- Collapse sits below the scroller so a long destination list
-                 cannot push it out of reach. MainActivity rotates its chevron
-                 0°→180° with the slide. -->
+            <!-- Footer, pinned below the scroller. statusPill shows only while a tunnel is
+                 starting or running; shellRemotePopover is the popover body MainActivity lifts
+                 into a PopupWindow. -->
+            <LinearLayout
+                android:id="@+id/urlBar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                >
+
+                <LinearLayout
+                    android:id="@+id/statusPill"
+                    android:layout_marginTop="@dimen/od_space_4"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/shell_rail_footer_row_height"
+                    android:background="@drawable/shell_rail_remote_row"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="@dimen/shell_rail_content_inset"
+                    android:paddingEnd="@dimen/shell_rail_content_inset"
+                    android:visibility="gone">
+
+                    <FrameLayout
+                        android:layout_width="@dimen/od_icon_md"
+                        android:layout_height="@dimen/od_icon_md">
+
+                        <View
+                            android:id="@+id/shellRemoteHalo"
+                            android:layout_width="@dimen/shell_remote_halo"
+                            android:layout_height="@dimen/shell_remote_halo"
+                            android:layout_gravity="center"
+                            android:alpha="0.22"
+                            android:background="@drawable/status_dot_offline" />
+
+                        <View
+                            android:id="@+id/urlStatusDot"
+                            android:layout_width="@dimen/shell_remote_dot"
+                            android:layout_height="@dimen/shell_remote_dot"
+                            android:layout_gravity="center"
+                            android:background="@drawable/status_dot_offline" />
+                    </FrameLayout>
+
+                    <View
+                        android:id="@+id/statusIndicator"
+                        android:layout_width="0dp"
+                        android:layout_height="0dp"
+                        android:visibility="gone" />
+
+                    <LinearLayout
+                        android:id="@+id/shellRemoteText"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="@dimen/shell_rail_label_gap"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:ellipsize="end"
+                            android:maxLines="1"
+                            android:text="@string/dashboard_metric_tunnel"
+                            android:textAlignment="viewStart"
+                            android:textAppearance="@style/TextAppearance.Overdrive.Shell.RemoteTitle" />
+
+                        <TextView
+                            android:id="@+id/tvCurrentUrl"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:ellipsize="end"
+                            android:maxLines="1"
+                            android:text="@string/dashboard_no_tunnel"
+                            android:textAlignment="viewStart"
+                            android:textAppearance="@style/TextAppearance.Overdrive.Shell.RemoteUrl" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/shellRemotePopover"
+                    android:layout_width="@dimen/shell_popover_width"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="@dimen/shell_popover_padding"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:id="@+id/shellRemotePopoverTitle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:maxLines="1"
+                        android:text="@string/dashboard_metric_tunnel"
+                        android:textAlignment="viewStart"
+                        android:textAppearance="@style/TextAppearance.Overdrive.Overline" />
+
+                    <TextView
+                        android:id="@+id/shellRemotePopoverUrl"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/od_space_8"
+                        android:background="@drawable/shell_popover_url_bg"
+                        android:paddingHorizontal="@dimen/od_space_12"
+                        android:paddingVertical="@dimen/shell_popover_url_padding_v"
+                        android:textAlignment="viewStart"
+                        android:textAppearance="@style/TextAppearance.Overdrive.Shell.PopoverUrl"
+                        android:textIsSelectable="true" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/od_space_12"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <ImageButton
+                            android:id="@+id/btnCopyUrl"
+                            android:layout_width="@dimen/od_touch_min"
+                            android:layout_height="@dimen/od_touch_min"
+                            android:background="@drawable/shell_popover_copy_bg"
+                            android:contentDescription="@string/cd_copy_url"
+                            android:padding="@dimen/od_space_12"
+                            android:src="@drawable/ic_copy"
+                            android:tooltipText="@string/cd_copy_url"
+                            app:tint="?attr/colorOnSecondaryContainer" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/shellRemoteDetails"
+                            style="@style/Widget.Material3.Button.TextButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="@dimen/od_space_8"
+                            android:minHeight="@dimen/od_touch_min"
+                            android:text="@string/shell_remote_details" />
+                    </LinearLayout>
+                </LinearLayout>
+            </LinearLayout>
+
             <include
                 android:id="@+id/railCollapseRow"
                 layout="@layout/item_rail_destination"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
+                android:layout_height="@dimen/shell_rail_footer_row_height"
+                android:layout_marginBottom="@dimen/od_space_2" />
         </LinearLayout>
 
-        <!-- ============================================================== -->
-        <!--  Main stage — toolbar (compact) → URL bar → fragment host.     -->
-        <!-- ============================================================== -->
         <LinearLayout
+            android:id="@+id/shellStage"
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:orientation="vertical">
 
+            <!-- Sub-page header: visible only on nested destinations. -->
             <com.google.android.material.appbar.AppBarLayout
                 android:id="@+id/appBarLayout"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:background="?attr/colorSurface"
+                android:background="?android:attr/colorBackground"
+                android:visibility="gone"
                 app:elevation="0dp"
                 app:liftOnScroll="false">
 
-                <!--
-                  Compact toolbar (48dp) for landscape. The default
-                  ?actionBarSize is 56dp portrait / 48dp landscape on most
-                  themes, but pinning it explicitly avoids the larger
-                  Material3 64dp from eating the page's vertical budget.
-                -->
                 <com.google.android.material.appbar.MaterialToolbar
                     android:id="@+id/toolbar"
                     android:layout_width="match_parent"
-                    android:layout_height="@dimen/app_bar_height"
-                    android:background="?attr/colorSurface"
+                    android:layout_height="@dimen/od_subpage_header_height"
+                    android:background="?android:attr/colorBackground"
                     app:contentInsetStart="@dimen/page_padding_horizontal"
-                    app:titleTextAppearance="@style/TextAppearance.Overdrive.HeadlineSmall">
-
-                    <!--
-                      Status pill (landscape variant). Same view shape as the
-                      portrait toolbar so MainActivity bindings (urlBar,
-                      statusIndicator, urlStatusDot, tvCurrentUrl, btnCopyUrl)
-                      all resolve identically. It starts hidden until a tunnel
-                      is genuinely starting or running.
-                    -->
-                    <LinearLayout
-                        android:id="@+id/urlBar"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_gravity="end"
-                        android:layout_marginEnd="4dp"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
-
-                        <LinearLayout
-                            android:id="@+id/statusPill"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:background="@drawable/status_pill_background"
-                            android:clickable="true"
-                            android:focusable="true"
-                            android:gravity="center_vertical"
-                            android:minHeight="48dp"
-                            android:orientation="horizontal"
-                            android:paddingHorizontal="14dp"
-                            android:paddingVertical="6dp"
-                            android:visibility="gone">
-
-                            <View
-                                android:id="@+id/urlStatusDot"
-                                android:layout_width="8dp"
-                                android:layout_height="8dp"
-                                android:background="@drawable/status_dot_offline" />
-
-                            <View
-                                android:id="@+id/statusIndicator"
-                                android:layout_width="0dp"
-                                android:layout_height="0dp"
-                                android:visibility="gone" />
-
-                            <TextView
-                                android:id="@+id/tvCurrentUrl"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginStart="10dp"
-                                android:ellipsize="middle"
-                                android:fontFamily="monospace"
-                                android:maxWidth="320dp"
-                                android:singleLine="true"
-                                android:text="@string/dashboard_no_tunnel"
-                                android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                                android:textColor="?attr/colorPrimary"
-                                android:textIsSelectable="true" />
-
-                            <ImageButton
-                                android:id="@+id/btnCopyUrl"
-                                android:layout_width="48dp"
-                                android:layout_height="48dp"
-                                android:layout_marginStart="6dp"
-                                android:background="?attr/selectableItemBackgroundBorderless"
-                                android:contentDescription="@string/cd_copy_url"
-                                android:padding="12dp"
-                                android:src="@drawable/ic_copy"
-                                app:tint="?attr/colorOnSurfaceVariant" />
-                        </LinearLayout>
-
-                        <ImageButton
-                            android:id="@+id/toolbarLanguageButton"
-                            android:layout_width="48dp"
-                            android:layout_height="48dp"
-                            android:layout_marginStart="4dp"
-                            android:background="?attr/selectableItemBackgroundBorderless"
-                            android:contentDescription="@string/settings_language_label"
-                            android:padding="12dp"
-                            android:src="@drawable/ic_language"
-                            app:tint="?attr/colorOnSurfaceVariant" />
-
-                        <!-- Help packs next to language inside urlBar; urlBar stays
-                             visible even when the tunnel pill is gone. -->
-                        <ImageButton
-                            android:id="@+id/toolbarHelpButton"
-                            android:layout_width="48dp"
-                            android:layout_height="48dp"
-                            android:background="?attr/selectableItemBackgroundBorderless"
-                            android:contentDescription="@string/onboarding_help_cd"
-                            android:padding="12dp"
-                            android:src="@drawable/ic_help"
-                            app:tint="?attr/colorOnSurfaceVariant" />
-                    </LinearLayout>
-                </com.google.android.material.appbar.MaterialToolbar>
-
-                <!-- App bar divider (mirrors portrait). -->
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:background="?attr/colorOutlineVariant" />
+                    app:titleTextAppearance="@style/TextAppearance.Overdrive.PageTitle" />
             </com.google.android.material.appbar.AppBarLayout>
 
             <androidx.fragment.app.FragmentContainerView

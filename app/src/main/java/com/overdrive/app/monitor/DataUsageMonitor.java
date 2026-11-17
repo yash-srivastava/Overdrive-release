@@ -102,9 +102,7 @@ public class DataUsageMonitor {
     // The shell daemons + native tunnels all run under this UID.
     private static final int SHELL_UID = 2000;
 
-    // Format sampled counter deltas using the local calendar day. Resolve the
-    // current timezone at each call: the head unit can correct its timezone
-    // after boot without restarting the daemon.
+    // Format sampled counter deltas using the local calendar day.
     private static String dayKey(long ms) {
         return DataUsageDayKeys.format(ms, TimeZone.getDefault());
     }
@@ -116,6 +114,13 @@ public class DataUsageMonitor {
     private volatile boolean isInitialized = false;
     private volatile boolean isRunning = false;
     private ScheduledExecutorService scheduler;
+    // Dead-store reopen state, guarded by `lock` (as is every use of `connection`).
+    private static final long HEAL_COOLDOWN_NANOS = 10_000_000_000L;
+    private boolean healAttempted;
+    private long lastHealAttemptNanos;
+    private boolean inHealRetry;
+    private boolean deadDuringRetry;
+    private volatile boolean shuttingDown;
 
     // Resolved once from the app context: the app process UID (10xxx). -1 until
     // resolved → we then count UID 2000 only (still useful; logged).
@@ -227,6 +232,7 @@ public class DataUsageMonitor {
                 }
                 createTables();
                 isInitialized = true;
+                shuttingDown = false;
                 logger.info("DataUsageMonitor: H2 initialized at " + DB_PATH);
             } catch (Throwable t) {
                 logger.error("DataUsageMonitor: init failed: " + t.getMessage(), t);
@@ -291,7 +297,21 @@ public class DataUsageMonitor {
     private void sampleTick() throws Exception {
         long[] cur = readCounters();   // {wifi, mobile, other, app, system} cumulative rx+tx
         if (cur == null) return;       // proc unreadable — recorded nothing
+        synchronized (lock) {
+            if (!isInitialized) return;
+            try {
+                recordSample(cur);
+            } catch (Exception e) {
+                // Healed inside this lock hold, so it can't reopen a connection another caller
+                // already healed. No retry: the next tick re-derives its delta from the persisted
+                // baseline, so a good reopen must not keep the cooldown either.
+                if (healDeadStore(e)) healAttempted = false;
+                throw e;
+            }
+        }
+    }
 
+    private void recordSample(long[] cur) throws Exception {
         long now = System.currentTimeMillis();
         long[] last = new long[]{0, 0, 0, 0, 0};
         long lastMs = 0;
@@ -638,25 +658,31 @@ public class DataUsageMonitor {
 
             JSONArray arr = new JSONArray();
             long tW = 0, tM = 0, tO = 0, tA = 0, tS = 0;
-            try (PreparedStatement ps = connection.prepareStatement(
-                    "SELECT day_key, wifi_bytes, mobile_bytes, other_bytes, app_bytes, system_bytes FROM "
-                            + TABLE_DAILY + " WHERE day_key >= ? ORDER BY day_key ASC")) {
-                ps.setString(1, from);
-                try (ResultSet rs = ps.executeQuery()) {
-                    while (rs.next()) {
-                        long w = rs.getLong(2), m = rs.getLong(3), o = rs.getLong(4);
-                        long a = rs.getLong(5), s = rs.getLong(6);
-                        JSONObject d = new JSONObject();
-                        d.put("date", rs.getString(1));
-                        d.put("wifi", w);
-                        d.put("mobile", m);
-                        d.put("other", o);
-                        d.put("app", a);
-                        d.put("system", s);
-                        d.put("total", w + m + o);
-                        arr.put(d);
-                        tW += w; tM += m; tO += o; tA += a; tS += s;
+            synchronized (lock) {
+                try (PreparedStatement ps = connection.prepareStatement(
+                        "SELECT day_key, wifi_bytes, mobile_bytes, other_bytes, app_bytes, system_bytes FROM "
+                                + TABLE_DAILY + " WHERE day_key >= ? ORDER BY day_key ASC")) {
+                    ps.setString(1, from);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) {
+                            long w = rs.getLong(2), m = rs.getLong(3), o = rs.getLong(4);
+                            long a = rs.getLong(5), s = rs.getLong(6);
+                            JSONObject d = new JSONObject();
+                            d.put("date", rs.getString(1));
+                            d.put("wifi", w);
+                            d.put("mobile", m);
+                            d.put("other", o);
+                            d.put("app", a);
+                            d.put("system", s);
+                            d.put("total", w + m + o);
+                            arr.put(d);
+                            tW += w; tM += m; tO += o; tA += a; tS += s;
+                        }
                     }
+                } catch (Exception e) {
+                    final int requestedDays = days;
+                    if (healDeadStore(e)) return retryAfterHeal(() -> getUsage(requestedDays));
+                    throw e;
                 }
             }
             out.put("days", arr);
@@ -676,25 +702,82 @@ public class DataUsageMonitor {
     /** Clear all recorded history (both the daily rows and the delta baseline).
      *  Used by the performance page's Reset action. */
     public boolean resetHistory() {
-        if (!isInitialized) return false;
-        try (Statement st = connection.createStatement()) {
-            st.execute("DELETE FROM " + TABLE_DAILY);
-            st.execute("DELETE FROM " + TABLE_STATE);
-            logger.info("DataUsageMonitor: history reset");
-            try {
-                st.execute("CHECKPOINT");
+        synchronized (lock) {
+            if (!isInitialized) return false;
+            try (Statement st = connection.createStatement()) {
+                st.execute("DELETE FROM " + TABLE_DAILY);
+                st.execute("DELETE FROM " + TABLE_STATE);
+                logger.info("DataUsageMonitor: history reset");
+                try {
+                    st.execute("CHECKPOINT");
+                } catch (Throwable t) {
+                    // A dying store only buffered the reset: fail it so it heals and re-applies.
+                    if (com.overdrive.app.storage.H2StoreFaults.isStoreDead(t)) throw t;
+                    logger.warn("DataUsageMonitor: reset checkpoint failed (persists within WRITE_DELAY): " + t.getMessage());
+                }
+                return true;
             } catch (Throwable t) {
-                logger.warn("DataUsageMonitor: reset checkpoint failed (persists within WRITE_DELAY): " + t.getMessage());
+                if (healDeadStore(t)) return retryAfterHeal(this::resetHistory);
+                logger.warn("DataUsageMonitor.resetHistory failed: " + t.getMessage());
+                return false;
             }
+        }
+    }
+
+    /**
+     * Reopen a store H2 killed under a still-open connection (no other path here reopens it).
+     * Caller holds {@link #lock} and runs any retry through retryAfterHeal().
+     */
+    private boolean healDeadStore(Throwable failure) {
+        if (inHealRetry) {
+            // The retry failed too: keep the cooldown, never heal recursively.
+            if (com.overdrive.app.storage.H2StoreFaults.isStoreDead(failure)) deadDuringRetry = true;
+            return false;
+        }
+        if (!isInitialized || shuttingDown
+                || !com.overdrive.app.storage.H2StoreFaults.isStoreDead(failure)) return false;
+        // An interrupted thread would kill the reopened store on its next file read; a later
+        // caller heals instead, and this thread keeps its interrupt.
+        if (Thread.currentThread().isInterrupted()) return false;
+        if (healAttempted && System.nanoTime() - lastHealAttemptNanos < HEAL_COOLDOWN_NANOS) return false;
+        logger.warn("DataUsageMonitor: store died under a live connection, reopening: "
+                + com.overdrive.app.storage.H2StoreFaults.describe(failure));
+        if (connection != null) {
+            try { connection.close(); } catch (Throwable ignored) { /* a dead store throws here */ }
+        }
+        try {
+            connection = DriverManager.getConnection(JDBC_URL, "sa", "");
+            try (Statement st = connection.createStatement()) {
+                st.execute("SET CACHE_SIZE 2048");
+            }
+            createTables();
             return true;
         } catch (Throwable t) {
-            logger.warn("DataUsageMonitor.resetHistory failed: " + t.getMessage());
+            logger.error("DataUsageMonitor: reopen failed: " + t.getMessage(), t);
             return false;
+        } finally {
+            // Stamped after the attempt; retryAfterHeal clears it again if the retry finds the store healthy.
+            healAttempted = true;
+            lastHealAttemptNanos = System.nanoTime();
+        }
+    }
+
+    /** Runs the caller's single retry; a retry that never meets a dead store lifts the cooldown. */
+    private <T> T retryAfterHeal(java.util.function.Supplier<T> retry) {
+        inHealRetry = true;
+        deadDuringRetry = false;
+        try {
+            return retry.get();
+        } finally {
+            inHealRetry = false;
+            if (!deadDuringRetry) healAttempted = false;
         }
     }
 
     /** Close the H2 connection on daemon shutdown. */
     public void shutdown() {
+        // Set before stop() interrupts the sampler: a store that interrupt kills is not reopened.
+        shuttingDown = true;
         stop();
         synchronized (lock) {
             if (connection != null) {

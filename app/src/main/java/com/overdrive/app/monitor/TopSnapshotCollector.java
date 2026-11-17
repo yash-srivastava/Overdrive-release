@@ -91,7 +91,7 @@ public final class TopSnapshotCollector {
                             now,
                             android.os.SystemClock.elapsedRealtime() - startedAt,
                             "top -b -n 1");
-                    if (fallbackParsed.optBoolean("available", false)) {
+                    if (fallbackParsed.optBoolean("available", false) && !result.timedOut) {
                         limitedTopUnsupported = true;
                     }
                     result = fallback;

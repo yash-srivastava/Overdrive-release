@@ -694,6 +694,10 @@ public class SurveillanceApiHandler {
         config.put("deterrentAction", survConfig.optString("deterrentAction", "silent"));
         config.put("deterrentCooldownSeconds", survConfig.optInt("deterrentCooldownSeconds", 60));
         config.put("deterrentTrigger", survConfig.optString("deterrentTrigger", "any"));
+        config.put("deterrentZone", survConfig.optString("deterrentZone", "follow"));
+        config.put("deterrentScheduleEnabled", survConfig.optBoolean("deterrentScheduleEnabled", false));
+        config.put("deterrentScheduleStartMin", survConfig.optInt("deterrentScheduleStartMin", 1200));
+        config.put("deterrentScheduleEndMin", survConfig.optInt("deterrentScheduleEndMin", 360));
         config.put("impactDetection", survConfig.optBoolean("impactDetection", false));
         config.put("impactSensitivity", survConfig.optString("impactSensitivity", "medium"));
         config.put("screenDeterrentEnabled", survConfig.optBoolean("screenDeterrentEnabled", false));
@@ -968,6 +972,14 @@ public class SurveillanceApiHandler {
                         com.overdrive.app.camera.BydApaViewpointHelper.isMosaicViewpointConfirmed());
                     config.put("dilink4ViewpointRc",
                         com.overdrive.app.camera.BydApaViewpointHelper.getLastAcquireRc());
+                }
+                // Recording engine (Camera probe): what the running pipeline uses and why.
+                com.overdrive.app.surveillance.GpuSurveillancePipeline enginePipeline =
+                    CameraDaemon.getGpuPipeline();
+                if (enginePipeline != null) {
+                    config.put("recordingEngineActive", enginePipeline.getRecordingEngineActive());
+                    String engineWhy = enginePipeline.getRecordingEngineWhy();
+                    if (engineWhy != null) config.put("recordingEngineWhy", engineWhy);
                 }
             } catch (Exception ignored) {}
         } else {
@@ -1476,6 +1488,36 @@ public class SurveillanceApiHandler {
                         || "person_or_vehicle".equals(trigger)) {
                     com.overdrive.app.config.UnifiedConfigManager.updateValues(
                             "surveillance", java.util.Collections.singletonMap("deterrentTrigger", trigger));
+                }
+            }
+
+            // Deterrent zone: an extra filter on top of the detection zone; "follow" adds none.
+            if (configJson.has("deterrentZone")) {
+                String zone = configJson.optString("deterrentZone", "follow");
+                if ("follow".equals(zone) || "close".equals(zone)
+                        || "normal".equals(zone) || "extended".equals(zone)) {
+                    com.overdrive.app.config.UnifiedConfigManager.updateValues(
+                            "surveillance", java.util.Collections.singletonMap("deterrentZone", zone));
+                }
+            }
+
+            // Deterrent hours: minutes since local midnight, 0..1439.
+            if (configJson.has("deterrentScheduleEnabled") || configJson.has("deterrentScheduleStartMin")
+                    || configJson.has("deterrentScheduleEndMin")) {
+                java.util.Map<String, Object> scheduleUpdates = new java.util.HashMap<>();
+                Object scheduleEnabled = configJson.opt("deterrentScheduleEnabled");
+                if (scheduleEnabled instanceof Boolean) scheduleUpdates.put("deterrentScheduleEnabled", scheduleEnabled);
+                for (String key : new String[]{"deterrentScheduleStartMin", "deterrentScheduleEndMin"}) {
+                    Object minutes = configJson.opt(key);
+                    if (minutes instanceof Number) {
+                        int value = ((Number) minutes).intValue();
+                        if (value >= 0 && value <= 1439 && value == ((Number) minutes).doubleValue()) {
+                            scheduleUpdates.put(key, value);
+                        }
+                    }
+                }
+                if (!scheduleUpdates.isEmpty()) {
+                    com.overdrive.app.config.UnifiedConfigManager.updateValues("surveillance", scheduleUpdates);
                 }
             }
 
@@ -2357,6 +2399,21 @@ public class SurveillanceApiHandler {
                     + " (legacy path only; takes effect on next camera restart)");
                 configChanged = true;
             }
+            // Recording engine: "cpu" / "gpu"; anything else = platform default.
+            // Persist-only like the lane above: applies on the next camera restart.
+            if (configJson.has("recordingEngine")) {
+                String engine = com.overdrive.app.surveillance.RecordingEngine
+                    .normalize(configJson.optString("recordingEngine", ""));
+                if (!com.overdrive.app.camera.CameraConfigResolver.saveRecordingEngineMode(engine)) {
+                    CameraDaemon.log("Failed to persist recordingEngine=" + engine);
+                    HttpResponse.sendJsonError(out,
+                        "Could not persist camera config (filesystem permission?)");
+                    return;
+                }
+                CameraDaemon.log("recordingEngine set to " + (engine.isEmpty() ? "auto" : engine)
+                    + " (takes effect on next camera restart)");
+                configChanged = true;
+            }
             if (configJson.has("clearManualCameraId")
                     && configJson.optBoolean("clearManualCameraId", false)) {
                 if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
@@ -3043,7 +3100,9 @@ public class SurveillanceApiHandler {
                     if (frame == null) {
                         frame = retriever.getFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
                     }
-                    if (frame != null) return frame;
+                    if (frame != null) {
+                        return com.overdrive.app.surveillance.LensTag.dewarpFrameForClip(frame, events[i]);
+                    }
                 } catch (Exception e) {
                     // Try next file
                 } finally {

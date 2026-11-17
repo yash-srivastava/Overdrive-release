@@ -11,6 +11,10 @@ import com.overdrive.app.camera.dilink5.ClusterTransport
 import com.overdrive.app.config.UnifiedConfigManager
 import com.overdrive.app.daemon.CameraDaemon
 import com.overdrive.app.logging.DaemonLogger
+import com.overdrive.app.launcher.dilink5.cluster.DiLink5HostedProjectionBridge
+import com.overdrive.app.launcher.dilink5.cluster.DiLink5ProjectionConfig
+import com.overdrive.app.launcher.dilink5.cluster.DiLink5ProjectionOwnership
+import com.overdrive.app.launcher.dilink5.cluster.HostedProjectionGeometry
 import com.overdrive.app.surveillance.ClusterMirrorController
 import com.overdrive.app.surveillance.ClusterProjectionController
 import com.overdrive.app.surveillance.ClusterViewMirrorService
@@ -21,6 +25,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.math.roundToInt
 
 private const val DI5_MIN_WINDOW_PX = 200
 private const val DI5_SHARED_DISPLAY_FULL =
@@ -65,6 +70,8 @@ object DiLink5ClusterCast {
     private const val TASK_GUARD_UNKNOWN_RETRY_COUNT = 3
     private const val TASK_GUARD_FORCE_RESTART_COUNT = 5
     private const val TASK_GUARD_MAX_FOREGROUND_TAKEOVERS = 5
+    private const val LIFECYCLE_GUARD_POLL_MS = 5_000L
+    private const val LIFECYCLE_GUARD_FAILURES = 2
     private const val MARKER_PENDING = "di5ClusterProjectionPending"
     private const val MARKER_POWERED = "di5ClusterProjectionPowered"
     private const val MARKER_APP_MOVED = "di5ClusterProjectionAppMoved"
@@ -90,6 +97,8 @@ object DiLink5ClusterCast {
         longArrayOf(1_000L, 3_000L, 8_000L)
 
     private val stateLock = Any()
+    /** Serializes task/density/freeform dispatch with stop's session invalidation. */
+    private val taskMutationLock = TaskMutationAuthority()
     private val operations = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "DiLink5ClusterProjection").apply { isDaemon = true }
     }
@@ -118,6 +127,11 @@ object DiLink5ClusterCast {
     @Volatile private var legacyProjectionRecoveryBlocked = false
     @Volatile private var legacyRecoveryResumeScheduled = false
     @Volatile private var recoveryRetryTicket = 0L
+    private val hostedResourceSequence = java.util.concurrent.atomic.AtomicLong(0L)
+    private val uncertainHostedResources = HashMap<Long, MutableSet<Long>>()
+    /** Unpublished replacements; retired predecessors remain in cleanup ownership only. */
+    private val pendingHostedReplacements = HashSet<Long>()
+    private val lifecycleGuardians = HashSet<String>()
     /** Shared display name (lowercase) → elapsedRealtime when an OEM cluster app
      *  last reclaimed its foreground from our session. Guarded by [stateLock]. */
     private val reclaimedDisplays = HashMap<String, Long>()
@@ -193,17 +207,36 @@ object DiLink5ClusterCast {
         val pkg: String,
         val component: String,
         val kind: SessionKind,
+        /** OEM panel identity used for mirror/compositor ownership. */
+        val physicalDisplayId: Int,
+        /** Display that owns the launched task; differs from the panel in hosted mode. */
         val targetDisplayId: Int,
         val targetDisplayName: String,
         val displayWidth: Int,
-        val displayHeight: Int
+        val displayHeight: Int,
+        val projectionTransport: String = "direct",
+        val hostedResourceGeneration: Long = 0L,
+        val hostedGeometry: HostedProjectionGeometry? = null,
+    )
+
+    private data class HostedSurfaceLoss(
+        val resourceGeneration: Long,
+        val pendingOwner: DiLink5ProjectionOwnership?,
+        val cleanupClaimed: AtomicBoolean = AtomicBoolean(false),
     )
 
     private data class ProjectionTarget(
+        /** Physical OEM panel. */
         val displayId: Int,
         val name: String,
         val width: Int,
-        val height: Int
+        val height: Int,
+        /** Task destination. Equal to [displayId] in direct mode. */
+        val contentDisplayId: Int = displayId,
+        val transport: String = "direct",
+        val hostedResourceGeneration: Long = 0L,
+        val deferCompositorEnable: Boolean = false,
+        val hostedGeometry: HostedProjectionGeometry? = null,
     )
 
     private data class RecoveryMarker(
@@ -234,6 +267,8 @@ object DiLink5ClusterCast {
     private data class LaunchVerification(
         val succeeded: Boolean,
         val reason: String = "",
+        /** True only when command rejection or observed task/foreground state proves direct failed. */
+        val definiteFailure: Boolean = false,
         /** Package that kept taking the target display's foreground, when that
          *  is why verification failed (drives the shared-display fallback). */
         val foreignPackage: String? = null
@@ -354,6 +389,20 @@ object DiLink5ClusterCast {
     }
 
     private fun startTarget(target: LaunchTarget): StartTicket? {
+        val admission = com.overdrive.app.launcher.layout.LayoutModeGate.enterStandard()
+            ?: run {
+                lastFailureReason = "Stop Layouts before starting a single app or full cluster map"
+                return null
+            }
+        return try {
+            startTargetAdmitted(target)
+        } finally {
+            admission.close()
+        }
+    }
+
+    private fun startTargetAdmitted(target: LaunchTarget): StartTicket? {
+        if (!prepareHostedOwnershipForAdmission()) return null
         synchronized(stateLock) {
             if (activeCleanup != null) {
                 lastFailureReason =
@@ -569,20 +618,157 @@ object DiLink5ClusterCast {
                         phase == SessionPhase.ACTIVE &&
                         !stopping
             }
-            ?.targetDisplayId
+            ?.physicalDisplayId
             ?: -1
 
     @JvmStatic
+    fun currentContentDisplayId(): Int =
+        session?.takeIf {
+            it.generation == generation && phase == SessionPhase.ACTIVE && !stopping
+        }?.targetDisplayId ?: -1
+
+    /**
+     * Input target plus physical-panel rectangle and content-buffer dimensions.
+     * Returned as contentId,left,top,width,height,bufferWidth,bufferHeight.
+     */
+    @JvmStatic
+    fun currentInputMapping(expectedGeneration: Long): IntArray? {
+        val live = session?.takeIf {
+            it.generation == expectedGeneration && generation == expectedGeneration &&
+                phase == SessionPhase.ACTIVE && !stopping
+        } ?: return null
+        val hosted = live.hostedGeometry
+        return if (live.projectionTransport == "hosted" && hosted != null) {
+            intArrayOf(
+                live.targetDisplayId,
+                hosted.overlay.left,
+                hosted.overlay.top,
+                hosted.overlay.width(),
+                hosted.overlay.height(),
+                hosted.bufferWidth,
+                hosted.bufferHeight,
+            )
+        } else {
+            intArrayOf(
+                live.targetDisplayId,
+                0,
+                0,
+                live.displayWidth,
+                live.displayHeight,
+                live.displayWidth,
+                live.displayHeight,
+            )
+        }
+    }
+
+    @JvmStatic
+    fun currentProjectionTransport(): String =
+        session?.takeIf { it.generation == generation }?.projectionTransport ?: "none"
+
+    /** Called by the app-overlay owner after an unexpected Surface/service teardown. */
+    @JvmStatic
+    fun onHostedSurfaceLost(resourceGeneration: Long) {
+        // Resize records its possible task movement before dispatch. Surface loss must reclaim
+        // that pending replacement even while the old host is still the published Session.
+        val pendingOwner = try {
+            DiLink5ProjectionOwnership.load(resourceGeneration)
+        } catch (_: Throwable) { null }
+        val loss = HostedSurfaceLoss(resourceGeneration, pendingOwner)
+        val lost = synchronized(stateLock) {
+            hostedSurfaceLossScopeLocked(loss)
+        } ?: return
+        Thread({
+            completeHostedSurfaceLoss(
+                isMap = lost.second == SessionKind.MAP,
+                stop = {
+                    stopInternal(
+                        lost.first,
+                        rehome = lost.second == SessionKind.APP,
+                        foreground = false,
+                        expectedKind = lost.second,
+                        hostedSurfaceLoss = loss,
+                    )
+                },
+                onMapFailure = {
+                    if (loss.cleanupClaimed.get()) {
+                        com.overdrive.app.navmap.ClusterMapProjector.onDiLink5ProjectionFailed()
+                    }
+                },
+            )
+        }, "DiLink5HostedSurfaceCleanup").apply {
+            isDaemon = true
+            start()
+        }
+    }
+
+    /** Caller holds stateLock, including stop's final claim against resize publication. */
+    private fun hostedSurfaceLossScopeLocked(loss: HostedSurfaceLoss): Pair<Long, SessionKind>? {
+        if (stopping) return null
+        val published = session?.takeIf {
+            it.projectionTransport == "hosted" && it.generation == generation &&
+                it.hostedResourceGeneration == loss.resourceGeneration
+        }
+        val resourceRegistered =
+            uncertainHostedResources[generation]?.contains(loss.resourceGeneration) == true
+        if (!hostedSurfaceLossNeedsCleanup(
+                resourceGeneration = loss.resourceGeneration,
+                publishedResourceGeneration = published?.hostedResourceGeneration ?: 0L,
+                registeredForCleanup = resourceRegistered,
+                preparing = phase == SessionPhase.PREPARING,
+                active = phase == SessionPhase.ACTIVE,
+                pendingReplacement = loss.resourceGeneration in pendingHostedReplacements,
+                taskMayBeMoved = loss.pendingOwner?.taskMayBeMoved == true,
+                packageMatches = loss.pendingOwner?.packageName == activePackage,
+            )
+        ) return null
+        val kind = published?.kind ?: activeKind?.takeIf { activePackage != null } ?: return null
+        return generation to kind
+    }
+
+    @JvmStatic
     fun currentTargetDisplayWidth(): Int =
-        session?.takeIf { it.targetDisplayId == currentTargetDisplayId() }
-            ?.displayWidth
-            ?: 0
+        session?.takeIf {
+            it.generation == generation && phase == SessionPhase.ACTIVE && !stopping
+        }?.displayWidth ?: 0
 
     @JvmStatic
     fun currentTargetDisplayHeight(): Int =
-        session?.takeIf { it.targetDisplayId == currentTargetDisplayId() }
-            ?.displayHeight
-            ?: 0
+        session?.takeIf {
+            it.generation == generation && phase == SessionPhase.ACTIVE && !stopping
+        }?.displayHeight ?: 0
+
+    /** Physical overlay bounds; content buffer pixels are deliberately separate. */
+    @JvmStatic
+    fun currentHostedProjectionBounds(): IntArray? = synchronized(stateLock) {
+        session?.takeIf {
+            it.generation == generation && it.projectionTransport == "hosted" &&
+                !stopping && phase == SessionPhase.ACTIVE
+        }?.hostedGeometry?.overlay?.let {
+            intArrayOf(it.left, it.top, it.right, it.bottom)
+        }
+    }
+
+    @JvmStatic
+    fun currentAppProjectionSnapshot(): JSONObject = synchronized(stateLock) {
+        val appPackage = activePackage?.takeIf {
+            activeKind == SessionKind.APP && !stopping &&
+                phase != SessionPhase.IDLE && phase != SessionPhase.FAILED
+        }.orEmpty()
+        val live = session?.takeIf {
+            it.generation == generation && it.kind == SessionKind.APP &&
+                it.pkg == appPackage && !stopping
+        }
+        JSONObject()
+            .put("castPackage", appPackage)
+            .put("castSessionGeneration", if (appPackage.isNotEmpty()) generation else 0L)
+            .put("projectionPathActive", live?.projectionTransport ?: "none")
+            .put("hostedProjectionBounds", live?.takeIf {
+                it.projectionTransport == "hosted" && phase == SessionPhase.ACTIVE
+            }?.hostedGeometry?.overlay?.let {
+                JSONObject().put("l", it.left).put("t", it.top)
+                    .put("r", it.right).put("b", it.bottom)
+            } ?: JSONObject.NULL)
+    }
 
     @JvmStatic
     fun isMapActive(): Boolean =
@@ -629,33 +815,409 @@ object DiLink5ClusterCast {
     }
 
     @JvmStatic
-    fun resize(left: Int, top: Int, right: Int, bottom: Int, commit: Boolean): Boolean {
+    @JvmOverloads
+    fun resize(
+        left: Int, top: Int, right: Int, bottom: Int, commit: Boolean,
+        expectedPackage: String? = null, expectedGeneration: Long = 0L,
+    ): Boolean {
         if (!ClusterTransport.isDiLink5()) return false
-        val live = session ?: return false
-        if (live.kind != SessionKind.APP ||
-            activePackage != live.pkg ||
-            activeKind != SessionKind.APP ||
-            stopping
-        ) return false
+        val live = synchronized(taskMutationLock.lock) {
+            synchronized(stateLock) {
+                session?.takeIf {
+                    it.kind == SessionKind.APP && activeKind == SessionKind.APP &&
+                        isLiveSession(it) && diLink5ResizeOwnershipMatches(
+                            expectedPackage, expectedGeneration, it.pkg, it.generation,
+                        )
+                }
+            }
+        } ?: return false
         val bounds = clampDiLink5ProjectionBounds(
             left, top, right, bottom, live.displayWidth, live.displayHeight
         ) ?: return false
-        val applied = ClusterFreeformWindow.applyBounds(
-            live.pkg,
-            Rect(bounds.left, bounds.top, bounds.right, bounds.bottom),
-            commit,
-            live.targetDisplayId
-        )
-        if (applied && commit) {
-            ClusterCast.saveWindowFractions(
+        if (live.projectionTransport == "hosted") {
+            return resizeHosted(live, bounds, commit)
+        }
+        val applied = synchronized(taskMutationLock.lock) {
+            if (!isLiveSession(live)) return@synchronized false
+            val resized = ClusterFreeformWindow.applyBounds(
                 live.pkg,
-                bounds.left / live.displayWidth.toDouble(),
-                bounds.top / live.displayHeight.toDouble(),
-                bounds.right / live.displayWidth.toDouble(),
-                bounds.bottom / live.displayHeight.toDouble()
+                Rect(bounds.left, bounds.top, bounds.right, bounds.bottom),
+                commit,
+                live.targetDisplayId
             )
+            if (resized && commit && isLiveSession(live)) {
+                ClusterCast.saveWindowFractions(
+                    live.pkg,
+                    bounds.left / live.displayWidth.toDouble(),
+                    bounds.top / live.displayHeight.toDouble(),
+                    bounds.right / live.displayWidth.toDouble(),
+                    bounds.bottom / live.displayHeight.toDouble()
+                )
+            }
+            resized
         }
         return applied
+    }
+
+    private fun resizeHosted(
+        live: Session,
+        bounds: DiLink5ProjectionBounds,
+        commit: Boolean
+    ): Boolean {
+        // Live drag is deferred. Hosted resize replaces two owned resources and is
+        // committed only on release, preventing a Surface/VD allocation backlog.
+        if (!commit || !isLiveSession(live)) return false
+        val context = CameraDaemon.getAppContext() ?: return false
+        val base = try {
+            DiLink5ProjectionConfig.from(
+                UnifiedConfigManager.loadConfig().optJSONObject("projection")
+            )
+        } catch (_: Throwable) { return false }
+        val remainingW = (live.displayWidth - bounds.width()).coerceAtLeast(0)
+        val remainingH = (live.displayHeight - bounds.height()).coerceAtLeast(0)
+        val replacementConfig = base.copy(
+            widthPercent = (bounds.width() * 100.0 / live.displayWidth).roundToInt()
+                .coerceIn(20, 100),
+            heightPercent = (bounds.height() * 100.0 / live.displayHeight).roundToInt()
+                .coerceIn(20, 100),
+            xOffsetPercent = if (remainingW == 0) 0 else
+                (bounds.left * 100.0 / remainingW).roundToInt().coerceIn(0, 100),
+            yOffsetPercent = if (remainingH == 0) 0 else
+                (bounds.top * 100.0 / remainingH).roundToInt().coerceIn(0, 100)
+        )
+        val manager = context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
+            ?: return false
+        val physical = manager.getDisplay(live.physicalDisplayId)?.takeIf { it.isValid }
+            ?: return false
+        val nativeDensity = ClusterAppDensity.nativeDensityForDisplay(live.physicalDisplayId)
+            ?: return false
+        val geometry = HostedProjectionGeometry.calculate(
+            live.displayWidth, live.displayHeight, nativeDensity, replacementConfig
+        ) ?: return false
+        synchronized(taskMutationLock.lock) {
+            if (!isLiveSession(live) ||
+                !UnifiedConfigManager.updateValues("projection", replacementConfig.toValues())
+            ) return false
+        }
+        val resourceGeneration = nextHostedResourceGeneration()
+        val replacementTarget = ProjectionTarget(
+            live.physicalDisplayId,
+            live.targetDisplayName,
+            live.displayWidth,
+            live.displayHeight
+        )
+        val pendingOwner = projectionOwnership(
+            resourceGeneration, replacementTarget, live.physicalDisplayId,
+            overlayOwned = true, virtualDisplayOwned = true,
+            taskMayBeMoved = false, uncertain = true
+        ).copy(
+            packageName = live.pkg,
+            densityOwner = "di5:${live.generation}:resize:$resourceGeneration",
+        )
+        if (!DiLink5ProjectionOwnership.persist(pendingOwner)) return false
+        val allocation = startHostedAllocation(
+            register = {
+                synchronized(stateLock) {
+                    if (!isLiveSession(live)) false else {
+                        uncertainHostedResources.getOrPut(live.generation) { LinkedHashSet() }
+                            .add(resourceGeneration)
+                        pendingHostedReplacements.add(resourceGeneration)
+                        true
+                    }
+                }
+            },
+            start = {
+                DiLink5HostedProjectionBridge.start(
+                    context,
+                    resourceGeneration,
+                    live.physicalDisplayId,
+                    live.targetDisplayName,
+                    geometry,
+                )
+            },
+            current = { isLiveSession(live) },
+        )
+        if (!allocation.registered) {
+            DiLink5ProjectionOwnership.clear(resourceGeneration, true, readCurrentBootId())
+            return false
+        }
+        if (!allocation.publicationAllowed) {
+            // STOP may already have attempted cleanup while allocation was blocked. Republish the
+            // exact late resource before a final release attempt so failure remains recoverable.
+            reconcileLateHostedAllocation(
+                republish = {
+                    allocation.value?.let { late ->
+                        DiLink5ProjectionOwnership.persist(pendingOwner.copy(
+                            contentDisplayId = late.contentDisplayId,
+                            virtualDisplayName = late.virtualDisplayName,
+                        ))
+                    } ?: true
+                },
+                release = {
+                    DiLink5HostedProjectionBridge.release(resourceGeneration) &&
+                        clearHostedOwnershipIfPresent(resourceGeneration)
+                },
+                updateRegistration = { released ->
+                    synchronized(stateLock) {
+                        val resources = uncertainHostedResources
+                            .getOrPut(live.generation) { LinkedHashSet() }
+                        if (released) {
+                            resources.remove(resourceGeneration)
+                            pendingHostedReplacements.remove(resourceGeneration)
+                            if (resources.isEmpty()) uncertainHostedResources.remove(live.generation)
+                        } else {
+                            resources.add(resourceGeneration)
+                        }
+                    }
+                },
+            )
+            return false
+        }
+        val replacement = allocation.value?.takeIf {
+            DiLink5HostedProjectionBridge.isSurfaceAlive(resourceGeneration)
+        } ?: run {
+            releaseUnmovedHostedReplacement(live, resourceGeneration)
+            return false
+        }
+        val registeredForCleanup = synchronized(stateLock) {
+            if (!isLiveSession(live)) {
+                false
+            } else {
+                uncertainHostedResources.getOrPut(live.generation) { LinkedHashSet() }
+                    .add(resourceGeneration)
+                true
+            }
+        }
+        if (!registeredForCleanup) {
+            val released = DiLink5HostedProjectionBridge.release(resourceGeneration) &&
+                DiLink5ProjectionOwnership.clear(
+                    resourceGeneration,
+                    true,
+                    readCurrentBootId(),
+                )
+            if (!released) {
+                synchronized(stateLock) {
+                    uncertainHostedResources.getOrPut(live.generation) { LinkedHashSet() }
+                        .add(resourceGeneration)
+                }
+            } else {
+                synchronized(stateLock) { pendingHostedReplacements.remove(resourceGeneration) }
+            }
+            return false
+        }
+        return synchronized(taskMutationLock.lock) {
+        val location = ClusterFreeformWindow.findTaskLocation(
+            live.pkg, live.targetDisplayId
+        )
+        if (!location.known || location.taskId <= 0) {
+            releaseUnmovedHostedReplacement(live, resourceGeneration)
+            return false
+        }
+        val densityOwner = "di5:${live.generation}"
+        val replacementDensityOwner = "$densityOwner:resize:$resourceGeneration"
+        if (ClusterAppDensity.prepareHostedReplacement(
+                live.pkg,
+                replacement.contentDisplayId,
+                densityOwner,
+                replacementDensityOwner,
+            ) { isLiveSession(live) } == HostedDensityPreparation.FAILED
+        ) {
+            releaseUnmovedHostedReplacement(live, resourceGeneration)
+            return false
+        }
+        val replacementDensityOwned = ClusterAppDensity.hasLease(replacementDensityOwner)
+        val moveOwnerPersisted = synchronized(stateLock) {
+            isLiveSession(live) && DiLink5ProjectionOwnership.persist(pendingOwner.copy(
+                contentDisplayId = replacement.contentDisplayId,
+                virtualDisplayName = replacement.virtualDisplayName,
+                taskId = location.taskId,
+                taskMayBeMoved = true,
+                densityOwned = replacementDensityOwned,
+                densityOwner = if (replacementDensityOwned) replacementDensityOwner else "",
+            ))
+        }
+        if (!moveOwnerPersisted) {
+            releaseUnmovedHostedReplacement(live, resourceGeneration)
+            return false
+        }
+        val moveResult = ClusterFreeformWindow.moveTaskToDisplayResult(
+            location.taskId,
+            replacement.contentDisplayId,
+        ) { dispatch ->
+            synchronized(stateLock) {
+                DiLink5HostedProjectionBridge.withLiveSurfaceGeneration(resourceGeneration) {
+                    runHostedMoveDispatch(
+                        current = { isLiveSession(live) },
+                        register = {
+                            uncertainHostedResources.getOrPut(live.generation) { LinkedHashSet() }
+                                .add(resourceGeneration)
+                        },
+                        dispatch = dispatch,
+                    )
+                } ?: false
+            }
+        }
+        when (hostedResizeMoveDisposition(moveResult, isLiveSession(live))) {
+            HostedResizeMoveDisposition.RELEASE_UNMOVED -> {
+                releaseUnmovedHostedReplacement(live, resourceGeneration)
+                return false
+            }
+            HostedResizeMoveDisposition.RETAIN_UNCERTAIN -> return false
+            HostedResizeMoveDisposition.CONTINUE_VERIFICATION -> Unit
+        }
+        var verified = false
+        repeat(VERIFY_ATTEMPTS) {
+            if (!isLiveSession(live) ||
+                !DiLink5HostedProjectionBridge.isSurfaceAlive(resourceGeneration)
+            ) return false
+            val current = ClusterFreeformWindow.findTaskLocation(
+                live.pkg, replacement.contentDisplayId
+            )
+            if (current.known && current.taskId == location.taskId &&
+                current.displayId == replacement.contentDisplayId
+            ) {
+                verified = true
+                return@repeat
+            }
+            try { Thread.sleep(VERIFY_POLL_MS) } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return false
+            }
+        }
+        if (!verified) {
+            // Movement was dispatched but not verified. Retain both resources for
+            // owner-scoped stop/recovery rather than destroying a possible task host.
+            synchronized(stateLock) {
+                uncertainHostedResources.getOrPut(live.generation) { LinkedHashSet() }
+                    .add(resourceGeneration)
+            }
+            return false
+        }
+        if (!ClusterAppDensity.restoreForSession(densityOwner) ||
+            !ClusterAppDensity.promoteHostedReplacement(
+                densityOwner,
+                replacementDensityOwner,
+            )
+        ) {
+            synchronized(stateLock) {
+                uncertainHostedResources.getOrPut(live.generation) { LinkedHashSet() }
+                    .add(resourceGeneration)
+                if (live.hostedResourceGeneration > 0L) {
+                    uncertainHostedResources.getOrPut(live.generation) { LinkedHashSet() }
+                        .add(live.hostedResourceGeneration)
+                }
+            }
+            return false
+        }
+        val canonicalDensityOwned = ClusterAppDensity.hasLease(densityOwner)
+        val replacementLive = synchronized(stateLock) publicationState@{
+            if (!isLiveSession(live)) {
+                uncertainHostedResources.getOrPut(live.generation) { LinkedHashSet() }
+                    .add(resourceGeneration)
+                return@publicationState null
+            }
+            DiLink5HostedProjectionBridge.withLiveSurfaceGeneration(resourceGeneration) publication@{
+                if (!DiLink5ProjectionOwnership.persist(pendingOwner.copy(
+                        packageName = live.pkg,
+                        contentDisplayId = replacement.contentDisplayId,
+                        virtualDisplayName = replacement.virtualDisplayName,
+                        taskId = location.taskId,
+                        taskMayBeMoved = true,
+                        densityOwned = canonicalDensityOwned,
+                        densityOwner = if (canonicalDensityOwned) densityOwner else "",
+                        compositorOwned = true,
+                        uncertain = false
+                    ))) {
+                    uncertainHostedResources.getOrPut(live.generation) { LinkedHashSet() }
+                        .add(resourceGeneration)
+                    return@publication null
+                }
+                uncertainHostedResources[live.generation]?.let { resources ->
+                    resources.remove(resourceGeneration)
+                    if (resources.isEmpty()) uncertainHostedResources.remove(live.generation)
+                }
+                pendingHostedReplacements.remove(resourceGeneration)
+                if (live.hostedResourceGeneration > 0L) {
+                    uncertainHostedResources.getOrPut(live.generation) { LinkedHashSet() }
+                        .add(live.hostedResourceGeneration)
+                }
+                live.copy(
+                    targetDisplayId = replacement.contentDisplayId,
+                    hostedResourceGeneration = resourceGeneration,
+                    hostedGeometry = geometry,
+                ).also { session = it }
+            }
+        } ?: return false
+        if (DiLink5HostedProjectionBridge.release(live.hostedResourceGeneration) &&
+            DiLink5ProjectionOwnership.clear(
+                live.hostedResourceGeneration,
+                true,
+                readCurrentBootId(),
+            )
+        ) {
+            synchronized(stateLock) {
+                uncertainHostedResources[live.generation]?.let { resources ->
+                    resources.remove(live.hostedResourceGeneration)
+                    if (resources.isEmpty()) uncertainHostedResources.remove(live.generation)
+                }
+            }
+        } else {
+            synchronized(stateLock) {
+                uncertainHostedResources.getOrPut(live.generation) { LinkedHashSet() }
+                    .add(live.hostedResourceGeneration)
+            }
+        }
+        startTaskGuardian(
+            replacementLive,
+            LaunchTarget(replacementLive.pkg, replacementLive.component, replacementLive.kind),
+        )
+        ClusterCast.saveWindowFractions(
+            live.pkg,
+            bounds.left / live.displayWidth.toDouble(),
+            bounds.top / live.displayHeight.toDouble(),
+            bounds.right / live.displayWidth.toDouble(),
+            bounds.bottom / live.displayHeight.toDouble()
+        )
+        isLiveSession(replacementLive) &&
+            DiLink5HostedProjectionBridge.isSurfaceAlive(resourceGeneration)
+        }
+    }
+
+    /** Release only while this resize still owns the live session. Once stop wins the state
+     * lock, the replacement stays registered for that stop/recovery pass instead. */
+    private fun releaseUnmovedHostedReplacement(
+        live: Session,
+        resourceGeneration: Long,
+    ): Boolean {
+        val releaseHere = synchronized(stateLock) {
+            isLiveSession(live) &&
+                uncertainHostedResources[live.generation]?.contains(resourceGeneration) == true
+        }
+        if (!releaseHere) return false
+        return completeHostedReplacementCleanup(
+            restoreDensity = {
+                ClusterAppDensity.restoreForSession(
+                    "di5:${live.generation}:resize:$resourceGeneration"
+                )
+            },
+            releaseResources = {
+                DiLink5HostedProjectionBridge.release(resourceGeneration) &&
+                    DiLink5ProjectionOwnership.clear(
+                        resourceGeneration,
+                        true,
+                        readCurrentBootId(),
+                    )
+            },
+            clearRegistration = {
+                synchronized(stateLock) {
+                    uncertainHostedResources[live.generation]?.let { resources ->
+                        resources.remove(resourceGeneration)
+                        if (resources.isEmpty()) uncertainHostedResources.remove(live.generation)
+                    }
+                    pendingHostedReplacements.remove(resourceGeneration)
+                }
+            },
+        )
     }
 
     @JvmStatic
@@ -771,6 +1333,7 @@ object DiLink5ClusterCast {
         retryAttempt: Int,
         reservedRetryTicket: Long?
     ) {
+        recoverPersistedHostedOwnership()
         if (!ClusterTransport.isDiLink5() && !allowInactiveCleanup) return
         // `allowInactiveCleanup` is also the explicit cross-mode recovery
         // authority while DI5 itself is selected. A stale legacy marker was
@@ -1274,6 +1837,17 @@ object DiLink5ClusterCast {
     @JvmStatic
     fun isRecovering(): Boolean = phase == SessionPhase.RECOVERING
 
+    @JvmStatic
+    fun isTaskReclamationInFlight(): Boolean = synchronized(stateLock) {
+        phase == SessionPhase.RECOVERING || activeCleanup != null
+    }
+
+    @JvmStatic
+    fun hasUnresolvedTaskReclamation(): Boolean = synchronized(stateLock) {
+        phase == SessionPhase.RECOVERING || activeCleanup != null ||
+            appMovedGeneration > 0L || cleanupUncertain
+    }
+
     /**
      * The bounded recovery ladder ended without a same-boot indeterminate
      * lockout. The cross-mode fence exists to order an ACTIVE recovery
@@ -1340,6 +1914,12 @@ object DiLink5ClusterCast {
                 return false
             }
         }
+        recoverUnpublishedHostedResources()
+        recoverPersistedHostedOwnership()
+        val hostedOwnershipUnresolved = DiLink5ProjectionOwnership.loadAll()
+            .any { it.transport == "hosted" } || synchronized(stateLock) {
+                uncertainHostedResources.isNotEmpty()
+            }
         val markerRead = readRecoveryMarker()
         if (markerRead.failed) {
             synchronized(stateLock) {
@@ -1388,7 +1968,7 @@ object DiLink5ClusterCast {
         val taskMayBeMoved =
             marker.appMoved || appMovedGeneration > 0L || session != null
         if (!needsPowerDown && !taskMayBeMoved) {
-            if (!marker.pending) return true
+            if (!marker.pending) return !hostedOwnershipUnresolved
             val cleared = writeMarker(
                 pending = false,
                 powered = false,
@@ -1397,15 +1977,18 @@ object DiLink5ClusterCast {
                 enableBootId = "",
                 pkg = ""
             )
-            if (!cleared) {
+            if (!cleared || hostedOwnershipUnresolved) {
                 synchronized(stateLock) {
                     cleanupUncertain = true
                     phase = SessionPhase.FAILED
-                    lastFailureReason =
+                    lastFailureReason = if (!cleared) {
                         "stale DI5 projection pending marker could not be cleared"
+                    } else {
+                        "hosted projection ownership cleanup remains incomplete"
+                    }
                 }
             }
-            return cleared
+            return cleared && !hostedOwnershipUnresolved
         }
 
         val recoveryPkg = marker.pkg.ifEmpty {
@@ -1483,7 +2066,8 @@ object DiLink5ClusterCast {
                 },
                 pkg = if (taskMayBeMoved && !rehomed) recoveryPkg else ""
             )
-            recovered = rehomed && poweredDown && markerWritten
+            recovered = rehomed && poweredDown && markerWritten &&
+                !hostedOwnershipUnresolved
             if (!recovered) {
                 logger.warn(
                     "DI5 cluster cast: orphaned shutdown recovery incomplete"
@@ -1639,13 +2223,24 @@ object DiLink5ClusterCast {
             if (projectionTarget.width <= 1 || projectionTarget.height <= 1) {
                 throw IllegalStateException("invalid projection display size")
             }
-            val targetDisplayId = projectionTarget.displayId
-            if (targetDisplayId <= Display.DEFAULT_DISPLAY) {
+            val physicalDisplayId = projectionTarget.displayId
+            val targetDisplayId = projectionTarget.contentDisplayId
+            if (physicalDisplayId <= Display.DEFAULT_DISPLAY ||
+                targetDisplayId <= Display.DEFAULT_DISPLAY
+            ) {
                 throw IllegalStateException(
-                    "invalid OEM projection display id $targetDisplayId"
+                    "invalid projection display identity physical=$physicalDisplayId content=$targetDisplayId"
                 )
             }
-            if (!isCurrent(expectedGeneration, pkg)) return
+            if (!isCurrent(expectedGeneration, pkg)) {
+                if (projectionTarget.hostedResourceGeneration > 0 &&
+                    DiLink5HostedProjectionBridge.release(projectionTarget.hostedResourceGeneration)) {
+                    DiLink5ProjectionOwnership.clear(
+                        projectionTarget.hostedResourceGeneration, true, readCurrentBootId()
+                    )
+                }
+                return
+            }
 
             var activeTarget = projectionTarget
             var live = Session(
@@ -1653,18 +2248,56 @@ object DiLink5ClusterCast {
                 pkg,
                 target.component,
                 target.kind,
+                physicalDisplayId,
                 targetDisplayId,
                 projectionTarget.name,
                 projectionTarget.width,
-                projectionTarget.height
+                projectionTarget.height,
+                projectionTarget.transport,
+                projectionTarget.hostedResourceGeneration,
+                projectionTarget.hostedGeometry,
             )
             session = live
             ClusterFreeformWindow.invalidateTaskCache()
+            if (activeTarget.transport == "direct") {
+                ClusterFreeformWindow.beginDirectPlacementAttempt()
+            }
 
             var launch = launchAndVerify(
                 target, targetDisplayId, expectedGeneration
             )
-            if (!launch.succeeded && launch.foreignPackage != null) {
+            if (shouldFallbackToHostedAfterDirectFailure(
+                    activeTarget.transport,
+                    isAutoProjectionTransport(),
+                    launch.succeeded,
+                    launch.definiteFailure,
+                ) && isCurrent(expectedGeneration, pkg)
+            ) {
+                val hosted = if (ClusterFreeformWindow.prepareHostedFreeformState()) {
+                    configureHostedProjectionTarget(
+                        context,
+                        activeTarget,
+                        expectedGeneration,
+                    )
+                } else {
+                    null
+                }
+                if (hosted != null) {
+                    activeTarget = hosted
+                    live = live.copy(
+                        targetDisplayId = hosted.contentDisplayId,
+                        projectionTransport = "hosted",
+                        hostedResourceGeneration = hosted.hostedResourceGeneration,
+                        hostedGeometry = hosted.hostedGeometry,
+                    )
+                    session = live
+                    ClusterFreeformWindow.invalidateTaskCache()
+                    launch = launchAndVerify(target, hosted.contentDisplayId, expectedGeneration)
+                }
+            }
+            if (!launch.succeeded && launch.foreignPackage != null &&
+                activeTarget.transport == "direct"
+            ) {
                 // An OEM cluster app keeps re-fronting itself on this shared
                 // surface (DiLink 5.0 Atto 3: com.byd.sr on _0 every ~2-9 s).
                 // Fighting it fails by design after a bounded number of
@@ -1691,6 +2324,21 @@ object DiLink5ClusterCast {
                                 "${launch.foreignPackage}; retrying $pkg on " +
                                 "${alternative.name} (display ${alternative.displayId})"
                     )
+                    val deferredEnable = activeTarget.deferCompositorEnable
+                    val alternativeAppVisible = if (deferredEnable) {
+                        DiLink5HostedProjectionBridge.isAppDisplayVisible(
+                            context, alternative.displayId,
+                        )
+                    } else false
+                    if (!isCurrent(expectedGeneration, pkg)) return
+                    val preparedAlternative = alternative.copy(
+                        deferCompositorEnable = prepareDiLink5AlternativeCompositor(
+                            deferredEnable,
+                            alternativeAppVisible,
+                        ) {
+                            enableProjectionCompositorForCurrentSession(expectedGeneration, pkg)
+                        },
+                    )
                     if (target.kind == SessionKind.APP) {
                         // A running task keeps its old display affinity through
                         // `am start --display`; start it fresh on the new surface.
@@ -1698,17 +2346,22 @@ object DiLink5ClusterCast {
                         Thread.sleep(CONTAINER_SETTLE_MS)
                     }
                     if (!isCurrent(expectedGeneration, pkg)) return
-                    activeTarget = alternative
+                    activeTarget = preparedAlternative
                     live = live.copy(
-                        targetDisplayId = alternative.displayId,
-                        targetDisplayName = alternative.name,
-                        displayWidth = alternative.width,
-                        displayHeight = alternative.height
+                        physicalDisplayId = preparedAlternative.displayId,
+                        targetDisplayId = preparedAlternative.contentDisplayId,
+                        targetDisplayName = preparedAlternative.name,
+                        displayWidth = preparedAlternative.width,
+                        displayHeight = preparedAlternative.height,
+                        projectionTransport = preparedAlternative.transport,
+                        hostedResourceGeneration = preparedAlternative.hostedResourceGeneration,
+                        hostedGeometry = preparedAlternative.hostedGeometry,
                     )
                     session = live
                     ClusterFreeformWindow.invalidateTaskCache()
+                    ClusterFreeformWindow.beginDirectPlacementAttempt()
                     launch = launchAndVerify(
-                        target, alternative.displayId, expectedGeneration
+                        target, preparedAlternative.displayId, expectedGeneration
                     )
                     if (!launch.succeeded && launch.foreignPackage != null) {
                         markDisplayReclaimed(alternative.name)
@@ -1724,6 +2377,34 @@ object DiLink5ClusterCast {
             if (!launch.succeeded) {
                 throw IllegalStateException(launch.reason)
             }
+            if (!ClusterAppDensity.restoreForSessionExceptDisplay(
+                    "di5:$expectedGeneration",
+                    activeTarget.contentDisplayId,
+                ) { isCurrent(expectedGeneration, pkg) }
+            ) {
+                throw IllegalStateException("previous display density could not be restored after task placement")
+            }
+            if (activeTarget.deferCompositorEnable &&
+                !enableProjectionCompositorForCurrentSession(expectedGeneration, pkg)) {
+                throw IllegalStateException("compositor enable failed after verified direct placement")
+            }
+            if (activeTarget.transport == "hosted") {
+                val location = ClusterFreeformWindow.findTaskLocation(pkg, activeTarget.contentDisplayId)
+                val currentOwner = DiLink5ProjectionOwnership.load(
+                    activeTarget.hostedResourceGeneration
+                ) ?: throw IllegalStateException("hosted ownership record is missing")
+                if (currentOwner.generation != activeTarget.hostedResourceGeneration ||
+                    !DiLink5ProjectionOwnership.persist(currentOwner.copy(
+                        packageName = pkg,
+                        taskId = location.taskId,
+                        taskMayBeMoved = location.known && location.taskId > 0,
+                        compositorOwned = poweredGeneration == expectedGeneration ||
+                            enableIndeterminateGeneration == expectedGeneration,
+                        uncertain = !location.known
+                    ))) {
+                    throw IllegalStateException("hosted ownership commit could not be persisted")
+                }
+            }
             try {
                 rememberStableSharedDisplay(
                     context.getSystemService(Context.DISPLAY_SERVICE)
@@ -1733,8 +2414,22 @@ object DiLink5ClusterCast {
                 )
             } catch (_: Throwable) {
             }
-            if (target.kind == SessionKind.APP) {
+            if (target.kind == SessionKind.APP && live.projectionTransport != "hosted") {
                 applyPersistedBounds(live)
+            }
+            if (activeTarget.transport == "hosted") {
+                val owner = DiLink5ProjectionOwnership.load(
+                    activeTarget.hostedResourceGeneration,
+                ) ?: throw IllegalStateException("hosted ownership disappeared after placement")
+                if (!DiLink5ProjectionOwnership.persist(owner.copy(
+                        densityOwned = ClusterAppDensity.hasLease("di5:$expectedGeneration"),
+                        densityOwner = if (ClusterAppDensity.hasLease("di5:$expectedGeneration"))
+                            "di5:$expectedGeneration" else "",
+                        freeformOwned = ClusterFreeformWindow.hasFreeformSupportOwnership(),
+                    ))
+                ) {
+                    throw IllegalStateException("hosted post-placement ownership could not be persisted")
+                }
             }
             synchronized(stateLock) {
                 if (!isCurrent(expectedGeneration, pkg)) return
@@ -1742,21 +2437,37 @@ object DiLink5ClusterCast {
                     poweredGeneration == expectedGeneration
                 val enableIndeterminate =
                     enableIndeterminateGeneration == expectedGeneration
-                if (!writeMarker(
-                        pending = false,
-                        powered = compositorPowered,
-                        appMoved = true,
-                        enableIndeterminate = enableIndeterminate,
-                        enableBootId =
-                            if (enableIndeterminate) readCurrentBootId() else "",
-                        pkg = pkg
-                    )
-                ) {
-                    throw IllegalStateException(
-                        "active-state marker could not be persisted"
-                    )
+                fun publishActive(): Boolean {
+                    if (!writeMarker(
+                            pending = false,
+                            powered = compositorPowered,
+                            appMoved = true,
+                            enableIndeterminate = enableIndeterminate,
+                            enableBootId =
+                                if (enableIndeterminate) readCurrentBootId() else "",
+                            pkg = pkg
+                        )
+                    ) {
+                        throw IllegalStateException(
+                            "active-state marker could not be persisted"
+                        )
+                    }
+                    phase = SessionPhase.ACTIVE
+                    return true
                 }
-                phase = SessionPhase.ACTIVE
+                if (live.projectionTransport == "hosted") {
+                    if (DiLink5HostedProjectionBridge.withLiveSurfaceGeneration(
+                            live.hostedResourceGeneration,
+                            ::publishActive,
+                        ) != true
+                    ) {
+                        throw IllegalStateException(
+                            "hosted projection surface was lost before publication"
+                        )
+                    }
+                } else {
+                    publishActive()
+                }
             }
             completeStart(expectedGeneration, success = true, reason = "")
             logger.info(
@@ -1783,15 +2494,52 @@ object DiLink5ClusterCast {
         displayId: Int,
         expectedGeneration: Long
     ): LaunchVerification {
+        if (target.kind == SessionKind.APP) {
+            val densityDecision = densityAdoptionDecision(
+                ClusterFreeformWindow.packageTaskOnDisplay(target.pkg, displayId)
+            )
+            if (densityDecision == DensityAdoptionDecision.APPLY_FOR_NEW_TASK) {
+                // Restoring an old lease is itself a display mutation. Do it only after the
+                // complete task inventory proves this launch is not adopting an on-target task.
+                if (!ClusterAppDensity.restoreForDisplay(displayId) {
+                        isCurrent(expectedGeneration, target.pkg)
+                    }) {
+                    return LaunchVerification(
+                        false,
+                        "Previous cluster density could not be restored",
+                        definiteFailure = true,
+                    )
+                }
+                ClusterAppDensity.applyForLaunch(
+                    target.pkg, displayId, "di5:$expectedGeneration"
+                ) { isCurrent(expectedGeneration, target.pkg) }
+            } else if (densityDecision == DensityAdoptionDecision.DEFER_UNCERTAIN) {
+                logger.warn(
+                    "DI5 cluster cast: task inventory was incomplete; preserving display density"
+                )
+            }
+        } else {
+            if (!ClusterAppDensity.restoreForDisplay(displayId) {
+                    isCurrent(expectedGeneration, target.pkg)
+                }) {
+                return LaunchVerification(
+                    false,
+                    "Previous cluster density could not be restored",
+                    definiteFailure = true,
+                )
+            }
+        }
         if (!markAppMayMove(expectedGeneration, target.pkg)) {
             return LaunchVerification(
                 false,
                 lastFailureReason.ifEmpty {
                     "app-move recovery marker could not be persisted"
-                }
+                },
+                definiteFailure = true,
             )
         }
         var stateKnown = false
+        var launchCommandRejected = false
         var lastForeignPackage: String? = null
 
         fun remember(result: ForegroundVerification): Boolean {
@@ -1806,7 +2554,7 @@ object DiLink5ClusterCast {
             if (!isCurrent(expectedGeneration, target.pkg)) {
                 return LaunchVerification(false, "projection start superseded")
             }
-            launchTarget(target, displayId)
+            if (!launchTarget(target, displayId)) launchCommandRejected = true
             val verification = awaitStableTargetForeground(
                 target, displayId, expectedGeneration
             )
@@ -1823,6 +2571,7 @@ object DiLink5ClusterCast {
                     foregroundFailureReason(
                         target.pkg, displayId, stateKnown, lastForeignPackage
                     ),
+                    definiteFailure = true,
                     foreignPackage = lastForeignPackage
                 )
             }
@@ -1855,7 +2604,7 @@ object DiLink5ClusterCast {
             AppLauncher.forceStopPackage(target.pkg)
         ) {
             Thread.sleep(CONTAINER_SETTLE_MS)
-            launchTarget(target, displayId)
+            if (!launchTarget(target, displayId)) launchCommandRejected = true
             val finalVerification = awaitStableTargetForeground(
                 target, displayId, expectedGeneration
             )
@@ -1875,6 +2624,7 @@ object DiLink5ClusterCast {
                 stateKnown,
                 lastForeignPackage
             ),
+            definiteFailure = stateKnown || launchCommandRejected,
             foreignPackage = lastForeignPackage?.takeIf { it.isNotEmpty() }
         )
     }
@@ -2099,6 +2849,8 @@ object DiLink5ClusterCast {
             var consecutivePlacementFailures = 0
             var consecutiveForeignPolls = 0
             var foregroundTakeovers = 0
+            var placedTaskId = 0
+            val densityLossEpisodes = DirectDensityLossEpisodes(live.generation)
             var lastObservedForeground: String? = live.pkg
             var lastForeignPackage: String? = null
             while (android.os.SystemClock.elapsedRealtime() < hardDeadline) {
@@ -2152,6 +2904,12 @@ object DiLink5ClusterCast {
                             unknownTaskPolls = 0
                             placementNeedsCorrection =
                                 taskLocation.displayId != live.targetDisplayId
+                            if (!placementNeedsCorrection) {
+                                densityLossEpisodes.confirmTaskReturn(
+                                    taskLocation, live.targetDisplayId,
+                                )
+                                placedTaskId = taskLocation.taskId
+                            }
                         }
                         else -> unknownTaskPolls++
                     }
@@ -2191,6 +2949,38 @@ object DiLink5ClusterCast {
                 if (shouldCorrect) {
                     if (placementNeedsCorrection) {
                         consecutivePlacementFailures++
+                        val densityLossReason = if (live.projectionTransport == "direct" &&
+                            taskLocation != null && taskLocation.known &&
+                            ClusterFreeformWindow.packageTaskOnDisplay(
+                                live.pkg,
+                                live.targetDisplayId,
+                            ) == false
+                        ) directDensityLossReason(
+                                placedTaskId,
+                                taskLocation.taskId,
+                                taskLocation.displayId,
+                                live.targetDisplayId,
+                                taskLocation.windowingMode,
+                            ) else null
+                        val resetFailed = densityLossReason != null && withLiveTaskMutation(live, false) {
+                            ClusterAppDensity.recordPostLaunchLoss(
+                                live.pkg,
+                                "di5:${live.generation}",
+                                densityLossEpisodes.episodeForLoss(placedTaskId),
+                                densityLossReason,
+                            ) && !ClusterAppDensity.resetDirectScaleToNativeForRetry(
+                                "di5:${live.generation}",
+                            ) { isLiveSession(live) }
+                        }
+                        if (resetFailed) {
+                            failGuardedSession(
+                                live,
+                                "cluster density could not reset before native retry",
+                                foreground,
+                                target,
+                            )
+                            return@Thread
+                        }
                     }
                     val now = android.os.SystemClock.elapsedRealtime()
                     completionAt = maxOf(
@@ -2205,17 +2995,21 @@ object DiLink5ClusterCast {
                             taskLocation.taskId > 0 &&
                             taskLocation.displayId >= 0 &&
                             taskLocation.displayId != live.targetDisplayId &&
-                            ClusterFreeformWindow.moveTaskToDisplay(
-                                taskLocation.taskId, live.targetDisplayId
-                            )
+                            withLiveTaskMutation(live, false) {
+                                ClusterFreeformWindow.moveTaskToDisplay(
+                                    taskLocation.taskId, live.targetDisplayId
+                                )
+                            }
                     val focused = taskLocation != null &&
                             taskLocation.known &&
                             taskLocation.taskId > 0 &&
                             taskLocation.displayId == live.targetDisplayId &&
                             !foregroundOurs &&
-                            ClusterFreeformWindow.focusTask(
-                                taskLocation.taskId, live.targetDisplayId
-                            )
+                            withLiveTaskMutation(live, false) {
+                                ClusterFreeformWindow.focusTask(
+                                    taskLocation.taskId, live.targetDisplayId
+                                )
+                            }
                     var relaunched = false
                     val corrected: Boolean
                     if (live.kind == SessionKind.APP &&
@@ -2223,28 +3017,39 @@ object DiLink5ClusterCast {
                         consecutivePlacementFailures >=
                         TASK_GUARD_FORCE_RESTART_COUNT
                     ) {
-                        relaunched =
-                            AppLauncher.forceStopPackage(live.pkg) &&
-                                    launchTarget(
-                                        target, live.targetDisplayId
-                                    )
+                        relaunched = withLiveTaskMutation(live, false) {
+                            val stopped = AppLauncher.forceStopPackage(live.pkg)
+                            if (stopped && live.projectionTransport == "direct") {
+                                ClusterFreeformWindow.beginDirectPlacementAttempt()
+                            }
+                            stopped && launchTarget(target, live.targetDisplayId)
+                        }
                         corrected = relaunched
                         consecutivePlacementFailures = 0
                     } else {
                         if (moved || focused) {
                             corrected = true
                         } else {
-                            relaunched = launchTarget(
-                                target, live.targetDisplayId
-                            )
+                            relaunched = withLiveTaskMutation(live, false) {
+                                if (live.projectionTransport == "direct") {
+                                    ClusterFreeformWindow.beginDirectPlacementAttempt()
+                                }
+                                launchTarget(target, live.targetDisplayId)
+                            }
                             corrected = relaunched
                         }
                     }
+                    if (relaunched) {
+                        placedTaskId = 0
+                    }
                     if (corrected &&
                         live.kind == SessionKind.APP &&
+                        live.projectionTransport != "hosted" &&
                         (moved || relaunched)
                     ) {
-                        applyPersistedBounds(live)
+                        withLiveTaskMutation(live, Unit) {
+                            applyPersistedBounds(live)
+                        }
                     }
                     logger.info(
                         "DI5 task guardian: ${live.pkg} " +
@@ -2264,7 +3069,12 @@ object DiLink5ClusterCast {
                             return@Thread
                         }
                     }
-                    onTarget = corrected && isTaskForegroundOnTarget(live)
+                    onTarget = corrected && isTaskForegroundOnTarget(live) { returnedTask ->
+                        if (densityLossEpisodes.confirmTaskReturn(
+                                returnedTask, live.targetDisplayId,
+                            )
+                        ) placedTaskId = returnedTask.taskId
+                    }
                 } else if (onTarget) {
                     consecutivePlacementFailures = 0
                 }
@@ -2276,6 +3086,7 @@ object DiLink5ClusterCast {
                         "DI5 task guardian: stable ${live.pkg} on display " +
                                 "${live.targetDisplayId}"
                     )
+                    startLifecycleGuardian(live, target)
                     return@Thread
                 }
             }
@@ -2303,6 +3114,8 @@ object DiLink5ClusterCast {
                     lastForeignPackage?.takeIf { it.isNotEmpty() },
                     target
                 )
+            } else {
+                startLifecycleGuardian(live, target)
             }
         }, "DiLink5TaskGuardian-${live.generation}").apply {
             isDaemon = true
@@ -2310,14 +3123,104 @@ object DiLink5ClusterCast {
         }
     }
 
+    private fun startLifecycleGuardian(live: Session, target: LaunchTarget) {
+        val key = "${live.generation}:${live.targetDisplayId}:${live.hostedResourceGeneration}"
+        synchronized(stateLock) {
+            if (!lifecycleGuardians.add(key)) return
+        }
+        Thread({
+            var missingDisplay = 0
+            var missingTask = 0
+            try {
+                while (isLiveSession(live)) {
+                    try {
+                        Thread.sleep(LIFECYCLE_GUARD_POLL_MS)
+                    } catch (interrupted: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        return@Thread
+                    }
+                    if (!isLiveSession(live)) return@Thread
+                    if (live.projectionTransport == "hosted" &&
+                        !DiLink5HostedProjectionBridge.isSurfaceAlive(live.hostedResourceGeneration)
+                    ) {
+                        onHostedSurfaceLost(live.hostedResourceGeneration)
+                        return@Thread
+                    }
+                    val context = CameraDaemon.getAppContext()
+                    val manager = context?.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
+                    var displayDumpLoaded = false
+                    var displayDump: String? = null
+                    fun displayPresent(id: Int): Boolean? {
+                        if (id <= 0) return false
+                        manager?.getDisplay(id)?.let { return it.isValid }
+                        if (!displayDumpLoaded) {
+                            displayDump = ClusterDisplayReader.readDisplayDump()
+                            displayDumpLoaded = true
+                        }
+                        val dump = displayDump ?: return null
+                        return ClusterDisplaySnapshot.find(dump, id) != null
+                    }
+                    val displayEvidence = listOf(
+                        displayPresent(live.physicalDisplayId),
+                        displayPresent(live.targetDisplayId),
+                    )
+                    when {
+                        displayEvidence.any { it == false } -> missingDisplay++
+                        displayEvidence.all { it == true } -> missingDisplay = 0
+                        else -> Unit
+                    }
+
+                    when (ClusterFreeformWindow.packageTaskOnDisplay(
+                        live.pkg,
+                        live.targetDisplayId,
+                    )) {
+                        true -> missingTask = 0
+                        false -> missingTask++
+                        null -> Unit
+                    }
+                    if (missingDisplay >= LIFECYCLE_GUARD_FAILURES ||
+                        missingTask >= LIFECYCLE_GUARD_FAILURES
+                    ) {
+                        failGuardedSession(
+                            live,
+                            if (missingDisplay >= LIFECYCLE_GUARD_FAILURES) {
+                                "projection display disappeared after startup"
+                            } else {
+                                "projected task exited after startup"
+                            },
+                            target = target,
+                        )
+                        return@Thread
+                    }
+                }
+            } finally {
+                synchronized(stateLock) { lifecycleGuardians.remove(key) }
+            }
+        }, "DiLink5LifecycleGuardian-$key").apply {
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun <T> withLiveTaskMutation(
+        live: Session,
+        staleResult: T,
+        mutation: () -> T,
+    ): T = synchronized(taskMutationLock.lock) {
+        if (!isLiveSession(live)) staleResult else mutation()
+    }
+
     private fun isLiveSession(live: Session): Boolean =
-        session?.generation == live.generation &&
+        session === live &&
                 generation == live.generation &&
                 activePackage == live.pkg &&
                 phase == SessionPhase.ACTIVE &&
                 !stopping
 
-    private fun isTaskForegroundOnTarget(live: Session): Boolean {
+    private fun isTaskForegroundOnTarget(
+        live: Session,
+        observeTask: ((ClusterFreeformWindow.TaskLocation) -> Unit)? = null,
+    ): Boolean {
         if (ClusterCast.resumedPackageOnDisplay(live.targetDisplayId) != live.pkg) {
             return false
         }
@@ -2325,6 +3228,7 @@ object DiLink5ClusterCast {
         val location = ClusterFreeformWindow.findTaskLocation(
             live.pkg, live.targetDisplayId
         )
+        observeTask?.invoke(location)
         return (location.known &&
                 location.taskId > 0 &&
                 location.displayId == live.targetDisplayId) ||
@@ -2438,6 +3342,8 @@ object DiLink5ClusterCast {
             activeCleanup = cleanupTicket
         }
         var rehomed = false
+        var densityRestored = false
+        var hostedReleased = false
         var poweredDown = false
         var markerWritten = false
         try {
@@ -2446,9 +3352,6 @@ object DiLink5ClusterCast {
             } catch (_: Throwable) {
             }
             val live = session?.takeIf { it.generation == expectedGeneration }
-            if (live != null) {
-                session = null
-            }
             if (appMayBeMoved && failedKind == SessionKind.APP) {
                 try {
                     ClusterFreeformWindow.restoreFullscreen(
@@ -2468,6 +3371,16 @@ object DiLink5ClusterCast {
                 // incomplete; restart required" until the daemon was restarted.
                 rehomed = forceStopAndConfirmAbsent(pkg)
             }
+            if (rehomed) {
+                densityRestored = ClusterAppDensity.restoreForSessionFamily("di5:$expectedGeneration")
+                hostedReleased = completeHostedGenerationCleanup(
+                    densityRestored,
+                    ClusterAppDensity.hasLeaseFamily("di5:$expectedGeneration"),
+                ) { releaseHostedResources(expectedGeneration, live?.hostedResourceGeneration ?: 0L) }
+            } else {
+                ClusterAppDensity.deferRestoration("di5:$expectedGeneration")
+            }
+            if (live != null) session = null
             ClusterFreeformWindow.invalidateTaskCache()
             poweredDown = !compositorPowered || powerDownCompositor(
                 ownershipGeneration = expectedGeneration,
@@ -2476,7 +3389,7 @@ object DiLink5ClusterCast {
                 teardownMayStillComplete =
                     compositorTeardownIndeterminate
             )
-            markerWritten = if (rehomed && poweredDown) {
+            markerWritten = if (rehomed && densityRestored && hostedReleased && poweredDown) {
                 writeMarker(
                     pending = false,
                     powered = false,
@@ -2499,7 +3412,8 @@ object DiLink5ClusterCast {
                 )
             }
         } finally {
-            val cleanupComplete = rehomed && poweredDown && markerWritten
+            val cleanupComplete = rehomed && densityRestored && hostedReleased &&
+                poweredDown && markerWritten
             val finalReason = if (cleanupComplete) {
                 reason
             } else {
@@ -2552,7 +3466,8 @@ object DiLink5ClusterCast {
         expectedGeneration: Long,
         rehome: Boolean,
         foreground: Boolean,
-        expectedKind: SessionKind?
+        expectedKind: SessionKind?,
+        hostedSurfaceLoss: HostedSurfaceLoss? = null,
     ): Boolean {
         while (true) {
             val inFlight = synchronized(stateLock) { activeCleanup }
@@ -2567,13 +3482,20 @@ object DiLink5ClusterCast {
                 return false
             }
         }
+        val persistedHostedCleanup = DiLink5ProjectionOwnership.loadAll()
+            .any { it.transport == "hosted" }
         val orphanedCleanup = synchronized(stateLock) {
+            if (hostedSurfaceLoss != null && hostedSurfaceLossScopeLocked(hostedSurfaceLoss) == null) {
+                return true
+            }
             activePackage == null &&
                     (poweredGeneration > 0L ||
                             enableIndeterminateGeneration > 0L ||
                             teardownIndeterminateGeneration > 0L ||
                             appMovedGeneration > 0L ||
                             cleanupUncertain ||
+                            uncertainHostedResources.isNotEmpty() ||
+                            persistedHostedCleanup ||
                             session != null)
         }
         if (orphanedCleanup) {
@@ -2589,11 +3511,20 @@ object DiLink5ClusterCast {
         val startTicket: StartTicket?
         val cleanupGeneration: Long
         val cleanupTicket = CleanupTicket()
-        synchronized(stateLock) {
-            if (activeCleanup != null) return false
+        synchronized(taskMutationLock.lock) {
+            synchronized(stateLock) {
+                if (activeCleanup != null) return false
             val current = activePackage ?: return true
             if (expectedGeneration > 0L && generation != expectedGeneration) return true
             if (expectedKind != null && activeKind != expectedKind) return true
+            if (hostedSurfaceLoss != null && !claimHostedSurfaceLoss(
+                    current = { hostedSurfaceLossScopeLocked(hostedSurfaceLoss) != null },
+                    claim = {
+                        hostedSurfaceLoss.cleanupClaimed.set(true)
+                        lastFailureReason = "hosted projection surface was lost"
+                    },
+                )
+            ) return true
             pkg = current
             stoppingGeneration = generation
             stoppingKind = activeKind
@@ -2613,6 +3544,7 @@ object DiLink5ClusterCast {
             pendingStart = null
             cleanupUncertain = false
             activeCleanup = cleanupTicket
+            }
         }
         startTicket?.completion?.countDown()
         val cleanupAbandoned = AtomicBoolean(false)
@@ -2651,6 +3583,11 @@ object DiLink5ClusterCast {
                             targetDisplayId = targetDisplayId
                         )
                     }
+                }
+                // Density restoration is deliberately deferred until the task is confirmed
+                // reclaimed or absent. ACC-off keeps the lease for the later recovery owner.
+                if (!rehome) {
+                    ClusterAppDensity.deferRestoration("di5:$stoppingGeneration")
                 }
                 if (!cleanupStillOwned(
                         cleanupGeneration, cleanupAbandoned
@@ -2693,7 +3630,24 @@ object DiLink5ClusterCast {
                     // state machine in "cleanup incomplete; restart required".
                     rehomed = forceStopAndConfirmAbsent(pkg)
                 }
-                val taskCleanupSatisfied = !rehome || rehomed
+                val baseTaskCleanupSatisfied = !rehome || rehomed
+                val densityOwner = "di5:$stoppingGeneration"
+                val densityCleanupSatisfied = if (rehome && rehomed) {
+                    ClusterAppDensity.restoreForSessionFamily(densityOwner)
+                } else {
+                    !rehome
+                }
+                // Never retire a VirtualDisplay while its density restoration journal still
+                // depends on that exact display. Retain both owners for the recovery pass.
+                val hostedCleanupSatisfied = baseTaskCleanupSatisfied &&
+                    completeHostedGenerationCleanup(
+                        densityCleanupSatisfied,
+                        ClusterAppDensity.hasLeaseFamily(densityOwner),
+                    ) {
+                        releaseHostedResources(stoppingGeneration, live?.hostedResourceGeneration ?: 0L)
+                    }
+                val taskCleanupSatisfied = baseTaskCleanupSatisfied &&
+                    densityCleanupSatisfied && hostedCleanupSatisfied
                 val appStillMoved = appMayBeMoved && !rehomed
                 if (!cleanupStillOwned(
                         cleanupGeneration, cleanupAbandoned
@@ -2761,7 +3715,7 @@ object DiLink5ClusterCast {
                 pkg = if (result.appStillMoved) pkg else ""
             )
             cleaned = result.complete && markerWritten
-            deferredRehome = cleaned &&
+            deferredRehome = result.poweredDown && markerWritten &&
                     result.appStillMoved &&
                     stoppingKind == SessionKind.APP &&
                     !rehome
@@ -2835,6 +3789,113 @@ object DiLink5ClusterCast {
         return cleaned
     }
 
+    private fun clearHostedOwnershipIfPresent(resourceGeneration: Long): Boolean {
+        val recorded = DiLink5ProjectionOwnership.loadAll()
+            .any { it.generation == resourceGeneration }
+        val cleared = !recorded || DiLink5ProjectionOwnership.clear(
+            resourceGeneration,
+            true,
+            readCurrentBootId(),
+        )
+        if (cleared) synchronized(stateLock) { pendingHostedReplacements.remove(resourceGeneration) }
+        return cleared
+    }
+
+    private fun recoverUnpublishedHostedResources() {
+        val resources = synchronized(stateLock) {
+            uncertainHostedResources.values.flatMap { it }.distinct()
+        }
+        resources.forEach { resourceGeneration ->
+            val ownership = DiLink5ProjectionOwnership.loadAll()
+                .firstOrNull { it.generation == resourceGeneration }
+            if (ownership != null && !canReleaseUnpublishedHostedResource(
+                    ownership.taskMayBeMoved,
+                    ownership.densityOwned,
+                )
+            ) {
+                return@forEach
+            }
+            if (releaseHostedResource(resourceGeneration)) {
+                synchronized(stateLock) {
+                    uncertainHostedResources.entries.removeAll { entry ->
+                        entry.value.remove(resourceGeneration)
+                        entry.value.isEmpty()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun recoverPersistedHostedOwnership() {
+        val currentBoot = readCurrentBootId()
+        CameraDaemon.getAppContext()?.let(DiLink5HostedProjectionBridge::attachDaemonContext)
+        DiLink5ProjectionOwnership.loadAll().forEach { ownership ->
+            if (ownership.bootId.isNotEmpty() && currentBoot.isNotEmpty() &&
+                ownership.bootId != currentBoot) {
+                if (ownership.transport == "hosted" &&
+                    !ClusterAppDensity.restoreForOwnedHostedDisplay(ownership)
+                ) return@forEach
+                DiLink5ProjectionOwnership.clear(ownership.generation, false, currentBoot)
+                return@forEach
+            }
+            if (ownership.transport != "hosted") return@forEach
+
+            val taskRecovered = !ownership.taskMayBeMoved ||
+                (AppLauncher.isValidPackageName(ownership.packageName) &&
+                    rehomeTask(ownership.packageName, foreground = false))
+            if (!taskRecovered) return@forEach
+
+            val densityRecovered = ClusterAppDensity.restoreForOwnedHostedDisplay(ownership)
+            if (!densityRecovered) return@forEach
+
+            if (releaseHostedResource(ownership.generation)) {
+                synchronized(stateLock) {
+                    uncertainHostedResources.entries.removeAll { entry ->
+                        entry.value.remove(ownership.generation)
+                        entry.value.isEmpty()
+                    }
+                }
+            }
+        }
+        ClusterFreeformWindow.recoverFreeformSupportOwnership()
+    }
+
+    private fun releaseHostedResource(resourceGeneration: Long): Boolean {
+        val owned = DiLink5ProjectionOwnership.load(resourceGeneration)
+        if (owned != null && !ClusterAppDensity.restoreForOwnedHostedDisplay(owned)) return false
+        if (!DiLink5HostedProjectionBridge.release(resourceGeneration)) return false
+        return clearHostedOwnershipIfPresent(resourceGeneration)
+    }
+
+    /** Failed allocations also own resources even though there is no published Session. */
+    private fun releaseHostedResources(
+        sessionGeneration: Long,
+        currentResourceGeneration: Long = 0L,
+    ): Boolean {
+        val registered = synchronized(stateLock) {
+            uncertainHostedResources[sessionGeneration]?.toList().orEmpty()
+        }
+        val resources = (registered + listOf(sessionGeneration, currentResourceGeneration))
+            .filter { it > 0L }.distinct().filter { resourceGeneration ->
+                resourceGeneration in registered ||
+                    resourceGeneration == currentResourceGeneration ||
+                    DiLink5ProjectionOwnership.load(resourceGeneration)?.transport == "hosted"
+            }
+        return finishHostedResourceCleanup(
+            resources,
+            release = ::releaseHostedResource,
+            clearRegistration = { resourceGeneration ->
+                synchronized(stateLock) {
+                    pendingHostedReplacements.remove(resourceGeneration)
+                    uncertainHostedResources[sessionGeneration]?.let { pending ->
+                        pending.remove(resourceGeneration)
+                        if (pending.isEmpty()) uncertainHostedResources.remove(sessionGeneration)
+                    }
+                }
+            },
+        )
+    }
+
     private fun cleanupStillOwned(
         cleanupGeneration: Long,
         abandoned: AtomicBoolean
@@ -2883,7 +3944,13 @@ object DiLink5ClusterCast {
                     }
                     ClusterFreeformWindow.invalidateTaskCache()
 
-                    val markerCleared = recovered && writeMarker(
+                    val densityRecovered = recovered &&
+                        ClusterAppDensity.restoreForSessionFamily("di5:$stoppedGeneration")
+                    val hostedRecovered = completeHostedGenerationCleanup(
+                        densityRecovered,
+                        ClusterAppDensity.hasLeaseFamily("di5:$stoppedGeneration"),
+                    ) { releaseHostedResources(stoppedGeneration) }
+                    val markerCleared = recovered && densityRecovered && hostedRecovered && writeMarker(
                         pending = false,
                         powered = false,
                         appMoved = false,
@@ -2897,7 +3964,7 @@ object DiLink5ClusterCast {
                         ) {
                             appMovedGeneration = 0L
                         }
-                        completed = recovered &&
+                        completed = recovered && densityRecovered && hostedRecovered &&
                                 markerCleared &&
                                 poweredGeneration == 0L
                         if (activePackage == null &&
@@ -2913,6 +3980,8 @@ object DiLink5ClusterCast {
                                 completed -> ""
                                 !recovered ->
                                     "projected task could not be recovered from OEM display"
+                                !densityRecovered || !hostedRecovered ->
+                                    "hosted projection restoration is pending confirmed ACC-on and display cleanup"
                                 !markerCleared ->
                                     "projected task recovered but its marker could not be cleared"
                                 else ->
@@ -3069,6 +4138,50 @@ object DiLink5ClusterCast {
             }
             else -> Unit
         }
+        val preferredName = if (requireShared) readSharedDisplayPreference() else null
+        val reclaimed = if (requireShared) recentlyReclaimedDisplayNames() else emptySet()
+        if (requireShared && (preferredName != null || reclaimed.isNotEmpty())) {
+            logger.info(
+                "DI5 cluster cast: shared display steering preferred=" +
+                    (preferredName ?: "<none>") + " reclaimed=" +
+                    reclaimed.joinToString().ifEmpty { "<none>" }
+            )
+        }
+        val preEnableCandidate = if (requireShared) {
+            var selected: ProjectionTarget? = null
+            for (excluded in listOf(reclaimed, emptySet())) {
+                selected = resolveDaemonVisibleProjectionDisplay(
+                    manager, preferFull, true, preferredName, excluded
+                ) ?: resolveAuthoritativeProjectionDisplay(
+                    manager, preferFull, true, preferredName, excluded
+                )
+                if (selected != null || excluded.isEmpty()) break
+            }
+            selected
+        } else {
+            resolveDaemonVisibleProjectionDisplay(
+                manager, preferFull, false
+            ) ?: resolveAuthoritativeProjectionDisplay(manager, preferFull, false)
+        }
+        if (!canDispatchDiLink5ContainerEnable(preEnableCandidate?.displayId ?: -1)) {
+            throw IllegalStateException(
+                "DI5 projection target was not resolved before container enable"
+            )
+        }
+        val preEnableTarget = requireNotNull(preEnableCandidate)
+        val appVisible = DiLink5HostedProjectionBridge.isAppDisplayVisible(
+            context,
+            preEnableTarget.displayId,
+        )
+        if (!appVisible) {
+            logger.info(
+                "DI5 cluster cast: using direct transport for shell-only target; " +
+                    "deferring compositor enable until verified placement"
+            )
+            return configureProjectionTarget(
+                context, preEnableTarget, expectedGeneration, appDisplayVisible = false,
+            ).copy(deferCompositorEnable = true)
+        }
         val commandResult = synchronized(stateLock) {
             if (!isCurrent(expectedGeneration, pkg)) {
                 throw InterruptedException("projection start superseded")
@@ -3108,42 +4221,12 @@ object DiLink5ClusterCast {
         }
 
         if (requireShared) {
-            // Steer around a shared surface an OEM cluster app reclaimed within
-            // the last RECLAIMED_DISPLAY_MEMORY_MS and honour the learned
-            // preference; if every shared surface is excluded, fall back to
-            // the unconstrained ranking so a cast is still attempted.
-            val preferredName = readSharedDisplayPreference()
-            val reclaimed = recentlyReclaimedDisplayNames()
-            if (preferredName != null || reclaimed.isNotEmpty()) {
-                logger.info(
-                    "DI5 cluster cast: shared display steering preferred=" +
-                            (preferredName ?: "<none>") +
-                            " reclaimed=" + reclaimed.joinToString().ifEmpty { "<none>" }
-                )
-            }
-            for (excluded in listOf(reclaimed, emptySet())) {
-                resolveVisibleProjectionDisplay(
-                    manager, preferFull, true, preferredName, excluded
-                )?.let {
-                    logger.info(
-                        "DI5 cluster cast: using live OEM shared projection " +
-                                "display ${it.displayId} (${it.name}); " +
-                                "sendInfo16=$commandResult"
-                    )
-                    return it
-                }
-                resolveAuthoritativeProjectionDisplay(
-                    manager, preferFull, true, preferredName, excluded
-                )?.let {
-                    logger.info(
-                        "DI5 cluster cast: using authoritative OEM shared " +
-                                "projection display ${it.displayId} (${it.name}); " +
-                                "sendInfo16=$commandResult"
-                    )
-                    return it
-                }
-                if (excluded.isEmpty()) break
-            }
+            logger.info(
+                "DI5 cluster cast: using preflight-selected OEM shared projection " +
+                    "display ${preEnableTarget.displayId} (${preEnableTarget.name}); " +
+                    "sendInfo16=$commandResult"
+            )
+            return configureProjectionTarget(context, preEnableTarget, expectedGeneration)
         }
 
         if (commandResult ==
@@ -3179,54 +4262,217 @@ object DiLink5ClusterCast {
             )
         }
 
-        val started = android.os.SystemClock.elapsedRealtime()
-        val deadline = started + PROJECTION_DISPLAY_TIMEOUT_MS
-        var authoritativeAttempts = 0
-        var nextAuthoritativeAttempt = started
-        while (android.os.SystemClock.elapsedRealtime() < deadline &&
-            isCurrent(expectedGeneration, pkg)
-        ) {
-            resolveVisibleProjectionDisplay(
-                manager, preferFull, requireShared
-            )?.let { return it }
+        return configureProjectionTarget(context, preEnableTarget, expectedGeneration)
+    }
 
-            val now = android.os.SystemClock.elapsedRealtime()
-            if (authoritativeAttempts < 3 && now >= nextAuthoritativeAttempt) {
-                authoritativeAttempts++
-                resolveAuthoritativeProjectionDisplay(
-                    manager, preferFull, requireShared
-                )?.let {
-                    logger.info(
-                        "DI5 cluster cast: resolved OEM projection display " +
-                                "${it.displayId} via dumpsys (${it.name})"
-                    )
-                    return it
+    private fun isAutoProjectionTransport(): Boolean = try {
+        DiLink5ProjectionConfig.from(
+            UnifiedConfigManager.loadConfig().optJSONObject("projection")
+        ).transport == DiLink5ProjectionConfig.Transport.AUTO
+    } catch (_: Throwable) {
+        true
+    }
+
+    private fun configureProjectionTarget(
+        context: Context,
+        direct: ProjectionTarget,
+        expectedGeneration: Long,
+        appDisplayVisible: Boolean = true,
+    ): ProjectionTarget {
+        val config = try {
+            DiLink5ProjectionConfig.from(
+                UnifiedConfigManager.loadConfig().optJSONObject("projection")
+            )
+        } catch (_: Throwable) {
+            DiLink5ProjectionConfig.from(null)
+        }
+        if (config.initialTransport(appDisplayVisible) == DiLink5ProjectionConfig.Transport.DIRECT) {
+            return direct
+        }
+        if (!ClusterFreeformWindow.prepareHostedFreeformState()) {
+            throw IllegalStateException("hosted projection freeform restoration was not confirmed")
+        }
+        return configureHostedProjectionTarget(context, direct, expectedGeneration)
+            ?: throw IllegalStateException("hosted projection resources unavailable")
+    }
+
+    private fun configureHostedProjectionTarget(
+        context: Context,
+        direct: ProjectionTarget,
+        expectedGeneration: Long
+    ): ProjectionTarget? {
+        val config = try {
+            DiLink5ProjectionConfig.from(
+                UnifiedConfigManager.loadConfig().optJSONObject("projection")
+            )
+        } catch (_: Throwable) {
+            DiLink5ProjectionConfig.from(null)
+        }
+        val appDisplay = DiLink5HostedProjectionBridge.probeAppDisplay(
+            context,
+            direct.displayId,
+        ) ?: return null
+        val nativeDensity = ClusterAppDensity.nativeDensityForDisplay(direct.displayId)
+            ?: return null
+        val geometry = HostedProjectionGeometry.calculate(
+            appDisplay.width,
+            appDisplay.height,
+            nativeDensity,
+            config,
+        ) ?: return null
+        val pendingOwner = projectionOwnership(
+            generation = expectedGeneration,
+            target = direct,
+            contentDisplayId = direct.displayId,
+            overlayOwned = true,
+            virtualDisplayOwned = true,
+            taskMayBeMoved = false,
+            uncertain = true
+        )
+        if (!DiLink5ProjectionOwnership.persist(pendingOwner)) return null
+        val allocation = startHostedAllocation(
+            register = {
+                synchronized(stateLock) {
+                    if (!isCurrent(expectedGeneration, activePackage.orEmpty())) false else {
+                        uncertainHostedResources.getOrPut(expectedGeneration) { LinkedHashSet() }
+                            .add(expectedGeneration)
+                        true
+                    }
                 }
-                nextAuthoritativeAttempt = when (authoritativeAttempts) {
-                    1 -> started + 2_500L
-                    else -> started + 5_500L
+            },
+            start = {
+                DiLink5HostedProjectionBridge.start(
+                    context, expectedGeneration, direct.displayId, direct.name, geometry,
+                )
+            },
+            current = { isCurrent(expectedGeneration, activePackage.orEmpty()) },
+        )
+        if (!allocation.registered) {
+            DiLink5ProjectionOwnership.clear(expectedGeneration, true, readCurrentBootId())
+            return null
+        }
+        if (!allocation.publicationAllowed) {
+            val late = allocation.value
+            if (late != null) {
+                DiLink5ProjectionOwnership.persist(pendingOwner.copy(
+                    contentDisplayId = late.contentDisplayId,
+                    virtualDisplayName = late.virtualDisplayName,
+                ))
+            }
+            val released = DiLink5HostedProjectionBridge.release(expectedGeneration) &&
+                clearHostedOwnershipIfPresent(expectedGeneration)
+            if (released) {
+                synchronized(stateLock) {
+                    uncertainHostedResources[expectedGeneration]?.let { resources ->
+                        resources.remove(expectedGeneration)
+                        if (resources.isEmpty()) uncertainHostedResources.remove(expectedGeneration)
+                    }
                 }
             }
-            Thread.sleep(PROJECTION_DISPLAY_POLL_MS)
+            return null
         }
+        val hosted = allocation.value?.takeIf {
+            DiLink5HostedProjectionBridge.isSurfaceAlive(expectedGeneration)
+        } ?: run {
+            val released = DiLink5HostedProjectionBridge.release(expectedGeneration) &&
+                DiLink5ProjectionOwnership.clear(expectedGeneration, true, readCurrentBootId())
+            if (released) {
+                synchronized(stateLock) {
+                    uncertainHostedResources[expectedGeneration]?.let { resources ->
+                        resources.remove(expectedGeneration)
+                        if (resources.isEmpty()) uncertainHostedResources.remove(expectedGeneration)
+                    }
+                }
+            }
+            return null
+        }
+        val allocatedOwner = pendingOwner.copy(
+            contentDisplayId = hosted.contentDisplayId,
+            virtualDisplayName = hosted.virtualDisplayName
+        )
+        if (!DiLink5ProjectionOwnership.persist(allocatedOwner)) {
+            val released = DiLink5HostedProjectionBridge.release(expectedGeneration) &&
+                clearHostedOwnershipIfPresent(expectedGeneration)
+            if (released) {
+                synchronized(stateLock) {
+                    uncertainHostedResources[expectedGeneration]?.let { resources ->
+                        resources.remove(expectedGeneration)
+                        if (resources.isEmpty()) uncertainHostedResources.remove(expectedGeneration)
+                    }
+                }
+            }
+            return null
+        }
+        logger.info(
+            "DI5 cluster cast: hosted panel=${direct.displayId} " +
+                    "content=${hosted.contentDisplayId}"
+        )
+        return direct.copy(
+            width = appDisplay.width,
+            height = appDisplay.height,
+            contentDisplayId = hosted.contentDisplayId,
+            transport = "hosted",
+            hostedResourceGeneration = expectedGeneration,
+            deferCompositorEnable = false,
+            hostedGeometry = geometry,
+        )
+    }
 
-        val inventory = manager.displays.joinToString {
-            "${it.displayId}:${it.name}"
-        }
-        logger.warn(
-            "DI5 cluster cast: projection display inventory after enable: $inventory"
+    private fun projectionOwnership(
+        generation: Long,
+        target: ProjectionTarget,
+        contentDisplayId: Int,
+        overlayOwned: Boolean,
+        virtualDisplayOwned: Boolean,
+        taskMayBeMoved: Boolean,
+        uncertain: Boolean,
+        taskId: Int = -1
+    ): DiLink5ProjectionOwnership {
+        val display = (CameraDaemon.getAppContext()
+            ?.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)
+            ?.getDisplay(target.displayId)
+        return DiLink5ProjectionOwnership(
+            generation = generation,
+            bootId = readCurrentBootId(),
+            transport = if (overlayOwned) "hosted" else "direct",
+            packageName = activePackage.orEmpty(),
+            physicalDisplayId = target.displayId,
+            physicalDisplayName = target.name,
+            physicalUniqueId = try {
+                display?.let {
+                    Display::class.java.getDeclaredMethod("getUniqueId").invoke(it) as? String
+                }.orEmpty()
+            } catch (_: Throwable) { "" },
+            contentDisplayId = contentDisplayId,
+            virtualDisplayName = if (overlayOwned) "OverDriveCluster-$generation" else "",
+            taskId = taskId,
+            overlayOwned = overlayOwned,
+            virtualDisplayOwned = virtualDisplayOwned,
+            taskMayBeMoved = taskMayBeMoved,
+            densityOwned = false,
+            freeformOwned = false,
+            compositorOwned = poweredGeneration == generation || enableIndeterminateGeneration == generation,
+            uncertain = uncertain
         )
-        if (requireShared) {
-            throw IllegalStateException(
-                "OEM shared projection display unavailable on trinket " +
-                        "(sendInfo16=$commandResult); refusing the non-physical " +
-                        "$DI5_DEBUG_DISPLAY debug target"
+    }
+
+    private fun enableProjectionCompositorForCurrentSession(
+        expectedGeneration: Long,
+        pkg: String
+    ): Boolean = synchronized(stateLock) {
+        if (!isCurrent(expectedGeneration, pkg)) return@synchronized false
+        markCompositorEnableInFlight(expectedGeneration, pkg)
+        val result = ClusterProjectionController.sendDiLink5ContainerInfoResult(16)
+        if (shouldTrackDiLink5CompositorOwnership(result)) {
+            markCompositorPowered(
+                expectedGeneration,
+                pkg,
+                result == ClusterProjectionController.DiLink5CommandResult.INDETERMINATE
             )
+        } else {
+            clearCompositorEnableInFlight(expectedGeneration, pkg)
         }
-        throw IllegalStateException(
-            "DI5 OEM projection display unavailable " +
-                    "(sendInfo16=$commandResult)"
-        )
+        result == ClusterProjectionController.DiLink5CommandResult.ACCEPTED
     }
 
     /** Caller holds [stateLock]. */
@@ -3238,7 +4484,7 @@ object DiLink5ClusterCast {
         if (!writeMarker(
                 pending = true,
                 powered = false,
-                appMoved = false,
+                appMoved = appMovedGeneration == expectedGeneration,
                 enableIndeterminate = true,
                 enableBootId = bootId,
                 pkg = pkg
@@ -3259,7 +4505,7 @@ object DiLink5ClusterCast {
         if (!writeMarker(
                 pending = true,
                 powered = false,
-                appMoved = false,
+                appMoved = appMovedGeneration == expectedGeneration,
                 enableIndeterminate = false,
                 enableBootId = "",
                 pkg = pkg
@@ -3286,7 +4532,7 @@ object DiLink5ClusterCast {
         if (!writeMarker(
                 pending = true,
                 powered = true,
-                appMoved = false,
+                appMoved = appMovedGeneration == expectedGeneration,
                 enableIndeterminate = enableIndeterminate,
                 enableBootId =
                     if (enableIndeterminate) readCurrentBootId() else "",
@@ -3321,15 +4567,12 @@ object DiLink5ClusterCast {
 
     private fun readPreferFullCluster(): Boolean =
         try {
-            UnifiedConfigManager.loadConfig()
-                .optJSONObject("projection")
-                ?.optBoolean(PREFER_FULL_KEY, true)
-                ?: true
+            DiLink5ProjectionConfig.from(
+                UnifiedConfigManager.loadConfig().optJSONObject("projection")
+            ).target == DiLink5ProjectionConfig.Target.FULL
         } catch (_: Throwable) {
-            // Match the configured/default behavior on transient config-read
-            // failures. Falling back to the standard display here could route
-            // a cast to the wrong physical cluster surface.
-            true
+            // Fresh and unreadable configuration uses the standard target.
+            false
         }
 
     private fun readSharedDisplayPreference(): String? =
@@ -3406,14 +4649,16 @@ object DiLink5ClusterCast {
         excludeName: String
     ): ProjectionTarget? {
         val excluded = recentlyReclaimedDisplayNames() + excludeName.lowercase(Locale.US)
-        return resolveVisibleProjectionDisplay(
+        return resolveDaemonVisibleProjectionDisplay(
             manager, preferFull, true, null, excluded
         ) ?: resolveAuthoritativeProjectionDisplay(
             manager, preferFull, true, null, excluded
         )
     }
 
-    private fun resolveVisibleProjectionDisplay(
+    /** DisplayManager visibility in the daemon/shell process; app-overlay visibility is
+     * independently proved by DiLink5HostedProjectionService before hosted allocation. */
+    private fun resolveDaemonVisibleProjectionDisplay(
         manager: DisplayManager,
         preferFull: Boolean,
         requireShared: Boolean,
@@ -3925,10 +5170,183 @@ object DiLink5ClusterCast {
     private fun isCurrent(expectedGeneration: Long, pkg: String): Boolean =
         !stopping && generation == expectedGeneration && activePackage == pkg
 
-    private fun nextGenerationLocked(): Long {
-        val next = generation + 1L
-        return if (next > 0L) next else 1L
+    private fun prepareHostedOwnershipForAdmission(): Boolean {
+        synchronized(stateLock) {
+            if (activePackage != null) return true
+            if (activeCleanup != null || stopping ||
+                phase == SessionPhase.STOPPING || phase == SessionPhase.RECOVERING
+            ) {
+                lastFailureReason = "previous hosted projection cleanup is still in progress"
+                return false
+            }
+        }
+        // Reattempt retained failures on every inactive admission, not only after daemon restart.
+        recoverUnpublishedHostedResources()
+        recoverPersistedHostedOwnership()
+        val currentBoot = readCurrentBootId()
+        val unresolved = DiLink5ProjectionOwnership.loadAll().filter { ownership ->
+            ownership.bootId.isEmpty() || currentBoot.isEmpty() || ownership.bootId == currentBoot
+        }
+        if (unresolved.isNotEmpty()) {
+            lastFailureReason = "previous hosted projection ownership is unresolved"
+            logger.warn("DI5 cluster cast: refusing admission with ${unresolved.size} unresolved hosted owner(s)")
+            return false
+        }
+        val durableFloor = DiLink5ProjectionOwnership.loadAll()
+            .maxOfOrNull { it.generation } ?: 0L
+        synchronized(stateLock) {
+            generation = maxOf(generation, durableFloor)
+            hostedResourceSequence.set(maxOf(hostedResourceSequence.get(), generation))
+        }
+        return true
     }
+
+    private fun nextHostedResourceGeneration(): Long {
+        val durableFloor = DiLink5ProjectionOwnership.loadAll()
+            .maxOfOrNull { it.generation } ?: 0L
+        while (true) {
+            val observed = hostedResourceSequence.get()
+            val floor = maxOf(observed, generation, durableFloor)
+            val next = nextPositiveGeneration(floor)
+            if (hostedResourceSequence.compareAndSet(observed, next)) return next
+        }
+    }
+
+    private fun nextGenerationLocked(): Long {
+        val floor = maxOf(generation, hostedResourceSequence.get())
+        return nextPositiveGeneration(floor)
+    }
+}
+
+internal fun nextPositiveGeneration(floor: Long): Long =
+    if (floor in 0 until Long.MAX_VALUE) floor + 1L else 1L
+
+internal fun diLink5ResizeOwnershipMatches(
+    expectedPackage: String?,
+    expectedGeneration: Long,
+    actualPackage: String,
+    actualGeneration: Long,
+): Boolean = (expectedPackage.isNullOrEmpty() || expectedPackage == actualPackage) &&
+    (expectedGeneration == 0L || expectedGeneration == actualGeneration) &&
+    expectedGeneration >= 0L && actualGeneration > 0L
+
+internal fun completeHostedGenerationCleanup(
+    densityRestored: Boolean,
+    densityLeasePending: Boolean,
+    releaseResources: () -> Boolean,
+): Boolean = (densityRestored || !densityLeasePending) &&
+    !densityLeasePending && releaseResources()
+
+internal fun finishHostedResourceCleanup(
+    resources: Iterable<Long>,
+    release: (Long) -> Boolean,
+    clearRegistration: (Long) -> Unit,
+): Boolean {
+    var complete = true
+    resources.distinct().forEach {
+        if (release(it)) clearRegistration(it) else complete = false
+    }
+    return complete
+}
+
+internal data class HostedAllocationStart<T>(
+    val registered: Boolean,
+    val value: T?,
+    val publicationAllowed: Boolean = registered,
+)
+
+internal fun <T> startHostedAllocation(
+    register: () -> Boolean,
+    start: () -> T?,
+    current: () -> Boolean = { true },
+): HostedAllocationStart<T> {
+    if (!register()) return HostedAllocationStart(false, null, false)
+    val value = start()
+    return HostedAllocationStart(true, value, value == null || current())
+}
+
+internal class TaskMutationAuthority {
+    val lock = Any()
+
+    inline fun <T> mutate(block: () -> T): T = synchronized(lock, block)
+}
+
+internal fun canReleaseUnpublishedHostedResource(
+    taskMayBeMoved: Boolean,
+    densityOwned: Boolean,
+): Boolean = !taskMayBeMoved && !densityOwned
+
+internal fun reconcileLateHostedAllocation(
+    republish: () -> Boolean,
+    release: () -> Boolean,
+    updateRegistration: (Boolean) -> Unit,
+): Boolean {
+    val persisted = republish()
+    val released = release()
+    updateRegistration(released)
+    return persisted && released
+}
+
+internal fun runHostedMoveDispatch(
+    current: () -> Boolean,
+    register: () -> Unit,
+    dispatch: Runnable,
+): Boolean {
+    if (!current()) return false
+    register()
+    dispatch.run()
+    return true
+}
+
+internal fun completeHostedReplacementCleanup(
+    restoreDensity: () -> Boolean,
+    releaseResources: () -> Boolean,
+    clearRegistration: () -> Unit,
+): Boolean {
+    if (!restoreDensity()) return false
+    if (!releaseResources()) return false
+    clearRegistration()
+    return true
+}
+
+internal fun completeHostedSurfaceLoss(
+    isMap: Boolean,
+    stop: () -> Boolean,
+    onMapFailure: () -> Unit,
+): Boolean {
+    val cleanupComplete = stop()
+    if (isMap) onMapFailure()
+    return cleanupComplete
+}
+
+internal fun pendingHostedSurfaceLossNeedsCleanup(
+    preparing: Boolean,
+    active: Boolean,
+    pendingReplacement: Boolean,
+    taskMayBeMoved: Boolean,
+    packageMatches: Boolean,
+): Boolean = preparing || (active && pendingReplacement && taskMayBeMoved && packageMatches)
+
+internal fun hostedSurfaceLossNeedsCleanup(
+    resourceGeneration: Long,
+    publishedResourceGeneration: Long,
+    registeredForCleanup: Boolean,
+    preparing: Boolean,
+    active: Boolean,
+    pendingReplacement: Boolean,
+    taskMayBeMoved: Boolean,
+    packageMatches: Boolean,
+): Boolean = resourceGeneration > 0L &&
+    (resourceGeneration == publishedResourceGeneration ||
+        (registeredForCleanup && pendingHostedSurfaceLossNeedsCleanup(
+            preparing, active, pendingReplacement, taskMayBeMoved, packageMatches,
+        )))
+
+/** Called under the same task/state locks as publication; a queued loss is rechecked here. */
+internal fun claimHostedSurfaceLoss(current: () -> Boolean, claim: () -> Unit): Boolean {
+    if (!current()) return false
+    claim()
+    return true
 }
 
 internal fun executeDiLink5MarkedTeardownCommand(
@@ -4134,7 +5552,12 @@ private fun selectDefaultDiLink5ProjectionDisplayName(
     // exclusion set, when an OEM cluster app keeps reclaiming `_0` (DiLink 5.0
     // Atto 3: com.byd.sr re-fronts on _0 every few seconds while _1 carries the
     // container service's 1920x480 app-projection override).
-    listOf(DI5_SHARED_DISPLAY_FULL, DI5_SHARED_DISPLAY_STANDARD).forEach { expected ->
+    val preferredShared = if (preferFull) {
+        listOf(DI5_SHARED_DISPLAY_FULL, DI5_SHARED_DISPLAY_STANDARD)
+    } else {
+        listOf(DI5_SHARED_DISPLAY_STANDARD, DI5_SHARED_DISPLAY_FULL)
+    }
+    preferredShared.forEach { expected ->
         names.firstOrNull { it.equals(expected, ignoreCase = true) }?.let { return it }
     }
 
@@ -4149,8 +5572,10 @@ private fun selectDefaultDiLink5ProjectionDisplayName(
             compareBy<String>(
                 {
                     when {
-                        it.endsWith("_0", ignoreCase = true) -> 0
-                        it.endsWith("_1", ignoreCase = true) -> 1
+                        preferFull && it.endsWith("_0", ignoreCase = true) -> 0
+                        !preferFull && it.endsWith("_1", ignoreCase = true) -> 0
+                        it.endsWith("_0", ignoreCase = true) ||
+                            it.endsWith("_1", ignoreCase = true) -> 1
                         else -> 2
                     }
                 }
@@ -4325,6 +5750,16 @@ internal fun readDiLink5SystemPropertyViaShell(key: String): String? {
     }
 }
 
+internal fun canDispatchDiLink5ContainerEnable(resolvedDisplayId: Int): Boolean =
+    resolvedDisplayId > Display.DEFAULT_DISPLAY
+
+internal fun shouldFallbackToHostedAfterDirectFailure(
+    transport: String,
+    automatic: Boolean,
+    succeeded: Boolean,
+    definiteFailure: Boolean,
+): Boolean = transport == "direct" && automatic && !succeeded && definiteFailure
+
 private fun projectionIdentityValue(value: String?): String {
     val compact = value
         ?.replace(Regex("""\s+"""), " ")
@@ -4446,4 +5881,105 @@ internal fun clampDiLink5ProjectionBounds(
         clampedLeft + requestedWidth,
         clampedTop + requestedHeight
     )
+}
+
+internal enum class DensityAdoptionDecision {
+    PRESERVE_ADOPTED,
+    APPLY_FOR_NEW_TASK,
+    DEFER_UNCERTAIN,
+}
+
+internal fun densityAdoptionDecision(taskOnTarget: Boolean?): DensityAdoptionDecision = when (taskOnTarget) {
+    true -> DensityAdoptionDecision.PRESERVE_ADOPTED
+    false -> DensityAdoptionDecision.APPLY_FOR_NEW_TASK
+    null -> DensityAdoptionDecision.DEFER_UNCERTAIN
+}
+
+internal enum class HostedResizeMoveDisposition {
+    RELEASE_UNMOVED,
+    RETAIN_UNCERTAIN,
+    CONTINUE_VERIFICATION,
+}
+
+internal fun hostedResizeMoveDisposition(
+    result: ClusterFreeformWindow.MoveTaskResult,
+    sessionCurrent: Boolean,
+): HostedResizeMoveDisposition = when {
+    !sessionCurrent -> HostedResizeMoveDisposition.RETAIN_UNCERTAIN
+    result == ClusterFreeformWindow.MoveTaskResult.NOT_DISPATCHED ->
+        HostedResizeMoveDisposition.RELEASE_UNMOVED
+    result == ClusterFreeformWindow.MoveTaskResult.DISPATCHED_UNCONFIRMED ->
+        HostedResizeMoveDisposition.RETAIN_UNCERTAIN
+    else -> HostedResizeMoveDisposition.CONTINUE_VERIFICATION
+}
+
+internal fun densityLossEpisode(
+    generation: Long,
+    episode: Long,
+    placedTaskId: Int,
+): String = "$generation:$episode:$placedTaskId"
+
+/** One unresolved loss keeps its token until a known task returns to the exact target. */
+internal class DirectDensityLossEpisodes(private val generation: Long) {
+    private var episode = 0L
+    private var unresolvedLoss: String? = null
+
+    fun episodeForLoss(placedTaskId: Int): String =
+        unresolvedLoss ?: densityLossEpisode(generation, episode, placedTaskId).also {
+            unresolvedLoss = it
+        }
+
+    fun confirmTaskReturn(
+        task: ClusterFreeformWindow.TaskLocation,
+        targetDisplayId: Int,
+    ): Boolean {
+        if (!task.known || task.taskId <= 0 || task.displayId != targetDisplayId) return false
+        if (unresolvedLoss != null) {
+            unresolvedLoss = null
+            episode++
+        }
+        return true
+    }
+}
+
+/** A living freeform task can move without a density loss; a fullscreen reset remains a loss. */
+internal fun isDirectDensityLoss(
+    placedTaskId: Int,
+    observedTaskId: Int,
+    observedDisplayId: Int,
+    targetDisplayId: Int,
+    observedWindowingMode: Int?,
+): Boolean = directDensityLossReason(
+    placedTaskId, observedTaskId, observedDisplayId, targetDisplayId, observedWindowingMode,
+) != null
+
+internal fun directDensityLossReason(
+    placedTaskId: Int,
+    observedTaskId: Int,
+    observedDisplayId: Int,
+    targetDisplayId: Int,
+    observedWindowingMode: Int?,
+): DirectDensityLossReason? {
+    if (observedTaskId <= 0) return DirectDensityLossReason.MISSING_TASK
+    if (observedDisplayId == targetDisplayId) return null
+    val movedLivingFreeformTask = observedWindowingMode == 5 &&
+        (placedTaskId <= 0 || observedTaskId == placedTaskId)
+    if (movedLivingFreeformTask) return null
+    return if (placedTaskId > 0 && observedTaskId != placedTaskId)
+        DirectDensityLossReason.RECREATED_TASK else DirectDensityLossReason.TASK_MODE_RESET
+}
+
+/**
+ * Preserve a shell-only enable obligation across target replacement. An app-visible replacement
+ * enables before placement; a shell-only replacement keeps that enable deferred until verification.
+ */
+internal fun prepareDiLink5AlternativeCompositor(
+    enableDeferred: Boolean,
+    appDisplayVisible: Boolean,
+    enableResolvedTarget: () -> Boolean,
+): Boolean {
+    if (!enableDeferred) return false
+    if (!appDisplayVisible) return true
+    check(enableResolvedTarget()) { "compositor enable failed before alternative direct placement" }
+    return false
 }

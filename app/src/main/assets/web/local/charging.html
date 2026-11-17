@@ -10,8 +10,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#007A62">
-    <script src="../shared/theme.js?v=11"></script>
-    <script src="../shared/app-shell.js?v=19"></script>
+    <script src="../shared/theme.js?v=12"></script>
+    <script src="../shared/app-shell.js?v=23"></script>
     <!--
       Bottom-tab manifest for Charging. Tabs apply to the LIST VIEW only;
       the DETAIL VIEW (#chargingDetail) is a sequential drill-in and ignores
@@ -27,7 +27,7 @@
             { id: 'settings', label: 'Settings', i18n: 'charge.tab_settings', svg: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>' }
         ];
     </script>
-    <script src="../shared/app-tabs.js?v=3"></script>
+    <script src="../shared/app-tabs.js?v=4"></script>
     <link rel="stylesheet" href="../shared/styles.css?v=38">
     <link rel="stylesheet" href="../shared/revamp.css?v=2">
     <style>
@@ -123,25 +123,8 @@
         .charge-period-seg::-webkit-scrollbar { display: none; }
         .charge-period-seg > * + * { margin-left: 2px; }
         [dir="rtl"] .charge-period-seg > * + * { margin-left: 0; margin-right: 2px; }
-        .charge-location-filter-row {
-            display: -webkit-flex; display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            margin: 0 -8px 4px 0;
-        }
-        .charge-location-filter-row > * { margin: 0 8px 8px 0; }
-        [dir="rtl"] .charge-location-filter-row { margin: 0 0 4px -8px; }
-        [dir="rtl"] .charge-location-filter-row > * { margin: 0 0 8px 8px; }
-        .charge-location-chip svg { color: var(--primary); }
-        .charge-location-hint {
-            margin: 0 0 8px;
-            color: var(--on-surface-variant);
-            font-size: var(--fs-label);
-            line-height: 1.35;
-        }
         .ch-summary-actions { margin: 0 0 12px; }
         .ch-copy-summary-btn { min-height: 44px; background: var(--well); color: var(--on-surface); }
-        .ch-copy-summary-btn.active { background: var(--secondary-container); color: var(--on-secondary-container); }
         #chargeCustomTab { min-height: 44px; padding: 0 16px 0 12px; background: var(--well); color: var(--on-surface); }
         #chargeCustomTab svg { width: 18px; height: 18px; flex: 0 0 auto; color: var(--primary); }
         #chargeCustomTab svg + span { margin-left: 8px; }
@@ -153,12 +136,11 @@
             #chargeCustomTab:hover { background: var(--well-2); }
             #chargeCustomTab.active:hover { background: var(--secondary-container); }
         }
-        /* Sticky on wrappers (full scroll range); transparent shell so only chips
-           show. Custom range row lives outside #sessionFilters in markup. */
+        /* Sessions period bar (7d / 30d / all / custom): pinned under the page header and
+           sticky section tabs, compact and opaque. The custom range row sits outside it. */
         body.charging-page {
             --ch-sticky-top: calc(var(--page-header-h, 64px) + var(--tabs-h, 48px) + 8px);
             --ch-sticky-top-tabs: calc(var(--tabs-h, 48px) + 8px);
-            --ch-sticky-detail-top: calc(var(--tabs-h, 48px) + 12px);
         }
         #sessionFilters {
             position: -webkit-sticky;
@@ -166,11 +148,9 @@
             top: var(--ch-sticky-top);
             z-index: 5;
             margin-bottom: 4px;
-            padding: 0;
-            background: transparent;
-            pointer-events: none;
+            padding: 4px 0 8px;
+            background: var(--page);
         }
-        #sessionFilters > * { pointer-events: auto; }
         :root[data-app-shell="1"] #sessionFilters {
             top: var(--ch-sticky-top-tabs);
         }
@@ -930,35 +910,21 @@
         @media (hover: none) { .session-delete-btn { opacity: .7; } }
         @media (pointer: coarse) { .session-delete-btn { width: 44px; height: 44px; } }
         #chargingDetail { width: 100%; max-width: 1900px; margin-right: auto; margin-left: auto; }
-        /* Detail nav wrapper stays sticky for the full drill-in scroll. */
+        /* Back link (mock .back-link) — stays reachable while session detail scrolls. */
         .ch-detail-nav {
-            display: flex; align-items: center; flex-wrap: wrap;
-            min-height: 0;
-            margin: 0 0 8px;
-            padding: 0;
-            background: transparent;
-            pointer-events: none;
+            display: flex; align-items: center; min-height: 44px;
             position: -webkit-sticky;
             position: sticky;
-            top: var(--ch-sticky-top);
+            /* Same variable the section tabs stick to; app-shell.js sets it to the
+               mobile header height when the page header is hidden (detail view). */
+            top: calc(var(--page-header-h, 0px) + var(--tabs-h, 48px) + 12px);
             z-index: 5;
+            margin: 0 0 8px;
+            padding: 6px 0 10px;
+            background: var(--page);
         }
-        .ch-detail-nav > * { pointer-events: auto; }
-        body.charging-detail-open .ch-detail-nav,
-        :root[data-app-shell="1"] .ch-detail-nav {
-            top: var(--ch-sticky-detail-top);
-        }
-        .ch-detail-nav .ch-pager { margin-left: auto; }
-        [dir="rtl"] .ch-detail-nav .ch-pager {
-            margin-left: 0;
-            margin-right: auto;
-        }
-        /* Document scrolls (app-tabs.js). Sticky needs every ancestor up to the
-           viewport to avoid a scrollport; body { overflow-x: hidden } in
-           styles.css forces overflow-y: auto on body and breaks sticky. */
-        body.charging-page,
-        body.charging-page .app-layout,
-        body.charging-page .main-content,
+        /* Document scrolls (app-tabs.js). .page-body's overflow (styles.css) makes
+           it a scrollport and breaks sticky; the outer ancestors are already fine. */
         body.charging-page .main-content > .page-body {
             overflow: visible;
         }
@@ -966,7 +932,7 @@
             display: inline-flex; align-items: center;   /* svg+span spacing via sibling margin (Chrome-58: flex gap unsupported) */
             min-height: 44px; margin-left: -6px; padding: 0 12px 0 6px;
             border: 0; border-radius: var(--radius-full);
-            background: var(--page); color: var(--primary);
+            background: transparent; color: var(--primary);
             font-family: inherit; font-size: var(--fs-label); font-weight: 600;
             cursor: pointer;
         }
@@ -977,6 +943,19 @@
         [dir="rtl"] .ch-back-btn svg + span { margin-left: 0; margin-right: 6px; }
         @media (hover: hover) {
             .ch-back-btn:hover { background: var(--primary-soft); }
+        }
+        /* Previous / next session, in the list's sort order. */
+        .ch-pager { display: flex; margin-left: auto; }
+        [dir="rtl"] .ch-pager { margin-left: 0; margin-right: auto; }
+        .ch-back-btn.ch-pager-btn { margin: 0; padding: 0 12px; }
+        [dir="rtl"] .ch-back-btn.ch-pager-btn { margin: 0; padding: 0 12px; }
+        .ch-pager-btn + .ch-pager-btn { margin-left: 4px; }
+        [dir="rtl"] .ch-pager-btn + .ch-pager-btn { margin-left: 0; margin-right: 4px; }
+        .ch-pager-next span + svg { margin-left: 6px; }
+        [dir="rtl"] .ch-pager-next span + svg { margin-left: 0; margin-right: 6px; }
+        .ch-back-btn:disabled { opacity: 0.38; cursor: default; }
+        @media (hover: hover) {
+            .ch-back-btn:disabled:hover { background: transparent; }
         }
         /* Title, live badge, subtitle and the danger-tonal delete (mock .detail-head). */
         .ch-detail-title-row { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 16px; }
@@ -1268,7 +1247,7 @@
 </head>
 <body class="charging-page">
     <div class="app-layout">
-        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=19) -->
+        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=23) -->
         <div id="app-shell-mount"></div>
         <main class="main-content">
             <div class="mobile-header">
@@ -1456,10 +1435,7 @@
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="17" rx="3"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/><path d="M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01"/></svg>
                                 <span data-i18n="charge.filter_custom">Custom</span>
                             </button>
-                        </div>
-                        <p class="charge-location-hint" id="chargeLocationFilterHint" style="display:none;" data-i18n="charge.filter_location_hint">Add location tariffs in Settings to filter by place.</p>
-                        <div class="charge-location-filter-row" id="chargeLocationFilterRow" style="display:none;">
-                            <label class="session-sort app-chip charge-location-chip" for="sessionLocationFilter">
+                            <label class="session-sort app-chip charge-location-chip" id="chargeLocationFilterRow" for="sessionLocationFilter" style="display:none;">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-6-5.5-6-10a6 6 0 0 1 12 0c0 4.5-6 10-6 10z"/><circle cx="12" cy="11" r="2"/></svg>
                                 <select id="sessionLocationFilter" aria-label="Location" data-i18n-attr="aria-label:charge.filter_location" onchange="CHARGING.setLocationFilter(this.value)">
                                     <option value="" data-i18n="charge.filter_all_locations">All locations</option>
@@ -1556,7 +1532,7 @@
                             </div>
                             <div class="setting-control ch-rate-control">
                                 <select id="currencySelect" class="select-input ch-currency" onchange="CHARGING.showApplyNeeded()">
-                                    <optgroup label="Common">
+                                    <optgroup label="Common" data-i18n-attr="label:common.tz_group_common">
                                         <option value="$">$ USD</option>
                                         <option value="€">€ EUR</option>
                                         <option value="£">£ GBP</option>
@@ -1565,7 +1541,7 @@
                                         <option value="C$">C$ CAD</option>
                                         <option value="CHF ">CHF</option>
                                     </optgroup>
-                                    <optgroup label="Asia / Pacific">
+                                    <optgroup label="Asia / Pacific" data-i18n-attr="label:common.tz_group_asia">
                                         <option value="₹">₹ INR</option>
                                         <option value="रू">रू NPR</option>
                                         <option value="CN¥">CN¥ CNY</option>
@@ -1580,14 +1556,14 @@
                                         <option value="₫">₫ VND</option>
                                         <option value="NZ$">NZ$ NZD</option>
                                     </optgroup>
-                                    <optgroup label="Middle East / Africa">
+                                    <optgroup label="Middle East / Africa" data-i18n-attr="label:common.tz_group_mideast">
                                         <option value="AED ">AED</option>
                                         <option value="SAR ">SAR</option>
                                         <option value="QAR ">QAR</option>
                                         <option value="₪">₪ ILS</option>
                                         <option value="R ">R ZAR</option>
                                     </optgroup>
-                                    <optgroup label="Europe (non-EUR)">
+                                    <optgroup label="Europe (non-EUR)" data-i18n-attr="label:common.tz_group_europe">
                                         <option value="NOK ">NOK kr</option>
                                         <option value="SEK ">SEK kr</option>
                                         <option value="DKK ">DKK kr</option>
@@ -1598,7 +1574,7 @@
                                         <option value="₽">₽ RUB</option>
                                         <option value="₴">₴ UAH</option>
                                     </optgroup>
-                                    <optgroup label="Latin America">
+                                    <optgroup label="Latin America" data-i18n-attr="label:common.tz_group_latam">
                                         <option value="R$">R$ BRL</option>
                                         <option value="MX$">MX$ MXN</option>
                                         <option value="AR$">AR$ ARS</option>
@@ -1733,6 +1709,16 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
                             <span data-i18n="charge.detail_back">Back to sessions</span>
                         </button>
+                        <span class="ch-pager">
+                            <button type="button" class="ch-back-btn ch-pager-btn" id="detailPrevBtn" onclick="CHARGING.navigateSession(-1)" disabled>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+                                <span data-i18n="common.nav_previous">Previous</span>
+                            </button>
+                            <button type="button" class="ch-back-btn ch-pager-btn ch-pager-next" id="detailNextBtn" onclick="CHARGING.navigateSession(1)" disabled>
+                                <span data-i18n="common.nav_next">Next</span>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+                            </button>
+                        </span>
                     </div>
                     <div class="ch-detail-title-row">
                         <div>
@@ -1742,7 +1728,7 @@
                             </div>
                             <div class="ch-detail-subtitle" id="detailSubtitle"></div>
                         </div>
-                        <button id="detailDeleteBtn" class="ch-detail-delete-btn" onclick="CHARGING.deleteCurrent()" title="Delete session">
+                        <button id="detailDeleteBtn" class="ch-detail-delete-btn" onclick="CHARGING.deleteCurrent()" title="Delete session" data-i18n-attr="title:charge.delete_session_title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                             <span data-i18n="charge.delete_session_title">Delete session</span>
                         </button>
@@ -1827,9 +1813,9 @@
     <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
     <div id="toastContainer" class="toast-container"></div>
 
-    <script src="../shared/core.js?v=24"></script>
+    <script src="../shared/core.js?v=27"></script>
     <script src="../shared/update-flow.js?v=3"></script>
-    <script src="../shared/charging.js?v=47"></script>
+    <script src="../shared/charging.js?v=50"></script>
     <script>
         function toggleSidebar() {
             var sb = document.getElementById('sidebar');

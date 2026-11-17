@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="cluster_text_title">Cluster text entry</string>
+    <string name="cluster_text_service_label">OverDrive cluster text entry</string>
+    <string name="cluster_text_service_description">Lets you enter text on the head unit into the focused text field of a DiLink 5 cluster cast app. Password fields are excluded. Enable automatic prompts only if you want the keyboard dialog to open when a cluster text field gains focus.</string>
+    <string name="cluster_text_hint">Text for the cluster app</string>
+    <string name="cluster_text_auto_prompt">Automatically open for cluster text fields</string>
+    <string name="cluster_text_send">Send text</string>
+    <string name="cluster_text_send_submit">Send text and enter</string>
+    <string name="cluster_text_retry">Check focused field</string>
+    <string name="cluster_text_enable_service">Accessibility settings</string>
+    <string name="cluster_text_enable_hint">Enable “OverDrive cluster text entry” in Accessibility settings, then focus a text field in the cast app and check again.</string>
+    <string name="cluster_text_checking">Checking the cluster text field…</string>
+    <string name="cluster_text_target">Text field in %1$s</string>
+    <string name="cluster_text_requires_android11">Cluster text entry requires DiLink 5 with Android 11 or newer and access to the cluster’s accessibility windows. This firmware cannot verify which display owns a text field.</string>
+    <string name="cluster_text_requires_cast">Start a DiLink 5 app cast before entering text.</string>
+    <string name="cluster_text_no_field">No accessible, focused text field was found on the cluster. Focus a field in the cast app and check again. Password fields are excluded.</string>
+    <string name="cluster_text_field_changed">The cast session or focused field changed. Check the field again before sending.</string>
+    <string name="cluster_text_unavailable">The cluster text field could not be verified. Check the cast and accessibility connection, then try again.</string>
+    <string name="cluster_text_rejected">The app did not confirm the text. Check the cluster field before trying again.</string>
+    <string name="cluster_text_submit_rejected">Text was sent, but the app did not accept Enter. Submit from the cluster app.</string>
+</resources>

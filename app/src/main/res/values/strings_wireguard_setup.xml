@@ -36,6 +36,10 @@
     <string name="wgsetup_import_too_large">That file is too large</string>
     <string name="wgsetup_import_no_qr">No QR code found in that image</string>
     <string name="wgsetup_imported">Imported. Check the text and tap Save.</string>
+    <string name="wgsetup_import_pick_title">Choose a config file</string>
+    <string name="wgsetup_import_qr_picture">Picture of a QR code…</string>
+    <string name="wgsetup_import_none_found">No .conf file found in Download, Documents or Overdrive, or on a USB drive. Copy the file to the top folder of a USB drive or to Download, then try again.</string>
+    <string name="wgsetup_import_no_picker">No file picker is available on this head unit</string>
 
     <string name="wgsetup_phone_title">Open this on your phone</string>
     <string name="wgsetup_phone_steps">Scan the code, sign in, then upload or paste the config your router exported. The phone must reach the car (same Wi-Fi or hotspot, or through an active tunnel).</string>

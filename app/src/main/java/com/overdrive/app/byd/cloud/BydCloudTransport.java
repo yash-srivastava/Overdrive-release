@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 
 import okhttp3.Call;
 import okhttp3.Cookie;
@@ -98,7 +99,7 @@ public final class BydCloudTransport {
 
     private final BydCloudConfig config;
     private final EnvelopeCodec codec;
-    private final OkHttpClient httpClient;
+    private final Call.Factory httpClient;
     private final ConcurrentMap<Thread, Call> activeCalls = new ConcurrentHashMap<>();
 
     public BydCloudTransport(BydCloudConfig config, EnvelopeCodec codec) {
@@ -137,6 +138,12 @@ public final class BydCloudTransport {
                 .build();
     }
 
+    BydCloudTransport(BydCloudConfig config, EnvelopeCodec codec, Call.Factory httpClient) {
+        this.config = config;
+        this.codec = codec;
+        this.httpClient = httpClient;
+    }
+
     /**
      * Send a secure POST request with Bangcle envelope wrapping.
      * 
@@ -161,7 +168,16 @@ public final class BydCloudTransport {
             String endpoint,
             JSONObject outerPayload,
             long callTimeoutMs) throws IOException {
+        return postSecure(endpoint, outerPayload, callTimeoutMs, null);
+    }
+
+    public JSONObject postSecure(
+            String endpoint,
+            JSONObject outerPayload,
+            long callTimeoutMs,
+            BooleanSupplier authority) throws IOException {
         throwIfRequestCancelled();
+        requireCurrentAuthority(authority);
         // Encode the outer payload into a Bangcle envelope
         String requestEnvelope = codec.encodeEnvelope(outerPayload.toString());
 
@@ -203,6 +219,7 @@ public final class BydCloudTransport {
             // registered request free to dispatch.
             try {
                 throwIfRequestCancelled();
+                requireCurrentAuthority(authority);
             } catch (InterruptedIOException cancelled) {
                 call.cancel();
                 throw cancelled;
@@ -270,6 +287,20 @@ public final class BydCloudTransport {
         if (Thread.currentThread().isInterrupted()) {
             throw new InterruptedIOException("BYD cloud request cancelled");
         }
+    }
+
+    static void requireCurrentAuthority(BooleanSupplier authority) throws InterruptedIOException {
+        if (authority == null) return;
+        final boolean current;
+        try {
+            current = authority.getAsBoolean();
+        } catch (Throwable unavailable) {
+            InterruptedIOException cancelled = new InterruptedIOException(
+                    "Cloud command authority is unavailable");
+            cancelled.initCause(unavailable);
+            throw cancelled;
+        }
+        if (!current) throw new InterruptedIOException("Cloud command cancelled by its owner");
     }
 
     /**

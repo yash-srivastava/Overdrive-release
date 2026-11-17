@@ -45,6 +45,9 @@ BYD.stream = {
     latencyCheckInterval: null,
     streamStarted: false,
     selectedQuality: 'MEDIUM',
+    _qualityRequestId: 0,
+    _qualityRequestTail: Promise.resolve(),
+    _broadwayWorkerUrl: null,
     activeFps: 10,  // Updated from /api/stream/quality response; default matches MEDIUM preset
     isDiLink5: false,
     // Last view mode the backend accepted; currentViewMode is set optimistically.
@@ -575,7 +578,8 @@ BYD.stream = {
             // 5. Create Worker from modified source
             const blob = new Blob([decoderCode], { type: 'application/javascript' });
             const workerUrl = URL.createObjectURL(blob);
-            
+            this._broadwayWorkerUrl = workerUrl;
+
             this.broadwayPlayer = new Player({
                 useWorker: true,
                 workerFile: workerUrl,
@@ -968,9 +972,16 @@ BYD.stream = {
         }
         
         if (this.broadwayPlayer) {
+            try {
+                if (this.broadwayPlayer.worker) this.broadwayPlayer.worker.terminate();
+            } catch (e) {}
             this.broadwayPlayer = null;
         }
-        
+        if (this._broadwayWorkerUrl) {
+            try { URL.revokeObjectURL(this._broadwayWorkerUrl); } catch (e) {}
+            this._broadwayWorkerUrl = null;
+        }
+
         // Hide video elements by dropping the .active class, NOT via an inline
         // display:none — inline style outranks the non-important `video.active`
         // rule, so a later restart could never make the legacy player visible.
@@ -1156,11 +1167,20 @@ BYD.stream = {
      * Set streaming quality (saves to backend)
      */
     async setQuality(quality) {
+        const requestId = ++this._qualityRequestId;
         this.selectedQuality = quality;
+        // One request at a time, so the last pick is the one the server keeps.
+        const previous = this._qualityRequestTail;
+        let release;
+        this._qualityRequestTail = new Promise(resolve => { release = resolve; });
         try {
+            await previous;
+            if (requestId !== this._qualityRequestId) return;
             const res = await this._postEmpty('/api/stream/quality/' + quality);
             const data = await res.json();
+            if (requestId !== this._qualityRequestId) return;
             if (data.success) {
+                if (data.fps) this.activeFps = data.fps;
                 const displayName = data.displayName || quality;
                 if (BYD.utils && BYD.utils.toast) {
                     // {name}-templated so locales that need a different
@@ -1169,13 +1189,32 @@ BYD.stream = {
                     const tmpl = BYD.i18n.t('stream.quality_set');
                     BYD.utils.toast(tmpl.replace('{name}', displayName), 'info');
                 }
-                // Server restarts encoder with new resolution — the existing WebSocket
-                // connection will receive new SPS/PPS and the decoder handles it automatically
+                // The server applies a new quality when the stream reconnects.
+                this._restartForQuality();
             }
         } catch (e) {
+            if (requestId !== this._qualityRequestId) return;
             console.error('[Stream] Set quality error:', e);
             if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('stream.quality_failed'), 'error');
+        } finally {
+            release();
         }
+    },
+
+    // Reconnects the open camera so the new quality takes effect; a closed or hidden stream picks it up when it starts.
+    _restartForQuality() {
+        if (!this.streamStarted || document.hidden) return;
+        const mode = (typeof this.confirmedViewMode === 'number' && this.confirmedViewMode >= 0)
+            ? this.confirmedViewMode
+            : this.currentViewMode;
+        if (typeof mode !== 'number' || mode < 0) return;
+        console.log('[Stream] Quality changed - reconnecting camera:', mode);
+        this.stopStream();
+        // -1 so Live View's same-camera tap does not read this as a toggle-off.
+        this.currentViewMode = -1;
+        Promise.resolve(this.selectCamera(mode)).catch(e => {
+            console.error('[Stream] Reconnect after quality change failed:', e);
+        });
     },
     
     /**

@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shared tokens for the native UI revamp. Colours come from ?attr roles and the status_* colours. -->
+<resources>
+    <!-- Touch: primary in-car controls 76dp, standard rows 56dp, never below 48dp. -->
+    <dimen name="od_touch_primary">76dp</dimen>
+    <dimen name="od_touch_standard">56dp</dimen>
+    <dimen name="od_touch_min">48dp</dimen>
+    <dimen name="od_touch_gap">8dp</dimen>
+
+    <!-- 4/8dp rhythm -->
+    <dimen name="od_space_2">2dp</dimen>
+    <dimen name="od_space_4">4dp</dimen>
+    <dimen name="od_space_6">6dp</dimen>
+    <dimen name="od_space_8">8dp</dimen>
+    <dimen name="od_space_12">12dp</dimen>
+    <dimen name="od_space_16">16dp</dimen>
+    <dimen name="od_space_20">20dp</dimen>
+    <dimen name="od_space_24">24dp</dimen>
+    <dimen name="od_space_28">28dp</dimen>
+    <dimen name="od_space_32">32dp</dimen>
+
+    <!-- Corners: controls 8, cards 12, sheets and floating panels 20, pills = half height. -->
+    <dimen name="od_radius_control">8dp</dimen>
+    <dimen name="od_radius_card">12dp</dimen>
+    <dimen name="od_radius_panel">20dp</dimen>
+    <dimen name="od_radius_pill_48">24dp</dimen>
+    <dimen name="od_radius_pill_44">22dp</dimen>
+    <dimen name="od_radius_pill_40">20dp</dimen>
+    <dimen name="od_radius_pill_32">16dp</dimen>
+
+    <dimen name="od_icon_sm">18dp</dimen>
+    <dimen name="od_icon_md">24dp</dimen>
+    <dimen name="od_icon_tile">44dp</dimen>
+    <dimen name="od_status_dot">8dp</dimen>
+    <dimen name="od_hairline">1dp</dimen>
+    <dimen name="od_page_padding_h">24dp</dimen>
+    <dimen name="od_page_padding_top">16dp</dimen>
+    <dimen name="od_subpage_header_height">56dp</dimen>
+
+    <!-- Motion (ms). Springs are configured in code: damping 1.0, response 0.32-0.45 s. -->
+    <integer name="od_motion_crossfade">120</integer>
+    <integer name="od_motion_expand">320</integer>
+    <integer name="od_motion_sheet">340</integer>
+    <integer name="od_motion_theme_fade">300</integer>
+
+    <!-- Live numbers: fixed-width digits, tighter tracking only at display sizes. -->
+    <style name="Widget.Overdrive.Metric" parent="">
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:fontFeatureSettings">tnum</item>
+        <item name="android:includeFontPadding">false</item>
+        <item name="android:textColor">?attr/colorOnSurface</item>
+        <item name="android:maxLines">1</item>
+    </style>
+    <style name="Widget.Overdrive.Metric.Hero">
+        <item name="android:textSize">68sp</item>
+        <item name="android:letterSpacing">-0.03</item>
+    </style>
+    <style name="Widget.Overdrive.Metric.HeroUnit">
+        <item name="android:textSize">30sp</item>
+        <item name="android:letterSpacing">-0.01</item>
+        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
+    </style>
+    <style name="Widget.Overdrive.Metric.Large">
+        <item name="android:textSize">28sp</item>
+        <item name="android:letterSpacing">-0.015</item>
+    </style>
+    <style name="Widget.Overdrive.Metric.Medium">
+        <item name="android:textSize">34sp</item>
+        <item name="android:letterSpacing">-0.02</item>
+    </style>
+    <style name="Widget.Overdrive.Metric.Inline">
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:letterSpacing">0</item>
+    </style>
+
+    <!-- Section overline: small caps label above a group. -->
+    <style name="TextAppearance.Overdrive.Overline" parent="TextAppearance.Material3.LabelMedium">
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:letterSpacing">0.08</item>
+        <item name="android:textAllCaps">true</item>
+        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
+    </style>
+    <style name="TextAppearance.Overdrive.Status" parent="TextAppearance.Material3.LabelLarge">
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:letterSpacing">0</item>
+    </style>
+    <style name="TextAppearance.Overdrive.CardTitle" parent="TextAppearance.Material3.TitleMedium">
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:letterSpacing">0</item>
+        <item name="android:textColor">?attr/colorOnSurface</item>
+    </style>
+    <style name="TextAppearance.Overdrive.PageTitle" parent="TextAppearance.Material3.HeadlineSmall">
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textSize">24sp</item>
+        <item name="android:letterSpacing">-0.01</item>
+        <item name="android:textColor">?attr/colorOnSurface</item>
+    </style>
+
+    <!-- Cards: tonal, no elevation, 12dp corners. -->
+    <style name="Widget.Overdrive.Revamp.Card" parent="Widget.Material3.CardView.Filled">
+        <item name="cardBackgroundColor">?attr/colorSurfaceContainer</item>
+        <item name="cardCornerRadius">@dimen/od_radius_card</item>
+        <item name="cardElevation">0dp</item>
+        <item name="contentPadding">@dimen/od_space_16</item>
+    </style>
+    <!-- 76dp quick-action tile. -->
+    <style name="Widget.Overdrive.Revamp.Tile" parent="Widget.Material3.CardView.Filled">
+        <item name="cardBackgroundColor">?attr/colorSurfaceContainerHigh</item>
+        <item name="cardCornerRadius">@dimen/od_radius_card</item>
+        <item name="cardElevation">0dp</item>
+        <item name="android:minHeight">@dimen/od_touch_primary</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+    </style>
+    <!-- Pill controls (search fields, segmented groups, filter chips) at 44dp. -->
+    <style name="Widget.Overdrive.Revamp.PillButton" parent="Widget.Material3.Button.TonalButton">
+        <item name="cornerRadius">@dimen/od_radius_pill_44</item>
+        <item name="android:minHeight">44dp</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textAppearance">@style/TextAppearance.Material3.LabelLarge</item>
+        <item name="backgroundTint">?attr/colorSurfaceContainerHigh</item>
+        <item name="android:textColor">?attr/colorOnSurface</item>
+        <item name="iconTint">?attr/colorOnSurfaceVariant</item>
+        <item name="iconSize">20dp</item>
+    </style>
+    <style name="Widget.Overdrive.Revamp.PillIconButton" parent="Widget.Material3.Button.IconButton.Filled.Tonal">
+        <item name="android:minWidth">44dp</item>
+        <item name="android:minHeight">44dp</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:insetLeft">0dp</item>
+        <item name="android:insetRight">0dp</item>
+        <item name="backgroundTint">?attr/colorSurfaceContainerHigh</item>
+        <item name="iconTint">?attr/colorOnSurfaceVariant</item>
+        <item name="iconSize">22dp</item>
+    </style>
+    <!-- Status text with a leading dot (set drawableStart to @drawable/od_status_dot and tint). -->
+    <style name="Widget.Overdrive.Revamp.StatusText" parent="">
+        <item name="android:textAppearance">@style/TextAppearance.Overdrive.Status</item>
+        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
+        <item name="android:drawablePadding">8dp</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:minHeight">32dp</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+    </style>
+</resources>

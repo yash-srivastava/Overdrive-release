@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Status-bar notifications and channel names of the background services. -->
+<resources>
+    <string name="notif_channel_roadsense_overlay">שכבת RoadSense</string>
+    <string name="notif_roadsense_overlay_text">שכבת התראות המפגעים פעילה</string>
+    <string name="notif_channel_roadsense_imu">חיישני תנועה של RoadSense</string>
+    <string name="notif_roadsense_imu_text">חישת הכביש פעילה</string>
+    <string name="notif_channel_onscreen_messages">הודעות על המסך</string>
+    <string name="notif_onscreen_message_title">הודעה על המסך</string>
+    <string name="notif_channel_parked_impact">ניטור פגיעות בחניה</string>
+    <string name="notif_parked_impact_title">מעקב</string>
+    <string name="notif_parked_impact_text">מנטר פגיעות בזמן חניה</string>
+    <string name="notif_network_hotspot">רשת ונקודה חמה</string>
+    <string name="notif_channel_media_playback">הפעלת מדיה</string>
+    <string name="notif_roadsense_chime_title">אזהרת RoadSense</string>
+    <string name="notif_roadsense_chime_text">משמיע צליל בטיחות</string>
+    <string name="notif_channel_location">שירות מיקום</string>
+    <string name="notif_channel_location_desc">מעקב GPS עבור מצב המעקב</string>
+    <string name="notif_location_title">מיקום פעיל</string>
+    <string name="notif_location_text">מעקב GPS פועל</string>
+    <string name="notif_vehicle_control">בקרת רכב</string>
+    <string name="notif_media_title">משמיע שמע</string>
+    <string name="notif_media_text">אוטומציה של OverDrive</string>
+    <string name="notif_channel_keepalive">שמירת שירותי רקע</string>
+    <string name="notif_channel_keepalive_desc">שומר על פעילות שירותי הרקע</string>
+    <string name="notif_channel_summary">סטטוס Overdrive</string>
+    <string name="notif_channel_summary_desc">שורת סטטוס מאוחדת לשירותי הרקע של Overdrive</string>
+    <string name="notif_channel_remote_voice">שמע קולי מרחוק</string>
+    <string name="notif_channel_status_overlay">שכבת סטטוס</string>
+    <string name="notif_channel_status_overlay_desc">שכבת סטטוס הקלטה ונסיעה</string>
+</resources>

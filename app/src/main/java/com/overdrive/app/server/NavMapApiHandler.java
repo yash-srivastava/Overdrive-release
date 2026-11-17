@@ -64,7 +64,7 @@ public class NavMapApiHandler {
         // Cluster projection: start / stop / status for projecting the map onto
         // the driver-cluster display (a SUSTAINED holder of ClusterProjectionController).
         if (cleanPath.equals("/api/navmap/cluster/start") && method.equals("POST")) {
-            com.overdrive.app.navmap.ClusterMapProjector.start();
+            com.overdrive.app.navmap.ClusterMapProjector.startWhenSettled();
             sendClusterStatus(out);
             return true;
         }

@@ -1,6 +1,8 @@
 package com.overdrive.app.server;
 
 import com.overdrive.app.byd.AutoServiceBridge;
+import com.overdrive.app.byd.AutoServiceProtocol;
+import com.overdrive.app.camera.dilink5.DiLink5Platform;
 import com.overdrive.app.daemon.CameraDaemon;
 
 import org.json.JSONArray;
@@ -36,9 +38,143 @@ public final class AutoServiceDebugApiHandler {
     private static final String TAG = "AutoServiceDebug";
     private static final int SWEEP_MAX_RANGE = 4096;
 
+    interface Backend {
+        AutoServiceProtocol.ModeSnapshot currentMode();
+        AutoServiceBridge.DiagnosticStatus status(AutoServiceProtocol.ModeSnapshot expected);
+        AutoServiceBridge.DiLink5Read typedRead(
+                AutoServiceProtocol.ModeSnapshot expected,
+                int transaction,
+                int device,
+                int featureId);
+        int getInt(AutoServiceProtocol.ModeSnapshot expected, int area, int command);
+        byte[] getBuffer(AutoServiceProtocol.ModeSnapshot expected, int area, int command);
+        int remoteControl(AutoServiceProtocol.ModeSnapshot expected, int opcode);
+        boolean isConnected(AutoServiceProtocol.ModeSnapshot expected);
+        boolean isUsingShellCall(AutoServiceProtocol.ModeSnapshot expected);
+    }
+
+    interface DirectAccess {
+        Object collector();
+        Class<?> findClass(String name) throws ClassNotFoundException;
+        Object fieldValue(java.lang.reflect.Field field, Object target) throws Exception;
+        Object multimediaDevice(Object collector);
+        Object invoke(java.lang.reflect.Method method, Object target, Object... args) throws Exception;
+        Object speedLimitWarning(Object collector);
+    }
+
+    private static final DirectAccess SYSTEM_DIRECT_ACCESS = new DirectAccess() {
+        @Override public Object collector() {
+            return com.overdrive.app.byd.BydDataCollector.getInstance();
+        }
+
+        @Override public Class<?> findClass(String name) throws ClassNotFoundException {
+            return Class.forName(name);
+        }
+
+        @Override public Object fieldValue(java.lang.reflect.Field field, Object target)
+                throws Exception {
+            return field.get(target);
+        }
+
+        @Override public Object multimediaDevice(Object collector) {
+            return ((com.overdrive.app.byd.BydDataCollector) collector).getMultimediaDevice();
+        }
+
+        @Override public Object invoke(
+                java.lang.reflect.Method method, Object target, Object... args) throws Exception {
+            return method.invoke(target, args);
+        }
+
+        @Override public Object speedLimitWarning(Object collector) {
+            return ((com.overdrive.app.byd.BydDataCollector) collector)
+                    .dumpSpeedLimitWarningRaw();
+        }
+    };
+
+    private static final class ModeFence {
+        private final Backend backend;
+        private final AutoServiceProtocol.ModeSnapshot expected;
+        private final String path;
+
+        ModeFence(
+                Backend backend,
+                AutoServiceProtocol.ModeSnapshot expected,
+                String path) {
+            this.backend = backend;
+            this.expected = expected;
+            this.path = path;
+        }
+
+        boolean rejectIfChanged(OutputStream out) throws Exception {
+            if (expected.equals(backend.currentMode())) return false;
+            handleUnsupported(out, path, "active vehicle mode changed during request");
+            return true;
+        }
+    }
+
+    private static final Backend SYSTEM_BACKEND = new Backend() {
+        @Override public AutoServiceProtocol.ModeSnapshot currentMode() {
+            DiLink5Platform.ActiveModeSnapshot value = DiLink5Platform.currentActiveModeSnapshot();
+            return value == null ? null
+                    : new AutoServiceProtocol.ModeSnapshot(value.mode, value.generation);
+        }
+
+        @Override public AutoServiceBridge.DiagnosticStatus status(
+                AutoServiceProtocol.ModeSnapshot expected) {
+            return AutoServiceBridge.INSTANCE.diagnosticStatus(expected);
+        }
+
+        @Override public AutoServiceBridge.DiLink5Read typedRead(
+                AutoServiceProtocol.ModeSnapshot expected,
+                int transaction,
+                int device,
+                int featureId) {
+            return AutoServiceBridge.INSTANCE.readDiLink5(
+                    expected, transaction, device, featureId);
+        }
+
+        @Override public int getInt(
+                AutoServiceProtocol.ModeSnapshot expected, int area, int command) {
+            return AutoServiceBridge.INSTANCE.getInt(expected, area, command);
+        }
+
+        @Override public byte[] getBuffer(
+                AutoServiceProtocol.ModeSnapshot expected, int area, int command) {
+            return AutoServiceBridge.INSTANCE.getBuffer(expected, area, command);
+        }
+
+        @Override public int remoteControl(
+                AutoServiceProtocol.ModeSnapshot expected, int opcode) {
+            return AutoServiceBridge.INSTANCE.remoteControl(expected, opcode);
+        }
+
+        @Override public boolean isConnected(AutoServiceProtocol.ModeSnapshot expected) {
+            return AutoServiceBridge.INSTANCE.isConnected(expected);
+        }
+
+        @Override public boolean isUsingShellCall(AutoServiceProtocol.ModeSnapshot expected) {
+            return AutoServiceBridge.INSTANCE.isUsingShellCall(expected);
+        }
+    };
+
     private AutoServiceDebugApiHandler() {}
 
     public static boolean handle(String method, String path, String body, OutputStream out) throws Exception {
+        return handle(method, path, body, out, SYSTEM_BACKEND);
+    }
+
+    static boolean handle(
+            String method, String path, String body, OutputStream out, Backend backend) throws Exception {
+        return handle(method, path, body, out, backend, SYSTEM_DIRECT_ACCESS);
+    }
+
+    static boolean handle(
+            String method,
+            String path,
+            String body,
+            OutputStream out,
+            Backend backend,
+            DirectAccess directAccess) throws Exception {
         if (!"GET".equals(method)) {
             HttpResponse.sendError(out, 405, "Method Not Allowed");
             return true;
@@ -55,38 +191,61 @@ public final class AutoServiceDebugApiHandler {
             }
         }
 
+        AutoServiceProtocol.ModeSnapshot mode = backend.currentMode();
+        if (mode == null) {
+            return handleUnsupported(out, pathOnly, "active vehicle mode is unavailable");
+        }
+        if (mode.isDiLink5() && !DiLink5SdkDiagnosticRegistry.isEndpointAllowed(pathOnly)) {
+            return handleUnsupported(out, pathOnly, "endpoint is unavailable in the active vehicle mode");
+        }
+        ModeFence modeFence = new ModeFence(backend, mode, pathOnly);
+        if (modeFence.rejectIfChanged(out)) return true;
+
         if (pathOnly.equals("/api/debug/autoservice/status")) {
-            return handleStatus(out);
+            return handleStatus(out, backend, mode);
+        }
+        if (pathOnly.equals("/api/debug/autoservice/typed-int")) {
+            return handleTypedRead(out, q, backend, mode, false);
+        }
+        if (pathOnly.equals("/api/debug/autoservice/typed-float")) {
+            return handleTypedRead(out, q, backend, mode, true);
         }
         if (pathOnly.equals("/api/debug/autoservice/get-int")) {
-            return handleGetInt(out, q);
+            return handleGetInt(out, q, backend, mode);
         }
         if (pathOnly.equals("/api/debug/autoservice/get-buffer")) {
-            return handleGetBuffer(out, q);
+            return handleGetBuffer(out, q, backend, mode);
         }
         if (pathOnly.equals("/api/debug/autoservice/sweep")) {
-            return handleSweep(out, q);
+            return handleSweep(out, q, backend, mode);
         }
         if (pathOnly.equals("/api/debug/autoservice/known")) {
-            return handleKnown(out);
+            return handleKnown(out, backend, mode);
         }
         if (pathOnly.equals("/api/debug/autoservice/remote-control")) {
-            return handleRemoteControl(out, q);
+            return handleRemoteControl(out, q, backend, mode);
         }
         if (pathOnly.equals("/api/debug/autoservice/probe-methods")) {
-            return handleProbeMethods(out);
+            return handleProbeMethods(out, modeFence, directAccess);
         }
         if (pathOnly.equals("/api/debug/autoservice/sdk-remote-control")) {
-            return handleSdkRemoteControl(out, q);
+            return handleSdkRemoteControl(out, q, modeFence, directAccess);
         }
         if (pathOnly.equals("/api/debug/autoservice/sdk-getter")) {
-            return handleSdkGetter(out, q);
+            return handleSdkGetter(out, q, modeFence, directAccess);
         }
         if (pathOnly.equals("/api/debug/autoservice/probe-getters")) {
-            return handleProbeGetters(out, q);
+            return handleProbeGetters(out, q, modeFence, directAccess);
         }
         if (pathOnly.equals("/api/debug/autoservice/list-setters")) {
-            return handleListSetters(out);
+            return handleListSetters(out, modeFence, directAccess);
+        }
+        if (pathOnly.equals("/api/debug/autoservice/adas-slw")) {
+            if (modeFence.rejectIfChanged(out)) return true;
+            Object collector = directAccess.collector();
+            if (modeFence.rejectIfChanged(out)) return true;
+            HttpResponse.sendJson(out, directAccess.speedLimitWarning(collector).toString());
+            return true;
         }
 
         HttpResponse.sendError(out, 404, "Unknown autoservice debug endpoint");
@@ -100,7 +259,11 @@ public final class AutoServiceDebugApiHandler {
      * <p>Opcodes (from {@link AutoServiceBridge}):
      * 5=UNLOCK, 6=TRUNK_OPEN, 7=LOCK, 9=POWER_OFF, 17=CLOSE_WINDOWS, 22=FLASH_LIGHTS.
      */
-    private static boolean handleRemoteControl(OutputStream out, Map<String, String> q) throws Exception {
+    private static boolean handleRemoteControl(
+            OutputStream out,
+            Map<String, String> q,
+            Backend backend,
+            AutoServiceProtocol.ModeSnapshot expected) throws Exception {
         Integer opcode = parseIntParam(q, "opcode");
         if (opcode == null) {
             HttpResponse.sendJsonError(out, "Missing 'opcode' parameter (decimal or 0x-hex)");
@@ -114,7 +277,7 @@ public final class AutoServiceDebugApiHandler {
         }
 
         long t0 = System.nanoTime();
-        int reply = AutoServiceBridge.INSTANCE.remoteControl(opcode);
+        int reply = backend.remoteControl(expected, opcode);
         long latencyMs = (System.nanoTime() - t0) / 1_000_000;
 
         JSONObject r = new JSONObject();
@@ -126,7 +289,8 @@ public final class AutoServiceDebugApiHandler {
         r.put("isError", reply == AutoServiceBridge.ERROR_NO_BINDER
                 || reply == AutoServiceBridge.ERROR_TRANSACT_FALSE
                 || reply == AutoServiceBridge.ERROR_TRANSACT_EXC
-                || reply == AutoServiceBridge.ERROR_SHELL_CALL);
+                || reply == AutoServiceBridge.ERROR_SHELL_CALL
+                || reply == AutoServiceBridge.ERROR_UNSUPPORTED_MODE);
         r.put("latencyMs", latencyMs);
         HttpResponse.sendJson(out, r.toString());
         try {
@@ -138,15 +302,18 @@ public final class AutoServiceDebugApiHandler {
 
     /**
      * Probes whether the runtime SDK device classes ({@code BYDAutoSettingDevice},
-     * {@code BYDAutoBodyworkDevice}) expose any of control.apk's remote-control
-     * methods. These are NOT in our local stub — they live in the BYD framework
+     * {@code BYDAutoBodyworkDevice}) expose known remote-control methods. These
+     * methods are not in our local stub; they live in the platform framework
      * jar at runtime, accessible only via reflection on the device instance.
      *
      * <p>Returns: which classes exist, what {@code (int)}-arg methods they expose,
      * and whether the canonical names ({@code voiceCtlLockCar},
      * {@code remoteControlCar}, {@code setRemoteControl}) are present.
      */
-    private static boolean handleProbeMethods(OutputStream out) throws Exception {
+    private static boolean handleProbeMethods(
+            OutputStream out,
+            ModeFence modeFence,
+            DirectAccess directAccess) throws Exception {
         JSONObject r = new JSONObject();
 
         String[] candidates = {
@@ -162,7 +329,8 @@ public final class AutoServiceDebugApiHandler {
         for (String className : candidates) {
             JSONObject classInfo = new JSONObject();
             try {
-                Class<?> cls = Class.forName(className);
+                if (modeFence.rejectIfChanged(out)) return true;
+                Class<?> cls = directAccess.findClass(className);
                 classInfo.put("found", true);
                 JSONArray declared = new JSONArray();
                 for (java.lang.reflect.Method m : cls.getDeclaredMethods()) {
@@ -206,15 +374,19 @@ public final class AutoServiceDebugApiHandler {
 
     /**
      * Calls one of the SDK device classes' remote-control methods reflectively
-     * on the live device instance held by {@code BydDataCollector}. This is
-     * control.apk's primary path — they reflect a method like
+     * on the live device instance held by {@code BydDataCollector}.
+     * The runtime framework may expose a method like
      * {@code voiceCtlLockCar(int)} on the {@code SettingDevice} object that
      * the BYD framework hands them.
      *
      * <p>Caller picks {@code class=Setting|Bodywork}, {@code method=name},
      * {@code arg=opcode}. Gated by {@code confirm=YES}.
      */
-    private static boolean handleSdkRemoteControl(OutputStream out, Map<String, String> q) throws Exception {
+    private static boolean handleSdkRemoteControl(
+            OutputStream out,
+            Map<String, String> q,
+            ModeFence modeFence,
+            DirectAccess directAccess) throws Exception {
         String klass = q.getOrDefault("class", "Setting");
         String methodName = q.get("method");
         Integer arg = parseIntParam(q, "arg");
@@ -227,8 +399,8 @@ public final class AutoServiceDebugApiHandler {
             return true;
         }
 
-        com.overdrive.app.byd.BydDataCollector collector =
-            com.overdrive.app.byd.BydDataCollector.getInstance();
+        if (modeFence.rejectIfChanged(out)) return true;
+        Object collector = directAccess.collector();
         Object device;
         try {
             java.lang.reflect.Field f;
@@ -238,7 +410,8 @@ public final class AutoServiceDebugApiHandler {
                 f = collector.getClass().getDeclaredField("settingDevice");
             }
             f.setAccessible(true);
-            device = f.get(collector);
+            if (modeFence.rejectIfChanged(out)) return true;
+            device = directAccess.fieldValue(f, collector);
         } catch (Exception e) {
             HttpResponse.sendJsonError(out, "Device fetch failed: " + e.getMessage());
             return true;
@@ -256,8 +429,9 @@ public final class AutoServiceDebugApiHandler {
 
         try {
             java.lang.reflect.Method m = device.getClass().getMethod(methodName, Integer.TYPE);
+            if (modeFence.rejectIfChanged(out)) return true;
             long t0 = System.nanoTime();
-            Object result = m.invoke(device, arg);
+            Object result = directAccess.invoke(m, device, arg);
             long latencyMs = (System.nanoTime() - t0) / 1_000_000;
             r.put("ok", true);
             r.put("latencyMs", latencyMs);
@@ -281,7 +455,11 @@ public final class AutoServiceDebugApiHandler {
      * Lets us probe whether shell-uid daemon can read state that the app-uid
      * collector currently can't (e.g. {@code getDoorLock()}).
      */
-    private static boolean handleSdkGetter(OutputStream out, Map<String, String> q) throws Exception {
+    private static boolean handleSdkGetter(
+            OutputStream out,
+            Map<String, String> q,
+            ModeFence modeFence,
+            DirectAccess directAccess) throws Exception {
         String klass = q.getOrDefault("class", "Setting");
         String methodName = q.get("method");
         if (methodName == null) {
@@ -289,8 +467,8 @@ public final class AutoServiceDebugApiHandler {
             return true;
         }
 
-        com.overdrive.app.byd.BydDataCollector collector =
-            com.overdrive.app.byd.BydDataCollector.getInstance();
+        if (modeFence.rejectIfChanged(out)) return true;
+        Object collector = directAccess.collector();
         Object device;
         try {
             // BydDataCollector field names are lowerCamelCase
@@ -301,7 +479,8 @@ public final class AutoServiceDebugApiHandler {
                     : Character.toLowerCase(klass.charAt(0)) + klass.substring(1) + "Device";
             java.lang.reflect.Field f = collector.getClass().getDeclaredField(fname);
             f.setAccessible(true);
-            device = f.get(collector);
+            if (modeFence.rejectIfChanged(out)) return true;
+            device = directAccess.fieldValue(f, collector);
         } catch (Exception e) {
             HttpResponse.sendJsonError(out, "Device fetch failed: " + e.getMessage());
             return true;
@@ -317,8 +496,9 @@ public final class AutoServiceDebugApiHandler {
         r.put("method", methodName);
         try {
             java.lang.reflect.Method m = device.getClass().getMethod(methodName);
+            if (modeFence.rejectIfChanged(out)) return true;
             long t0 = System.nanoTime();
-            Object result = m.invoke(device);
+            Object result = directAccess.invoke(m, device);
             long latencyMs = (System.nanoTime() - t0) / 1_000_000;
             r.put("ok", true);
             r.put("latencyMs", latencyMs);
@@ -357,13 +537,17 @@ public final class AutoServiceDebugApiHandler {
      *   <li>{@code prefix=getX} — filter to method names starting with prefix</li>
      * </ul>
      */
-    private static boolean handleProbeGetters(OutputStream out, Map<String, String> q) throws Exception {
+    private static boolean handleProbeGetters(
+            OutputStream out,
+            Map<String, String> q,
+            ModeFence modeFence,
+            DirectAccess directAccess) throws Exception {
         String classFilter = q.get("class");      // null = all
         boolean dumpAll = "all".equals(q.get("mode"));
         String prefix = q.getOrDefault("prefix", "get");
 
-        com.overdrive.app.byd.BydDataCollector collector =
-            com.overdrive.app.byd.BydDataCollector.getInstance();
+        if (modeFence.rejectIfChanged(out)) return true;
+        Object collector = directAccess.collector();
 
         // Walk the collector's reflective device fields. Each Object*Device
         // field on BydDataCollector is a runtime BYD HAL handle.
@@ -377,13 +561,15 @@ public final class AutoServiceDebugApiHandler {
             if (classFilter != null && !classFilter.equalsIgnoreCase(label)) continue;
             f.setAccessible(true);
             Object dev = null;
-            try { dev = f.get(collector); } catch (Exception ignore) {}
+            if (modeFence.rejectIfChanged(out)) return true;
+            try { dev = directAccess.fieldValue(f, collector); } catch (Exception ignore) {}
             if (dev != null) devices.put(label, dev);
         }
 
         // Multimedia is a special case
         if (classFilter == null || "Multimedia".equalsIgnoreCase(classFilter)) {
-            Object mm = collector.getMultimediaDevice();
+            if (modeFence.rejectIfChanged(out)) return true;
+            Object mm = directAccess.multimediaDevice(collector);
             if (mm != null) devices.put("Multimedia", mm);
         }
 
@@ -411,8 +597,9 @@ public final class AutoServiceDebugApiHandler {
                 if (ret == void.class || ret == Void.class) continue;
                 totalProbed++;
                 long callT0 = System.nanoTime();
+                if (modeFence.rejectIfChanged(out)) return true;
                 try {
-                    Object v = m.invoke(dev);
+                    Object v = directAccess.invoke(m, dev);
                     long us = (System.nanoTime() - callT0) / 1000;
                     JSONObject hit = new JSONObject();
                     hit.put("type", ret.getSimpleName());
@@ -488,9 +675,12 @@ public final class AutoServiceDebugApiHandler {
      * Read-only — does NOT invoke. Use this to hand-pick which controls to
      * test via {@code /sdk-remote-control}.
      */
-    private static boolean handleListSetters(OutputStream out) throws Exception {
-        com.overdrive.app.byd.BydDataCollector collector =
-            com.overdrive.app.byd.BydDataCollector.getInstance();
+    private static boolean handleListSetters(
+            OutputStream out,
+            ModeFence modeFence,
+            DirectAccess directAccess) throws Exception {
+        if (modeFence.rejectIfChanged(out)) return true;
+        Object collector = directAccess.collector();
         JSONObject root = new JSONObject();
         for (java.lang.reflect.Field f : collector.getClass().getDeclaredFields()) {
             String fname = f.getName();
@@ -499,7 +689,8 @@ public final class AutoServiceDebugApiHandler {
             label = label.substring(0, 1).toUpperCase(Locale.ROOT) + label.substring(1);
             f.setAccessible(true);
             Object dev = null;
-            try { dev = f.get(collector); } catch (Exception ignore) {}
+            if (modeFence.rejectIfChanged(out)) return true;
+            try { dev = directAccess.fieldValue(f, collector); } catch (Exception ignore) {}
             if (dev == null) continue;
 
             JSONObject perDevice = new JSONObject();
@@ -542,17 +733,132 @@ public final class AutoServiceDebugApiHandler {
         }
     }
 
-    private static boolean handleStatus(OutputStream out) throws Exception {
-        AutoServiceBridge.INSTANCE.init();
-        JSONObject r = new JSONObject();
-        r.put("connected", AutoServiceBridge.INSTANCE.isConnected());
-        r.put("useShellCall", AutoServiceBridge.INSTANCE.isUsingShellCall());
-        r.put("interfaceToken", "android.gui.BYDAutoServer");
-        HttpResponse.sendJson(out, r.toString());
+    private static boolean handleUnsupported(
+            OutputStream out, String path, String reason) throws Exception {
+        JSONObject response = new JSONObject();
+        response.put("supported", false);
+        response.put("path", path);
+        response.put("reason", reason);
+        HttpResponse.sendJson(out, response.toString());
         return true;
     }
 
-    private static boolean handleGetInt(OutputStream out, Map<String, String> q) throws Exception {
+    private static boolean handleStatus(
+            OutputStream out,
+            Backend backend,
+            AutoServiceProtocol.ModeSnapshot expected) throws Exception {
+        AutoServiceBridge.DiagnosticStatus status = backend.status(expected);
+        JSONObject response = new JSONObject();
+        response.put("mode", status.mode == null ? JSONObject.NULL : status.mode);
+        response.put("generation", status.generation == null ? JSONObject.NULL : status.generation);
+        response.put("configuredTransport", status.configuredTransport);
+        response.put("connected", status.connected);
+        response.put("dispatchAvailable", status.dispatchAvailable);
+        response.put("readable", status.readable == null ? JSONObject.NULL : status.readable);
+        response.put("useShellCall", "shell".equals(status.configuredTransport));
+        if (expected.getSupportsLegacy()) {
+            response.put("interfaceToken", AutoServiceProtocol.LEGACY_INTERFACE_TOKEN);
+        }
+        HttpResponse.sendJson(out, response.toString());
+        return true;
+    }
+
+    private static boolean handleTypedRead(
+            OutputStream out,
+            Map<String, String> query,
+            Backend backend,
+            AutoServiceProtocol.ModeSnapshot expected,
+            boolean floatingPoint) throws Exception {
+        Integer device = parseIntParam(query, "device");
+        Integer featureId = parseIntParam(query, "fid");
+        if (device == null || featureId == null) {
+            HttpResponse.sendJsonError(out, "Need valid 'device' and 'fid' parameters");
+            return true;
+        }
+
+        String minimumText = query.get("min");
+        String maximumText = query.get("max");
+        if ((minimumText == null) != (maximumText == null)) {
+            HttpResponse.sendJsonError(out, "Provide both 'min' and 'max', or neither");
+            return true;
+        }
+
+        Integer integerMinimum = null;
+        Integer integerMaximum = null;
+        Float floatMinimum = null;
+        Float floatMaximum = null;
+        if (minimumText != null) {
+            if (floatingPoint) {
+                floatMinimum = parseFiniteFloat(minimumText);
+                floatMaximum = parseFiniteFloat(maximumText);
+                if (floatMinimum == null || floatMaximum == null || floatMinimum > floatMaximum) {
+                    HttpResponse.sendJsonError(out, "Invalid floating-point plausibility range");
+                    return true;
+                }
+            } else {
+                integerMinimum = parseInt(minimumText);
+                integerMaximum = parseInt(maximumText);
+                if (integerMinimum == null || integerMaximum == null
+                        || integerMinimum > integerMaximum) {
+                    HttpResponse.sendJsonError(out, "Invalid integer plausibility range");
+                    return true;
+                }
+            }
+        }
+
+        int transaction = floatingPoint
+                ? AutoServiceProtocol.TX_TYPED_FLOAT
+                : AutoServiceProtocol.TX_TYPED_INT;
+        AutoServiceBridge.DiLink5Read raw = backend.typedRead(
+                expected, transaction, device, featureId);
+        JSONObject response = new JSONObject();
+        response.put("device", device);
+        response.put("fid", featureId);
+        response.put("transaction", transaction);
+        response.put("type", floatingPoint ? "float" : "int");
+        if (raw == null) {
+            response.put("transportReply", false);
+            response.put("readable", false);
+            response.put("plausible", JSONObject.NULL);
+            HttpResponse.sendJson(out, response.toString());
+            return true;
+        }
+
+        AutoServiceProtocol.RawReply reply = new AutoServiceProtocol.RawReply(
+                java.util.Arrays.asList(raw.status, raw.valueBits), null, null);
+        AutoServiceProtocol.TypedRead decoded =
+                AutoServiceProtocol.INSTANCE.decodeTyped(reply, floatingPoint);
+        response.put("transportReply", true);
+        response.put("status", raw.status);
+        response.put("statusOk", raw.status == 0);
+        response.put("valueBits", raw.valueBits);
+        response.put("valueHex", "0x" + String.format(Locale.ROOT, "%08X", raw.valueBits));
+        response.put("sentinel", decoded != null && decoded.getSentinel());
+        response.put("readable", decoded != null && decoded.getReadable());
+        if (floatingPoint) {
+            Float value = decoded == null ? null : decoded.getFloatValue();
+            response.put("value", value == null ? JSONObject.NULL : value);
+            Boolean plausible = floatMinimum == null ? null
+                    : AutoServiceProtocol.INSTANCE.plausibleFloat(
+                            decoded, floatMinimum, floatMaximum);
+            response.put("plausible", plausible == null ? JSONObject.NULL : plausible);
+        } else {
+            Integer value = decoded == null ? null : decoded.getIntegerValue();
+            response.put("value", value == null ? JSONObject.NULL : value);
+            Boolean plausible = integerMinimum == null ? null
+                    : AutoServiceProtocol.INSTANCE.plausibleInteger(
+                            decoded, integerMinimum, integerMaximum);
+            response.put("plausible", plausible == null ? JSONObject.NULL : plausible);
+        }
+        HttpResponse.sendJson(out, response.toString());
+        return true;
+    }
+
+    private static boolean handleGetInt(
+            OutputStream out,
+            Map<String, String> q,
+            Backend backend,
+            AutoServiceProtocol.ModeSnapshot expected) throws Exception {
         Integer area = parseIntParam(q, "area");
         Integer cmd = parseIntParam(q, "cmd");
         if (area == null) {
@@ -562,7 +868,7 @@ public final class AutoServiceDebugApiHandler {
         if (cmd == null) cmd = 0;
 
         long t0 = System.nanoTime();
-        int value = AutoServiceBridge.INSTANCE.getInt(area, cmd);
+        int value = backend.getInt(expected, area, cmd);
         long latencyMicros = (System.nanoTime() - t0) / 1000;
 
         JSONObject r = new JSONObject();
@@ -575,13 +881,18 @@ public final class AutoServiceDebugApiHandler {
         r.put("isError", value == AutoServiceBridge.ERROR_NO_BINDER
                 || value == AutoServiceBridge.ERROR_TRANSACT_FALSE
                 || value == AutoServiceBridge.ERROR_TRANSACT_EXC
-                || value == AutoServiceBridge.ERROR_SHELL_CALL);
+                || value == AutoServiceBridge.ERROR_SHELL_CALL
+                || value == AutoServiceBridge.ERROR_UNSUPPORTED_MODE);
         r.put("latencyMicros", latencyMicros);
         HttpResponse.sendJson(out, r.toString());
         return true;
     }
 
-    private static boolean handleGetBuffer(OutputStream out, Map<String, String> q) throws Exception {
+    private static boolean handleGetBuffer(
+            OutputStream out,
+            Map<String, String> q,
+            Backend backend,
+            AutoServiceProtocol.ModeSnapshot expected) throws Exception {
         Integer area = parseIntParam(q, "area");
         Integer cmd = parseIntParam(q, "cmd");
         if (area == null) {
@@ -591,7 +902,7 @@ public final class AutoServiceDebugApiHandler {
         if (cmd == null) cmd = 0;
 
         long t0 = System.nanoTime();
-        byte[] bytes = AutoServiceBridge.INSTANCE.getBuffer(area, cmd);
+        byte[] bytes = backend.getBuffer(expected, area, cmd);
         long latencyMicros = (System.nanoTime() - t0) / 1000;
 
         JSONObject r = new JSONObject();
@@ -611,7 +922,11 @@ public final class AutoServiceDebugApiHandler {
         return true;
     }
 
-    private static boolean handleSweep(OutputStream out, Map<String, String> q) throws Exception {
+    private static boolean handleSweep(
+            OutputStream out,
+            Map<String, String> q,
+            Backend backend,
+            AutoServiceProtocol.ModeSnapshot expected) throws Exception {
         Integer from = parseIntParam(q, "from");
         Integer to = parseIntParam(q, "to");
         Integer cmd = parseIntParam(q, "cmd");
@@ -621,7 +936,7 @@ public final class AutoServiceDebugApiHandler {
         }
         if (cmd == null) cmd = 0;
         if (to < from) { int t = to; to = from; from = t; }
-        if (to - from > SWEEP_MAX_RANGE) {
+        if ((long) to - from > SWEEP_MAX_RANGE) {
             HttpResponse.sendJsonError(out, "Range too large (max " + SWEEP_MAX_RANGE + ")");
             return true;
         }
@@ -629,14 +944,16 @@ public final class AutoServiceDebugApiHandler {
         JSONArray hits = new JSONArray();
         int totalProbed = 0;
         long t0 = System.nanoTime();
-        for (int area = from; area <= to; area++) {
-            int v = AutoServiceBridge.INSTANCE.getInt(area, cmd);
+        for (long cursor = from; cursor <= to; cursor++) {
+            int area = (int) cursor;
+            int v = backend.getInt(expected, area, cmd);
             totalProbed++;
             if (v == AutoServiceBridge.INVALID_VALUE) continue;
             if (v == AutoServiceBridge.ERROR_NO_BINDER
                     || v == AutoServiceBridge.ERROR_TRANSACT_FALSE
                     || v == AutoServiceBridge.ERROR_TRANSACT_EXC
-                    || v == AutoServiceBridge.ERROR_SHELL_CALL) continue;
+                    || v == AutoServiceBridge.ERROR_SHELL_CALL
+                    || v == AutoServiceBridge.ERROR_UNSUPPORTED_MODE) continue;
             JSONObject hit = new JSONObject();
             hit.put("area", area);
             hit.put("areaHex", "0x" + Integer.toHexString(area));
@@ -666,16 +983,18 @@ public final class AutoServiceDebugApiHandler {
      * Reads every signal we have a name for, plus all 7 door states and all 4 windows,
      * so the operator gets a one-shot snapshot of what the bridge can actually fetch.
      */
-    private static boolean handleKnown(OutputStream out) throws Exception {
+    private static boolean handleKnown(
+            OutputStream out,
+            Backend backend,
+            AutoServiceProtocol.ModeSnapshot expected) throws Exception {
         JSONObject r = new JSONObject();
 
-        // Door cmd ids 1..7 — feature key is the area, cmd selects the door
-        // (control.apk uses tx=8 getBuffer for door-state but tx=6 getInt also works on most trims)
+        // Door cmd ids 1..7: the feature key is the area and cmd selects the door.
         JSONObject doors = new JSONObject();
         String[] doorNames = {"left_front", "right_front", "left_rear", "right_rear", "hood", "trunk", "fuel_cap"};
         for (int i = 0; i < doorNames.length; i++) {
             int cmd = i + 1;     // BODYWORK_CMD_DOOR_LEFT_FRONT=1 .. _FUEL_TANK_CAP=7
-            int v = AutoServiceBridge.INSTANCE.getInt(0, cmd);
+            int v = backend.getInt(expected, 0, cmd);
             doors.put(doorNames[i], doorJson(0, cmd, v));
         }
         r.put("doors", doors);
@@ -684,36 +1003,36 @@ public final class AutoServiceDebugApiHandler {
         String[] windowNames = {"left_front", "right_front", "left_rear", "right_rear"};
         for (int i = 0; i < windowNames.length; i++) {
             int cmd = i + 1;
-            int v = AutoServiceBridge.INSTANCE.getInt(1, cmd);
+            int v = backend.getInt(expected, 1, cmd);
             windows.put(windowNames[i], doorJson(1, cmd, v));
         }
         r.put("windows", windows);
 
         // Named feature IDs from BYDAutoFeatureIds
         JSONObject features = new JSONObject();
-        addFeature(features, "STATISTIC_TOTAL_MILEAGE", 4096);
-        addFeature(features, "ENGINE_REAR_MOTOR_SPEED", 4097);
-        addFeature(features, "ENGINE_FRONT_MOTOR_SPEED", 4098);
-        addFeature(features, "INSTRUMENT_DD_MILEAGE_UNIT", 4099);
-        addFeature(features, "SPEED_ACCELERATOR_S", 4100);
-        addFeature(features, "SPEED_BRAKE_S", 4101);
-        addFeature(features, "STATISTIC_FUEL_PERCENTAGE", 4102);
-        addFeature(features, "STATISTIC_MILEAGE_EV", 4103);
-        addFeature(features, "STATISTIC_MILEAGE_HEV", 4104);
-        addFeature(features, "ENGINE_SPEED", 4105);
-        addFeature(features, "ENGINE_POWER", 4106);
-        addFeature(features, "CHARGING_DISCHARGE_VEHICLE_OUTPUT_VOLTAGE", 4112);
-        addFeature(features, "BODYWORK_EMERGENCY_ALARM_STATE", 0);
-        addFeature(features, "STATISTIC_HIGHEST_BATTERY_TEMP", 1148190752);
-        addFeature(features, "STATISTIC_AVERAGE_BATTERY_TEMP", 1148190776);
-        addFeature(features, "STATISTIC_LOWEST_BATTERY_TEMP", 1148190736);
-        addFeature(features, "STATISTIC_HIGHEST_BATTERY_VOLTAGE", 1147142192);
-        addFeature(features, "STATISTIC_LOWEST_BATTERY_VOLTAGE", 1147142160);
-        addFeature(features, "SET_LF_MEMORY_LOCATION_WAKE_SET", 8192);
+        addFeature(backend, expected, features, "STATISTIC_TOTAL_MILEAGE", 4096);
+        addFeature(backend, expected, features, "ENGINE_REAR_MOTOR_SPEED", 4097);
+        addFeature(backend, expected, features, "ENGINE_FRONT_MOTOR_SPEED", 4098);
+        addFeature(backend, expected, features, "INSTRUMENT_DD_MILEAGE_UNIT", 4099);
+        addFeature(backend, expected, features, "SPEED_ACCELERATOR_S", 4100);
+        addFeature(backend, expected, features, "SPEED_BRAKE_S", 4101);
+        addFeature(backend, expected, features, "STATISTIC_FUEL_PERCENTAGE", 4102);
+        addFeature(backend, expected, features, "STATISTIC_MILEAGE_EV", 4103);
+        addFeature(backend, expected, features, "STATISTIC_MILEAGE_HEV", 4104);
+        addFeature(backend, expected, features, "ENGINE_SPEED", 4105);
+        addFeature(backend, expected, features, "ENGINE_POWER", 4106);
+        addFeature(backend, expected, features, "CHARGING_DISCHARGE_VEHICLE_OUTPUT_VOLTAGE", 4112);
+        addFeature(backend, expected, features, "BODYWORK_EMERGENCY_ALARM_STATE", 0);
+        addFeature(backend, expected, features, "STATISTIC_HIGHEST_BATTERY_TEMP", 1148190752);
+        addFeature(backend, expected, features, "STATISTIC_AVERAGE_BATTERY_TEMP", 1148190776);
+        addFeature(backend, expected, features, "STATISTIC_LOWEST_BATTERY_TEMP", 1148190736);
+        addFeature(backend, expected, features, "STATISTIC_HIGHEST_BATTERY_VOLTAGE", 1147142192);
+        addFeature(backend, expected, features, "STATISTIC_LOWEST_BATTERY_VOLTAGE", 1147142160);
+        addFeature(backend, expected, features, "SET_LF_MEMORY_LOCATION_WAKE_SET", 8192);
         r.put("features", features);
 
-        r.put("connected", AutoServiceBridge.INSTANCE.isConnected());
-        r.put("useShellCall", AutoServiceBridge.INSTANCE.isUsingShellCall());
+        r.put("connected", backend.isConnected(expected));
+        r.put("useShellCall", backend.isUsingShellCall(expected));
         HttpResponse.sendJson(out, r.toString());
         return true;
     }
@@ -734,8 +1053,13 @@ public final class AutoServiceDebugApiHandler {
         return o;
     }
 
-    private static void addFeature(JSONObject features, String name, int id) throws Exception {
-        int v = AutoServiceBridge.INSTANCE.getInt(id, 0);
+    private static void addFeature(
+            Backend backend,
+            AutoServiceProtocol.ModeSnapshot expected,
+            JSONObject features,
+            String name,
+            int id) throws Exception {
+        int v = backend.getInt(expected, id, 0);
         JSONObject o = new JSONObject();
         o.put("id", id);
         o.put("idHex", "0x" + Integer.toHexString(id));
@@ -746,14 +1070,31 @@ public final class AutoServiceDebugApiHandler {
     }
 
     private static Integer parseIntParam(Map<String, String> q, String key) {
-        String s = q.get(key);
-        if (s == null) return null;
-        s = s.trim();
+        return parseInt(q.get(key));
+    }
+
+    private static Integer parseInt(String value) {
+        if (value == null) return null;
+        String s = value.trim();
         try {
             if (s.startsWith("0x") || s.startsWith("0X")) {
-                return (int) Long.parseLong(s.substring(2), 16);
+                long bits = Long.parseLong(s.substring(2), 16);
+                if (bits < 0L || bits > 0xffffffffL) return null;
+                return (int) bits;
             }
-            return (int) Long.parseLong(s);
+            long parsed = Long.parseLong(s);
+            if (parsed < Integer.MIN_VALUE || parsed > Integer.MAX_VALUE) return null;
+            return (int) parsed;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static Float parseFiniteFloat(String value) {
+        if (value == null) return null;
+        try {
+            float parsed = Float.parseFloat(value.trim());
+            return Float.isFinite(parsed) ? parsed : null;
         } catch (NumberFormatException e) {
             return null;
         }

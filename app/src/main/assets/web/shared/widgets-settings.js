@@ -29,6 +29,7 @@ const WidgetsSettings = {
         { id: 'power', key: 'widgets.w_power', name: 'Vehicle power & tyres', desc: 'widgets.w_power_desc', descFb: 'Power flowing to the motors and back on regen; the wheels show tyre pressure.' },
         { id: 'controls', key: 'widgets.w_controls', name: 'Vehicle controls', desc: 'widgets.w_controls_desc', descFb: 'Lock, climate, boot, lights and all four windows. Works in Park only.' },
         { id: 'shortcuts', key: 'widgets.w_shortcuts', name: 'Automation shortcuts', desc: 'widgets.w_shortcuts_desc', descFb: 'Three keys that each run an automation with one tap. Hold a key to choose or remove its automation.' },
+        { id: 'seats', key: 'widgets.w_seats', name: 'Seat positions', desc: 'widgets.w_seats_desc', descFb: 'Your saved seat positions. Tap one to move the seat; works in Park only.' },
     ],
 
     config: null,

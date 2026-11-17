@@ -141,6 +141,9 @@ public class QualitySettingsApiHandler {
             sendTelegramStatus(out);
             return true;
         }
+        if (path.equals("/api/settings/logging")) {
+            return LogsApiHandler.handleLevel(method, body, out);
+        }
         return false;
     }
 
@@ -303,7 +306,7 @@ public class QualitySettingsApiHandler {
         response.put("recordingsStorageType", storage.getRecordingsStorageType().name());
         response.put("surveillanceStorageType", storage.getSurveillanceStorageType().name());
         response.put("recordingsStorageTypeActive", storage.getActiveRecordingsStorageType().name());
-        response.put("surveillanceStorageTypeActive", storage.getActiveSurveillanceStorageType().name());
+        response.put("surveillanceStorageTypeActive", storage.getReportedSurveillanceStorageType().name());
 
         // SD card info. Each get*Space() builds a fresh StatFs (plus an
         // exists()/isDirectory() pair), so the raw + formatted pairs below read
@@ -460,10 +463,10 @@ public class QualitySettingsApiHandler {
                     long recDelta = 0, survDelta = 0;
                     long recSize = storage.getRecordingsSize();
                     long recLimitBytes = storage.getRecordingsLimitMb() * 1024 * 1024;
-                    if (recSize > recLimitBytes) recDelta = recSize - recLimitBytes;
+                    if (recLimitBytes > 0 && recSize > recLimitBytes) recDelta = recSize - recLimitBytes;
                     long survSize = storage.getSurveillanceSize();
                     long survLimitBytes = storage.getSurveillanceLimitMb() * 1024 * 1024;
-                    if (survSize > survLimitBytes) survDelta = survSize - survLimitBytes;
+                    if (survLimitBytes > 0 && survSize > survLimitBytes) survDelta = survSize - survLimitBytes;
                     if (recDelta > 0 || survDelta > 0) {
                         CameraDaemon.log("Storage limit change will reap ~"
                             + StorageManager.formatSize(recDelta) + " recordings, ~"
@@ -483,7 +486,7 @@ public class QualitySettingsApiHandler {
             response.put("recordingsStorageType", storage.getRecordingsStorageType().name());
             response.put("surveillanceStorageType", storage.getSurveillanceStorageType().name());
             response.put("recordingsStorageTypeActive", storage.getActiveRecordingsStorageType().name());
-            response.put("surveillanceStorageTypeActive", storage.getActiveSurveillanceStorageType().name());
+            response.put("surveillanceStorageTypeActive", storage.getReportedSurveillanceStorageType().name());
             response.put("recordingsPath", storage.getRecordingsPath());
             response.put("surveillancePath", storage.getSurveillancePath());
 
@@ -528,6 +531,9 @@ public class QualitySettingsApiHandler {
                 reader.close();
                 
                 JSONObject config = new JSONObject(sb.toString());
+                // (never the device secret: it's the login code, and loopback callers get here without one)
+                JSONObject auth = config.optJSONObject("auth");
+                if (auth != null) auth.remove("deviceSecret");
                 response.put("config", config);
                 response.put("lastModified", unifiedFile.lastModified());
             } else {
@@ -616,6 +622,11 @@ public class QualitySettingsApiHandler {
                 if (k.startsWith("__overdrive")) internalKeys.add(k);
             }
             for (String k : internalKeys) data.remove(k);
+            // The device secret is the daemon's to keep; no request writes it.
+            if ("auth".equals(section)) {
+                data.remove("deviceSecret");
+                data.remove("handedOff");
+            }
 
             // This is a GENERIC section writer, so without this it is a way straight around
             // the shell-execution gates in KeymapApiHandler.handleSaveConfig and
@@ -883,6 +894,15 @@ public class QualitySettingsApiHandler {
                     if (oem != null) oem.reapplyAxisProfileFromUcm();
                 } catch (Exception e) {
                     CameraDaemon.log("oem idle-throttle reapply dispatch failed: " + e.getMessage());
+                }
+            }
+            // Cluster speed badge switch (Projection screen + RoadSense): show/hide it on an open projection now.
+            if ("surveillance".equals(section)
+                    && data.has(com.overdrive.app.surveillance.ClusterSpeedOverlay.CONFIG_KEY)) {
+                try {
+                    com.overdrive.app.surveillance.ClusterSpeedOverlay.onEnabledChanged();
+                } catch (Exception e) {
+                    CameraDaemon.log("cluster speed overlay dispatch failed: " + e.getMessage());
                 }
             }
 
@@ -1197,10 +1217,14 @@ public class QualitySettingsApiHandler {
                 ? pipeline.getCamera().getMeasuredFps() : 0f;
             if (measured > 0f) {
                 response.put("cameraFpsActual", Math.round(measured * 10) / 10.0);
-                if (Math.abs(measured - currentFps) > 1.5f) {
+                // Compare with the rate the camera is running now: parked it is the
+                // surveillance rate, not the drive setting (#545).
+                int requested = pipeline.getCamera().getTargetFps();
+                if (requested <= 0) requested = currentFps;
+                if (Math.abs(measured - requested) > 1.5f) {
                     response.put("cameraFpsClampNote",
                         "HAL emitting at ~" + Math.round(measured)
-                            + " fps (requested " + currentFps + ")");
+                            + " fps (requested " + requested + ")");
                 }
             }
         } catch (Exception ignored) {}

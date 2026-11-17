@@ -519,6 +519,18 @@ public class TripDatabase {
                 "sum_squared_litres_per_km REAL DEFAULT 0" +
                 ")"
             );
+
+            // The driver's range calibration: one row, id 1.
+            stmt.execute(
+                "CREATE TABLE IF NOT EXISTS range_calibration (" +
+                "id INTEGER PRIMARY KEY," +
+                "norm_rate DOUBLE PRECISION," +
+                "picked_rate DOUBLE PRECISION," +
+                "picked_range_km DOUBLE PRECISION," +
+                "picked_soc DOUBLE PRECISION," +
+                "set_at_ms BIGINT" +
+                ")"
+            );
         }
     }
 
@@ -1546,7 +1558,7 @@ public class TripDatabase {
         // Order matters only weakly here (no FK constraints in the schema),
         // but child-like tables before parent feels right and matches the
         // create-order idiom used elsewhere in this file.
-        String[] tables = {"consumption_buckets", "fuel_consumption_buckets",
+        String[] tables = {"consumption_buckets", "fuel_consumption_buckets", "range_calibration",
                            "monthly_rollups", "weekly_rollups", "routes", "trips"};
         try (Statement stmt = connection.createStatement()) {
             for (String t : tables) {
@@ -2973,6 +2985,80 @@ public class TripDatabase {
             }
         } catch (Exception e) {
             logger.error("Failed to get overall fuel average", e);
+            reconnect();
+        }
+        return null;
+    }
+
+    // ==================== RANGE CALIBRATION ====================
+
+    public synchronized RangeCalibration getRangeCalibration() {
+        if (!ensureConnection()) return null;
+        String sql = "SELECT norm_rate, picked_rate, picked_range_km, picked_soc, set_at_ms "
+                + "FROM range_calibration WHERE id = 1";
+        try (PreparedStatement pstmt = connection.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+            if (rs.next()) {
+                RangeCalibration c = new RangeCalibration(rs.getDouble(1), rs.getDouble(2),
+                        rs.getDouble(3), rs.getDouble(4), rs.getLong(5));
+                return c.isUsable() ? c : null;
+            }
+        } catch (Exception e) {
+            logger.error("Failed to read range calibration", e);
+            reconnect();
+        }
+        return null;
+    }
+
+    public synchronized boolean setRangeCalibration(RangeCalibration c) {
+        if (c == null || !c.isUsable() || !ensureConnection()) return false;
+        String sql = "MERGE INTO range_calibration (id, norm_rate, picked_rate, picked_range_km, "
+                + "picked_soc, set_at_ms) KEY(id) VALUES (1, ?, ?, ?, ?, ?)";
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setDouble(1, c.normRateKwhPerKm);
+            pstmt.setDouble(2, c.pickedRateKwhPerKm);
+            pstmt.setDouble(3, c.pickedRangeKm);
+            pstmt.setDouble(4, c.pickedSocPercent);
+            pstmt.setLong(5, c.setAtMs);
+            pstmt.executeUpdate();
+            return true;
+        } catch (Exception e) {
+            logger.error("Failed to save range calibration", e);
+            reconnect();
+            return false;
+        }
+    }
+
+    public synchronized boolean clearRangeCalibration() {
+        if (!ensureConnection()) return false;
+        try (Statement stmt = connection.createStatement()) {
+            stmt.executeUpdate("DELETE FROM range_calibration");
+            return true;
+        } catch (Exception e) {
+            logger.error("Failed to clear range calibration", e);
+            reconnect();
+            return false;
+        }
+    }
+
+    /**
+     * "count:maxId:km:lastEnd" of finalized trips started since {@code sinceMs}; any insert,
+     * finalize, delete or reset changes it. Null when the table can't be read.
+     */
+    public synchronized String getTripsFingerprint(long sinceMs) {
+        if (!ensureConnection()) return null;
+        String sql = "SELECT COUNT(*), COALESCE(MAX(id), 0), COALESCE(SUM(distance_km), 0), "
+                + "COALESCE(MAX(end_time), 0) FROM trips WHERE start_time >= ? AND end_time > 0";
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setLong(1, sinceMs);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getLong(1) + ":" + rs.getLong(2) + ":" + rs.getDouble(3)
+                            + ":" + rs.getLong(4);
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Failed to read trips fingerprint", e);
             reconnect();
         }
         return null;

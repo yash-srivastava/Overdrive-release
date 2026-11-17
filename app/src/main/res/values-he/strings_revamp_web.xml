@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="web_state_retry_now">נסה שוב עכשיו</string>
+    <string name="web_state_retry_in">ניסיון חוזר אוטומטי · הניסיון הבא בעוד %1$d שנ׳</string>
+    <string name="web_state_retrying_now">ניסיון חוזר אוטומטי · מנסה עכשיו…</string>
+    <string name="web_state_sign_in_title">לא ניתן היה להתחבר לדף הזה</string>
+    <string name="web_state_sign_in_body">תהליך הרקע של המצלמה פועל, אבל לא קיבל את ההתחברות של האפליקציה. OverDrive משחזר אותה אוטומטית כל עוד ADB מחובר.</string>
+</resources>

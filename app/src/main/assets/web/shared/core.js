@@ -166,10 +166,13 @@ BYD.i18n = (function () {
         try { localStorage.setItem(STORAGE_KEY, lang); } catch (e) { /* private mode */ }
     }
 
-    // Last catalog fetched per language, kept in localStorage so the next page
+    // The active non-English catalog, kept in localStorage so the next page
     // load can translate synchronously instead of painting the English HTML
-    // and swapping text in after the fetch. Only non-English users write it.
+    // and swapping text in after the fetch. One entry only; CATALOG_LANG_KEY
+    // names the active language for theme.js, which runs before this file and
+    // has no resolveLang().
     var CATALOG_CACHE_PREFIX = 'overdrive_i18n_catalog_';
+    var CATALOG_LANG_KEY = 'overdrive_i18n_catalog_lang';
     function readCachedCatalog(lang) {
         try {
             var raw = localStorage.getItem(CATALOG_CACHE_PREFIX + lang);
@@ -177,19 +180,35 @@ BYD.i18n = (function () {
         } catch (e) { return null; }
     }
     function writeCachedCatalog(lang, cat) {
-        if (!cat || state.lang === DEFAULT_LANG) return;
-        try { localStorage.setItem(CATALOG_CACHE_PREFIX + lang, JSON.stringify(cat)); } catch (e) { /* quota / private mode */ }
+        // Never the English fallback: a stale copy would hide keys added since
+        // behind raw key names in script-built text (see init()).
+        if (!cat || lang === DEFAULT_LANG || lang !== state.lang) return;
+        try {
+            for (var i = localStorage.length - 1; i >= 0; i--) {
+                var k = localStorage.key(i);
+                if (k && k.indexOf(CATALOG_CACHE_PREFIX) === 0 && k !== CATALOG_LANG_KEY
+                        && k !== CATALOG_CACHE_PREFIX + lang) localStorage.removeItem(k);
+            }
+            localStorage.setItem(CATALOG_CACHE_PREFIX + lang, JSON.stringify(cat));
+        } catch (e) { /* quota / private mode */ }
     }
-    /** Catalog available without waiting: the app bundle in-app, else the cache. */
-    function syncCatalog(lang) {
+    function noteActiveLang(lang) {
+        try { localStorage.setItem(CATALOG_LANG_KEY, lang); } catch (e) { /* private mode */ }
+    }
+    /** The app bundle's catalog; null outside the app. */
+    function bundledCatalog(lang) {
         try {
             if (window.AndroidBridge
                     && typeof window.AndroidBridge.getI18nCatalog === 'function') {
                 var bundled = window.AndroidBridge.getI18nCatalog(lang);
                 if (bundled) return JSON.parse(bundled);
             }
-        } catch (e) { /* fall through to the cache */ }
-        return readCachedCatalog(lang);
+        } catch (e) { /* no bundle */ }
+        return null;
+    }
+    /** Catalog available without waiting: the app bundle in-app, else the cache. */
+    function syncCatalog(lang) {
+        return bundledCatalog(lang) || readCachedCatalog(lang);
     }
 
     /** Fetch the catalog JSON for `lang`. Falls back to en on failure. */
@@ -406,6 +425,7 @@ BYD.i18n = (function () {
         var resolved = resolveLang(lang);
         if (resolved === state.lang && state.loaded) return Promise.resolve();
         state.lang = resolved;
+        noteActiveLang(resolved);
         var revision = ++state.loadRevision;
         setStored(resolved);
         // A server/native-origin update has already been persisted. Do not
@@ -510,6 +530,7 @@ BYD.i18n = (function () {
         if (!picked) picked = getStored() || detectFromBrowser();
         var initialLang = resolveLang(picked);
         state.lang = initialLang;
+        noteActiveLang(initialLang);
         var revision = ++state.loadRevision;
         state.loadingPromise = fetchCatalog(initialLang).then(function (cat) {
             if (revision !== state.loadRevision || state.lang !== initialLang) return cat;
@@ -583,30 +604,43 @@ BYD.i18n = (function () {
      * so a stale cache is corrected without blocking the first paint.
      */
     (function earlyHydrate() {
-        var picked = null;
         try {
-            if (inAppWebView() && typeof window.AndroidBridge.getAppLocale === 'function') {
-                picked = window.AndroidBridge.getAppLocale();
+            // Stop theme.js's parse-time observer at DOMContentLoaded whatever happens below;
+            // left running it would revert script writes to [data-i18n] nodes for the page's life.
+            var early = window.__odI18nEarly;
+            if (early) {
+                var stopEarly = function () { early.stop(); };
+                if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', stopEarly);
+                else stopEarly();
             }
-        } catch (e) {}
-        var lang = resolveLang(picked || getStored() || detectFromBrowser());
-        if (lang === DEFAULT_LANG) return;
-        var early = window.__odI18nEarly;
-        var cat = (early && early.lang === lang) ? early.catalog : syncCatalog(lang);
-        if (early) {
-            var stopEarly = function () { early.stop(); };
-            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', stopEarly);
-            else stopEarly();
-        }
-        if (!cat) return;
-        state.lang = lang;
-        state.catalog = cat;
-        state.enCatalog = syncCatalog(DEFAULT_LANG);
-        state.loaded = true;
-        hydrate(document);
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', function () { hydrate(document); });
-        }
+            var picked = null;
+            try {
+                if (inAppWebView() && typeof window.AndroidBridge.getAppLocale === 'function') {
+                    picked = window.AndroidBridge.getAppLocale();
+                }
+            } catch (e) {}
+            var lang = resolveLang(picked || getStored() || detectFromBrowser());
+            if (lang === DEFAULT_LANG) return;
+            var cat = (early && early.lang === lang) ? early.catalog : syncCatalog(lang);
+            if (!cat) return;
+            state.lang = lang;
+            state.catalog = cat;
+            // English fallback from the app bundle only: a cached copy would make init() skip the
+            // fresh English fetch, and keys added since would render as raw key names.
+            state.enCatalog = bundledCatalog(DEFAULT_LANG);
+            var earlyPass = function () {
+                // Once init() has started it owns hydration; another pass would overwrite text
+                // that page scripts wrote in between.
+                if (state.loadingPromise) return;
+                state.loaded = true;
+                hydrate(document);
+                // Without the English fallback (browser), t() would hand page scripts raw key
+                // names for untranslated keys, so it keeps answering null until init() is done.
+                if (!state.enCatalog) state.loaded = false;
+            };
+            earlyPass();
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', earlyPass);
+        } catch (e) { /* init() still translates the page */ }
     })();
 
     return {
@@ -819,6 +853,57 @@ BYD.units = {
 };
 
 /**
+ * Clock times follow the head unit's 12/24-hour switch (/status.clock24h).
+ * Until the head unit has one set, times keep the page language's default.
+ */
+BYD.clock = (function () {
+    var KEY = 'overdrive_clock_24h';
+    var h24 = null;
+    try {
+        var saved = localStorage.getItem(KEY);
+        h24 = saved === '24' ? true : (saved === '12' ? false : null);
+    } catch (e) { /* private mode */ }
+
+    function pad(n) { return (n < 10 ? '0' : '') + n; }
+
+    /** Intl options with the head unit's hour12 added once it is known. */
+    function options(base) {
+        var opts = {};
+        for (var k in base) opts[k] = base[k];
+        if (h24 !== null) opts.hour12 = !h24;
+        return opts;
+    }
+
+    return {
+        is24h: function () { return h24; },
+
+        set: function (value) {
+            var next = (value === true || value === false) ? value : null;
+            if (next === h24) return;
+            h24 = next;
+            try {
+                if (next === null) localStorage.removeItem(KEY);
+                else localStorage.setItem(KEY, next ? '24' : '12');
+            } catch (e) { /* private mode */ }
+            try {
+                window.dispatchEvent(new CustomEvent('byd:clock-changed', { detail: { h24: next } }));
+            } catch (e) { /* CustomEvent unsupported */ }
+        },
+
+        options: options,
+
+        /** Time of day for a Date or epoch ms, e.g. "19:25" or "07:25 PM". */
+        time: function (value, lang, base) {
+            var d = value instanceof Date ? value : new Date(value);
+            if (isNaN(d.getTime())) return '';
+            // Built by hand: some engines print "24:05" for hour12:false.
+            if (h24 === true) return pad(d.getHours()) + ':' + pad(d.getMinutes());
+            return d.toLocaleTimeString(lang, options(base || { hour: '2-digit', minute: '2-digit' }));
+        }
+    };
+})();
+
+/**
  * Screenshot privacy mode.
  *
  * The native Settings switch is persisted in unified config and echoed by
@@ -1009,6 +1094,8 @@ BYD.core = {
     // instantly on show (visibilitychange below forces an immediate tick).
     POLL_INTERVAL_HIDDEN_MS: 60000,
     POLL_STALE_AFTER_FAILURES: 2,
+    // A request in flight when the link dropped can hang on a dead socket; bound it so the poll resumes.
+    STATUS_FETCH_TIMEOUT_MS: 8000,
 
     /**
      * Initialize core module
@@ -1032,23 +1119,28 @@ BYD.core = {
             if (!document.hidden) {
                 const el = document.getElementById('currentTime');
                 if (el) {
-                    const time = new Date().toLocaleTimeString(BYD.i18n.getLang(), {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        hour12: false
-                    });
+                    const time = BYD.clock.is24h() !== null
+                        ? BYD.clock.time(new Date(), BYD.i18n.getLang())
+                        : new Date().toLocaleTimeString(BYD.i18n.getLang(), {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: false
+                        });
                     if (el.textContent !== time) { el.textContent = time; }
                 }
             }
             // Align the next wakeup with the next minute boundary.
             self.clockTimer = setTimeout(update, 60000 - (Date.now() % 60000) + 20);
         };
-        document.addEventListener('visibilitychange', () => {
-            if (!document.hidden) {
-                clearTimeout(self.clockTimer);
-                update();
-            }
-        });
+        const refreshNow = () => {
+            if (document.hidden) return;
+            clearTimeout(self.clockTimer);
+            update();
+        };
+        document.addEventListener('visibilitychange', refreshNow);
+        // The 12/24 h switch and a language change no longer ride a 1 s tick.
+        window.addEventListener('byd:clock-changed', refreshNow);
+        if (BYD.i18n && BYD.i18n.onChange) BYD.i18n.onChange(refreshNow);
         update();
     },
 
@@ -1099,6 +1191,24 @@ BYD.core = {
                 }
             });
         }
+        // Network back, page restored from the back/forward cache or window refocused: poll now.
+        if (typeof window !== 'undefined' && window.addEventListener) {
+            var wake = function () {
+                if (self.tickInFlight || (typeof document !== 'undefined' && document.hidden)) return;
+                if (self.pollInterval) { clearTimeout(self.pollInterval); self.pollInterval = null; }
+                tick();
+            };
+            window.addEventListener('online', wake);
+            window.addEventListener('pageshow', wake);
+            window.addEventListener('focus', wake);
+        }
+        // The chain re-arms itself after every tick; restart it if it ever ends with nothing pending.
+        setInterval(function () {
+            if (!self.tickInFlight && !self.pollInterval
+                    && !(typeof document !== 'undefined' && document.hidden)) {
+                tick();
+            }
+        }, 15000);
         tick();
     },
 
@@ -1119,13 +1229,29 @@ BYD.core = {
      *          or null on failure.
      */
     async refreshStatus() {
+        var abort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+        var deadlineTimer = null;
+        var timeoutMs = this.STATUS_FETCH_TIMEOUT_MS;
+        // Chrome 58 (in-car WebView) has no AbortController: the race still releases the poll.
+        var deadline = new Promise(function (resolve, reject) {
+            deadlineTimer = setTimeout(function () {
+                if (abort) { try { abort.abort(); } catch (ignored) {} }
+                reject(new Error('status request timed out'));
+            }, timeoutMs);
+        });
+        deadline.catch(function () {});
+        var recovered = this.pollFailureCount >= this.POLL_STALE_AFTER_FAILURES;
         try {
-            const res = await fetch('/status');
+            const res = await Promise.race([
+                abort ? fetch('/status', { signal: abort.signal }) : fetch('/status'),
+                deadline
+            ]);
             // 401 means JWT is missing/expired/invalid — bounce to login so
             // the user lands on a screen that actually does something. The
             // global fetch wrapper in auth.js attaches Authorization but does
             // NOT redirect on 401; we handle it here for /status specifically.
             if (res.status === 401) {
+                clearTimeout(deadlineTimer);
                 this._showStaleBanner('disconnected');
                 const path = window.location.pathname + window.location.search;
                 window.location.href = '/login.html?redirect=' + encodeURIComponent(path);
@@ -1134,7 +1260,8 @@ BYD.core = {
             if (!res.ok) {
                 throw new Error('HTTP ' + res.status);
             }
-            const status = await res.json();
+            const status = await Promise.race([res.json(), deadline]);
+            clearTimeout(deadlineTimer);
             this.pollFailureCount = 0;
             this._clearStaleBanner();
             this.lastStatus = status;
@@ -1176,6 +1303,9 @@ BYD.core = {
                     || status.pressureUnit === 'bar') {
                 BYD.units.pressureMode = status.pressureUnit;
             }
+
+            // Head unit 12/24-hour switch; absent means not read yet, so keep the saved one.
+            if ('clock24h' in status) BYD.clock.set(status.clock24h);
 
             // Locale sync — ONLY in the Android WebView, where the app's
             // language picker is the source of truth. External tunnel /
@@ -1272,8 +1402,15 @@ BYD.core = {
                 BYD.recording.updateFromStatus(status);
             }
 
+            if (recovered) {
+                // Pages restart their own pollers once the link is back.
+                setTimeout(function () {
+                    try { document.dispatchEvent(new CustomEvent('byd:reconnected')); } catch (ignored) {}
+                }, 0);
+            }
             return status;
         } catch (e) {
+            clearTimeout(deadlineTimer);
             this.pollFailureCount++;
             if (window.RemoteAccess && RemoteAccess.updateBluetoothStatus) {
                 RemoteAccess.updateBluetoothStatus(this.lastStatus && this.lastStatus.bluetooth, true);
@@ -1541,38 +1678,53 @@ BYD.core = {
         const netIcon = document.getElementById('networkIcon');
         if (!netEl) return;
 
+        // The label names the connection; the value holds only its address.
         const net = status.network;
-        // Status is polled frequently; avoid reparsing identical SVG/HTML and
-        // invalidating layout when the connection details are unchanged.
-        const setHtml = (el, html) => {
-            if (el && el.innerHTML !== html) el.innerHTML = html;
+        const showAddress = (ip) => {
+            netEl.textContent = ip || '--';
+            netEl.className = ip ? 'status-value on net-addr' : 'status-value';
+            if (ip) netEl.setAttribute('title', ip); else netEl.removeAttribute('title');
         };
         if (!net) {
-            netEl.textContent = '--';
-            netEl.className = 'status-value';
-            setHtml(netIcon, this._wifiSvg());
+            this._setNetworkLabel('status.network', null);
+            showAddress('');
+            if (netIcon) netIcon.innerHTML = this._wifiSvg();
             return;
         }
 
         if (net.type === 'wifi') {
-            const ssid = net.ssid || BYD.i18n.t('status.wifi');
-            const ip = net.ip || '';
-            // Show SSID on first line, IP smaller below
-            setHtml(netEl, '<span class="net-ssid">' + this._esc(ssid) + '</span>' +
-                (ip ? '<span class="net-ip">' + this._esc(ip) + '</span>' : ''));
-            netEl.className = 'status-value on net-info';
-            setHtml(netIcon, this._wifiSvg());
+            this._setNetworkLabel('status.wifi', net.ssid || null);
+            showAddress(net.ip || '');
+            if (netIcon) netIcon.innerHTML = this._wifiSvg();
         } else if (net.type === 'cellular') {
-            const ip = net.ip || '';
-            setHtml(netEl, '<span class="net-ssid">' + this._esc(BYD.i18n.t('status.mobile_data')) + '</span>' +
-                (ip ? '<span class="net-ip">' + this._esc(ip) + '</span>' : ''));
-            netEl.className = 'status-value on net-info';
-            setHtml(netIcon, this._cellSvg());
+            this._setNetworkLabel('status.mobile_data', null);
+            showAddress(net.ip || '');
+            if (netIcon) netIcon.innerHTML = this._cellSvg();
         } else {
-            netEl.textContent = BYD.i18n.t('status.no_network');
+            this._setNetworkLabel('status.no_network', null);
+            showAddress('');
             netEl.className = 'status-value off';
-            setHtml(netIcon, this._wifiOffSvg());
+            if (netIcon) netIcon.innerHTML = this._wifiOffSvg();
         }
+    },
+
+    /** Rewrites the network row's label text and its i18n key, so a language switch keeps it. */
+    _setNetworkLabel(key, tooltip) {
+        const icon = document.getElementById('networkIcon');
+        const label = icon && icon.parentNode;
+        if (!label || !label.setAttribute) return;
+        label.setAttribute('data-i18n', key);
+        if (tooltip) label.setAttribute('title', tooltip); else label.removeAttribute('title');
+        const text = BYD.i18n.t(key);
+        if (text == null || text === key) return;
+        for (let i = 0; i < label.childNodes.length; i++) {
+            const node = label.childNodes[i];
+            if (node.nodeType === 3 && node.nodeValue.replace(/\s/g, '').length > 0) {
+                node.nodeValue = text;
+                return;
+            }
+        }
+        label.appendChild(document.createTextNode(text));
     },
 
     /** Escape HTML */

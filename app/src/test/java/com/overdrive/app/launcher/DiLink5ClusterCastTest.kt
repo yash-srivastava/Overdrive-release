@@ -8,8 +8,142 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 class DiLink5ClusterCastTest {
+    @Test
+    fun aConfirmedReturnMakesTheSameTasksNextFullscreenResetADistinctDensityLoss() {
+        val watch = DirectDensityLossEpisodes(17)
+        val strikes = linkedSetOf<String>()
+        val returned = ClusterFreeformWindow.TaskLocation(true, 42, 8, 1)
+        assertTrue(watch.confirmTaskReturn(returned, 8))
+        val reason = directDensityLossReason(42, 42, 0, 8, 1)
+        assertEquals(DirectDensityLossReason.TASK_MODE_RESET, reason)
+        val first = watch.episodeForLoss(42)
+        assertTrue(recordDirectDensityLossForAttempt(strikes, "di5:17", first))
+
+        // An accepted correction/relaunch or an unreadable foreground-compatible poll
+        // does not prove a return; every still-off-target poll remains the same loss.
+        assertFalse(watch.confirmTaskReturn(ClusterFreeformWindow.TaskLocation(false, 42, 8), 8))
+        assertFalse(watch.confirmTaskReturn(ClusterFreeformWindow.TaskLocation(true, -1, 8), 8))
+        assertFalse(watch.confirmTaskReturn(ClusterFreeformWindow.TaskLocation(true, 42, -1), 8))
+        assertFalse(watch.confirmTaskReturn(ClusterFreeformWindow.TaskLocation(true, 42, 0), 8))
+        assertEquals(first, watch.episodeForLoss(0)) // relaunch cleared the captured placed ID
+        assertFalse(recordDirectDensityLossForAttempt(strikes, "di5:17", watch.episodeForLoss(42)))
+        assertEquals(1, strikes.size)
+
+        assertTrue(watch.confirmTaskReturn(returned, 8))
+        assertTrue(watch.confirmTaskReturn(returned, 8)) // repeated healthy polls do not add episodes
+        val second = watch.episodeForLoss(42)
+        assertEquals("17:1:42", second)
+        assertTrue(recordDirectDensityLossForAttempt(strikes, "di5:17", second))
+        assertEquals(2, strikes.size)
+        val unsafe = mapOf("com.example.navigator" to DirectDensityVerdict(reason!!, 1234L))
+        assertEquals(unsafe, readDirectDensityVerdicts(
+            JSONObject(serializeDirectDensityVerdicts(unsafe).toString()),
+        ))
+    }
+
+    @Test
+    fun alternativeTargetPreservesDeferredEnableAndAppVisibleOrderingWithoutDuplicateCommands() {
+        val events = mutableListOf<String>()
+        assertTrue(prepareDiLink5AlternativeCompositor(true, false) {
+            events += "enable16"
+            true
+        })
+        assertTrue(events.isEmpty()) // the shell-only replacement must place and verify first
+        events += "verified-shell-placement"
+        events += "enable16"
+        assertEquals(listOf("verified-shell-placement", "enable16"), events)
+
+        events.clear()
+        assertFalse(prepareDiLink5AlternativeCompositor(true, true) {
+            events += "marked-enable16"
+            true
+        })
+        events += "app-visible-placement"
+        assertEquals(listOf("marked-enable16", "app-visible-placement"), events)
+
+        events.clear()
+        assertFalse(prepareDiLink5AlternativeCompositor(false, true) {
+            events += "duplicate-enable16"
+            true
+        })
+        assertTrue(events.isEmpty())
+    }
+
+    @Test(expected = IllegalStateException::class)
+    fun rejectedAlternativeEnableCannotProceedAsAnUnmarkedSuccessfulPlacement() {
+        prepareDiLink5AlternativeCompositor(true, true) { false }
+    }
+
+    @Test
+    fun resizeRefusesAnotherPackageOrAnotherSessionOfTheSamePackage() {
+        assertTrue(diLink5ResizeOwnershipMatches("com.example.app", 7, "com.example.app", 7))
+        assertFalse(diLink5ResizeOwnershipMatches("com.old.app", 7, "com.example.app", 7))
+        assertFalse(diLink5ResizeOwnershipMatches("com.example.app", 7, "com.example.app", 8))
+        assertFalse(diLink5ResizeOwnershipMatches("com.example.app", -1, "com.example.app", 8))
+        assertTrue(diLink5ResizeOwnershipMatches(null, 0, "com.example.app", 8))
+    }
+
+    @Test
+    fun unpublishedAllocationFailureRetainsGenerationUntilTheNextConfirmedCleanup() {
+        val pending = linkedSetOf<Long>()
+        val ownership = linkedSetOf<Long>()
+        val allocation = startHostedAllocation<String>(
+            register = { pending += 7; ownership += 7; true },
+            start = { null },
+        )
+        assertNull(allocation.value) // no Session was ever published
+        var releaseSucceeds = false
+        fun cleanup(): Boolean = completeHostedGenerationCleanup(
+            densityRestored = true,
+            densityLeasePending = false,
+        ) {
+            finishHostedResourceCleanup(
+                pending.toList(),
+                release = { generation ->
+                    if (!releaseSucceeds) false else {
+                        ownership.remove(generation)
+                        true
+                    }
+                },
+                clearRegistration = pending::remove,
+            )
+        }
+        assertFalse(cleanup())
+        assertEquals(setOf(7L), pending)
+        assertEquals(setOf(7L), ownership)
+        releaseSucceeds = true
+        assertTrue(cleanup())
+        assertTrue(pending.isEmpty())
+        assertTrue(ownership.isEmpty())
+    }
+
+    @Test
+    fun failedDensityRestoreAndAccDeferralRetainAllHostedResourcesForRecovery() {
+        val events = mutableListOf<String>()
+        val resources = linkedSetOf(7L, 8L)
+        val release = {
+            finishHostedResourceCleanup(
+                resources.toList(),
+                release = { events += "release-$it"; true },
+                clearRegistration = resources::remove,
+            )
+        }
+        assertFalse(completeHostedGenerationCleanup(false, true, release))
+        assertFalse(completeHostedGenerationCleanup(true, true, release))
+        assertTrue(events.isEmpty())
+        assertEquals(setOf(7L, 8L), resources)
+        assertTrue(completeHostedGenerationCleanup(true, false, release))
+        assertEquals(listOf("release-7", "release-8"), events)
+        assertTrue(resources.isEmpty())
+    }
+
     @Test
     fun trinketFirmwareRequiresTheOemSharedDisplay() {
         assertTrue(
@@ -32,9 +166,446 @@ class DiLink5ClusterCastTest {
     }
 
     @Test
+    fun containerEnableRequiresAPositiveResolvedAndAppVisibleTarget() {
+        assertFalse(canDispatchDiLink5ContainerEnable(-1))
+        assertFalse(canDispatchDiLink5ContainerEnable(Display.DEFAULT_DISPLAY))
+        assertTrue(canDispatchDiLink5ContainerEnable(4))
+
+        val source = File("src/main/java/com/overdrive/app/launcher/DiLink5ClusterCast.kt").readText()
+        val methodStart = source.indexOf("private fun enableAndAwaitProjectionDisplay(")
+        val methodEnd = source.indexOf("private fun isAutoProjectionTransport()", methodStart)
+        val method = source.substring(methodStart, methodEnd)
+        val visibilityCheck = method.indexOf("isAppDisplayVisible(")
+        val enableDispatch = method.indexOf("sendDiLink5ContainerInfoResult(16)")
+        assertTrue(visibilityCheck >= 0)
+        assertTrue(enableDispatch > visibilityCheck)
+    }
+
+    @Test
+    fun autoUsesHostedForEveryDefiniteDirectFailureOnly() {
+        assertTrue(shouldFallbackToHostedAfterDirectFailure("direct", true, false, true))
+        assertFalse(shouldFallbackToHostedAfterDirectFailure("direct", true, false, false))
+        assertFalse(shouldFallbackToHostedAfterDirectFailure("direct", false, false, true))
+        assertFalse(shouldFallbackToHostedAfterDirectFailure("hosted", true, false, true))
+        assertFalse(shouldFallbackToHostedAfterDirectFailure("direct", true, true, true))
+    }
+
+    @Test
+    fun persistedHostedGenerationsReserveFutureAdmission() {
+        assertEquals(1L, nextPositiveGeneration(0L))
+        assertEquals(43L, nextPositiveGeneration(42L))
+        assertEquals(1L, nextPositiveGeneration(Long.MAX_VALUE))
+        val source = File("src/main/java/com/overdrive/app/launcher/DiLink5ClusterCast.kt").readText()
+        assertTrue(source.contains("prepareHostedOwnershipForAdmission()"))
+        assertTrue(source.contains("previous hosted projection ownership is unresolved"))
+        assertTrue(source.contains("DiLink5ProjectionOwnership.loadAll()"))
+        assertTrue(source.contains("nextHostedResourceGeneration()"))
+    }
+
+    @Test
+    fun markerTargetAndDensityOrderingPreserveRecoveryEvidence() {
+        val source = File("src/main/java/com/overdrive/app/launcher/DiLink5ClusterCast.kt").readText()
+        val markerStart = source.indexOf("private fun markCompositorEnableInFlight(")
+        val markerEnd = source.indexOf("private fun markDisplayReclaimed(", markerStart)
+        val markers = source.substring(markerStart, markerEnd)
+        assertEquals(3, Regex("appMoved = appMovedGeneration == expectedGeneration").findAll(markers).count())
+
+        val enableStart = source.indexOf("private fun enableAndAwaitProjectionDisplay(")
+        val enableEnd = source.indexOf("private fun isAutoProjectionTransport()", enableStart)
+        val enable = source.substring(enableStart, enableEnd)
+        assertTrue(enable.indexOf("val preferredName") < enable.indexOf("isAppDisplayVisible("))
+        assertTrue(enable.contains("return configureProjectionTarget(context, preEnableTarget"))
+
+        val hostedStart = source.indexOf("private fun configureHostedProjectionTarget(")
+        val hostedEnd = source.indexOf("private fun projectionOwnership(", hostedStart)
+        val hosted = source.substring(hostedStart, hostedEnd)
+        assertTrue(hosted.indexOf("nativeDensityForDisplay") <
+            hosted.indexOf("HostedProjectionGeometry.calculate"))
+        assertTrue(hosted.indexOf("uncertainHostedResources.getOrPut") <
+            hosted.indexOf("DiLink5HostedProjectionBridge.start("))
+    }
+
+    @Test
+    fun longLivedLifecycleAndFinalMutationFencesCoverAppAndMapSessions() {
+        val source = File("src/main/java/com/overdrive/app/launcher/DiLink5ClusterCast.kt").readText()
+        assertTrue(source.contains("private fun startLifecycleGuardian("))
+        assertTrue(source.contains("LIFECYCLE_GUARD_POLL_MS"))
+        assertTrue(source.contains("projected task exited after startup"))
+        assertTrue(source.contains("projection display disappeared after startup"))
+        assertTrue(source.contains("private val taskMutationLock"))
+        assertTrue(source.contains("withLiveTaskMutation(live"))
+        val surface = source.substring(
+            source.indexOf("fun onHostedSurfaceLost("),
+            source.indexOf("fun currentTargetDisplayWidth", source.indexOf("fun onHostedSurfaceLost(")),
+        )
+        assertTrue(surface.contains("expectedKind = lost.second"))
+        assertTrue(surface.contains("lost.second == SessionKind.APP"))
+        assertTrue(surface.contains("lost.second == SessionKind.MAP"))
+        assertTrue(surface.contains("onDiLink5ProjectionFailed()"))
+    }
+
+    @Test
+    fun mapSurfaceLossClearsProjectorEvenWhenCleanupOwnershipIsRetained() {
+        var mapFailures = 0
+        assertFalse(
+            completeHostedSurfaceLoss(
+                isMap = true,
+                stop = { false },
+                onMapFailure = { mapFailures++ },
+            ),
+        )
+        assertEquals(1, mapFailures)
+
+        assertFalse(
+            completeHostedSurfaceLoss(
+                isMap = false,
+                stop = { false },
+                onMapFailure = { mapFailures++ },
+            ),
+        )
+        assertEquals(1, mapFailures)
+    }
+
+    @Test
+    fun movedPendingResizeSurfaceLossReclaimsTheCanonicalSession() {
+        assertTrue(pendingHostedSurfaceLossNeedsCleanup(
+            preparing = true, active = false, pendingReplacement = false,
+            taskMayBeMoved = false, packageMatches = false,
+        ))
+        assertTrue(pendingHostedSurfaceLossNeedsCleanup(
+            preparing = false, active = true, pendingReplacement = true,
+            taskMayBeMoved = true, packageMatches = true,
+        ))
+        // An unmoved replacement can fail while the previous projection remains usable.
+        assertFalse(pendingHostedSurfaceLossNeedsCleanup(
+            preparing = false, active = true, pendingReplacement = true,
+            taskMayBeMoved = false, packageMatches = true,
+        ))
+        assertFalse(pendingHostedSurfaceLossNeedsCleanup(
+            preparing = false, active = true, pendingReplacement = true,
+            taskMayBeMoved = true, packageMatches = false,
+        ))
+        assertFalse(pendingHostedSurfaceLossNeedsCleanup(
+            preparing = false, active = false, pendingReplacement = true,
+            taskMayBeMoved = true, packageMatches = true,
+        ))
+        // A predecessor awaiting release is cleanup-owned, but is no longer a pending replacement.
+        assertFalse(pendingHostedSurfaceLossNeedsCleanup(
+            preparing = false, active = true, pendingReplacement = false,
+            taskMayBeMoved = true, packageMatches = true,
+        ))
+    }
+
+    @Test
+    fun retiredSurfaceLossAndAQueuedOldLossCannotStopThePublishedReplacement() {
+        var publishedResource = 17L
+        val cleanupResources = linkedSetOf(17L, 18L)
+        val pendingReplacements = linkedSetOf(18L)
+        fun needsCleanup(resource: Long): Boolean = hostedSurfaceLossNeedsCleanup(
+            resourceGeneration = resource,
+            publishedResourceGeneration = publishedResource,
+            registeredForCleanup = resource in cleanupResources,
+            preparing = false,
+            active = true,
+            pendingReplacement = resource in pendingReplacements,
+            taskMayBeMoved = true,
+            packageMatches = true,
+        )
+
+        assertTrue(needsCleanup(17)) // loss selected while the original Session is published
+        assertTrue(needsCleanup(18)) // a moved, unpublished replacement must still be reclaimed
+
+        // Publication and stop admission hold the same task/state locks in production. Old 17
+        // remains cleanup-owned if its retirement fails; that role must not authorize stopping 18.
+        pendingReplacements.remove(18)
+        publishedResource = 18
+        assertFalse(needsCleanup(17))
+        assertTrue(cleanupResources.contains(17))
+        var stoppedResource = 0L
+        assertFalse(claimHostedSurfaceLoss(
+            current = { needsCleanup(17) },
+            claim = { stoppedResource = publishedResource },
+        ))
+        assertEquals(0L, stoppedResource)
+        assertEquals(18L, publishedResource)
+
+        // Losing the actually published replacement still owns the final cleanup claim.
+        assertTrue(claimHostedSurfaceLoss(
+            current = { needsCleanup(18) },
+            claim = { stoppedResource = publishedResource },
+        ))
+        assertEquals(18L, stoppedResource)
+    }
+
+    @Test
+    fun hostedAllocationRegistersCleanupBeforeStartAndRetainsNullOutcome() {
+        val registered = AtomicBoolean(false)
+        val startEntered = CountDownLatch(1)
+        val releaseStart = CountDownLatch(1)
+        val result = AtomicReference<HostedAllocationStart<String>>()
+        val allocation = Thread {
+            result.set(startHostedAllocation(
+                register = {
+                    registered.set(true)
+                    true
+                },
+                start = {
+                    startEntered.countDown()
+                    releaseStart.await(2, TimeUnit.SECONDS)
+                    null
+                },
+            ))
+        }
+
+        allocation.start()
+        assertTrue(startEntered.await(2, TimeUnit.SECONDS))
+        assertTrue(registered.get())
+        releaseStart.countDown()
+        allocation.join(2_000L)
+        assertTrue(result.get().registered)
+        assertTrue(result.get().publicationAllowed)
+        assertNull(result.get().value)
+
+        val stillCurrent = AtomicBoolean(true)
+        val lateEntered = CountDownLatch(1)
+        val releaseLate = CountDownLatch(1)
+        val late = AtomicReference<HostedAllocationStart<String>>()
+        val lateWorker = Thread {
+            late.set(startHostedAllocation(
+                register = { true },
+                start = {
+                    lateEntered.countDown()
+                    releaseLate.await(2, TimeUnit.SECONDS)
+                    "display"
+                },
+                current = { stillCurrent.get() },
+            ))
+        }
+        lateWorker.start()
+        assertTrue(lateEntered.await(2, TimeUnit.SECONDS))
+        stillCurrent.set(false)
+        releaseLate.countDown()
+        lateWorker.join(2_000L)
+        assertFalse(lateWorker.isAlive)
+        assertTrue(late.get().registered)
+        assertFalse(late.get().publicationAllowed)
+        assertEquals("display", late.get().value)
+
+        var started = false
+        val rejected = startHostedAllocation(
+            register = { false },
+            start = { started = true; "unexpected" },
+        )
+        assertFalse(rejected.registered)
+        assertFalse(started)
+    }
+
+    @Test
+    fun guardianAndResizeMutationsShareOneSerializedAuthority() {
+        val authority = TaskMutationAuthority()
+        val guardianEntered = CountDownLatch(1)
+        val releaseGuardian = CountDownLatch(1)
+        val resizeEntered = AtomicBoolean(false)
+        val guardian = Thread {
+            authority.mutate {
+                guardianEntered.countDown()
+                releaseGuardian.await(2, TimeUnit.SECONDS)
+            }
+        }
+        val resize = Thread {
+            authority.mutate { resizeEntered.set(true) }
+        }
+
+        guardian.start()
+        assertTrue(guardianEntered.await(2, TimeUnit.SECONDS))
+        resize.start()
+        Thread.sleep(50L)
+        assertFalse(resizeEntered.get())
+        releaseGuardian.countDown()
+        guardian.join(2_000L)
+        resize.join(2_000L)
+        assertTrue(resizeEntered.get())
+    }
+
+    @Test
+    fun lateHostedAllocationRepublishesBeforeReleaseAndRetainsFailure() {
+        val events = mutableListOf<String>()
+        var registered = true
+        assertFalse(reconcileLateHostedAllocation(
+            republish = { events += "persist"; true },
+            release = { events += "release"; false },
+            updateRegistration = { released -> registered = !released },
+        ))
+        assertEquals(listOf("persist", "release"), events)
+        assertTrue(registered)
+
+        events.clear()
+        assertTrue(reconcileLateHostedAllocation(
+            republish = { events += "persist"; true },
+            release = { events += "release"; true },
+            updateRegistration = { released -> registered = !released },
+        ))
+        assertEquals(listOf("persist", "release"), events)
+        assertFalse(registered)
+        assertTrue(canReleaseUnpublishedHostedResource(false, false))
+        assertFalse(canReleaseUnpublishedHostedResource(true, false))
+        assertFalse(canReleaseUnpublishedHostedResource(false, true))
+    }
+
+    @Test
+    fun hostedMoveDispatchCannotRunBeforeRegistrationOrAfterStopWins() {
+        var current = false
+        var registered = false
+        var dispatched = 0
+        assertFalse(runHostedMoveDispatch(
+            current = { current },
+            register = { registered = true },
+            dispatch = Runnable { dispatched++ },
+        ))
+        assertFalse(registered)
+        assertEquals(0, dispatched)
+
+        current = true
+        assertTrue(runHostedMoveDispatch(
+            current = { current },
+            register = { registered = true },
+            dispatch = Runnable {
+                assertTrue(registered)
+                dispatched++
+            },
+        ))
+        assertEquals(1, dispatched)
+    }
+
+    @Test
+    fun replacementCleanupRegistrationSurvivesUntilDensityAndResourcesAreClean() {
+        var registered = true
+        var releases = 0
+        assertFalse(completeHostedReplacementCleanup(
+            restoreDensity = { false },
+            releaseResources = { releases++; true },
+            clearRegistration = { registered = false },
+        ))
+        assertTrue(registered)
+        assertEquals(0, releases)
+
+        assertFalse(completeHostedReplacementCleanup(
+            restoreDensity = { true },
+            releaseResources = { releases++; false },
+            clearRegistration = { registered = false },
+        ))
+        assertTrue(registered)
+        assertEquals(1, releases)
+
+        assertTrue(completeHostedReplacementCleanup(
+            restoreDensity = { true },
+            releaseResources = { releases++; true },
+            clearRegistration = { registered = false },
+        ))
+        assertFalse(registered)
+        assertEquals(2, releases)
+    }
+
+    @Test
+    fun hostedResizeRetainsEveryPossiblyMovedOrStopRacedReplacement() {
+        assertEquals(
+            HostedResizeMoveDisposition.RELEASE_UNMOVED,
+            hostedResizeMoveDisposition(
+                ClusterFreeformWindow.MoveTaskResult.NOT_DISPATCHED,
+                sessionCurrent = true,
+            ),
+        )
+        assertEquals(
+            HostedResizeMoveDisposition.RETAIN_UNCERTAIN,
+            hostedResizeMoveDisposition(
+                ClusterFreeformWindow.MoveTaskResult.DISPATCHED_UNCONFIRMED,
+                sessionCurrent = true,
+            ),
+        )
+        assertEquals(
+            HostedResizeMoveDisposition.RETAIN_UNCERTAIN,
+            hostedResizeMoveDisposition(
+                ClusterFreeformWindow.MoveTaskResult.NOT_DISPATCHED,
+                sessionCurrent = false,
+            ),
+        )
+        assertEquals(
+            HostedResizeMoveDisposition.CONTINUE_VERIFICATION,
+            hostedResizeMoveDisposition(
+                ClusterFreeformWindow.MoveTaskResult.CONFIRMED,
+                sessionCurrent = true,
+            ),
+        )
+
+        val source = File("src/main/java/com/overdrive/app/launcher/DiLink5ClusterCast.kt").readText()
+        val start = source.indexOf("private fun resizeHosted(")
+        val end = source.indexOf("fun recoverAtBoot()", start)
+        val resize = source.substring(start, end)
+        assertTrue(resize.indexOf("registeredForCleanup") <
+            resize.indexOf("moveTaskToDisplayResult("))
+        assertTrue(resize.indexOf("nativeDensityForDisplay(live.physicalDisplayId)") <
+            resize.indexOf("HostedProjectionGeometry.calculate"))
+        assertTrue(resize.indexOf("startHostedAllocation(") <
+            resize.indexOf("DiLink5HostedProjectionBridge.start("))
+        assertTrue(resize.indexOf("synchronized(taskMutationLock.lock)") <
+            resize.indexOf("findTaskLocation("))
+        assertTrue(resize.indexOf("synchronized(taskMutationLock.lock)") <
+            resize.indexOf("startTaskGuardian("))
+        assertTrue(resize.indexOf("prepareHostedReplacement(") <
+            resize.indexOf("moveTaskToDisplayResult("))
+        assertTrue(resize.indexOf("restoreForSession(densityOwner)") <
+            resize.indexOf("promoteHostedReplacement("))
+        assertTrue(resize.contains("runHostedMoveDispatch("))
+        assertTrue(resize.contains("synchronized(stateLock)"))
+    }
+
+    @Test
+    fun densityAdoptionUsesCompleteOnTargetEvidence() {
+        assertEquals(
+            DensityAdoptionDecision.PRESERVE_ADOPTED,
+            densityAdoptionDecision(true),
+        )
+        assertEquals(
+            DensityAdoptionDecision.APPLY_FOR_NEW_TASK,
+            densityAdoptionDecision(false),
+        )
+        assertEquals(
+            DensityAdoptionDecision.DEFER_UNCERTAIN,
+            densityAdoptionDecision(null),
+        )
+
+        val source = File("src/main/java/com/overdrive/app/launcher/DiLink5ClusterCast.kt").readText()
+        val start = source.indexOf("private fun launchAndVerify(")
+        val end = source.indexOf("private fun awaitStableTargetForeground(", start)
+        val method = source.substring(start, end)
+        assertTrue(method.contains("ClusterFreeformWindow.packageTaskOnDisplay"))
+        assertTrue(method.indexOf("densityAdoptionDecision(") <
+            method.indexOf("restoreForDisplay(displayId)"))
+    }
+
+    @Test
+    fun directAttemptsReassertFreeformAndHostedPreparationFailsClosed() {
+        val cast = File("src/main/java/com/overdrive/app/launcher/DiLink5ClusterCast.kt").readText()
+        val freeform = File("src/main/java/com/overdrive/app/launcher/ClusterFreeformWindow.java").readText()
+        val density = File("src/main/java/com/overdrive/app/launcher/ClusterAppDensity.kt").readText()
+
+        assertTrue(cast.contains("ClusterFreeformWindow.beginDirectPlacementAttempt()"))
+        assertTrue(cast.contains("if (!ClusterFreeformWindow.prepareHostedFreeformState())"))
+        assertTrue(cast.contains("if (ClusterFreeformWindow.prepareHostedFreeformState())"))
+        assertTrue(freeform.contains("freeformRecoveryChecked = false;"))
+        assertTrue(freeform.contains("freeformSettingChecked = false;"))
+        val directPreparation = freeform.substring(
+            freeform.indexOf("static void beginDirectPlacementAttempt()"),
+            freeform.indexOf("private static TaskCache cacheFor"),
+        )
+        assertTrue(directPreparation.contains("ensureFreeformSupportEnabled();"))
+        assertTrue(density.contains("ClusterFreeformWindow.freeformSupportStatus()"))
+    }
+
+    @Test
     fun projectionDisplayPrefersThePhysicallyRoutedFamily() {
         assertEquals(
-            "shared_fission_bg_XDJAScreenProjection_0",
+            "shared_fission_bg_XDJAScreenProjection_1",
             selectDiLink5ProjectionDisplayName(
                 listOf(
                     "XDJAScreenProjection_1",

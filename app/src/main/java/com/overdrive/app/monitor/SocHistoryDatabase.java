@@ -1480,7 +1480,8 @@ public class SocHistoryDatabase {
             
         } catch (Exception e) {
             // Log but don't rethrow - scheduler must continue running
-            logger.error("Failed to record SOC: " + e.getMessage(), e);
+            logger.error("Failed to record SOC: " + e.getMessage()
+                    + com.overdrive.app.storage.H2StoreFaults.detail(e), e);
             // ONLY count it if the DATABASE failed. This try block also spans non-DB work — the
             // VehicleDataMonitor HAL reads above and the SohEstimator/BydDataCollector calls — and a
             // throw from any of those says nothing about the connection. Counting it would blame the
@@ -12283,7 +12284,8 @@ public class SocHistoryDatabase {
                 " kWh=" + (remainingKwh == null ? "null" : remainingKwh));
         } catch (Exception e) {
             // Never propagate — must not break the daemon's ACC state machine.
-            logger.error("recordAccEvent failed: " + e.getMessage(), e);
+            logger.error("recordAccEvent failed: " + e.getMessage()
+                    + com.overdrive.app.storage.H2StoreFaults.detail(e), e);
         }
     }
 

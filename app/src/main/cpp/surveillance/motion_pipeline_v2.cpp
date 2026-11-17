@@ -669,6 +669,11 @@ static float stage4b_flowCoherence(
         // ~64 samples; require average per-sample deviation ≥ 6 luma.
         if (texture < sampleCount * 6) continue;
 
+        // Lazy per-block reference-luma cache (stored as luma+1; 0 = unsampled).
+        // SAD values and scan/tie order are unchanged.
+        const int CACHE_STRIDE = V2_BLOCK_SIZE + 2 * V2_FLOW_SEARCH_RADIUS;
+        uint16_t referenceLumaCache[CACHE_STRIDE * CACHE_STRIDE] = {};
+
         // Integer SAD block-match over the ±R window (stride-4 grayscale),
         // matching the cached current samples against the N-3 reference.
         long bestSad = -1;
@@ -686,8 +691,15 @@ static float stage4b_flowCoherence(
                 bool canImprove = true;
                 for (int y = 0; y < patchHeight && canImprove; y += 4) {
                     for (int x = 0; x < V2_BLOCK_SIZE; x += 4) {
-                        int ref = lumaAt(reference, x0 + x + dx, y0 + y + dy);
-                        sad += std::abs(curSamp[si++] - ref);
+                        int cacheIdx = (y + dy + V2_FLOW_SEARCH_RADIUS) * CACHE_STRIDE
+                                + x + dx + V2_FLOW_SEARCH_RADIUS;
+                        uint16_t refPlusOne = referenceLumaCache[cacheIdx];
+                        if (refPlusOne == 0) {
+                            refPlusOne = static_cast<uint16_t>(1 + lumaAt(
+                                    reference, x0 + x + dx, y0 + y + dy));
+                            referenceLumaCache[cacheIdx] = refPlusOne;
+                        }
+                        sad += std::abs(curSamp[si++] - (static_cast<int>(refPlusOne) - 1));
                         if (bestSad >= 0 && sad >= bestSad) {
                             canImprove = false;
                             break;

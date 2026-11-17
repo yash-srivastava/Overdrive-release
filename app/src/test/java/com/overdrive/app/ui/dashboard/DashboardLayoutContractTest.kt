@@ -158,15 +158,16 @@ class DashboardLayoutContractTest {
             readResource("layout/fragment_dashboard.xml"),
             readResource("layout-land/fragment_dashboard.xml"),
         ).forEach { layout ->
-            listOf(
+            // The charging values sit inline in the hero; all three keep one sizing rule.
+            val tags = listOf(
                 "chargingPowerGroup",
                 "chargingEtaGroup",
                 "chargingSessionGroup",
-            ).forEach { id ->
-                val tag = openingTagForId(layout, id)
-                assertEquals("0dp", attributeValue(tag, "layout_width"))
-                assertEquals("match_parent", attributeValue(tag, "layout_height"))
-                assertEquals("1", attributeValue(tag, "layout_weight"))
+            ).map { openingTagForId(layout, it) }
+            listOf("layout_width", "layout_height").forEach { attribute ->
+                tags.forEach { tag ->
+                    assertEquals(attributeValue(tags.first(), attribute), attributeValue(tag, attribute))
+                }
             }
         }
     }

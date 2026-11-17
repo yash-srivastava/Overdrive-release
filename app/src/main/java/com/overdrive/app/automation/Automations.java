@@ -1391,7 +1391,7 @@ public class Automations {
             case "sunroof": case "sunshade": return "window";
             case "tailgate": return "boot";
             case "setAc": case "acAuto": case "acSync": case "acAutoOff": case "fanOnly": case "maxCool": case "airPurify":
-            case "setAcTemp": case "stepAcTemp": case "setAcFan": case "recirculation": case "frontDefrost": case "rearDefrost":
+            case "setAcTemp": case "stepAcTemp": case "setAcFan": case "stepAcFan": case "recirculation": case "airflow": case "frontDefrost": case "rearDefrost":
             case "steeringHeat": case "seat": case "remoteClimateSchedule": case "remoteClimateScheduleUpdate":
             case "remoteClimateScheduleDelete": return "fan";
             case "flash": case "findCar": case "drl": case "headlight_mode": case "headlightLevel": case "hazard":
@@ -1401,7 +1401,7 @@ public class Automations {
             case "notification": case "showToast": case "showDialog": case "speak": return "bell";
             case "api": case "mqttPublish": return "cloud";
             case "shell": return "terminal";
-            case "radio": case "playAudio": case "stopAudio": case "mediaControl": case "mediaVolume": case "volumeStep": return "music";
+            case "radio": case "playAudio": case "stopAudio": case "mediaControl": case "mediaVolume": case "volumeStep": case "engineSound": return "music";
             case "safeKeep": case "surveillance": return "shield";
             case "genAiInsight": return "sparkle";
             case "manualClip": case "recording": case "showCameraFeed": case "showCameraView": case "native_camera_view": return "camera";
@@ -1650,14 +1650,14 @@ public class Automations {
                     AutomationExecutionHistory.record(id, "trigger", "queued",
                             TimeUnit.NANOSECONDS.toMillis(
                                     System.nanoTime() - evaluationStartedAt),
-                            "Signal " + key + (conditionsMet
+                            "Signal " + key.getType() + (conditionsMet
                                     ? " matched conditions" : " selected else branch"));
                 } else if (AutomationQueue.removeFromQueue(id)) {
                     logger.info("Removing automation from queue: " + id);
                     AutomationExecutionHistory.record(id, "trigger", "conditions_not_met",
                             TimeUnit.NANOSECONDS.toMillis(
                                     System.nanoTime() - evaluationStartedAt),
-                            "Signal " + key + " did not satisfy conditions");
+                            "Signal " + key.getType() + " did not satisfy conditions");
                 }
             });
         }
@@ -2216,6 +2216,17 @@ public class Automations {
     private static final java.util.Set<String> mqttChannelsSeen =
             java.util.concurrent.ConcurrentHashMap.newKeySet();
 
+    /** Read-only: every inbound MQTT channel seen since start, by name, with its latest payload (null if none). */
+    public static Map<String, String> mqttChannelPayloads() {
+        Map<String, String> out = new java.util.TreeMap<>();
+        for (String channel : mqttChannelsSeen) {
+            Value v = getStateValue(com.overdrive.app.automation.condition.BydEvent.mqttTrigger(channel));
+            Object payload = v instanceof BaseValue ? ((BaseValue<?>) v).getValue() : null;
+            out.put(channel, payload == null ? null : payload.toString());
+        }
+        return out;
+    }
+
     /** Fixed ASCII on purpose: it is sent as the HTTP status reason of a rejected save. */
     public static final String MQTT_CHANNEL_ERROR =
             "MQTT channel names may only use letters, numbers, '.', '_' and '-'.";
@@ -2299,6 +2310,8 @@ public class Automations {
         private boolean recorded;
         private AutomationAction deferredAction;
         private boolean deferredActionCompleted;
+        // The deferral last written to the execution history (a Wait Until yields every tick).
+        private AutomationAction historyDeferredAction;
         private long resumeAtNanos;
         private AutomationAction pendingWaitAction;
         private long pendingWaitDeadlineNanos;
@@ -2526,6 +2539,7 @@ public class Automations {
         ACTIVE_QUEUED_AUTOMATION_ID.set(id);
         ACTIVE_QUEUED_DEFINITION_REVISION.set(cursor.automationRevision);
         boolean allActionsSucceeded = true;
+        boolean chainWasAborted = false;
         try {
             while (cursor.nextAction < cursor.actions.size()) {
                 if (Thread.currentThread().isInterrupted()) return false;
@@ -2571,6 +2585,7 @@ public class Automations {
                 if (!ownsQueuedDefinition(id, cursor)) return true;
                 if (chainAborted()) {
                     allActionsSucceeded = false;
+                    chainWasAborted = true;
                     cursor.nextAction = cursor.actions.size();
                     break;
                 }
@@ -2580,10 +2595,13 @@ public class Automations {
                             && !"actionGroup".equals(automationAction.getType())) {
                         cursor.advance(QUEUE_ACTION_OCCURRENCES.get());
                     }
-                    AutomationExecutionHistory.record(id, "execution", "deferred",
-                            TimeUnit.NANOSECONDS.toMillis(
-                                    System.nanoTime() - executionStartedAt),
-                            "Action chain yielded and will resume at its saved cursor");
+                    if (cursor.historyDeferredAction != cursor.deferredAction) {
+                        cursor.historyDeferredAction = cursor.deferredAction;
+                        AutomationExecutionHistory.record(id, "execution", "deferred",
+                                TimeUnit.NANOSECONDS.toMillis(
+                                        System.nanoTime() - executionStartedAt),
+                                "Action chain yielded and will resume at its saved cursor");
+                    }
                     return false;
                 }
                 if (Thread.currentThread().isInterrupted()) {
@@ -2646,9 +2664,11 @@ public class Automations {
             saveToFile();
         }
         AutomationExecutionHistory.record(id, "execution",
-                allActionsSucceeded ? "completed" : "completed_with_failures",
+                chainWasAborted ? "aborted"
+                        : allActionsSucceeded ? "completed" : "completed_with_failures",
                 TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - executionStartedAt),
-                "All remaining actions reached a terminal state");
+                chainWasAborted ? "The chain was aborted; the remaining actions were not run"
+                        : "All remaining actions reached a terminal state");
         return true;
     }
 

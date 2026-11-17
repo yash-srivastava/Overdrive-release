@@ -77,6 +77,8 @@ public final class VehicleCommandRouter {
      * separate from cloudLock so STOP never waits for a network request to finish.
      */
     private final Object tailgateAbortLock = new Object();
+    private final AtomicReference<com.overdrive.app.byd.LocalActuationCancellation>
+            activeTailgateLocalCancellation = new AtomicReference<>();
     private final AtomicReference<Future<?>> activeTailgateOpenFuture = new AtomicReference<>();
     private final AtomicReference<Thread> activeTailgateOpenWorker = new AtomicReference<>();
     private final AtomicReference<BydCloudClient> activeTailgateOpenClient = new AtomicReference<>();
@@ -218,7 +220,7 @@ public final class VehicleCommandRouter {
 
     public enum Outcome {
         SUCCESS, FAILED, NOT_SUPPORTED, RATE_LIMITED, VEHICLE_UNREACHABLE,
-        AUTH_REQUIRED, BLOCKED_DRIVING
+        AUTH_REQUIRED, BLOCKED_DRIVING, ACCEPTED_UNVERIFIED, REJECTED, UNKNOWN
     }
 
     /**
@@ -250,6 +252,9 @@ public final class VehicleCommandRouter {
         public static CommandResult failed(Path path, String msg, long latencyMs, Throwable t) {
             return new CommandResult(Outcome.FAILED, path, msg, latencyMs, t);
         }
+        public static CommandResult unknown(Path path, String msg, long latencyMs, Throwable t) {
+            return new CommandResult(Outcome.UNKNOWN, path, msg, latencyMs, t);
+        }
         public static CommandResult notSupported(String msg) {
             return new CommandResult(Outcome.NOT_SUPPORTED, Path.NONE, msg, 0, null);
         }
@@ -264,6 +269,14 @@ public final class VehicleCommandRouter {
         }
         public static CommandResult blocked(String msg) {
             return new CommandResult(Outcome.BLOCKED_DRIVING, Path.NONE, msg, 0, null);
+        }
+        public static CommandResult nativeTerminal(
+                Outcome outcome, String msg, long latencyMs) {
+            if (outcome != Outcome.ACCEPTED_UNVERIFIED
+                    && outcome != Outcome.REJECTED && outcome != Outcome.UNKNOWN) {
+                throw new IllegalArgumentException("invalid native terminal outcome");
+            }
+            return new CommandResult(outcome, Path.SDK, msg, latencyMs, null);
         }
 
         public String pathString() {
@@ -810,24 +823,40 @@ public final class VehicleCommandRouter {
     public static final class TrunkOpenCommand extends VehicleCommand {
         // Treated specially in execute() — see executeTrunkOpen().
         private final long stopGeneration;
-        public TrunkOpenCommand() { this(-1L); }
+        private final long daemonStopGeneration;
+        private final transient java.util.function.BooleanSupplier daemonAuthorityCurrent;
+        public TrunkOpenCommand() { this(-1L, -1L, null); }
         private TrunkOpenCommand(long stopGeneration) {
+            this(stopGeneration, -1L, null);
+        }
+        TrunkOpenCommand(
+                long stopGeneration,
+                long daemonStopGeneration,
+                java.util.function.BooleanSupplier daemonAuthorityCurrent) {
             this.stopGeneration = stopGeneration;
+            this.daemonStopGeneration = daemonStopGeneration;
+            this.daemonAuthorityCurrent = daemonAuthorityCurrent;
         }
         public String name() { return "trunk-open"; }
         public Capability cloudCapability() { return Capability.AVAILABLE; }
         public Capability sdkCapability() { return Capability.AVAILABLE; }
         public RoutePreference defaultPreference() { return RoutePreference.SDK_FIRST; }
         public CloudOutcome executeViaCloud(BydCloudClient client, String vin) throws Exception {
+            if (daemonStopGeneration >= 0L) {
+                return remoteCommand(
+                        client, vin, "OPENTRUNK", null, daemonAuthorityCurrent);
+            }
             return remoteCommand(client, vin, "OPENTRUNK", null);
         }
         /**
          * MQTT is intentionally SDK-only. Do not fire the tailgate motor until
          * the local lock rail explicitly says the vehicle is unlocked; UNKNOWN
          * is treated as locked because opening while locked can trigger the alarm.
+         * DiLink 5 also opens with ACC confirmed on and parked: an ACC-on lock leaves the alarm disarmed.
          */
         public boolean executeViaSdk(BydDataCollector c) {
-            return c.readDoorLockState() == BydDataCollector.DOOR_STATE_UNLOCK
+            return (c.readDoorLockState() == BydDataCollector.DOOR_STATE_UNLOCK
+                    || DrivingSafetyGuard.isDiLink5AccOnAndParked())
                     && c.openTailgate();
         }
         public CloudCapabilities.Feature cloudFeature() { return CloudCapabilities.Feature.TRUNK_OPEN; }
@@ -861,7 +890,8 @@ public final class VehicleCommandRouter {
         public Capability sdkCapability() { return Capability.REQUIRED; }
         public RoutePreference defaultPreference() { return RoutePreference.SDK_ONLY; }
         public boolean executeViaSdk(BydDataCollector c) {
-            return c.readDoorLockState() == BydDataCollector.DOOR_STATE_UNLOCK
+            return (c.readDoorLockState() == BydDataCollector.DOOR_STATE_UNLOCK
+                    || DrivingSafetyGuard.isDiLink5AccOnAndParked())
                     && c.openTailgate();
         }
         public MotionSafety motionSafety() { return MotionSafety.BLOCK_WHILE_MOVING; }
@@ -888,6 +918,35 @@ public final class VehicleCommandRouter {
         public Capability sdkCapability() { return Capability.REQUIRED; }
         public RoutePreference defaultPreference() { return RoutePreference.SDK_ONLY; }
         public boolean executeViaSdk(BydDataCollector c) { return c.setSunWindowCommand(6, command); }
+    }
+
+    /** Closed command type accepted only through {@link #executeManualNative}. */
+    public static final class NativeVehicleCommand extends VehicleCommand {
+        private static final long serialVersionUID = 1L;
+        public final com.overdrive.app.byd.dilink5.NativeVehicleAction action;
+        public final long tailgateStopGeneration;
+
+        private NativeVehicleCommand(com.overdrive.app.byd.dilink5.NativeVehicleAction action) {
+            this(action, -1L);
+        }
+
+        private NativeVehicleCommand(
+                com.overdrive.app.byd.dilink5.NativeVehicleAction action,
+                long tailgateStopGeneration) {
+            this.action = action;
+            this.tailgateStopGeneration = tailgateStopGeneration;
+        }
+
+        public String name() { return "native-" + action.id; }
+        public Capability sdkCapability() { return Capability.REQUIRED; }
+        public RoutePreference defaultPreference() { return RoutePreference.SDK_ONLY; }
+        public MotionSafety motionSafety() {
+            return action.safety == com.overdrive.app.byd.dilink5.NativeVehicleAction.Safety.TAILGATE_OPEN
+                    || action.safety == com.overdrive.app.byd.dilink5.NativeVehicleAction.Safety.PARKED
+                    ? MotionSafety.BLOCK_WHILE_MOVING : MotionSafety.UNRESTRICTED;
+        }
+        public String motionSafetyGuardKey() { return DrivingSafetyGuard.GUARD_TRUNK; }
+        public boolean executeViaSdk(BydDataCollector ignored) { return false; }
     }
 
     /** Rear-door child lock (both sides) — BYDAutoDoorLockDevice feature write. */
@@ -1063,7 +1122,8 @@ public final class VehicleCommandRouter {
      * no cloud command can express "one level faster than now". The written level is published
      * to [resultLevel] so the caller can report it without a second read.
      */
-    public static final class ClimateStepFanCommand extends VehicleCommand {
+    public static final class ClimateStepFanCommand extends VehicleCommand
+            implements CabinClimateCommand {
         public final int delta;
         /** The level actually written, or UNAVAILABLE when the step didn't happen. */
         public volatile int resultLevel = com.overdrive.app.byd.BydVehicleData.UNAVAILABLE;
@@ -1380,6 +1440,18 @@ public final class VehicleCommandRouter {
         public Capability sdkCapability() { return Capability.REQUIRED; }
         public RoutePreference defaultPreference() { return RoutePreference.SDK_ONLY; }
         public boolean executeViaSdk(BydDataCollector c) { return c.setAcRecirculation(recirculate); }
+    }
+
+    /** Air outlets, SDK wind mode 1..7 (face, face+feet, feet, feet+windscreen, windscreen,
+     *  face+feet+windscreen, face+windscreen). SDK-only. */
+    public static final class AcAirflowCommand extends VehicleCommand
+            implements CabinClimateCommand {
+        public final int mode;
+        public AcAirflowCommand(int mode) { this.mode = mode; }
+        public String name() { return "ac-airflow"; }
+        public Capability sdkCapability() { return Capability.REQUIRED; }
+        public RoutePreference defaultPreference() { return RoutePreference.SDK_ONLY; }
+        public boolean executeViaSdk(BydDataCollector c) { return c.setAcWindMode(mode); }
     }
 
     /** Front windscreen defrost/demist on/off (feature-id Ac.DEFROST_FRONT_SET). SDK-only —
@@ -2085,7 +2157,238 @@ public final class VehicleCommandRouter {
 
     // ── Routing ─────────────────────────────────────────────────────────
 
+    /**
+     * The only router entry point for the optional native profile. Generic, cloud-only, and
+     * SDK-only entry points reject this command type so profile selection cannot authorize an
+     * automation or remote caller.
+     */
+    public CommandResult executeManualNative(
+            com.overdrive.app.byd.dilink5.NativeVehicleAction action) {
+        if (action == null
+                || !com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                || !UnifiedConfigManager.isNativeVehicleManualProfileEnabled()) {
+            return CommandResult.notSupported("Manual native vehicle profile is disabled");
+        }
+        BydDataCollector collector = BydDataCollector.getInstance();
+        final boolean manualTailgateOpen = action
+                == com.overdrive.app.byd.dilink5.NativeVehicleAction.TAILGATE_OPEN;
+        final String manualModeGeneration = manualTailgateOpen
+                ? com.overdrive.app.camera.dilink5.DiLink5Platform
+                        .currentActiveModeGeneration() : null;
+        final long startedAt = System.currentTimeMillis();
+        final long stopGeneration = manualTailgateOpen
+                ? tailgateStopGeneration.get() : -1L;
+        com.overdrive.app.byd.LocalActuationCancellation cancellation = null;
+        final long nativeStopGeneration;
+        if (manualTailgateOpen) {
+            cancellation = new com.overdrive.app.byd.LocalActuationCancellation();
+            synchronized (tailgateAbortLock) {
+                if (isTailgateOpenCancelled(stopGeneration)) {
+                    return tailgateOpenCancelled(Path.SDK, startedAt);
+                }
+                activeTailgateLocalCancellation.set(cancellation);
+            }
+            Long captured = captureNativeTailgateAuthority(
+                    cancellation,
+                    () -> !isTailgateOpenCancelled(stopGeneration),
+                    () -> com.overdrive.app.byd.dilink5.NativeVehicleWriteClient
+                            .captureTailgateStopGeneration(
+                                    collector.getRuntimeContext(), 500L));
+            if (captured == null || isTailgateOpenCancelled(stopGeneration)
+                    || cancellation.isCancelled()) {
+                activeTailgateLocalCancellation.compareAndSet(cancellation, null);
+                return captured == null
+                        ? CommandResult.nativeTerminal(
+                                Outcome.UNKNOWN,
+                                "Tailgate control is not ready; retry when the helper is connected",
+                                System.currentTimeMillis() - startedAt)
+                        : tailgateOpenCancelled(Path.SDK, startedAt);
+            }
+            nativeStopGeneration = captured.longValue();
+        } else {
+            nativeStopGeneration = -1L;
+        }
+        NativeVehicleCommand command = new NativeVehicleCommand(action, nativeStopGeneration);
+        CommandResult blocked = checkDrivingSafety(command);
+        if (blocked != null) {
+            if (cancellation != null) {
+                activeTailgateLocalCancellation.compareAndSet(cancellation, null);
+            }
+            return blocked;
+        }
+        if (manualTailgateOpen) {
+            int lockState = collector.readDoorLockState();
+            if (!shouldUseNativeTailgateOpen(lockState)) {
+                try {
+                    return executeManualTailgateCloudFallback(
+                            lockState, nativeStopGeneration, collector.getRuntimeContext(),
+                            manualModeGeneration, stopGeneration, cancellation);
+                } finally {
+                    activeTailgateLocalCancellation.compareAndSet(cancellation, null);
+                }
+            }
+        }
+        com.overdrive.app.byd.VehicleActuatorBridge.NativeWriteOutcome result = null;
+        try {
+            final com.overdrive.app.byd.LocalActuationCancellation ownedCancellation = cancellation;
+            if (ownedCancellation == null) {
+                com.overdrive.app.byd.VehicleActuatorBridge.dispatchDiLink5Command(
+                        collector.getRuntimeContext(), command);
+                result = com.overdrive.app.byd.VehicleActuatorBridge.takeLastNativeWriteOutcome();
+            } else {
+                result = com.overdrive.app.byd.VehicleActuatorBridge.withRemoteKeyRequestCancellation(
+                        ownedCancellation,
+                        () -> {
+                            if (isTailgateOpenCancelled(stopGeneration)) return null;
+                            com.overdrive.app.byd.VehicleActuatorBridge.dispatchDiLink5Command(
+                                    collector.getRuntimeContext(), command);
+                            return com.overdrive.app.byd.VehicleActuatorBridge
+                                    .takeLastNativeWriteOutcome();
+                        });
+            }
+        } catch (Exception failure) {
+            logger.warn("Manual native vehicle request failed: " + failure.getMessage());
+        } finally {
+            if (cancellation != null) {
+                activeTailgateLocalCancellation.compareAndSet(cancellation, null);
+            }
+        }
+        long elapsed = System.currentTimeMillis() - startedAt;
+        if (result == null && manualTailgateOpen &&
+                (isTailgateOpenCancelled(stopGeneration) ||
+                        (cancellation != null && cancellation.isCancelled()))) {
+            return CommandResult.nativeTerminal(
+                    Outcome.REJECTED, "Native tailgate request cancelled by STOP", elapsed);
+        }
+        if (result == null) {
+            return CommandResult.nativeTerminal(
+                    Outcome.UNKNOWN, "Native vehicle request outcome is unknown", elapsed);
+        }
+        switch (result.kind) {
+            case ACCEPTED:
+                return CommandResult.nativeTerminal(nativeTerminalOutcome(result.kind),
+                        "Request accepted; physical state not verified", elapsed);
+            case REJECTED:
+            case CALLER_REJECTED:
+            case TOKEN_REJECTED:
+            case TRUNCATED:
+            case UNKNOWN_ACTION:
+            case STALE_REQUEST:
+            case CANCELLED:
+                return CommandResult.nativeTerminal(nativeTerminalOutcome(result.kind),
+                        "Native vehicle request rejected", elapsed);
+            default:
+                return CommandResult.nativeTerminal(nativeTerminalOutcome(result.kind),
+                        "Native vehicle request outcome is unknown", elapsed);
+        }
+    }
+
+    static boolean shouldUseNativeTailgateOpen(int lockState) {
+        return lockState == BydDataCollector.DOOR_STATE_UNLOCK;
+    }
+
+    private CommandResult executeManualTailgateCloudFallback(
+            int lockState,
+            long nativeStopGeneration,
+            android.content.Context context,
+            String manualModeGeneration,
+            long stopGeneration,
+            com.overdrive.app.byd.LocalActuationCancellation cancellation) {
+        java.util.function.BooleanSupplier daemonCurrent = () -> {
+            com.overdrive.app.camera.dilink5.DiLink5Platform.refreshActiveMode();
+            return com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                    && UnifiedConfigManager.isNativeVehicleManualProfileEnabled()
+                    && com.overdrive.app.camera.dilink5.DiLink5Platform
+                            .matchesActiveModeGeneration(manualModeGeneration)
+                    && nativeTailgateAuthorityCurrent(
+                            nativeStopGeneration,
+                            com.overdrive.app.byd.dilink5.NativeVehicleWriteClient
+                                    .captureTailgateStopGeneration(context, 0L));
+        };
+        TrunkOpenCommand command = manualTailgateCloudCommand(
+                stopGeneration, nativeStopGeneration, cancellation,
+                () -> !isTailgateOpenCancelled(stopGeneration), daemonCurrent);
+        ((VehicleCommand) command).beginLocalAttempt();
+        CommandResult blocked = checkDrivingSafety(command);
+        if (blocked != null) return blocked;
+        long startedAt = System.currentTimeMillis();
+        java.util.function.BooleanSupplier cancelled = () ->
+                isTailgateOpenCancelled(command);
+        synchronized (cloudLock) {
+            if (cancelled.getAsBoolean()) {
+                return tailgateOpenCancelled(Path.CLOUD, startedAt);
+            }
+            SdkLeg noLocalMutation = new SdkLeg(false, null);
+            return completeTrunkOpenAttempt(
+                    command,
+                    startedAt,
+                    lockState,
+                    noLocalMutation,
+                    cancelled,
+                    () -> cloudHandshakeSatisfied(command),
+                    () -> dispatchTrunkOpenCloud(command, lockState, null, startedAt));
+        }
+    }
+
+    /**
+     * Cloud fallback belongs to the original manual OPEN, including a STOP during the lock read
+     * or before the cloud worker registers. Never replace its local ticket with a fresh one.
+     */
+    static TrunkOpenCommand manualTailgateCloudCommand(
+            long stopGeneration,
+            long nativeStopGeneration,
+            com.overdrive.app.byd.LocalActuationCancellation cancellation,
+            java.util.function.BooleanSupplier localCurrent,
+            java.util.function.BooleanSupplier daemonCurrent) {
+        if (stopGeneration < 0L || nativeStopGeneration < 0L || cancellation == null
+                || localCurrent == null || daemonCurrent == null) {
+            throw new IllegalArgumentException("Manual tailgate OPEN requires its original authority");
+        }
+        java.util.function.BooleanSupplier originalAuthority = () -> {
+            if (cancellation.isCancelled() || !localCurrent.getAsBoolean()) return false;
+            if (!daemonCurrent.getAsBoolean()) return false;
+            // The daemon query itself may have waited while an app-process STOP revoked us.
+            return !cancellation.isCancelled() && localCurrent.getAsBoolean();
+        };
+        return new TrunkOpenCommand(stopGeneration, nativeStopGeneration, originalAuthority);
+    }
+
+    static Long captureNativeTailgateAuthority(
+            com.overdrive.app.byd.LocalActuationCancellation cancellation,
+            java.util.function.BooleanSupplier localAuthority,
+            java.util.function.Supplier<Long> capture) {
+        if (cancellation == null || cancellation.isCancelled()
+                || !localAuthority.getAsBoolean()) return null;
+        Long captured = capture.get();
+        return cancellation.isCancelled() || !localAuthority.getAsBoolean()
+                ? null : captured;
+    }
+
+    static boolean nativeTailgateAuthorityCurrent(long expected, Long observed) {
+        return expected >= 0L && observed != null && observed.longValue() == expected;
+    }
+
+    static Outcome nativeTerminalOutcome(
+            com.overdrive.app.byd.dilink5.NativeVehicleWriteBoundary.Kind kind) {
+        if (kind == com.overdrive.app.byd.dilink5.NativeVehicleWriteBoundary.Kind.ACCEPTED) {
+            return Outcome.ACCEPTED_UNVERIFIED;
+        }
+        if (kind == com.overdrive.app.byd.dilink5.NativeVehicleWriteBoundary.Kind.REJECTED
+                || kind == com.overdrive.app.byd.dilink5.NativeVehicleWriteBoundary.Kind.CALLER_REJECTED
+                || kind == com.overdrive.app.byd.dilink5.NativeVehicleWriteBoundary.Kind.TOKEN_REJECTED
+                || kind == com.overdrive.app.byd.dilink5.NativeVehicleWriteBoundary.Kind.TRUNCATED
+                || kind == com.overdrive.app.byd.dilink5.NativeVehicleWriteBoundary.Kind.UNKNOWN_ACTION
+                || kind == com.overdrive.app.byd.dilink5.NativeVehicleWriteBoundary.Kind.STALE_REQUEST
+                || kind == com.overdrive.app.byd.dilink5.NativeVehicleWriteBoundary.Kind.CANCELLED) {
+            return Outcome.REJECTED;
+        }
+        return Outcome.UNKNOWN;
+    }
+
     public CommandResult execute(VehicleCommand cmd) {
+        if (cmd instanceof NativeVehicleCommand) {
+            return CommandResult.notSupported("Manual native vehicle commands require owner action");
+        }
         // Snapshot at ingress before any safety/preflight work can yield. MQTT may provide
         // a still-earlier message-ingress snapshot, so an already-queued open cannot overtake
         // a STOP while its per-connection worker is busy.
@@ -2437,6 +2740,9 @@ public final class VehicleCommandRouter {
      * catalog should not have offered them in the first place).
      */
     public CommandResult executeSdkOnly(VehicleCommand cmd) {
+        if (cmd instanceof NativeVehicleCommand) {
+            return CommandResult.notSupported("Manual native vehicle commands require owner action");
+        }
         // See execute(): this must happen before checkDrivingSafety() in the
         // unserialized helper so STOP invalidates an already-entered request.
         long tailgateOpenStopGeneration = tailgateOpenStopGeneration(cmd);
@@ -2573,6 +2879,9 @@ public final class VehicleCommandRouter {
      * means "cloud not configured" and is returned before any network call.
      */
     public CommandResult executeCloudOnly(VehicleCommand cmd) {
+        if (cmd instanceof NativeVehicleCommand) {
+            return CommandResult.notSupported("Manual native vehicle commands require owner action");
+        }
         CommandResult blocked = checkDrivingSafety(cmd);
         if (blocked != null) return blocked;
         if (resolveEffectivePreference(cmd) == RoutePreference.SDK_ONLY) {
@@ -2618,7 +2927,14 @@ public final class VehicleCommandRouter {
             if (cr.outcome == CloudOutcomeKind.RATE_LIMITED) {
                 return CommandResult.rateLimited(msg("rate_limited"), elapsed);
             }
-            // Cloud failed (timeout, HTTP, controlState=2). Try SDK.
+            if (!cloudFailureAllowsSdkFallback(cr.mutationMayHaveRun)) {
+                return CommandResult.unknown(
+                        Path.CLOUD,
+                        "Cloud request outcome is unknown; local fallback was suppressed",
+                        elapsed,
+                        cr.error);
+            }
+            // Only a failure proven to precede mutation dispatch may use SDK fallback.
             if (cmd.hasSdkPath()) {
                 SdkLeg leg = invokeSdk(cmd);
                 long elapsed2 = System.currentTimeMillis() - start;
@@ -2696,6 +3012,13 @@ public final class VehicleCommandRouter {
         if (cr.outcome == CloudOutcomeKind.BLOCKED_DRIVING) {
             return CommandResult.blocked(msg("blocked_driving"));
         }
+        if (cr.mutationMayHaveRun) {
+            return CommandResult.unknown(
+                    Path.SDK_THEN_CLOUD,
+                    "Cloud request outcome is unknown",
+                    elapsed,
+                    cr.error);
+        }
         // BYD endpoint rejected the command shape — distinct from a transient
         // failure. Mirror runCloudOnly's UNSUPPORTED handling.
         if (cr.outcome == CloudOutcomeKind.UNSUPPORTED) {
@@ -2705,6 +3028,13 @@ public final class VehicleCommandRouter {
     }
 
     private CommandResult mapCloudOnlyResult(CloudCallResult cr, long elapsed) {
+        if (cr.mutationMayHaveRun && cr.outcome != CloudOutcomeKind.SUCCESS) {
+            return CommandResult.unknown(
+                    Path.CLOUD,
+                    "Cloud request outcome is unknown",
+                    elapsed,
+                    cr.error);
+        }
         switch (cr.outcome) {
             case SUCCESS:      return CommandResult.success(Path.CLOUD, msg("cloud_sent"), elapsed);
             case RATE_LIMITED: return CommandResult.rateLimited(msg("rate_limited"), elapsed);
@@ -2720,6 +3050,7 @@ public final class VehicleCommandRouter {
      * Trunk open: use the local SDK motor only when the local lock rail explicitly says the
      * vehicle is already unlocked. The body controller can trip the alarm when a locked
      * tailgate is driven through the SDK, so LOCKED and UNKNOWN values skip that motor entirely.
+     * DiLink 5 exception: ACC confirmed on and parked ({@link DrivingSafetyGuard#isDiLink5AccOnAndParked}).
      *
      * <p>When the local leg is unavailable, use BYD's capability-gated {@code OPENTRUNK}
      * command directly. It is the remote tailgate operation and must not be preceded by the
@@ -2742,7 +3073,8 @@ public final class VehicleCommandRouter {
         synchronized (cloudLock) {
             long start = System.currentTimeMillis();
             BydDataCollector collector = BydDataCollector.getInstance();
-            if (collector.readDoorLockState() != BydDataCollector.DOOR_STATE_UNLOCK) {
+            if (collector.readDoorLockState() != BydDataCollector.DOOR_STATE_UNLOCK
+                    && !DrivingSafetyGuard.isDiLink5AccOnAndParked()) {
                 return CommandResult.failed(Path.SDK, msg("not_supported"),
                         System.currentTimeMillis() - start, null);
             }
@@ -2751,16 +3083,23 @@ public final class VehicleCommandRouter {
             // physical motor write.
             CommandResult safety = checkDrivingSafety(command);
             if (safety != null) return safety;
+            // DiLink 5 can wait for its app-process adapter. Give STOP a cancellation owner
+            // instead of holding the coordination lock for that entire bounded wait.
+            if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+                SdkLeg local = invokeTailgateOpen(command, stopGeneration);
+                long elapsed = System.currentTimeMillis() - start;
+                if (local.blocked) return CommandResult.blocked(msg("blocked_driving"));
+                return local.success
+                        ? CommandResult.success(Path.SDK, msg("local_sent"), elapsed)
+                        : CommandResult.failed(Path.SDK, msg("not_supported"), elapsed, local.error);
+            }
             synchronized (tailgateAbortLock) {
                 if (isTailgateOpenCancelled(stopGeneration)) {
                     return tailgateOpenCancelled(Path.SDK, start);
                 }
                 boolean opened;
                 try {
-                    opened = shouldDispatchViaDiLink5Bridge(command)
-                            ? com.overdrive.app.byd.VehicleActuatorBridge.dispatchDiLink5Command(
-                                    collector.getRuntimeContext(), command)
-                            : collector.openTailgate();
+                    opened = collector.openTailgate();
                 } catch (Exception e) {
                     logger.warn("SDK exec for " + command.name() + " threw: " + e.getMessage());
                     return CommandResult.failed(Path.SDK, msg("not_supported"),
@@ -2804,30 +3143,79 @@ public final class VehicleCommandRouter {
             CommandResult localSafety = checkDrivingSafety(command);
             if (localSafety != null) return localSafety;
             local = invokeTailgateOpen(command, stopGeneration);
+        } else if (DrivingSafetyGuard.isDiLink5AccOnAndParked()) {
+            CommandResult localSafety = checkDrivingSafety(command);
+            if (localSafety != null) return localSafety;
+            local = invokeTailgateOpen(command, stopGeneration);
+        } else if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            logger.info("trunk-open: car locked and ACC-on + parked not confirmed ("
+                    + com.overdrive.app.monitor.AccMonitor.describeLastDiLink5AccObservation() + ")");
         }
-        long elapsed = System.currentTimeMillis() - start;
+        final Throwable localError = local.error;
+        return completeTrunkOpenAttempt(
+                command,
+                start,
+                lockState,
+                local,
+                () -> isTailgateOpenCancelled(stopGeneration),
+                () -> cloudHandshakeSatisfied(command),
+                () -> dispatchTrunkOpenCloud(command, lockState, localError, start));
+    }
+
+    /**
+     * Completes the production tailgate transaction after the one local attempt. Keeping the
+     * terminal-abort and cloud-admission ordering in this executable seam makes it possible to
+     * prove that an uncertain local write never reaches a second actuator rail.
+     */
+    CommandResult completeTrunkOpenAttempt(
+            VehicleCommand command,
+            long startedAt,
+            int lockState,
+            SdkLeg local,
+            java.util.function.BooleanSupplier cancelled,
+            java.util.function.BooleanSupplier cloudAdmission,
+            Callable<CommandResult> cloudDispatch) {
+        long elapsed = System.currentTimeMillis() - startedAt;
         if (local.blocked) return CommandResult.blocked(msg("blocked_driving"));
         if (local.success) return CommandResult.success(Path.SDK, msg("local_sent"), elapsed);
+        if (local.error instanceof com.overdrive.app.byd.LocalActuationAbort) {
+            command.localAttempt().abort(
+                    (com.overdrive.app.byd.LocalActuationAbort) local.error);
+            return stoppedLocalAttempt(command, elapsed);
+        }
         Path localPath = Path.SDK;
-        Path cloudPath = lockState == BydDataCollector.DOOR_STATE_UNLOCK
-                ? Path.SDK_THEN_CLOUD : Path.CLOUD;
-        if (isTailgateOpenCancelled(stopGeneration)) {
-            return tailgateOpenCancelled(localPath, start);
+        if (cancelled.getAsBoolean()) {
+            return tailgateOpenCancelled(localPath, startedAt);
         }
 
         // Direct OPENTRUNK handles the remote tailgate operation. Never issue OPENDOOR here:
         // it exposes the cabin without being necessary for the cloud trunk command.
-        if (!cloudHandshakeSatisfied(command)) {
+        if (!cloudAdmission.getAsBoolean()) {
             return CommandResult.failed(localPath, msg("local_failed"), elapsed, local.error);
         }
-        if (isTailgateOpenCancelled(stopGeneration)) {
-            return tailgateOpenCancelled(localPath, start);
+        if (cancelled.getAsBoolean()) {
+            return tailgateOpenCancelled(localPath, startedAt);
         }
+        try {
+            return cloudDispatch.call();
+        } catch (Exception failure) {
+            Path cloudPath = lockState == BydDataCollector.DOOR_STATE_UNLOCK
+                    ? Path.SDK_THEN_CLOUD : Path.CLOUD;
+            return CommandResult.failed(
+                    cloudPath, msg("both_legs_failed"),
+                    System.currentTimeMillis() - startedAt, failure);
+        }
+    }
+
+    private CommandResult dispatchTrunkOpenCloud(
+            VehicleCommand command, int lockState, Throwable localError, long startedAt) {
         // Recheck at the cloud dispatch boundary so a movement edge cannot open the tailgate.
         CommandResult cloudSafety = checkDrivingSafety(command);
         if (cloudSafety != null) return cloudSafety;
         CloudCallResult cloud = runCloudCall(command);
-        elapsed = System.currentTimeMillis() - start;
+        long elapsed = System.currentTimeMillis() - startedAt;
+        Path cloudPath = lockState == BydDataCollector.DOOR_STATE_UNLOCK
+                ? Path.SDK_THEN_CLOUD : Path.CLOUD;
         if (cloud.outcome == CloudOutcomeKind.SUCCESS) {
             return CommandResult.success(cloudPath,
                     cloudPath == Path.CLOUD ? msg("cloud_sent")
@@ -2839,21 +3227,41 @@ public final class VehicleCommandRouter {
         if (cloud.outcome == CloudOutcomeKind.BLOCKED_DRIVING) {
             return CommandResult.blocked(msg("blocked_driving"));
         }
+        if (cloud.mutationMayHaveRun) {
+            return CommandResult.unknown(
+                    cloudPath,
+                    "Cloud tailgate request outcome is unknown",
+                    elapsed,
+                    cloud.error != null ? cloud.error : localError);
+        }
         if (cloud.outcome == CloudOutcomeKind.UNSUPPORTED) {
             return CommandResult.notSupported(msg("not_supported"));
         }
         return CommandResult.failed(cloudPath, msg("both_legs_failed"), elapsed,
-                cloud.error != null ? cloud.error : local.error);
+                cloud.error != null ? cloud.error : localError);
     }
 
     private boolean isTailgateOpenCancelled(long stopGeneration) {
         return tailgateStopGeneration.get() != stopGeneration;
     }
 
+    static boolean tailgateAuthorityCurrent(
+            TrunkOpenCommand open,
+            long currentStopGeneration) {
+        if (open == null) return false;
+        if (open.stopGeneration >= 0L && open.stopGeneration != currentStopGeneration) {
+            return false;
+        }
+        return open.daemonStopGeneration < 0L ||
+                (open.daemonAuthorityCurrent != null &&
+                        open.daemonAuthorityCurrent.getAsBoolean());
+    }
+
     private boolean isTailgateOpenCancelled(VehicleCommand command) {
-        return command instanceof TrunkOpenCommand
-                && ((TrunkOpenCommand) command).stopGeneration >= 0L
-                && isTailgateOpenCancelled(((TrunkOpenCommand) command).stopGeneration);
+        return command instanceof TrunkOpenCommand &&
+                !tailgateAuthorityCurrent(
+                        (TrunkOpenCommand) command,
+                        tailgateStopGeneration.get());
     }
 
     /**
@@ -2861,14 +3269,23 @@ public final class VehicleCommandRouter {
      * remote tailgate-open request rather than waiting for its network budget.
      */
     private void cancelPendingTailgateOpen() {
+        // The native boundary lives in the daemon process. Advancing it first revokes app-owned
+        // manual OPEN requests that have not yet registered as well as requests awaiting dispatch.
+        com.overdrive.app.byd.dilink5.NativeVehicleWriteService.cancelTailgateOpenRequests();
+        com.overdrive.app.byd.LocalActuationCancellation localCancellation;
+        Future<?> future;
+        Thread worker;
+        BydCloudClient client;
         synchronized (tailgateAbortLock) {
             tailgateStopGeneration.incrementAndGet();
-            Future<?> future = activeTailgateOpenFuture.getAndSet(null);
-            Thread worker = activeTailgateOpenWorker.getAndSet(null);
-            BydCloudClient client = activeTailgateOpenClient.getAndSet(null);
-            if (future != null) future.cancel(true);
-            if (client != null) client.cancelRequestForThread(worker);
+            localCancellation = activeTailgateLocalCancellation.getAndSet(null);
+            future = activeTailgateOpenFuture.getAndSet(null);
+            worker = activeTailgateOpenWorker.getAndSet(null);
+            client = activeTailgateOpenClient.getAndSet(null);
         }
+        if (localCancellation != null) localCancellation.cancel();
+        if (future != null) future.cancel(true);
+        if (client != null) client.cancelRequestForThread(worker);
     }
 
     private void cancelCloudRequest(Future<?> future, BydCloudClient client, Thread worker,
@@ -2902,8 +3319,37 @@ public final class VehicleCommandRouter {
      * The composite flow already owns cloudLock. Keep STOP out of that lock while
      * still making its generation change and the final local motor write atomic.
      */
-    private SdkLeg invokeTailgateOpen(TrunkOpenCommand command, long stopGeneration) {
+    private SdkLeg invokeTailgateOpen(VehicleCommand command, long stopGeneration) {
         if (checkDrivingSafety(command) != null) return new SdkLeg(false, null, true);
+        if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            synchronized (tailgateAbortLock) {
+                if (isTailgateOpenCancelled(stopGeneration)) {
+                    return new SdkLeg(false,
+                            new java.util.concurrent.CancellationException(
+                                    "tailgate open cancelled by stop"));
+                }
+                if (checkDrivingSafety(command) != null) return new SdkLeg(false, null, true);
+                try {
+                    return new SdkLeg(executeSdkCommand(command), null);
+                } catch (Exception e) {
+                    logger.warn("SDK exec for " + command.name() + " threw: " + e.getMessage());
+                    return new SdkLeg(false, e);
+                }
+            }
+        }
+
+        return invokeDiLink5TailgateOpen(
+                command, stopGeneration, () -> executeSdkCommand(command));
+    }
+
+    /**
+     * Owns one DiLink 5 local-open cancellation ticket from admission through the final write.
+     * STOP can revoke this ticket while adapter acquisition is waiting without taking cloudLock.
+     */
+    SdkLeg invokeDiLink5TailgateOpen(
+            VehicleCommand command, long stopGeneration, Callable<Boolean> localDispatch) {
+        com.overdrive.app.byd.LocalActuationCancellation cancellation =
+                new com.overdrive.app.byd.LocalActuationCancellation();
         synchronized (tailgateAbortLock) {
             if (isTailgateOpenCancelled(stopGeneration)) {
                 return new SdkLeg(false,
@@ -2911,12 +3357,34 @@ public final class VehicleCommandRouter {
                                 "tailgate open cancelled by stop"));
             }
             if (checkDrivingSafety(command) != null) return new SdkLeg(false, null, true);
-            try {
-                return new SdkLeg(executeSdkCommand(command), null);
-            } catch (Exception e) {
-                logger.warn("SDK exec for " + command.name() + " threw: " + e.getMessage());
-                return new SdkLeg(false, e);
+            activeTailgateLocalCancellation.set(cancellation);
+        }
+        com.overdrive.app.byd.RemoteKeyControl.takeLastAbort();
+        try {
+            boolean accepted = com.overdrive.app.byd.VehicleActuatorBridge
+                    .withRemoteKeyRequestCancellation(cancellation, localDispatch);
+            com.overdrive.app.byd.LocalActuationAbort stopped =
+                    com.overdrive.app.byd.RemoteKeyControl.takeLastAbort();
+            if (stopped != null) {
+                command.localAttempt().abort(stopped);
+                return new SdkLeg(false, stopped,
+                        stopped.kind
+                                == com.overdrive.app.byd.LocalActuationAbort.Kind.BLOCKED_DRIVING);
             }
+            return new SdkLeg(accepted, null);
+        } catch (Exception e) {
+            com.overdrive.app.byd.LocalActuationAbort stopped =
+                    com.overdrive.app.byd.RemoteKeyControl.takeLastAbort();
+            if (stopped != null) {
+                command.localAttempt().abort(stopped);
+                return new SdkLeg(false, stopped,
+                        stopped.kind
+                                == com.overdrive.app.byd.LocalActuationAbort.Kind.BLOCKED_DRIVING);
+            }
+            logger.warn("SDK exec for " + command.name() + " threw: " + e.getMessage());
+            return new SdkLeg(false, e);
+        } finally {
+            activeTailgateLocalCancellation.compareAndSet(cancellation, null);
         }
     }
 
@@ -2932,16 +3400,26 @@ public final class VehicleCommandRouter {
      */
     // ── Cloud helpers ───────────────────────────────────────────────────
 
+    static boolean cloudFailureAllowsSdkFallback(boolean mutationMayHaveRun) {
+        return !mutationMayHaveRun;
+    }
+
     private enum CloudOutcomeKind {
         SUCCESS, FAILED, RATE_LIMITED, VEHICLE_UNREACHABLE, BLOCKED_DRIVING, UNSUPPORTED
     }
     private static final class CloudCallResult {
         final CloudOutcomeKind outcome;
         final Throwable error;
-        CloudCallResult(CloudOutcomeKind o, Throwable e) { outcome = o; error = e; }
+        final boolean mutationMayHaveRun;
+        CloudCallResult(CloudOutcomeKind o, Throwable e) { this(o, e, false); }
+        CloudCallResult(CloudOutcomeKind o, Throwable e, boolean mayHaveRun) {
+            outcome = o;
+            error = e;
+            mutationMayHaveRun = mayHaveRun;
+        }
     }
 
-    private static final class SdkLeg {
+    static final class SdkLeg {
         final boolean success;
         final Throwable error;
         final boolean blocked;
@@ -3128,6 +3606,8 @@ public final class VehicleCommandRouter {
             Future<CloudOutcome> future = null;
             final AtomicReference<Thread> workerThread = new AtomicReference<>();
             final AtomicBoolean cancelled = new AtomicBoolean(false);
+            final AtomicBoolean cloudMutationDispatchStarted = new AtomicBoolean(false);
+            final Object cloudMutationDispatchLock = new Object();
             final boolean trackTailgateOpen = cmd instanceof TrunkOpenCommand
                     && ((TrunkOpenCommand) cmd).stopGeneration >= 0L;
             final AtomicReference<Future<?>> tailgateFuture = new AtomicReference<>();
@@ -3155,89 +3635,120 @@ public final class VehicleCommandRouter {
                     public CloudOutcome call() throws Exception {
                         Thread worker = Thread.currentThread();
                         workerThread.set(worker);
-                        if (trackTailgateOpen) {
-                            // submit() can start the worker before its Future is published.
-                            // Do not run unless the open is still the registered active one.
-                            synchronized (tailgateAbortLock) {
-                                Future<?> registered = tailgateFuture.get();
-                                if (registered == null
-                                        || activeTailgateOpenFuture.get() != registered
-                                        || isCloudCallCancelled(cancelled)
-                                        || isTailgateOpenCancelled(cmd)) {
-                                    return CloudOutcome.failed();
-                                }
-                                activeTailgateOpenWorker.set(worker);
-                            }
+                        com.overdrive.app.byd.dilink5.NativeVehicleWriteClient
+                                .TailgateStopRegistration daemonRegistration = null;
+                        if (cmd instanceof TrunkOpenCommand
+                                && ((TrunkOpenCommand) cmd).daemonStopGeneration >= 0L) {
+                            daemonRegistration = com.overdrive.app.byd.dilink5
+                                    .NativeVehicleWriteClient.registerTailgateStopCancellation(
+                                            ((TrunkOpenCommand) cmd).daemonStopGeneration,
+                                            () -> {
+                                                synchronized (cloudMutationDispatchLock) {
+                                                    cancelled.set(true);
+                                                }
+                                                cloudClient.cancelRequestForThread(worker);
+                                                worker.interrupt();
+                                            });
+                            if (daemonRegistration == null) return CloudOutcome.failed();
                         }
-                        if (isCloudCallCancelled(cancelled)) return CloudOutcome.failed();
-                        CloudCapabilities.Feature feature = cmd.cloudFeature();
-                        CloudCapabilities capabilities = null;
-                        if (feature != CloudCapabilities.Feature.NONE) {
-                            capabilities = cloudClient.getCachedCloudCapabilities(vin);
-                            if (capabilities == null) {
-                                try {
-                                    capabilities = cloudClient.fetchCloudCapabilities(vin);
-                                } catch (Exception e) {
-                                    if (isCloudCallCancelled(cancelled)) {
+                        try {
+                            if (trackTailgateOpen) {
+                                // submit() can start the worker before its Future is published.
+                                // Do not run unless the open is still the registered active one.
+                                synchronized (tailgateAbortLock) {
+                                    Future<?> registered = tailgateFuture.get();
+                                    if (registered == null
+                                            || activeTailgateOpenFuture.get() != registered
+                                            || isCloudCallCancelled(cancelled)
+                                            || isTailgateOpenCancelled(cmd)) {
                                         return CloudOutcome.failed();
                                     }
-                                    // Never send a physical remote command when
-                                    // support is unknown. SDK-first commands
-                                    // have already attempted their local leg;
-                                    // cloud-only commands fail closed.
-                                    logger.info("Cloud capability discovery failed for " + cmd.name()
-                                            + "; skipping cloud dispatch: " + e.getMessage());
+                                    activeTailgateOpenWorker.set(worker);
+                                }
+                            }
+                            if (isCloudCallCancelled(cancelled)) return CloudOutcome.failed();
+                            CloudCapabilities.Feature feature = cmd.cloudFeature();
+                            CloudCapabilities capabilities = null;
+                            if (feature != CloudCapabilities.Feature.NONE) {
+                                capabilities = cloudClient.getCachedCloudCapabilities(vin);
+                                if (capabilities == null) {
+                                    try {
+                                        capabilities = cloudClient.fetchCloudCapabilities(vin);
+                                    } catch (Exception e) {
+                                        if (isCloudCallCancelled(cancelled)) {
+                                            return CloudOutcome.failed();
+                                        }
+                                        // Never send a physical remote command when
+                                        // support is unknown. SDK-first commands
+                                        // have already attempted their local leg;
+                                        // cloud-only commands fail closed.
+                                        logger.info("Cloud capability discovery failed for " + cmd.name()
+                                                + "; skipping cloud dispatch: " + e.getMessage());
+                                        return CloudOutcome.unsupported();
+                                    }
+                                }
+                                if (!capabilities.supports(feature)) {
                                     return CloudOutcome.unsupported();
                                 }
                             }
-                            if (!capabilities.supports(feature)) {
-                                return CloudOutcome.unsupported();
+                            if (isCloudCallCancelled(cancelled)) return CloudOutcome.failed();
+                            if (localAttempt.cloudAbort() != null) return CloudOutcome.failed();
+                            // /control/remoteControl commands require the PIN handshake;
+                            // /control/smartCharge/* and similar config writes do not.
+                            if (cmd.requiresControlPin()) {
+                                cloudClient.verifyControlPassword(vin);
                             }
-                        }
-                        if (isCloudCallCancelled(cancelled)) return CloudOutcome.failed();
-                        if (localAttempt.cloudAbort() != null) return CloudOutcome.failed();
-                        // /control/remoteControl commands require the PIN handshake;
-                        // /control/smartCharge/* and similar config writes do not.
-                        if (cmd.requiresControlPin()) {
-                            cloudClient.verifyControlPassword(vin);
-                        }
-                        if (isCloudCallCancelled(cancelled)) return CloudOutcome.failed();
-                        if (localAttempt.cloudAbort() != null) return CloudOutcome.failed();
-                        // The command may have waited behind another cloud
-                        // request, capability discovery, or PIN verification.
-                        // Recheck here, directly before physical dispatch.
-                        if (isCloudDispatchBlocked(cmd)) {
-                            return CloudOutcome.blockedDriving();
-                        }
-                        if (isTailgateOpenCancelled(cmd)) {
-                            return CloudOutcome.failed();
-                        }
-                        if (trackTailgateOpen) {
-                            // STOP synchronizes with this final guard and then interrupts both
-                            // the worker and its registered OkHttp Call if it arrives later.
-                            synchronized (tailgateAbortLock) {
-                                Future<?> registered = tailgateFuture.get();
-                                if (registered == null
-                                        || activeTailgateOpenFuture.get() != registered
-                                        || isCloudCallCancelled(cancelled)
+                            if (isCloudCallCancelled(cancelled)) return CloudOutcome.failed();
+                            if (localAttempt.cloudAbort() != null) return CloudOutcome.failed();
+                            // The command may have waited behind another cloud
+                            // request, capability discovery, or PIN verification.
+                            // Recheck here, directly before physical dispatch.
+                            if (isCloudDispatchBlocked(cmd)) {
+                                return CloudOutcome.blockedDriving();
+                            }
+                            if (isTailgateOpenCancelled(cmd)) {
+                                return CloudOutcome.failed();
+                            }
+                            if (trackTailgateOpen) {
+                                // STOP synchronizes with this final guard and then interrupts both
+                                // the worker and its registered OkHttp Call if it arrives later.
+                                synchronized (tailgateAbortLock) {
+                                    Future<?> registered = tailgateFuture.get();
+                                    if (registered == null
+                                            || activeTailgateOpenFuture.get() != registered
+                                            || isCloudCallCancelled(cancelled)
+                                            || isTailgateOpenCancelled(cmd)) {
+                                        return CloudOutcome.failed();
+                                    }
+                                }
+                            }
+                            int seatSteeringWheelWireState = -1;
+                            if (seatCommand != null) {
+                                seatSteeringWheelWireState =
+                                        prepareSeatCloudSteeringWheelWireState(
+                                                seatCommand, capabilities);
+                                if (seatSteeringWheelWireState < 0) {
+                                    return CloudOutcome.unsupported();
+                                }
+                            }
+                            synchronized (cloudMutationDispatchLock) {
+                                if (isCloudCallCancelled(cancelled)
+                                        || localAttempt.cloudAbort() != null
                                         || isTailgateOpenCancelled(cmd)) {
                                     return CloudOutcome.failed();
                                 }
+                                cloudMutationDispatchStarted.set(true);
                             }
-                        }
-                        if (seatCommand != null) {
-                            int seatSteeringWheelWireState =
-                                    prepareSeatCloudSteeringWheelWireState(
-                                            seatCommand, capabilities);
-                            if (seatSteeringWheelWireState < 0) {
-                                return CloudOutcome.unsupported();
+                            if (seatCommand != null) {
+                                boolean ok = cloudClient.setSeatClimate(vin, seatCommand.cloudChairType(),
+                                        seatState[0], seatState[1], seatState[2], seatState[3],
+                                        seatSteeringWheelWireState);
+                                return ok ? CloudOutcome.success() : CloudOutcome.failed();
                             }
-                            boolean ok = cloudClient.setSeatClimate(vin, seatCommand.cloudChairType(),
-                                    seatState[0], seatState[1], seatState[2], seatState[3],
-                                    seatSteeringWheelWireState);
-                            return ok ? CloudOutcome.success() : CloudOutcome.failed();
+                            return cmd.executeViaCloud(cloudClient, vin);
+                        } finally {
+                            if (daemonRegistration != null) daemonRegistration.close();
                         }
-                        return cmd.executeViaCloud(cloudClient, vin);
                     }
                 };
                 if (trackTailgateOpen) {
@@ -3266,35 +3777,55 @@ public final class VehicleCommandRouter {
                 }
                 if (out.rateLimited) return new CloudCallResult(CloudOutcomeKind.RATE_LIMITED, null);
                 if (out.unsupported) return new CloudCallResult(CloudOutcomeKind.UNSUPPORTED, null);
-                return new CloudCallResult(CloudOutcomeKind.FAILED, null);
+                return new CloudCallResult(
+                        CloudOutcomeKind.FAILED,
+                        null,
+                        cloudMutationDispatchStarted.get());
             } catch (TimeoutException te) {
-                // Mark cancellation before interrupting the worker. The transport
-                // checks the interrupt both before and after registering each
-                // OkHttp Call, closing the race where a new request otherwise
-                // starts immediately after this timeout returns to the caller.
-                cancelled.set(true);
+                // Linearize timeout cancellation with the final cloud mutation boundary.
+                boolean mayHaveRun;
+                synchronized (cloudMutationDispatchLock) {
+                    cancelled.set(true);
+                    mayHaveRun = cloudMutationDispatchStarted.get();
+                }
                 cancelCloudRequest(future, client, workerThread.get(), trackTailgateOpen);
                 logger.warn("Cloud leg for '" + cmd.name() + "' timed out after "
                         + cmd.cloudTimeoutMs() + "ms");
-                return new CloudCallResult(CloudOutcomeKind.FAILED, te);
+                return new CloudCallResult(
+                        CloudOutcomeKind.FAILED,
+                        te,
+                        mayHaveRun);
             } catch (InterruptedException ie) {
-                // Treat caller cancellation exactly like timeout. Returning
-                // while the worker continues could dispatch a physical remote
-                // command after its caller has already abandoned it.
-                cancelled.set(true);
+                boolean mayHaveRun;
+                synchronized (cloudMutationDispatchLock) {
+                    cancelled.set(true);
+                    mayHaveRun = cloudMutationDispatchStarted.get();
+                }
                 cancelCloudRequest(future, client, workerThread.get(), trackTailgateOpen);
                 Thread.currentThread().interrupt();
-                return new CloudCallResult(CloudOutcomeKind.FAILED, ie);
+                return new CloudCallResult(
+                        CloudOutcomeKind.FAILED,
+                        ie,
+                        mayHaveRun);
             } catch (ExecutionException ee) {
                 Throwable cause = ee.getCause();
                 if (cause instanceof BydCloudClient.SmartChargeVehicleUnreachableException) {
-                    return new CloudCallResult(CloudOutcomeKind.VEHICLE_UNREACHABLE, cause);
+                    return new CloudCallResult(
+                            CloudOutcomeKind.VEHICLE_UNREACHABLE,
+                            cause,
+                            cloudMutationDispatchStarted.get());
                 }
                 logger.warn("Cloud leg for '" + cmd.name() + "' failed: " + cause);
-                return new CloudCallResult(CloudOutcomeKind.FAILED, cause);
+                return new CloudCallResult(
+                        CloudOutcomeKind.FAILED,
+                        cause,
+                        cloudMutationDispatchStarted.get());
             } catch (Exception e) {
                 logger.warn("Cloud leg for '" + cmd.name() + "' failed: " + e);
-                return new CloudCallResult(CloudOutcomeKind.FAILED, e);
+                return new CloudCallResult(
+                        CloudOutcomeKind.FAILED,
+                        e,
+                        cloudMutationDispatchStarted.get());
             } finally {
                 if (trackTailgateOpen) {
                     clearActiveTailgateOpen(future, workerThread.get(), client);
@@ -3311,8 +3842,18 @@ public final class VehicleCommandRouter {
      */
     private static CloudOutcome remoteCommand(BydCloudClient client, String vin,
                                               String commandType, JSONObject extra) throws Exception {
+        return remoteCommand(client, vin, commandType, extra, null);
+    }
+
+    private static CloudOutcome remoteCommand(BydCloudClient client, String vin,
+                                              String commandType, JSONObject extra,
+                                              java.util.function.BooleanSupplier authority)
+            throws Exception {
         BydCloudClient.CloudCommandResult r =
-                client.executeRemoteCommandWithCode(vin, commandType, extra, true);
+                authority == null
+                        ? client.executeRemoteCommandWithCode(vin, commandType, extra, true)
+                        : client.executeRemoteCommandWithCode(vin, commandType, extra, true,
+                                authority);
         if (r.success) return CloudOutcome.success();
         if (BydCloudClient.DRIVING_SAFETY_BLOCKED_CODE.equals(r.code)) {
             return CloudOutcome.blockedDriving();
@@ -3409,6 +3950,10 @@ public final class VehicleCommandRouter {
         String reason = DrivingSafetyGuard.getActionBlockReason(cmd.motionSafetyGuardKey());
         if (reason == null) return null;
         logger.warn("Blocked '" + cmd.name() + "' — not confirmed parked (" + reason + ")");
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                && DrivingSafetyGuard.isUnconfirmedReason(reason)) {
+            return CommandResult.blocked(msg("blocked_unconfirmed"));
+        }
         return CommandResult.blocked(msg("blocked_driving"));
     }
 

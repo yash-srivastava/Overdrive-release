@@ -65,13 +65,13 @@ public final class VoiceExecutionPolicy {
      * level, Play Video, locks, power and the shell/API escape hatches stay refused.
      */
     static final Set<String> ALLOWLIST = new HashSet<>(Arrays.asList(
-            "setAc", "setAcTemp", "stepAcTemp", "setAcFan", "recirculation", "maxCool",
+            "setAc", "setAcTemp", "stepAcTemp", "setAcFan", "stepAcFan", "recirculation", "airflow", "maxCool",
             "acAuto", "frontDefrost", "rearDefrost",
             "seat", "steeringHeat",
             "sunshade", "windowsVent", TYPE_WINDOWS_ALL,
             "ambientPower", "manualClip",
             "openApp", "openAppSplit", "openAppsSplit",
-            "mediaControl", "mediaVolume", "channelVolume", "playAudio", "stopAudio",
+            "mediaControl", "mediaVolume", "channelVolume", "engineSound", "playAudio", "stopAudio",
             "drl", "hudPower", "screenPower",
             "notification", "showToast", "showDialog", "speak", "pause",
             "setVariable", "incrementVariable", "computeVariable", "captureVariable"));

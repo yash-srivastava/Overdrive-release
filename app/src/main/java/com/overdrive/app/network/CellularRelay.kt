@@ -8,11 +8,7 @@ import android.net.NetworkRequest
 import com.overdrive.app.logging.LogManager
 import java.io.InputStream
 import java.io.OutputStream
-import java.net.Inet4Address
-import java.net.InetAddress
 import java.net.InetSocketAddress
-import java.net.NetworkInterface
-import java.security.MessageDigest
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.URI
@@ -68,11 +64,16 @@ object CellularRelay {
     private val relayedRx = java.util.concurrent.atomic.AtomicLong(0)
     private val relayedTx = java.util.concurrent.atomic.AtomicLong(0)
 
+    // No credentials, so never every interface: loopback for sing-box's client tunnel,
+    // plus the hotspot's own IPv4 once it has one (bindHotspot).
     @Volatile private var server: ServerSocket? = null
+    @Volatile private var apServer: ServerSocket? = null
+    @Volatile private var apAddress: String? = null
     @Volatile private var accept: Thread? = null
     @Volatile private var cell: Network? = null
     @Volatile private var netCallback: ConnectivityManager.NetworkCallback? = null
     @Volatile private var cm: ConnectivityManager? = null
+    @Volatile private var lastRefusalLogMs = 0L
 
     private val pool: ThreadPoolExecutor = Executors.newCachedThreadPool { r ->
         Thread(r, "cell-relay").apply { isDaemon = true }
@@ -86,43 +87,29 @@ object CellularRelay {
      * Requesting the network keeps the radio's data call up even when the AP has
      * taken the WiFi interface, which is what makes the bound sockets routable.
      */
-    /**
-     * Per-session client credential. When non-null, SOCKS5 requires username/password
-     * method 0x02 with this token as the password and HTTP requires
-     * `Proxy-Authorization: Bearer <token>`. Set by HotspotManager from the persisted
-     * hotspot.clientProxyToken. SECURITY (run-2 finding CellularRelay.kt:0.0.0.0:8121):
-     * the relay was an unauthenticated open proxy on a wildcard bind.
-     */
-    @Volatile internal var authToken: String? = null   // internal for unit tests
-
-    fun start(context: Context, authToken: String? = null) {
+    fun start(context: Context) {
         synchronized(lifecycleLock) {
             if (running.get()) return
             val epoch = generation.incrementAndGet()
             running.set(true)
-            this.authToken = authToken
             try {
                 val ctx = context.applicationContext
                 val manager = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
                     ?: throw IllegalStateException("no ConnectivityManager")
                 cm = manager
-                // Fail closed before requesting a radio network if the AP gateway
-                // is unavailable. Any later startup failure is rolled back by stop().
-                val bindAddr = apGatewayAddress()
-                    ?: throw IllegalStateException("no AP gateway address; fail closed")
                 val ss = ServerSocket()
                 server = ss // publish before bind so even bind failures close this socket
                 ss.reuseAddress = true
-                ss.bind(InetSocketAddress(bindAddr, PORT))
+                ss.bind(InetSocketAddress("127.0.0.1", PORT))
                 requestCellular(manager, epoch)
 
                 val t = Thread({ acceptLoop(ss, epoch) }, "cell-relay-accept").apply { isDaemon = true }
                 accept = t
                 t.start()
-                log.info(TAG, "relay listening on ${bindAddr.hostAddress}:$PORT (AP bind, auth=${authToken != null})")
+                log.info(TAG, "relay listening on 127.0.0.1:$PORT")
             } catch (t: Throwable) {
                 log.warn(TAG, "relay start failed: ${t.message}")
-                stop() // Closes listener and unregisters a partially established network request.
+                stop()
             }
         }
     }
@@ -134,6 +121,9 @@ object CellularRelay {
             generation.incrementAndGet() // invalidate old accept threads and network callbacks
             try { server?.close() } catch (_: Throwable) { }
             server = null
+            try { apServer?.close() } catch (_: Throwable) { }
+            apServer = null
+            apAddress = null
             accept = null
             // Closing sockets wakes blocking reads; otherwise tunnels could
             // continue relaying for up to IO_TIMEOUT_MS after hotspot shutdown.
@@ -146,13 +136,40 @@ object CellularRelay {
             netCallback = null
             cm = null
             cell = null
-            authToken = null
             if (manager != null && cb != null) {
                 try { manager.unregisterNetworkCallback(cb) } catch (_: Throwable) { }
             }
             log.info(TAG, "relay stopped")
         }
     }
+
+    /** Also listen on the hotspot's own IPv4 (null closes that listener). Idempotent. */
+    fun bindHotspot(address: String?) {
+        synchronized(lifecycleLock) {
+            if (!running.get()) return
+            if (address == apAddress && apServer?.isClosed == false) return
+            try { apServer?.close() } catch (_: Throwable) { }
+            apServer = null
+            apAddress = null
+            if (address == null) return
+            val epoch = generation.get()
+            val ss = ServerSocket()
+            try {
+                ss.reuseAddress = true
+                ss.bind(InetSocketAddress(address, PORT))
+                apServer = ss
+                apAddress = address
+                Thread({ acceptLoop(ss, epoch) }, "cell-relay-accept-ap").apply { isDaemon = true }.start()
+                log.info(TAG, "relay listening on $address:$PORT")
+            } catch (t: Throwable) {
+                try { ss.close() } catch (_: Throwable) { }
+                log.warn(TAG, "relay hotspot bind failed on $address: ${t.message}")
+            }
+        }
+    }
+
+    /** True once the hotspot-address listener is up. */
+    fun isHotspotBound(): Boolean = apServer?.isClosed == false
 
     private fun isCurrent(epoch: Long): Boolean = running.get() && generation.get() == epoch
 
@@ -164,57 +181,6 @@ object CellularRelay {
     private fun closeTracked(socket: Socket) {
         openSockets.remove(socket)
         try { socket.close() } catch (_: Throwable) { }
-    }
-
-
-    // ==================== SECURITY helpers (run-2 fix) ====================
-
-    private val AP_IFACE_HINTS = listOf("wlan", "ap", "softap", "p2p")
-
-    /**
-     * The SoftAP gateway address (the head unit's own address on the tethering
-     * subnet, normally 192.168.43.1), or null when no AP interface address is
-     * visible. Used as the relay's bind address so the port is reachable from
-     * tethered clients but never from other interfaces.
-     */
-    internal fun apGatewayAddress(): InetAddress? {
-        return try {
-            NetworkInterface.getNetworkInterfaces()?.toList()?.asSequence()
-                ?.filter { AP_IFACE_HINTS.any { h -> it.name.startsWith(h) } }
-                ?.flatMap { it.inetAddresses.toList().asSequence() }
-                ?.filterIsInstance<Inet4Address>()
-                ?.mapNotNull { runCatching { InetAddress.getByAddress(it.address) }.getOrNull() }
-                ?.firstOrNull { it.hostAddress?.startsWith("192.168.") == true }
-        } catch (t: Throwable) {
-            null
-        }
-    }
-
-    /**
-     * Destination policy for relayed connections: internet egress only. Blocks
-     * loopback, link-local, site-local (RFC1918), ULA (fc00::/7), multicast and
-     * unspecified addresses so the relay cannot be used to reach the head unit
-     * itself or other private networks. Pure function (unit-testable).
-     */
-    fun isAllowedDestination(addr: InetAddress): Boolean {
-        if (addr.isAnyLocalAddress || addr.isLoopbackAddress || addr.isLinkLocalAddress ||
-            addr.isMulticastAddress || addr.isSiteLocalAddress) {
-            return false
-        }
-        if (addr is java.net.Inet6Address) {
-            val b = addr.address
-            if (b.isNotEmpty() && (b[0].toInt() and 0xFE) == 0xFC) return false   // fc00::/7 ULA
-        }
-        return true
-    }
-
-    /** Constant-time comparison of a client-supplied credential against the token. */
-    fun authTokenMatches(provided: String?): Boolean {
-        val expected = authToken ?: return true   // auth disabled only when never configured
-        if (provided == null) return false
-        return MessageDigest.isEqual(
-            provided.toByteArray(Charsets.UTF_8),
-            expected.toByteArray(Charsets.UTF_8))
     }
 
     /** Endpoint string for the UI, e.g. "192.168.43.1:8121". */
@@ -286,6 +252,13 @@ object CellularRelay {
             val client = try {
                 ss.accept()
             } catch (t: Throwable) {
+                if (isCurrent(epoch) && ss !== server) {
+                    // Only the hotspot listener ended (replaced, or its address went away):
+                    // drop it and let the next hotspot sync bind again.
+                    synchronized(lifecycleLock) { if (apServer === ss) { apServer = null; apAddress = null } }
+                    try { ss.close() } catch (_: Throwable) { }
+                    return
+                }
                 if (isCurrent(epoch)) {
                     log.warn(TAG, "accept failed: ${t.message}")
                     // A broken listener must not strand the cellular network request.
@@ -296,6 +269,16 @@ object CellularRelay {
             if (!isCurrent(epoch)) {
                 try { client.close() } catch (_: Throwable) { }
                 return
+            }
+            // (hotspot devices and this head unit only: not the car's own client Wi-Fi, nor a cellular address)
+            if (!HotspotManager.isHotspotClient(client.inetAddress)) {
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (now - lastRefusalLogMs > 60_000L) {
+                    lastRefusalLogMs = now
+                    log.warn(TAG, "refused a client outside the hotspot: ${client.inetAddress?.hostAddress}")
+                }
+                try { client.close() } catch (e: Throwable) { }
+                continue
             }
             if (!admissions.tryAcquire()) {
                 log.warn(TAG, "tunnel cap reached; dropping client")
@@ -348,6 +331,15 @@ object CellularRelay {
             admissions.release()
         }
     }
+
+    /**
+     * Internet egress only. A loopback connection from the relay is trusted as this head unit by
+     * AuthMiddleware, so a hotspot client must never reach 127.0.0.1 (or 0.0.0.0) through it.
+     * Hotspot and other private addresses stay reachable: there the source is not loopback.
+     */
+    internal fun isAllowedDestination(addr: java.net.InetAddress): Boolean =
+        !(addr.isAnyLocalAddress || addr.isLoopbackAddress || addr.isLinkLocalAddress ||
+            addr.isMulticastAddress)
 
     /** Resolve over cellular and track an in-progress connect for immediate shutdown. */
     private fun dial(host: String, port: Int, epoch: Long): Socket? {
@@ -413,25 +405,6 @@ object CellularRelay {
         val requestLine = text.substringBefore("\r\n")
         val parts = requestLine.split(' ')
         if (parts.size < 2) return null
-
-        // SECURITY: when a client token is configured, plain proxying requires it.
-        if (authToken != null) {
-            val authLine = text.lineSequence()
-                .firstOrNull { it.startsWith("Proxy-Authorization:", ignoreCase = true) }
-                ?: run {
-                    client.getOutputStream().write(
-                        "HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Bearer realm=\"overdrive\"\r\nConnection: close\r\n\r\n".toByteArray())
-                    client.getOutputStream().flush()
-                    return null
-                }
-            val cred = authLine.substringAfter(':').trim().removePrefix("Bearer ").removePrefix("bearer ").trim()
-            if (!authTokenMatches(cred)) {
-                client.getOutputStream().write(
-                    "HTTP/1.1 407 Proxy Authentication Required\r\nConnection: close\r\n\r\n".toByteArray())
-                client.getOutputStream().flush()
-                return null
-            }
-        }
 
         if (parts[0].equals("CONNECT", ignoreCase = true)) {
             val hp = parts[1]
@@ -501,40 +474,9 @@ object CellularRelay {
         val out = client.getOutputStream()
         val methodCount = input.read()
         if (methodCount <= 0) return null
-        var offeredUserPass = false
-        repeat(methodCount) {
-            val m = input.read()
-            if (m < 0) return null
-            if (m == 0x02) offeredUserPass = true
-        }
-        // SECURITY: when a client token is configured, only username/password
-        // (0x02) is acceptable — never fall back to no-auth.
-        if (authToken != null) {
-            out.write(byteArrayOf(0x05, if (offeredUserPass) 0x02 else 0xFF.toByte()))
-            out.flush()
-            if (!offeredUserPass) return null
-            // RFC 1929 username/password sub-negotiation
-            val ver = input.read()
-            if (ver != 0x01) return null
-            val ulen = input.read()
-            if (ulen <= 0) return null
-            val uname = ByteArray(ulen)
-            if (!readFully(input, uname)) return null
-            val plen = input.read()
-            if (plen <= 0) return null
-            val passwd = ByteArray(plen)
-            if (!readFully(input, passwd)) return null
-            val ok = authTokenMatches(String(passwd, Charsets.ISO_8859_1))
-            out.write(byteArrayOf(0x01, if (ok) 0x00 else 0x01))
-            out.flush()
-            if (!ok) {
-                log.warn(TAG, "SOCKS5 auth failed from ${client.inetAddress?.hostAddress}")
-                return null
-            }
-        } else {
-            out.write(byteArrayOf(0x05, 0x00))   // no authentication (legacy, token not configured)
-            out.flush()
-        }
+        repeat(methodCount) { if (input.read() < 0) return null }
+        out.write(byteArrayOf(0x05, 0x00))   // no authentication
+        out.flush()
 
         if (input.read() != 0x05) return null
         val cmd = input.read()

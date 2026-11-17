@@ -242,13 +242,14 @@ public class GpuPipelineConfig {
     public enum StreamingQuality {
         // Ultra Low: 400 kbps - prioritize resolution over FPS for surveillance
         // Higher resolution at lower FPS looks better than low-res at higher FPS
-        ULTRA_LOW(480, 360, 5, 400_000, "Ultra Low (400k)"),
-        
+        // Sizes stay 4:3 and multiples of 16: decoders that skip the H.264 crop show padded rows.
+        ULTRA_LOW(448, 336, 5, 400_000, "Ultra Low (400k)"),
+
         // Low: 600 kbps - for slow connections
         LOW(640, 480, 8, 600_000, "Low (600k)"),
-        
+
         // Medium: 1 Mbps - balanced quality/bandwidth (default)
-        MEDIUM(800, 600, 10, 1_000_000, "Medium (1M)"),
+        MEDIUM(768, 576, 10, 1_000_000, "Medium (1M)"),
         
         // High: 1.5 Mbps - good quality
         HIGH(960, 720, 12, 1_500_000, "High (1.5M)"),

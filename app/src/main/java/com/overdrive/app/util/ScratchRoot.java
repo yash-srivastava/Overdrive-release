@@ -28,7 +28,8 @@ import java.util.Map;
  *       command, so daemons and their children inherit the live root.</li>
  *   <li>The stored app selection — authoritative in the app process (the app
  *       cannot delete the marker, so a stale marker must never outvote the
- *       user's toggle).</li>
+ *       user's toggle). With nothing stored (fresh or reinstalled app) the
+ *       app falls through to the marker like the daemons.</li>
  *   <li>{@link #ALT_MARKER} — daemons started without the environment (an old
  *       watchdog, a manual launch) read the choice from disk.</li>
  *   <li>{@link #LEGACY_DIR}.</li>
@@ -77,7 +78,10 @@ public final class ScratchRoot {
         if (context == null) return;
         Boolean stored = null;
         try {
-            stored = prefs(context).getBoolean(KEY_ALTERNATE, false);
+            SharedPreferences prefs = prefs(context);
+            // No stored choice (fresh or reinstalled app): the marker decides, as it does for
+            // the daemons, so the app doesn't run on legacy while they run on the alternate root.
+            if (prefs.contains(KEY_ALTERNATE)) stored = prefs.getBoolean(KEY_ALTERNATE, false);
         } catch (Throwable ignored) {
             // No preference storage: fall through to marker/legacy resolution.
         }
@@ -125,7 +129,9 @@ public final class ScratchRoot {
         if (cached != null) return cached;
         if (context == null) return false;
         try {
-            return prefs(context).getBoolean(KEY_ALTERNATE, false);
+            SharedPreferences prefs = prefs(context);
+            return prefs.contains(KEY_ALTERNATE)
+                    ? prefs.getBoolean(KEY_ALTERNATE, false) : markerPresent();
         } catch (Throwable t) {
             return false;
         }
@@ -169,29 +175,6 @@ public final class ScratchRoot {
     /** {@link #path(String)} as a {@link File}. */
     public static File file(String name) {
         return new File(path(name));
-    }
-
-    /**
-     * Maps {@code name} onto the counterpart scratch root ({@link #ALT_DIR}
-     * when currently on {@link #LEGACY_DIR}, or {@link #LEGACY_DIR} when on
-     * {@link #ALT_DIR}) so watchdogs and lifecycle commands can observe or
-     * clear stop/parked sentinels across a mixed-root split-brain.
-     */
-    public static String counterpartPath(String name) {
-        String root = dir();
-        String other = LEGACY_DIR.equals(root) ? ALT_DIR : LEGACY_DIR;
-        if (name == null || name.isEmpty()) return other;
-        if (name.charAt(0) == '/') {
-            if (name.equals(LEGACY_DIR) || name.equals(ALT_DIR)) return other;
-            if (name.startsWith(LEGACY_DIR + "/")) {
-                return other + name.substring(LEGACY_DIR.length());
-            }
-            if (name.startsWith(ALT_DIR + "/")) {
-                return other + name.substring(ALT_DIR.length());
-            }
-            return name;
-        }
-        return other + "/" + name;
     }
 
     /**
@@ -293,10 +276,13 @@ public final class ScratchRoot {
     /**
      * Shell text the app runs over ADB when the user turns the toggle off.
      * Removes only the marker; files in the alternate root are left for the
-     * user, exactly as legacy files are never touched by opt-in.
+     * user, exactly as legacy files are never touched by opt-in. Acknowledges
+     * only once the marker is gone: a stored "off" with the marker still on
+     * disk would leave the daemons on the alternate root and the app on legacy.
      */
     public static String disableCommand() {
-        return "rm -f " + shellQuote(ALT_MARKER) + " 2>/dev/null; echo OD_SCRATCH_OFF";
+        String marker = shellQuote(ALT_MARKER);
+        return "rm -f " + marker + " 2>/dev/null; [ -e " + marker + " ] || echo OD_SCRATCH_OFF";
     }
 
     public static final String ENABLE_OK = "OD_SCRATCH_ON";

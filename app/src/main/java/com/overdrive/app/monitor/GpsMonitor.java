@@ -175,29 +175,6 @@ public class GpsMonitor {
         startStaleWatch();
     }
 
-    /**
-     * Re-read persisted cache when the in-memory snapshot has no coordinates.
-     * The daemon normally loads cache once at init; the app-side sidecar may
-     * write {@link #CACHE_FILE_APP} later (after init or after a sidecar
-     * restart) while IPC is still down — trip telemetry would then journal
-     * (0,0) for every 5 Hz tick even though a fix exists on disk.
-     */
-    public void reloadCacheIfNoFix() {
-        if (!fixSnapshot.hasLocation()) {
-            loadFromCache();
-        }
-    }
-
-    /**
-     * Trip recording copies lat/lon from this monitor on every sample. Poke the
-     * LocationSidecar (in case it died since daemon boot) and back-fill from
-     * cache so the first ticks of a drive are not all zeros.
-     */
-    public void ensureTripRecordingFeed() {
-        start();
-        reloadCacheIfNoFix();
-    }
-
     private synchronized void startStaleWatch() {
         if (staleWatch != null) return;
         staleWatchStartedElapsed = SystemClock.elapsedRealtime();

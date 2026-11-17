@@ -152,7 +152,12 @@ object RoadSenseHazardApiClient {
                     // keys (no CAN / not initialized) parse to null → GPS-only fallback.
                     canSpeedKmh = if (loc.has("canSpeedKmh")) loc.optDouble("canSpeedKmh", Double.NaN).takeUnless { it.isNaN() } else null,
                     accelPercent = if (loc.has("accelPercent")) loc.optInt("accelPercent", -1).takeUnless { it < 0 } else null,
-                    brakePercent = if (loc.has("brakePercent")) loc.optInt("brakePercent", -1).takeUnless { it < 0 } else null
+                    brakePercent = if (loc.has("brakePercent")) loc.optInt("brakePercent", -1).takeUnless { it < 0 } else null,
+                    measuredAtMono = loc.optLong("fixAgeMs", -1L).let { age ->
+                        if (age >= 0L) android.os.SystemClock.elapsedRealtime() - age else 0L
+                    },
+                    gear = loc.optString("gear", "").takeIf { it.isNotEmpty() },
+                    accOn = if (loc.has("accOn")) loc.optBoolean("accOn") else null
                 )
             }
         } catch (t: Throwable) {
@@ -174,7 +179,13 @@ object RoadSenseHazardApiClient {
         val timestampMs: Long? = null,
         val canSpeedKmh: Double? = null,
         val accelPercent: Int? = null,
-        val brakePercent: Int? = null
+        val brakePercent: Int? = null,
+        /** elapsedRealtime the fix was measured; 0 when unknown (an older daemon, a cached fix). */
+        val measuredAtMono: Long = 0L,
+        /** The gear while fresh ("P", "R", "N", "D", "M", "S"); null when unknown. */
+        val gear: String? = null,
+        /** ACC as the daemon has it (false: the car switched off); null when unknown. */
+        val accOn: Boolean? = null
     ) {
         /** Best available speed in m/s: prefer the smooth CAN wheel speed, fall back to
          *  the noisy GPS speed, else 0. The puck dead-reckoner uses this so its forward

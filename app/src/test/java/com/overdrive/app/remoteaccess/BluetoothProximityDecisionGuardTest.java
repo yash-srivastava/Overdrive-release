@@ -96,12 +96,15 @@ public class BluetoothProximityDecisionGuardTest {
                 .put("connectionState", "connected"), 1_100));
     }
 
-    @Test public void absenceNeedsKnownPoweredRadioAndThreeUniqueProofsWithDwell() throws Exception {
+    @Test public void absenceNeedsKnownPoweredRadioAndTwoUniqueProofsWithDwell() throws Exception {
         assertFalse(allows("lock", absence().put("connectionKnown", false), 1_100));
         assertFalse(allows("lock", absence().put("radioReadKnown", false), 1_100));
         assertFalse(allows("lock", absence().put("radioOn", false), 1_100));
-        assertFalse(allows("lock", absence().put("disconnectionSampleCount", 2), 1_100));
-        assertFalse(allows("lock", absence().put("disconnectedForMs", 5_999), 1_100));
+        assertFalse(allows("lock", absence().put("disconnectionSampleCount", 1), 1_100));
+        assertFalse(allows("lock", absence().put("disconnectedForMs", 1_999), 1_100));
+        // The evaluator's two reads over two seconds is enough (it was 3 / 6 s before 20 Oct).
+        assertTrue(allows("lock", absence().put("disconnectionSampleCount", 2)
+                .put("disconnectedForMs", 2_000), 1_100));
         assertFalse(allows("lock", absence().put("rawRssi", -32), 1_100));
     }
 

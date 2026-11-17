@@ -130,7 +130,7 @@ public final class CabinAudioCaptureService extends Service {
     private void createNotificationChannel() {
         NotificationChannel channel = new NotificationChannel(
                 CHANNEL_ID,
-                getString(R.string.cabin_audio_notification_channel),
+                com.overdrive.app.util.AppLocaleContext.INSTANCE.of(this).getString(com.overdrive.app.R.string.cabin_audio_notification_channel),
                 NotificationManager.IMPORTANCE_LOW);
         channel.setShowBadge(false);
         NotificationManager manager = getSystemService(NotificationManager.class);
@@ -146,8 +146,8 @@ public final class CabinAudioCaptureService extends Service {
                 launch,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         return new Notification.Builder(this, CHANNEL_ID)
-                .setContentTitle(getString(R.string.cabin_audio_notification_title))
-                .setContentText(getString(R.string.cabin_audio_notification_text))
+                .setContentTitle(com.overdrive.app.util.AppLocaleContext.INSTANCE.of(this).getString(com.overdrive.app.R.string.cabin_audio_notification_title))
+                .setContentText(com.overdrive.app.util.AppLocaleContext.INSTANCE.of(this).getString(com.overdrive.app.R.string.cabin_audio_notification_text))
                 .setSmallIcon(R.drawable.ic_overlay_mic_active)
                 .setContentIntent(content)
                 .setOngoing(true)

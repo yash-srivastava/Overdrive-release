@@ -221,9 +221,19 @@ public class DiLink5VehicleBoundaryContractTest {
         assertTrue(rehome.contains("isTaskStateReferenceLine(line)"));
         assertFalse(cast.contains("getRealDisplay"));
         assertTrue(cast.contains(
-                "OEM shared projection display unavailable on trinket"));
+                "DI5 projection target was not resolved before container enable"));
         assertTrue(cast.contains(
-                "refusing the non-physical"));
+                "using preflight-selected OEM shared projection"));
+        int shellOnlyBranch = cast.indexOf("if (!appVisible) {");
+        int compositorDispatch = cast.indexOf(
+                "val commandResult = synchronized(stateLock) {", shellOnlyBranch);
+        assertTrue(shellOnlyBranch >= 0);
+        assertTrue(compositorDispatch > shellOnlyBranch);
+        String shellOnlyPlan = cast.substring(shellOnlyBranch, compositorDispatch);
+        assertTrue(shellOnlyPlan.contains("return configureProjectionTarget("));
+        assertTrue(shellOnlyPlan.contains("appDisplayVisible = false"));
+        assertTrue(shellOnlyPlan.contains(".copy(deferCompositorEnable = true)"));
+        assertFalse(shellOnlyPlan.contains("sendDiLink5ContainerInfoResult(16)"));
         assertFalse(cast.contains("createVirtualDisplay("));
         assertFalse(cast.contains("TYPE_APPLICATION_OVERLAY"));
         assertFalse(cast.contains("di5ClusterSizeProfile"));
@@ -284,12 +294,11 @@ public class DiLink5VehicleBoundaryContractTest {
         assertFalse(controller.contains(
                 "cleared stale legacy projection gate "));
         assertTrue(cast.contains(
-                "} catch (_: Throwable) {\n"
-                        + "            // Match the configured/default behavior"));
+                "DiLink5ProjectionConfig.from("));
         assertTrue(cast.contains(
-                "wrong physical cluster surface.\n"
-                        + "            true\n"
-                        + "        }"));
+                "Target.FULL"));
+        assertTrue(cast.contains(
+                "Fresh and unreadable configuration uses the standard target."));
 
         String clusterCast = readRepositoryFile(
                 "app/src/main/java/com/overdrive/app/launcher/ClusterCast.java");
@@ -363,13 +372,12 @@ public class DiLink5VehicleBoundaryContractTest {
                         "private void pollReady(long elapsed, int epoch)"));
         assertOrdered(
                 legacyOpen,
-                "if (!writeGateFlags(",
-                "sendOpenInfo(\n"
-                        + "                            sizeOp",
-                "sendOpenInfo(\n"
-                        + "                        OP_FULLSCREEN_ON",
-                "sendOpenInfo(\n"
-                        + "                            OP_DI4_MODE");
+                "writeGateFlagsAsync(",
+                "fissionDisplayExists()",
+                "sendOpenStep(OP_FULLSCREEN_ON, epoch, true)",
+                "sendOpenStep(sizeOp, epoch, false)",
+                "sendOpenStep(OP_FULLSCREEN_ON, epoch, false)",
+                "sendOpenStep(OP_DI4_MODE, epoch, false)");
         String legacyForceClose = legacyProjection.substring(
                 legacyProjection.indexOf(
                         "public void forceClose(String reason)"),

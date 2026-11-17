@@ -77,6 +77,9 @@ class DaemonStartupManager(
         // armed at once, and one adbd restart must not fan out into one
         // immediate check per manager instance.
         private const val RECONNECT_CHECK_MIN_INTERVAL_MS = 10_000L
+        // A staged start whose probe could not reach ADB is re-probed until the health check owns revival.
+        private const val STAGED_PROBE_RETRY_MS = 10_000L
+        private const val STAGED_PROBE_RETRIES = 6
         @Volatile
         private var lastReconnectHealthCheckAtMs = 0L
 
@@ -431,9 +434,43 @@ class DaemonStartupManager(
                 android.util.Log.w(TAG, "ensureAccSentryJudgeRunning failed: ${e.message}")
             }
         }
+
+        /**
+         * Supervision once MainActivity is gone, as [startOnBoot] would set it up without an Activity.
+         * The boot start reruns only while it was still pending or after a park ended; otherwise
+         * only the health check resumes, which never clears a machine stop marker.
+         */
+        @Synchronized
+        private fun resumeBootSupervision(context: Context, bootStartPending: Boolean) {
+            if (activityManager != null || bootManager != null) return
+            val appCtx = context.applicationContext ?: context
+            if (java.io.File(com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH).exists()) {
+                parkObserved = true
+                ensureAccSentryJudgeRunning(appCtx)
+                return
+            }
+            val endedStamp = readParkEndedStamp()
+            val parkEnded = parkObserved || (endedStamp != null && endedStamp != consumedParkEndStamp)
+            if (parkEnded) {
+                parkObserved = false
+                if (endedStamp != null) consumedParkEndStamp = endedStamp
+                TunnelLauncher.resetAutoStartBackoff()
+            }
+            bootStarted = true
+            val manager = DaemonStartupManager(appCtx, null)
+            bootManager = manager
+            val fullStart = bootStartPending || parkEnded
+            LogManager.getInstance().info(TAG, "MainActivity gone — boot-scoped manager resumes " +
+                (if (fullStart) "the boot start" else "the health check"))
+            if (fullStart) manager.initializeOnBoot() else manager.startDaemonHealthCheck()
+        }
     }
 
     fun initializeOnAppLaunch() {
+        if (supervisionStopped) {
+            log.info(TAG, "initializeOnAppLaunch ignored — this manager's Activity is destroyed")
+            return
+        }
         log.info(TAG, "=== Initializing daemon startup on app launch ===")
         log.info(TAG, "Waiting 45 seconds before starting daemons (system stabilization)...")
 
@@ -541,9 +578,6 @@ class DaemonStartupManager(
     private fun initializeOnBoot() {
         log.info(TAG, "=== Initializing daemon startup on boot ===")
         log.info(TAG, "Waiting 45 seconds before starting daemons (system stabilization)...")
-        
-        // Reset only the process-local cache; durable manual stops survive boot.
-        userStoppedDaemons.clear()
 
         // Enable AccessibilityService keep-alive immediately on boot
         enableAccessibilityKeepAlive()
@@ -667,7 +701,12 @@ class DaemonStartupManager(
      * /data/local/tmp). Probe errors fail closed: preserving an explicit user
      * stop is more important than one automatic start attempt.
      */
-    private fun ifNotUserStopped(type: DaemonType, onAllowed: () -> Unit) {
+    private fun ifNotUserStopped(
+        type: DaemonType,
+        probeRetries: Int = STAGED_PROBE_RETRIES,
+        onAllowed: () -> Unit
+    ) {
+        if (supervisionStopped) return
         val noteGeneration = daemonsViewModel?.userStartGeneration(type) ?: 0
         // ABSOLUTE "Vehicle ON only" parked gate, for BOTH managers, in the SAME
         // ordered shell command as the per-daemon sentinel decision. While the
@@ -718,7 +757,13 @@ class DaemonStartupManager(
                             if (out.contains("MACHINE")) {
                                 log.info(TAG, "Auto-start: cleared machine stop for ${type.displayName}")
                             }
-                            handler.post { onAllowed() }
+                            handler.post {
+                                // A retried probe defers to the health check once it owns revival.
+                                if (!supervisionStopped
+                                    && (probeRetries == STAGED_PROBE_RETRIES || !healthCheckRunning.get())) {
+                                    onAllowed()
+                                }
+                            }
                         }
                         else -> log.warn(TAG, "Auto-start sentinel probe returned no decision for " +
                             "${type.displayName} — leaving it stopped")
@@ -726,9 +771,24 @@ class DaemonStartupManager(
                 }
                 override fun onLaunched() {}
                 override fun onError(error: String) {
-                    log.warn(TAG, "Auto-start sentinel probe failed for " +
-                        "${type.displayName} ($error) — leaving it stopped")
-                    deferUntilAdbConnects(type, onAllowed)
+                    if (deferUntilAdbConnects(type, onAllowed)) {
+                        log.warn(TAG, "Auto-start sentinel probe failed for " +
+                            "${type.displayName} ($error) — waiting for ADB")
+                    } else if (probeRetries > 0 && !supervisionStopped && !healthCheckRunning.get()) {
+                        log.warn(TAG, "Auto-start sentinel probe failed for " +
+                            "${type.displayName} ($error) — retrying in ${STAGED_PROBE_RETRY_MS / 1000}s")
+                        handler.postDelayed({
+                            // The same gates the deferred-start replay applies.
+                            if (!healthCheckRunning.get() && type !in userStoppedDaemons
+                                && (type !in OPTIONAL_DAEMONS || PreferencesManager.isDaemonEnabled(type))) {
+                                ifNotUserStopped(type, probeRetries - 1, onAllowed)
+                            }
+                        }, STAGED_PROBE_RETRY_MS)
+                    } else {
+                        log.warn(TAG, "Auto-start sentinel probe failed for " +
+                            "${type.displayName} ($error) — " +
+                            if (healthCheckRunning.get()) "the health check will retry" else "leaving it stopped")
+                    }
                 }
             }
         )
@@ -1196,7 +1256,7 @@ class DaemonStartupManager(
      * Daemons intentionally stopped by the user are skipped.
      */
     private fun startDaemonHealthCheck() {
-        if (!healthCheckRunning.compareAndSet(false, true)) return
+        if (supervisionStopped || !healthCheckRunning.compareAndSet(false, true)) return
         // From here the health check owns revival (a manager without a ViewModel has no
         // Telegram/Tailscale/Singbox fallback, as before).
         synchronized(deferredStarts) { deferredStarts.clear() }
@@ -1285,11 +1345,15 @@ class DaemonStartupManager(
      * connection, which on DI5 always notifies the reconnect listeners. A closed port means adbd is
      * down and every daemon it spawned is gone at deferral time. Not on main.
      */
-    private fun deferUntilAdbConnects(type: DaemonType, onAllowed: () -> Unit) {
+    private fun deferUntilAdbConnects(type: DaemonType, onAllowed: () -> Unit): Boolean {
         if (supervisionStopped || healthCheckRunning.get()
-            || !com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
-            || !AdbShellExecutor.wasDiLink5PortClosed()
-            || !AdbShellExecutor.isAdbPortClosedNow()) return
+            || !com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) return false
+        val portClosedSeen = AdbShellExecutor.wasDiLink5PortClosed()
+        if (!portClosedSeen || !AdbShellExecutor.isAdbPortClosedNow()) {
+            log.warn(TAG, "DI5: ${type.displayName} not deferred — " +
+                if (!portClosedSeen) "ADB port was never seen closed" else "ADB port is open")
+            return false
+        }
         synchronized(deferredStarts) {
             deferredStarts.removeAll { it.first == type }
             deferredStarts.add(type to onAllowed)
@@ -1302,6 +1366,7 @@ class DaemonStartupManager(
             // The connection came up before the listener was registered.
             replayDeferredStarts(-1L)
         }
+        return true
     }
 
     /**
@@ -1322,7 +1387,7 @@ class DaemonStartupManager(
                 // A stop while ADB was down may not have reached its sentinel; the staged start checks these too.
                 if (type in userStoppedDaemons) return@postDelayed
                 if (type in OPTIONAL_DAEMONS && !PreferencesManager.isDaemonEnabled(type)) return@postDelayed
-                ifNotUserStopped(type, onAllowed)
+                ifNotUserStopped(type, onAllowed = onAllowed)
             }, index * 5_000L)
         }
     }
@@ -1499,6 +1564,10 @@ class DaemonStartupManager(
                             "(disable sentinel or parked-shutdown marker present) — NOT relaunching")
                     } else {
                         daemonsViewModel?.clearExternalStop(type)
+                        if (com.overdrive.app.launcher.adb.DiLink5AdbAutomaticRecoveryGate.allowed()) {
+                            com.overdrive.app.launcher.adb.AdbRecoveryManager
+                                .get(context.applicationContext).triggerAutomatic()
+                        }
                         if (type != DaemonType.CLOUDFLARED_TUNNEL || !cloudflaredBackingOff("Health check")) {
                             doRelaunchDaemon(type)
                         }
@@ -1514,6 +1583,7 @@ class DaemonStartupManager(
     }
 
     private fun doRelaunchDaemon(type: DaemonType) {
+        if (supervisionStopped) return
         val vm = daemonsViewModel
         if (vm != null) {
             // userInitiated=false: a health-check revival must NOT clear the
@@ -1617,6 +1687,19 @@ class DaemonStartupManager(
         } catch (e: Exception) {
             log.warn(TAG, "healthCheckThread quit failed: ${e.message}")
         }
+    }
+
+    /**
+     * MainActivity.onDestroy: this manager stops for good. When its Activity owned supervision
+     * and is not being recreated, a boot-scoped manager takes over.
+     */
+    fun onHostDestroyed(changingConfigurations: Boolean) {
+        val owned = activityManager === this
+        val bootStartPending = !healthCheckRunning.get()
+        handler.removeCallbacksAndMessages(null)
+        synchronized(deferredStarts) { deferredStarts.clear() }
+        stopHealthCheckThread()
+        if (owned && !changingConfigurations) resumeBootSupervision(context, bootStartPending)
     }
 
     fun cleanup() {

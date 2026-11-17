@@ -96,6 +96,13 @@ public final class DoorEventNotifier {
                     + " skipped: duplicate edge");
             return;
         }
+        // Legacy cars publish each area's first polled state after a restart; a close with no
+        // observed open is that baseline, not an event.
+        if (prev == null && state == BodyworkConstants.STATE_CLOSED
+                && !com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            logger.info("door area " + area + " closed at first reading: baseline, not published");
+            return;
+        }
 
         boolean opened = state == BodyworkConstants.STATE_OPEN;
         String category = opened

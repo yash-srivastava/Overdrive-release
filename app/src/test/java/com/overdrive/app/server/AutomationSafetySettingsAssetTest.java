@@ -8,6 +8,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.junit.Test;
 
@@ -161,10 +163,16 @@ public class AutomationSafetySettingsAssetTest {
                         + "                DrivingSafetyGuard.GUARD_DISPLAY_POWER)"));
         assertTrue(cloudClient.contains(
                 "String guardKey = drivingSafetyGuardForRemoteCommand(commandType);"));
-        assertTrue(cloudClient.indexOf(
-                "String guardKey = drivingSafetyGuardForRemoteCommand(commandType);")
-                < cloudClient.indexOf(
-                        "transport.postSecure(\"/control/remoteControl\", env.outer)"));
+        int guardCheck = cloudClient.indexOf(
+                "String guardKey = drivingSafetyGuardForRemoteCommand(commandType);");
+        Matcher remoteDispatch = Pattern.compile(
+                "JSONObject\\s+response\\s*=\\s*transport\\.postSecure\\s*\\("
+                        + "\\s*\"/control/remoteControl\"\\s*,\\s*env\\.outer"
+                        + "\\s*,\\s*0L\\s*,\\s*authority\\s*\\)")
+                .matcher(cloudClient);
+        assertTrue("The guarded dispatch must carry its cancellation authority",
+                remoteDispatch.find());
+        assertTrue(guardCheck < remoteDispatch.start());
         assertTrue(cloudClient.contains(
                 "if (Thread.currentThread().isInterrupted()) {\n"
                         + "            throw new IOException(\"remote command cancelled\");\n"

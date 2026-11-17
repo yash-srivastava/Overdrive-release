@@ -170,6 +170,34 @@ public final class MultiPhoneProximityPolicy {
     }
 
     /**
+     * Lock consensus after the switch-off guard. With both opt-in flags off this is the original rule:
+     * a detected key vetoes, then {@link #canLock}. Key-inside consent lets a phone departure pass a
+     * detected key and skip the key-search wait; phone priority lets a confirmed-Near phone veto a
+     * keyfob departure. {@code fobAway} is already gated on keyfob locking being configured.
+     */
+    public static boolean consensus(boolean phoneDeparture, boolean keyDetected, boolean keyInsideConsent,
+            boolean phonePriority, boolean fobConfigured, boolean waitsForKeyAbsence, boolean fobAway,
+            List<Observation> observations, long now, long staleMs) {
+        boolean keyInside = phoneDeparture && keyInsideConsent;
+        if (keyDetected && !keyInside) return false;
+        if (!phoneDeparture && phonePriority && anyConfirmedNear(observations, now, staleMs)) return false;
+        return canLock(phoneDeparture, !phoneDeparture || (fobConfigured && !keyInside && waitsForKeyAbsence),
+                fobAway, observations, now, staleMs);
+    }
+
+    /** Phone priority: an enabled phone whose fresh connected reading is a confirmed Near. */
+    public static boolean anyConfirmedNear(List<Observation> observations, long now, long staleMs) {
+        if (observations == null || now < 0 || staleMs <= 0) return false;
+        for (Observation observation : observations) {
+            if (observation != null && observation.enabled && observation.connected && observation.rawPresent
+                    && observation.state == ProximityEvaluator.State.NEAR
+                    && observation.lastObservedMs >= 0 && observation.lastObservedMs <= now
+                    && now - observation.lastObservedMs <= staleMs) return true;
+        }
+        return false;
+    }
+
+    /**
      * A verified physical-key departure is authoritative and independent of
      * saved phone observations. Phone-triggered fallback requires every
      * participating phone to be freshly Away, plus confirmed fob absence when

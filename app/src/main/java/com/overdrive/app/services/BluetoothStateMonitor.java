@@ -9,6 +9,8 @@ import android.content.IntentFilter;
 import android.util.Log;
 
 import com.overdrive.app.util.DaemonHttpClient;
+import com.overdrive.app.remoteaccess.BluetoothRadioRecoveryEvents;
+import com.overdrive.app.remoteaccess.SharedBluetoothKeepAliveController;
 
 import org.json.JSONObject;
 
@@ -18,7 +20,7 @@ import java.net.HttpURLConnection;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -83,11 +85,18 @@ public final class BluetoothStateMonitor {
     // Each attempt self-cancels once the name is known (see scheduleNameRecheck), so on the
     // common path only the 1.2s tick does any work.
     private static final long[] NAME_RECHECK_MS = {1200L, 3000L, 5000L, 10_000L};
-    private final ScheduledExecutorService reassert = Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread t = new Thread(r, "bt-state-reassert");
-        t.setDaemon(true);
-        return t;
-    });
+    private final ScheduledThreadPoolExecutor reassert = createReassertExecutor();
+    private final BluetoothRadioRecoveryEvents radioRecovery;
+
+    private static ScheduledThreadPoolExecutor createReassertExecutor() {
+        ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(1, r -> {
+            Thread t = new Thread(r, "bt-state-reassert");
+            t.setDaemon(true);
+            return t;
+        });
+        executor.setRemoveOnCancelPolicy(true);
+        return executor;
+    }
 
     // ── BT-automation gate ────────────────────────────────────────────────────
     // Whether any ENABLED automation references a bluetooth trigger. Answered by
@@ -146,6 +155,11 @@ public final class BluetoothStateMonitor {
 
     private BluetoothStateMonitor(Context ctx) {
         this.appContext = ctx.getApplicationContext();
+        radioRecovery = new BluetoothRadioRecoveryEvents((task, delayMs) -> {
+            java.util.concurrent.ScheduledFuture<?> scheduled =
+                    reassert.schedule(task, delayMs, TimeUnit.MILLISECONDS);
+            return () -> scheduled.cancel(false);
+        }, () -> SharedBluetoothKeepAliveController.resume(appContext));
     }
 
     /** Start the monitor (idempotent). Safe to call from onServiceConnected each bind. */
@@ -162,6 +176,17 @@ public final class BluetoothStateMonitor {
         try {
             receiver = new BroadcastReceiver() {
                 @Override public void onReceive(Context c, Intent intent) {
+                    if (intent == null) return;
+                    if (BluetoothAdapter.ACTION_STATE_CHANGED.equals(intent.getAction())) {
+                        try {
+                            // The event is only a wake signal. Each asynchronous
+                            // check rereads consent, vehicle power and adapter state.
+                            radioRecovery.onAdapterChanged();
+                        } catch (RuntimeException unavailable) {
+                            Log.w(TAG, "Radio recovery scheduling failed: "
+                                    + unavailable.getClass().getSimpleName());
+                        }
+                    }
                     // Any BT edge — re-resolve ground truth and relay if it changed.
                     //
                     // Pass the device the broadcast CARRIES as a name hint. On a fresh connect

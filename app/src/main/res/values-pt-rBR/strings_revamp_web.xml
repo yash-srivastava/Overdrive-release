@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="web_state_retry_now">Tentar novamente agora</string>
+    <string name="web_state_retry_in">Nova tentativa automática · próxima em %1$d s</string>
+    <string name="web_state_retrying_now">Nova tentativa automática · tentando agora…</string>
+    <string name="web_state_sign_in_title">Não foi possível entrar nesta página</string>
+    <string name="web_state_sign_in_body">O daemon da câmera está em execução, mas não aceitou o login do app. O OverDrive o restaura automaticamente enquanto o ADB estiver conectado.</string>
+</resources>

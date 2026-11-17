@@ -1309,21 +1309,37 @@ Java_com_overdrive_app_surveillance_NativeMotion_computeMOG2Quadrants(
             g_mog2->apply(grayMat, fgMask, learningRate);
         }
 
-        cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(3, 3));
+        // Identical 3x3 structuring element on every frame. Share its
+        // immutable storage instead of allocating the kernel each call.
+        static const cv::Mat kernel = cv::getStructuringElement(
+                cv::MORPH_ELLIPSE, cv::Size(3, 3));
         cv::morphologyEx(fgMask, fgMask, cv::MORPH_OPEN, kernel);   // remove small noise
         cv::morphologyEx(fgMask, fgMask, cv::MORPH_CLOSE, kernel);  // fill small holes
 
+        int foregroundPixels = -1;
         if (outQuadrantFractions != nullptr
                 && env->GetArrayLength(outQuadrantFractions) >= 4) {
             jfloat fr[4];
             int qw = width / 2, qh = height / 2;
+            int quadrantSum = 0;
             for (int q = 0; q < 4; q++) {
                 cv::Rect r((q % 2) * qw, (q / 2) * qh, qw, qh);
-                fr[q] = (float)cv::countNonZero(fgMask(r)) / (float)(qw * qh);
+                int quadrantPixels = cv::countNonZero(fgMask(r));
+                fr[q] = (float)quadrantPixels / (float)(qw * qh);
+                quadrantSum += quadrantPixels;
             }
             env->SetFloatArrayRegion(outQuadrantFractions, 0, 4, fr);
+            // Even dimensions tile the whole mask exactly. Avoid scanning
+            // all pixels again after the four quadrant countNonZero calls.
+            // Odd dimensions leave a border, so retain the full-mask scan.
+            if ((width & 1) == 0 && (height & 1) == 0) {
+                foregroundPixels = quadrantSum;
+            }
         }
-        return (float)cv::countNonZero(fgMask) / (float)(width * height);
+        if (foregroundPixels < 0) {
+            foregroundPixels = cv::countNonZero(fgMask);
+        }
+        return (float)foregroundPixels / (float)(width * height);
     } catch (...) {
         return -1.0f;
     }

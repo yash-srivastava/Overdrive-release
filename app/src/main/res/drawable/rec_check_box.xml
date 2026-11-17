@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Selection box over a thumbnail: 20dp box at the bottom-start of a 48dp target. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="?attr/colorControlHighlight">
+    <item>
+        <selector>
+            <item android:state_checked="true">
+                <layer-list>
+                    <item
+                        android:width="20dp"
+                        android:height="20dp"
+                        android:bottom="5dp"
+                        android:gravity="bottom|start"
+                        android:start="5dp">
+                        <shape android:shape="rectangle">
+                            <corners android:radius="6dp" />
+                            <solid android:color="?attr/colorPrimary" />
+                        </shape>
+                    </item>
+                    <item
+                        android:width="16dp"
+                        android:height="16dp"
+                        android:bottom="7dp"
+                        android:drawable="@drawable/rec_ic_check_small"
+                        android:gravity="bottom|start"
+                        android:start="7dp" />
+                </layer-list>
+            </item>
+            <item>
+                <layer-list>
+                    <item
+                        android:width="20dp"
+                        android:height="20dp"
+                        android:bottom="5dp"
+                        android:gravity="bottom|start"
+                        android:start="5dp">
+                        <shape android:shape="rectangle">
+                            <corners android:radius="6dp" />
+                            <solid android:color="@color/rec_check_unchecked_fill" />
+                            <stroke
+                                android:width="2dp"
+                                android:color="@color/rec_player_on_glass" />
+                        </shape>
+                    </item>
+                </layer-list>
+            </item>
+        </selector>
+    </item>
+</ripple>

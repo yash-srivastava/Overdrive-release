@@ -46,7 +46,8 @@ public class RecordingIdApiContractTest {
                 .contains("removeByPath(absMp4Path)"));
         assertFalse(methodBody(api, "private static void deleteSidecars")
                 .contains("remove(filename)"));
-        assertTrue(watcher.contains("removeByPath(new File(dir, path).getAbsolutePath())"));
+        assertTrue(watcher.contains("removeByPath(mp4Path)"));
+        assertTrue(watcher.contains("queue.submit(new File(dir, path).getAbsolutePath()"));
         assertFalse(storage.contains("remove(file.getName())"));
         assertTrue(methodBody(api, "private static void deleteSidecars")
                 .contains("RecordingIdentity.fromPath(mp4File.getAbsolutePath()).recordingId"));

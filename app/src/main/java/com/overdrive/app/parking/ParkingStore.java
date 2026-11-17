@@ -39,6 +39,15 @@ public final class ParkingStore {
 
     private final String jdbcUrl;
     private volatile Connection connection;
+    // Dead-store reopen state, guarded by this.
+    private static final long HEAL_COOLDOWN_NANOS = 10_000_000_000L;
+    private boolean ownerClosed;
+    private boolean healPending;
+    private boolean healAttempted;
+    private long lastHealAttemptNanos;
+    private boolean inHealRetry;
+    private boolean deadDuringRetry;
+    private volatile boolean healingEnabled = true;
 
     public ParkingStore() { this(defaultJdbcUrl()); }
 
@@ -47,6 +56,7 @@ public final class ParkingStore {
     // ==================== LIFECYCLE ====================
 
     public synchronized boolean open() {
+        ownerClosed = false;
         if (isOpen()) return true;
         try {
             Class.forName("org.h2.Driver");
@@ -60,6 +70,7 @@ public final class ParkingStore {
                 st.execute("SET CACHE_SIZE 2048");
             }
             createTables();
+            healPending = false;
             return true;
         } catch (Exception e) {
             logger.error("Parking store open failed: " + e.getMessage());
@@ -69,10 +80,14 @@ public final class ParkingStore {
     }
 
     public synchronized void close() {
+        ownerClosed = true;
+        healPending = false;
         closeQuietly();
     }
 
     public synchronized boolean isOpen() {
+        // A pending reopen reads as open so callers keep calling, and each call retries it.
+        if (healPending && !ownerClosed) return true;
         try {
             return connection != null && !connection.isClosed();
         } catch (Exception e) {
@@ -94,6 +109,66 @@ public final class ParkingStore {
             throw new IllegalStateException("parking store not open");
         }
         return c;
+    }
+
+    /**
+     * Off while the owner interrupts its worker, so the dying worker never reopens the store.
+     * Re-enabling also drops the cooldown a heal interrupted by that stop may have left.
+     */
+    public void setHealingEnabled(boolean enabled) {
+        healingEnabled = enabled;
+        if (enabled) clearHealCooldown();
+    }
+
+    private synchronized void clearHealCooldown() {
+        healAttempted = false;
+    }
+
+    /**
+     * Reopen a store H2 killed under a still-open connection (the old isOpen() stayed true).
+     * Caller is synchronized and runs its one retry through retryAfterHeal(); a failed reopen
+     * is retried on a later call.
+     */
+    private boolean healDeadStore(Exception failure) {
+        if (inHealRetry) {
+            // The retry failed too: keep the cooldown, never heal recursively.
+            if (healPending || com.overdrive.app.storage.H2StoreFaults.isStoreDead(failure)) {
+                deadDuringRetry = true;
+            }
+            return false;
+        }
+        if (ownerClosed || !healingEnabled || !(healPending
+                || com.overdrive.app.storage.H2StoreFaults.isStoreDead(failure))) {
+            return false;
+        }
+        // An interrupted thread would kill the reopened store on its next file read; a later
+        // caller heals instead, and this thread keeps its interrupt.
+        if (Thread.currentThread().isInterrupted()) return false;
+        if (healAttempted && System.nanoTime() - lastHealAttemptNanos < HEAL_COOLDOWN_NANOS) {
+            return false;
+        }
+        logger.warn("Parking store died under a live connection, reopening: "
+                + com.overdrive.app.storage.H2StoreFaults.describe(failure));
+        closeQuietly();
+        healPending = false;   // else open() sees isOpen() and skips the reopen
+        boolean reopened = open();
+        healPending = !reopened;
+        // Stamped after the attempt; retryAfterHeal clears it again if the retry finds the store healthy.
+        healAttempted = true;
+        lastHealAttemptNanos = System.nanoTime();
+        return reopened;
+    }
+
+    /** Runs the caller's single retry; a retry that never meets a dead store lifts the cooldown. */
+    private <T> T retryAfterHeal(java.util.function.Supplier<T> retry) {
+        inHealRetry = true;
+        deadDuringRetry = false;
+        try {
+            return retry.get();
+        } finally {
+            inHealRetry = false;
+            if (!deadDuringRetry) healAttempted = false;
+        }
     }
 
     private void createTables() throws Exception {
@@ -194,6 +269,7 @@ public final class ParkingStore {
             ps.executeUpdate();
             return true;
         } catch (Exception e) {
+            if (healDeadStore(e)) return retryAfterHeal(() -> insertSession(s));
             logger.warn("insertSession failed: " + e.getMessage());
             return false;
         }
@@ -214,6 +290,7 @@ public final class ParkingStore {
             ps.setString(i, s.sessionId);
             return ps.executeUpdate() > 0;
         } catch (Exception e) {
+            if (healDeadStore(e)) return retryAfterHeal(() -> updateSession(s));
             logger.warn("updateSession failed: " + e.getMessage());
             return false;
         }
@@ -270,7 +347,24 @@ public final class ParkingStore {
                 return rs.next() ? readSession(rs) : null;
             }
         } catch (Exception e) {
+            if (healDeadStore(e)) return retryAfterHeal(() -> getSession(sessionId));
             logger.warn("getSession failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /** TRUE/FALSE when the store answered; null when it could not, so callers never act on a failed lookup. */
+    public synchronized Boolean sessionExists(String sessionId) {
+        if (sessionId == null) return Boolean.FALSE;
+        try (PreparedStatement ps = conn().prepareStatement(
+                "SELECT 1 FROM parking_sessions WHERE session_id=?")) {
+            ps.setString(1, sessionId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (Exception e) {
+            if (healDeadStore(e)) return retryAfterHeal(() -> sessionExists(sessionId));
+            logger.warn("sessionExists failed: " + e.getMessage());
             return null;
         }
     }
@@ -283,6 +377,7 @@ public final class ParkingStore {
              ResultSet rs = ps.executeQuery()) {
             return rs.next() ? readSession(rs) : null;
         } catch (Exception e) {
+            if (healDeadStore(e)) return retryAfterHeal(() -> getOpenSession());
             logger.warn("getOpenSession failed: " + e.getMessage());
             return null;
         }
@@ -295,6 +390,7 @@ public final class ParkingStore {
              ResultSet rs = ps.executeQuery()) {
             return rs.next() ? readSession(rs) : null;
         } catch (Exception e) {
+            if (healDeadStore(e)) return retryAfterHeal(() -> getLatestSession());
             logger.warn("getLatestSession failed: " + e.getMessage());
             return null;
         }
@@ -327,6 +423,7 @@ public final class ParkingStore {
                 while (rs.next()) out.add(readSession(rs));
             }
         } catch (Exception e) {
+            if (healDeadStore(e)) return retryAfterHeal(() -> listSessions(fromMs, toMs, limit, offset));
             logger.warn("listSessions failed: " + e.getMessage());
         }
         return out;
@@ -337,6 +434,7 @@ public final class ParkingStore {
              ResultSet rs = st.executeQuery("SELECT COUNT(*) FROM parking_sessions")) {
             return rs.next() ? rs.getInt(1) : 0;
         } catch (Exception e) {
+            if (healDeadStore(e)) return retryAfterHeal(() -> countSessions());
             return 0;
         }
     }
@@ -355,6 +453,7 @@ public final class ParkingStore {
                 return ps.executeUpdate() > 0;
             }
         } catch (Exception e) {
+            if (healDeadStore(e)) return retryAfterHeal(() -> deleteSession(sessionId));
             logger.warn("deleteSession failed: " + e.getMessage());
             return false;
         }
@@ -382,6 +481,7 @@ public final class ParkingStore {
                 while (rs.next()) out.add(rs.getString(1));
             }
         } catch (Exception e) {
+            if (healDeadStore(e)) return retryAfterHeal(() -> listSessionIdsStartedBetween(floorMs, beforeMs, limit));
             logger.warn("listSessionIdsStartedBetween failed: " + e.getMessage());
         }
         return out;
@@ -395,6 +495,7 @@ public final class ParkingStore {
              ResultSet rs = ps.executeQuery()) {
             while (rs.next()) out.add(readSession(rs));
         } catch (Exception e) {
+            if (healDeadStore(e)) return retryAfterHeal(() -> listOpenSessions());
             logger.warn("listOpenSessions failed: " + e.getMessage());
         }
         return out;
@@ -412,6 +513,7 @@ public final class ParkingStore {
                 while (rs.next()) out.add(readSession(rs));
             }
         } catch (Exception e) {
+            if (healDeadStore(e)) return retryAfterHeal(() -> listSessionsWithSignageState(state, limit));
             logger.warn("listSessionsWithSignageState failed: " + e.getMessage());
         }
         return out;
@@ -502,6 +604,7 @@ public final class ParkingStore {
             }
             return n.id;
         } catch (Exception e) {
+            if (healDeadStore(e)) return retryAfterHeal(() -> upsertNeighbour(n));
             logger.warn("upsertNeighbour failed: " + e.getMessage());
             return 0L;
         }
@@ -541,6 +644,7 @@ public final class ParkingStore {
                 return rs.next() ? readNeighbour(rs) : null;
             }
         } catch (Exception e) {
+            if (healDeadStore(e)) return retryAfterHeal(() -> findNeighbourByKey(sessionId, key));
             logger.warn("findNeighbourByKey failed: " + e.getMessage());
             return null;
         }
@@ -556,6 +660,7 @@ public final class ParkingStore {
                 while (rs.next()) out.add(readNeighbour(rs));
             }
         } catch (Exception e) {
+            if (healDeadStore(e)) return retryAfterHeal(() -> listNeighbours(sessionId));
             logger.warn("listNeighbours failed: " + e.getMessage());
         }
         return out;
@@ -569,6 +674,7 @@ public final class ParkingStore {
             ps.setString(1, sessionId);
             return ps.executeUpdate();
         } catch (Exception e) {
+            if (healDeadStore(e)) return retryAfterHeal(() -> clearNeighbourFrames(sessionId));
             logger.warn("clearNeighbourFrames failed: " + e.getMessage());
             return 0;
         }
@@ -584,6 +690,7 @@ public final class ParkingStore {
                 return rs.next() ? rs.getInt(1) : 0;
             }
         } catch (Exception e) {
+            if (healDeadStore(e)) return retryAfterHeal(() -> countNeighbours(sessionId, confirmedOnly));
             return 0;
         }
     }

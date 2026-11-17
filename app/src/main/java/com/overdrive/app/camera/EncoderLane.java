@@ -57,20 +57,17 @@ public final class EncoderLane {
         final long camGeneration;
         final int wsSlot;
         final int wsTex;
-        final long wsGeneration;
         final boolean wsReady;
         final long ptsNs;
         final long seq;
 
-        public Frame(int camSlot, int camTex, long camGeneration,
-                     int wsSlot, int wsTex, long wsGeneration,
+        public Frame(int camSlot, int camTex, long camGeneration, int wsSlot, int wsTex,
                      boolean wsReady, long ptsNs, long seq) {
             this.camSlot = camSlot;
             this.camTex = camTex;
             this.camGeneration = camGeneration;
             this.wsSlot = wsSlot;
             this.wsTex = wsTex;
-            this.wsGeneration = wsGeneration;
             this.wsReady = wsReady;
             this.ptsNs = ptsNs;
             this.seq = seq;
@@ -330,6 +327,7 @@ public final class EncoderLane {
             }
             try {
                 if (ensureLaneContextLocked()) {
+                    retirePendingRead();
                     task.run();
                     ran.set(true);
                 }
@@ -444,6 +442,8 @@ public final class EncoderLane {
             laneCore = EGLCore.createShared(parentCore, true);
             lanePbuffer = laneCore.createPbufferSurface(1, 1);
             laneCore.makeCurrent(lanePbuffer);
+            // Fence sync is GLES3-only; an ES2 fallback context keeps the glFinish barrier.
+            fenceUnavailable = laneCore.getActualGlesVersion() < 3;
             logger.info("EncoderLane EGL context created (shared, recordable)");
             return true;
         } catch (Throwable t) {
@@ -520,6 +520,13 @@ public final class EncoderLane {
         return true;
     }
 
+    /** Lane thread only: finish the pending GPU read before the recorder or encoder is touched. */
+    private void retirePendingRead() {
+        if (readFence == 0) return;
+        android.opengl.GLES20.glFinish();
+        releasePendingReadFence();
+    }
+
     private void releasePendingReadFence() {
         if (readFence != 0) {
             try { android.opengl.GLES30.glDeleteSync(readFence); }
@@ -540,7 +547,7 @@ public final class EncoderLane {
             // Poll again even if camera submissions stop. Only one retry is
             // queued at a time; the latest-wins mailbox remains untouched.
             Handler h = handler;
-            if (h != null && postQueued.compareAndSet(false, true)) {
+            if (h != null && !shutdownRequested.get() && postQueued.compareAndSet(false, true)) {
                 if (!h.postDelayed(this::drainOnce, 5)) postQueued.set(false);
             }
             return;
@@ -590,7 +597,12 @@ public final class EncoderLane {
             if (camRing == null) {
                 return;
             }
-            if (!camRing.pinForRead(f.camSlot, f.camGeneration)) {
+            if (!camRing.pinForRead(f.camSlot)) {
+                return;
+            }
+            // Pinned slots are never rewritten, so a mismatch here means the packet went stale.
+            if (camRing.generationOf(f.camSlot) != f.camGeneration) {
+                camRing.unpinRead();
                 return;
             }
             boolean camPinned = true;
@@ -598,8 +610,7 @@ public final class EncoderLane {
             // (recorder falls back to the 360 front slice) — the camera slot
             // is pinned and safe, so dropping the whole frame would be worse.
             CopiedFrameRing wsRing = f.wsReady ? wsRingSupplier.get() : null;
-            boolean wsPinned = wsRing != null
-                && wsRing.pinForRead(f.wsSlot, f.wsGeneration);
+            boolean wsPinned = wsRing != null && wsRing.pinForRead(f.wsSlot);
             boolean wsUse = f.wsReady && wsPinned;
             try {
                 localRecorder.drawFrame(f.camTex,
@@ -643,6 +654,7 @@ public final class EncoderLane {
                     return;
                 }
                 try {
+                    retirePendingRead();
                     localRecorder.release();
                     if (!localEncoder.release()) {
                         logger.error("Encoder reinit ABORTED — worker wedged during "

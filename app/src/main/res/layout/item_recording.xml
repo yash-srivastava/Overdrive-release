@@ -1,261 +1,232 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Portrait library row: same row as landscape; the overflow button carries the extra actions
+     (evidence pack, SafeKeep) and RecordingAdapter hides it when there are none. -->
 <com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:layout_gravity="top"
-    android:layout_margin="6dp"
-    android:foreground="?attr/selectableItemBackground"
-    app:cardBackgroundColor="?attr/colorSurfaceContainer"
-    app:cardCornerRadius="@dimen/card_radius_standard"
-    app:cardElevation="0dp">
+    android:layout_height="@dimen/rec_row_height"
+    android:layout_marginVertical="@dimen/od_space_2"
+    app:cardBackgroundColor="@android:color/transparent"
+    app:cardCornerRadius="@dimen/od_radius_card"
+    app:cardElevation="0dp"
+    app:strokeWidth="0dp">
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical">
+        android:layout_height="match_parent"
+        android:baselineAligned="false"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="@dimen/rec_row_padding_start">
 
-        <com.overdrive.app.ui.view.RecordingAspectRatioFrameLayout
+        <com.google.android.material.card.MaterialCardView
             android:id="@+id/recordingMedia"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content">
+            android:layout_width="@dimen/rec_thumb_width"
+            android:layout_height="@dimen/rec_thumb_height"
+            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+            app:cardCornerRadius="@dimen/rec_thumb_radius"
+            app:cardElevation="0dp"
+            app:strokeWidth="0dp">
 
             <ImageView
                 android:id="@+id/ivThumbnail"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:background="?attr/colorSurfaceContainerHigh"
                 android:contentDescription="@string/cd_video_thumbnail"
                 android:scaleType="centerCrop" />
 
             <View
                 android:id="@+id/severityStripe"
-                android:layout_width="match_parent"
-                android:layout_height="4dp"
-                android:layout_gravity="top"
+                android:layout_width="@dimen/rec_severity_stripe"
+                android:layout_height="match_parent"
+                android:layout_gravity="start"
                 android:visibility="gone" />
 
-            <TextView
-                android:id="@+id/tvCameraId"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="top|start"
-                android:layout_margin="8dp"
-                android:background="@color/recording_thumb_scrim"
-                android:fontFamily="sans-serif-medium"
-                android:paddingHorizontal="8dp"
-                android:paddingVertical="4dp"
-                android:textColor="@android:color/white"
-                android:textSize="11sp"
-                tools:text="C0" />
-
             <LinearLayout
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_gravity="top|end"
-                android:layout_margin="8dp"
-                android:gravity="end"
-                android:orientation="vertical">
+                android:layout_gravity="top"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="@dimen/od_space_6"
+                android:paddingTop="3dp"
+                android:paddingEnd="3dp">
 
                 <TextView
-                    android:id="@+id/tvSeverity"
-                    android:layout_width="wrap_content"
+                    android:id="@+id/tvCameraId"
+                    style="@style/Widget.Overdrive.Rec.ThumbLabel"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:fontFamily="sans-serif-medium"
-                    android:paddingHorizontal="8dp"
-                    android:paddingVertical="4dp"
-                    android:textColor="@android:color/white"
-                    android:textSize="11sp"
-                    android:visibility="gone"
-                    tools:text="ALERT" />
+                    android:layout_weight="1"
+                    tools:text="C0" />
 
-                <TextView
-                    android:id="@+id/tvTypeBadge"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:background="@color/recording_thumb_scrim"
-                    android:fontFamily="sans-serif-medium"
-                    android:paddingHorizontal="8dp"
-                    android:paddingVertical="4dp"
-                    android:textColor="@android:color/white"
-                    android:textSize="11sp"
-                    tools:text="EVENT" />
-
-                <TextView
-                    android:id="@+id/tvStorageBadge"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:fontFamily="sans-serif-medium"
-                    android:paddingHorizontal="8dp"
-                    android:paddingVertical="4dp"
-                    android:textColor="@android:color/white"
-                    android:textSize="11sp"
-                    android:visibility="gone"
-                    tools:text="SD"
-                    tools:visibility="visible" />
-
-                <!-- SafeKeep backup state; bound only while SafeKeep is on. -->
                 <TextView
                     android:id="@+id/tvSafeKeepBadge"
+                    style="@style/Widget.Overdrive.Rec.SafeKeepBadge"
                     android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:ellipsize="end"
-                    android:fontFamily="sans-serif-medium"
-                    android:gravity="center_vertical"
-                    android:maxWidth="160dp"
-                    android:paddingHorizontal="8dp"
-                    android:paddingVertical="4dp"
-                    android:singleLine="true"
-                    android:textColor="@android:color/white"
-                    android:textSize="11sp"
                     android:visibility="gone"
-                    tools:text="SAVED"
                     tools:visibility="visible" />
             </LinearLayout>
 
             <TextView
-                android:id="@+id/tvActorSummary"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="bottom|start"
-                android:layout_margin="8dp"
-                android:background="@color/recording_thumb_scrim"
-                android:ellipsize="end"
-                android:maxWidth="240dp"
-                android:paddingHorizontal="8dp"
-                android:paddingVertical="4dp"
-                android:singleLine="true"
-                android:textColor="@android:color/white"
-                android:textSize="11sp"
-                android:visibility="gone"
-                tools:text="1 person · close" />
-
-            <TextView
                 android:id="@+id/tvDuration"
+                style="@style/Widget.Overdrive.Rec.ThumbDuration"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
                 android:layout_gravity="bottom|end"
-                android:layout_margin="8dp"
-                android:background="@color/recording_thumb_scrim"
-                android:paddingHorizontal="8dp"
-                android:paddingVertical="4dp"
-                android:textColor="@android:color/white"
-                android:textSize="11sp"
+                android:layout_margin="@dimen/od_space_4"
                 android:visibility="gone"
                 tools:text="0:42"
                 tools:visibility="visible" />
 
             <CheckBox
                 android:id="@+id/cbSelect"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:layout_gravity="top|start"
-                android:layout_margin="2dp"
-                android:buttonTint="?attr/colorPrimary"
-                android:gravity="center"
+                android:layout_width="@dimen/od_touch_min"
+                android:layout_height="@dimen/od_touch_min"
+                android:layout_gravity="bottom|start"
+                android:background="@drawable/rec_check_box"
+                android:button="@null"
                 android:visibility="gone" />
-
-            <ImageView
-                android:layout_width="56dp"
-                android:layout_height="56dp"
-                android:layout_gravity="center"
-                android:alpha="0.9"
-                android:contentDescription="@null"
-                android:src="@drawable/ic_play_circle" />
-        </com.overdrive.app.ui.view.RecordingAspectRatioFrameLayout>
+        </com.google.android.material.card.MaterialCardView>
 
         <LinearLayout
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:paddingStart="12dp"
-            android:paddingTop="10dp"
-            android:paddingEnd="6dp"
-            android:paddingBottom="6dp">
+            android:layout_marginStart="10dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
 
-            <TextView
-                android:id="@+id/tvFilename"
+            <!-- Time, then badges: the type badge collapses first, the severity badge ellipsizes last. -->
+            <com.overdrive.app.ui.widget.BadgeLine
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:visibility="gone"
-                tools:text="event_20260514_223124.mp4" />
+                android:layout_height="wrap_content">
+
+                <TextView
+                    android:id="@+id/tvRecordingTime"
+                    style="@style/Widget.Overdrive.Rec.RowTime"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    tools:text="22:31" />
+
+                <com.overdrive.app.ui.widget.FitOrHideTextView
+                    android:id="@+id/tvTypeBadge"
+                    style="@style/Widget.Overdrive.Rec.Badge"
+                    android:layout_width="wrap_content"
+                    android:layout_marginStart="@dimen/od_space_6"
+                    tools:text="EVENT" />
+
+                <TextView
+                    android:id="@+id/tvSeverity"
+                    style="@style/Widget.Overdrive.Rec.Badge"
+                    android:layout_width="wrap_content"
+                    android:layout_marginStart="@dimen/od_space_6"
+                    android:visibility="gone"
+                    tools:text="Alert" />
+            </com.overdrive.app.ui.widget.BadgeLine>
 
             <TextView
                 android:id="@+id/tvLocation"
+                style="@style/Widget.Overdrive.Rec.RowMeta"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:minLines="1"
-                android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
-                android:textColor="?attr/colorOnSurface"
+                android:layout_marginTop="3dp"
+                android:drawableStart="@drawable/rec_ic_pin_14"
+                android:drawablePadding="@dimen/od_space_4"
+                android:drawableTint="?attr/colorOnSurfaceVariant"
+                android:gravity="center_vertical"
                 android:visibility="invisible"
                 tools:text="Cheras, Kuala Lumpur"
                 tools:visibility="visible" />
 
             <LinearLayout
-                android:layout_width="match_parent"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
                 android:gravity="center_vertical"
-                android:minHeight="48dp"
                 android:orientation="horizontal">
 
                 <TextView
-                    android:id="@+id/tvRecordingTime"
-                    android:layout_width="0dp"
+                    android:id="@+id/tvEventTitle"
+                    style="@style/Widget.Overdrive.Rec.RowMeta"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:ellipsize="end"
-                    android:singleLine="true"
-                    android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                    android:textColor="?attr/colorOnSurface"
-                    tools:text="22:31" />
+                    android:visibility="gone"
+                    tools:text="Motion detected" />
+
+                <TextView
+                    android:id="@+id/tvActorSummary"
+                    style="@style/Widget.Overdrive.Rec.RowMeta"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:visibility="gone"
+                    tools:text="1 person · Close"
+                    tools:visibility="visible" />
+
+                <TextView
+                    style="@style/Widget.Overdrive.Rec.RowMeta"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:importantForAccessibility="no"
+                    android:text="@string/rec_meta_separator" />
 
                 <TextView
                     android:id="@+id/tvSize"
+                    style="@style/Widget.Overdrive.Rec.RowMeta"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
-                    android:ellipsize="end"
-                    android:singleLine="true"
-                    android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-                    android:textColor="?attr/colorOnSurfaceVariant"
                     tools:text="125 MB" />
 
-                <ImageButton
-                    android:id="@+id/btnMore"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="@string/cd_recording_more_actions"
-                    android:padding="12dp"
-                    android:src="@drawable/ic_more_vert"
-                    app:tint="?attr/colorOnSurfaceVariant" />
-
-                <ImageButton
-                    android:id="@+id/btnShare"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="@string/cd_share"
-                    android:padding="12dp"
-                    android:src="@drawable/ic_share"
-                    app:tint="?attr/colorOnSurfaceVariant" />
-
-                <ImageButton
-                    android:id="@+id/btnDelete"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="@string/cd_delete"
-                    android:padding="12dp"
-                    android:src="@drawable/ic_delete"
-                    app:tint="?attr/colorOnSurfaceVariant" />
+                <TextView
+                    android:id="@+id/tvStorageBadge"
+                    style="@style/Widget.Overdrive.Rec.Badge.Small"
+                    android:layout_width="wrap_content"
+                    android:layout_marginStart="@dimen/od_space_6"
+                    android:visibility="gone"
+                    tools:text="SD"
+                    tools:visibility="visible" />
             </LinearLayout>
+
+            <TextView
+                android:id="@+id/tvFilename"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:visibility="gone" />
         </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <ImageButton
+                android:id="@+id/btnShare"
+                style="@style/Widget.Overdrive.Rec.RowAction"
+                android:contentDescription="@string/cd_share"
+                android:src="@drawable/ic_share" />
+
+            <ImageButton
+                android:id="@+id/btnDelete"
+                style="@style/Widget.Overdrive.Rec.RowAction"
+                android:contentDescription="@string/cd_delete"
+                android:src="@drawable/ic_delete" />
+        </LinearLayout>
+
+        <ImageButton
+            android:id="@+id/btnMore"
+            style="@style/Widget.Overdrive.Rec.RowAction"
+            android:contentDescription="@string/cd_recording_more_actions"
+            android:src="@drawable/ic_more_vert"
+            android:visibility="gone" />
     </LinearLayout>
+
+    <View
+        android:id="@+id/activeIndicator"
+        android:layout_width="@dimen/rec_active_marker_width"
+        android:layout_height="@dimen/rec_active_marker_height"
+        android:layout_gravity="start|center_vertical"
+        android:background="@drawable/rec_active_marker"
+        android:visibility="gone" />
 </com.google.android.material.card.MaterialCardView>

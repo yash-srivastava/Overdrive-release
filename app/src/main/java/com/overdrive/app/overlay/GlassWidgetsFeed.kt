@@ -7,6 +7,7 @@ import com.overdrive.app.overlay.glass.GlassDriveView
 import com.overdrive.app.overlay.glass.GlassPickerSheet
 import com.overdrive.app.overlay.glass.GlassPowerView
 import com.overdrive.app.overlay.glass.GlassRoadSenseView
+import com.overdrive.app.overlay.glass.GlassSeatsView
 import com.overdrive.app.overlay.glass.GlassTripView
 import org.json.JSONObject
 import kotlin.math.abs
@@ -45,7 +46,14 @@ internal object GlassWidgetsFeed {
         val terrain: GlassRoadSenseView.Terrain? = null,
         /** The driver door alone; picks the lock tile's action, never shown as whole-car state. */
         val driverLocked: Boolean? = null,
+        /** While charging: what this charge has added and cost so far; null when not charging. */
+        val chargeCost: ChargeCost? = null,
+        /** Core reads the car as switched off: neither on nor charging. */
+        val carOff: Boolean = false,
     )
+
+    /** A charge's energy added and cost so far: the session's own figures, else live energy at the live rate ([costEstimated]). */
+    class ChargeCost(val addedKwh: Float?, val cost: Float?, val currency: String?, val costEstimated: Boolean)
 
     /** [knownPhev] is the powertrain from an earlier summary, kept when this one leaves the vehicle block out. */
     fun parse(s: JSONObject, knownPhev: Boolean? = null): Snapshot {
@@ -117,6 +125,9 @@ internal object GlassWidgetsFeed {
             locked = if (st.has("locked") && !st.isNull("locked")) st.optBoolean("locked") else null,
             driverLocked = if (st.has("driverLocked") && !st.isNull("driverLocked")) st.optBoolean("driverLocked") else null,
             terrain = terrain(s.optJSONObject("terrain")),
+            chargeCost = if (!charging) null else ChargeCost(num(c, "addedKwh"), num(c, "cost"),
+                c.optString("currency").trim().take(8).takeIf { !c.isNull("currency") && it.isNotEmpty() }, c.optBoolean("costEstimated", false)),
+            carOff = st.optString("acc") == "off",
         )
     }
 
@@ -185,6 +196,51 @@ internal object GlassWidgetsFeed {
             out.add(GlassPickerSheet.Item(id, x.optString("name"), x.optString("mode", "automatic"), x.optString("glyph", "bolt")))
         }
         return out
+    }
+
+    /** `/api/positions`: the saved seat positions, and whether the car lets one be applied now ([reason] says why not). */
+    class Seats(val entries: List<GlassSeatsView.Entry>, val blocked: Boolean, val reason: String?)
+
+    /** Null for a failed reply, never an empty list standing in for one. */
+    fun seats(o: JSONObject): Seats? {
+        if (failed(o)) return null
+        val a = o.optJSONArray("positions") ?: return null
+        val entries = ArrayList<GlassSeatsView.Entry>(a.length())
+        for (i in 0 until a.length()) {
+            val p = a.optJSONObject(i) ?: continue
+            val id = p.optString("id").takeIf { it.isNotEmpty() && !p.isNull("id") } ?: continue
+            entries.add(GlassSeatsView.Entry(id, p.optString("name").trim().ifEmpty { "Position ${entries.size + 1}" }))
+        }
+        // as the Seat Positions page gates its buttons: the motors are unpowered with the car off, and the
+        // positioning guard holds them outside Park
+        val off = o.has("acc") && !o.optBoolean("acc", true)
+        val guarded = o.optBoolean("positioningBlocked", false)
+        // the guard's own code goes through as it is; the widget words it
+        val reason = when {
+            off -> "Turn the car on first"
+            guarded -> o.optString("movementBlockReason").takeIf { !o.isNull("movementBlockReason") && it.isNotEmpty() }
+            else -> null
+        }
+        return Seats(entries, off || guarded, reason)
+    }
+
+    /** A `/api/positions/apply` answer as a short line for the widget; null when the seat moved. */
+    fun seatFailure(code: Int, text: String): String? {
+        if (code <= 0) return "Couldn't reach the car"
+        if (code !in 200..299) return "Seat didn't move"
+        val o = try { JSONObject(text) } catch (_: Throwable) { return "Seat didn't move" }
+        if (o.optBoolean("needsModelAck", false)) return "Confirm on the Seat Positions page"
+        return if (o.has("error") || o.has("skipped") || failed(o)) "Seat didn't move" else null
+    }
+
+    /** One channel of `/api/widgets/mqtt`: a finite number, else short plain text, else null. */
+    fun mqttValue(values: JSONObject, channel: String): Any? {
+        if (!values.has(channel) || values.isNull(channel)) return null
+        return when (val v = values.opt(channel)) {
+            is Number -> v.toDouble().takeIf { it.isFinite() }
+            is String -> v.trim().let { t -> t.toDoubleOrNull()?.takeIf { it.isFinite() } ?: t.filter { !it.isISOControl() }.take(64) }
+            else -> null
+        }
     }
 
     /** A motor counts as present once it has turned faster than walking pace while driving. */

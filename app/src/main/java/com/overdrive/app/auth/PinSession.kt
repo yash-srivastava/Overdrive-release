@@ -37,6 +37,7 @@ object PinSession {
 
     @Volatile private var unlockedRealtime: Long = 0L
     @Volatile private var pausedRealtime: Long = 0L
+    @Volatile private var returnGraceUntil: Long = 0L
 
     private var screenReceiver: BroadcastReceiver? = null
 
@@ -58,6 +59,17 @@ object PinSession {
         if (unlockedRealtime > 0L) Log.i(TAG, "Session locked")
         unlockedRealtime = 0L
         pausedRealtime = 0L
+        returnGraceUntil = 0L
+    }
+
+    /**
+     * OverDrive itself is opening another app's screen (the setup guide's BYD settings): the first
+     * return within [windowMs] keeps an unlocked session. Screen-off and a locked session still gate.
+     */
+    @Synchronized
+    fun expectReturn(windowMs: Long) {
+        if (unlockedRealtime <= 0L) return
+        returnGraceUntil = SystemClock.elapsedRealtime() + windowMs
     }
 
     /**
@@ -102,6 +114,15 @@ object PinSession {
         if (!PinManager.isEnabled()) return false
         if (unlockedRealtime <= 0L) return true
         if (autoLockMs == AUTOLOCK_NEVER) return false
+
+        val grace = returnGraceUntil
+        if (grace > 0L) {
+            returnGraceUntil = 0L
+            if (SystemClock.elapsedRealtime() <= grace) {
+                pausedRealtime = 0L
+                return false
+            }
+        }
 
         // No pause recorded yet (unlock just happened, no onPause/onResume cycle) → don't gate.
         if (pausedRealtime <= 0L) return false

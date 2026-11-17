@@ -857,6 +857,13 @@ public class GpuSurveillancePipeline {
         }
     }
 
+    /** Applies the active mode's tier bitrate live; no custom override, so the surveillance tier stays its own. */
+    public void applyTierBitrate() {
+        synchronized (reconfigLock) {
+            applyBitrateChangeLocked(0);
+        }
+    }
+
     private void applyBitrateChangeLocked(int bitrate) {
         // Update config first
         config.setCustomBitrate(bitrate);
@@ -1352,7 +1359,7 @@ public class GpuSurveillancePipeline {
                 } catch (Exception e) {
                     logger.warn("Batched apply: failed to persist targetFps: " + e.getMessage());
                 }
-                if (camera != null) camera.setTargetFps(clampedFps);
+                if (camera != null && !isSurveillanceMode()) camera.setTargetFps(clampedFps);
             }
 
             // FIX (audit R7): gate against concurrent stop() teardown. Config
@@ -1368,6 +1375,13 @@ public class GpuSurveillancePipeline {
             if (encoder == null) {
                 logger.info("Batched apply: encoder not yet initialized — settings persisted, will apply on init");
                 return;
+            }
+
+            if (!codecChanged && isSurveillanceMode()) {
+                // Parked: drive settings apply at the next drive; the surveillance profile stays live.
+                applySurveillanceProfileLocked("drive settings saved");
+                newBitrate = -1;
+                clampedFps = -1;
             }
 
             // Inline-update path: bitrate change without codec change. Encoder
@@ -1662,6 +1676,219 @@ public class GpuSurveillancePipeline {
             noFlip, noFlip, noFlip, noFlip);
     }
 
+    // Recording engine in use ("cpu"/"gpu") and why it isn't the CPU (RecordingEngine.WHY_*).
+    private volatile String recordingEngineActive = "";
+    private volatile String recordingEngineWhy;
+    private final java.util.concurrent.atomic.AtomicBoolean recordingEngineSwitchQueued =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+
+    public String getRecordingEngineActive() {
+        return recordingEngineActive;
+    }
+
+    public String getRecordingEngineWhy() {
+        return recordingEngineWhy;
+    }
+
+    /**
+     * Null when the CPU engine can build this pipeline's recording; otherwise
+     * the RecordingEngine.WHY_* reason it stays on the GPU. The CPU engine
+     * renders every legacy layout (grid, dashcam, lens correction, overlay),
+     * so only the camera path, the build or a runtime failure keep the GPU.
+     */
+    private String cpuRecordingBlocker() {
+        String blocker = cpuEngineBlocker();
+        if (blocker != null) return blocker;
+        // CPU only while the car is on; sentry's AI needs the CPU when it is off.
+        return Boolean.TRUE.equals(com.overdrive.app.daemon.CameraDaemon.admittedAccOffHint())
+            ? RecordingEngine.WHY_ACC_OFF : null;
+    }
+
+    /** Same as cpuRecordingBlocker() without the ACC state: can the CPU engine run here at all? */
+    private String cpuEngineBlocker() {
+        if (!RecordingEngine.prefersCpu()) return RecordingEngine.WHY_GPU_SELECTED;
+        String blocked = RecordingEngine.sessionBlock();
+        if (blocked != null) return blocked;
+        String path = PanoramicCameraGpu.cpuRecordingFrameBlocker();
+        if (path != null) return path;
+        if (!CpuMosaicCompositor.isAvailable()) return RecordingEngine.WHY_NATIVE_MISSING;
+        GpuMosaicRecorder rec = recorder;
+        String recorderReason = rec != null ? rec.cpuIncompatibleReason() : null;
+        if (recorderReason != null) return recorderReason;
+        return null;
+    }
+
+    private void noteRecordingEngine(String blocker) {
+        HardwareEventRecorderGpu enc = encoder;
+        boolean cpu = enc != null && enc.isCpuInput();
+        if (blocker == null && !cpu) {
+            blocker = RecordingEngine.WHY_CODEC_REJECTED;
+            RecordingEngine.blockForSession(blocker);
+        }
+        recordingEngineActive = cpu ? RecordingEngine.CPU : RecordingEngine.GPU;
+        recordingEngineWhy = cpu ? null : blocker;
+        logger.info("Recording engine: " + (cpu ? "CPU" : "GPU (" + blocker + ")"));
+    }
+
+    /** GL thread: the CPU engine hit something it can't handle; move to the GPU. */
+    private void onCpuEngineFailure(String why) {
+        RecordingEngine.blockForSession(why);
+        recordingEngineWhy = why;
+        PanoramicCameraGpu cam = camera;
+        final boolean laneLost = cam != null && !cam.isDecoupledEncoderLane()
+            && PanoramicCameraGpu.decoupledLaneConfigured();
+        Thread t = new Thread(() -> {
+            // Remembered for this build so a restart doesn't retry and fail again.
+            try {
+                com.overdrive.app.camera.CameraConfigResolver.saveRecordingEngineBlock(why);
+            } catch (Throwable e) {
+                logger.warn("Could not store the CPU engine failure: " + e.getMessage());
+            }
+            if (laneLost) {
+                // Only a fresh camera brings the decoupled lane back for the GPU engine.
+                com.overdrive.app.daemon.CameraDaemon.requestProcessRestartPreservingTrip(
+                    "CPU recording engine fallback (" + why + ") with the decoupled lane on");
+            } else {
+                requestRecordingEngineCheck("CPU engine " + why);
+            }
+        }, "RecEngineFallback");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private final java.util.concurrent.atomic.AtomicBoolean recordingEngineCheckPending =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+    private final java.util.concurrent.atomic.AtomicBoolean accEdgeCheckPending =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+
+    /**
+     * ACC changed: re-pick the engine a few seconds later, once the daemon's own
+     * ACC handling (recording stop/start, camera reopen) has settled. The check
+     * reads the latest ACC state when it runs. Never blocks the caller.
+     */
+    public void onAccEdgeForRecordingEngine() {
+        if (!RecordingEngine.isCpuEngineEnabled()) return;
+        if (!accEdgeCheckPending.compareAndSet(false, true)) return;
+        Thread t = new Thread(() -> {
+            try {
+                Thread.sleep(4_000L);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+            accEdgeCheckPending.set(false);
+            try {
+                scheduleRecordingEngineCheck("ACC change");
+            } catch (Throwable e) {
+                logger.warn("Recording engine ACC check failed: " + e.getMessage());
+            }
+        }, "RecEngineAcc");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** Runs the engine check on a short thread: callers may hold the config lock or be the GL thread. */
+    private void requestRecordingEngineCheck(String trigger) {
+        if (encoder == null || !running) return;
+        if (!recordingEngineCheckPending.compareAndSet(false, true)) return;
+        Thread t = new Thread(() -> {
+            recordingEngineCheckPending.set(false);
+            try {
+                scheduleRecordingEngineCheck(trigger);
+            } catch (Throwable e) {
+                logger.warn("Recording engine check failed: " + e.getMessage());
+            }
+        }, "RecEngineCheck");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** Re-checks the engine after a setting change and switches off-thread when it differs. */
+    private void scheduleRecordingEngineCheck(String trigger) {
+        HardwareEventRecorderGpu enc = encoder;
+        if (enc == null || !running || stopping) return;
+        boolean wantCpu = cpuRecordingBlocker() == null;
+        if (wantCpu == enc.isCpuInput()) return;
+        PanoramicCameraGpu cam = camera;
+        if (wantCpu && (cam == null || !cam.isCpuFrameReader())) {
+            logger.info("Recording engine: CPU applies at the next camera start (" + trigger + ")");
+            return;
+        }
+        if (!recordingEngineSwitchQueued.compareAndSet(false, true)) return;
+        Thread t = new Thread(() -> {
+            boolean switched = false;
+            try {
+                synchronized (reconfigLock) {
+                    switched = applyRecordingEngineChangeLocked(trigger);
+                }
+            } catch (Throwable e) {
+                logger.warn("Recording engine switch failed: " + e.getMessage());
+            } finally {
+                recordingEngineSwitchQueued.set(false);
+            }
+            // A setting may have flipped again while this switch ran.
+            if (switched) scheduleRecordingEngineCheck(trigger);
+        }, "RecEngineSwitch");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** Same stop / reinit / resume cycle as a codec change. Caller holds reconfigLock. */
+    private boolean applyRecordingEngineChangeLocked(String trigger) {
+        if (!running || stopping || encoder == null) return false;
+        boolean wantCpu = cpuRecordingBlocker() == null;
+        if (wantCpu == encoder.isCpuInput()) return false;
+        PanoramicCameraGpu cam = camera;
+        if (wantCpu && (cam == null || !cam.isCpuFrameReader())) return false;
+        logger.info("Recording engine switch to " + (wantCpu ? "CPU" : "GPU") + " (" + trigger + ")");
+
+        boolean wasSurveillance = currentMode == Mode.SURVEILLANCE;
+        boolean wasNormalRecording = currentMode == Mode.NORMAL_RECORDING;
+        boolean wasRecording = isRecording() || pendingRecordingPrefix != null || recordingMode;
+        try {
+            if (wasRecording && recorder != null && recorder.isRecording()) {
+                logger.info("Stopping recording for recording engine switch");
+                recorder.stopRecording();
+                Thread.sleep(500);
+            }
+            reinitializeEncoder();
+            if (wasRecording) {
+                if (wasSurveillance) {
+                    enableSurveillance();
+                } else if (wasNormalRecording || recordingMode || pendingRecordingPrefix != null) {
+                    java.io.File restartDir;
+                    String restartPrefix;
+                    if (pendingRecordingPrefix != null) {
+                        restartDir = pendingRecordingDir;
+                        restartPrefix = pendingRecordingPrefix;
+                    } else if (activeRecordingPrefix != null) {
+                        restartDir = activeRecordingDir;
+                        restartPrefix = activeRecordingPrefix;
+                    } else {
+                        restartDir = null;
+                        restartPrefix = null;
+                    }
+                    if (restartPrefix != null) {
+                        startRecording(restartDir, restartPrefix);
+                    } else {
+                        startRecording();
+                    }
+                }
+            }
+            return true;
+        } catch (Exception e) {
+            logger.error("Recording engine switch failed: " + e.getMessage(), e);
+            // Same recovery as a failed codec reinit: let RMM rebuild the pipeline.
+            logger.warn("Forcing pipeline stop after engine-switch failure — "
+                + "RMM will rebuild on next activation");
+            try {
+                stop();
+            } catch (Throwable t) {
+                logger.warn("Failed to stop pipeline after engine switch error: " + t.getMessage());
+            }
+            return false;
+        }
+    }
+
     /**
      * Reinitializes the encoder with current config settings.
      * This is a synchronous operation that waits for completion.
@@ -1763,6 +1990,8 @@ public class GpuSurveillancePipeline {
             encoder = new HardwareEventRecorderGpu(encoderWidth, encoderHeight, fps, bitrate, codecMimeType);
             encoder.setManualClipRetentionDuration(
                 com.overdrive.app.recording.ManualClipService.getConfiguredRetentionSeconds());
+            // The parked tier is applied inline later; size the pre-roll arena for it now.
+            encoder.setPreRecordBudgetBitrate(Math.max(bitrate, getEffectiveSurveillanceBitrate()));
         } catch (Throwable t) {
             logger.warn("New encoder allocation failed — clearing recorder's stale "
                 + "encoder ref so caller can stop() cleanly: " + t.getMessage());
@@ -1852,7 +2081,13 @@ public class GpuSurveillancePipeline {
             logger.warn("Failed to wire encoder writing probe: " + e.getMessage());
         }
 
+        String engineBlocker = cpuRecordingBlocker();
+        if (engineBlocker == null && (camera == null || !camera.isCpuFrameReader())) {
+            engineBlocker = RecordingEngine.WHY_RESTART_PENDING;
+        }
+        encoder.setCpuInput(engineBlocker == null);
         encoder.init();
+        noteRecordingEngine(engineBlocker);
 
         // Re-seed the clip segment length after a codec/quality reinit so the
         // fresh encoder keeps the user's chosen rotation interval.
@@ -1886,6 +2121,7 @@ public class GpuSurveillancePipeline {
                         camera.isDecoupledEncoderLane());
                 }
                 recorder.setSegmentRotatedListener(this::noteSegmentRotated);
+                recorder.setCpuEngineFailureListener(this::onCpuEngineFailure);
                 applyRecorderDilink4Layout();
             }
             Exception laneErr = camera.reinitRecorderOnEncoderLane(recorder, encoder, 3000);
@@ -1931,6 +2167,7 @@ public class GpuSurveillancePipeline {
                         // wedge-ticker grace-windowing keeps working post-
                         // encoder-reinit.
                         recorder.setSegmentRotatedListener(this::noteSegmentRotated);
+                        recorder.setCpuEngineFailureListener(this::onCpuEngineFailure);
                         // FIX: a FRESH recorder starts with cameraLayout=0 and
                         // an all-zero producer-corner map, because the DiLink 4
                         // layout push lives only in the init path above. Without
@@ -2109,6 +2346,8 @@ public class GpuSurveillancePipeline {
         encoder = new HardwareEventRecorderGpu(encoderWidth, encoderHeight, fps, bitrate, codecMimeType);
         encoder.setManualClipRetentionDuration(
             com.overdrive.app.recording.ManualClipService.getConfiguredRetentionSeconds());
+        // The parked tier is applied inline later; size the pre-roll arena for it now.
+        encoder.setPreRecordBudgetBitrate(Math.max(bitrate, getEffectiveSurveillanceBitrate()));
 
         // Pre-load saved pre-record duration BEFORE encoder.init() so the
         // byte ring is sized correctly on first allocation. Mode-aware:
@@ -2173,7 +2412,11 @@ public class GpuSurveillancePipeline {
             logger.warn("Failed to wire encoder writing probe: " + e.getMessage());
         }
 
+        // Recording engine: CPU only when the camera path, size and layout allow it.
+        String engineBlocker = cpuRecordingBlocker();
+        encoder.setCpuInput(engineBlocker == null);
         encoder.init();
+        noteRecordingEngine(engineBlocker);
 
         // Seed the clip segment length from the shared recording config so the
         // ACC-on dashcam axis rotates at the user's chosen interval (2/5/10
@@ -2201,6 +2444,9 @@ public class GpuSurveillancePipeline {
         // selectors are resolved from platform/config, while EGL/HAL resources
         // are allocated only by start(). Keep this local until every dependent
         // component is ready, then publish it at step 5 below.
+        // Read at camera construction: CPU-readable frames and no decoupled lane
+        // whenever the CPU engine can run (car on), even while sentry uses the GPU.
+        RecordingEngine.setCpuEngineEnabled(cpuEngineBlocker() == null);
         PanoramicCameraGpu nextCamera = new PanoramicCameraGpu(
             cameraWidth, cameraHeight, quadrantStripOffsetX, quadrantCornerOffsetsXY);
         boolean isTexture2D = nextCamera.isTexture2D();
@@ -2208,6 +2454,7 @@ public class GpuSurveillancePipeline {
         logger.info("Resolved camera texture contract before consumer construction: "
             + (isTexture2D ? "GL_TEXTURE_2D" : "EXTERNAL_OES")
             + ", decoupledEncoderLane=" + decoupledEncoderLane);
+        nextCamera.setCpuRecordingFrames(RecordingEngine.isCpuEngineEnabled());
         // FIX (audit R6): cache for reinitializeEncoder()'s recorder=null branch.
         this.lastQuadrantStripOffsetX = quadrantStripOffsetX;
 
@@ -2224,6 +2471,7 @@ public class GpuSurveillancePipeline {
         // segment close so RecordingModeManager's wedge ticker can grace-
         // window the between-segments isRecording()=false flicker.
         recorder.setSegmentRotatedListener(this::noteSegmentRotated);
+        recorder.setCpuEngineFailureListener(this::onCpuEngineFailure);
 
         // Wire up telemetry collector to new recorder if available
         if (telemetryCollector != null) {
@@ -2830,6 +3078,15 @@ public class GpuSurveillancePipeline {
                                     + "falling back to default (prefix=cam)");
                             }
                             try {
+                                // Legacy reopen: open the clip on new frames, not the pre-record
+                                // ring's last one, and start it as soon as they are encoded.
+                                PanoramicCameraGpu resumedCamera = camera;
+                                HardwareEventRecorderGpu resumedEncoder = encoder;
+                                if (resumedCamera != null && resumedCamera.isLegacyAvmPath()
+                                        && resumedEncoder != null) {
+                                    resumedEncoder.requireFreshFrameForNextStart(2,
+                                        freshFrameKickoff());
+                                }
                                 startRecording(resumeDir, resumePrefix);
                                 logger.info("Post-reacquire: normal recording resumed via pipeline.startRecording");
                             } catch (Throwable t) {
@@ -2857,6 +3114,9 @@ public class GpuSurveillancePipeline {
                                 com.overdrive.app.daemon.CameraDaemon.getRecordingModeManager();
                             if (rmm != null) {
                                 rmm.forceWarmupRestart("hal-zero-frame-escalation");
+                            } else if (cam != null && cam.isLegacyAvmPath()) {
+                                logger.warn("HAL recovery: RecordingModeManager unavailable — "
+                                    + "leaving the stall watchdog to retry");
                             } else {
                                 logger.error("HAL recovery: RecordingModeManager unavailable — "
                                     + "requesting trip-safe daemon rebuild");
@@ -3769,8 +4029,11 @@ public class GpuSurveillancePipeline {
                     // records nothing because the old code (a) logged a false
                     // "Normal recording started" and (b) never retried.
                     // Defer + retry until storage settles.
-                    logger.warn("Recording did not start — camera warming up or "
-                        + "storage not write-ready; deferring and scheduling retry");
+                    logger.warn(enc.isAwaitingFreshFrame()
+                        ? "Recording did not start — camera reopened, waiting for its "
+                            + "first frame; scheduling retry"
+                        : "Recording did not start — storage not write-ready "
+                            + "(USB still mounting?); deferring and scheduling retry");
                     pendingRecordingDir = outputDir;
                     pendingRecordingPrefix = prefix;
                     recordingMode = true;
@@ -3823,6 +4086,17 @@ public class GpuSurveillancePipeline {
      * Called when the encoder format becomes available (probe complete, first frame encoded).
      * Starts any pending recording that was deferred because the encoder wasn't ready.
      */
+    /** Drainer callback for a legacy reopen: start the pending clip off the drain thread. */
+    private Runnable freshFrameKickoff() {
+        return () -> new Thread(() -> {
+            try {
+                checkPendingRecording();
+            } catch (Exception e) {
+                logger.warn("Fresh-frame recording start failed: " + e.getMessage());
+            }
+        }, "FreshFrameKickoff").start();
+    }
+
     void checkPendingRecording() {
         if (pendingRecordingPrefix == null) return;
         if (recorder == null || recorder.getEncoder() == null) return;
@@ -4642,6 +4916,8 @@ public class GpuSurveillancePipeline {
             sentry.enable();
             currentMode = Mode.SURVEILLANCE;
             logger.info("Surveillance mode enabled (sentry.active=" + sentry.isActive() + ")");
+            HardwareEventRecorderGpu fenceEncoder = encoder;
+            if (fenceEncoder != null) fenceEncoder.clearPreRecordFence();
             // Assert the ACC-off surveillance fps/bitrate NOW that the mode is
             // SURVEILLANCE. setRecordingMode(SENTRY) only fires on the direct
             // ACC-off (door-lock) path; the schedule-window-open and
@@ -4730,7 +5006,6 @@ public class GpuSurveillancePipeline {
      */
     public void onAccOn() {
         logger.info("ACC ON detected - stopping surveillance and finalizing recordings");
-        final boolean wasSurveillance = currentMode == Mode.SURVEILLANCE;
 
         try {
             // First, stop any active recording immediately (synchronous)
@@ -4762,6 +5037,13 @@ public class GpuSurveillancePipeline {
                     try { recorder.stopRecording(); }
                     catch (Throwable t) { logger.warn("onAccOn: post-disable drain failed: " + t.getMessage()); }
                 }
+            }
+
+            // The first drive clip starts at power-on, not with parked pre-roll.
+            HardwareEventRecorderGpu fenceEncoder = encoder;
+            if (fenceEncoder != null) {
+                try { fenceEncoder.fencePreRecordAtAccOn(); }
+                catch (Throwable t) { logger.warn("onAccOn: pre-record fence failed: " + t.getMessage()); }
             }
 
             // Also stop normal recording if active
@@ -4813,15 +5095,22 @@ public class GpuSurveillancePipeline {
                     || com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled();
             } catch (Throwable ignored) {}
             if (camera != null && running && !persistentCamera) {
-                if (wasSurveillance && camera.hasLiveNativeSharedCamera()) {
-                    // The native BYD app already owns primary and our secondary
-                    // feed is fresh. Reopening would discard a working stream
-                    // and repeat the handoff/warmup unnecessarily.
-                    logger.info("ACC ON: preserving live secondary AVM camera");
-                } else {
-                    camera.reopenCamera();
-                    logger.info("ACC ON transition complete - all recordings finalized, camera reopened");
+                camera.reopenCamera();
+                // The reopened camera stays dark through its warm-up: open the drive clip on
+                // its first frame instead of an empty muxer.
+                HardwareEventRecorderGpu reopenedEncoder = encoder;
+                PanoramicCameraGpu reopenedCamera = camera;
+                if (reopenedEncoder != null) {
+                    try {
+                        if (reopenedCamera != null && reopenedCamera.isLegacyAvmPath()) {
+                            reopenedEncoder.requireFreshFrameForNextStart(2, freshFrameKickoff());
+                        } else {
+                            reopenedEncoder.requireFreshFrameForNextStart();
+                        }
+                    }
+                    catch (Throwable t) { logger.warn("onAccOn: fresh-frame barrier failed: " + t.getMessage()); }
                 }
+                logger.info("ACC ON transition complete - all recordings finalized, camera reopened");
             } else if (persistentCamera) {
                 logger.info("ACC ON transition complete - DiLink camera stays alive (no reopen)");
                 // A parked DI4 HAL may have paused its producer or died. Re-arm
@@ -4832,12 +5121,6 @@ public class GpuSurveillancePipeline {
                 }
             } else {
                 logger.info("ACC ON transition complete - all recordings finalized");
-            }
-
-            if (wasSurveillance && running && encoder != null) {
-                // Arm after the OEM handoff decision. The first cam_* file
-                // must use a newly encoded post-ACC frame, never parked pre-roll.
-                encoder.requireFreshFrameForNextDriveClip();
             }
         } catch (Throwable t) {
             // Any failure mid-transition leaves the pipeline in a half-mutated
@@ -4994,6 +5277,8 @@ public class GpuSurveillancePipeline {
 
     private void enableStreamingInternal(int streamWidth, int streamHeight, int streamFps,
                                          int streamBitrate) throws Exception {
+        requestedStreamFps = streamFps;
+        requestedStreamBitrate = streamBitrate;
         // R8-A #18: defensively reset externalStreamSourceActive on every
         // enable. The disable path resets it at line ~1999 — but a disable
         // that threw before reaching that line could leave the flag stuck
@@ -9794,7 +10079,19 @@ public class GpuSurveillancePipeline {
     public HardwareEventRecorderGpu getStreamEncoder() {
         return streamEncoder;
     }
-    
+
+    // Stream profile as requested (before platform clamps), so a quality pick can be compared.
+    private volatile int requestedStreamFps = 0;
+    private volatile int requestedStreamBitrate = 0;
+
+    public int getRequestedStreamFps() {
+        return requestedStreamFps;
+    }
+
+    public int getRequestedStreamBitrate() {
+        return requestedStreamBitrate;
+    }
+
     /**
      * Gets the WebSocket stream server.
      */
@@ -10397,6 +10694,11 @@ public class GpuSurveillancePipeline {
      */
     public boolean isSurveillanceMode() {
         return currentMode == Mode.SURVEILLANCE;
+    }
+
+    /** Composition of the active profile: 1 = dashcam (forward view over the 360 strip), 0 = 360 grid. */
+    public int getActiveRecordingLayout() {
+        return currentMode == Mode.SURVEILLANCE ? surveillanceLayoutConfig : recordingLayoutConfig;
     }
 
     /**

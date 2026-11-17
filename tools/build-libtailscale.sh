@@ -3,8 +3,10 @@
 #
 # It is intentionally named .so so Android extracts it from jniLibs with executable
 # permissions; the artifact is a static PIE containing both tailscale and tailscaled.
-# The local patch keeps the existing loopback-TCP local API and adds an Android ACME
-# resolver fallback. Do not add ts_omit_acme: tailnet HTTPS depends on it.
+# The local patch keeps the existing loopback-TCP local API, adds an Android ACME
+# resolver fallback, and stops userspace netstack from raw-forwarding tailnet
+# connections into device loopback (only Serve-published ports stay reachable).
+# Do not add ts_omit_acme: tailnet HTTPS depends on it.
 set -euo pipefail
 
 TS_VERSION="${1:-v1.96.4}"
@@ -82,7 +84,7 @@ echo "==> testing patched upstream packages"
 (
     cd "$WORK/tailscale"
     env GOTOOLCHAIN="$GO_TOOLCHAIN" go test \
-        ./ipn/ipnauth ./ipn/ipnlocal ./safesocket ./cmd/tailscale/cli
+        ./ipn/ipnauth ./ipn/ipnlocal ./safesocket ./cmd/tailscale/cli ./wgengine/netstack
 )
 
 echo "==> building android/arm64 with $GO_TOOLCHAIN"

@@ -10,8 +10,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#00876C">
-    <script src="../shared/theme.js?v=11"></script>
-    <script src="../shared/app-shell.js?v=19"></script>
+    <script src="../shared/theme.js?v=12"></script>
+    <script src="../shared/app-shell.js?v=23"></script>
     <!--
       Bottom-tab manifest for Trips. Tabs apply to the LIST VIEW only;
       the DETAIL VIEW (#tripDetailView) is a sequential drill-in and
@@ -29,7 +29,7 @@
             { id: 'storage', label: 'Settings', i18n: 'common.settings', svg: '<path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4"/>' }
         ];
     </script>
-    <script src="../shared/app-tabs.js?v=3"></script>
+    <script src="../shared/app-tabs.js?v=4"></script>
     <link rel="stylesheet" href="../shared/styles.css?v=38">
     <link rel="stylesheet" href="../shared/revamp.css?v=2">
     <link rel="stylesheet" href="../shared/leaflet.css" />
@@ -435,6 +435,105 @@
         .range-delta-capsule.better { background: var(--primary-soft); color: var(--primary); }
         .range-delta-capsule.worse { background: var(--danger-soft); color: var(--danger); }
         .range-delta-capsule.neutral { background: var(--tertiary-soft); color: var(--tertiary); }
+        /* Range calibration: the card's entry row (under the hover tooltip, which passes taps through) and its sheet. */
+        .range-cal-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            margin-top: 8px;
+        }
+        .range-cal-row > * { margin: 3px 4px; }
+        .range-hero-card .range-cal-row:hover ~ .range-hero-tooltip { opacity: 0; }
+        .range-cal-chip {
+            padding: 4px 10px;
+            border-radius: var(--radius-full);
+            background: var(--primary-soft);
+            color: var(--primary);
+            font-size: var(--fs-caption);
+            font-weight: 600;
+        }
+        .range-cal-btn {
+            display: inline-flex;
+            align-items: center;
+            min-height: 36px;
+            padding: 6px 14px;
+            border: 1px solid var(--hairline);
+            border-radius: var(--radius-full);
+            background: transparent;
+            color: var(--on-surface);
+            font: inherit;
+            font-size: var(--fs-caption);
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .range-cal-btn:hover { background: var(--tile-raised); }
+        .range-cal-btn svg { width: 16px; height: 16px; margin-right: 6px; flex-shrink: 0; }
+        [dir="rtl"] .range-cal-btn svg { margin-right: 0; margin-left: 6px; }
+        .range-cal-card .range-cal-prompt {
+            margin: -8px 0 14px;
+            color: var(--on-surface-variant);
+            font-size: var(--fs-label);
+            line-height: 1.45;
+        }
+        .range-cal-card:focus { outline: none; }
+        .range-cal-readout { display: flex; align-items: baseline; justify-content: center; }
+        .range-cal-value {
+            font-size: 40px;
+            font-weight: 700;
+            line-height: 1.1;
+            color: var(--on-surface);
+            font-variant-numeric: tabular-nums;
+        }
+        .range-cal-unit { margin-left: 6px; font-size: 16px; color: var(--on-surface-variant); }
+        [dir="rtl"] .range-cal-unit { margin-left: 0; margin-right: 6px; }
+        .range-cal-rate {
+            margin-top: 2px;
+            text-align: center;
+            color: var(--on-surface-variant);
+            font-size: var(--fs-caption);
+            font-variant-numeric: tabular-nums;
+        }
+        /* A number line reads left to right in every language. */
+        .range-cal-slider-wrap { margin: 14px 0 4px; direction: ltr; }
+        .range-cal-track { position: relative; }
+        .range-cal-slider { position: relative; z-index: 1; display: block; width: 100%; }
+        .range-cal-tick {
+            position: absolute;
+            z-index: 0;
+            top: 50%;
+            width: 2px;
+            height: 18px;
+            margin: -9px 0 0 -1px;
+            border-radius: 1px;
+            background: var(--on-surface-variant);
+            opacity: 0.7;
+            pointer-events: none;
+        }
+        .range-cal-ends {
+            display: flex;
+            justify-content: space-between;
+            color: var(--on-surface-variant);
+            font-size: var(--fs-caption);
+            font-variant-numeric: tabular-nums;
+        }
+        .range-cal-trips,
+        .range-cal-note,
+        .range-cal-explain,
+        .range-cal-share {
+            margin: 8px 0 0;
+            font-size: var(--fs-caption);
+            line-height: 1.45;
+            color: var(--on-surface-variant);
+        }
+        .range-cal-trips { text-align: center; font-weight: 600; color: var(--on-surface); }
+        .range-cal-share { color: var(--primary); }
+        .range-cal-card .soh-modal-actions > .range-cal-remove { margin-right: auto; }
+        [dir="rtl"] .range-cal-card .soh-modal-actions > .range-cal-remove { margin-right: 4px; margin-left: auto; }
+        @media (max-width: 480px) {
+            .range-cal-card .soh-modal-actions > .range-cal-remove,
+            [dir="rtl"] .range-cal-card .soh-modal-actions > .range-cal-remove { margin: 4px 0; }
+        }
         /* Cost formula capsule below circle */
         .cost-formula-capsule {
             display: inline-flex;
@@ -593,9 +692,8 @@
             --trip-sticky-top-shell: calc(var(--tabs-h, 48px) + 8px);
             --trip-sticky-detail-top: calc(var(--tabs-h, 48px) + 12px);
         }
-        body.trips-page,
-        body.trips-page .app-layout,
-        body.trips-page .main-content,
+        /* Sticky needs no scrollport between the bars and the viewport: only .page-body
+           (styles.css) has one; body's overflow-x stays hidden (it goes to the viewport). */
         body.trips-page .main-content > .page-body {
             overflow: visible;
         }
@@ -605,11 +703,9 @@
             top: var(--trip-sticky-top);
             z-index: 5;
             margin-bottom: 4px;
-            padding: 0;
-            background: transparent;
-            pointer-events: none;
+            padding: 4px 0 8px;
+            background: var(--page);
         }
-        #tripListView > #tripFilters.trips-period-sticky > * { pointer-events: auto; }
         :root[data-app-shell="1"] #tripListView > #tripFilters.trips-period-sticky {
             top: var(--trip-sticky-top-shell);
         }
@@ -1261,11 +1357,9 @@
             top: var(--trip-sticky-top);
             z-index: 5;
             margin-bottom: var(--card-gap);
-            padding: 0;
-            background: transparent;
-            pointer-events: none;
+            padding: 6px 0 10px;
+            background: var(--page);
         }
-        .detail-header > * { pointer-events: auto; }
         body.trip-detail-open .detail-header,
         :root[data-app-shell="1"] .trip-detail.active .detail-header {
             top: var(--trip-sticky-detail-top);
@@ -1292,6 +1386,18 @@
         [dir="rtl"] .detail-back-btn svg { margin-right: 0; margin-left: 8px; }
         [dir="rtl"] .detail-header > .detail-back-btn:first-child svg { -webkit-transform: scaleX(-1); transform: scaleX(-1); }
         :root[data-android-embed="1"] .detail-back-btn { min-height: 56px; font-size: var(--fs-body); }
+        /* Previous / next trip, in the list's order; Export stays at the end. */
+        .detail-pager { display: flex; margin-left: auto; margin-right: 8px; }
+        [dir="rtl"] .detail-pager { margin-left: 8px; margin-right: auto; }
+        .detail-pager > * + * { margin-left: 8px; }
+        [dir="rtl"] .detail-pager > * + * { margin-left: 0; margin-right: 8px; }
+        .detail-pager-next svg { margin-right: 0; margin-left: 8px; }
+        [dir="rtl"] .detail-pager-next svg { margin-left: 0; margin-right: 8px; }
+        [dir="rtl"] .detail-pager-btn svg { -webkit-transform: scaleX(-1); transform: scaleX(-1); }
+        .detail-back-btn:disabled { opacity: 0.38; cursor: default; }
+        @media (hover: hover) {
+            .detail-back-btn:disabled:hover { background: var(--well); }
+        }
 
         /* Detail sections read as mock tiles. */
         .detail-summary,
@@ -1885,7 +1991,7 @@
 <body class="trips-page">
     <div class="app-layout">
         <!-- Sidebar -->
-        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=19) -->
+        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=23) -->
         <div id="app-shell-mount"></div>
         <!-- Main Content -->
         <main class="main-content" aria-busy="true" inert style="pointer-events:none">
@@ -1954,6 +2060,7 @@
                                 </div>
                             </div>
                             <div id="rangeDeltaCapsule" class="range-delta-capsule neutral" style="display:none;"></div>
+                            <div id="rangeCalibrateRow" class="range-cal-row" style="display:none;"></div>
                             <div id="rangeHeroContent">
                                 <div class="range-hero-no-data">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
@@ -2113,7 +2220,7 @@
                                 </div>
                                 <div class="setting-control trip-inline-ctl trip-rate-ctl">
                                     <select id="currencySelect" class="select-input trip-currency-select" onchange="TRIPS.showApplyNeeded()" data-i18n-attr="aria-label:trip.settings.elec_rate_label" aria-label="Electricity Rate">
-                                        <optgroup label="Common">
+                                        <optgroup label="Common" data-i18n-attr="label:common.tz_group_common">
                                             <option value="$">$ USD</option>
                                             <option value="€">€ EUR</option>
                                             <option value="£">£ GBP</option>
@@ -2122,7 +2229,7 @@
                                             <option value="C$">C$ CAD</option>
                                             <option value="CHF ">CHF</option>
                                         </optgroup>
-                                        <optgroup label="Asia / Pacific">
+                                        <optgroup label="Asia / Pacific" data-i18n-attr="label:common.tz_group_asia">
                                             <option value="₹">₹ INR</option>
                                             <option value="रू">रू NPR</option>
                                             <option value="CN¥">CN¥ CNY</option>
@@ -2137,14 +2244,14 @@
                                             <option value="₫">₫ VND</option>
                                             <option value="NZ$">NZ$ NZD</option>
                                         </optgroup>
-                                        <optgroup label="Middle East / Africa">
+                                        <optgroup label="Middle East / Africa" data-i18n-attr="label:common.tz_group_mideast">
                                             <option value="AED ">AED</option>
                                             <option value="SAR ">SAR</option>
                                             <option value="QAR ">QAR</option>
                                             <option value="₪">₪ ILS</option>
                                             <option value="R ">R ZAR</option>
                                         </optgroup>
-                                        <optgroup label="Europe (non-EUR)">
+                                        <optgroup label="Europe (non-EUR)" data-i18n-attr="label:common.tz_group_europe">
                                             <option value="NOK ">NOK kr</option>
                                             <option value="SEK ">SEK kr</option>
                                             <option value="DKK ">DKK kr</option>
@@ -2155,7 +2262,7 @@
                                             <option value="₽">₽ RUB</option>
                                             <option value="₴">₴ UAH</option>
                                         </optgroup>
-                                        <optgroup label="Latin America">
+                                        <optgroup label="Latin America" data-i18n-attr="label:common.tz_group_latam">
                                             <option value="R$">R$ BRL</option>
                                             <option value="MX$">MX$ MXN</option>
                                             <option value="AR$">AR$ ARS</option>
@@ -2239,6 +2346,16 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
                             <span data-i18n="trip.detail.back">Back to Trips</span>
                         </button>
+                        <span class="detail-pager">
+                            <button type="button" class="detail-back-btn detail-pager-btn" id="tripPrevBtn" onclick="TRIPS.navigateTrip(-1)" disabled>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+                                <span data-i18n="common.nav_previous">Previous</span>
+                            </button>
+                            <button type="button" class="detail-back-btn detail-pager-btn detail-pager-next" id="tripNextBtn" onclick="TRIPS.navigateTrip(1)" disabled>
+                                <span data-i18n="common.nav_next">Next</span>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+                            </button>
+                        </span>
                         <button class="detail-back-btn" id="detailExportBtn" onclick="TripExport.open()">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                             <span data-i18n="trip.detail.export">Export</span>
@@ -2494,11 +2611,11 @@
     <script src="../shared/leaflet.js"></script>
     <script src="../shared/auth.js"></script>
     <script src="../shared/pwa-init.js?v=index1"></script>
-    <script src="../shared/core.js?v=24"></script>
+    <script src="../shared/core.js?v=27"></script>
     <script src="../shared/settings-hydration.js?v=1"></script>
     <script src="../shared/update-flow.js?v=3"></script>
-    <script src="../shared/storage-budget.js?v=8"></script>
-    <script src="../shared/trips.js?v=history15"></script>
+    <script src="../shared/storage-budget.js?v=9"></script>
+    <script src="../shared/trips.js?v=rangecal2"></script>
     <script>
         // ES5-only — Chrome 58 / Android 7.1 head-unit floor.
         // Per-trip GPX / KML / CSV download (served on demand; no background work).

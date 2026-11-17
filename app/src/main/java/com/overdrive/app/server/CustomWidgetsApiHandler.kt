@@ -1,5 +1,6 @@
 package com.overdrive.app.server
 
+import com.overdrive.app.automation.Automations
 import com.overdrive.app.config.UnifiedConfigManager
 import com.overdrive.app.daemon.CameraDaemon
 import com.overdrive.app.logging.DaemonLogger
@@ -12,6 +13,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.OutputStream
+import java.net.URLDecoder
 
 /**
  * Widget builder routes: the signal catalog, the car's current readings and its custom widget store.
@@ -21,7 +23,9 @@ object CustomWidgetsApiHandler {
 
     private const val SIGNALS = "/api/widgets/signals"
     private const val VALUES = "/api/widgets/values"
+    private const val MQTT = "/api/widgets/mqtt"
     private const val CUSTOM = "/api/widgets/custom"
+    private const val MAX_MQTT_ASKED = 16
     // a pretty-printed 16 KB doc plus its envelope; anything bigger is refused before parsing
     private const val MAX_BODY_CHARS = 4 * CustomWidgetStore.MAX_BYTES
 
@@ -35,13 +39,14 @@ object CustomWidgetsApiHandler {
             when {
                 p == SIGNALS -> if (method == "GET") signals(out) else notAllowed(out)
                 p == VALUES -> if (method == "GET") values(out) else notAllowed(out)
+                p == MQTT -> if (method == "GET") mqtt(path, out) else notAllowed(out)
                 p == CUSTOM -> if (method == "GET") list(out) else notAllowed(out)
                 p.startsWith("$CUSTOM/") -> item(method, p.substring(CUSTOM.length + 1).split('/'), body, out)
                 else -> return false
             }
         } catch (t: Throwable) {
             logger.error("custom widgets: ${t.message}")
-            fail(out, 500, "Internal error")
+            fail(out, 500, Messages.get("errors.widgets_internal_error"))
         }
         return true
     }
@@ -54,7 +59,7 @@ object CustomWidgetsApiHandler {
             parts.size == 1 && method == "DELETE" -> delete(id, out)
             show && method == "POST" -> show(id, body, out)
             parts.size == 1 || show -> notAllowed(out)
-            else -> fail(out, 404, "Unknown widget route")
+            else -> fail(out, 404, Messages.get("errors.widgets_unknown_route"))
         }
     }
 
@@ -103,6 +108,42 @@ object CustomWidgetsApiHandler {
             .put("values", values).toString())
     }
 
+    /**
+     * Inbound MQTT channels from the automation state: `?channels=a,b` (at most 16, invalid names ignored)
+     * maps each to its value; without it, every channel seen so far is listed.
+     */
+    private fun mqtt(path: String, out: OutputStream) {
+        val payloads = Automations.mqttChannelPayloads()
+        val asked = path.substringAfter('?', "").split('&').firstOrNull { it.startsWith("channels=") }?.substringAfter('=')
+        val res = JSONObject().put("success", true).put("at", System.currentTimeMillis())
+        if (asked != null) {
+            val names = try { URLDecoder.decode(asked, "UTF-8") } catch (e: Exception) { asked }
+            val values = JSONObject()
+            names.split(',').map { it.trim() }.filter { MQTT_CHANNEL.matches(it) }.distinct().take(MAX_MQTT_ASKED)
+                .forEach { values.put(it, mqttValue(payloads[it])) }
+            res.put("values", values)
+        } else {
+            val channels = JSONArray()
+            for ((channel, payload) in payloads) channels.put(JSONObject().put("channel", channel).put("value", mqttValue(payload)))
+            res.put("channels", channels)
+        }
+        HttpResponse.sendJson(out, res.toString())
+    }
+
+    private val MQTT_CHANNEL = Regex("[A-Za-z0-9._-]{1,64}")
+    private val NUMBER = Regex("[+-]?(\\d+\\.?\\d*|\\.\\d+)([eE][+-]?\\d+)?")
+    private val CONTROL = Regex("\\p{Cc}")
+
+    /** A payload as widgets read it: a finite number, else trimmed text without control characters (at most 64), else null. */
+    private fun mqttValue(payload: String?): Any {
+        if (payload == null) return JSONObject.NULL
+        val t = payload.trim()
+        if (NUMBER.matches(t)) t.toDouble().takeIf { it.isFinite() }?.let { return it }
+        var s = CONTROL.replace(t, "").trim()
+        if (s.length > 64) s = s.substring(0, if (Character.isHighSurrogate(s[63])) 63 else 64)
+        return s
+    }
+
     /** A core route answered in this process, no socket: its JSON when it replied 200 without `success:false`. */
     private fun reply(route: (OutputStream) -> Boolean): JSONObject? {
         val buf = ByteArrayOutputStream()
@@ -137,60 +178,60 @@ object CustomWidgetsApiHandler {
     }
 
     private fun put(id: String, body: String?, out: OutputStream) {
-        if (!CustomWidgetStore.isValidId(id)) return fail(out, 400, "Invalid widget id")
-        if (body != null && body.length > MAX_BODY_CHARS) return fail(out, 413, "This widget is too big to save")
-        val doc = parse(body)?.optJSONObject("doc") ?: return fail(out, 400, "Missing doc")
+        if (!CustomWidgetStore.isValidId(id)) return fail(out, 400, Messages.get("errors.widgets_invalid_id"))
+        if (body != null && body.length > MAX_BODY_CHARS) return fail(out, 413, Messages.get("errors.widgets_too_big"))
+        val doc = parse(body)?.optJSONObject("doc") ?: return fail(out, 400, Messages.get("errors.widgets_missing_doc"))
         val raw = doc.toString()
         val canonical = try {
             CustomDoc.canonical(raw)
         } catch (e: CustomDoc.Invalid) {
             // the engine refuses an oversize doc as invalid; that one is a 413
             val code = if (raw.toByteArray(Charsets.UTF_8).size > CustomWidgetStore.MAX_BYTES) 413 else 400
-            return fail(out, code, e.message ?: "Invalid widget")
+            return fail(out, code, e.message ?: Messages.get("errors.widgets_invalid"))
         } catch (e: Exception) {
             logger.warn("widget $id rejected: ${e.message}")
-            return fail(out, 400, "Invalid widget")
+            return fail(out, 400, Messages.get("errors.widgets_invalid"))
         }
         val entry = try {
             CustomWidgetStore.edit(id, canonical)
         } catch (e: CustomWidgetStore.Full) {
-            return fail(out, 409, e.message ?: "Too many widgets")
+            return fail(out, 409, e.message ?: Messages.get("errors.widgets_too_many"))
         } catch (e: CustomWidgetStore.TooLarge) {
-            return fail(out, 413, e.message ?: "This widget is too big to save")
+            return fail(out, 413, e.message ?: Messages.get("errors.widgets_too_big"))
         } catch (e: CustomWidgetStore.Unavailable) {
-            return fail(out, 503, e.message ?: "Try again")
+            return fail(out, 503, e.message ?: Messages.get("errors.widgets_try_again"))
         } catch (e: IllegalArgumentException) {
-            return fail(out, 400, e.message ?: "Invalid widget")
+            return fail(out, 400, e.message ?: Messages.get("errors.widgets_invalid"))
         }
         HttpResponse.sendJson(out, JSONObject().put("success", true).put("id", entry.id)
             .put("doc", entry.doc).toString())
     }
 
     private fun delete(id: String, out: OutputStream) {
-        if (!CustomWidgetStore.isValidId(id)) return fail(out, 400, "Invalid widget id")
+        if (!CustomWidgetStore.isValidId(id)) return fail(out, 400, Messages.get("errors.widgets_invalid_id"))
         val removed = try {
             CustomWidgetStore.delete(id)
         } catch (e: CustomWidgetStore.Unavailable) {
-            return fail(out, 503, e.message ?: "Try again")
+            return fail(out, 503, e.message ?: Messages.get("errors.widgets_try_again"))
         }
-        if (!removed) return fail(out, 404, "No such widget")
+        if (!removed) return fail(out, 404, Messages.get("errors.widgets_not_found"))
         HttpResponse.sendJson(out, JSONObject().put("success", true).put("id", id).toString())
     }
 
     private fun show(id: String, body: String?, out: OutputStream) {
-        if (!CustomWidgetStore.isValidId(id)) return fail(out, 400, "Invalid widget id")
-        val shown = parse(body)?.opt("shown") as? Boolean ?: return fail(out, 400, "shown must be true or false")
+        if (!CustomWidgetStore.isValidId(id)) return fail(out, 400, Messages.get("errors.widgets_invalid_id"))
+        val shown = parse(body)?.opt("shown") as? Boolean ?: return fail(out, 400, Messages.get("errors.widgets_shown_boolean"))
         try {
             CustomWidgetStore.setShown(id, shown)
         } catch (e: NoSuchElementException) {
-            return fail(out, 404, "No such widget")
+            return fail(out, 404, Messages.get("errors.widgets_not_found"))
         } catch (e: CustomWidgetStore.Unavailable) {
-            return fail(out, 503, e.message ?: "Try again")
+            return fail(out, 503, e.message ?: Messages.get("errors.widgets_try_again"))
         }
         HttpResponse.sendJson(out, JSONObject().put("success", true).put("id", id).put("shown", shown).toString())
     }
 
-    private fun notAllowed(out: OutputStream) = fail(out, 405, "Method not allowed")
+    private fun notAllowed(out: OutputStream) = fail(out, 405, Messages.get("errors.widgets_method_not_allowed"))
 
     private fun parse(body: String?): JSONObject? {
         if (body.isNullOrBlank()) return null

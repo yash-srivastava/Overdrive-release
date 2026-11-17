@@ -167,6 +167,9 @@
     "tyre_wheel_pressure": "{0} ({1})"
   },
   "telegram": {
+    "deterrent_triggered": "경고 작동: {0}",
+    "deterrent_screen": "화면",
+    "deterrent_cloud": "클라우드",
     "recording_caption": " 녹음 ({0}) - {1}",
     "recording_caption_no_label": " 녹음 - {0}",
     "proximity_alert": " 근위 경보 시간: {0} 트리거: {1} ({2}) 녹화 시작...",
@@ -476,6 +479,7 @@
   },
   "vehicle_control": {
     "blocked_driving": "차량이 주행 중일 때는 이 작업을 사용할 수 없습니다",
+    "blocked_unconfirmed": "지금은 차량이 주차 상태인지 확인할 수 없습니다. 잠시 후 다시 시도하세요.",
     "cloud_required": "이 컨트롤을 사용하기 위해 설정에서 BYD 계정을 연결",
     "cloud_sent": "클라우드를 통해 전송",
     "cloud_unavailable_used_local": "클라우드 사용 불가능  사용된 직접 연결",

@@ -1,5 +1,6 @@
 package com.overdrive.app.overlay.glass
 
+import com.overdrive.app.R
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
@@ -503,9 +504,9 @@ abstract class GlassWidgetView(
         const val SHEEN_MS = 950L
 
         fun lastSeenText(min: Int): String = when {
-            min < 1 -> "Last seen just now"
-            min < 60 -> "Last seen $min min ago"
-            else -> "Last seen ${min / 60} h ago"
+            min < 1 -> gs(R.string.glass_last_seen_now)
+            min < 60 -> gs(R.string.glass_last_seen_min, min)
+            else -> gs(R.string.glass_last_seen_h, min / 60)
         }
 
         /** CSS linear-gradient(angle) across [r]: 0° points up, 90° right. For baking only (allocates). */

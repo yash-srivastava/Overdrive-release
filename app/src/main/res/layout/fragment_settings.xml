@@ -1,37 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  SOTA Settings — portrait hub (1080×1920 / 540dp × 960dp logical).
-
-  Composition (vertical, content-driven height):
-    HERO HEADER : "OVERDRIVE" overline + "Settings" headline + 1-line subtitle
-    QUICK ROW   : two tile-toggle cards (Theme / Language) — the most-used
-                  switches surfaced denser than the section list
-    PREFERENCES : section list — Recording, Surveillance, Daemons. Each is
-                  a rich row card (icon + title + subtitle + chevron)
-    ABOUT&DATA  : two rich rows — "About OverDrive" (info) and "Reset data"
-                  (destructive, colorErrorContainer background)
-    FOOTER      : small unobtrusive build line in colorOnSurfaceVariant
-
-  Density math (portrait 540dp wide):
-    - 24dp outer padding all around
-    - 16dp gap between sections
-    - 12dp gap between sibling cards in a section
-    - 20dp card corner radius (24dp on the destructive reset to read as
-      "warmer" relative to neutral cards)
-    - Surface tier alternation:
-        outer            = colorBackground
-        cards            = colorSurfaceContainer
-        destructive card = colorErrorContainer
-
-  Preserved IDs (Kotlin references in SettingsFragment.kt):
-    cardLanguage, tvLanguageValue
-    cardSectionRecording, cardSectionSurveillance, cardSectionStorage, cardSectionDaemons
-    cardCheckUpdate (now mapped to "About" row), cardResetData
-
-  Note on theme picker: the portrait page no longer hosts the theme picker
-  inline (the new visual-tile picker only fits the Appearance pane). Tapping
-  "Theme" in the quick row opens the same dialog the in-app theme picker
-  uses, falling back to a snackbar/toast invocation handled by Kotlin.
+  Settings, portrait hub (the landscape variant is the sub-rail two-pane layout).
+  Order: subtitle, Theme/Language tiles, Preferences rows, status overlay, remote
+  communication, Security, Daemons, Reset data, footer. SettingsFragment wires every id here.
 -->
 <androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -45,55 +16,45 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:paddingHorizontal="@dimen/page_padding_horizontal"
-        android:paddingTop="@dimen/page_padding_top"
-        android:paddingBottom="@dimen/page_padding_bottom">
+        android:paddingHorizontal="@dimen/od_page_padding_h"
+        android:paddingTop="@dimen/od_page_padding_top"
+        android:paddingBottom="@dimen/od_space_24">
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="@dimen/page_padding_top"
+            android:layout_marginBottom="@dimen/od_space_12"
             android:text="@string/settings_hero_subtitle"
-            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-            android:textColor="?attr/colorOnSurfaceVariant" />
+            android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:textSize="15sp" />
 
-        <!-- ================= QUICK ROW ================= -->
-        <!--
-          Two equal-weight tile cards. Tapping THEME opens the in-app theme
-          picker; tapping LANGUAGE opens LanguagePickerDialog. Both tiles
-          show their current value as a large body-medium text underneath
-          the title for at-a-glance status.
-        -->
+        <!-- Theme opens the picker dialog; Language opens LanguagePickerDialog. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="@dimen/card_gap_vertical"
             android:baselineAligned="false"
             android:orientation="horizontal">
 
-            <!-- Theme quick tile -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/quickTileTheme"
+                style="@style/Widget.Overdrive.Revamp.Card"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginEnd="@dimen/card_gap_horizontal_half"
+                android:layout_marginEnd="@dimen/int_grid_gap_half"
                 android:layout_weight="1"
-                android:minHeight="@dimen/grid_tile_min_height"
                 android:clickable="true"
                 android:focusable="true"
-                app:cardBackgroundColor="?attr/colorSurfaceContainer"
-                app:cardCornerRadius="@dimen/card_radius_standard"
-                app:cardElevation="0dp">
+                android:minHeight="@dimen/od_touch_primary">
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="@dimen/card_padding_standard">
+                    android:orientation="vertical">
 
                     <ImageView
-                        android:layout_width="@dimen/card_icon_standard"
-                        android:layout_height="@dimen/card_icon_standard"
+                        android:layout_width="@dimen/od_icon_md"
+                        android:layout_height="@dimen/od_icon_md"
                         android:contentDescription="@null"
                         android:src="@drawable/ic_dashboard"
                         app:tint="?attr/colorPrimary" />
@@ -101,50 +62,42 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="14dp"
-                        android:letterSpacing="0.04"
+                        android:layout_marginTop="@dimen/od_space_12"
                         android:text="@string/settings_quick_theme_label"
-                        android:textAllCaps="true"
-                        android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
+                        android:textAppearance="@style/TextAppearance.Overdrive.Overline" />
 
                     <TextView
                         android:id="@+id/tvQuickThemeValue"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
+                        android:layout_marginTop="@dimen/od_space_2"
                         android:ellipsize="end"
                         android:maxLines="1"
                         android:text="@string/settings_theme_auto"
-                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                        android:textColor="?attr/colorOnSurface" />
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle"
+                        android:textSize="16sp" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- Language quick tile — keeps cardLanguage + tvLanguageValue
-                 IDs that SettingsFragment.kt wires to LanguagePickerDialog. -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/cardLanguage"
+                style="@style/Widget.Overdrive.Revamp.Card"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="@dimen/card_gap_horizontal_half"
+                android:layout_marginStart="@dimen/int_grid_gap_half"
                 android:layout_weight="1"
-                android:minHeight="@dimen/grid_tile_min_height"
                 android:clickable="true"
                 android:focusable="true"
-                app:cardBackgroundColor="?attr/colorSurfaceContainer"
-                app:cardCornerRadius="@dimen/card_radius_standard"
-                app:cardElevation="0dp">
+                android:minHeight="@dimen/od_touch_primary">
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="@dimen/card_padding_standard">
+                    android:orientation="vertical">
 
                     <ImageView
-                        android:layout_width="@dimen/card_icon_standard"
-                        android:layout_height="@dimen/card_icon_standard"
+                        android:layout_width="@dimen/od_icon_md"
+                        android:layout_height="@dimen/od_icon_md"
                         android:contentDescription="@null"
                         android:src="@drawable/ic_language"
                         app:tint="?attr/colorPrimary" />
@@ -152,68 +105,60 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="14dp"
-                        android:letterSpacing="0.04"
+                        android:layout_marginTop="@dimen/od_space_12"
                         android:text="@string/settings_quick_language_label"
-                        android:textAllCaps="true"
-                        android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
+                        android:textAppearance="@style/TextAppearance.Overdrive.Overline" />
 
                     <TextView
                         android:id="@+id/tvLanguageValue"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
+                        android:layout_marginTop="@dimen/od_space_2"
                         android:ellipsize="end"
                         android:maxLines="1"
-                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                        android:textColor="?attr/colorOnSurface" />
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle"
+                        android:textSize="16sp" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
         </LinearLayout>
 
-        <!-- ================= PREFERENCES ================= -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:layout_marginBottom="@dimen/section_overline_bottom"
-            android:letterSpacing="0.06"
+            android:layout_marginTop="@dimen/od_space_24"
+            android:layout_marginBottom="@dimen/od_space_8"
+            android:accessibilityHeading="true"
             android:text="@string/settings_overline_preferences"
-            android:textAllCaps="true"
-            android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-            android:textColor="?attr/colorOnSurfaceVariant" />
+            android:textAppearance="@style/TextAppearance.Overdrive.Overline" />
 
-        <!-- Recording -->
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/cardSectionRecording"
+            style="@style/Widget.Overdrive.Revamp.Card"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="@dimen/card_gap_vertical"
+            android:layout_marginBottom="@dimen/od_space_12"
             android:clickable="true"
-            android:focusable="true"
-            app:cardBackgroundColor="?attr/colorSurfaceContainer"
-            app:cardCornerRadius="@dimen/card_radius_standard"
-            app:cardElevation="0dp">
+            android:focusable="true">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:padding="@dimen/card_padding_standard">
+                android:minHeight="@dimen/od_touch_standard"
+                android:orientation="horizontal">
 
                 <ImageView
-                    android:layout_width="@dimen/card_icon_standard"
-                    android:layout_height="@dimen/card_icon_standard"
+                    android:layout_width="@dimen/od_icon_md"
+                    android:layout_height="@dimen/od_icon_md"
                     android:contentDescription="@null"
                     android:src="@drawable/ic_recording_settings"
-                    app:tint="?attr/colorPrimary" />
+                    app:tint="?attr/colorOnSurfaceVariant" />
 
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="16dp"
+                    android:layout_marginStart="@dimen/od_space_16"
+                    android:layout_marginEnd="@dimen/od_space_12"
                     android:layout_weight="1"
                     android:orientation="vertical">
 
@@ -221,57 +166,54 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/settings_section_recording"
-                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                        android:textColor="?attr/colorOnSurface" />
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle"
+                        android:textSize="16sp" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
+                        android:layout_marginTop="@dimen/od_space_2"
                         android:text="@string/settings_section_recording_subtitle"
-                        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowMeta" />
                 </LinearLayout>
 
                 <ImageView
-                    android:layout_width="20dp"
-                    android:layout_height="20dp"
+                    android:layout_width="@dimen/od_icon_md"
+                    android:layout_height="@dimen/od_icon_md"
                     android:contentDescription="@null"
                     android:src="@drawable/ic_chevron_right"
                     app:tint="?attr/colorOnSurfaceVariant" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- Surveillance -->
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/cardSectionSurveillance"
+            style="@style/Widget.Overdrive.Revamp.Card"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="@dimen/card_gap_vertical"
+            android:layout_marginBottom="@dimen/od_space_12"
             android:clickable="true"
-            android:focusable="true"
-            app:cardBackgroundColor="?attr/colorSurfaceContainer"
-            app:cardCornerRadius="@dimen/card_radius_standard"
-            app:cardElevation="0dp">
+            android:focusable="true">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:padding="@dimen/card_padding_standard">
+                android:minHeight="@dimen/od_touch_standard"
+                android:orientation="horizontal">
 
                 <ImageView
-                    android:layout_width="@dimen/card_icon_standard"
-                    android:layout_height="@dimen/card_icon_standard"
+                    android:layout_width="@dimen/od_icon_md"
+                    android:layout_height="@dimen/od_icon_md"
                     android:contentDescription="@null"
                     android:src="@drawable/ic_sentry"
-                    app:tint="?attr/colorPrimary" />
+                    app:tint="?attr/colorOnSurfaceVariant" />
 
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="16dp"
+                    android:layout_marginStart="@dimen/od_space_16"
+                    android:layout_marginEnd="@dimen/od_space_12"
                     android:layout_weight="1"
                     android:orientation="vertical">
 
@@ -279,57 +221,54 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/settings_section_surveillance"
-                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                        android:textColor="?attr/colorOnSurface" />
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle"
+                        android:textSize="16sp" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
+                        android:layout_marginTop="@dimen/od_space_2"
                         android:text="@string/settings_section_surveillance_subtitle"
-                        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowMeta" />
                 </LinearLayout>
 
                 <ImageView
-                    android:layout_width="20dp"
-                    android:layout_height="20dp"
+                    android:layout_width="@dimen/od_icon_md"
+                    android:layout_height="@dimen/od_icon_md"
                     android:contentDescription="@null"
                     android:src="@drawable/ic_chevron_right"
                     app:tint="?attr/colorOnSurfaceVariant" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- Storage -->
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/cardSectionStorage"
+            style="@style/Widget.Overdrive.Revamp.Card"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="@dimen/card_gap_vertical"
+            android:layout_marginBottom="@dimen/od_space_12"
             android:clickable="true"
-            android:focusable="true"
-            app:cardBackgroundColor="?attr/colorSurfaceContainer"
-            app:cardCornerRadius="@dimen/card_radius_standard"
-            app:cardElevation="0dp">
+            android:focusable="true">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:padding="@dimen/card_padding_standard">
+                android:minHeight="@dimen/od_touch_standard"
+                android:orientation="horizontal">
 
                 <ImageView
-                    android:layout_width="@dimen/card_icon_standard"
-                    android:layout_height="@dimen/card_icon_standard"
+                    android:layout_width="@dimen/od_icon_md"
+                    android:layout_height="@dimen/od_icon_md"
                     android:contentDescription="@null"
                     android:src="@drawable/ic_recording_storage"
-                    app:tint="?attr/colorPrimary" />
+                    app:tint="?attr/colorOnSurfaceVariant" />
 
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="16dp"
+                    android:layout_marginStart="@dimen/od_space_16"
+                    android:layout_marginEnd="@dimen/od_space_12"
                     android:layout_weight="1"
                     android:orientation="vertical">
 
@@ -337,41 +276,36 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/recording_lib_filter_section_storage"
-                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                        android:textColor="?attr/colorOnSurface" />
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle"
+                        android:textSize="16sp" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
+                        android:layout_marginTop="@dimen/od_space_2"
                         android:text="@string/settings_section_storage_subtitle"
-                        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowMeta" />
                 </LinearLayout>
 
                 <ImageView
-                    android:layout_width="20dp"
-                    android:layout_height="20dp"
+                    android:layout_width="@dimen/od_icon_md"
+                    android:layout_height="@dimen/od_icon_md"
                     android:contentDescription="@null"
                     android:src="@drawable/ic_chevron_right"
                     app:tint="?attr/colorOnSurfaceVariant" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- Status overlay (inline two-switch card) -->
+        <!-- Status overlay: three inline switches. -->
         <com.google.android.material.card.MaterialCardView
+            style="@style/Widget.Overdrive.Revamp.Card"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="@dimen/card_gap_vertical"
-            app:cardBackgroundColor="?attr/colorSurfaceContainer"
-            app:cardCornerRadius="@dimen/card_radius_standard"
-            app:cardElevation="0dp">
+            android:layout_height="wrap_content">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="@dimen/card_padding_standard">
+                android:orientation="vertical">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -380,16 +314,16 @@
                     android:orientation="horizontal">
 
                     <ImageView
-                        android:layout_width="@dimen/card_icon_standard"
-                        android:layout_height="@dimen/card_icon_standard"
+                        android:layout_width="@dimen/od_icon_md"
+                        android:layout_height="@dimen/od_icon_md"
                         android:contentDescription="@null"
                         android:src="@drawable/ic_overlay_rec_active"
-                        app:tint="?attr/colorPrimary" />
+                        app:tint="?attr/colorOnSurfaceVariant" />
 
                     <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="16dp"
+                        android:layout_marginStart="@dimen/od_space_16"
                         android:layout_weight="1"
                         android:orientation="vertical">
 
@@ -397,38 +331,37 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text="@string/settings_section_overlay"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="?attr/colorOnSurface" />
+                            android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle"
+                            android:textSize="16sp" />
 
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="2dp"
+                            android:layout_marginTop="@dimen/od_space_2"
                             android:text="@string/settings_overlay_subtitle"
-                            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                            android:textColor="?attr/colorOnSurfaceVariant" />
+                            android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowMeta" />
                     </LinearLayout>
                 </LinearLayout>
 
-                <!-- Camera toggle row -->
                 <LinearLayout
                     android:id="@+id/rowOverlayCamera"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
+                    android:layout_marginTop="@dimen/od_space_8"
                     android:background="?attr/selectableItemBackground"
                     android:clickable="true"
                     android:focusable="true"
                     android:gravity="center_vertical"
+                    android:minHeight="@dimen/od_touch_standard"
                     android:orientation="horizontal">
 
                     <TextView
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
+                        android:layout_marginEnd="@dimen/od_space_12"
                         android:layout_weight="1"
                         android:text="@string/settings_overlay_camera_title"
-                        android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
-                        android:textColor="?attr/colorOnSurface" />
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle" />
 
                     <com.google.android.material.switchmaterial.SwitchMaterial
                         android:id="@+id/swOverlayCamera"
@@ -436,25 +369,25 @@
                         android:layout_height="wrap_content" />
                 </LinearLayout>
 
-                <!-- Trip toggle row -->
                 <LinearLayout
                     android:id="@+id/rowOverlayTrip"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
+                    android:layout_marginTop="0dp"
                     android:background="?attr/selectableItemBackground"
                     android:clickable="true"
                     android:focusable="true"
                     android:gravity="center_vertical"
+                    android:minHeight="@dimen/od_touch_standard"
                     android:orientation="horizontal">
 
                     <TextView
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
+                        android:layout_marginEnd="@dimen/od_space_12"
                         android:layout_weight="1"
                         android:text="@string/settings_overlay_trip_title"
-                        android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
-                        android:textColor="?attr/colorOnSurface" />
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle" />
 
                     <com.google.android.material.switchmaterial.SwitchMaterial
                         android:id="@+id/swOverlayTrip"
@@ -462,25 +395,25 @@
                         android:layout_height="wrap_content" />
                 </LinearLayout>
 
-                <!-- RoadSense overlay toggle row -->
                 <LinearLayout
                     android:id="@+id/rowOverlayRoadSense"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
+                    android:layout_marginTop="0dp"
                     android:background="?attr/selectableItemBackground"
                     android:clickable="true"
                     android:focusable="true"
                     android:gravity="center_vertical"
+                    android:minHeight="@dimen/od_touch_standard"
                     android:orientation="horizontal">
 
                     <TextView
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
+                        android:layout_marginEnd="@dimen/od_space_12"
                         android:layout_weight="1"
                         android:text="@string/settings_overlay_roadsense_title"
-                        android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
-                        android:textColor="?attr/colorOnSurface" />
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle" />
 
                     <com.google.android.material.switchmaterial.SwitchMaterial
                         android:id="@+id/swOverlayRoadSense"
@@ -490,38 +423,93 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- Shared with the landscape overlay pane; carries its own 12dp top/bottom margins. -->
         <include layout="@layout/include_remote_communication_settings" />
 
-        <!-- Security (PIN lock) -->
         <com.google.android.material.card.MaterialCardView
-            android:id="@+id/cardSectionSecurity"
+            android:id="@+id/cardSectionAdb"
+            style="@style/Widget.Overdrive.Revamp.Card"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="@dimen/page_padding_top"
+            android:layout_marginBottom="@dimen/od_space_12"
             android:clickable="true"
-            android:focusable="true"
-            app:cardBackgroundColor="?attr/colorSurfaceContainer"
-            app:cardCornerRadius="@dimen/card_radius_standard"
-            app:cardElevation="0dp">
+            android:focusable="true">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:padding="@dimen/card_padding_standard">
+                android:minHeight="@dimen/od_touch_standard"
+                android:orientation="horizontal">
 
                 <ImageView
-                    android:layout_width="@dimen/card_icon_standard"
-                    android:layout_height="@dimen/card_icon_standard"
+                    android:layout_width="@dimen/od_icon_md"
+                    android:layout_height="@dimen/od_icon_md"
                     android:contentDescription="@null"
-                    android:src="@drawable/ic_security_lock"
-                    app:tint="?attr/colorPrimary" />
+                    android:src="@drawable/ic_diagnostics"
+                    app:tint="?attr/colorOnSurfaceVariant" />
 
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="16dp"
+                    android:layout_marginStart="@dimen/od_space_16"
+                    android:layout_marginEnd="@dimen/od_space_12"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_section_adb"
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle"
+                        android:textSize="16sp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/od_space_2"
+                        android:text="@string/settings_adb_subtitle"
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowMeta" />
+                </LinearLayout>
+
+                <ImageView
+                    android:layout_width="@dimen/od_icon_md"
+                    android:layout_height="@dimen/od_icon_md"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_chevron_right"
+                    app:tint="?attr/colorOnSurfaceVariant" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Security (PIN lock) -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardSectionSecurity"
+            style="@style/Widget.Overdrive.Revamp.Card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="@dimen/od_space_12"
+            android:clickable="true"
+            android:focusable="true">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:minHeight="@dimen/od_touch_standard"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:layout_width="@dimen/od_icon_md"
+                    android:layout_height="@dimen/od_icon_md"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_security_lock"
+                    app:tint="?attr/colorOnSurfaceVariant" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/od_space_16"
+                    android:layout_marginEnd="@dimen/od_space_12"
                     android:layout_weight="1"
                     android:orientation="vertical">
 
@@ -529,123 +517,111 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/settings_section_security"
-                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                        android:textColor="?attr/colorOnSurface" />
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle"
+                        android:textSize="16sp" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
+                        android:layout_marginTop="@dimen/od_space_2"
                         android:text="@string/settings_security_subtitle"
-                        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowMeta" />
                 </LinearLayout>
 
                 <ImageView
-                    android:layout_width="20dp"
-                    android:layout_height="20dp"
+                    android:layout_width="@dimen/od_icon_md"
+                    android:layout_height="@dimen/od_icon_md"
                     android:contentDescription="@null"
                     android:src="@drawable/ic_chevron_right"
                     app:tint="?attr/colorOnSurfaceVariant" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- Daemons -->
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/cardSectionDaemons"
+            style="@style/Widget.Overdrive.Revamp.Card"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="@dimen/page_padding_top"
+            android:layout_marginBottom="0dp"
             android:clickable="true"
-            android:focusable="true"
-            app:cardBackgroundColor="?attr/colorSurfaceContainer"
-            app:cardCornerRadius="@dimen/card_radius_standard"
-            app:cardElevation="0dp">
+            android:focusable="true">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:padding="@dimen/card_padding_standard">
+                android:minHeight="@dimen/od_touch_standard"
+                android:orientation="horizontal">
 
                 <ImageView
-                    android:layout_width="@dimen/card_icon_standard"
-                    android:layout_height="@dimen/card_icon_standard"
+                    android:layout_width="@dimen/od_icon_md"
+                    android:layout_height="@dimen/od_icon_md"
                     android:contentDescription="@null"
                     android:src="@drawable/ic_services"
-                    app:tint="?attr/colorPrimary" />
+                    app:tint="?attr/colorOnSurfaceVariant" />
 
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="16dp"
+                    android:layout_marginStart="@dimen/od_space_16"
+                    android:layout_marginEnd="@dimen/od_space_12"
                     android:layout_weight="1"
                     android:orientation="vertical">
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="@string/settings_section_daemons"
-                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                        android:textColor="?attr/colorOnSurface" />
+                        android:text="@string/daemons_hero_title"
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle"
+                        android:textSize="16sp" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
+                        android:layout_marginTop="@dimen/od_space_2"
                         android:text="@string/settings_section_daemons_subtitle"
-                        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowMeta" />
                 </LinearLayout>
 
                 <ImageView
-                    android:layout_width="20dp"
-                    android:layout_height="20dp"
+                    android:layout_width="@dimen/od_icon_md"
+                    android:layout_height="@dimen/od_icon_md"
                     android:contentDescription="@null"
                     android:src="@drawable/ic_chevron_right"
                     app:tint="?attr/colorOnSurfaceVariant" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- ================= DATA =================
-             The About row was removed from this page — About now lives
-             only on the main navigation rail so users have a single
-             entry point. Reset Data stays here as the lone destructive
-             action under Settings.
-        -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="@dimen/section_overline_bottom"
-            android:letterSpacing="0.06"
+            android:layout_marginTop="@dimen/od_space_24"
+            android:layout_marginBottom="@dimen/od_space_8"
+            android:accessibilityHeading="true"
             android:text="@string/settings_overline_about_data"
-            android:textAllCaps="true"
-            android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-            android:textColor="?attr/colorOnSurfaceVariant" />
+            android:textAppearance="@style/TextAppearance.Overdrive.Overline" />
 
-        <!-- Reset data — destructive errorContainer card -->
+        <!-- Reset data: the only destructive action on this page. -->
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/cardResetData"
+            style="@style/Widget.Overdrive.Revamp.Card"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="@dimen/page_padding_top"
+            android:layout_marginBottom="@dimen/od_space_16"
             android:clickable="true"
             android:focusable="true"
-            app:cardBackgroundColor="?attr/colorErrorContainer"
-            app:cardCornerRadius="@dimen/card_radius_standard"
-            app:cardElevation="0dp">
+            app:cardBackgroundColor="?attr/colorErrorContainer">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:padding="@dimen/card_padding_standard">
+                android:minHeight="@dimen/od_touch_standard"
+                android:orientation="horizontal">
 
                 <ImageView
-                    android:layout_width="@dimen/card_icon_standard"
-                    android:layout_height="@dimen/card_icon_standard"
+                    android:layout_width="@dimen/od_icon_md"
+                    android:layout_height="@dimen/od_icon_md"
                     android:contentDescription="@null"
                     android:src="@drawable/ic_delete"
                     app:tint="?attr/colorOnErrorContainer" />
@@ -653,7 +629,8 @@
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="16dp"
+                    android:layout_marginStart="@dimen/od_space_16"
+                    android:layout_marginEnd="@dimen/od_space_12"
                     android:layout_weight="1"
                     android:orientation="vertical">
 
@@ -661,36 +638,33 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/settings_action_reset_data"
-                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                        android:textColor="?attr/colorOnErrorContainer" />
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle"
+                        android:textColor="?attr/colorOnErrorContainer"
+                        android:textSize="16sp" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:alpha="0.85"
+                        android:layout_marginTop="@dimen/od_space_2"
                         android:text="@string/settings_reset_row_subtitle"
-                        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowMeta"
                         android:textColor="?attr/colorOnErrorContainer" />
                 </LinearLayout>
 
                 <ImageView
-                    android:layout_width="20dp"
-                    android:layout_height="20dp"
-                    android:alpha="0.85"
+                    android:layout_width="@dimen/od_icon_md"
+                    android:layout_height="@dimen/od_icon_md"
                     android:contentDescription="@null"
                     android:src="@drawable/ic_chevron_right"
                     app:tint="?attr/colorOnErrorContainer" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- ================= FOOTER ================= -->
         <TextView
             android:id="@+id/tvSettingsFooter"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center"
-            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-            android:textColor="?attr/colorOnSurfaceVariant" />
+            android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowMeta" />
     </LinearLayout>
 </androidx.core.widget.NestedScrollView>

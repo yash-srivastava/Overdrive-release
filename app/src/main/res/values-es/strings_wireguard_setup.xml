@@ -31,6 +31,10 @@
     <string name="wgsetup_import_too_large">Ese archivo es demasiado grande</string>
     <string name="wgsetup_import_no_qr">No se encontró ningún código QR en esa imagen</string>
     <string name="wgsetup_imported">Importado. Revisa el texto y toca Guardar.</string>
+    <string name="wgsetup_import_pick_title">Elige un archivo de configuración</string>
+    <string name="wgsetup_import_qr_picture">Imagen de un código QR…</string>
+    <string name="wgsetup_import_none_found">No se encontró ningún archivo .conf en Download, Documents u Overdrive ni en una unidad USB. Copia el archivo a la carpeta principal de una unidad USB o a Download y vuelve a intentarlo.</string>
+    <string name="wgsetup_import_no_picker">Esta unidad principal no tiene ningún selector de archivos</string>
     <string name="wgsetup_phone_title">Abre esto en tu teléfono</string>
     <string name="wgsetup_phone_steps">Escanea el código, inicia sesión y sube o pega la configuración que exportó tu router. El teléfono debe poder llegar al vehículo (mismo Wi-Fi o punto de acceso, o a través de un túnel activo).</string>
     <string name="wgsetup_phone_lan_note">Ábrelo solo en tu propio Wi-Fi o en el punto de acceso del vehículo.</string>

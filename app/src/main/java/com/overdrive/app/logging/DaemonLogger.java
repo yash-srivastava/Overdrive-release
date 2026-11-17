@@ -122,6 +122,7 @@ public class DaemonLogger {
     // each thread its own formatter, so logging is always safe with no lock contention.
     private final ThreadLocal<SimpleDateFormat> timestampFormat =
             ThreadLocal.withInitial(() -> new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US));
+    private final String cacheKey;
     private long currentFileSize = 0;
     private volatile boolean writerInitialized = false;
     
@@ -129,13 +130,16 @@ public class DaemonLogger {
     
     private DaemonLogger(String tag) {
         this.tag = tag;
-        this.logFilePath = globalConfig.logDir + "/" + tag.toLowerCase() + ".log";
+        this.cacheKey = tag;
+        // Locale.ROOT: a Turkish system locale would otherwise turn "I" into a dotless "ı" in file names.
+        this.logFilePath = globalConfig.logDir + "/" + tag.toLowerCase(java.util.Locale.ROOT) + ".log";
         // Lazy init - don't create file until first write
     }
     
     private DaemonLogger(String tag, String logDir) {
         this.tag = tag;
-        this.logFilePath = logDir + "/" + tag.toLowerCase() + ".log";
+        this.cacheKey = tag + "@" + logDir;
+        this.logFilePath = logDir + "/" + tag.toLowerCase(java.util.Locale.ROOT) + ".log";
         // Lazy init - don't create file until first write
     }
     
@@ -162,9 +166,56 @@ public class DaemonLogger {
     public static void configure(Config config) {
         synchronized (globalLock) {
             globalConfig = config;
+            Level saved = persistedMinLevel;
+            if (saved != null) globalConfig.minLevel = saved;
         }
     }
-    
+
+    // The level the user saved (Settings or /api/logs/level); null keeps the code default.
+    private static volatile Level persistedMinLevel = null;
+    private static volatile boolean minLevelListenerRegistered = false;
+
+    /**
+     * Sets the minimum level for every logger in this process.
+     */
+    public static void setMinLevel(Level level) {
+        if (level == null) return;
+        synchronized (globalLock) {
+            globalConfig.minLevel = level;
+        }
+    }
+
+    /**
+     * Applies the level saved in UnifiedConfigManager, then follows changes written in this
+     * process. Called from UnifiedConfigManager.init() (after restore recovery), never from static
+     * init, which would put a config read and its lock wait on class loading.
+     */
+    public static void syncMinLevelFromConfig() {
+        try {
+            applySavedMinLevel(com.overdrive.app.config.UnifiedConfigManager.getPersistedLogLevel());
+            if (minLevelListenerRegistered) return;
+            minLevelListenerRegistered = true;
+            // Listeners run inside the config file lock: read the delivered JSON, never re-load.
+            com.overdrive.app.config.UnifiedConfigManager.addListener((section, config) -> {
+                org.json.JSONObject logging = "logging".equals(section) ? config
+                        : "all".equals(section) ? config.optJSONObject("logging") : null;
+                if (logging != null) {
+                    applySavedMinLevel(com.overdrive.app.config.UnifiedConfigManager
+                            .canonicalLogLevel(logging.optString("minLevel", "")));
+                }
+            });
+        } catch (Throwable ignored) {
+            // Logging setup must never fail config init.
+        }
+    }
+
+    private static void applySavedMinLevel(String name) {
+        if (name == null) return;
+        Level level = Level.valueOf(name);
+        persistedMinLevel = level;
+        setMinLevel(level);
+    }
+
     /**
      * Get current global configuration.
      */
@@ -374,7 +425,6 @@ public class DaemonLogger {
         } catch (Exception e) {
             // Silently skip file logging if directory is not writable (e.g. app process can't write to /data/local/tmp/)
             // Falls back to logcat only — this is expected when AuthManager is called from app UI
-            writerInitialized = true;
         }
     }
     
@@ -535,7 +585,8 @@ public class DaemonLogger {
                 writerInitialized = false;
             }
         }
-        instances.remove(tag);
+        // Only this logger's own entry: a custom-directory logger is cached under tag@dir.
+        instances.remove(cacheKey, this);
     }
     
     /**

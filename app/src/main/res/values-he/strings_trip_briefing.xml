@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Trip Briefing: the car-start "Heading to work? Want directions?" prompt. The spoken line is
+         greeting + heading + duration (or one extra that replaces it) + question, joined by spaces,
+         and read aloud by text-to-speech. -->
+    <string name="trip_briefing_greeting_morning">בוקר טוב.</string>
+    <string name="trip_briefing_greeting_afternoon">צהריים טובים.</string>
+    <string name="trip_briefing_greeting_evening">ערב טוב.</string>
+    <string name="trip_briefing_heading_home">נוסעים הביתה?</string>
+    <string name="trip_briefing_heading_work">נוסעים לעבודה?</string>
+    <!-- %1$s: the place's name, e.g. "Phoenix Mall". -->
+    <string name="trip_briefing_heading_place">נוסעים אל %1$s?</string>
+    <plurals name="trip_briefing_duration">
+        <item quantity="one">בערך %1$d דקה.</item>
+        <item quantity="two">בערך %1$d דקות.</item>
+        <item quantity="other">בערך %1$d דקות.</item>
+    </plurals>
+    <!-- %1$s: range left, %2$s: the trip's length, each "31 km" or "19 mi". -->
+    <string name="trip_briefing_extra_range">הטווח גבולי: נשארו %1$s לנסיעה של %2$s.</string>
+    <plurals name="trip_briefing_extra_hazards">
+        <item quantity="one">%1$d מפגע חדש בדרך.</item>
+        <item quantity="two">%1$d מפגעים חדשים בדרך.</item>
+        <item quantity="other">%1$d מפגעים חדשים בדרך.</item>
+    </plurals>
+    <!-- %1$s: an hour of the day in the device's clock format, e.g. "7 PM" or "19:00". -->
+    <string name="trip_briefing_extra_rain">צפוי גשם בסביבות %1$s.</string>
+    <string name="trip_briefing_question">להתחיל ניווט?</string>
+    <string name="trip_briefing_distance_km">%1$d ק״מ</string>
+    <string name="trip_briefing_distance_mi">%1$d מייל</string>
+
+    <!-- The destination as the AI assistant should say it. -->
+    <string name="trip_briefing_said_home">הבית</string>
+    <string name="trip_briefing_said_work">העבודה</string>
+
+    <!-- Card -->
+    <string name="trip_briefing_title_home">בית</string>
+    <string name="trip_briefing_title_work">עבודה</string>
+    <!-- Title for a regular destination that has no name yet. -->
+    <string name="trip_briefing_title_unnamed">היעד הקבוע שלך</string>
+    <string name="trip_briefing_name_place">לתת שם</string>
+    <string name="trip_briefing_no">לא</string>
+    <string name="trip_briefing_go_failed">הניווט לא התחיל. אפשר לפתוח את המפה כדי לנווט.</string>
+    <!-- The car's own navigation app. -->
+    <string name="trip_briefing_app_car">ניווט הרכב</string>
+</resources>

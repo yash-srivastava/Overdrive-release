@@ -41,6 +41,8 @@ public class ThermalTest {
 
         assertEquals(80f, sampler.readCelsius(), 0f);
         assertTrue(new File(selected, "temp").delete());
+        now[0] += Thermal.Sampler.RESCAN_INTERVAL_MS;
+        assertTrue(Float.isNaN(sampler.readCelsius()));
         now[0] += Thermal.Sampler.RESCAN_INTERVAL_MS - 1L;
         assertTrue(Float.isNaN(sampler.readCelsius()));
         now[0]++;

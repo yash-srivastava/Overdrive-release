@@ -186,13 +186,7 @@ public class TariffManager {
     static JSONArray tariffsArrayFromSection(JSONObject section) {
         if (section == null) return new JSONArray();
         JSONArray arr = section.optJSONArray(KEY_TARIFFS);
-        if (arr != null) {
-            try {
-                return new JSONArray(arr.toString());
-            } catch (Exception ignored) {
-                return new JSONArray();
-            }
-        }
+        if (arr != null) return arr;
         JSONObject lone = section.optJSONObject(KEY_TARIFFS);
         if (lone != null) {
             JSONArray out = new JSONArray();
@@ -934,7 +928,6 @@ public class TariffManager {
                     target.put("useCount", normalizedCount);
                     target.put("lastUsedAt", normalizedLastUsed);
                     section.put(KEY_TARIFFS, tariffs);
-                    root.put(SECTION, section);
                     if (!UnifiedConfigManager.saveConfig(root)) {
                         return UsageReconcileResult.failure(
                                 "config persistence rejected usage replay");

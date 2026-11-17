@@ -33,6 +33,9 @@ import com.overdrive.app.util.BydDataCacheWhitelist;
  * on every install, so the user MUST be reminded to re-enable it.
  */
 public class SetupGuideDialog {
+    // A BYD settings round trip from this guide keeps an unlocked PIN session.
+    private static final long SETUP_RETURN_GRACE_MS = 3 * 60_000L;
+
 
     private static final String TAG = "SetupGuideDialog";
     private static final String PREFS_NAME = "overdrive_setup";
@@ -111,6 +114,7 @@ public class SetupGuideDialog {
                 R.id.tvAutoStartTitle, R.id.tvAutoStartBody,
                 R.id.btnOpenAutoStart, R.id.ivAutoStartCheck);
         autoStartStep.button.setOnClickListener(v -> {
+            com.overdrive.app.auth.PinSession.INSTANCE.expectReturn(SETUP_RETURN_GRACE_MS);
             autoStartStep.button.setEnabled(false);
             autoStartStep.button.setText(context.getString(R.string.setup_autostart_enabling));
             runAutoStartWhenServiceReady(
@@ -127,6 +131,7 @@ public class SetupGuideDialog {
         renderOverlayPermission(context, overlayStep);
 
         overlayStep.button.setOnClickListener(v -> {
+            com.overdrive.app.auth.PinSession.INSTANCE.expectReturn(SETUP_RETURN_GRACE_MS);
             try {
                 Intent intent = new Intent(
                         Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
@@ -341,6 +346,7 @@ public class SetupGuideDialog {
     }
 
     private static void openAutoStartSettings(Context context) {
+        com.overdrive.app.auth.PinSession.INSTANCE.expectReturn(SETUP_RETURN_GRACE_MS);
         // 1) Canonical BYD deep link.
         try {
             Intent direct = buildAppStartManagementIntent();

@@ -1,18 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  SOTA WebView host.
-
-  Composition:
-    - Full-bleed WebView
-    - Loading overlay : centered M3 progress + caption
-    - Error overlay   : icon + headline + body + tonal retry button
-
-  Both overlays use ?attr/colorBackground so they blend with the rest of
-  the shell while the page is loading or unreachable.
-
-  Preserved IDs (WebViewFragment.kt findViewById targets):
-    webView, loadingOverlay, errorOverlay, btnRetry
--->
+<!-- WebView host: loading overlay, and a service-down state card that WebViewFragment retries on its own.
+     Ids read by WebViewFragment: webView, loadingOverlay, errorOverlay, btnRetry, btnWebServices, webErrorRetryStatus. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
@@ -24,20 +12,28 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- ==================== LOADING OVERLAY ==================== -->
+    <!-- Every direct child fades in 300 ms after the backdrop (WebViewFragment.showLoading). -->
     <LinearLayout
         android:id="@+id/loadingOverlay"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="?android:attr/colorBackground"
+        android:clickable="true"
+        android:focusable="false"
         android:gravity="center"
         android:orientation="vertical"
         android:visibility="visible">
 
-        <ProgressBar
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:indeterminateTint="?attr/colorPrimary" />
+        <com.google.android.material.progressindicator.CircularProgressIndicator
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:indeterminate="true"
+            app:indeterminateTrackVisible="true"
+            app:indicatorColor="?attr/colorPrimary"
+            app:indicatorSize="@dimen/web_state_spinner"
+            app:indicatorTrackGapSize="0dp"
+            app:trackColor="?attr/colorSurfaceContainerHighest"
+            app:trackThickness="@dimen/web_state_spinner_track" />
 
         <TextView
             android:layout_width="wrap_content"
@@ -48,50 +44,161 @@
             android:textColor="?attr/colorOnSurfaceVariant" />
     </LinearLayout>
 
-    <!-- ==================== ERROR OVERLAY ==================== -->
+    <!-- Clickable: the page may reload behind the card during an automatic retry. -->
     <LinearLayout
         android:id="@+id/errorOverlay"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="?android:attr/colorBackground"
-        android:gravity="center"
+        android:clickable="true"
+        android:focusable="false"
+        android:importantForAccessibility="no"
         android:orientation="vertical"
-        android:padding="48dp"
         android:visibility="gone">
 
-        <ImageView
-            android:layout_width="56dp"
-            android:layout_height="56dp"
-            android:contentDescription="@null"
-            android:src="@drawable/ic_signal_disconnected"
-            app:tint="?attr/colorOnSurfaceVariant" />
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:accessibilityHeading="true"
-            android:gravity="center"
-            android:text="@string/webview_camera_daemon_not_running"
-            android:textAppearance="@style/TextAppearance.Overdrive.HeadlineSmall"
-            android:textColor="?attr/colorOnSurface"
-            android:textStyle="bold" />
+            <!-- Static 2x2 placeholder grid. -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:importantForAccessibility="noHideDescendants"
+                android:orientation="vertical"
+                android:paddingStart="24dp"
+                android:paddingTop="16dp"
+                android:paddingEnd="24dp"
+                android:paddingBottom="24dp">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:gravity="center"
-            android:text="@string/webview_start_camera_daemon"
-            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-            android:textColor="?attr/colorOnSurfaceVariant" />
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:orientation="horizontal">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnRetry"
-            style="@style/Widget.Overdrive.M3.Button.Tonal"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:text="@string/action_retry" />
+                    <View
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:background="@drawable/web_skeleton_tile" />
+
+                    <View
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_marginStart="@dimen/web_skeleton_gap"
+                        android:layout_weight="1"
+                        android:background="@drawable/web_skeleton_tile" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_marginTop="@dimen/web_skeleton_gap"
+                    android:layout_weight="1"
+                    android:orientation="horizontal">
+
+                    <View
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:background="@drawable/web_skeleton_tile" />
+
+                    <View
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_marginStart="@dimen/web_skeleton_gap"
+                        android:layout_weight="1"
+                        android:background="@drawable/web_skeleton_tile" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- minWidth + text maxWidth: 468dp where it fits, otherwise the available width. -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:layout_margin="24dp"
+                android:background="@drawable/web_state_card"
+                android:elevation="@dimen/web_state_card_elevation"
+                android:gravity="center_horizontal"
+                android:minWidth="@dimen/web_state_card_width"
+                android:orientation="vertical"
+                android:paddingStart="28dp"
+                android:paddingTop="28dp"
+                android:paddingEnd="28dp"
+                android:paddingBottom="24dp">
+
+                <com.google.android.material.progressindicator.CircularProgressIndicator
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="16dp"
+                    android:indeterminate="true"
+                    app:indeterminateTrackVisible="true"
+                    app:indicatorColor="?attr/colorPrimary"
+                    app:indicatorSize="@dimen/web_state_spinner"
+                    app:indicatorTrackGapSize="0dp"
+                    app:trackColor="?attr/colorSurfaceContainerHighest"
+                    app:trackThickness="@dimen/web_state_spinner_track" />
+
+                <TextView
+                    android:id="@+id/webErrorTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:accessibilityHeading="true"
+                    android:gravity="center"
+                    android:lineHeight="28sp"
+                    android:maxWidth="@dimen/web_state_text_max_width"
+                    android:text="@string/webview_camera_daemon_not_running"
+                    android:textAppearance="@style/TextAppearance.Overdrive.Web.StateTitle" />
+
+                <TextView
+                    android:id="@+id/webErrorBody"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:gravity="center"
+                    android:lineHeight="22sp"
+                    android:maxWidth="@dimen/web_state_text_max_width"
+                    android:text="@string/webview_start_camera_daemon"
+                    android:textAppearance="@style/TextAppearance.Overdrive.Web.StateBody" />
+
+                <!-- Countdown text is set by WebViewFragment while the card is up. -->
+                <TextView
+                    android:id="@+id/webErrorRetryStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:drawableStart="@drawable/web_retry_dot"
+                    android:drawablePadding="6dp"
+                    android:drawableTint="@color/status_warning"
+                    android:gravity="center"
+                    android:maxWidth="@dimen/web_state_text_max_width"
+                    android:textAppearance="@style/TextAppearance.Overdrive.Web.StateStatus" />
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:gravity="center"
+                    android:orientation="horizontal">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnRetry"
+                        style="@style/Widget.Overdrive.Web.StateButton.Tonal"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/web_state_retry_now" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnWebServices"
+                        style="@style/Widget.Overdrive.Web.StateButton.Outlined"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:text="@string/daemons_hero_title" />
+                </LinearLayout>
+            </LinearLayout>
+        </FrameLayout>
     </LinearLayout>
 </FrameLayout>

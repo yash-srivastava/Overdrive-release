@@ -18,12 +18,14 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.speech.tts.TextToSpeech;
 import android.util.Log;
 
 import com.overdrive.app.R;
 import com.overdrive.app.auth.AuthManager;
 
+import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -49,6 +51,10 @@ import java.util.Map;
  * self-stop the service on completion; looping playback lives until an explicit stop
  * (service stop or the {@link #ACTION_STOP} broadcast). Uses async prepare with a real
  * Looper (the service main thread), so no blocking on the caller.
+ *
+ * <p>A request carrying {@code queue=true} instead waits in a FIFO behind the current
+ * sound. Waiting sounds survive a replacing play, end a loop after its current pass, and
+ * are dropped only by stop. All queue state is main-thread only.
  */
 public final class MediaPlaybackService extends Service {
 
@@ -67,9 +73,22 @@ public final class MediaPlaybackService extends Service {
     /** Broadcast that stops playback (shared with the video activity + daemon stop()). */
     public static final String ACTION_STOP = "com.overdrive.app.action.STOP_MEDIA";
 
+    private static final int MAX_QUEUED_STARTS = 10;
+    private static final long QUEUE_PREPARE_BUDGET_MS = 30_000L;
+    private static final long QUEUE_SLACK_MS = 15_000L;
+    private static final long QUEUE_MAX_HOLD_MS = 10 * 60_000L;
+
     private MediaPlayer player;
     private boolean playerPrepared;
+    private boolean playerLooping;
+    private int playerStartId;
+    private long playerGeneration;
     private int latestStartId;
+    private final ArrayDeque<QueuedStart> queuedStarts = new ArrayDeque<>();
+    // uptimeMillis by which the current sound must finish while others wait.
+    private long queueHoldDeadline;
+    private final Runnable queueWatchdog = this::checkQueueHold;
+    private int ttsInitFailures;
     private AudioManager audioManager;
     private Object audioFocusRequest; // AudioFocusRequest (API26+) or null
     private AudioManager.OnAudioFocusChangeListener focusListener;
@@ -162,11 +181,8 @@ public final class MediaPlaybackService extends Service {
                 rejectStartWithoutInterruptingPlayback(startId, "missing speech text");
                 return START_NOT_STICKY;
             }
-            String ch = orDefault(request.channel, "voice");
-            long generation = beginPlaybackSession();
-            releasePlayer();
-            stopTts();
-            speak(text, ch, startId, generation);
+            if (request.queue && enqueueBehindCurrent(request, startId)) return START_NOT_STICKY;
+            beginSpeak(request, startId);
             return START_NOT_STICKY;
         }
         boolean hasLibrarySource =
@@ -177,9 +193,30 @@ public final class MediaPlaybackService extends Service {
             rejectStartWithoutInterruptingPlayback(startId, "missing audio source");
             return START_NOT_STICKY;
         }
+        if (request.queue && enqueueBehindCurrent(request, startId)) return START_NOT_STICKY;
+        beginPlay(request, startId);
+        // Not sticky: if the OS kills us mid-clip we don't silently resurrect a sound.
+        return START_NOT_STICKY;
+    }
+
+    private void beginSpeak(StartRequest request, int startId) {
+        String ch = orDefault(request.channel, "voice");
+        long generation = beginPlaybackSession();
+        releasePlayer();
+        stopTts();
+        speak(request.text, ch, startId, generation);
+        if (!queuedStarts.isEmpty()) armQueueHold();
+    }
+
+    private void beginPlay(StartRequest request, int startId) {
+        boolean hasLibrarySource =
+                request.libName != null && !request.libName.trim().isEmpty();
+        boolean hasFileSource =
+                request.filePath != null && !request.filePath.trim().isEmpty();
         long generation = beginPlaybackSession();
         String channel = orDefault(request.channel, "media");
-        boolean loop = request.loop;
+        // A loop started while sounds are waiting plays one pass so it cannot hold the queue.
+        boolean loop = request.loop && queuedStarts.isEmpty();
         String libName = request.libName;
         String filePath = request.filePath;
 
@@ -196,14 +233,101 @@ public final class MediaPlaybackService extends Service {
         // first means tts.stop() callbacks cannot stop this freshly started player.
         stopTts();
         startPlayback(uri, headers, channel, loop, startId, generation);
-        // Not sticky: if the OS kills us mid-clip we don't silently resurrect a sound.
-        return START_NOT_STICKY;
+        if (!queuedStarts.isEmpty()) armQueueHold();
+    }
+
+    /** Queues a play-after request behind the current sound; false when nothing is playing. */
+    private boolean enqueueBehindCurrent(StartRequest request, int startId) {
+        if (!hasActivePlayback()) return false;
+        if (queuedStarts.size() >= MAX_QUEUED_STARTS) {
+            Log.w(TAG, "playback queue full (" + MAX_QUEUED_STARTS + " waiting); dropping sound");
+            return true;
+        }
+        boolean firstWaiter = queuedStarts.isEmpty();
+        queuedStarts.add(new QueuedStart(request, startId));
+        Log.i(TAG, "queued sound behind current playback (" + queuedStarts.size() + " waiting)");
+        if (firstWaiter) {
+            endLoopAfterCurrentPass();
+            armQueueHold();
+        }
+        return true;
+    }
+
+    /** Starts the oldest waiting sound; false when nothing is waiting. */
+    private boolean playNextQueued() {
+        QueuedStart next = queuedStarts.poll();
+        if (next == null) return false;
+        Log.i(TAG, "playing queued sound (" + queuedStarts.size() + " still waiting)");
+        if ("speak".equals(next.request.action)) {
+            beginSpeak(next.request, next.startId);
+        } else {
+            beginPlay(next.request, next.startId);
+        }
+        return true;
+    }
+
+    private void endLoopAfterCurrentPass() {
+        MediaPlayer p = player;
+        if (p == null || !playerLooping) return;
+        playerLooping = false;
+        int startId = playerStartId;
+        long generation = playerGeneration;
+        try {
+            p.setOnCompletionListener(done -> finishPlayback(done, startId, generation));
+            p.setLooping(false);
+            Log.i(TAG, "looping sound ends after this pass (a queued sound is waiting)");
+        } catch (Throwable t) {
+            Log.w(TAG, "could not end looping sound: " + t.getMessage());
+            finishPlayback(p, startId, generation);
+        }
+    }
+
+    private void armQueueHold() {
+        long budget;
+        if (player != null) {
+            budget = playerPrepared ? remainingClipBudget(player) : QUEUE_PREPARE_BUDGET_MS;
+        } else {
+            String text = activeSpeakText != null ? activeSpeakText : pendingSpeak;
+            budget = text != null ? speechBudget(text) : 0L;
+        }
+        queueHoldDeadline = SystemClock.uptimeMillis() + budget;
+        mainHandler.removeCallbacks(queueWatchdog);
+        if (!queuedStarts.isEmpty()) mainHandler.postAtTime(queueWatchdog, queueHoldDeadline);
+    }
+
+    private static long remainingClipBudget(MediaPlayer p) {
+        long duration = -1L;
+        long position = 0L;
+        try {
+            duration = p.getDuration();
+            position = p.getCurrentPosition();
+        } catch (Throwable ignored) {
+        }
+        if (duration <= 0L) return QUEUE_MAX_HOLD_MS;
+        return Math.max(0L, duration - position) + Math.max(QUEUE_SLACK_MS, duration / 10L);
+    }
+
+    private static long speechBudget(String text) {
+        return Math.min(QUEUE_MAX_HOLD_MS, QUEUE_PREPARE_BUDGET_MS + 200L * text.length());
+    }
+
+    /** Skips a sound that overran its expected length so the waiting ones still play. */
+    private void checkQueueHold() {
+        if (queuedStarts.isEmpty()) return;
+        if (SystemClock.uptimeMillis() < queueHoldDeadline) {
+            mainHandler.postAtTime(queueWatchdog, queueHoldDeadline);
+            return;
+        }
+        Log.w(TAG, "current sound overran its expected length; playing the next queued sound");
+        stopTts();
+        releasePlayer();
+        if (!playNextQueued()) stopSelfResult(latestStartId);
     }
 
     private StartRequest readStartRequest(Intent intent) {
         try {
             Bundle extras = intent.getExtras();
-            if (extras == null) return new StartRequest(null, null, null, false, null, null);
+            if (extras == null) return new StartRequest(null, null, null, false, null, null, false);
 
             boolean hasAction = extras.containsKey("action");
             boolean hasText = extras.containsKey("text");
@@ -211,21 +335,24 @@ public final class MediaPlaybackService extends Service {
             boolean hasLoop = extras.containsKey("loop");
             boolean hasLibName = extras.containsKey("libName");
             boolean hasFilePath = extras.containsKey("filePath");
+            boolean hasQueue = extras.containsKey("queue");
             String action = parseStringExtra(extras.get("action"), hasAction);
             String text = parseStringExtra(extras.get("text"), hasText);
             String channel = parseStringExtra(extras.get("channel"), hasChannel);
             Boolean loop = parseBooleanExtra(extras.get("loop"), hasLoop);
             String libName = parseStringExtra(extras.get("libName"), hasLibName);
             String filePath = parseStringExtra(extras.get("filePath"), hasFilePath);
+            Boolean queue = parseBooleanExtra(extras.get("queue"), hasQueue);
             if ((hasAction && action == null)
                     || (hasText && text == null)
                     || (hasChannel && channel == null)
                     || loop == null
                     || (hasLibName && libName == null)
-                    || (hasFilePath && filePath == null)) {
+                    || (hasFilePath && filePath == null)
+                    || queue == null) {
                 return null;
             }
-            return new StartRequest(action, text, channel, loop, libName, filePath);
+            return new StartRequest(action, text, channel, loop, libName, filePath, queue);
         } catch (Throwable t) {
             // This component is exported to the shell UID. BadParcelableException and
             // adversarial extra types must reject the command, not crash the app process.
@@ -264,6 +391,9 @@ public final class MediaPlaybackService extends Service {
         }
         player = mp;
         playerPrepared = false;
+        playerLooping = loop;
+        playerStartId = startId;
+        playerGeneration = generation;
         try {
             applyChannelRouting(mp, channel);
             if (headers != null) {
@@ -275,6 +405,7 @@ public final class MediaPlaybackService extends Service {
             mp.setOnPreparedListener(p -> {
                 if (!isCurrentPlayer(p, generation)) return;
                 playerPrepared = true;
+                if (!queuedStarts.isEmpty()) armQueueHold();
                 applyRoadSenseDuck(p);
                 try { p.start(); Log.i(TAG, "playback started (loop=" + loop + ")"); }
                 catch (Throwable t) {
@@ -331,7 +462,8 @@ public final class MediaPlaybackService extends Service {
             // the user presses a "Speak" automation or mapped button and sees
             // "OverDrive has stopped", with the foreground service leaked too.
             try {
-                tts = new TextToSpeech(getApplicationContext(), status -> {
+                int failuresBefore = ttsInitFailures;
+                TextToSpeech engine = new TextToSpeech(getApplicationContext(), status -> {
                     ttsReady = (status == TextToSpeech.SUCCESS);
                     if (ttsReady) {
                         try { tts.setLanguage(Locale.getDefault()); } catch (Throwable ignored) {}
@@ -344,6 +476,7 @@ public final class MediaPlaybackService extends Service {
                             speakNow(pend, pendCh, pendStartId, pendGeneration);
                         }
                     } else {
+                        ttsInitFailures++;
                         Log.w(TAG, "TTS init failed (status=" + status + ")");
                         // Release the handle so a LATER speak retries init instead
                         // of wedging: with a non-null tts and ttsReady false, the
@@ -365,6 +498,12 @@ public final class MediaPlaybackService extends Service {
                         }
                     }
                 });
+                // An engine that failed inside its own constructor can never become ready.
+                if (ttsInitFailures == failuresBefore) {
+                    tts = engine;
+                } else {
+                    try { engine.shutdown(); } catch (Throwable ignored) {}
+                }
             } catch (Throwable t) {
                 Log.w(TAG, "TextToSpeech unavailable on this ROM: " + t.getMessage());
                 tts = null;
@@ -500,6 +639,7 @@ public final class MediaPlaybackService extends Service {
 
     private void releasePlayer() {
         playerPrepared = false;
+        playerLooping = false;
         if (player != null) {
             try { if (player.isPlaying()) player.stop(); } catch (Throwable ignored) {}
             try { player.release(); } catch (Throwable ignored) {}
@@ -572,6 +712,8 @@ public final class MediaPlaybackService extends Service {
     private void invalidatePlaybackSession() {
         playbackSession.invalidate();
         pendingSpeak = null;
+        queuedStarts.clear();
+        mainHandler.removeCallbacks(queueWatchdog);
     }
 
     private boolean isCurrentSession(long generation) {
@@ -594,6 +736,7 @@ public final class MediaPlaybackService extends Service {
     private void finishPlayback(MediaPlayer expected, int startId, long generation) {
         if (!isCurrentPlayer(expected, generation)) return;
         releasePlayer();
+        if (playNextQueued()) return;
         stopSelfResult(latestStartId);
     }
 
@@ -601,11 +744,13 @@ public final class MediaPlaybackService extends Service {
         if (!isCurrentSession(generation)) return;
         clearActiveTtsState();
         releasePlayer();
+        if (playNextQueued()) return;
         stopSelfResult(latestStartId);
     }
 
     private boolean hasActivePlayback() {
-        return player != null || pendingSpeak != null || activeSpeakText != null;
+        return player != null || pendingSpeak != null || activeSpeakText != null
+                || !queuedStarts.isEmpty();
     }
 
     private void rejectStartWithoutInterruptingPlayback(int startId, String reason) {
@@ -650,15 +795,27 @@ public final class MediaPlaybackService extends Service {
         final boolean loop;
         final String libName;
         final String filePath;
+        final boolean queue;
 
         StartRequest(String action, String text, String channel, boolean loop,
-                     String libName, String filePath) {
+                     String libName, String filePath, boolean queue) {
             this.action = action;
             this.text = text;
             this.channel = channel;
             this.loop = loop;
             this.libName = libName;
             this.filePath = filePath;
+            this.queue = queue;
+        }
+    }
+
+    private static final class QueuedStart {
+        final StartRequest request;
+        final int startId;
+
+        QueuedStart(StartRequest request, int startId) {
+            this.request = request;
+            this.startId = startId;
         }
     }
 
@@ -798,7 +955,7 @@ public final class MediaPlaybackService extends Service {
     private void createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel ch = new NotificationChannel(
-                    CHANNEL_ID, "Media Playback", NotificationManager.IMPORTANCE_LOW);
+                    CHANNEL_ID, com.overdrive.app.util.AppLocaleContext.INSTANCE.of(this).getString(com.overdrive.app.R.string.notif_channel_media_playback), NotificationManager.IMPORTANCE_LOW);
             ch.setShowBadge(false);
             NotificationManager nm = getSystemService(NotificationManager.class);
             if (nm != null) nm.createNotificationChannel(ch);
@@ -809,8 +966,8 @@ public final class MediaPlaybackService extends Service {
         Notification.Builder b = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                 ? new Notification.Builder(this, CHANNEL_ID)
                 : new Notification.Builder(this);
-        return b.setContentTitle("Playing audio")
-                .setContentText("OverDrive automation")
+        return b.setContentTitle(com.overdrive.app.util.AppLocaleContext.INSTANCE.of(this).getString(com.overdrive.app.R.string.notif_media_title))
+                .setContentText(com.overdrive.app.util.AppLocaleContext.INSTANCE.of(this).getString(com.overdrive.app.R.string.notif_media_text))
                 .setSmallIcon(R.drawable.ic_play_circle)
                 .setOngoing(true)
                 .setGroup(DaemonKeepaliveService.NOTIFICATION_GROUP_KEY)

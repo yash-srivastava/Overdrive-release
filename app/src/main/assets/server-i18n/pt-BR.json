@@ -192,6 +192,9 @@
     }
   },
   "telegram": {
+    "deterrent_triggered": "Dissuasão acionada: {0}",
+    "deterrent_screen": "Tela",
+    "deterrent_cloud": "Nuvem",
     "recording_caption": "📹 Gravando ({0}) - {1}s",
     "recording_caption_no_label": "📹 Gravando - {0} s",
     "recording_label": {
@@ -518,6 +521,7 @@
   },
   "vehicle_control": {
     "blocked_driving": "Esta ação não está disponível enquanto o veículo está em movimento",
+    "blocked_unconfirmed": "Não é possível confirmar agora que o veículo está estacionado. Tente novamente em instantes.",
     "cloud_required": "Conecte uma conta BYD nas Configurações para usar este controle",
     "cloud_sent": "Enviado pela nuvem",
     "cloud_unavailable_used_local": "Nuvem indisponível — usou conexão direta",

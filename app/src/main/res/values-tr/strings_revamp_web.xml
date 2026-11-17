@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="web_state_retry_now">Şimdi yeniden dene</string>
+    <string name="web_state_retry_in">Otomatik yeniden deneme · sonraki deneme %1$d sn sonra</string>
+    <string name="web_state_retrying_now">Otomatik yeniden deneme · şimdi deneniyor…</string>
+    <string name="web_state_sign_in_title">Bu sayfada oturum açılamadı</string>
+    <string name="web_state_sign_in_body">Kamera daemon\'u çalışıyor ancak uygulamanın oturum açma isteğini kabul etmedi. ADB bağlıyken OverDrive bunu otomatik olarak geri yükler.</string>
+</resources>

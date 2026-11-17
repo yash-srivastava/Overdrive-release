@@ -68,6 +68,9 @@ public class HttpServer {
     // LinkedBlockingQueue, allowing slow clients to accumulate sockets/Fds.
     private static final int HTTP_WORKER_THREADS = 32;
     private static final int HTTP_PENDING_CONNECTIONS = 64;
+    // Accept-loop only (single thread): throttle for the capacity warning.
+    private long lastCapacityWarnNs = 0L;
+    private int suppressedCapacityWarns = 0;
     private final ExecutorService threadPool = new ThreadPoolExecutor(
             HTTP_WORKER_THREADS,
             HTTP_WORKER_THREADS,
@@ -116,6 +119,7 @@ public class HttpServer {
             File webRoot = new File(WEB_ROOT);
             boolean cacheHit = expectedStamp != null
                     && webAssetCacheValid(webRoot, expectedStamp);
+            StringBuilder manifest = new StringBuilder();
             if (cacheHit) {
                 CameraDaemon.log("Reusing existing web assets (APK unchanged)");
             } else {
@@ -130,19 +134,19 @@ public class HttpServer {
                 }
             
                 // Extract web/local and web/shared directories
-                extractAssetDir(assetManager, "web/local", new File(WEB_ROOT, "local"));
-                extractAssetDir(assetManager, "web/shared", new File(WEB_ROOT, "shared"));
+                extractAssetDir(assetManager, "web/local", new File(WEB_ROOT, "local"), manifest);
+                extractAssetDir(assetManager, "web/shared", new File(WEB_ROOT, "shared"), manifest);
                 // Extract i18n catalogs (one JSON per supported locale).
                 // The web/i18n directory is created by the NLLB translation pipeline
                 // — at minimum web/i18n/en.json must exist for the runtime to load.
-                extractAssetDir(assetManager, "web/i18n", new File(WEB_ROOT, "i18n"));
+                extractAssetDir(assetManager, "web/i18n", new File(WEB_ROOT, "i18n"), manifest);
                 // Extract server-side i18n catalogs (Messages.java lookup source).
                 // Kept distinct from web/i18n so the HTTP /i18n/ route doesn't accidentally
                 // expose internal error keys, and the two catalogs can diverge if needed.
-                extractAssetDir(assetManager, "server-i18n", new File(WEB_ROOT, "server-i18n"));
+                extractAssetDir(assetManager, "server-i18n", new File(WEB_ROOT, "server-i18n"), manifest);
 
                 // Extract overlay icons for telemetry overlay
-                extractAssetDir(assetManager, "overlay", new File(com.overdrive.app.util.ScratchRoot.path("overlay")));
+                extractAssetDir(assetManager, "overlay", new File(com.overdrive.app.util.ScratchRoot.path("overlay")), manifest);
             
             }
 
@@ -184,7 +188,7 @@ public class HttpServer {
             // were extracted successfully. A crash before rename will cause
             // the next daemon start to retry the full extraction.
             if (!cacheHit && expectedStamp != null) {
-                writeWebAssetStamp(webRoot, expectedStamp);
+                writeWebAssetStamp(webRoot, expectedStamp, manifest);
             }
             if (!cacheHit) CameraDaemon.log("Web assets extracted to " + WEB_ROOT);
         } catch (Exception e) {
@@ -229,17 +233,30 @@ public class HttpServer {
         if (!marker.isFile()) return false;
         try (BufferedReader in = new BufferedReader(new InputStreamReader(
                 new FileInputStream(marker), java.nio.charset.StandardCharsets.UTF_8))) {
-            return expectedStamp.equals(in.readLine()) && in.readLine() == null;
-        } catch (java.io.IOException ignored) {
+            if (!expectedStamp.equals(in.readLine())) return false;
+            // Every extracted file must still exist at its recorded size.
+            int entries = 0;
+            for (String line; (line = in.readLine()) != null; ) {
+                if (line.isEmpty()) continue;
+                int tab = line.indexOf('\t');
+                if (tab <= 0) return false;
+                File f = new File(line.substring(tab + 1));
+                if (!f.isFile() || f.length() != Long.parseLong(line.substring(0, tab))) return false;
+                entries++;
+            }
+            return entries > 0;
+        } catch (java.io.IOException | NumberFormatException ignored) {
             return false;
         }
     }
 
-    private static void writeWebAssetStamp(File webRoot, String stamp) throws java.io.IOException {
+    /** Stamp line, then one "size<TAB>absolute path" line per extracted file. */
+    private static void writeWebAssetStamp(File webRoot, String stamp, CharSequence manifest)
+            throws java.io.IOException {
         File marker = new File(webRoot, WEB_ASSET_STAMP);
         File pending = new File(webRoot, WEB_ASSET_STAMP + ".tmp");
         try (FileOutputStream out = new FileOutputStream(pending)) {
-            out.write((stamp + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            out.write((stamp + "\n" + manifest).getBytes(java.nio.charset.StandardCharsets.UTF_8));
             out.getFD().sync();
         }
         if (!pending.renameTo(marker)) {
@@ -259,7 +276,8 @@ public class HttpServer {
         file.delete();
     }
     
-    private static void extractAssetDir(AssetManager assetManager, String assetPath, File destDir) throws Exception {
+    private static void extractAssetDir(AssetManager assetManager, String assetPath, File destDir,
+                                        StringBuilder manifest) throws Exception {
         if (!destDir.exists()) {
             destDir.mkdirs();
         }
@@ -276,7 +294,7 @@ public class HttpServer {
             
             String[] subFiles = assetManager.list(assetFilePath);
             if (subFiles != null && subFiles.length > 0) {
-                extractAssetDir(assetManager, assetFilePath, destFile);
+                extractAssetDir(assetManager, assetFilePath, destFile, manifest);
             } else {
                 try (InputStream in = assetManager.open(assetFilePath);
                      FileOutputStream out = new FileOutputStream(destFile)) {
@@ -285,7 +303,11 @@ public class HttpServer {
                     while ((read = in.read(buffer)) != -1) {
                         out.write(buffer, 0, read);
                     }
+                    // Durable before the stamp is published: car power can drop at any time.
+                    out.getFD().sync();
                 }
+                manifest.append(destFile.length()).append('\t')
+                        .append(destFile.getAbsolutePath()).append('\n');
                 CameraDaemon.log("Extracted: " + assetFilePath + " -> " + destFile.getAbsolutePath());
             }
         }
@@ -297,7 +319,8 @@ public class HttpServer {
         // Initialize auth system
         AuthManager.initialize();
         CameraDaemon.log("Auth system initialized");
-        
+        HeadUnitClock.setting(); // start the 12/24-hour read before the first page asks
+
         while (running && CameraDaemon.isRunning()) {
             try {
                 if (serverSocket != null && !serverSocket.isClosed()) {
@@ -361,7 +384,16 @@ public class HttpServer {
                         if (!accepted) {
                             try { client.close(); } catch (Exception ignored) {}
                             if (running) {
-                                CameraDaemon.log("WARN: HTTP client capacity reached; rejected connection");
+                                // At most one line per 10 s: a wedged pool under 4 Hz polls would flood the log.
+                                long nowNs = System.nanoTime();
+                                if (lastCapacityWarnNs == 0L || nowNs - lastCapacityWarnNs >= 10_000_000_000L) {
+                                    CameraDaemon.log("WARN: HTTP client capacity reached; rejected connection"
+                                            + (suppressedCapacityWarns > 0 ? " (+" + suppressedCapacityWarns + " more)" : ""));
+                                    lastCapacityWarnNs = nowNs;
+                                    suppressedCapacityWarns = 0;
+                                } else {
+                                    suppressedCapacityWarns++;
+                                }
                             }
                         }
                     } catch (java.net.SocketException e) {
@@ -433,6 +465,10 @@ public class HttpServer {
         // so an ordinary short `t=` param (a cache-buster, a timestamp) is left readable.
         if (out.indexOf("t=") >= 0) {
             out = out.replaceAll("([?&]t=)[A-Za-z0-9._~-]{20,}", "$1<redacted>");
+        }
+        // The Trip Briefing context on /ws/genai carries the destination.
+        if (out.indexOf("brief=") >= 0) {
+            out = out.replaceAll("([?&]brief=)[^& ]*", "$1<redacted>");
         }
         return out;
     }
@@ -536,6 +572,7 @@ public class HttpServer {
         OutputStream out = null;
         try {
             client.setSoTimeout(15000);
+            try { client.setTcpNoDelay(true); } catch (Exception ignored) {}
             // Read network-controlled request lines/headers as bounded bytes,
             // without letting BufferedReader.readLine() allocate indefinitely.
             // Reuse this same stream for the body: no header-byte read-ahead is lost.
@@ -580,17 +617,25 @@ public class HttpServer {
             // (safety turn-indicator read) and /api/bs/status during warm, the blind-spot
             // preview streams /api/bs/live while a slider is dragged, and the
             // UI polls /status — at ~4-8 req/s these drown out everything else.
-            // The glass widgets poll /api/widgets/live (1 Hz while driving) and
-            // /api/widgets/foreground (home-screen check). The voice assistant polls its media
+            // The glass widgets poll /api/widgets/live (1 Hz while driving),
+            // /api/widgets/foreground (home-screen check) and, for MQTT-fed custom widgets,
+            // /api/widgets/mqtt (every 5 s). The voice assistant polls its media
             // state as /api/vehicle/media?poll=… (1 Hz while armed); its pause/resume calls use
-            // the plain path and still log. All other requests still log.
+            // the plain path and still log. The proximity signal relay and the automations list
+            // are 0.5-1 Hz background polls; a refused non-local relay call logs below. The Trip Briefing card
+            // reads /api/briefing/gear at 4 Hz while it is up.
+            // All other requests still log.
             if (!(requestLine.contains("/api/stream/turn")
                     || requestLine.contains("/api/bs/status")
                     || requestLine.contains("/api/bs/live")
                     || requestLine.startsWith("GET /status")
                     || requestLine.startsWith("GET /api/widgets/live")
                     || requestLine.startsWith("GET /api/widgets/foreground")
-                    || requestLine.startsWith("POST /api/vehicle/media?poll="))) {
+                    || requestLine.startsWith("GET /api/widgets/mqtt?")
+                    || requestLine.startsWith("POST /api/vehicle/media?poll=")
+                    || requestLine.startsWith("GET /api/briefing/gear")
+                    || requestLine.contains("/api/remote-access/relay")
+                    || requestLine.contains("/api/automations/list"))) {
                 CameraDaemon.log("HTTP: " + redactQueryToken(requestLine));
             }
 
@@ -607,6 +652,7 @@ public class HttpServer {
             String ifNoneMatchHeader = null;
             String cookieHeader = null;
             String authHeader = null;
+            String userAgentHeader = null;
             // Reverse-proxy fingerprints — used by AuthMiddleware to disable
             // the loopback safety net when a tunnel relayed the request.
             // Tailscale Serve, zrok and ngrok inject X-Forwarded-*;
@@ -619,6 +665,7 @@ public class HttpServer {
             // before forwarding, and stashes the original public hostname in
             // X-Forwarded-Host. Captured here so isPwaOrigin can match it.
             String forwardedHostHeader = null;
+            String secFetchSiteHeader = null;
 
             while (!(line = head.readHeaderLine()).isEmpty()) {
                 framing.accept(line);
@@ -637,6 +684,8 @@ public class HttpServer {
                     cookieHeader = line.substring(7).trim();
                 } else if (lower.startsWith("authorization:")) {
                     authHeader = line.substring(14).trim();
+                } else if (lower.startsWith("user-agent:")) {
+                    userAgentHeader = line.substring(11).trim();
                 } else if (lower.startsWith("accept-language:")) {
                     // First-touch locale hint. Only used if the user has never
                     // explicitly chosen via the picker (LocaleManager file empty).
@@ -653,6 +702,8 @@ public class HttpServer {
                     // Multiple Origin fields are not a browser origin. Keep an
                     // opaque value so neither auth fallback nor GenAI accepts it.
                     originHeader = originHeader == null ? line.substring(7).trim() : "null";
+                } else if (lower.startsWith("sec-fetch-site:")) {
+                    secFetchSiteHeader = line.substring(15).trim();
                 } else if (lower.startsWith("x-forwarded-for:")) {
                     hasTunnelHeaders = true;
                     forwardedFor = forwardedForValue(
@@ -691,7 +742,9 @@ public class HttpServer {
                 HttpResponse.sendError(out, 413, "Payload too large");
                 return;
             }
-            String body = HttpRequestHead.readUtf8Body(input, contentLength);
+            String body = framing.isChunked()
+                    ? HttpRequestHead.readChunkedUtf8Body(input, maxBodyBytes)
+                    : HttpRequestHead.readUtf8Body(input, contentLength);
 
             String[] parts = requestLine.split(" ");
             if (parts.length < 2) {
@@ -749,7 +802,7 @@ public class HttpServer {
                         wsPathOnly, cookieHeader, wsAuthHeader, out)
                     : AuthMiddleware.checkAuth(wsPathOnly, cookieHeader, wsAuthHeader, out,
                         client.getRemoteSocketAddress(), hasTunnelHeaders,
-                        originHeader, client.getLocalPort());
+                        originHeader, client.getLocalPort(), hostHeader);
                 if (!wsAuthenticated) {
                     client.close();
                     return;
@@ -773,7 +826,8 @@ public class HttpServer {
                     GenAiVoiceWebSocket.handle(
                             client, websocketKey,
                             GenAiApiHandler.queryParam(path, "lang"),
-                            GenAiApiHandler.queryParam(path, "mic"));
+                            GenAiApiHandler.queryParam(path, "mic"),
+                            GenAiApiHandler.queryParam(path, "brief"));
                 } else if (wsPathOnly.equals(GenAiChatWebSocket.PATH)) {
                     GenAiChatWebSocket.handle(client, websocketKey);
                 } else {
@@ -811,7 +865,8 @@ public class HttpServer {
                 // it bounds a caller that rotates X-Forwarded-For to escape the bucket above.
                 String socketIp = client.getInetAddress() == null
                         ? "unknown" : client.getInetAddress().getHostAddress();
-                AuthApiHandler.handle(method, path, body, out, clientIdentity, socketIp);
+                AuthApiHandler.handle(method, path, body, out, clientIdentity, socketIp,
+                        AuthMiddleware.sessionToken(cookieHeader, authHeader), userAgentHeader);
                 client.close();
                 return;
             }
@@ -860,8 +915,30 @@ public class HttpServer {
             boolean remoteAccessRequest = pathOnly.equals("/remote-access")
                     || pathOnly.equals("/remote-access.html")
                     || pathOnly.startsWith("/api/remote-access/");
+            // Home/Work and saved places: a session is required, loopback callers included.
+            boolean briefingRequest = pathOnly.equals("/api/briefing") || pathOnly.startsWith("/api/briefing/");
+            // The app taking the device secret, or asking for a new one: a session, from this head unit only.
+            boolean secretRequest = pathOnly.equals("/api/auth/handoff") || pathOnly.equals("/api/auth/regenerate");
+            // Signed-in browsers: a real session, and changes only from this site's own pages.
+            boolean sessionsRequest = pathOnly.equals("/api/auth/sessions") || pathOnly.startsWith("/api/auth/sessions/");
+            if (sessionsRequest && !method.equals("GET") && !method.equals("OPTIONS")
+                    && !GenAiRequestSecurity.isAllowedOrigin(originHeader, hostHeader, forwardedHostHeader)) {
+                HttpResponse.sendError(out, 403, "Forbidden origin");
+                client.close();
+                return;
+            }
+            // Range calibration steers every range figure: a session, and changes only from this site's own pages.
+            boolean rangeCalibrationWrite = pathOnly.equals("/api/trips/range/calibration")
+                    && !method.equals("GET") && !method.equals("OPTIONS");
+            if (rangeCalibrationWrite
+                    && !GenAiRequestSecurity.isAllowedOrigin(originHeader, hostHeader, forwardedHostHeader)) {
+                HttpResponse.sendError(out, 403, "Forbidden origin");
+                client.close();
+                return;
+            }
             if (pathOnly.equals("/api/remote-access/relay")
                     && (!client.getInetAddress().isLoopbackAddress() || hasTunnelHeaders)) {
+                CameraDaemon.log("HTTP: refused non-local " + redactQueryToken(requestLine));
                 HttpResponse.sendError(out, 403, "Signal relay is local only");
                 client.close();
                 return;
@@ -870,12 +947,18 @@ public class HttpServer {
             // the glassWidgets settings, like the built-ins: the car's own arrange mode writes those over loopback.
             boolean widgetWriteRequest = !method.equals("GET")
                     && (isCustomWidgetsPath(pathOnly) || isCommunityWidgetsPath(pathOnly));
+            // Factory DVR footage always requires an authenticated web session, even on loopback.
+            boolean factoryDvrRequest = pathOnly.equals("/factory-dvr")
+                    || pathOnly.equals("/factory-dvr.html")
+                    || pathOnly.equals("/api/factory-dvr")
+                    || pathOnly.startsWith("/api/factory-dvr/");
             boolean authenticated = remoteDevRequest || genAiRequest || wireGuardRequest || remoteAccessRequest
-                    || widgetWriteRequest
+                    || widgetWriteRequest || briefingRequest || secretRequest || sessionsRequest
+                    || factoryDvrRequest || rangeCalibrationWrite
                 ? AuthMiddleware.checkJwtOnly(path, cookieHeader, authHeader, out)
                 : AuthMiddleware.checkAuth(path, cookieHeader, authHeader, out,
                     client.getRemoteSocketAddress(), hasTunnelHeaders,
-                    originHeader, client.getLocalPort());
+                    originHeader, client.getLocalPort(), hostHeader);
             if (!authenticated) {
                 client.close();
                 return;
@@ -883,7 +966,9 @@ public class HttpServer {
 
             // Record who this is for canGrantShellAccess(). Set for every network
             // request so a socket caller can never inherit the in-process default.
-            CALLER.set(new CallerContext(hasTunnelHeaders, cookieHeader, authHeader));
+            CALLER.set(new CallerContext(hasTunnelHeaders, cookieHeader, authHeader,
+                    client.getInetAddress() != null && client.getInetAddress().isLoopbackAddress()));
+            TimelineApiHandler.bindRequest(client, secFetchSiteHeader);
 
             // Route to modular handlers first
             if (routeToHandlers(method, path, body, rangeHeader, ifNoneMatchHeader, out)) {
@@ -917,6 +1002,10 @@ public class HttpServer {
             } else if (path.equals("/recording.html") || path.equals("/recording")) {
                 if (!serveStaticFile(out, "local/recording.html")) {
                     HttpResponse.sendError(out, 404, "recording.html not found");
+                }
+            } else if (path.equals("/factory-dvr.html") || path.equals("/factory-dvr")) {
+                if (!serveStaticFile(out, "local/factory-dvr.html")) {
+                    HttpResponse.sendError(out, 404, "factory-dvr.html not found");
                 }
             } else if (path.equals("/storage.html") || path.equals("/storage")) {
                 if (!serveStaticFile(out, "local/storage.html")) {
@@ -1019,6 +1108,14 @@ public class HttpServer {
                 if (!serveStaticFile(out, "local/key-mapping.html")) {
                     HttpResponse.sendError(out, 404, "key-mapping.html not found");
                 }
+            } else if (path.equals("/daemons.html") || path.equals("/daemons")) {
+                if (!serveStaticFile(out, "local/daemons.html")) {
+                    HttpResponse.sendError(out, 404, "daemons.html not found");
+                }
+            } else if (path.equals("/sessions.html") || path.equals("/sessions")) {
+                if (!serveStaticFile(out, "local/sessions.html")) {
+                    HttpResponse.sendError(out, 404, "sessions.html not found");
+                }
             } else if (path.equals("/about.html") || path.equals("/about")) {
                 if (!serveStaticFile(out, "local/about.html")) {
                     HttpResponse.sendError(out, 404, "about.html not found");
@@ -1085,6 +1182,7 @@ public class HttpServer {
         } catch (HttpRequestHead.HeadException e) {
             // Fail before authentication/routing: do not echo attacker-supplied
             // header values or request targets in this response.
+            CameraDaemon.log("HTTP: rejected request head " + e.status + " " + e.getMessage());
             if (out != null) {
                 try { HttpResponse.sendError(out, e.status, e.getMessage()); }
                 catch (Exception ignored) { /* peer may have disconnected */ }
@@ -1093,6 +1191,7 @@ public class HttpServer {
             CameraDaemon.log("HTTP error: " + e.getMessage());
         } finally {
             CALLER.remove();
+            TimelineApiHandler.bindRequest(null, null);
             try { client.close(); } catch (Exception e) {}
         }
     }
@@ -1138,12 +1237,26 @@ public class HttpServer {
         final boolean tunnelRelayed;
         final String cookieHeader;
         final String authHeader;
+        final boolean loopback;
 
-        CallerContext(boolean tunnelRelayed, String cookieHeader, String authHeader) {
+        CallerContext(boolean tunnelRelayed, String cookieHeader, String authHeader, boolean loopback) {
             this.tunnelRelayed = tunnelRelayed;
             this.cookieHeader = cookieHeader;
             this.authHeader = authHeader;
+            this.loopback = loopback;
         }
+    }
+
+    /** A caller on this head unit (not relayed through a tunnel) holding a valid session: the app itself. */
+    static boolean isLocalSessionCaller() {
+        CallerContext c = CALLER.get();
+        return c != null && c.loopback && !c.tunnelRelayed && AuthMiddleware.hasValidJwt(c.cookieHeader, c.authHeader);
+    }
+
+    /** The caller holds a valid session (any network, tunnels included). */
+    public static boolean callerHasSession() {
+        CallerContext c = CALLER.get();
+        return c != null && AuthMiddleware.hasValidJwt(c.cookieHeader, c.authHeader);
     }
 
     // Cleared in handleClient's finally so a pooled thread cannot leak one request's
@@ -1180,6 +1293,8 @@ public class HttpServer {
         // Destructive system action: exact route only. The handler independently requires
         // Park and a persisted reboot-loop guard before it starts the reboot command.
         if (clean.equals("/api/system/ivi-reboot")) return true;
+        // Exact route only: the rest of /api/audio/ (uploads, playback, mic probes) stays off this surface.
+        if (clean.equals("/api/audio/engine-sound")) return true;
         if (clean.startsWith("/api/surveillance/")) {
             return clean.equals("/api/surveillance/enable")
                     || clean.equals("/api/surveillance/disable")
@@ -1238,7 +1353,7 @@ public class HttpServer {
     /** CustomWidgetsApiHandler's routes; the JWT-only check and the router must agree, so both use this. */
     private static boolean isCustomWidgetsPath(String path) {
         String p = path.contains("?") ? path.substring(0, path.indexOf('?')) : path;
-        return p.equals("/api/widgets/signals") || p.equals("/api/widgets/values")
+        return p.equals("/api/widgets/signals") || p.equals("/api/widgets/values") || p.equals("/api/widgets/mqtt")
                 || p.equals("/api/widgets/custom") || p.startsWith("/api/widgets/custom/");
     }
 
@@ -1254,6 +1369,16 @@ public class HttpServer {
      */
     private boolean routeToHandlers(String method, String path, String body, String rangeHeader,
                                      String ifNoneMatchHeader, OutputStream out) throws Exception {
+        if (path.equals("/api/auth/handoff") || path.equals("/api/auth/regenerate")) {
+            AuthApiHandler.handleSecret(method, path, isLocalSessionCaller(), out);
+            return true;
+        }
+        if (path.equals("/api/auth/sessions") || path.startsWith("/api/auth/sessions/")) {
+            CallerContext caller = CALLER.get();
+            AuthApiHandler.handleSessions(method, path, body, out, caller == null ? null
+                    : AuthMiddleware.sessionToken(caller.cookieHeader, caller.authHeader));
+            return true;
+        }
         if (path.startsWith("/api/remote-access/")) {
             try {
                 if (path.equals("/api/remote-access/relay") && method.equals("POST")) {
@@ -1348,6 +1473,13 @@ public class HttpServer {
             return true;
         }
 
+        if (path.startsWith("/api/cluster/layouts")) {
+            return ClusterLayoutsApiHandler.handle(method, path, body, out);
+        }
+        if (path.startsWith("/api/cluster/guidance")) {
+            return ClusterGuidanceApiHandler.handle(method, path, body, out);
+        }
+
         // Launcher aggregation API — stable public /api/launcher/v1/* face over
         // existing internal handlers (summary/traffic/apps/vehicle/appearance).
         // Additive, read-mostly; dispatched here like the other modular handlers.
@@ -1362,10 +1494,16 @@ public class HttpServer {
             return AboutApiHandler.handle(method, path, body, out);
         }
 
+        // Factory DVR API uses the read-only scanner added in issue #529.
+        if (FactoryDvrApiHandler.handle(method, path, rangeHeader, out)) return true;
         // Recordings API (with Range header support for video seeking) + thumbnails + event timelines
         if (path.startsWith("/api/recordings") || path.startsWith("/video/") ||
             path.startsWith("/thumb/") || path.startsWith("/api/events/")) {
             return RecordingsApiHandler.handleWithRange(method, path, body, rangeHeader, ifNoneMatchHeader, out);
+        }
+        // Recordings timeline: window/day JSON, scrub frames, HLS playlists and segments
+        if (path.startsWith("/api/timeline") || path.startsWith("/hls/")) {
+            if (TimelineApiHandler.handle(method, path, rangeHeader, ifNoneMatchHeader, out)) return true;
         }
         
         // Surveillance API
@@ -1374,6 +1512,11 @@ public class HttpServer {
         }
         if (path.startsWith("/api/surveillance")) {
             return SurveillanceApiHandler.handle(method, path, body, out);
+        }
+
+        // Trip Briefing API
+        if (path.startsWith("/api/briefing")) {
+            return com.overdrive.app.briefing.daemon.TripBriefingApiHandler.handle(method, path, body, out);
         }
 
         // Parking Intelligence: sessions / neighbours API + session stills
@@ -1402,7 +1545,12 @@ public class HttpServer {
         if (path.startsWith("/api/gps")) {
             return GpsApiHandler.handle(method, path, body, out);
         }
-        
+
+        // Read-only daemon status for the web Daemons page.
+        if (path.equals("/api/daemons") || path.startsWith("/api/daemons?")) {
+            return DaemonsApiHandler.handle(method, path, body, out);
+        }
+
         // Quality Settings API (includes storage settings)
         if (path.startsWith("/api/settings/")) {
             return QualitySettingsApiHandler.handle(method, path, body, out);
@@ -1599,6 +1747,9 @@ public class HttpServer {
         if (path.startsWith("/api/apps/")) {
             return AppsApiHandler.handle(method, path, body, out);
         }
+        if (path.startsWith("/api/cluster/apps/")) {
+            return ClusterAppToolsApiHandler.handle(method, path, body, out);
+        }
 
         // Autoservice AIDL debug sweep — read-only reach probes for the BYD
         // autoservice surface. Lets the operator hand-pick an `area`/`cmd`
@@ -1686,6 +1837,11 @@ public class HttpServer {
             return RemoteDevViewApiHandler.handle(method, path, body, out);
         }
 
+        // The car's Wi-Fi client radio for the web dashboard (separate from the hotspot).
+        if (path.equals("/api/network/wifi")) {
+            return WifiClientApiHandler.handle(method, path, body, out);
+        }
+
         // Network & Hotspot API (AP on/off, clients, session stats, data limit, proxy)
         if (path.startsWith("/api/hotspot")) {
             return HotspotApiHandler.handle(method, path, body, out);
@@ -1766,15 +1922,8 @@ public class HttpServer {
                         "Cache-Control: no-cache\r\n" +
                         "Connection: close\r\n\r\n";
         out.write(headers.getBytes());
+        out.write(frame);
         out.flush();
-        
-        int offset = 0;
-        while (offset < frame.length) {
-            int count = Math.min(frame.length - offset, 1024);
-            out.write(frame, offset, count);
-            out.flush();
-            offset += count;
-        }
     }
 
     private void sendStatus(OutputStream out) throws Exception {
@@ -1916,6 +2065,14 @@ public class HttpServer {
             CameraDaemon.log("status: vehicle data block failed: " + e);
             status.put("vehicleDataError", e.getClass().getSimpleName() + ": " + e.getMessage());
         }
+        // Head unit's 12/24-hour switch: true/false, null when never set there, absent until read.
+        try {
+            String clock = HeadUnitClock.setting();
+            if (clock != null) {
+                status.put("clock24h", clock.isEmpty() ? JSONObject.NULL : (Object) "24".equals(clock));
+            }
+        } catch (Exception ignored) {
+        }
         try {
             JSONObject soh = new JSONObject();
             boolean hasSoh = false;
@@ -1985,6 +2142,21 @@ public class HttpServer {
             // would silently disable the self-heal whenever rmm is unavailable — exactly
             // the degraded case where it matters most. Two volatile field reads, no lock.
             if (pipeline != null) {
+                // The clip being written, for the dashboard's clip timer. Elapsed is computed here
+                // so the browser never compares its clock with the head unit's.
+                com.overdrive.app.surveillance.HardwareEventRecorderGpu clipEncoder = pipeline.getEncoder();
+                long clipStartWallMs = clipEncoder != null ? clipEncoder.getSegmentStartWallMs() : 0;
+                if (clipStartWallMs > 0 && pipeline.isRecording()) {
+                    JSONObject clip = new JSONObject();
+                    clip.put("elapsedMs", Math.max(0, System.currentTimeMillis() - clipStartWallMs));
+                    clip.put("durationMs", clipEncoder.getSegmentDurationMs());
+                    clip.put("rotationPending", clipEncoder.isSegmentRotationPending());
+                    clip.put("audio", clipEncoder.isAudioMuxingActive());
+                    clip.put("layout", pipeline.getActiveRecordingLayout() == 1 ? "dashcam" : "standard");
+                    clip.put("kind", pipeline.isSurveillanceMode() ? "SURVEILLANCE"
+                            : rmm != null ? rmm.getCurrentMode().name() : "UNKNOWN");
+                    recordingStatus.put("clip", clip);
+                }
                 recordingStatus.put("camViewActive", pipeline.isCamViewActive());
                 recordingStatus.put("camViewTarget", pipeline.getCamViewTargetString());
                 // Blind-spot card state, so the overlay can RECONCILE its floating ✕ from
@@ -2068,6 +2240,26 @@ public class HttpServer {
             // Trip status not available
         }
         
+        // Trip Briefing offer, only while one is pending; "soon" while one is being prepared (in-memory reads)
+        try {
+            com.overdrive.app.briefing.daemon.TripBriefingService briefing =
+                    com.overdrive.app.briefing.daemon.TripBriefingService.get();
+            // Only {id, expiresAt}: /status needs no session, the offer itself is read from /api/briefing/offer.
+            JSONObject tripBriefing = briefing.pendingOfferMarker();
+            if (tripBriefing != null) status.put("tripBriefing", tripBriefing);
+            if (tripBriefing != null && briefing.movingNow()) status.put("tripBriefingMoving", true);
+            if (tripBriefing != null) {
+                String gear = briefing.gearNow();
+                if (gear != null) status.put("tripBriefingGear", gear);
+                double kmh = briefing.speedKmhNow();
+                if (!Double.isNaN(kmh) && !Double.isInfinite(kmh)) status.put("tripBriefingKmh", Math.round(kmh));
+            }
+            if (briefing.preparingOffer()) status.put("tripBriefingSoon", true);
+            if (briefing.syncWanted()) status.put("tripBriefingSync", true);
+        } catch (Throwable t) {
+            // Trip briefing not available
+        }
+
         // GPS location
         com.overdrive.app.monitor.GpsMonitor gps = com.overdrive.app.monitor.GpsMonitor.getInstance();
         status.put("gps", gps.getLocationJson());
@@ -2130,7 +2322,8 @@ public class HttpServer {
                         com.overdrive.app.monitor.SocHistoryDatabase.getInstance());
             status.put("charging", chargingPublication.toStatusJson());
         }
-        HttpResponse.sendJson(out, status.toString());
+        // No CORS: loopback callers need no session, so a page in the head unit's browser could read live GPS.
+        HttpResponse.sendJsonNoCors(out, status.toString());
     }
 
     static boolean resolveChargingPlugged(
@@ -2321,7 +2514,12 @@ public class HttpServer {
                    .append("Content-Type: ").append(contentType).append("\r\n")
                    .append("Content-Length: ").append(file.length()).append("\r\n")
                    .append("ETag: ").append(etag).append("\r\n")
-                   .append("Cache-Control: ").append(cacheControl).append("\r\n");
+                   .append("Cache-Control: ").append(cacheControl).append("\r\n")
+                   // SECURITY (run-2 fix): CSP + XFO on every static response;
+                   // HTML pages get the full policy, other assets get nosniff/XFO.
+                   .append(relativePath.endsWith(".html")
+                           ? HttpResponse.SECURITY_HEADERS
+                           : "X-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\n");
             if (relativePath.endsWith(".html")) {
                 headers.append("Pragma: no-cache\r\n")
                        .append("Expires: 0\r\n");
@@ -2569,6 +2767,15 @@ public class HttpServer {
                             profileChanged = profileChanged
                                     || existingEncoder.getFps() != q.fps
                                     || existingEncoder.getBitrate() != q.bitrate;
+                        } else if (!diLink5) {
+                            // Smooth/Max/Ultra share 1280x960: compare the requested fps and bitrate too.
+                            int requestedFps = pipeline.getRequestedStreamFps();
+                            int requestedBitrate = pipeline.getRequestedStreamBitrate();
+                            if (requestedFps > 0 && requestedBitrate > 0) {
+                                profileChanged = profileChanged
+                                        || requestedFps != q.fps
+                                        || requestedBitrate != q.bitrate;
+                            }
                         }
                         if (profileChanged) {
                             CameraDaemon.log("WS: Quality changed ("

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="web_state_retry_now">Thử lại ngay</string>
+    <string name="web_state_retry_in">Tự động thử lại · lần tiếp theo sau %1$d giây</string>
+    <string name="web_state_retrying_now">Tự động thử lại · đang thử…</string>
+    <string name="web_state_sign_in_title">Không thể đăng nhập vào trang này</string>
+    <string name="web_state_sign_in_body">Camera Daemon đang chạy nhưng không chấp nhận đăng nhập của ứng dụng. OverDrive tự động khôi phục khi ADB được kết nối.</string>
+</resources>

@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Speed popover anchored to the player's speed button (landscape). Ids shared with sheet_timeline_speed. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="344dp"
+    android:layout_height="wrap_content"
+    android:background="@drawable/tl_popover_bg"
+    android:orientation="vertical"
+    android:paddingStart="@dimen/od_space_20"
+    android:paddingTop="@dimen/od_space_16"
+    android:paddingEnd="@dimen/od_space_20"
+    android:paddingBottom="@dimen/od_space_8">
+
+    <TextView
+        android:id="@+id/tlSpeedTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:accessibilityHeading="true"
+        android:letterSpacing="0.1"
+        android:text="@string/timeline_speed_title"
+        android:textAllCaps="true"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:textSize="13sp" />
+
+    <com.google.android.material.button.MaterialButtonToggleGroup
+        android:id="@+id/tlSpeedGroup"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_marginTop="@dimen/od_space_12"
+        android:background="@drawable/rec_pill_track"
+        android:paddingHorizontal="3dp"
+        android:spacing="2dp"
+        android:theme="@style/ThemeOverlay.Overdrive.Rec.Segments"
+        app:innerCornerSize="50%"
+        app:selectionRequired="true"
+        app:singleSelection="true">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/tlSpeed1"
+            style="@style/Widget.Overdrive.Rec.Segment"
+            android:layout_width="0dp"
+            android:layout_height="56dp"
+            android:textSize="15sp"
+            android:layout_weight="1" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/tlSpeed2"
+            style="@style/Widget.Overdrive.Rec.Segment"
+            android:layout_width="0dp"
+            android:layout_height="56dp"
+            android:textSize="15sp"
+            android:layout_weight="1" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/tlSpeed4"
+            style="@style/Widget.Overdrive.Rec.Segment"
+            android:layout_width="0dp"
+            android:layout_height="56dp"
+            android:textSize="15sp"
+            android:layout_weight="1" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/tlSpeed8"
+            style="@style/Widget.Overdrive.Rec.Segment"
+            android:layout_width="0dp"
+            android:layout_height="56dp"
+            android:textSize="15sp"
+            android:layout_weight="1" />
+    </com.google.android.material.button.MaterialButtonToggleGroup>
+
+    <TextView
+        android:id="@+id/tlSpeedNote"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/od_space_8"
+        android:text="@string/timeline_speed_note"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:textSize="13sp" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="@dimen/od_space_12"
+        android:background="@drawable/tl_divider" />
+
+    <LinearLayout
+        android:id="@+id/tlSkipQuietRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/selectableItemBackground"
+        android:gravity="center_vertical"
+        android:importantForAccessibility="no"
+        android:minHeight="64dp"
+        android:orientation="horizontal"
+        android:paddingTop="@dimen/od_space_8"
+        android:paddingBottom="@dimen/od_space_8">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:importantForAccessibility="no"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/timeline_skip_quiet"
+                android:textColor="?attr/colorOnSurface"
+                android:textSize="16sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="@string/timeline_skip_quiet_desc"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/tlSkipQuietSwitch"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:layout_marginStart="@dimen/od_space_12"
+            android:contentDescription="@string/timeline_skip_quiet" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@drawable/tl_divider" />
+
+    <LinearLayout
+        android:id="@+id/tlContinueRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/selectableItemBackground"
+        android:gravity="center_vertical"
+        android:importantForAccessibility="no"
+        android:minHeight="64dp"
+        android:orientation="horizontal"
+        android:paddingTop="@dimen/od_space_8"
+        android:paddingBottom="@dimen/od_space_8">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:importantForAccessibility="no"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/timeline_continue"
+                android:textColor="?attr/colorOnSurface"
+                android:textSize="16sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="@string/timeline_continue_desc"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/tlContinueSwitch"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:layout_marginStart="@dimen/od_space_12"
+            android:contentDescription="@string/timeline_continue" />
+    </LinearLayout>
+</LinearLayout>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="web_state_retry_now">今すぐ再試行</string>
+    <string name="web_state_retry_in">自動で再試行します · 次の試行まで %1$d 秒</string>
+    <string name="web_state_retrying_now">自動で再試行します · 試行中…</string>
+    <string name="web_state_sign_in_title">このページにサインインできませんでした</string>
+    <string name="web_state_sign_in_body">カメラデーモンは動作していますが、アプリのサインインを受け付けませんでした。ADB が接続されていれば OverDrive が自動的に復元します。</string>
+</resources>

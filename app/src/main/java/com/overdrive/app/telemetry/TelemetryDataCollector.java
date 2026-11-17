@@ -498,10 +498,7 @@ public class TelemetryDataCollector {
             }
             if (refs > 0) {
                 logger.info("Polling stop requested but still needed (refCount=" + refs + ")");
-                // setOverlayRecordingActive() already restarts the executor when
-                // the requested rate changes. A consumer releasing a reference
-                // does not change that rate; restarting here only discards the
-                // current schedule and spins up an unnecessary poller thread.
+                // The rate only changes via setOverlayRecordingActive(), which restarts the poller itself.
                 return;
             }
             activePollingGeneration = 0L;

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Trip Briefing voice turn: said once the driver answered the briefing question. -->
+    <string name="voice_brief_starting">開始導航。</string>
+    <string name="voice_brief_opening_waze">正在開啟 Waze。</string>
+    <string name="voice_brief_opening_gmaps">正在開啟 Google 地圖。</string>
+    <string name="voice_brief_starting_car">正在啟動車機導航。</string>
+    <string name="voice_brief_app_missing">沒有安裝這個應用程式，請在螢幕上選擇。</string>
+</resources>

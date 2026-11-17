@@ -325,6 +325,8 @@ public class OverlayBitmapRenderer {
             // healthy DiLink 3/4/5 devices.
             final boolean canText = DaemonFonts.canDrawText();
             final boolean blink = (fc / 3) % 2 == 0;
+            // Car known to be off: an open buckle there is an empty seat, not a warning.
+            final boolean parked = com.overdrive.app.monitor.AccMonitor.isInSentryMode();
 
             // Slow-changing signals are pulled from the daemon's already-running
             // collectors ONLY when a field that needs them is enabled — an
@@ -462,7 +464,7 @@ public class OverlayBitmapRenderer {
                 if (!fields.has(f)) continue;
                 if (!first) x += SEGMENT_GAP;
                 first = false;
-                drawSegment(c, f, x, iy, canText, blink, spd, spdUnit, snap,
+                drawSegment(c, f, x, iy, canText, blink, parked, spd, spdUnit, snap,
                         soc, volt12, lowBeam, highBeam,
                         lowBeamKnown, highBeamKnown,
                         lat, lon, hasLoc, vin);
@@ -541,8 +543,11 @@ public class OverlayBitmapRenderer {
     }
 
     /** Draw a single content segment starting at {@code x} (origin = left edge). */
+    /** Neutral grey for both belts while the car is known to be off. */
+    private static final int BELT_PARKED = 0xFF888888;
+
     private void drawSegment(Canvas c, Field f, float x, int iy, boolean canText,
-                             boolean blink, String spd, String spdUnit,
+                             boolean blink, boolean parked, String spd, String spdUnit,
                              TelemetrySnapshot snap, double soc, double volt12,
                              boolean lowBeam, boolean highBeam,
                              boolean lowBeamKnown, boolean highBeamKnown,
@@ -593,20 +598,20 @@ public class OverlayBitmapRenderer {
             }
             case SEATBELT_DRIVER: {
                 boolean b = snap.seatbeltBuckled.length > 0 && snap.seatbeltBuckled[0];
-                int col = b ? 0xFF22DD22 : (blink ? 0xFFFF2222 : 0xFF552222);
+                int col = parked ? BELT_PARKED : b ? 0xFF22DD22 : (blink ? 0xFFFF2222 : 0xFF552222);
                 drawIcon(c, alphaBelt, x, iy, col);
                 if (canText) {
-                    labelPaint.setColor(b ? 0xFF22DD22 : 0xFFFF2222);
+                    labelPaint.setColor(parked ? BELT_PARKED : b ? 0xFF22DD22 : 0xFFFF2222);
                     c.drawText("D", x + ICON_SIZE / 2f - 4, iy + ICON_SIZE + 14, labelPaint);
                 }
                 break;
             }
             case SEATBELT_PASSENGER: {
                 boolean b = snap.seatbeltBuckled.length > 1 && snap.seatbeltBuckled[1];
-                int col = b ? 0xFF22DD22 : (blink ? 0xFFFF2222 : 0xFF552222);
+                int col = parked ? BELT_PARKED : b ? 0xFF22DD22 : (blink ? 0xFFFF2222 : 0xFF552222);
                 drawIcon(c, alphaBelt, x, iy, col);
                 if (canText) {
-                    labelPaint.setColor(b ? 0xFF22DD22 : 0xFFFF2222);
+                    labelPaint.setColor(parked ? BELT_PARKED : b ? 0xFF22DD22 : 0xFFFF2222);
                     c.drawText("P", x + ICON_SIZE / 2f - 3, iy + ICON_SIZE + 14, labelPaint);
                 }
                 break;

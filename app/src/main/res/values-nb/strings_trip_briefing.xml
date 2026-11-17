@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Trip Briefing: the car-start "Heading to work? Want directions?" prompt. The spoken line is
+         greeting + heading + duration (or one extra that replaces it) + question, joined by spaces,
+         and read aloud by text-to-speech. -->
+    <string name="trip_briefing_greeting_morning">God morgen.</string>
+    <string name="trip_briefing_greeting_afternoon">God ettermiddag.</string>
+    <string name="trip_briefing_greeting_evening">God kveld.</string>
+    <string name="trip_briefing_heading_home">På vei hjem?</string>
+    <string name="trip_briefing_heading_work">På vei til jobben?</string>
+    <!-- %1$s: the place's name, e.g. "Phoenix Mall". -->
+    <string name="trip_briefing_heading_place">På vei til %1$s?</string>
+    <plurals name="trip_briefing_duration">
+        <item quantity="one">Omtrent %1$d minutt.</item>
+        <item quantity="other">Omtrent %1$d minutter.</item>
+    </plurals>
+    <!-- %1$s: range left, %2$s: the trip's length, each "31 km" or "19 mi". -->
+    <string name="trip_briefing_extra_range">Knapp rekkevidde: %1$s igjen til en reise på %2$s.</string>
+    <plurals name="trip_briefing_extra_hazards">
+        <item quantity="one">%1$d ny fare på veien.</item>
+        <item quantity="other">%1$d nye farer på veien.</item>
+    </plurals>
+    <!-- %1$s: an hour of the day in the device's clock format, e.g. "7 PM" or "19:00". -->
+    <string name="trip_briefing_extra_rain">Det blir trolig regn rundt %1$s.</string>
+    <string name="trip_briefing_question">Vil du ha veibeskrivelse?</string>
+    <string name="trip_briefing_distance_km">%1$d km</string>
+    <string name="trip_briefing_distance_mi">%1$d mi</string>
+
+    <!-- The destination as the AI assistant should say it. -->
+    <string name="trip_briefing_said_home">hjem</string>
+    <string name="trip_briefing_said_work">jobb</string>
+
+    <!-- Card -->
+    <string name="trip_briefing_title_home">Hjem</string>
+    <string name="trip_briefing_title_work">Arbeid</string>
+    <!-- Title for a regular destination that has no name yet. -->
+    <string name="trip_briefing_title_unnamed">Ditt vanlige stopp</string>
+    <string name="trip_briefing_name_place">Navngi stedet</string>
+    <string name="trip_briefing_no">Nei</string>
+    <string name="trip_briefing_go_failed">Veiledningen startet ikke. Åpne kartet for å navigere.</string>
+    <!-- The car's own navigation app. -->
+    <string name="trip_briefing_app_car">Bilnavigasjon</string>
+</resources>

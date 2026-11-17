@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="dash_vehicle_line">%1$s · %2$.1f kWh</string>
+    <string name="dash_range_caption">续航</string>
+    <string name="dash_status_remote_on">远程访问已开启</string>
+    <string name="dash_status_remote_off">远程访问已关闭</string>
+    <string name="dash_status_remote_state">远程访问 · %1$s</string>
+    <string name="dash_status_services">%1$d/%2$d 项服务</string>
+    <string name="dash_status_view">查看</string>
+    <string name="dash_status_recording_idle">录制空闲</string>
+    <string name="dash_services_running">%1$d/%2$d 运行中</string>
+    <string name="dash_charge_eta_left">剩余 %1$s</string>
+    <string name="dash_charge_session_inline">本次 %1$s</string>
+    <plurals name="dash_clip_count">
+        <item quantity="other">%1$d 个片段</item>
+    </plurals>
+</resources>

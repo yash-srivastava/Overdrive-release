@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Theme tile: selected = 2dp colorPrimary ring; the ring is inside the bounds so nothing shifts. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="?attr/colorControlHighlight">
+    <item>
+        <selector>
+            <item android:state_selected="true">
+                <shape android:shape="rectangle">
+                    <solid android:color="?attr/colorSurfaceContainerHigh" />
+                    <stroke android:width="2dp" android:color="?attr/colorPrimary" />
+                    <corners android:radius="@dimen/od_radius_card" />
+                </shape>
+            </item>
+            <item>
+                <shape android:shape="rectangle">
+                    <solid android:color="?attr/colorSurfaceContainerHigh" />
+                    <corners android:radius="@dimen/od_radius_card" />
+                </shape>
+            </item>
+        </selector>
+    </item>
+</ripple>

@@ -779,6 +779,7 @@ window.SK = (function () {
         var timer = null;
         var closed = false;
         var cancelling = false;
+        var cancelFailed = false;
         var polling = false;
         var origClose = m.close;
         function closeNow() {
@@ -797,17 +798,21 @@ window.SK = (function () {
         }
         m.close = function () {
             if (closed || cancelling) return;
-            if (link && link.state === 'pending') {
+            if (link && link.state === 'pending' && !cancelFailed) {
                 cancelling = true;
                 cancelLink(link.linkId).then(function (r) {
                     cancelling = false;
-                    if (r.success) closeNow();
+                    if (r.success) { closeNow(); return; }
                     // A claimed commit cannot be revoked: retain the modal and its status poll.
-                    else poll(); // Paste mode also needs a status loop after a lost finish response.
+                    // Paste mode also needs a status loop after a lost finish response.
+                    // The next Cancel closes anyway (the car may be unreachable); load() then refreshes.
+                    cancelFailed = true;
+                    poll();
                 });
                 return;
             }
             closeNow();
+            if (cancelFailed) load();
         };
         m.setActions([{ label: t('common.cancel', 'Cancel'), onClick: function (mm) { mm.close(); } }]);
         api('POST', '/api/safekeep/link/start', { type: type, params: params }).then(function (r) {
@@ -1210,10 +1215,14 @@ window.SK = (function () {
     function generateKey(onRecipient) {
         api('POST', '/api/safekeep/keys/generate', {}).then(function (r) {
             if (!r.success) { toast(r.message || 'Error', 'error'); return; }
+            // In the car app the kit leaves as a QR scan or a copy: a file would stay on the car.
+            var inCar = typeof window.AndroidBridge !== 'undefined'
+                || document.documentElement.getAttribute('data-android-embed') === '1';
             var body = '<p class="setting-desc">' + esc(t('safekeep.kit_intro', 'This is your secret key. It is shown once and is NOT kept on the car. Without it, encrypted backups can never be opened — save it in a password manager or print it.')) + '</p>'
+                + (r.qr ? '<div class="sk-qr"><img src="' + esc(r.qr) + '" alt="QR"><div class="sk-muted">' + esc(t('safekeep.kit_qr_hint', 'Scan with your phone to save the key')) + '</div></div>' : '')
                 + '<div class="sk-kit" id="skKitId">' + esc(r.identity) + '</div>'
                 + '<div class="byd-action-row" style="margin:10px 0;"><button class="btn btn-secondary" id="skKitCopy">' + esc(t('safekeep.copy', 'Copy')) + '</button>'
-                + '<button class="btn btn-secondary" id="skKitSave">' + esc(t('safekeep.download_kit', 'Download recovery kit')) + '</button></div>'
+                + (inCar ? '' : '<button class="btn btn-secondary" id="skKitSave">' + esc(t('safekeep.download_kit', 'Download recovery kit')) + '</button>') + '</div>'
                 + '<div class="sk-muted">' + esc(t('safekeep.kit_public', 'Public key (stored on the car):')) + '</div><div class="sk-kit">' + esc(r.recipient) + '</div>'
                 + '<label class="sk-row-inline" style="margin-top:12px;"><input type="checkbox" id="skKitAck"> <span class="setting-desc">' + esc(t('safekeep.kit_ack', 'I have saved my secret key')) + '</span></label>';
             var m = openModal({
@@ -1229,16 +1238,8 @@ window.SK = (function () {
                 }]
             });
             $('skKitCopy').onclick = function () { copyText(r.identity); };
-            $('skKitSave').onclick = function () {
+            if ($('skKitSave')) $('skKitSave').onclick = function () {
                 var text = '# OverDrive SafeKeep recovery kit\n# Keep this private. Decrypt with: age -d -i this-file backup.age\n# public key: ' + r.recipient + '\n' + r.identity + '\n';
-                // In the app a blob link does nothing: the bridge writes the file to Download/OverDrive.
-                if (window.AndroidBridge && typeof window.AndroidBridge.saveTextFile === 'function') {
-                    var path = '';
-                    try { path = window.AndroidBridge.saveTextFile('overdrive-safekeep-key.txt', text) || ''; } catch (e) { path = ''; }
-                    if (path) toast(t('safekeep.kit_saved', 'Saved to {path}', { path: path }), 'success');
-                    else { copyText(r.identity); toast(t('safekeep.kit_save_failed', 'Could not save the file'), 'warning'); }
-                    return;
-                }
                 try {
                     var blob = new Blob([text], { type: 'text/plain' });
                     var a = document.createElement('a');
@@ -1410,7 +1411,10 @@ window.SK = (function () {
                 ? [['eq', t('safekeep.is', 'is')], ['neq', t('safekeep.is_not', 'is not')]]
                 : [['eq', '='], ['neq', '≠'], ['gt', '>'], ['gte', '≥'], ['lt', '<'], ['lte', '≤']];
             var valHtml;
-            if (def.kind === 'enum') valHtml = select('skCV_' + laneId + '_' + i, def.opts, c.value);
+            if (def.kind === 'enum') valHtml = select('skCV_' + laneId + '_' + i, def.opts.map(function (o) {
+                // Gear letters stay as-is; other enum labels are localized for display only.
+                return c.type === 'gear' ? o : [o[0], t('safekeep.cond_' + c.type + '_' + o[0], o[1])];
+            }), c.value);
             else if (def.kind === 'time') valHtml = '<input type="time" class="text-input" id="skCV_' + laneId + '_' + i + '" value="' + minToTime(c.value) + '">';
             else if (def.kind === 'int') valHtml = '<input type="number" class="text-input" id="skCV_' + laneId + '_' + i + '" min="' + def.min + '" max="' + def.max + '" value="' + esc(c.value == null ? def.min : c.value) + '">';
             else valHtml = '<input class="text-input" id="skCV_' + laneId + '_' + i + '" value="' + esc(c.value || '') + '">';

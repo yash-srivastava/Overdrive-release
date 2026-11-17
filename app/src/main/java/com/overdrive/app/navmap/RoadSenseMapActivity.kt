@@ -52,6 +52,7 @@ import com.overdrive.app.navmap.nav.NavGuidanceEngine
 import com.overdrive.app.navmap.nav.NavRoute
 import com.overdrive.app.navmap.nav.NavVoice
 import com.overdrive.app.navmap.nav.SearchResult
+import com.overdrive.app.navmap.nav.TripStops
 import com.overdrive.app.navmap.nav.CongestionSpan
 import com.overdrive.app.navmap.nav.GeoPoint
 import com.overdrive.app.navmap.nav.NavRouting
@@ -59,7 +60,6 @@ import com.overdrive.app.navmap.nav.RouteProvider
 import com.overdrive.app.navmap.google.TrafficRefreshController
 import com.overdrive.app.navmap.google.GoogleAttributionView
 import com.overdrive.app.navmap.google.GoogleMapController
-import com.overdrive.app.navmap.google.GoogleMapStyle
 import com.overdrive.app.navmap.google.GoogleMapType
 import com.overdrive.app.navmap.google.GoogleMapsBudget
 import com.overdrive.app.navmap.google.GoogleMapsConfig
@@ -123,9 +123,40 @@ open class RoadSenseMapActivity : AppCompatActivity() {
 
     /** Most recent GPS fix (for the puck + prefetch); null until first fix. */
     @Volatile private var lastFix: RoadSenseHazardApiClient.LatLngFix? = null
+        set(value) {
+            field = value
+            if (value != null) lastFixAtMono = value.measuredAtMono
+            // a briefing trip that ran out of retries without a fix routes on the first fresh one (within 10 min)
+            if (value != null && routeOnFreshFix && fixIsFresh(RESTORE_FIX_MAX_AGE_MS)) {
+                routeOnFreshFix = false
+                mainHandler.post {
+                    if (isFinishing || isDestroyed || navigating || routeStops.isEmpty() || briefingStartAt <= 0L) return@post
+                    if (android.os.SystemClock.elapsedRealtime() - briefingStartAt < FIX_WAIT_MAX_MS) {
+                        recomputeItinerary(autoStart = true)
+                    } else {
+                        // as when retries run out: the stops stay to route by hand, nothing starts by itself
+                        briefingStartAt = 0L
+                        NavTripStore.clear(applicationContext)
+                    }
+                }
+            }
+        }
+    /** When [lastFix] was measured (elapsedRealtime; 0 unknown), whichever source set it. */
+    @Volatile private var lastFixAtMono = 0L
+    /** The last routing attempt had no fix to start from; a briefing trip then waits for one. */
+    private var lastRouteFailNoFix = false
+    /** This briefing trip has had to wait for GPS at some point (it may since be routing on a late fix). */
+    private var briefingWaitedForFix = false
+    @Volatile private var routeOnFreshFix = false
 
     /** True until the first successful auto-recenter, so we only auto-jump once. */
     private var didInitialRecenter = false
+    /** A recenter found no fix yet: the first fix the idle follow gets centres the map. */
+    private var recenterPending = false
+    /** The cluster camera has been put on a fix (until then it may sit far away, at the last-known spot). */
+    private var clusterPlaced = false
+    /** Style loads that failed in a row; retried a few times so a dropped network doesn't leave no map. */
+    private var styleFailures = 0
 
     /**
      * Guard so the map click / camera-idle listeners are wired exactly once even
@@ -205,6 +236,12 @@ open class RoadSenseMapActivity : AppCompatActivity() {
     private var lockedDestLat: Double = Double.NaN
     private var lockedDestLng: Double = Double.NaN
     @Volatile private var rerouting = false
+    /** The map is behind another app (or the screen is off): guidance goes on, drawing doesn't. */
+    @Volatile private var mapStopped = false
+    /** Bumped when guidance starts or stops, so a reroute still in flight from before is dropped. */
+    private var rerouteGen = 0
+    /** The trip's stops changed while a reroute was in flight: plan again when it lands. */
+    private var rerouteAgain = false
     private var lastRerouteMs: Long = 0L
     private var previewSelectedIdx: Int = 0
     private var routeSheetBehavior:
@@ -255,6 +292,20 @@ open class RoadSenseMapActivity : AppCompatActivity() {
      *  later style reload (e.g. theme switch) doesn't re-trigger the restore. */
     private var didRestoreTrip = false
 
+    /** A restored trip's routing retries while GPS or data comes up after car start. */
+    private var routeGen = 0
+    private var routeRetries = 0
+    private var autoRouting = false
+    /** When a Trip Briefing yes asked to start guidance (elapsedRealtime), while it hasn't started; else 0. */
+    private var briefingStartAt = 0L
+    /** The map was left while that trip was routing: it carries on when the map is back soon. */
+    private var routeOnReturn = false
+    /** The trip left behind was waiting for GPS: on return it may keep waiting up to [FIX_WAIT_MAX_MS]. */
+    private var fixWaitOnReturn = false
+    private val routeRetry = Runnable {
+        if (!navigating && routeStops.isNotEmpty()) recomputeItinerary(autoStart = true, retry = true)
+    }
+
     /**
      * True when this Activity instance was launched onto the driver cluster
      * (am start --display N --ez cluster true). The cluster is a NON-TOUCH display,
@@ -262,6 +313,10 @@ open class RoadSenseMapActivity : AppCompatActivity() {
      * immersive camera, and keep the view glanceable. Set once in onCreate.
      */
     private var clusterMode = false
+    private var layoutGeneration = 0L
+    private var layoutDisplayId = -1
+    private val layoutCheckPending = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val projectionCheckPending = java.util.concurrent.atomic.AtomicBoolean(false)
 
 
     // ── Motion smoothing (dead-reckoning) ───────────────────────────────────────
@@ -409,12 +464,15 @@ open class RoadSenseMapActivity : AppCompatActivity() {
             }
         }
     private val recenterAfterFree = Runnable {
-        if (navigating && cameraRig.mode == com.overdrive.app.navmap.motion.NavCameraRig.Mode.FREE) {
+        if ((navigating || (clusterMode && layoutGeneration > 0)) &&
+            cameraRig.mode == com.overdrive.app.navmap.motion.NavCameraRig.Mode.FREE) {
             recenterFollow(android.os.SystemClock.elapsedRealtime())
         }
     }
 
     private fun startMotionFollow() {
+        // (nothing to draw behind another app: onResume starts it again)
+        if (mapStopped) return
         motionFollowActive = true
         if (!frameLoop.isRunning) frameLoop.start()
     }
@@ -443,11 +501,22 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         // run after getInstance() and before the first style load. Without it the
         // basemap would bypass sing-box/Tailscale on a proxied head unit while
         // search/routing (already proxy-aware) worked.
+        com.overdrive.app.navmap.nav.VectorTileKeys.attach(applicationContext)
         com.overdrive.app.navmap.nav.MapNetworking.installMapLibreHttpClient()
 
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContentView(R.layout.activity_roadsense_map)
+        // The first-focus holder only exists for touch mode; key navigation must never land on it.
+        findViewById<View>(R.id.mapFocusSink)?.let { sink ->
+            val track = { inTouch: Boolean ->
+                sink.isFocusableInTouchMode = inTouch
+                if (!inTouch) sink.isFocusable = false
+            }
+            track(sink.isInTouchMode)
+            // Deferred: the key that leaves touch mode first moves focus off the sink as a normal focus step.
+            sink.viewTreeObserver.addOnTouchModeChangeListener { inTouch -> sink.post { track(inTouch) } }
+        }
 
         // Cluster mode: launched onto the non-touch driver-cluster display by the
         // daemon. Detected via the launching COMPONENT (the singleInstance alias
@@ -456,8 +525,10 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         // chrome + go glanceable.
         // Cluster mode when we're the dedicated cluster subclass (robust — survives
         // onNewIntent / can't be lost) OR the legacy `cluster` extra is set.
-        clusterMode = this is RoadSenseClusterMapActivity ||
+        clusterMode = this is RoadSenseClusterMapActivity || this is RoadSenseLayoutMapActivity ||
             intent?.getBooleanExtra("cluster", false) == true
+        layoutGeneration = if (clusterMode) intent.getLongExtra("layoutGeneration", 0L) else 0L
+        layoutDisplayId = if (layoutGeneration > 0) intent.getIntExtra("layoutDisplayId", -1) else -1
 
         // Safety: the cluster instance must NEVER end up on the default (head-unit)
         // display — if AMS placed it on display 0 (no cluster display present), it
@@ -473,7 +544,7 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         try {
             GoogleMapsBudget.init(applicationContext)
             GoogleUsageReporter.restoreSoon()
-            googleMap = GoogleMapController(this, clusterMode, googleHost)
+            googleMap = GoogleMapController(this, clusterMode && layoutGeneration <= 0, googleHost)
         } catch (t: Throwable) {
             Log.w("RoadSenseMap", "google map controller unavailable", t)
         }
@@ -526,7 +597,7 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         setupSearch()
         NavRouting.arrivalInstruction = getString(R.string.navmap_google_arrived)
         findViewById<FloatingActionButton>(R.id.fabEndNav)?.setOnClickListener {
-            stopGuidance()
+            endTrip()
             showSnackbar(getString(R.string.roadsense_map_nav_ended))
         }
 
@@ -553,6 +624,7 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         findViewById<View>(R.id.fabZoomOut)?.setOnClickListener { zoomBy(-1.0) }
 
         mapView = findViewById(R.id.mapView)
+        installGlSurfaceRebuild()
         mapView.onCreate(savedInstanceState)
         mapView.getMapAsync { mlMap -> onMapReady(mlMap) }
     }
@@ -585,11 +657,10 @@ open class RoadSenseMapActivity : AppCompatActivity() {
             val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
             appBar?.setPadding(0, bars.top, 0, 0)
             findViewById<View>(R.id.navHud)?.setPadding(bars.left, bars.top, bars.right, bars.bottom)
-            // The search COLUMN (bar + dropdown) is pinned to the top, just below
-            // the status bar + toolbar. Offset the whole column (NOT the inner
-            // card — that double-offset was the misalignment).
+            // The search COLUMN (bar + dropdown) sits level with the back pill. Offset
+            // the whole column (NOT the inner card — that double-offset was the misalignment).
             (searchColumn?.layoutParams as? android.view.ViewGroup.MarginLayoutParams)?.let {
-                it.topMargin = bars.top + dp(56); searchColumn.layoutParams = it
+                it.topMargin = bars.top + dp(16); searchColumn.layoutParams = it
             }
             // CLUSTER: applyClusterChrome OWNS the banner geometry (top-start, vertically
             // centred in the clear band above the centre-left speed badge, overscan-safe
@@ -601,16 +672,16 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                     it.topMargin = bars.top + dp(56); banner.layoutParams = it
                 }
             }
-            // Top-right map controls sit below the search bar.
+            // Top-end control capsule, level with the back pill.
             (controlsTop?.layoutParams as? android.view.ViewGroup.MarginLayoutParams)?.let {
-                it.topMargin = bars.top + dp(128); controlsTop.layoutParams = it
+                it.topMargin = bars.top + dp(16); controlsTop.layoutParams = it
             }
             // Immersive back FAB: just under the status bar, top-start.
             (fabNavBack?.layoutParams as? android.view.ViewGroup.MarginLayoutParams)?.let {
                 it.topMargin = bars.top + dp(16); fabNavBack.layoutParams = it
             }
             (fabLocate?.layoutParams as? android.view.ViewGroup.MarginLayoutParams)?.let {
-                it.bottomMargin = bars.bottom + dp(24); fabLocate.layoutParams = it
+                it.bottomMargin = bars.bottom + dp(16); fabLocate.layoutParams = it
             }
             (fabEnd?.layoutParams as? android.view.ViewGroup.MarginLayoutParams)?.let {
                 // fabEndNav is the ONLY bottom|START control (every other bottom FAB is
@@ -624,8 +695,9 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                 it.marginStart = bars.left + dp(24)
                 fabEnd.layoutParams = it
             }
+            // Zoom capsule: 10dp above the 56dp recenter button.
             (zoomControls?.layoutParams as? android.view.ViewGroup.MarginLayoutParams)?.let {
-                it.bottomMargin = bars.bottom + dp(96); zoomControls.layoutParams = it
+                it.bottomMargin = bars.bottom + dp(82); zoomControls.layoutParams = it
             }
             // Route-options sheet: pad its CONTENT above the nav bar so the Start
             // button + last row aren't hidden behind the system navigation bar.
@@ -644,11 +716,9 @@ open class RoadSenseMapActivity : AppCompatActivity() {
     }
 
     /**
-     * Cap the floating top panels (search column + maneuver banner) to a sensible
-     * column width and center them on wide/landscape screens; on portrait/narrow
-     * screens they fill the width. Without this, full-width panels stretch edge-to-
-     * edge across the 1920px landscape display and look unbalanced. The route sheet
-     * stays full-width (a bottom sheet is meant to span the bottom).
+     * Cap the maneuver banner to a column width and center it on wide/landscape
+     * screens (portrait/narrow: full width), and size the start-aligned search pill
+     * between the back pill and the end control capsule. The route sheet stays full-width.
      */
     private fun applyResponsiveLayout() {
         val dm = resources.displayMetrics
@@ -667,7 +737,16 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                 v.layoutParams = lp
             }
         }
-        setWidthCentered(R.id.navSearchColumn)
+        // Search pill: start-aligned after the back pill, stopping short of the end capsule.
+        findViewById<View>(R.id.navSearchColumn)?.let { v ->
+            (v.layoutParams as? androidx.coordinatorlayout.widget.CoordinatorLayout.LayoutParams)?.let { lp ->
+                val inset = resources.getDimensionPixelSize(R.dimen.map_search_inset)
+                lp.width = minOf(resources.getDimensionPixelSize(R.dimen.map_search_max_width),
+                    (screenW - 2 * inset).coerceAtLeast(0))
+                lp.gravity = android.view.Gravity.TOP or android.view.Gravity.START
+                v.layoutParams = lp
+            }
+        }
         // The cluster owns its own compact fixed-width banner geometry
         // (applyClusterChrome) — don't let the responsive full-width/centered sizing
         // clobber it (this also runs from onConfigurationChanged on rotation).
@@ -700,6 +779,12 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                     if (fix != null) mainHandler.post {
                         if (isFinishing || isDestroyed || navigating) return@post
                         lastFix = fix
+                        // a held fix may be from before a tow: only a fresh one counts as placed
+                        if (!clusterPlaced) {
+                            placeClusterCamera(fix)
+                            clusterPlaced = fixIsFresh(CLUSTER_FIX_FRESH_MS)
+                        }
+                        snapIfFar(fix)
                         feedMotionTruth(fix)   // single source of truth → render tick paints
                         startMotionFollow()    // idempotent; 30 fps glide of puck + camera
                     }
@@ -707,6 +792,16 @@ open class RoadSenseMapActivity : AppCompatActivity() {
             }
             mainHandler.postDelayed(this, GUIDANCE_TICK_MS)
         }
+    }
+
+    // A far first fix (no last-known spot, or the car moved while the map was off): jump there, don't glide.
+    private fun placeClusterCamera(fix: RoadSenseHazardApiClient.LatLngFix) {
+        if (layoutGeneration > 0 &&
+            cameraRig.mode == com.overdrive.app.navmap.motion.NavCameraRig.Mode.FREE) return
+        val m = map ?: return
+        val t = m.cameraPosition.target
+        val far = t == null || guidance.haversineMeters(t.latitude, t.longitude, fix.lat, fix.lng) > CLUSTER_PLACE_FAR_M
+        if (far) m.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(fix.lat, fix.lng), FOLLOW_ZOOM))
     }
 
     private fun startClusterFollow() {
@@ -748,6 +843,46 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * The head unit can hand MapLibre a new surface before its buffer size lands (Adreno "Invalid width or height:
+     * W = 0, H = 0"), leaving depth/stencil unusable: the clear colour and puck draw, every tile stays blank until a
+     * resize. Re-sending the size shortly after makes MapLibre rebuild its EGL surface, as the old auto-keyboard did.
+     */
+    private var glSurface: android.view.SurfaceView? = null
+    private var glSurfaceFormat = android.graphics.PixelFormat.TRANSPARENT
+    private val glSurfaceRebuild = Runnable {
+        val sv = glSurface ?: return@Runnable
+        if (isFinishing || isDestroyed || mapStopped) return@Runnable
+        val frame = sv.holder.surfaceFrame
+        if (sv.holder.surface?.isValid != true || frame.width() <= 0 || frame.height() <= 0) return@Runnable
+        try {
+            (sv as android.view.SurfaceHolder.Callback).surfaceChanged(sv.holder, glSurfaceFormat, frame.width(), frame.height())
+            Log.d("RoadSenseMap", "GL surface rebuilt ${frame.width()}x${frame.height()}")
+        } catch (t: Throwable) {
+            Log.w("RoadSenseMap", "GL surface rebuild failed: ${t.javaClass.simpleName}")
+        }
+    }
+
+    private fun installGlSurfaceRebuild() {
+        if (clusterMode) return
+        val sv = (0 until mapView.childCount).map { mapView.getChildAt(it) }
+            .firstOrNull { it is android.view.SurfaceView && it is android.view.SurfaceHolder.Callback } as? android.view.SurfaceView
+            ?: return
+        glSurface = sv
+        // Registered after MapLibre's own callback; calling its surfaceChanged directly doesn't re-enter this one.
+        sv.holder.addCallback(object : android.view.SurfaceHolder.Callback {
+            override fun surfaceCreated(holder: android.view.SurfaceHolder) {}
+            override fun surfaceChanged(holder: android.view.SurfaceHolder, format: Int, width: Int, height: Int) {
+                glSurfaceFormat = format
+                mainHandler.removeCallbacks(glSurfaceRebuild)
+                mainHandler.postDelayed(glSurfaceRebuild, GL_SURFACE_REBUILD_MS)
+            }
+            override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {
+                mainHandler.removeCallbacks(glSurfaceRebuild)
+            }
+        })
+    }
+
     private fun startClusterKeepWarm() {
         if (!clusterMode) return
         mainHandler.removeCallbacks(clusterKeepWarmRunnable)
@@ -761,9 +896,9 @@ open class RoadSenseMapActivity : AppCompatActivity() {
      * resume-from-background it sat at the stale pre-background fix until the user
      * tapped Locate (while the cluster, which DOES have an idle follow, stayed live).
      *
-     * <p>This refreshes the PUCK ONLY — it never moves the camera — so a user who
-     * panned/zoomed away from their position keeps that view; the blue dot just stays
-     * truthful underneath it. (Locate remains the explicit "snap back to me" action.)
+     * <p>It refreshes the puck and keeps the car in view ([followIdleCamera]) until the
+     * driver pans or zooms the map; from then the view stays theirs, the blue dot just
+     * truthful underneath it, until Locate (or a trip's end) gives the follow back.
      * Runs only on the head unit while NOT navigating: the guidance tick owns the puck
      * during nav, and the cluster has its own follow. Self-reschedules at the 1 Hz GPS
      * cadence; suspended in onStop, restarted in onResume.
@@ -776,17 +911,69 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                 if (fix != null) mainHandler.post {
                     if (isFinishing || isDestroyed || navigating || clusterMode) return@post
                     lastFix = fix
+                    val wasPending = recenterPending
+                    recenterIfPending(fix.lat, fix.lng)
+                    snapIfFar(fix)
                     // SOTA idle glide: feed the estimator + run the render tick so the
                     // idle puck dead-reckons + gyro-fuses between the sparse 1 Hz fixes
                     // (was: updateLocationPuck = raw teleport once/sec). renderMotionFrame
-                    // skips the camera block when NOT navigating/cluster (see its gate), so
-                    // this stays PUCK-ONLY — a user who panned away keeps their view.
+                    // leaves the camera alone when idle; only the follow below moves it.
                     feedMotionTruth(fix)
                     startMotionFollow()   // idempotent; 30/200ms adaptive tick
+                    if (idleFollowCamera && !wasPending && !idleFollowHeld()) followIdleCamera(fix.lat, fix.lng)
                 }
             }
             mainHandler.postDelayed(this, GUIDANCE_TICK_MS)
         }
+    }
+
+    /** Idle (no trip), the map keeps the car in view until the driver pans it; Locate gives the follow back. */
+    private var idleFollowCamera = true
+
+    // A plan or a place on screen (a route preview, its locked destination, a place sheet): the driver's looking at it.
+    // Stops alone don't hold it: a search whose routing failed leaves them with nothing drawn.
+    private fun idleFollowHeld(): Boolean =
+        previewRoutes.isNotEmpty() || !lockedDestLat.isNaN() || openPlaceSheet != null
+
+    /** When the camera's current move began (a zoom, a recentre, a fling); 0 once it's idle. */
+    private var cameraBusySince = 0L
+
+    // The car near the edge of the middle half of the screen: an ease back to it (zoom, tilt and bearing kept).
+    private fun followIdleCamera(fixLat: Double, fixLng: Double) {
+        val m = map ?: return
+        if (!::mapView.isInitialized || mapView.width <= 0 || mapView.height <= 0) return
+        val busy = cameraBusySince
+        if (busy > 0L && android.os.SystemClock.elapsedRealtime() - busy < CAMERA_BUSY_MAX_MS) return
+        // the puck as drawn, not the raw fix: one bad fix doesn't take the view off the car
+        val drawn = motionFollowActive && !(motionModel.lat == 0.0 && motionModel.lng == 0.0)
+        val lat = if (drawn) motionModel.lat else fixLat
+        val lng = if (drawn) motionModel.lng else fixLng
+        val p = m.projection.toScreenLocation(LatLng(lat, lng))
+        val w = mapView.width.toFloat()
+        val h = mapView.height.toFloat()
+        if (p.x in w * 0.25f..w * 0.75f && p.y in h * 0.25f..h * 0.75f) return
+        val t = m.cameraPosition.target
+        val far = t == null || guidance.haversineMeters(t.latitude, t.longitude, lat, lng) > CLUSTER_PLACE_FAR_M
+        val to = CameraUpdateFactory.newLatLng(LatLng(lat, lng))
+        if (far) m.moveCamera(to) else m.animateCamera(to, RECENTER_ANIM_MS)
+    }
+
+    /** The map opened (or Locate was tapped) before there was a fix: the first one centres it (head unit, idle). */
+    private fun recenterIfPending(lat: Double, lng: Double) {
+        if (!recenterPending || navigating || clusterMode) return
+        recenterPending = false
+        centreOn(lat, lng)
+    }
+
+    // Street zoom with the resting tilt; a jump rather than a glide across a long way (a stale saved spot).
+    private fun centreOn(lat: Double, lng: Double) {
+        val m = map ?: return
+        val pos = org.maplibre.android.camera.CameraPosition.Builder()
+            .target(LatLng(lat, lng)).zoom(FOLLOW_ZOOM).tilt(restingTilt()).bearing(0.0).build()
+        val t = m.cameraPosition.target
+        val far = t == null || guidance.haversineMeters(t.latitude, t.longitude, lat, lng) > CLUSTER_PLACE_FAR_M
+        if (far) m.moveCamera(CameraUpdateFactory.newCameraPosition(pos))
+        else m.animateCamera(CameraUpdateFactory.newCameraPosition(pos), RECENTER_ANIM_MS)
     }
 
     private fun startIdleFollow() {
@@ -888,6 +1075,32 @@ open class RoadSenseMapActivity : AppCompatActivity() {
     private val clusterFinishPoll = object : Runnable {
         override fun run() {
             if (clusterFinishing || isFinishing || isDestroyed) return
+            if (layoutGeneration > 0) {
+                val expectedGeneration = layoutGeneration
+                val expectedDisplay = layoutDisplayId
+                val actualDisplay = currentDisplayId()
+                if (layoutCheckPending.compareAndSet(false, true)) {
+                    try {
+                        ioExecutor().execute {
+                            val alive = com.overdrive.app.navmap.cluster.LayoutMapSessionClient.alive(
+                                expectedGeneration, expectedDisplay, actualDisplay)
+                            mainHandler.post {
+                                layoutCheckPending.set(false)
+                                if (layoutGeneration == expectedGeneration && alive == false &&
+                                    !isFinishing && !isDestroyed) {
+                                    clusterFinishing = true
+                                    mainHandler.removeCallbacks(clusterFollowRunnable)
+                                    finishAndRemoveTask()
+                                }
+                            }
+                        }
+                    } catch (_: java.util.concurrent.RejectedExecutionException) {
+                        layoutCheckPending.set(false)
+                    }
+                }
+                mainHandler.postDelayed(this, CLUSTER_FINISH_POLL_MS)
+                return
+            }
             if (clusterMapDismissed()) {
                 clusterFinishing = true
                 mainHandler.removeCallbacks(clusterFollowRunnable)
@@ -943,17 +1156,22 @@ open class RoadSenseMapActivity : AppCompatActivity() {
     private val headUnitProjectionPoll = object : Runnable {
         override fun run() {
             if (isFinishing || isDestroyed || clusterMode) return
-            ioExecutor().execute {
-                val active = isClusterProjectionActive()
-                mainHandler.post {
-                    if (isFinishing || isDestroyed || clusterMode) return@post
-                    if (active != projectionActive) {
-                        projectionActive = active
-                        // Re-kick the render tick so the rate change takes effect now
-                        // (when projection ENDS we want the head unit back to the smooth
-                        // glide immediately; when it STARTS we drop to idle next tick).
-                        if (motionFollowActive) startMotionFollow()
+            if (projectionCheckPending.compareAndSet(false, true)) {
+                try {
+                    ioExecutor().execute {
+                        val active = isClusterProjectionActive()
+                        mainHandler.post {
+                            projectionCheckPending.set(false)
+                            if (isFinishing || isDestroyed || clusterMode) return@post
+                            if (active != projectionActive) {
+                                projectionActive = active
+                                // Re-kick the render tick so the rate change takes effect now.
+                                if (motionFollowActive) startMotionFollow()
+                            }
+                        }
                     }
+                } catch (_: java.util.concurrent.RejectedExecutionException) {
+                    projectionCheckPending.set(false)
                 }
             }
             mainHandler.postDelayed(this, PROJECTION_POLL_MS)
@@ -979,7 +1197,10 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         return try {
             val nav = com.overdrive.app.config.UnifiedConfigManager.forceReload()
                 .optJSONObject("navMap")
-            nav != null && nav.optBoolean("clusterMapActive", false)
+            (nav != null && nav.optBoolean("clusterMapActive", false)) ||
+                (com.overdrive.app.config.UnifiedConfigManager.loadConfig()
+                    .optJSONObject("projection")?.optBoolean("clusterLayoutMapActive", false) == true &&
+                    com.overdrive.app.navmap.cluster.LayoutMapSessionClient.mapProjected())
         } catch (_: Throwable) {
             false
         }
@@ -1081,7 +1302,9 @@ open class RoadSenseMapActivity : AppCompatActivity() {
             val stackLeftX = CLUSTER_SPEED_BADGE_LEFT_PX
             val stackSeamY = panelH / 2
             (card.layoutParams as? androidx.coordinatorlayout.widget.CoordinatorLayout.LayoutParams)?.let { lp ->
-                lp.width = px(CLUSTER_BANNER_WIDTH_DP)
+                lp.width = if (layoutGeneration > 0)
+                    minOf(px(CLUSTER_BANNER_WIDTH_DP), maxOf(64, root.width - stackLeftX * 2))
+                    else px(CLUSTER_BANNER_WIDTH_DP)
                 lp.gravity = android.view.Gravity.TOP or android.view.Gravity.START
                 lp.marginStart = stackLeftX
                 lp.topMargin = stackSeamY
@@ -1099,7 +1322,9 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         // The HUD's compact cluster stack takes the banner's band beside the speed badge.
         findViewById<com.overdrive.app.navmap.ui.NavHudLayout>(R.id.navHud)?.clusterBounds = android.graphics.Rect(
             CLUSTER_SPEED_BADGE_LEFT_PX, panelH / 2,
-            CLUSTER_SPEED_BADGE_LEFT_PX + px(CLUSTER_BANNER_WIDTH_DP), panelH - px(8)
+            CLUSTER_SPEED_BADGE_LEFT_PX + (if (layoutGeneration > 0)
+                minOf(px(CLUSTER_BANNER_WIDTH_DP), maxOf(64, root.width - CLUSTER_SPEED_BADGE_LEFT_PX * 2))
+                else px(CLUSTER_BANNER_WIDTH_DP)), panelH - px(8)
         )
     }
 
@@ -1177,6 +1402,14 @@ open class RoadSenseMapActivity : AppCompatActivity() {
             org.maplibre.android.maps.renderer.MapRenderer.RenderingRefreshMode.WHEN_DIRTY
         )
         capRenderRate(0)
+        // A style that never loads (no network for its sources) must not leave the reload guard stuck, nor no map.
+        mapView.addOnDidFailLoadingMapListener { message ->
+            styleReloadInFlight = false
+            Log.w("RoadSenseMap", "map style failed to load: $message")
+            if (styleFailures++ < STYLE_RETRY_MAX) mainHandler.postDelayed({
+                if (map?.style?.isFullyLoaded != true) requestGoogleStyleReload()
+            }, STYLE_RETRY_MS)
+        }
         // Cluster counts and stop numbers are drawn the first time the style asks for them.
         mapView.addOnStyleImageMissingListener { id ->
             map?.style?.let { st -> com.overdrive.app.navmap.glass.MapGlassArt.drawMissing(this, st, id, isNightTheme()) }
@@ -1188,8 +1421,12 @@ open class RoadSenseMapActivity : AppCompatActivity() {
             }
         )
         mlMap.addOnCameraMoveStartedListener { reason ->
+            // the driver's (or the app's own) newer view wins over a recenter still waiting for a fix
+            recenterPending = false
+            cameraBusySince = android.os.SystemClock.elapsedRealtime()
             if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) onUserMovedMap()
         }
+        mlMap.addOnCameraIdleListener { cameraBusySince = 0L }
 
         // App-like feel: lock rotation + tilt, hide the compass (irrelevant
         // when north-locked) but ENABLE on-screen zoom +/- controls (no
@@ -1199,9 +1436,9 @@ open class RoadSenseMapActivity : AppCompatActivity() {
             setTiltGesturesEnabled(false)
             setCompassEnabled(false)
             // Cluster is non-touch → kill ALL gestures; head-unit keeps pinch/zoom.
-            setZoomGesturesEnabled(!clusterMode)
-            setQuickZoomGesturesEnabled(!clusterMode)
-            setScrollGesturesEnabled(!clusterMode)
+            setZoomGesturesEnabled(!clusterMode || layoutGeneration > 0)
+            setQuickZoomGesturesEnabled(!clusterMode || layoutGeneration > 0)
+            setScrollGesturesEnabled(!clusterMode || layoutGeneration > 0)
         }
         // MapLibre 11.x dropped the legacy on-screen zoom buttons, so we provide
         // our own +/- FABs (zoomInBy below). Pinch/quick-zoom gestures stay on
@@ -1220,11 +1457,9 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         // edge. Margins are in px; convert from dp.
         applyMapChromeInsets(mlMap)
 
-        // Initial camera: a sensible mid-zoom over the default region until
-        // the first viewport fetch / recenter narrows it.
-        mlMap.moveCamera(
-            CameraUpdateFactory.newLatLngZoom(LatLng(DEFAULT_LAT, DEFAULT_LNG), DEFAULT_ZOOM)
-        )
+        // Initial camera: where the car last was (its tiles are cached), else the default region, until the
+        // first fix / recenter narrows it.
+        mlMap.moveCamera(initialCamera())
 
         // Theme-aware basemap: dark style in night mode, light otherwise, so the
         // map matches the rest of the app shell. Loaded from the BUNDLED style asset
@@ -1396,7 +1631,7 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         createConfigurationContext(cfg)
     }
 
-    /** Dark M3 role colour regardless of the current theme (styles the Google night basemap). */
+    /** Dark M3 role colour regardless of the current theme. */
     private fun m3Night(role: String): Int {
         val id = resources.getIdentifier("md_sys_color_${role}_dark", "color", packageName)
         if (id == 0) return 0xFF808080.toInt()
@@ -1406,8 +1641,93 @@ open class RoadSenseMapActivity : AppCompatActivity() {
     /** Hex string form of [m3], for paint properties set via a color string. */
     private fun m3Hex(role: String): String = colorToHex(m3(role))
 
-    /** "#AARRGGBB" for a packed ARGB int (MapLibre accepts rgba()/hex strings). */
-    private fun colorToHex(color: Int): String = String.format("#%08X", color)
+    /**
+     * CSS colour for MapLibre: "#RRGGBB", or rgba() when translucent. "#AARRGGBB" is not CSS: MapLibre rejected it
+     * ("value must be a valid color"), dropping the Google style's background layer, so the map showed bare black.
+     */
+    private fun colorToHex(color: Int): String {
+        val a = color ushr 24
+        return if (a == 0xFF) String.format(java.util.Locale.ROOT, "#%06X", color and 0xFFFFFF)
+        else String.format(java.util.Locale.ROOT, "rgba(%d,%d,%d,%.3f)",
+            (color shr 16) and 0xFF, (color shr 8) and 0xFF, color and 0xFF, a / 255f)
+    }
+
+    private fun fixIsFresh(maxAgeMs: Long): Boolean =
+        lastFixAtMono > 0L && android.os.SystemClock.elapsedRealtime() - lastFixAtMono in 0L..maxAgeMs
+
+    // A fix far from the shown pose (towed, ferried, or a held fix finally replaced): seed there, don't crawl.
+    private fun snapIfFar(fix: RoadSenseHazardApiClient.LatLngFix) {
+        val lat = motionModel.lat
+        val lng = motionModel.lng
+        val far = !(lat == 0.0 && lng == 0.0) && guidance.haversineMeters(lat, lng, fix.lat, fix.lng) > SNAP_FAR_M
+        val good = (fix.accuracy ?: Double.MAX_VALUE) <= SNAP_MAX_ACCURACY_M && fix.measuredAtMono > 0L &&
+            android.os.SystemClock.elapsedRealtime() - fix.measuredAtMono in 0L..CLUSTER_FIX_FRESH_MS
+        if (!far || !good) {
+            snapCandidate = null
+            return
+        }
+        val c = snapCandidate
+        val apart = if (c == null) -1L else fix.measuredAtMono - c.measuredAtMono
+        // the same fix read again (the daemon repeats its last one until a new one) doesn't confirm itself
+        if (c != null && (apart in 0L until SNAP_CONFIRM_GAP_MS || (c.lat == fix.lat && c.lng == fix.lng))) return
+        if (c == null || apart !in 0L..SNAP_CONFIRM_WINDOW_MS ||
+            guidance.haversineMeters(c.lat, c.lng, fix.lat, fix.lng) > SNAP_CONFIRM_M
+        ) {
+            snapCandidate = fix
+            return
+        }
+        snapCandidate = null
+        motionEstimator.reset()
+        motionModel.reset()
+    }
+
+    /** A far fix waiting for a second, nearby one before the shown pose jumps there. */
+    private var snapCandidate: RoadSenseHazardApiClient.LatLngFix? = null
+
+    // The last spot saved by [saveLastCamera]; the default region the first time.
+    private fun initialCamera(): org.maplibre.android.camera.CameraUpdate {
+        val p = getSharedPreferences(PREFS_NAVMAP, MODE_PRIVATE)
+        val lat = p.getFloat(KEY_LAST_CAM_LAT, Float.NaN).toDouble()
+        val lng = p.getFloat(KEY_LAST_CAM_LNG, Float.NaN).toDouble()
+        val zoom = p.getFloat(KEY_LAST_CAM_ZOOM, FOLLOW_ZOOM.toFloat()).toDouble()
+        val known = lat.isFinite() && lng.isFinite() && kotlin.math.abs(lat) <= 90.0 && kotlin.math.abs(lng) <= 180.0
+        if (known) return CameraUpdateFactory.newLatLngZoom(LatLng(lat, lng), zoom.coerceIn(DEFAULT_ZOOM, FOLLOW_ZOOM))
+        // never opened before: the system's last known location beats a default region far away
+        val last = lastKnownLocation()
+        return if (last != null) {
+            CameraUpdateFactory.newLatLngZoom(LatLng(last.latitude, last.longitude), DEFAULT_ZOOM)
+        } else {
+            CameraUpdateFactory.newLatLngZoom(LatLng(DEFAULT_LAT, DEFAULT_LNG), DEFAULT_ZOOM)
+        }
+    }
+
+    private fun lastKnownLocation(): android.location.Location? = try {
+        val lm = getSystemService(LOCATION_SERVICE) as android.location.LocationManager
+        listOf(android.location.LocationManager.GPS_PROVIDER, android.location.LocationManager.NETWORK_PROVIDER,
+            android.location.LocationManager.PASSIVE_PROVIDER)
+            .mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }
+            .filter {
+                kotlin.math.abs(it.latitude) <= 90.0 && kotlin.math.abs(it.longitude) <= 180.0 &&
+                    !(kotlin.math.abs(it.latitude) < 1e-4 && kotlin.math.abs(it.longitude) < 1e-4) && !it.isFromMockProvider
+            }
+            .maxByOrNull { it.time }
+    } catch (t: Throwable) {
+        null
+    }
+
+    /** The car's last fix (else the camera, unless still on the default region), for the next open's first frame. */
+    private fun saveLastCamera() {
+        val cp = map?.cameraPosition ?: return
+        val fix = lastFix
+        val lat = fix?.lat ?: cp.target?.latitude ?: return
+        val lng = fix?.lng ?: cp.target?.longitude ?: return
+        if (!lat.isFinite() || !lng.isFinite() || (fix == null && lat == DEFAULT_LAT && lng == DEFAULT_LNG)) return
+        getSharedPreferences(PREFS_NAVMAP, MODE_PRIVATE).edit()
+            .putFloat(KEY_LAST_CAM_LAT, lat.toFloat())
+            .putFloat(KEY_LAST_CAM_LNG, lng.toFloat())
+            .putFloat(KEY_LAST_CAM_ZOOM, cp.zoom.toFloat())
+            .apply()
+    }
 
     private fun onStyleLoaded(style: Style) {
         // CRASH GUARD (intermittent "clicking Map crashes the app"): this callback is
@@ -1421,6 +1741,7 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         //  - Wrap the whole body so any residual add/decode failure is logged, never fatal.
         if (isFinishing || isDestroyed || !::mapView.isInitialized) return
         if (!style.isFullyLoaded) return
+        styleFailures = 0
         try {
             com.overdrive.app.navmap.glass.MapGlassArt.registerStatic(this, style, isNightTheme())
             hud?.setNight(isNightTheme())
@@ -1537,6 +1858,12 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         //    the live GPS fix the first time the map opens (so it lands on the
         //    user, not the default region). Subsequent recenters are manual (FAB).
         MapTilePrefetcher.configureAmbientCache(applicationContext)
+        // the streets around frequent places, on Wi-Fi, for a map with no network later (once a session, a while after
+        // the map is up)
+        if (!clusterMode && !placesPrefetchQueued) {
+            placesPrefetchQueued = true
+            mainHandler.postDelayed(prefetchPlacesTask, PLACES_PREFETCH_DELAY_MS)
+        }
         if (!didInitialRecenter) {
             didInitialRecenter = true
             recenter()
@@ -1660,7 +1987,7 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                     showNavHud(false)
                     endLiveTraffic()
                     glassLayers.clear()
-                    startClusterFollow()
+                    if (!mapStopped) startClusterFollow()
                 }
             }
         }
@@ -1900,15 +2227,16 @@ open class RoadSenseMapActivity : AppCompatActivity() {
     }
 
     private fun showSnackbar(text: String) {
+        if (mapStopped) return
         val root = findViewById<View>(R.id.mapRoot)
         val bar = Snackbar.make(root, text, Snackbar.LENGTH_SHORT)
-        // Anchor to a VISIBLE FAB so the snackbar sits above it: fabLocate is GONE
-        // during immersive nav (fabEndNav is the one shown then), so picking the
-        // hidden one floated the snackbar at the wrong height. Pick whatever's up,
-        // else leave it unanchored (bottom of the screen).
+        // Anchor above the highest VISIBLE bottom control: the zoom capsule sits over fabLocate, so
+        // anchoring to fabLocate hid zoom-out; in immersive nav only fabEndNav is up. Else unanchored.
         val anchor = when {
             navigating -> findViewById<View>(R.id.fabEndNav)?.takeIf { it.visibility == View.VISIBLE }
-            else -> findViewById<View>(R.id.fabLocate)?.takeIf { it.visibility == View.VISIBLE }
+            else -> listOf(R.id.zoomControls, R.id.fabLocate).firstNotNullOfOrNull { id ->
+                findViewById<View>(id)?.takeIf { it.visibility == View.VISIBLE }
+            }
         }
         if (anchor != null) bar.anchorView = anchor
         bar.show()
@@ -2146,20 +2474,9 @@ open class RoadSenseMapActivity : AppCompatActivity() {
     private val googleHost = object : GoogleMapController.Host {
         override fun isNight(): Boolean = isNightTheme()
 
-        // Always the dark roles: this palette styles the night basemap whatever the current theme.
-        override fun nightPalette() = GoogleMapStyle.NightPalette(
-            land = m3Night("surface"),
-            water = m3Night("secondary_container"),
-            park = m3Night("surface_container_high"),
-            road = m3Night("surface_container_high"),
-            roadCasing = m3Night("outline_variant"),
-            highway = m3Night("surface_container_highest"),
-            label = m3Night("on_surface_variant"),
-            labelHalo = m3Night("surface"),
-            poi = m3Night("tertiary")
-        )
-
-        override fun backgroundHex(): String = m3Hex("surface")
+        // At night: the land colour of the night roadmap, so tiles still loading don't show as black squares.
+        override fun backgroundHex(): String =
+            if (isNightTheme()) com.overdrive.app.navmap.glass.MapGlassBasemap.N_LAND else m3Hex("surface")
 
         override fun requestStyleReload() = runOnUiThread { requestGoogleStyleReload() }
 
@@ -2195,6 +2512,8 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                 return
             }
             waits = 0
+            // 5 s with no callback: that load is lost, not slow
+            styleReloadInFlight = false
             reloadStyleForTheme()
         }
     }
@@ -2493,8 +2812,11 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         btnStop.setIconResource(if (isStop) R.drawable.ic_clear else R.drawable.ic_add)
         btnStop.setOnClickListener {
             sheet.dismiss()
-            if (isStop) removePoiStop(existingIdx)
-            else addPoiAsStop(SearchResult(label, lat, lng))
+            if (isStop) {
+                // by place, not the index it opened with: a stop may have left the trip meanwhile
+                val idx = routeStops.indexOfFirst { kotlin.math.abs(it.lat - lat) < 1e-5 && kotlin.math.abs(it.lng - lng) < 1e-5 }
+                if (idx >= 0) removePoiStop(idx)
+            } else addPoiAsStop(SearchResult(label, lat, lng))
         }
 
         view.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnPoiNavigate)
@@ -2544,7 +2866,7 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         if (index !in routeStops.indices) return
         routeStops.removeAt(index)
         showSnackbar(getString(R.string.roadsense_map_stop_removed))
-        if (routeStops.isEmpty()) clearRoutePreview() else recomputeItinerary()
+        if (routeStops.isEmpty()) { if (navigating) endTrip() else clearRoutePreview() } else recomputeItinerary()
     }
 
     // ---------------------------------------------------------------------
@@ -2805,10 +3127,26 @@ open class RoadSenseMapActivity : AppCompatActivity() {
      * stops are stored. Cluster mirror never persists (it's a view-only consumer of
      * the head-unit's NavSession). Cheap SharedPreferences write; safe on main.
      */
-    private fun persistTrip() {
+    private fun persistTrip(guiding: Boolean = navigating) {
         if (clusterMode) return
-        NavTripStore.save(applicationContext, ArrayList(routeStops), navigating)
+        // set out for this destination (not one just replaced), or restored as such and not guiding yet
+        val dest = routeStops.lastOrNull()
+        persistedSetOut = dest != null &&
+            ((navigating && guidance.hasSetOut && dest == guidedDest) || dest == resumeSetOutTo)
+        NavTripStore.save(applicationContext, ArrayList(routeStops), guiding, setOut = persistedSetOut)
+        // where the car is left, for the stops as they are now
+        if (navigating) {
+            noteLeftAt(lastFix)
+            touchTrip(leftAtDest, leftAtStop != null, leftStanding)
+        }
     }
+
+    /** What the saved trip says about [NavGuidanceEngine.hasSetOut], so it's saved again once that changes. */
+    private var persistedSetOut = false
+    /** The destination guidance (and its set-out latch) belongs to. */
+    private var guidedDest: SearchResult? = null
+    /** A guiding trip restored after a restart had set out: its next guidance starts set out. */
+    private var resumeSetOutTo: SearchResult? = null
 
     /**
      * Restore a persisted trip on first open: re-seed [routeStops] and recompute the
@@ -2822,19 +3160,85 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         didRestoreTrip = true
         val trip = NavTripStore.load(applicationContext) ?: return
         if (trip.stops.isEmpty()) return
+        val start = NavTripStore.takeStart(applicationContext, START_REQUEST_MAX_AGE_MS)
+        // the driver's yes is the newer wish: guidance already running ends first (keeping the trip just loaded)
+        endOldGuidanceFor(start)
+        if (start) {
+            briefingStartAt = android.os.SystemClock.elapsedRealtime()
+            briefingWaitedForFix = false
+        }
+        val myStartAt = briefingStartAt
+        val gen = routeGen
         // Need an origin to recompute. Use the last fix if we have one, else fetch.
-        val resume = {
+        val resume = resume@{
+            // a trip that was guiding, picked up again with the car already at its destination: it arrived meanwhile
+            val dest = trip.stops.lastOrNull()
+            val here = lastFix
+            // (not under way yet, or with a stop still left: only after a long while away)
+            val away = trip.awayMs > STALE_GUIDANCE_GAP_MS
+            val freshHere = here?.takeIf { fixIsFresh(RESTORE_FIX_MAX_AGE_MS) }
+            // (not at its last stop, nor by the next one it was left by: nearer that than the destination)
+            val destM = if (dest != null && freshHere != null) guidance.haversineMeters(freshHere.lat, freshHere.lng, dest.lat, dest.lng)
+            else Double.MAX_VALUE
+            val stopsBy = listOfNotNull(
+                trip.stopLeftAt,
+                trip.stops.takeIf { trip.leftAtStop && it.size >= 2 }?.get(0)?.let { com.overdrive.app.navmap.nav.GeoPoint(it.lat, it.lng) }
+            )
+            val atDest = destM <= STALE_ARRIVED_M &&
+                stopsBy.all { destM < guidance.haversineMeters(freshHere!!.lat, freshHere.lng, it.lat, it.lng) }
+            // (or left by it when guidance stopped, the car switched off there, and back a while later; or guidance gone so
+            // long it's done with, wherever the car went meanwhile)
+            val awayFromLeft = if (trip.leftStanding) trip.awayMs > LEFT_PARKED_RETURN_MS
+            else trip.measuredAwayMs > STALE_GUIDANCE_GAP_MS
+            if (!start && trip.navigating &&
+                ((atDest && away) || (awayFromLeft && trip.leftAtDest) || trip.awayMs > STALE_TRIP_MS)
+            ) {
+                NavTripStore.clear(applicationContext)
+                return@resume
+            }
             routeStops.clear()
             routeStops.addAll(trip.stops)
-            showSnackbar(getString(R.string.roadsense_map_trip_restored))
-            recomputeItinerary(autoStart = trip.navigating)
+            resumeStopLeftAt = trip.stopLeftAt.takeIf { !start && trip.navigating }
+            // left standing by the next stop, back a long while later: visited
+            if (!start && trip.navigating && awayFromLeft && trip.leftAtStop && routeStops.size >= 2) {
+                val visited = routeStops.removeAt(0)
+                NavTripStore.touch(applicationContext)
+                NavTripStore.stopLeft(applicationContext, visited.lat, visited.lng)
+                resumeStopLeftAt = com.overdrive.app.navmap.nav.GeoPoint(visited.lat, visited.lng)
+            }
+            // under way before, picked up a long while later, or already at its only stop: it can still end where the car is
+            resumeSetOutTo = if (!start && trip.navigating && (trip.setOut || away || (atDest && trip.stops.size <= 1))) dest
+            else null
+            if (!start) showSnackbar(getString(R.string.roadsense_map_trip_restored))
+            if (start && !lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) {
+                // left before it could route (the reverse camera, another app): it carries on when the map is back
+                routeOnReturn = true
+                routeOnReturnSince = android.os.SystemClock.elapsedRealtime()
+                fixWaitOnReturn = false
+                NavTripStore.clear(applicationContext)
+            } else {
+                // (a guiding trip picked up a good while later comes back as a preview: it may have been finished without
+                // the map; Go takes it up again)
+                recomputeItinerary(autoStart = (trip.navigating && trip.awayMs <= RESUME_AS_PREVIEW_MS) || start)
+            }
         }
-        if (lastFix != null) { resume(); return }
+        // a fix from before the map was left (GPS stops with it) is no origin for a new trip
+        val freshFix = lastFix != null && fixIsFresh(RESTORE_FIX_MAX_AGE_MS)
+        if (freshFix) { resume(); return }
         ioExecutor().execute {
             val fix = RoadSenseHazardApiClient.fetchCurrentLocation()
             mainHandler.post {
-                if (isFinishing || isDestroyed) return@post
+                if (isFinishing || isDestroyed) {
+                    // a briefing yes the map never got to: no stale plan for a later map
+                    if (start) NavTripStore.clear(applicationContext)
+                    return@post
+                }
                 if (fix != null) lastFix = fix
+                // a route the driver searched or cleared meanwhile stands
+                if (routeGen != gen) {
+                    if (start && briefingStartAt == myStartAt) briefingStartAt = 0L
+                    return@post
+                }
                 resume()
             }
         }
@@ -3114,6 +3518,7 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                 // Default: a brand-new destination replaces the whole itinerary.
                 routeStops.clear()
                 routeStops.add(result)
+                unroutedSearch = true
             }
         }
         recomputeItinerary()
@@ -3425,8 +3830,18 @@ open class RoadSenseMapActivity : AppCompatActivity() {
     private fun previewRoutes(destLat: Double, destLng: Double, destLabel: String) {
         routeStops.clear()
         routeStops.add(SearchResult(destLabel, destLat, destLng))
+        unroutedSearch = true
         recomputeItinerary()
     }
+
+    /** A new search's destination hasn't been routed yet (so a failure leaves no trip to restore). */
+    private var unroutedSearch = false
+    /** An itinerary's routing is out (its result replans if the stops changed meanwhile). */
+    private var recomputing = false
+    /** When a briefing trip was set aside for the map to come back. */
+    private var routeOnReturnSince = 0L
+    /** The stops [previewRoutes] were planned through. */
+    private var previewStops: List<SearchResult> = emptyList()
 
     /**
      * Recompute + preview the current itinerary ([routeStops]) from the live GPS
@@ -3464,20 +3879,35 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         else -> getString(R.string.roadsense_map_route_failed)
     }
 
-    private fun recomputeItinerary(autoStart: Boolean = false) {
-        // Persist the new itinerary so it survives leaving the map.
-        persistTrip()
+    private fun recomputeItinerary(autoStart: Boolean = false, retry: Boolean = false) {
+        cancelRouteRetry()
+        val gen = routeGen
+        if (!retry) routeRetries = 0
+        autoRouting = autoStart
+        routeOnReturn = false
+        fixWaitOnReturn = false
+        routeOnFreshFix = false
+        if (!autoStart) briefingStartAt = 0L
+        // Persist the new itinerary so it survives leaving the map (a restored guiding trip still routing as guiding).
+        persistTrip(guiding = navigating || (autoStart && briefingStartAt == 0L))
         // The itinerary view should reflect the current stops immediately even
         // while the route is being (re)computed.
         if (routeStops.isEmpty()) {
             clearRoutePreview()
             return
         }
-        val origin = lastFix
+        val freshEnough = !(autoStart && briefingStartAt > 0L) || fixIsFresh(RESTORE_FIX_MAX_AGE_MS)
+        val origin = lastFix?.takeIf { freshEnough }
         if (origin == null) {
-            showSnackbar(getString(R.string.roadsense_map_no_location))
+            lastRouteFailNoFix = true
+            if (autoStart && briefingStartAt > 0L) briefingWaitedForFix = true
+            // only the first and the last failure are shown
+            if (!retryRoute(autoStart) || !retry) showSnackbar(getString(R.string.roadsense_map_no_location))
             return
         }
+        lastRouteFailNoFix = false
+        // (a stop the car is right at, or just through, isn't planned again)
+        if (navigating && !clusterMode) tripStops.beforeReroute(viaStops(), origin.lat, origin.lng)?.let { dropDone(it) }
         val destination = routeStops.last()
         val destLat = destination.lat
         val destLng = destination.lng
@@ -3486,25 +3916,51 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         val stopsSnapshot = ArrayList(routeStops)
         val useVia = stopsSnapshot.size > 1
 
-        showSnackbar(getString(R.string.roadsense_map_routing))
+        if (!retry && android.os.SystemClock.elapsedRealtime() >= goBackUntil) showSnackbar(getString(R.string.roadsense_map_routing))
+        recomputing = true
+        // (an edit while guiding: from the way the car is going)
+        val heading = if (navigating && !clusterMode) routeHeading() else null
         ioExecutor().execute {
             val routes = if (useVia) {
                 val pts = ArrayList<com.overdrive.app.navmap.nav.GeoPoint>(stopsSnapshot.size + 1)
                 pts.add(com.overdrive.app.navmap.nav.GeoPoint(origin.lat, origin.lng))
                 stopsSnapshot.forEach { pts.add(com.overdrive.app.navmap.nav.GeoPoint(it.lat, it.lng)) }
-                NavRouting.routeVia(pts)
+                NavRouting.routeVia(pts, heading)
             } else {
                 NavRouting.routesWithAlternates(
-                    origin.lat, origin.lng, destLat, destLng, ROUTE_ALTERNATES
+                    origin.lat, origin.lng, destLat, destLng, ROUTE_ALTERNATES, heading
                 )
             }
             mainHandler.post {
+                recomputing = false
                 if (isFinishing || isDestroyed) return@post
-                if (routes.isEmpty()) {
-                    showSnackbar(routeFailureMessage())
+                // a newer itinerary or an ended trip: an old result never shows or starts anything
+                if (gen != routeGen) return@post
+                // nor a briefing's, unseen: a map left meanwhile carries on when it's back
+                if (autoStart && briefingStartAt > 0L &&
+                    !lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) {
+                    autoRouting = false
+                    routeOnReturn = true
+                    routeOnReturnSince = android.os.SystemClock.elapsedRealtime()
+                    fixWaitOnReturn = briefingWaitedForFix
+                    NavTripStore.clear(applicationContext)
                     return@post
                 }
+                if (routes.isEmpty()) {
+                    if (!retryRoute(autoStart) || !retry) showSnackbar(routeFailureMessage())
+                    return@post
+                }
+                autoRouting = false
+                unroutedSearch = false
+                if (navigating && !clusterMode && routeStops != stopsSnapshot) {
+                    lastFix?.let { replanFrom(it) }
+                    return@post
+                }
+                // guiding already (the driver started it), or about to: the briefing's own start is done
+                val briefingStart = autoStart && !navigating && briefingStartAt > 0L
+                if (navigating || autoStart) briefingStartAt = 0L
                 previewRoutes = routes
+                previewStops = stopsSnapshot
                 previewDestLabel = destLabel
                 previewSelectedIdx = 0
                 // Lock the destination so off-route auto-reroute + in-nav route
@@ -3531,6 +3987,22 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                     // this branch (no showRouteOptionsSheet/frameRoutes) keeps the
                     // immersive follow view intact — matching switchToRouteDuringNav.
                     guidance.start(routes[0])
+                    // (another destination: the stops done with were the old trip's)
+                    val newDest = stopsSnapshot.lastOrNull()
+                    val oldDest = guidedDest
+                    if (newDest != null && oldDest != null &&
+                        guidance.haversineMeters(newDest.lat, newDest.lng, oldDest.lat, oldDest.lng) > NEW_DEST_M
+                    ) {
+                        tripStops.forgetLeftStop()
+                        NavTripStore.clearStopLeft(applicationContext)
+                    }
+                    guidedDest = stopsSnapshot.lastOrNull()
+                    replanPending = false
+                    clearLeftAt()
+                    tickElapsedAt = 0L
+                    tickUptimeAt = 0L
+                    resetArrivalTimers()
+                    tripStops.routeInstalled(viaStops(stopsSnapshot), lastFix?.lat ?: Double.NaN, lastFix?.lng ?: Double.NaN)
                     resetRouteTrim()
                     lastSpokenInstruction = null
                     NavSession.publishRoute(routes[0], destLabel)
@@ -3541,6 +4013,7 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                     // into the immersive view (no route-options sheet).
                     loadHazardCountsForRoutes(routes)
                     startGuidance(routes[0], destLabel)
+                    if (briefingStart && !clusterMode) offerClusterMap()
                 } else {
                     showRouteOptionsSheet(routes, destLabel)
                     frameRoutes(routes)
@@ -3685,7 +4158,7 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.tvRouteSheetTitle)?.text =
             getString(R.string.roadsense_map_routes_to, destLabel)
 
-        findViewById<View>(R.id.btnRouteSheetClose)?.setOnClickListener { clearRoutePreview() }
+        findViewById<View>(R.id.btnRouteSheetClose)?.setOnClickListener { if (navigating) hideRouteSheet() else clearRoutePreview() }
         findViewById<View>(R.id.btnRouteSheetSave)?.setOnClickListener { anchor ->
             // Save the current destination as Home / Work / a custom favourite.
             val dest = routeStops.lastOrNull() ?: return@setOnClickListener
@@ -3983,7 +4456,7 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         routeStops.removeAt(index)
         showSnackbar(getString(R.string.roadsense_map_stop_removed))
         if (routeStops.isEmpty()) {
-            clearRoutePreview()
+            if (navigating) endTrip() else clearRoutePreview()
         } else {
             recomputeItinerary()
         }
@@ -4024,13 +4497,51 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         }
     }
 
+    /** About a minute of retries, for a restored trip only (it starts guidance itself). */
+    private fun retryRoute(autoStart: Boolean): Boolean {
+        if (!autoStart || clusterMode || routeRetries >= ROUTE_RETRY_MAX) {
+            autoRouting = false
+            // a search that never got a route isn't a trip to bring back later
+            if (!autoStart && !navigating && !clusterMode && unroutedSearch) NavTripStore.clear(applicationContext)
+            // a briefing trip that never routed isn't kept for a later map, unless all it lacks is a fix
+            if (autoStart && briefingStartAt > 0L) {
+                if (lastRouteFailNoFix && android.os.SystemClock.elapsedRealtime() - briefingStartAt < FIX_WAIT_MAX_MS) {
+                    routeOnFreshFix = true
+                } else {
+                    briefingStartAt = 0L
+                    NavTripStore.clear(applicationContext)
+                }
+            }
+            return false
+        }
+        routeRetries++
+        mainHandler.postDelayed(routeRetry, ROUTE_RETRY_MS)
+        return true
+    }
+
+    private fun cancelRouteRetry() {
+        routeGen++
+        autoRouting = false
+        mainHandler.removeCallbacks(routeRetry)
+    }
+
+    // Ended or arrived: guidance stops and the trip goes with it, so a style reload can't draw it back.
+    private fun endTrip(keepSaved: Boolean = false) {
+        stopGuidance(keepSaved)
+        clearRoutePreview(keepSaved = keepSaved)
+    }
+
     /** Fully clear the preview: routes, lines, sheet, locked destination, stops. */
-    private fun clearRoutePreview(keepActive: Boolean = false) {
+    private fun clearRoutePreview(keepActive: Boolean = false, keepSaved: Boolean = false) {
+        cancelRouteRetry()
+        resumeSetOutTo = null
+        unroutedSearch = false
+        previewStops = emptyList()
         previewRoutes = emptyList()
         lockedDestLat = Double.NaN
         lockedDestLng = Double.NaN
         // Trip abandoned → drop the persisted itinerary too.
-        if (!clusterMode) NavTripStore.clear(applicationContext)
+        if (!clusterMode && !keepSaved) NavTripStore.clear(applicationContext)
         // Drop the whole itinerary + any pending add/edit mode so a fresh search
         // starts a brand-new trip.
         routeStops.clear()
@@ -4057,6 +4568,7 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         previewSelectedIdx = idx
         val chosen = previewRoutes[idx]
         guidance.start(chosen)
+        tripStops.routeSwitched(lastFix?.lat ?: Double.NaN, lastFix?.lng ?: Double.NaN)
         resetRouteTrim()   // switched to a different route → reset trim to the new line
         lastSpokenInstruction = null
         drawRoutePreview(previewRoutes, idx)
@@ -4089,8 +4601,37 @@ open class RoadSenseMapActivity : AppCompatActivity() {
 
     /** Begin turn-by-turn: arm the engine, enter immersive view, start tick + voice. */
     private fun startGuidance(route: NavRoute, destLabel: String) {
+        // a restored trip still routing must not switch this guidance to its own route
+        cancelRouteRetry()
+        briefingStartAt = 0L
+        hideRouteSheet()
         guidance.start(route)
+        val planned = previewStops.takeIf { it.isNotEmpty() } ?: ArrayList(routeStops)
+        guidedDest = planned.lastOrNull()
+        // restored after a restart, it had set out: so it can still end where the car is parked
+        val resumed = resumeSetOutTo != null && resumeSetOutTo == guidedDest
+        if (resumed) guidance.resumeSetOut()
+        resumeSetOutTo = null
+        tripTouchedAt = 0L
+        rerouteGen++
+        rerouting = false
+        rerouteAgain = false
+        replanPending = false
+        clearLeftAt()
+        tickElapsedAt = 0L
+        tickUptimeAt = 0L
+        tripStops.begin()
+        goBackUntil = 0L
+        pendingGoBack = null
+        // (nor where its last stop was done with, the car still there)
+        resumeStopLeftAt?.let { if (resumed) tripStops.stopLeftAt(it.lat, it.lng) }
+        // (another trip's is no more)
+        if (!resumed || resumeStopLeftAt == null) NavTripStore.clearStopLeft(applicationContext)
+        resumeStopLeftAt = null
+        tripStops.routeInstalled(viaStops(planned), lastFix?.lat ?: Double.NaN, lastFix?.lng ?: Double.NaN)
         navigating = true
+        // a new trip's first tick isn't "back after a long while"
+        NavSession.guidanceTick(headUnit = !clusterMode)
         resetRouteTrim()   // nav start → route fully visible, trim begins from 0
         // Guidance owns the puck now (its 1 Hz tick + 30 fps dead-reckon) — stop the
         // head-unit idle follow so the two don't both write the puck.
@@ -4123,6 +4664,71 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         if (hud == null) findViewById<FloatingActionButton>(R.id.fabEndNav)?.visibility = View.VISIBLE
         mainHandler.removeCallbacks(guidanceRunnable)
         mainHandler.post(guidanceRunnable)
+    }
+
+    // A Trip Briefing yes started this guidance: the cluster map one tap or one "yes" away, unless it's up there already.
+    private fun offerClusterMap() {
+        ioExecutor().execute {
+            if (isClusterProjectionActive()) return@execute
+            mainHandler.post {
+                if (isFinishing || isDestroyed || !navigating || clusterMode) return@post
+                val root = findViewById<View>(R.id.mapRoot) ?: return@post
+                var voice: com.overdrive.app.voice.TripBriefingAsk.Handle? = null
+                val bar = Snackbar.make(root, getString(R.string.roadsense_map_cluster_offer), CLUSTER_OFFER_SHOW_MS)
+                    .setAction(R.string.roadsense_map_cluster_show) {
+                        voice?.cancel()
+                        startClusterMap()
+                    }
+                findViewById<View>(R.id.fabEndNav)?.takeIf { it.visibility == View.VISIBLE }?.let { bar.anchorView = it }
+                bar.show()
+                // asked out loud too (a recorded clip where the head unit has no speech engine), answered yes or no
+                val ask = com.overdrive.app.voice.TripBriefingAsk(
+                    "cluster-" + android.os.SystemClock.elapsedRealtime(), getString(R.string.roadsense_map_cluster_offer),
+                    null, 0, null, emptyList(), CLUSTER_OFFER_SHOW_MS.toLong(), CLUSTER_OFFER_CLIP, true
+                )
+                voice = try {
+                    com.overdrive.app.voice.VoiceAssistantRuntime.askTripBriefing(ask) { answer, _, _ ->
+                        mainHandler.post { onClusterAnswer(answer, bar) }
+                    }
+                } catch (_: Throwable) {
+                    null
+                }
+            }
+        }
+    }
+
+    private fun onClusterAnswer(answer: String, bar: Snackbar) {
+        if (isFinishing || isDestroyed) return
+        when (answer) {
+            com.overdrive.app.voice.TripBriefingAsk.ANSWER_YES -> {
+                bar.dismiss()
+                if (navigating) startClusterMap()
+            }
+            com.overdrive.app.voice.TripBriefingAsk.ANSWER_NO, com.overdrive.app.voice.TripBriefingAsk.ANSWER_LATER -> bar.dismiss()
+        }
+    }
+
+    private fun startClusterMap() {
+        ioExecutor().execute {
+            val projecting = try {
+                val conn = com.overdrive.app.util.DaemonHttpClient.open("/api/navmap/cluster/start", "POST", 1500, 8000)
+                try {
+                    conn.doOutput = true
+                    conn.setRequestProperty("Content-Type", "application/json")
+                    conn.outputStream.use { it.write("{}".toByteArray(Charsets.UTF_8)) }
+                    conn.responseCode in 200..299 &&
+                        org.json.JSONObject(conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() })
+                            .optBoolean("projecting", false)
+                } finally {
+                    conn.disconnect()
+                }
+            } catch (_: Throwable) {
+                false
+            }
+            if (!projecting) mainHandler.post {
+                if (!isFinishing && !isDestroyed) showSnackbar(getString(R.string.roadsense_map_cluster_failed))
+            }
+        }
     }
 
     /**
@@ -4211,7 +4817,8 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                 .target(m.cameraPosition.target)
                 .tilt(0.0)
                 .bearing(0.0)
-                .zoom(DEFAULT_ZOOM)
+                // the nav zoom's tiles still cover a street view; zooming out to the overview needed a screen of new ones
+                .zoom(m.cameraPosition.zoom.coerceIn(DEFAULT_ZOOM, FOLLOW_ZOOM))
                 .padding(0.0, 0.0, 0.0, 0.0)
                 .build()
             m.animateCamera(CameraUpdateFactory.newCameraPosition(pos), RECENTER_ANIM_MS)
@@ -4224,8 +4831,8 @@ open class RoadSenseMapActivity : AppCompatActivity() {
      * zoom. Returns 0 (flat) on the non-touch cluster and while navigating — those
      * own the camera via their own loops (the cluster glanceable follow, and the
      * steeper heading-up [IMMERSIVE_TILT] during guidance). Only applied by
-     * [recenter] at [FOLLOW_ZOOM]; the overview framings (route preview, nav-exit
-     * level-off at [DEFAULT_ZOOM]) intentionally stay flat, where a tilt would distort.
+     * [centreOn] at [FOLLOW_ZOOM]; the route preview framing and the nav-exit level-off
+     * intentionally stay flat.
      */
     private fun restingTilt(): Double =
         if (clusterMode || navigating) 0.0 else RESTING_TILT
@@ -4301,7 +4908,7 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         val root = findViewById<com.overdrive.app.navmap.ui.NavHudLayout>(R.id.navHud) ?: return
         hud = try {
             com.overdrive.app.navmap.ui.NavHudController(root, object : com.overdrive.app.navmap.ui.NavHudController.Listener {
-                override fun onEnd() = stopGuidance()
+                override fun onEnd() = endTrip()
                 override fun onOverview() = toggleRouteOverview()
                 override fun onMute() {
                     val v = navVoice ?: return
@@ -4444,6 +5051,14 @@ open class RoadSenseMapActivity : AppCompatActivity() {
 
     /** The driver panned or zoomed during guidance: hand them the camera until they recentre or leave it alone. */
     private fun onUserMovedMap() {
+        if (clusterMode && layoutGeneration > 0) {
+            cameraRig.free(android.os.SystemClock.elapsedRealtime())
+            mainHandler.removeCallbacks(recenterAfterFree)
+            mainHandler.postDelayed(recenterAfterFree, com.overdrive.app.navmap.motion.NavCameraRig.RECENTER_AFTER_MS)
+            return
+        }
+        // idle: the driver took the map
+        if (!navigating && !clusterMode) idleFollowCamera = false
         if (!navigating || clusterMode) return
         cameraRig.free(android.os.SystemClock.elapsedRealtime())
         val h = hud
@@ -4463,18 +5078,64 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                 // main thread (same thread that start()/stop() it), not the IO thread.
                 // Pass heading+speed+clock so the windowed map-matcher + adaptive
                 // off-route latch engage (legacy 2-arg path stays for tests).
+                // (a bearing only while moving: a crawl's is noise)
                 val state = guidance.update(
-                    fix.lat, fix.lng, fix.bearing, fix.bestSpeedMps,
+                    fix.lat, fix.lng, fix.bearing?.takeIf { fix.bestSpeedMps > 2.0 }, fix.bestSpeedMps,
                     android.os.SystemClock.elapsedRealtime()
                 )
                 lastFix = fix
+                lastRemainingM = state.remainingDistanceM
+                val gear = gearNow(fix)
+                noteTrack(fix, gear)
+                if (!clusterMode) {
+                    // back after a long while (parked, the map closed), standing at the destination of a trip that was
+                    // under way: it arrived meanwhile
+                    val gap = android.os.SystemClock.elapsedRealtime() - NavSession.headUnitTickAt
+                    // (on the time the head unit slept since the last tick, whatever the first fix after it says: the
+                    // car may be moving off already; a gap in fixes while awake isn't sleep)
+                    val slept = if (NavSession.headUnitTickAt > 0L) sleptSinceTick() else 0L
+                    if (settleLeftGuidance(slept)) return@post
+                    // (asleep so long the trip is done with, wherever the car was left)
+                    if (slept > STALE_TRIP_MS) {
+                        endTrip()
+                        return@post
+                    }
+                    markTick()
+                    if (NavSession.headUnitTickAt > 0L && gap > STALE_GUIDANCE_GAP_MS && guidance.hasSetOut &&
+                        clearOfLastStop() &&
+                        routeStops.size <= 1 && fix.bestSpeedMps <= NEAR_STOP_SPEED_MPS && tripDest() != null &&
+                        guidance.haversineMeters(fix.lat, fix.lng, tripDest()!!.lat, tripDest()!!.lng) <= STALE_ARRIVED_M
+                    ) {
+                        NavSession.guidanceTick(headUnit = true)
+                        endTrip()
+                        return@post
+                    }
+                    updateStops(fix, gear)
+                    if (!recomputing && routeOutOfStep()) {
+                        maybeReroute(fix.lat, fix.lng, fix.bearing?.takeIf { fix.bestSpeedMps > 2.0 }, quiet = true)
+                    }
+                    if (!persistedSetOut && guidance.hasSetOut && routeStops.lastOrNull() == guidedDest) persistTrip()
+                    // behind another app, where the car is left if the head unit sleeps next; and the trip saved with it
+                    // where the car is left if guidance stops ticking now (the screen off, the head unit asleep, the power
+                    // gone), saved with the trip whenever it changes
+                    val noted = Triple(leftAtDest, leftAtStop != null, leftStanding)
+                    noteLeftAt(fix)
+                    val noting = Triple(leftAtDest, leftAtStop != null, leftStanding)
+                    val touchedAgoMs = android.os.SystemClock.elapsedRealtime() - tripTouchedAt
+                    if ((noting != noted && touchedAgoMs >= TRIP_TOUCH_MIN_MS) || tripTouchedAt == 0L || touchedAgoMs >= TRIP_TOUCH_MS) {
+                        touchTrip(leftAtDest, leftAtStop != null, leftStanding)
+                    }
+                    // (the drawing that measures traffic progress is off then)
+                    if (mapStopped && guidance.progressM >= 0.0) trafficTraveledM = guidance.progressM
+                }
+                NavSession.guidanceTick(headUnit = !clusterMode)
                 // Feed the TRUTH fix into the motion estimator. The puck + camera are
                 // NOT painted here anymore — the ~12fps renderMotionFrame() glides
                 // them from the dead-reckoned estimate so motion is continuous between
                 // these sparse 1s fixes (was: teleport per fix). startMotionFollow()
                 // is idempotent; ensure it's running.
                 feedMotionTruth(fix)
-                startMotionFollow()
+                if (!mapStopped) startMotionFollow()
                 // Arrival: the engine's radius/remainder check, OR a speed-gated
                 // near-stop on the final approach. The latter handles the common
                 // head-unit case where GPS parks the car 20-30 m off the true pin
@@ -4484,26 +5145,74 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                 // Require TWO consecutive near-stop ticks so a car briefly halted at a
                 // light/queue that happens to sit just short of the pin doesn't end nav
                 // on the very first stopped fix.
-                if (state.remainingDistanceM <= NEAR_STOP_ARRIVAL_M && fix.bestSpeedMps <= NEAR_STOP_SPEED_MPS) {
+                // under way once part of a route to this destination is behind the car (not at a round trip's start)
+                val setOut = guidance.hasSetOut
+                val offRoad = guidance.offRouteM >= NEAR_STOP_OFF_ROAD_M
+                // (the gear known and not P)
+                val inGear = gear != null && gear != GEAR_PARK
+                // (on the road as well once the car stands right at the pin: a light that close is at the destination)
+                if (state.remainingDistanceM <= NEAR_STOP_ARRIVAL_M && fix.bestSpeedMps <= NEAR_STOP_SPEED_MPS &&
+                    ((offRoad && puckReachedDestination(NEAR_STOP_PIN_M)) || puckReachedDestination(AT_PIN_STOP_M))
+                ) {
                     nearStopTicks++
                 } else {
                     nearStopTicks = 0
                 }
                 val nearStopArrived = nearStopTicks >= NEAR_STOP_ARRIVAL_TICKS
-                // PUCK-PROXIMITY arrival (the "nav never ends near the destination"
-                // fix). The guidance engine above is advanced ONLY by the 1 Hz daemon
-                // /api/gps poll, whose position can lag or sit 20-30 m off the true pin
-                // — so engine.arrived + the near-stop net can both miss even though the
-                // PUCK the driver sees (driven by the low-latency DIRECT platform fix
-                // through the motion estimator) has visibly reached the destination.
-                // Cross-check the estimator pose against the LOCKED destination: when
-                // the puck is within the arrival radius and the car has stopped, the
-                // driver HAS arrived. Same speed gate + 2-tick debounce as the near-stop
-                // net so a brief halt short of the pin can't end nav early. Head-unit
-                // only (the locked dest + estimator live here; the cluster has neither).
-                val puckArrived = puckReachedDestination() && fix.bestSpeedMps <= NEAR_STOP_SPEED_MPS
-                if (puckArrived) puckArrivedTicks++ else puckArrivedTicks = 0
-                val puckArrivedConfirmed = puckArrivedTicks >= NEAR_STOP_ARRIVAL_TICKS
+                // PUCK-PROXIMITY arrival: the estimator pose (fed by the low-latency direct fix) against the LOCKED
+                // destination, for when the route's end isn't where the car stops — parked across a divided road from it,
+                // or by a pin the route can't reach (whatever stop was skipped on the way). It takes a long stop there:
+                // a brief halt beside the pin isn't arriving. Head-unit only (the cluster has no locked dest).
+                // Switched off within 150 m of it; in P for 3 s off the road within 150 m (its car park), or on it within
+                // 60 m (a covered car park holds the fix at its entrance, an aisle the route runs through); little route
+                // left either way. Else near
+                // the pin for 150 s (longer than a light), 3 min with a stop still left (one skipped on the way); with
+                // none left, off the road throughout within 60 m for 60 s (its car park; a forecourt further back
+                // isn't), or standing within 150 m for 5 min (a kerb down the road, an aisle the route runs through), or,
+                // not in gear, within 400 m for 10 min (a big car park). None where the car stands at a
+                // stop just done with, nor with a long way round left (across a motorway, a river).
+                val nowMono = android.os.SystemClock.elapsedRealtime()
+                val stopped = fix.bestSpeedMps <= NEAR_STOP_SPEED_MPS
+                val clear = clearOfLastStop()
+                // (with a stop still left, not while at that stop: its own rules)
+                val atNextStop = routeStops.size > 1 && guidance.haversineMeters(fix.lat, fix.lng, routeStops[0].lat, routeStops[0].lng) <=
+                    TripStops.VISIT_NEAR_M
+                val atPin = clear && stopped && !atNextStop && puckReachedDestination(LONG_STOP_RADIUS_M)
+                // stood on the road short of it, then back or off the route from there (a drop-off at the school gate)
+                val droppedOff = routeStops.size <= 1 && tripDest()?.let {
+                    tripStops.destinationTick(it.lat, it.lng, fix.lat, fix.lng, fix.bestSpeedMps, nowMono)
+                } == true && clear
+                val nearOff = clear && stopped && offRoad && routeStops.size <= 1 && puckReachedDestination(NEAR_OFF_ROAD_RADIUS_M)
+                // (with much of the route still to go — the near side of a divided road — only the longer waits count;
+                // the gear known, standing with more than a little left is a queue, or a light waited out in P)
+                val routeLong = state.remainingDistanceM > if (gear != null) PIN_ROUTE_LEFT_IN_GEAR_M else PIN_ROUTE_LEFT_M
+                val nearLong = clear && stopped && routeStops.size <= 1 && !routeLong && puckReachedDestination(NEAR_LONG_RADIUS_M)
+                val parkedNear = clear && stopped && !inGear && state.remainingDistanceM <= LEFT_ROUTE_MAX_M &&
+                    routeStops.size <= 1 && puckReachedDestination(LEFT_AT_DEST_M)
+                val inParkMs = if (inParkSinceMs > 0L) nowMono - inParkSinceMs else -1L
+                // (in P off the road a few seconds running, not one fix wandering off a light's lane)
+                if (inParkMs < 0L || !offRoad) parkedOffSinceMs = 0L else if (parkedOffSinceMs == 0L) parkedOffSinceMs = nowMono
+                val parkedOff = parkedOffSinceMs > 0L && nowMono - parkedOffSinceMs >= PARKED_BY_MS &&
+                    puckReachedDestination(NEAR_LONG_RADIUS_M)
+                val parkedAtPin = inParkMs >= PARKED_BY_MS && puckReachedDestination(LONG_STOP_RADIUS_M)
+                val parkedBy = clear && stopped && !routeLong && routeStops.size <= 1 && (parkedOff || parkedAtPin)
+                // (switched off across a divided road from it is there: only a long way round by road isn't)
+                val switchedOffBy = clear && stopped && !inGear && state.remainingDistanceM <= LEFT_ROUTE_MAX_M &&
+                    switchedOff() && routeStops.size <= 1 && puckReachedDestination(NEAR_LONG_RADIUS_M)
+                if (!atPin) atPinSinceMs = 0L else if (atPinSinceMs == 0L) atPinSinceMs = nowMono
+                if (!nearOff) nearOffSinceMs = 0L else if (nearOffSinceMs == 0L) nearOffSinceMs = nowMono
+                if (!nearLong) nearLongSinceMs = 0L else if (nearLongSinceMs == 0L) nearLongSinceMs = nowMono
+                if (!parkedNear) parkedNearSinceMs = 0L else if (parkedNearSinceMs == 0L) parkedNearSinceMs = nowMono
+                val atPinMs = when {
+                    routeStops.size > 1 -> PARKED_NEAR_MS
+                    routeLong -> NEAR_LONG_MS
+                    else -> ON_ROAD_AT_PIN_MS
+                }
+                val longStopAtPin = (atPinSinceMs > 0L && nowMono - atPinSinceMs >= atPinMs) ||
+                    (nearOffSinceMs > 0L && nowMono - nearOffSinceMs >= LONG_STOP_MS) ||
+                    (nearLongSinceMs > 0L && nowMono - nearLongSinceMs >= NEAR_LONG_MS) ||
+                    (parkedNearSinceMs > 0L && nowMono - parkedNearSinceMs >= PARKED_FAR_MS) ||
+                    parkedBy || switchedOffBy || droppedOff
                 // ARRIVAL + REROUTE are LIFECYCLE actions owned by the head-unit (the
                 // control surface). The cluster is a VIEW-ONLY mirror: it must not end
                 // nav or recompute a route itself — it has no routeStops/locked dest, so
@@ -4515,13 +5224,16 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                 // lifecycle blocks to the head-unit; the cluster falls through to the
                 // banner-display update below.
                 if (!clusterMode) {
-                    if (state.arrived || nearStopArrived || puckArrivedConfirmed) {
+                    // at the end of the route (every stop on it passed in order; not a route out of step with the
+                    // trip, as to an old destination), or parked at the trip's destination
+                    if (setOut && (((state.arrived || nearStopArrived) && !routeOutOfStep()) || longStopAtPin)) {
                         speakOnce(getString(R.string.roadsense_map_arrived))
                         showSnackbar(getString(R.string.roadsense_map_arrived))
-                        stopGuidance()
+                        endTrip()
                         return@post
                     }
                     if (state.offRoute) {
+                        com.overdrive.app.navmap.cluster.ClusterGuidanceClient.clear("roadsense")
                         // Driver diverged → auto-recompute a route to the LOCKED
                         // destination from the current fix, then keep navigating. Pass
                         // the heading only when genuinely moving (a stationary GPS
@@ -4532,6 +5244,10 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                     }
                 }
                 bindHudGuidance(state)
+                if (!clusterMode) {
+                    com.overdrive.app.navmap.cluster.ClusterGuidanceClient.publishRoadSense(
+                        state, displayEtaSeconds(state.etaSeconds))
+                }
                 val m = state.currentManeuver
                 if (m != null) {
                     // Bucketed turn distance (stable "50 m", not jittery "47 m").
@@ -4571,14 +5287,28 @@ open class RoadSenseMapActivity : AppCompatActivity() {
      * isn't yet inside the radius. Bias-free: estimate() returns null before the first
      * truth fix, so a fresh trip can't false-arrive at the origin.
      */
-    private fun puckReachedDestination(): Boolean {
-        if (lockedDestLat.isNaN() || lockedDestLng.isNaN()) return false
-        if (!motionEstimator.hasFix()) return false
+    private fun puckReachedDestination(radiusM: Double = com.overdrive.app.navmap.nav.NavGuidanceEngine.ARRIVAL_RADIUS_M): Boolean =
+        puckDestinationM().let { !it.isNaN() && it <= radiusM }
+
+    // How far the car (the estimator's pose) is from the trip's destination; NaN when unknown.
+    private fun puckDestinationM(): Double {
+        val dest = tripDest() ?: return Double.NaN
+        if (!motionEstimator.hasFix()) return Double.NaN
         val nowMono = android.os.SystemClock.elapsedRealtime()
-        val m = motionEstimator.estimate(nowMono, nowMono) ?: return false
-        val d = guidance.haversineMeters(m.lat, m.lng, lockedDestLat, lockedDestLng)
-        return d <= com.overdrive.app.navmap.nav.NavGuidanceEngine.ARRIVAL_RADIUS_M
+        val m = motionEstimator.estimate(nowMono, nowMono) ?: return Double.NaN
+        return guidance.haversineMeters(m.lat, m.lng, dest.lat, dest.lng)
     }
+
+    // The trip's destination as it is now (the locked one only where there's no itinerary, as on the cluster).
+    private fun tripDest(): com.overdrive.app.navmap.nav.GeoPoint? = routeStops.lastOrNull()
+        ?.let { com.overdrive.app.navmap.nav.GeoPoint(it.lat, it.lng) }
+        ?: if (lockedDestLat.isNaN()) null else com.overdrive.app.navmap.nav.GeoPoint(lockedDestLat, lockedDestLng)
+
+    // The route on screen isn't the trip's: to another destination, through other stops or another order (an edit), or
+    // through one the trip has left (a replan that hasn't landed).
+    private fun routeOutOfStep(): Boolean =
+        navigating && !clusterMode && routeStops.isNotEmpty() &&
+            (replanPending || routeStops.last() != guidedDest || !tripStops.inStep(viaStops()))
 
     /** Roundabout exit ordinal suffix (" • exit 2") when Valhalla gave one and the
      *  instruction text doesn't already mention that ordinal. Empty otherwise. */
@@ -4864,8 +5594,10 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                 timestampMs = captureMono,
                 canSpeedKmh = lastFix?.canSpeedKmh,
                 accelPercent = lastFix?.accelPercent,
-                brakePercent = lastFix?.brakePercent
+                brakePercent = lastFix?.brakePercent,
+                measuredAtMono = captureMono
             )
+            recenterIfPending(loc.latitude, loc.longitude)
             startMotionFollow()   // idempotent — ensure the glide tick is running
         }
     }
@@ -4939,10 +5671,27 @@ open class RoadSenseMapActivity : AppCompatActivity() {
     /** Consecutive guidance ticks the car has been near-stopped within the final-approach
      *  band — debounces the speed-gated arrival against a brief halt just short of the pin. */
     private var nearStopTicks: Int = 0
-    /** Consecutive guidance ticks the PUCK (estimator pose, fed by the low-latency direct
-     *  fix) has been within the arrival radius of the locked destination AND stopped — the
-     *  puck-proximity arrival debounce, independent of the laggy daemon-poll engine state. */
-    private var puckArrivedTicks: Int = 0
+    /** Since when the car has stood within [LONG_STOP_RADIUS_M] / [LEFT_AT_DEST_M] of the destination (0: not). */
+    private var atPinSinceMs = 0L
+    private var nearOffSinceMs = 0L
+    private var nearLongSinceMs = 0L
+    private var parkedNearSinceMs = 0L
+    // The gear as last read (null: unknown), when, and since when it has been P (0: not).
+    private var gearRead: String? = null
+    private var gearReadAt = 0L
+    private var gearTickAt = 0L
+    private var inParkSinceMs = 0L
+    private var parkedOffSinceMs = 0L
+    // since when the car has been switched off (0: not), where, and whether a reading of it since went stale
+    private var switchedOffSinceMs = 0L
+    private var switchedOffLat = Double.NaN
+    private var switchedOffLng = Double.NaN
+    private var switchedOffStale = false
+    // a restored trip's last stop was done with with the car here
+    private var resumeStopLeftAt: com.overdrive.app.navmap.nav.GeoPoint? = null
+    private val tripStops by lazy { TripStops(guidance) }
+    /** When the saved trip was last stamped as guiding. */
+    private var tripTouchedAt = 0L
 
 
     /**
@@ -4952,20 +5701,36 @@ open class RoadSenseMapActivity : AppCompatActivity() {
      * burst of off-route ticks fires at most one recompute. No-op if the
      * destination isn't set (shouldn't happen while navigating).
      */
-    private fun maybeReroute(fromLat: Double, fromLng: Double, fromHeading: Double? = null) {
-        if (rerouting) return
+    private fun maybeReroute(
+        fromLat: Double, fromLng: Double, fromHeading: Double? = null, force: Boolean = false, quiet: Boolean = false
+    ) {
+        // (a replan for changed stops waits for one in flight, then goes; it isn't held back by the debounce)
+        if (rerouting) { if (force) rerouteAgain = true; return }
         if (lockedDestLat.isNaN() || lockedDestLng.isNaN()) return
         val now = android.os.SystemClock.elapsedRealtime()
-        if (now - lastRerouteMs < REROUTE_MIN_INTERVAL_MS) return
+        if (!force && now - lastRerouteMs < REROUTE_MIN_INTERVAL_MS) return
+        // (not for crawling off the road right by the destination: its car park, whose search would replace the route)
+        // (the gear unknown: arriving there relies on the car being off the route)
+        if (!force && !quiet && !gearKnown() && routeStops.size <= 1 && (lastFix?.bestSpeedMps ?: 0.0) <= CAR_PARK_MPS &&
+            tripDest()?.let { guidance.haversineMeters(fromLat, fromLng, it.lat, it.lng) <= NO_REROUTE_NEAR_DEST_M } == true
+        ) return
         lastRerouteMs = now
         rerouting = true
-        showSnackbar(getString(R.string.roadsense_map_rerouting))
-        val dLat = lockedDestLat; val dLng = lockedDestLng
+        val gen = rerouteGen
         // Itinerary-aware: build the list of stops still AHEAD of the car so a
         // multi-stop trip keeps its remaining via-stops on a reroute instead of
         // collapsing to a direct run at the final destination. Snapshot on the main
         // thread (routeStops is main-thread state).
-        val remainingStops = remainingStopsAhead(fromLat, fromLng)
+        // (a stop just driven through, and turned off from right after, stays behind)
+        tripStops.beforeReroute(viaStops(), fromLat, fromLng)?.let { dropDone(it) }
+        val remainingStops = remainingStopsAhead()
+        // to the trip's destination as it is now (a replaced one included), not the one the old route locked
+        val target = remainingStops.lastOrNull() ?: run { rerouting = false; return }
+        val dLat = target.lat; val dLng = target.lng
+        // (a skip only when the car itself left the route: a replan of ours isn't the driver asking; nor over a way back
+        // to a stop just passed)
+        if (!quiet && now >= goBackUntil) { if (force) showSnackbar(getString(R.string.roadsense_map_rerouting)) else showRerouteSnackbar() }
+        val heading = fromHeading ?: routeHeading()
         ioExecutor().execute {
             // Pass the travel heading so the new route departs in the direction the
             // car is already going (no demanded U-turn back to the old path).
@@ -4975,19 +5740,34 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                 val pts = ArrayList<com.overdrive.app.navmap.nav.GeoPoint>(remainingStops.size + 1)
                 pts.add(com.overdrive.app.navmap.nav.GeoPoint(fromLat, fromLng))
                 remainingStops.forEach { pts.add(com.overdrive.app.navmap.nav.GeoPoint(it.lat, it.lng)) }
-                NavRouting.routeVia(pts)
+                NavRouting.routeVia(pts, heading)
             } else {
                 NavRouting.routesWithAlternates(
-                    fromLat, fromLng, dLat, dLng, ROUTE_ALTERNATES, fromHeading
+                    fromLat, fromLng, dLat, dLng, ROUTE_ALTERNATES, heading
                 )
             }
             mainHandler.post {
+                // (one for a trip that has since ended or restarted is nobody's)
+                if (gen != rerouteGen) return@post
                 rerouting = false
                 if (isFinishing || isDestroyed || !navigating) return@post
+                // the trip's stops changed meanwhile (one reached or visited): this route is stale, plan again
+                if (rerouteAgain || routeStops != remainingStops) {
+                    rerouteAgain = false
+                    lastFix?.let { f -> maybeReroute(f.lat, f.lng, f.bearing?.takeIf { f.bestSpeedMps > 2.0 }, force = true) }
+                    return@post
+                }
                 if (routes.isEmpty()) return@post // keep the old route; try again next divergence
                 previewRoutes = routes
                 previewSelectedIdx = 0
+                lockedDestLat = dLat
+                lockedDestLng = dLng
+                previewDestLabel = target.label
+                previewStops = remainingStops
                 guidance.start(routes[0])
+                guidedDest = target
+                replanPending = false
+                tripStops.routeInstalled(viaStops(remainingStops), fromLat, fromLng)
                 resetRouteTrim()   // rerouted → reset trim against the NEW route arc length
                 lastSpokenInstruction = null
                 drawRoutePreview(routes, 0)
@@ -5001,24 +5781,322 @@ open class RoadSenseMapActivity : AppCompatActivity() {
     }
 
     /**
-     * The itinerary stops still AHEAD of the car, for an itinerary-aware reroute.
-     * Drops any leading via-stop the car has already effectively reached (within
-     * [STOP_REACHED_M]) so a reroute doesn't send the car BACK to a stop it just
-     * passed. The final destination is always kept (never pruned). Returns the
-     * ordered [aheadStop1, …, destination]; for a single-destination trip this is
-     * just [destination]. Reads [routeStops] — call on the main thread.
+     * The itinerary stops still ahead of the car, for an itinerary-aware reroute: [aheadStop1, …, destination]. Stops
+     * the car is done with already left [routeStops] (see [updateStops]); one it's just missing the entrance of stays,
+     * so the reroute goes back to it. Reads [routeStops] — call on the main thread.
      */
-    private fun remainingStopsAhead(fromLat: Double, fromLng: Double): List<SearchResult> {
-        if (routeStops.isEmpty()) return emptyList()
-        val lastIdx = routeStops.size - 1
-        val out = ArrayList<SearchResult>(routeStops.size)
-        routeStops.forEachIndexed { idx, s ->
-            // Always keep the destination; prune only intermediate stops we've reached.
-            if (idx == lastIdx) { out.add(s); return@forEachIndexed }
-            val reached = guidance.haversineMeters(fromLat, fromLng, s.lat, s.lng) <= STOP_REACHED_M
-            if (!reached) out.add(s)
+    private fun remainingStopsAhead(): List<SearchResult> = ArrayList(routeStops)
+
+    // The trip's stops still to come before its destination, in order.
+    private fun viaStops(stops: List<SearchResult> = routeStops): List<SearchResult> =
+        if (stops.size >= 2) stops.subList(0, stops.size - 1) else emptyList()
+
+    // Stops the car is done with leave the trip ([TripStops]: driven through, left behind, stopped at, dropped off at),
+    // so no reroute, reopened map or restore sends it back to one. A visited one has the rest planned from here.
+    private fun updateStops(fix: RoadSenseHazardApiClient.LatLngFix, gear: String?) {
+        if (!navigating) return
+        val done = tripStops.tick(
+            viaStops(), fix.lat, fix.lng, fix.bestSpeedMps, android.os.SystemClock.elapsedRealtime(), gear == GEAR_PARK,
+            switchedOff() && gear.let { it == null || it == GEAR_PARK }
+        ) ?: return
+        dropDone(done)
+        if (done.reason == TripStops.Reason.VISITED) replanFrom(fix)
+    }
+
+    // Stops done with: dropped, one passed on the route said, with a way back should its entrance have been missed.
+    private fun dropDone(done: TripStops.Done) {
+        val passed = routeStops.getOrNull(done.count - 1)?.takeIf { done.reason == TripStops.Reason.REACHED && routeStops.size > done.count }
+        // (one passed by still guards the destination: the car may be parking just past it)
+        dropLeadingStops(done.count, stood = done.stood)
+        passed?.let { offerGoBack(it) }
+    }
+
+    private fun offerGoBack(stop: SearchResult) {
+        try { navVoice?.speakQueued(passedText(stop)) } catch (_: Throwable) {}
+        if (clusterMode) return
+        val dest = routeStops.lastOrNull()
+        // (behind another app: offered when the map is back)
+        if (mapStopped) {
+            pendingGoBack = Triple(stop, dest, android.os.SystemClock.elapsedRealtime())
+            return
         }
-        return out
+        showGoBack(stop, dest)
+    }
+
+    private fun passedText(stop: SearchResult): String =
+        getString(R.string.roadsense_map_stop_passed, stop.label.substringBefore(',').trim().ifEmpty { stop.label })
+
+    private fun showGoBack(stop: SearchResult, dest: SearchResult?) {
+        val root = findViewById<View>(R.id.mapRoot) ?: return
+        val bar = Snackbar.make(root, passedText(stop), SKIP_OFFER_SHOW_MS)
+            .setAction(R.string.roadsense_map_go_back) { goBackTo(stop, dest) }
+        findViewById<View>(R.id.fabEndNav)?.takeIf { it.visibility == View.VISIBLE }?.let { bar.anchorView = it }
+        bar.show()
+        goBackUntil = android.os.SystemClock.elapsedRealtime() + SKIP_OFFER_SHOW_MS
+    }
+
+    // A way back to a stop passed behind another app, and until when one is on screen.
+    private var pendingGoBack: Triple<SearchResult, SearchResult?, Long>? = null
+    private var goBackUntil = 0L
+
+    // The driver wants the stop just passed after all (on the same trip): the next stop again, routed back to.
+    private fun goBackTo(stop: SearchResult, dest: SearchResult?) {
+        if (!navigating || clusterMode || routeStops.isEmpty() || routeStops.last() !== dest || routeStops.any { it === stop } ||
+            editingStopIndex >= 0 || addingStop
+        ) return
+        goBackUntil = 0L
+        routeStops.add(0, stop)
+        // (the car wasn't at it)
+        tripStops.forgetLeftStop()
+        NavTripStore.clearStopLeft(applicationContext)
+        persistTrip()
+        rebuildStopsUi()
+        lastFix?.let { replanFrom(it) }
+    }
+
+    private fun replanFrom(fix: RoadSenseHazardApiClient.LatLngFix) {
+        replanPending = true
+        maybeReroute(fix.lat, fix.lng, fix.bearing?.takeIf { fix.bestSpeedMps > 2.0 }, force = true)
+    }
+
+    /** A replan for changed stops hasn't landed yet (offline, say): the route on screen still has the old ones. */
+    private var replanPending = false
+
+    // The leading [n] stops leave the trip; a search still open for one keeps its aim.
+    private fun dropLeadingStops(n: Int, atStop: Boolean = true, stood: Boolean = false) {
+        val k = n.coerceAtMost(routeStops.size - 1)
+        if (k <= 0) return
+        // an offer computed with the old stops would route through the one that left
+        dismissFasterRoutePrompt()
+        val left = ArrayList(routeStops.subList(0, k))
+        repeat(k) { routeStops.removeAt(0) }
+        tripStops.dropped(left, atStop, stood)
+        // editing a stop that just left: the pick becomes an added stop; a later one moved up
+        if (editingStopIndex in 0 until k) {
+            editingStopIndex = -1
+            addingStop = true
+        } else if (editingStopIndex >= k) {
+            editingStopIndex -= k
+        }
+        persistTrip()
+        if (atStop) NavTripStore.stopLeft(applicationContext, left.last().lat, left.last().lng)
+        rebuildStopsUi()
+        guidance.activeRoute()?.let { renderItineraryMarkers(it, routeStops) }
+    }
+
+    // How long guidance was away, should the app be restarted meanwhile.
+    private fun touchTrip(leftAtDest: Boolean = false, leftAtStop: Boolean = false, standing: Boolean = false) {
+        if (clusterMode || !navigating) return
+        tripTouchedAt = android.os.SystemClock.elapsedRealtime()
+        NavTripStore.touch(applicationContext, leftAtDest, leftAtStop, standing)
+    }
+
+    /** When the map last stopped while guiding: the car was by its destination / standing by this next stop; standing. */
+    private var leftAtDest = false
+    private var leftAtStop: SearchResult? = null
+    private var leftStanding = false
+
+    // Where the car is left if guidance stops ticking now (the map going away, the head unit about to sleep): by its
+    // destination (no stop left, under way), or by its next stop (having driven on since the last).
+    // (Standing right by it — the destination within 150 m, the next stop within 60 m — counts after the short wait;
+    // anything else after the long one. Not for a route out of step: an edit's new stops aren't where the car was.)
+    private fun noteLeftAt(here: RoadSenseHazardApiClient.LatLngFix?) {
+        if (here == null || routeOutOfStep()) {
+            clearLeftAt()
+            return
+        }
+        val standing = here.bestSpeedMps <= TripStops.STANDING_MPS
+        val destM = tripDest()?.let { guidance.haversineMeters(here.lat, here.lng, it.lat, it.lng) } ?: Double.MAX_VALUE
+        // (not where a stop was just done with, nor with a long way round left)
+        leftAtDest = routeStops.size <= 1 && guidance.hasSetOut && clearOfLastStop() && destM <= LEFT_AT_DEST_M &&
+            lastRemainingM <= LEFT_ROUTE_MAX_M
+        val next = routeStops.takeIf { it.size >= 2 }?.get(0)
+        val stopM = next?.let { guidance.haversineMeters(here.lat, here.lng, it.lat, it.lng) } ?: Double.MAX_VALUE
+        leftAtStop = next?.takeIf { tripStops.armedToReach && stopM <= LEFT_AT_STOP_M }
+        // (in P or switched off by the next stop: parked for it, if not right at it)
+        val parked = inParkSinceMs > 0L || switchedOffSinceMs > 0L
+        leftStanding = (standing && ((leftAtDest && destM <= LEFT_NEAR_DEST_M) || (leftAtStop != null && stopM <= LEFT_NEAR_STOP_M))) ||
+            (parked && leftAtStop != null)
+    }
+
+    private fun resetArrivalTimers() {
+        nearStopTicks = 0
+        parkedOffSinceMs = 0L
+        atPinSinceMs = 0L
+        nearOffSinceMs = 0L
+        nearLongSinceMs = 0L
+        parkedNearSinceMs = 0L
+    }
+
+    // The gear with this fix (null: unknown), a reading stale for a moment (DiLink5 between probes) kept a few seconds.
+    private fun gearNow(fix: RoadSenseHazardApiClient.LatLngFix): String? {
+        val now = android.os.SystemClock.elapsedRealtime()
+        // (a state before a gap in ticks isn't known to have lasted through it)
+        if (now - gearTickAt > GEAR_HOLD_MS) { inParkSinceMs = 0L; switchedOffSinceMs = 0L }
+        gearTickAt = now
+        fix.gear?.let { gearRead = it; gearReadAt = now }
+        val g = gearRead?.takeIf { now - gearReadAt <= GEAR_HOLD_MS }
+        if (g != GEAR_PARK) inParkSinceMs = 0L else if (inParkSinceMs == 0L) inParkSinceMs = now
+        when {
+            fix.accOn != false -> { switchedOffSinceMs = 0L; switchedOffStale = false }
+            switchedOffStale -> {}
+            switchedOffSinceMs == 0L -> { switchedOffSinceMs = now; switchedOffLat = fix.lat; switchedOffLng = fix.lng }
+            // (moved on since: running again, whatever the daemon still says)
+            guidance.haversineMeters(fix.lat, fix.lng, switchedOffLat, switchedOffLng) > SWITCHED_OFF_MOVED_M -> {
+                switchedOffSinceMs = 0L
+                switchedOffStale = true
+            }
+        }
+        return g
+    }
+
+    // Saved places and recent destinations, prefetched for offline use when the network is Wi-Fi (not the car's SIM, nor
+    // a phone's hotspot).
+    private var placesPrefetchQueued = false
+    private val prefetchPlacesTask = Runnable {
+        if (isFinishing || isDestroyed) return@Runnable
+        val ctx = applicationContext
+        val places = ArrayList<Pair<Double, Double>>()
+        listOfNotNull(SavedPlacesStore.getHome(ctx), SavedPlacesStore.getWork(ctx)).forEach { places.add(Pair(it.lat, it.lng)) }
+        SavedPlacesStore.getCustom(ctx).forEach { places.add(Pair(it.lat, it.lng)) }
+        RecentSearchStore.getAll(ctx).forEach { places.add(Pair(it.lat, it.lng)) }
+        val usable = places.filter { !it.first.isNaN() && !it.second.isNaN() }
+        if (usable.isEmpty()) return@Runnable
+        val density = resources.displayMetrics.density
+        ioExecutor().execute {
+            val route = com.overdrive.app.safekeep.util.NetRoute.probe()
+            val unmetered = !route.metered() && !route.likelyPhoneHotspot
+            mainHandler.post {
+                if (!isFinishing && !isDestroyed) MapTilePrefetcher.prefetchPlaces(ctx, STYLE_URL, usable, density, unmetered)
+            }
+        }
+    }
+
+    // The way the car is going, for a route from where it is: the fix's bearing while moving, else the line of its track
+    // over the last 25 m if that ran straight (a crawl in a queue; not a turn, a three-point turn); null when not known.
+    private fun routeHeading(): Double? {
+        // (backing up: the way it moves isn't the way it faces)
+        if (gearKnown() && gearRead == GEAR_REVERSE) return null
+        val f = lastFix ?: return null
+        if (f.bestSpeedMps > 2.0) f.bearing?.let { return it }
+        val now = android.os.SystemClock.elapsedRealtime()
+        var pathM = 0.0
+        var prevLat = f.lat
+        var prevLng = f.lng
+        for (j in 1..minOf(trackCount, TRACK_N)) {
+            val i = (trackCount - j) % TRACK_N
+            if (now - trackAt[i] > TRACK_MAX_AGE_MS) return null
+            pathM += guidance.haversineMeters(prevLat, prevLng, trackLat[i], trackLng[i])
+            prevLat = trackLat[i]
+            prevLng = trackLng[i]
+            if (guidance.haversineMeters(trackLat[i], trackLng[i], f.lat, f.lng) >= TRACK_HEADING_M) {
+                val lineM = guidance.haversineMeters(trackLat[i], trackLng[i], f.lat, f.lng)
+                if (lineM < TRACK_STRAIGHT * pathM) return null
+                val y = Math.sin(Math.toRadians(f.lng - trackLng[i])) * Math.cos(Math.toRadians(f.lat))
+                val x = Math.cos(Math.toRadians(trackLat[i])) * Math.sin(Math.toRadians(f.lat)) -
+                    Math.sin(Math.toRadians(trackLat[i])) * Math.cos(Math.toRadians(f.lat)) * Math.cos(Math.toRadians(f.lng - trackLng[i]))
+                return (Math.toDegrees(Math.atan2(y, x)) + 360.0) % 360.0
+            }
+        }
+        return null
+    }
+
+    // Recent fixes while moving at all, for the line of the car's track.
+    private fun noteTrack(fix: RoadSenseHazardApiClient.LatLngFix, gear: String?) {
+        // (backing up isn't the way it will go: the line starts again after it)
+        if (gear == GEAR_REVERSE) { trackCount = 0; return }
+        if (fix.bestSpeedMps < TRACK_MIN_MPS) return
+        val i = trackCount % TRACK_N
+        trackLat[i] = fix.lat
+        trackLng[i] = fix.lng
+        trackAt[i] = android.os.SystemClock.elapsedRealtime()
+        trackCount++
+    }
+    private val trackLat = DoubleArray(TRACK_N)
+    private val trackLng = DoubleArray(TRACK_N)
+    private val trackAt = LongArray(TRACK_N)
+    private var trackCount = 0
+    // the route still to go at the last tick
+    private var lastRemainingM = Double.MAX_VALUE
+
+    // Switched off a few seconds, where the car still is.
+    // Reported off, and not moved since. No hold: a DiLink 3.0 head unit stops the app ~2.5 s after the car goes off.
+    private fun switchedOff(): Boolean = switchedOffSinceMs > 0L
+
+    // Clear of the last stop the car was at (nearer the destination than it), or none.
+    private fun clearOfLastStop(): Boolean = tripDest()?.let { tripStops.clearOfLastStop(it.lat, it.lng) } ?: true
+
+    private fun gearKnown(): Boolean = gearRead != null && android.os.SystemClock.elapsedRealtime() - gearReadAt <= GEAR_HOLD_MS
+
+    private fun clearLeftAt() {
+        leftAtDest = false
+        leftAtStop = null
+        leftStanding = false
+    }
+
+    // Guidance couldn't tick for [awayMs] (the head unit asleep) with the car left by its destination (switched off
+    // there, parked): it arrived; by its next stop: visited (the rest is planned from where the car is now). A car left
+    // standing counts after a short while, one still moving (a frozen fix underground) after a long one. True when the
+    // trip ended.
+    private fun settleLeftGuidance(awayMs: Long): Boolean {
+        if (!navigating || clusterMode || (!leftAtDest && leftAtStop == null)) return false
+        val waitMs = if (leftStanding) LEFT_PARKED_RETURN_MS else STALE_GUIDANCE_GAP_MS
+        if (awayMs < waitMs) return false
+        val dest = leftAtDest
+        val stop = leftAtStop
+        clearLeftAt()
+        markTick()
+        if (dest) {
+            endTrip()
+            return true
+        }
+        if (stop != null && routeStops.size >= 2 && routeStops[0] === stop) {
+            replanPending = true
+            dropLeadingStops(1, stood = true)
+        } else {
+            touchTrip()
+        }
+        return false
+    }
+
+    // The head unit's clocks at the last guidance tick: time asleep since is the wall time less the awake time.
+    private var tickElapsedAt = 0L
+    private var tickUptimeAt = 0L
+
+    private fun markTick() {
+        tickElapsedAt = android.os.SystemClock.elapsedRealtime()
+        tickUptimeAt = android.os.SystemClock.uptimeMillis()
+    }
+
+    private fun sleptSinceTick(): Long =
+        if (tickElapsedAt == 0L) 0L
+        else ((android.os.SystemClock.elapsedRealtime() - tickElapsedAt) - (android.os.SystemClock.uptimeMillis() - tickUptimeAt))
+            .coerceAtLeast(0L)
+
+    // "Recalculating"; with a stop still to come close by (a big site parked far from its pin, a drop-off down the
+    // road), one tap skips it.
+    private fun showRerouteSnackbar() {
+        if (mapStopped) return
+        val next = if (routeStops.size >= 2) routeStops[0] else null
+        val here = lastFix
+        if (next == null || here == null || clusterMode || (!tripStops.nearNext(SKIP_OFFER_M) &&
+                guidance.haversineMeters(here.lat, here.lng, next.lat, next.lng) > SKIP_OFFER_M)
+        ) {
+            showSnackbar(getString(R.string.roadsense_map_rerouting))
+            return
+        }
+        val root = findViewById<View>(R.id.mapRoot) ?: return
+        val bar = Snackbar.make(root, getString(R.string.roadsense_map_rerouting), SKIP_OFFER_SHOW_MS)
+            .setAction(R.string.roadsense_map_skip_stop) { skipStop(next) }
+        findViewById<View>(R.id.fabEndNav)?.takeIf { it.visibility == View.VISIBLE }?.let { bar.anchorView = it }
+        bar.show()
+    }
+
+    // The driver skipped the next stop (if it still is): on to the rest of the trip.
+    private fun skipStop(stop: SearchResult) {
+        if (!navigating || routeStops.size < 2 || routeStops[0] !== stop) return
+        dropLeadingStops(1, atStop = false)
+        lastFix?.let { replanFrom(it) }
     }
 
     // ---------------------------------------------------------------------
@@ -5091,33 +6169,10 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         return (trafficEtaS - ageMs / 1000.0).coerceAtLeast(0.0)
     }
 
-    /**
-     * Stops still ahead for a traffic refresh: [remainingStopsAhead] minus via-stops whose
-     * along-route position on [route] is already behind the car; the destination is always last.
-     */
-    private fun trafficWaypoints(route: NavRoute?, fixLat: Double, fixLng: Double): List<GeoPoint> {
-        val stops = remainingStopsAhead(fixLat, fixLng)
-        if (stops.isEmpty()) return emptyList()
-        val pts = route?.points.orEmpty()
-        val out = ArrayList<GeoPoint>(stops.size)
-        var from = 0
-        var alongFrom = 0.0
-        for (k in 0 until stops.size - 1) {
-            val s = stops[k]
-            // Nearest vertex at or after the previous stop's (stops are visited in order).
-            var best = Double.MAX_VALUE; var bestIdx = from; var bestAlong = alongFrom; var along = alongFrom
-            for (i in from until pts.size) {
-                if (i > from) along += guidance.haversineMeters(pts[i - 1].lat, pts[i - 1].lng, pts[i].lat, pts[i].lng)
-                val d = guidance.haversineMeters(s.lat, s.lng, pts[i].lat, pts[i].lng)
-                if (d < best) { best = d; bestIdx = i; bestAlong = along }
-            }
-            from = bestIdx
-            alongFrom = bestAlong
-            if (pts.isEmpty() || bestAlong > trafficTraveledM) out.add(GeoPoint(s.lat, s.lng))
-        }
-        stops.last().let { out.add(GeoPoint(it.lat, it.lng)) }
-        return out
-    }
+    /** Stops still ahead for a traffic refresh: every one left in the trip (done ones have left it), destination last. */
+    private fun trafficWaypoints(): List<GeoPoint> = remainingStopsAhead().map { GeoPoint(it.lat, it.lng) }
+    /** The waypoints the latest traffic refresh asked for. */
+    private var trafficAskedWaypoints: List<GeoPoint> = emptyList()
 
     private val trafficHost = object : TrafficRefreshController.Host {
         override fun mainHandler(): Handler = this@RoadSenseMapActivity.mainHandler
@@ -5128,8 +6183,8 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         override fun currentHeading(): Double? = lastFix?.let { f -> f.bearing?.takeIf { f.bestSpeedMps > 2.0 } }
         override fun currentSpeedMps(): Double? = lastFix?.bestSpeedMps?.takeIf { it.isFinite() && it >= 0.0 }
         override fun remainingWaypoints(): List<GeoPoint> {
-            val f = lastFix ?: return emptyList()
-            return trafficWaypoints(currentGuidanceRoute(), f.lat, f.lng)
+            if (lastFix == null) return emptyList()
+            return trafficWaypoints().also { trafficAskedWaypoints = it }
         }
         override fun traveledMeters(): Double = trafficTraveledM
         override fun onTrafficUpdate(route: NavRoute, spans: List<CongestionSpan>, remainingEtaSeconds: Double) =
@@ -5160,6 +6215,8 @@ open class RoadSenseMapActivity : AppCompatActivity() {
     /** Offers a faster route while navigating; auto-dismissed after [FASTER_ROUTE_PROMPT_MS]. */
     private fun showFasterRoutePrompt(candidate: NavRoute, savesSeconds: Double) {
         if (isFinishing || isDestroyed || clusterMode) return
+        // (planned through stops the trip has since left)
+        if (trafficAskedWaypoints != trafficWaypoints()) return
         val base = currentGuidanceRoute() ?: return
         val root = findViewById<View>(R.id.mapRoot) ?: return
         dismissFasterRoutePrompt()
@@ -5187,6 +6244,7 @@ open class RoadSenseMapActivity : AppCompatActivity() {
             .take(ROUTE_ALTERNATES + 1)
         previewSelectedIdx = 0
         guidance.start(candidate)
+        tripStops.routeSwitched(lastFix?.lat ?: Double.NaN, lastFix?.lng ?: Double.NaN)
         resetRouteTrim()
         lastSpokenInstruction = null
         drawRoutePreview(previewRoutes, 0)
@@ -5194,11 +6252,12 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         onGuidanceRouteChanged(candidate)
     }
 
-    private fun stopGuidance() {
+    private fun stopGuidance(keepSaved: Boolean = false) {
         navigating = false
+        cancelRouteRetry()
         // Nav ended (arrived / end-nav) → drop the persisted trip so a later re-entry
         // opens fresh, not back into a finished route.
-        if (!clusterMode) NavTripStore.clear(applicationContext)
+        if (!clusterMode && !keepSaved) NavTripStore.clear(applicationContext)
         mainHandler.removeCallbacks(guidanceRunnable)
         guidance.stop()
         // Stop the 30 fps dead-reckon render tick + reset the estimator on BOTH the
@@ -5224,7 +6283,22 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         lastCameraPose.lat = Double.NaN // reset the camera dead-band baseline too
         lastFedFixTsMs = 0L             // reset the duplicate-fix dedup for the next trip
         nearStopTicks = 0               // reset the near-stop arrival debounce
-        puckArrivedTicks = 0            // reset the puck-proximity arrival debounce
+        parkedOffSinceMs = 0L
+        goBackUntil = 0L
+        pendingGoBack = null
+        atPinSinceMs = 0L
+        nearOffSinceMs = 0L
+        nearLongSinceMs = 0L
+        parkedNearSinceMs = 0L
+        tripStops.begin()
+        rerouteGen++
+        rerouting = false
+        rerouteAgain = false
+        replanPending = false
+        clearLeftAt()
+        tickElapsedAt = 0L
+        tickUptimeAt = 0L
+        tripTouchedAt = 0L
         endLiveTraffic()                // stop the traffic refresh + clear congestion/ETA
         glassLayers.clear()
         findViewById<View>(R.id.navBanner)?.visibility = View.GONE
@@ -5236,7 +6310,11 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         poiSource?.setGeoJson(EMPTY_FEATURE_COLLECTION)
         // Hand the puck back to the idle follow so it keeps tracking the live fix after
         // the route ends (head unit → idle follow; cluster → its own idle follow).
-        if (clusterMode) startClusterFollow() else startIdleFollow()
+        // The camera follows the car again too (guidance's did until now).
+        idleFollowCamera = true
+        guidedDest = null
+        // (behind another app the idle follow waits for onResume: nothing to draw)
+        if (clusterMode) startClusterFollow() else if (!mapStopped) startIdleFollow()
     }
 
     private fun speakOnce(text: String) {
@@ -5312,12 +6390,14 @@ open class RoadSenseMapActivity : AppCompatActivity() {
      * is the one place a brief default-region ease is acceptable.
      */
     private fun recenter() {
+        idleFollowCamera = true
         ioExecutor().execute {
             val fix = RoadSenseHazardApiClient.fetchCurrentLocation()
             mainHandler.post {
                 if (isFinishing || isDestroyed) return@post
                 if (fix != null) {
                     lastFix = fix
+                    recenterPending = false
                     // Center on the live fix at street zoom with a gentle north-up
                     // RESTING TILT so the idle map reads as a modern 3D perspective
                     // (buildings/road casings gain depth) instead of a flat top-down
@@ -5325,20 +6405,13 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                     // heading-up + steep tilt is reserved for active guidance. The tilt
                     // is suppressed on the non-touch cluster (its follow loop owns the
                     // camera) and while navigating (guidance owns it).
-                    val pos = org.maplibre.android.camera.CameraPosition.Builder()
-                        .target(LatLng(fix.lat, fix.lng))
-                        .zoom(FOLLOW_ZOOM)
-                        .tilt(restingTilt())
-                        .bearing(0.0)
-                        .build()
-                    map?.animateCamera(
-                        CameraUpdateFactory.newCameraPosition(pos), RECENTER_ANIM_MS
-                    )
+                    centreOn(fix.lat, fix.lng)
                     updateLocationPuck(fix)
                     MapTilePrefetcher.schedulePrefetch(
                         applicationContext, STYLE_URL, fix.lat, fix.lng, resources.displayMetrics.density
                     )
                 } else {
+                    recenterPending = true
                     showSnackbar(getString(R.string.roadsense_map_no_location))
                 }
             }
@@ -5495,10 +6568,73 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         if (::mapView.isInitialized) startGyroFusion()
     }
 
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (clusterMode) {
+            layoutGeneration = intent.getLongExtra("layoutGeneration", 0L)
+            layoutDisplayId = if (layoutGeneration > 0) intent.getIntExtra("layoutDisplayId", -1) else -1
+            clusterFinishing = false
+            mainHandler.removeCallbacks(clusterFinishPoll)
+            startClusterFinishPoll()
+            if (::mapView.isInitialized) applyClusterChrome()
+        }
+        // A trip saved for a map that's already open (singleTop): start it as a fresh launch would.
+        if (clusterMode || !intent.hasExtra(NavTripStore.EXTRA_RESTORE_TRIP)) return
+        // the new trip replaces one waiting for the map to come back
+        routeOnReturn = false
+        fixWaitOnReturn = false
+        didRestoreTrip = false
+        // and guidance still running from before ends now, keeping the saved trip: nothing of the old one (its settle on
+        // resume, its next tick, a wait for the style) may save over the new one
+        endOldGuidanceFor(NavTripStore.hasStart(applicationContext))
+        if (map?.style?.isFullyLoaded == true) restoreTripIfAny()
+    }
+
+    // A new trip is coming in: where the old guidance left the car is no longer anyone's business, and (for one asking
+    // to start) the old guidance ends.
+    private fun endOldGuidanceFor(start: Boolean) {
+        clearLeftAt()
+        if (!start) return
+        if (navigating) endTrip(keepSaved = true) else clearRoutePreview(keepSaved = true)
+        // nor does an old one still routing get to start (a restore retrying, an earlier yes waiting for a fix)
+        cancelRouteRetry()
+        routeOnFreshFix = false
+    }
+
     override fun onResume() {
         super.onResume()
+        mapStopped = false
         if (!::mapView.isInitialized) return
         mapView.onResume()
+        // a stop passed meanwhile, on this trip still: the way back to it
+        pendingGoBack?.let { (stop, dest, at) ->
+            pendingGoBack = null
+            if (android.os.SystemClock.elapsedRealtime() - at <= GO_BACK_PENDING_MS && navigating && !clusterMode &&
+                routeStops.lastOrNull() === dest && routeStops.none { it === stop }
+            ) showGoBack(stop, dest)
+        }
+        // After onNewIntent: back to a briefing trip left while routing, it carries on if still fresh, else goes.
+        if (routeOnReturn) {
+            routeOnReturn = false
+            // one that was waiting for GPS (a garage, say) keeps waiting as long as it would have; either way only
+            // after a short absence (the reverse camera, a glance at another app), not a drive elsewhere
+            val cap = if (fixWaitOnReturn) FIX_WAIT_MAX_MS else START_REQUEST_MAX_AGE_MS
+            fixWaitOnReturn = false
+            val now = android.os.SystemClock.elapsedRealtime()
+            // (away since the yes was set aside, or since the map went, whichever is later)
+            val since = maxOf(backgroundedAtMono, routeOnReturnSince)
+            val away = if (since > 0L) now - since else 0L
+            if (!navigating && routeStops.isNotEmpty()) {
+                if (briefingStartAt > 0L && now - briefingStartAt <= cap && away <= START_REQUEST_MAX_AGE_MS) {
+                    routeRetries = 0
+                    recomputeItinerary(autoStart = true, retry = true)
+                } else {
+                    briefingStartAt = 0L
+                    clearRoutePreview()
+                }
+            }
+        }
         if (::googleMap.isInitialized) {
             googleMap.onResume()
             // The key/settings may have changed in the web UI: reload them off the looper, then the FAB.
@@ -5540,6 +6676,8 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         // as the cold-start seed + fallback until this warms up. getLastKnownLocation seeds
         // it immediately so the post-reset puck appears at the current position promptly.
         startDirectGps()
+        val sleptAway = if (NavSession.headUnitTickAt > 0L) sleptSinceTick() else awayMs
+        if (!settleLeftGuidance(sleptAway) && sleptAway > STALE_TRIP_MS && navigating && !clusterMode) endTrip()
         // Resume the camera/guidance loops suspended in onStop (state was kept).
         if (navigating) {
             mainHandler.removeCallbacks(guidanceRunnable); mainHandler.post(guidanceRunnable)
@@ -5551,8 +6689,9 @@ open class RoadSenseMapActivity : AppCompatActivity() {
             // so the puck stayed frozen at the pre-background lastFix until the user
             // tapped Locate — while the cluster (which has its own idle follow) stayed
             // live. Mirror that here: start the head-unit idle follow so the puck
-            // refreshes on resume and keeps tracking. PUCK-ONLY (never moves the camera)
-            // so a user who panned away keeps their view.
+            // refreshes on resume and keeps tracking. Back after a long while, the
+            // camera follows the car again even if the driver had panned.
+            if (awayMs >= IDLE_FOLLOW_REARM_MS) idleFollowCamera = true
             startIdleFollow()
         }
         // CLUSTER black-projection self-heal — runs on EVERY cluster resume, OUTSIDE the
@@ -5582,15 +6721,34 @@ open class RoadSenseMapActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
-        // Suspend the 1s guidance + cluster-follow loops while backgrounded — the
-        // SurfaceView render is paused here, so continuing to fire network GETs +
-        // animateCamera every second just drains the SoC / contends with the
-        // daemon encoder for nothing. The `navigating`/`clusterMode` flags are KEPT
-        // so onResume restarts seamlessly.
-        mainHandler.removeCallbacks(guidanceRunnable)
+        // a return (or a restart) a long while later knows how long guidance was away, and where the car was left
+        if (navigating && !clusterMode) {
+            noteLeftAt(lastFix)
+            touchTrip(leftAtDest, leftAtStop != null, leftStanding)
+        }
+        // Suspend the cluster-follow loops while backgrounded — the SurfaceView render is paused here, so firing network
+        // GETs + animateCamera every second just drains the SoC. Head-unit guidance itself carries on behind another app
+        // (voice, reroutes, stops, arrival, the cluster's mirror); only its drawing stops. The `navigating`/`clusterMode`
+        // flags are KEPT so onResume restarts seamlessly.
+        mapStopped = true
+        if (clusterMode || !navigating) mainHandler.removeCallbacks(guidanceRunnable)
+        mainHandler.removeCallbacks(recenterAfterFree)
         mainHandler.removeCallbacks(clusterFollowRunnable)
         mainHandler.removeCallbacks(clusterKeepWarmRunnable)   // suspend the keep-warm repaint nudge
+        mainHandler.removeCallbacks(glSurfaceRebuild)
         mainHandler.removeCallbacks(idleFollowRunnable)
+        saveLastCamera()
+        // back after a while, the car may be far from where the cluster camera stopped
+        clusterPlaced = false
+        // A briefing trip still routing (or waiting for a fix) doesn't start guidance unseen, nor outlive a map that
+        // isn't coming back.
+        if ((autoRouting || routeOnFreshFix) && briefingStartAt > 0L) {
+            fixWaitOnReturn = routeOnFreshFix || lastRouteFailNoFix || briefingWaitedForFix
+            cancelRouteRetry()
+            routeOnFreshFix = false
+            routeOnReturn = true
+            NavTripStore.clear(applicationContext)
+        }
         stopHeadUnitProjectionPoll()   // suspend the cluster-projection watch while backgrounded
         projectionActive = false       // clear so onResume re-derives it (the poll's first
                                        // read is 1s out; don't carry a stale-true → avoid
@@ -5680,6 +6838,7 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         ioExecutor?.shutdownNow()
         ioExecutor = null
         MapTilePrefetcher.cancelPending()
+        mainHandler.removeCallbacks(prefetchPlacesTask)
         hazardSource = null
         // Null symmetry: drop the remaining style-bound source/layer + sheet refs
         // so they don't pin a destroyed Style/MapView (no-op safety; map is gone).
@@ -5746,6 +6905,96 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         const val DEFAULT_LAT = 1.3521
         const val DEFAULT_LNG = 103.8198
         const val DEFAULT_ZOOM = 13.0
+        const val KEY_LAST_CAM_LAT = "last_cam_lat"
+        const val KEY_LAST_CAM_LNG = "last_cam_lng"
+        const val KEY_LAST_CAM_ZOOM = "last_cam_zoom"
+        const val CLUSTER_PLACE_FAR_M = 5_000.0
+        const val CLUSTER_FIX_FRESH_MS = 10_000L
+        const val SNAP_FAR_M = 1_000.0
+        const val SNAP_MAX_ACCURACY_M = 50.0
+        const val SNAP_CONFIRM_M = 300.0
+        /** How long after a briefing yes a missing fix may still start its guidance. */
+        const val FIX_WAIT_MAX_MS = 10 * 60_000L
+        /** A far fix is confirmed only by another fix measured this much later, and no later than the window. */
+        const val SNAP_CONFIRM_GAP_MS = 500L
+        /** Stood this long within this of the destination (no stop left; [PARKED_NEAR_MS] with one): arrived, whatever the route says. */
+        const val LONG_STOP_RADIUS_M = 60.0
+        const val LONG_STOP_MS = 60_000L
+        /** Stood off the road this near the pin (its car park) for [LONG_STOP_MS]: arrived. */
+        const val NEAR_OFF_ROAD_RADIUS_M = 60.0
+        /** The route-end near-stop needs the car this near the pin too (not stopped down the road past the last turn). */
+        const val NEAR_STOP_PIN_M = 50.0
+        const val AT_PIN_STOP_M = 30.0
+        /** More route than this still to go: standing by the pin needs the longer waits (a queue on the near side). */
+        const val PIN_ROUTE_LEFT_M = 400.0
+        /** Standing this near the pin, on the road or off, for [NEAR_LONG_MS]: arrived. */
+        const val NEAR_LONG_RADIUS_M = 150.0
+        /** Off the road: this far from the route (a light or a queue on it is nearer). */
+        const val NEAR_STOP_OFF_ROAD_M = 30.0
+        /** Stood on the road at the pin this long: arrived (a light is shorter). */
+        const val ON_ROAD_AT_PIN_MS = 150_000L
+        /** In P this long off the road within [NEAR_LONG_RADIUS_M] of the destination (its car park): arrived. */
+        const val PARKED_BY_MS = 3_000L
+        /** The gear known, more route than this left makes standing by the pin a queue: the longer wait. */
+        const val PIN_ROUTE_LEFT_IN_GEAR_M = 150.0
+        /** A gear reading is kept this long over readings gone stale. */
+        const val GEAR_HOLD_MS = 5_000L
+        /** A route from a crawl leaves along the car's track over this far, if it ran this straight, from this recently. */
+        const val TRACK_HEADING_M = 25.0
+        const val TRACK_STRAIGHT = 0.8
+        const val TRACK_MAX_AGE_MS = 90_000L
+        private const val TRACK_MIN_MPS = 0.5
+        private const val TRACK_N = 60
+        /** Parked by the destination, but this much route still to go: a long way round (a motorway, a river), not there. */
+        const val LEFT_ROUTE_MAX_M = 1_500.0
+        /** Frequent places are prefetched this long after the map is up (not competing with its first tiles). */
+        const val PLACES_PREFETCH_DELAY_MS = 30_000L
+        /** A stop passed behind another app is offered back on return this long after. */
+        const val GO_BACK_PENDING_MS = 2 * 60_000L
+        /** A changed destination this far from the old one is another trip's. */
+        const val NEW_DEST_M = 150.0
+        private const val GEAR_REVERSE = "R"
+        /** Switched off, then this far on: running again (the daemon's ACC on can lag). */
+        const val SWITCHED_OFF_MOVED_M = 40.0
+        private const val GEAR_PARK = "P"
+        /** Guidance stopped with the car this near its destination / its next stop, back after a long while: done. */
+        const val LEFT_AT_DEST_M = 400.0
+        const val LEFT_AT_STOP_M = 150.0
+        /** …and standing this near it then: back after the short wait ([LEFT_PARKED_RETURN_MS]) is enough. */
+        const val LEFT_NEAR_DEST_M = 150.0
+        const val LEFT_NEAR_STOP_M = 60.0
+        /** A guiding trip whose guidance hasn't run for this long isn't picked up again. */
+        const val STALE_TRIP_MS = 2 * 60 * 60_000L
+        /** A guiding trip picked up after this long comes back as a preview, not guidance. */
+        const val RESUME_AS_PREVIEW_MS = 30 * 60_000L
+        /** No reroute this near the destination (no stop left) at car-park speed: leaving the road there is its car park. */
+        const val NO_REROUTE_NEAR_DEST_M = 150.0
+        const val CAR_PARK_MPS = 4.0
+        /** A car left standing by its destination or next stop counts as there after this long away. */
+        const val LEFT_PARKED_RETURN_MS = 2 * 60_000L
+        /** Standing this long within [NEAR_LONG_RADIUS_M] of the destination, on the road or off: arrived. */
+        const val NEAR_LONG_MS = 5 * 60_000L
+        /** Standing this long within [LEFT_AT_DEST_M] of the destination, the gear unknown: arrived (a big car park). */
+        const val PARKED_FAR_MS = 10 * 60_000L
+        const val PARKED_NEAR_MS = 180_000L
+        /** The saved trip is stamped this often while guiding (for a restart's "how long away, from where"). */
+        const val TRIP_TOUCH_MS = 30_000L
+        const val TRIP_TOUCH_MIN_MS = 5_000L
+        /** A reroute this near the next stop offers to skip it, for this long. */
+        const val SKIP_OFFER_M = 1_500.0
+        const val SKIP_OFFER_SHOW_MS = 20_000
+        const val CLUSTER_OFFER_SHOW_MS = 15_000
+        const val CLUSTER_OFFER_CLIP = "brief_cluster_offer"
+        /** Back on the map after this long, the camera follows the car again even if it had been panned. */
+        const val IDLE_FOLLOW_REARM_MS = 5 * 60_000L
+        /** A camera move whose end never reported holds the idle follow no longer than this. */
+        const val CAMERA_BUSY_MAX_MS = 3_000L
+        /** Guidance back after this long with the car this near its destination ended there meanwhile. */
+        const val STALE_GUIDANCE_GAP_MS = 10 * 60_000L
+        const val STALE_ARRIVED_M = 200.0
+        const val SNAP_CONFIRM_WINDOW_MS = 30_000L
+        const val STYLE_RETRY_MS = 5_000L
+        const val STYLE_RETRY_MAX = 3
 
         // Zoom used when centering on the live GPS fix (closer than the
         // overview default so the user sees their immediate surroundings).
@@ -5761,6 +7010,12 @@ open class RoadSenseMapActivity : AppCompatActivity() {
 
         // How many ALTERNATE routes to request (Valhalla may return fewer).
         const val ROUTE_ALTERNATES = 2
+
+        // A restored trip retries routing every 5 s for a minute (no fix or no data yet at car start).
+        const val ROUTE_RETRY_MS = 5_000L
+        const val ROUTE_RETRY_MAX = 120
+        const val START_REQUEST_MAX_AGE_MS = 120_000L
+        const val RESTORE_FIX_MAX_AGE_MS = 60_000L
 
         // Max INTERMEDIATE stops (via-points) the itinerary allows; the trip then
         // holds up to MAX_STOPS stops + 1 destination. Capped so the via route
@@ -5892,6 +7147,8 @@ open class RoadSenseMapActivity : AppCompatActivity() {
          *  WHEN_DIRTY surface can stay black before a triggerRepaint() repaints it. ~3s is
          *  a negligible GPU cost (one frame/3s) vs the parked-car black-out risk. */
         const val CLUSTER_KEEP_WARM_MS = 3000L
+        /** Head unit: delay after a new map surface before its EGL surface is rebuilt (the buffer size has landed by then). */
+        const val GL_SURFACE_REBUILD_MS = 300L
 
         // GL render-rate cap (MapView.setMaximumFps) on top of WHEN_DIRTY while the frame
         // loop is idle (gestures, tile loads). While it runs, capRenderRate lifts the cap
@@ -5922,12 +7179,6 @@ open class RoadSenseMapActivity : AppCompatActivity() {
 
         const val REROUTE_MIN_INTERVAL_MS = 8000L // min gap between auto-reroutes
 
-        // A via-stop within this distance of the car counts as "reached" — pruned
-        // from an itinerary-aware reroute so the car isn't sent back to a stop it
-        // just passed. Generous (covers head-unit GPS offset) but well under any
-        // realistic inter-stop spacing.
-        const val STOP_REACHED_M = 60.0
-
         // Near-stop arrival: when the along-route remainder is inside this band AND
         // the car has slowed to (near) a stop, declare arrival even if GPS parks us
         // just outside the strict ARRIVAL_RADIUS_M. This is the "be smart enough to
@@ -5936,7 +7187,7 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         // same band so a slow final-approach wander can't trigger a recompute.
         const val NEAR_STOP_ARRIVAL_M = 60.0 // inside the "final 50-100 m" the user flagged
         const val NEAR_STOP_SPEED_MPS = 1.5  // ~5.4 km/h — genuinely stopped, not a slow crawl
-        const val NEAR_STOP_ARRIVAL_TICKS = 2 // consecutive near-stop ticks (≈2s at 1Hz) to confirm
+        const val NEAR_STOP_ARRIVAL_TICKS = 5 // consecutive near-stop ticks (≈5 s at 1 Hz), off the road, to confirm
 
         // Puck rewrite dead-band: a pose change this small is not written, so a parked
         // map emits no frames. Far below one frame of travel while driving.

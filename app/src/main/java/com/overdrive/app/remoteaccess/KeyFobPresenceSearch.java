@@ -19,6 +19,7 @@ import org.json.JSONObject;
  */
 final class KeyFobPresenceSearch {
     private static final int INSTRUMENT = 1007;
+    private static final int SETTING = 1023;
     private final Context context;
     private final Runnable wakeWorker;
     private final BooleanSupplier stillAllowed;
@@ -31,6 +32,11 @@ final class KeyFobPresenceSearch {
     private Object manager, instrument;
     private Method getInt, setInt, unregister;
     private int resultFeature, searchFeature;
+    /** BYD key screens pick the search pair from SET_SINGLE_DOUBLE_MODE: single = instrument, double = setting. */
+    private int searchDevice = INSTRUMENT, otherResultFeature;
+    private String keyModule = "single";
+    private volatile boolean otherResultDue;
+    private Integer otherResultRaw;
     private Integer baselineRaw, requestReturnCode;
     private volatile Integer lastCallbackRaw;
     private String baselineStatus = "not_read";
@@ -80,6 +86,7 @@ final class KeyFobPresenceSearch {
             return;
         }
         if (!reconcileMode()) return;
+        if (otherResultDue) readOtherResult();
         if (parkedLocked) {
             requestIssued = false;
             enabled = false;
@@ -108,6 +115,8 @@ final class KeyFobPresenceSearch {
         baselineRaw = lastCallbackRaw = requestReturnCode = null;
         baselineStatus = "not_read";
         requestAccepted = progressObserved = false;
+        otherResultDue = false;
+        otherResultRaw = null;
         try {
             initialize();
             if (!allowedNow(queryBinding)) throw new IllegalStateException("revoked");
@@ -148,6 +157,8 @@ final class KeyFobPresenceSearch {
                                     lastCallbackRaw = raw;
                                     if (raw == 0) progressObserved = true;
                                     completed = cycle.observe(generation, cycleId, raw, observed);
+                                    if (completed && (raw == 2 || raw == 3) && otherResultFeature != 0)
+                                        otherResultDue = true;
                                 }
                             } catch (Throwable unavailable) {
                                 completed = cycle.fail(generation, cycleId, observed);
@@ -183,7 +194,7 @@ final class KeyFobPresenceSearch {
                 throw new IllegalStateException("search_cancelled");
             requestIssued = true;
             if (!allowedNow(queryBinding)) throw new IllegalStateException("revoked");
-            Object result = setInt.invoke(manager, INSTRUMENT, searchFeature, 2);
+            Object result = setInt.invoke(manager, searchDevice, searchFeature, 2);
             requestReturnCode = result instanceof Integer ? (Integer) result : null;
             if (!(result instanceof Integer) || (Integer) result != 0)
                 throw new IllegalStateException("search_request_failed");
@@ -232,6 +243,54 @@ final class KeyFobPresenceSearch {
         setInt = managerType.getMethod("setInt", int.class, int.class, int.class);
         instrument = environment.instrumentDevice(context);
         if (instrument == null) throw new UnsupportedOperationException("search_device_unavailable");
+        selectKeyModule(ids, (Set<?>) features);
+    }
+
+    /** Leaves today's single pair in place unless the car reads double mode with both double features present. */
+    private void selectKeyModule(Class<?> ids, Set<?> instrumentFeatures) {
+        searchDevice = INSTRUMENT;
+        keyModule = "single";
+        otherResultFeature = 0;
+        int mode, check, find;
+        try {
+            mode = ids.getField("SET_SINGLE_DOUBLE_MODE").getInt(null);
+            check = ids.getField("SETTING_START_CHECK_APPLE_KEY_SET").getInt(null);
+            find = ids.getField("INSTRUMENT_FIND_KEY_RESULT").getInt(null);
+        } catch (ReflectiveOperationException | RuntimeException absent) {
+            return;
+        }
+        try {
+            Object settings = environment.nativeType("android.hardware.bydauto.BYDAutoDeviceFeaturesMap")
+                    .getMethod("getFeatureIdsFromDevice", int.class).invoke(null, SETTING);
+            if (!(settings instanceof Set) || !((Set<?>) settings).contains(mode)
+                    || !((Set<?>) settings).contains(check) || !instrumentFeatures.contains(find)) return;
+            otherResultFeature = find;
+            Object value = getInt.invoke(manager, SETTING, mode);
+            if (!(value instanceof Integer) || (Integer) value != 0 && (Integer) value != 1) {
+                keyModule = "unknown";
+                return;
+            }
+            if ((Integer) value == 0) return;
+            keyModule = "double";
+            otherResultFeature = resultFeature;
+            resultFeature = find;
+            searchFeature = check;
+            searchDevice = SETTING;
+        } catch (ReflectiveOperationException | RuntimeException unavailable) {
+            keyModule = "unknown";
+        }
+    }
+
+    /** One read-only sample of the other module's result after a not-found answer; never a query. */
+    private void readOtherResult() {
+        otherResultDue = false;
+        if (manager == null || getInt == null || otherResultFeature == 0) return;
+        try {
+            Object value = getInt.invoke(manager, INSTRUMENT, otherResultFeature);
+            otherResultRaw = value instanceof Integer ? (Integer) value : null;
+        } catch (ReflectiveOperationException | RuntimeException unavailable) {
+            otherResultRaw = null;
+        }
     }
 
     synchronized void invalidate(String nextReason) {
@@ -273,6 +332,15 @@ final class KeyFobPresenceSearch {
     }
 
     synchronized JSONObject runtime() throws Exception {
+        JSONObject out = baseRuntime();
+        Integer last = lastCallbackRaw;
+        if (!"single".equals(keyModule) || last != null && (last == 2 || last == 3))
+            out.put("keyModule", keyModule);
+        if (otherResultRaw != null) out.put("otherKeyResultRaw", otherResultRaw);
+        return out;
+    }
+
+    private JSONObject baseRuntime() throws Exception {
         KeyFobPresenceCycle.Snapshot value = cycle.snapshot();
         return new JSONObject().put("active", enabled && allowedNow()
                         && !hasCleanupFailure())

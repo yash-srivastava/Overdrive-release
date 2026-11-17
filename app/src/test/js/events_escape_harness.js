@@ -17,7 +17,7 @@ const sandbox = {
     document: { createElement: () => {
         const el = { _h: '' };
         Object.defineProperty(el, 'textContent', {
-            set(v) { el._h = String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); },
+            set(v) { el._h = String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); },
             get() { return el._h; }
         });
         Object.defineProperty(el, 'innerHTML', { get() { return el._h; }, set(v) { el._h = v; } });
@@ -51,6 +51,7 @@ assert.strictEqual(ev.recordingKey({ id: 'abc123' }), 'abc123', 'id passthrough 
 // Simulate the patched card template attribute interpolation with the hostile name
 const hostile = 'clip"><img src=x onerror=alert(1)>.mp4';
 const attr = 'data-filename="' + ev._esc(hostile) + '"';
+assert.ok(!ev._esc('a"b').includes('"') && !ev._esc("a'b").includes("'"), 'quotes must be escaped');
 assert.ok(!attr.includes('"<img'), 'attribute must not break out: ' + attr);
 const text = ev._esc(hostile);
 assert.ok(!text.includes('<img'), 'element text must not contain live tag');

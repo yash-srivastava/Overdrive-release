@@ -313,6 +313,13 @@ public class AccMonitor {
                 CameraDaemon.log("notifyAccEdge ACC-off cluster mirror stop failed: "
                         + t.getMessage());
             }
+            // Layout resources must retire before the physical cluster source.
+            // This path performs no task reparenting or density commands.
+            try {
+                com.overdrive.app.launcher.ClusterLayouts.stopForAccOff();
+            } catch (Throwable t) {
+                CameraDaemon.log("ACC-off layout detach pending: " + t.getMessage());
+            }
             // ACC-OFF: stop the cluster map projector so its holder releases + the
             // launched cluster Activity is torn down. Safe + idempotent if not active.
             try {
@@ -428,26 +435,24 @@ public class AccMonitor {
                         + "enabled — map wins");
                 projAuto = false;
             }
+            // Legacy projection commands are owned by the camera daemon; a second process would
+            // race its opcodes on the shared cluster.
             if ((mapAuto || (projAuto && projPkg != null && !projPkg.isEmpty()))
                     && !clusterRecoveryOwner
-                    && !com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()
-                    && com.overdrive.app.surveillance.ClusterProjectionController
-                            .isLegacyCommandUnresolvedThisBoot(
-                                    cfg.optJSONObject("surveillance"))) {
-                CameraDaemon.log(reason + ": cluster auto-start skipped — a legacy "
-                        + "cluster command from this boot is still unresolved");
+                    && !com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) {
+                CameraDaemon.log(reason + ": cluster auto-start left to the camera daemon");
                 return;
             }
             if (mapAuto) {
                 CameraDaemon.log(reason
                         + ": auto-projecting map to cluster");
-                com.overdrive.app.navmap.ClusterMapProjector.start();
+                com.overdrive.app.navmap.ClusterMapProjector.startWhenSettled();
             } else if (projAuto
                     && projPkg != null
                     && !projPkg.isEmpty()) {
                 CameraDaemon.log(reason
                         + ": auto-casting projection app " + projPkg);
-                com.overdrive.app.launcher.ClusterCast.start(projPkg);
+                com.overdrive.app.launcher.ClusterCast.startWhenSettled(projPkg);
             }
         } catch (Throwable t) {
             CameraDaemon.log(reason

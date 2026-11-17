@@ -142,6 +142,7 @@ object RecentSearchStore {
     fun clear(context: Context) {
         try {
             prefs(context).edit().remove(KEY_RECENTS).apply()
+            com.overdrive.app.briefing.app.TripBriefingSync.request(context)
         } catch (e: Throwable) {
             Log.w(TAG, "clear failed: ${e.message}")
         }
@@ -216,6 +217,7 @@ object RecentSearchStore {
                 arr.put(obj)
             }
             prefs(context).edit().putString(KEY_RECENTS, arr.toString()).apply()
+            com.overdrive.app.briefing.app.TripBriefingSync.request(context)
         } catch (e: Throwable) {
             Log.w(TAG, "persist failed: ${e.message}")
         }

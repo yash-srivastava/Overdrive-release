@@ -133,20 +133,13 @@ class RoadSenseImuSidecarService : Service(), SensorEventListener {
         batchStartMs = 0L
 
         if (accel == null) {
-            if (sensorUnsupportedThisProcess) {
-                stopSelf()
-                return
-            }
             val resolved = ImuSource.resolve(sm)
             if (!resolved.usableForDetection) {
                 // R-EXT-6 graceful fallback: no real -iner accel on this trim.
-                sensorUnsupportedThisProcess = true
-                recordHardwareUnsupportedForCurrentBuild()
                 Log.w(TAG, "no usable -iner accelerometer on this trim; stopping IMU sidecar")
                 stopSelf()
                 return
             }
-            clearHardwareUnsupportedIfSet()
             accel = resolved.accelerometer
             gyro = resolved.gyroscope
         }
@@ -294,7 +287,7 @@ class RoadSenseImuSidecarService : Service(), SensorEventListener {
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(CHANNEL_ID, "RoadSense IMU", NotificationManager.IMPORTANCE_LOW)
+            val ch = NotificationChannel(CHANNEL_ID, com.overdrive.app.util.AppLocaleContext.of(this).getString(R.string.notif_channel_roadsense_imu), NotificationManager.IMPORTANCE_LOW)
             ch.setShowBadge(false)
             getSystemService(NotificationManager::class.java)?.createNotificationChannel(ch)
         }
@@ -307,7 +300,7 @@ class RoadSenseImuSidecarService : Service(), SensorEventListener {
             @Suppress("DEPRECATION") Notification.Builder(this)
         }
         return b.setContentTitle("RoadSense")
-            .setContentText("Road sensing active")
+            .setContentText(com.overdrive.app.util.AppLocaleContext.of(this).getString(R.string.notif_roadsense_imu_text))
             .setSmallIcon(R.drawable.ic_diagnostics)
             .setOngoing(true)
             .setGroup(DaemonKeepaliveService.NOTIFICATION_GROUP_KEY)
@@ -322,56 +315,10 @@ class RoadSenseImuSidecarService : Service(), SensorEventListener {
 
         /** Intent extra carrying the desired [ImuRate] name (D-021 rate scaling). */
         const val EXTRA_RATE = "rate"
-        private const val UCM_KEY_UNSUPPORTED_FINGERPRINT = "imuUnsupportedFingerprint"
-
-        @Volatile private var sensorUnsupportedThisProcess = false
 
         /** Fully-qualified component for the daemon's `am` launch (see [start]). */
         private const val COMPONENT =
             "com.overdrive.app/com.overdrive.app.roadsense.sidecar.RoadSenseImuSidecarService"
-
-        internal fun isBuildMarkedUnsupported(savedFingerprint: String?, currentFingerprint: String?): Boolean {
-            val cur = currentFingerprint?.trim().orEmpty()
-            return cur.isNotEmpty() && savedFingerprint?.trim() == cur
-        }
-
-        private fun isHardwareUnsupportedOnCurrentBuild(): Boolean {
-            if (sensorUnsupportedThisProcess) return true
-            val fp = Build.FINGERPRINT ?: return false
-            return try {
-                val rs = com.overdrive.app.config.UnifiedConfigManager.loadConfig()
-                    .optJSONObject("roadSense") ?: return false
-                isBuildMarkedUnsupported(rs.optString(UCM_KEY_UNSUPPORTED_FINGERPRINT, ""), fp)
-            } catch (_: Throwable) {
-                false
-            }
-        }
-
-        private fun recordHardwareUnsupportedForCurrentBuild() {
-            val fp = Build.FINGERPRINT?.trim().orEmpty()
-            if (fp.isEmpty()) return
-            try {
-                com.overdrive.app.config.UnifiedConfigManager.forceReload()
-                com.overdrive.app.config.UnifiedConfigManager.updateSection(
-                    "roadSense",
-                    org.json.JSONObject().put(UCM_KEY_UNSUPPORTED_FINGERPRINT, fp),
-                )
-            } catch (_: Throwable) {}
-        }
-
-        private fun clearHardwareUnsupportedIfSet() {
-            try {
-                val rs = com.overdrive.app.config.UnifiedConfigManager.loadConfig()
-                    .optJSONObject("roadSense") ?: return
-                if (rs.optString(UCM_KEY_UNSUPPORTED_FINGERPRINT, "").isNotEmpty()) {
-                    com.overdrive.app.config.UnifiedConfigManager.forceReload()
-                    com.overdrive.app.config.UnifiedConfigManager.updateSection(
-                        "roadSense",
-                        org.json.JSONObject().put(UCM_KEY_UNSUPPORTED_FINGERPRINT, ""),
-                    )
-                }
-            } catch (_: Throwable) {}
-        }
 
         /**
          * Start the sidecar at [rate]. Called from the CameraDaemon (app_process,
@@ -386,7 +333,6 @@ class RoadSenseImuSidecarService : Service(), SensorEventListener {
          * as a string extra.
          */
         fun start(rate: ImuRate) {
-            if (isHardwareUnsupportedOnCurrentBuild()) return
             exec("am start-foreground-service -n $COMPONENT --es $EXTRA_RATE ${rate.name}")
         }
 

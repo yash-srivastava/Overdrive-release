@@ -35,11 +35,13 @@ class TailscaleLauncher(
         private val TAILSCALE_PROXY_FILE: String get() = "$TAILSCALE_HOME/proxy_enabled"
         private const val TAILSCALE_PROXY_PORT = "8539"
 
-        // Dashboard ingress. Tailscale userspace networking forwards an
-        // unconfigured tailnet port to the same localhost port, which makes a
-        // remote peer look identical to a trusted in-device caller. Publishing
-        // 8080 through TCP Serve with PROXY v1 gives HttpServer a trustworthy
-        // tunnel marker while preserving the existing http://100.x:8080 URL.
+        // Dashboard ingress. Stock userspace networking forwards an unconfigured
+        // tailnet port to the same localhost port; the bundled tailscaled is
+        // patched to drop those (tools/patches), so only Serve ports are reachable.
+        // Serve's own forward still reaches 8080 from 127.0.0.1, which looks
+        // identical to a trusted in-device caller, so publishing 8080 through TCP
+        // Serve with PROXY v1 gives HttpServer a trustworthy tunnel marker while
+        // preserving the existing http://100.x:8080 URL.
         private const val DASHBOARD_PORT = "8080"
         private const val DASHBOARD_BACKEND = "tcp://127.0.0.1:$DASHBOARD_PORT"
         private const val DASHBOARD_DENY_BACKEND = "tcp://127.0.0.1:1"
@@ -401,9 +403,8 @@ class TailscaleLauncher(
 
     private fun launchInstalledTailscale(callback: TailscaleCallback) {
         val useProxy = ProxyHelper.probePort(PROXY_PORT)
-        val healthyProxy = useProxy && ProxyHelper.isEgressProxyAvailable()
         isProxyEnabled { enableProxy ->
-            launchTailscaleDaemon(healthyProxy, enableProxy, callback)
+            launchTailscaleDaemon(useProxy, enableProxy, callback)
         }
     }
 

@@ -322,7 +322,12 @@ BYD.recording = {
                 try {
                     var modeRefresh = proxData.config.camera && proxData.config.camera.cameraMode;
                     var cardRefresh = document.getElementById('rectifyCard');
-                    if (cardRefresh) cardRefresh.style.display = (modeRefresh === 'dilink4') ? 'none' : '';
+                    if (cardRefresh) cardRefresh.style.display = (modeRefresh === 'dilink4' || modeRefresh === 'dilink5') ? 'none' : '';
+                    var vehRefresh = proxData.config.vehicle || {};
+                    var tangRefresh = String(vehRefresh.modelId || '').trim().toLowerCase() === 'tang'
+                        && vehRefresh.modelSource !== 'unset';
+                    var dl5CardRefresh = document.getElementById('dl5FisheyeCard');
+                    if (dl5CardRefresh) dl5CardRefresh.style.display = (modeRefresh === 'dilink5' && tangRefresh) ? '' : 'none';
                 } catch (_) {}
 
                 // Merge proximity guard with defaults. Skipped while dirty, like the blocks
@@ -1215,7 +1220,8 @@ BYD.recording = {
      * Lens-dewarp slider (0..100). Updates the displayed label and marks
      * the quality tab dirty — Apply persists via /api/settings/unified
      * which fires UnifiedConfigManager listeners; the active recorder picks
-     * up the new value within one frame, no segment rotation needed.
+     * up the new value within one frame. The CPU engine starts a new segment
+     * when correction turns on or off (its clips are corrected at playback).
      *
      * Also lightly debounced live-pushes to the daemon so users get
      * immediate visual confirmation without having to hit Apply for every
@@ -1886,10 +1892,11 @@ BYD.recording = {
                 const fields = qualityRejectedFields.join(', ');
                 const submittedQualityFieldCount = 4; // recordingQuality, recordingCodec, cameraFps, segmentDurationMinutes
                 if (qualityRejectedFields.length >= submittedQualityFieldCount) {
-                    msg = 'No changes applied — values rejected: ' + fields;
+                    msg = BYD.i18n.t('recording.values_rejected_all', {fields: fields}) || ('No changes applied — values rejected: ' + fields);
                     severity = 'error';
                 } else {
-                    msg = BYD.i18n.t('recording.settings_applied') + ' — but kept old values for: ' + fields;
+                    msg = BYD.i18n.t('recording.kept_old_values', {applied: BYD.i18n.t('recording.settings_applied'), fields: fields})
+                        || (BYD.i18n.t('recording.settings_applied') + ' — but kept old values for: ' + fields);
                     severity = 'warn';
                 }
             } else {

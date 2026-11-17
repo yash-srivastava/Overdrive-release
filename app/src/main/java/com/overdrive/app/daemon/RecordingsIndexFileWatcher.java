@@ -122,7 +122,7 @@ public final class RecordingsIndexFileWatcher {
                 indexWorker.shutdown();
                 indexWorker = null;
             }
-            started = false;
+            // Keep `started`: the next storage refresh retries the registration.
             CameraDaemon.log("RecordingsIndexFileWatcher start failed: "
                     + t.getClass().getSimpleName() + ": " + t.getMessage());
             logger.error("start failed", t);
@@ -142,10 +142,10 @@ public final class RecordingsIndexFileWatcher {
                     public void apply(String mp4Path, RecordingIndexEventQueue.Change change) {
                         File file = new File(mp4Path);
                         try {
-                            if (change == RecordingIndexEventQueue.Change.REMOVE
-                                    || !file.isFile()) {
+                            if (change == RecordingIndexEventQueue.Change.REMOVE) {
                                 RecordingsIndex.getInstance().removeByPath(mp4Path);
-                            } else if (file.length() > 0) {
+                            } else if (file.isFile() && file.length() > 0) {
+                                // A failed stat (e.g. mid-remount) leaves the row for reconcile.
                                 RecordingsIndex.getInstance().upsert(file);
                             }
                         } catch (Throwable t) {
@@ -170,10 +170,7 @@ public final class RecordingsIndexFileWatcher {
     /** Rebind watchers, retain queued changes, and discover existing clips on new mounts. */
     public synchronized void refresh() {
         if (!started) return;
-        start();
-        if (started) {
-            RecordingsIndex.getInstance().requestReconcile("watcher-storage-rebind");
-        }
+        start();   // the storage-change caller requests the reconcile
     }
 
     public synchronized void stop() {

@@ -31,22 +31,41 @@ public final class TelegramMessages {
                 && language.toLowerCase(Locale.ROOT).startsWith("pt");
     }
 
+    public static boolean isHebrew() {
+        String language = LocaleManager.get();
+        if (language == null) return false;
+        String l = language.toLowerCase(Locale.ROOT);
+        return l.startsWith("he") || l.startsWith("iw");
+    }
+
     /**
-     * Keep backend/exception details from reintroducing English into a PT-BR
-     * chat. English keeps the original diagnostic detail; PT-BR maps known
-     * failures and falls back to a localized pointer to the device logs.
+     * Locales whose chat must not fall back to raw English backend text:
+     * known failures are mapped to catalog strings instead (PT-BR and Hebrew).
+     */
+    public static boolean mapsTechnicalDetails() {
+        return isPortuguese() || isHebrew();
+    }
+
+    /**
+     * Keep backend/exception details from reintroducing English into a PT-BR or
+     * Hebrew chat. English keeps the original diagnostic detail; PT-BR and Hebrew map
+     * known failures and fall back to a localized pointer to the device logs.
      */
     public static String technicalDetail(String detail) {
         String value = detail == null ? "" : detail.trim();
         if (value.isEmpty()) return get("common.unknown_error");
-        if (!isPortuguese()) return escapeMarkdown(value);
+        if (!mapsTechnicalDetails()) return escapeMarkdown(value);
 
         // Codes, percentages, paths, versions, and numeric values are
         // language-neutral and remain useful as-is.
         if (value.matches("[\\d\\s%+./:_-]+")) return escapeMarkdown(value);
 
         String lower = value.toLowerCase(Locale.ROOT);
-        if (lower.matches(".*[áàâãéêíóôõúç].*")) {
+        // Already in the chat's language (a localized server message): pass through.
+        if (isPortuguese() && lower.matches(".*[áàâãéêíóôõúç].*")) {
+            return escapeMarkdown(value);
+        }
+        if (isHebrew() && value.matches("(?s).*[\\u05D0-\\u05EA].*")) {
             return escapeMarkdown(value);
         }
         if (lower.equals("unknown") || lower.startsWith("unknown (")) {

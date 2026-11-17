@@ -13,7 +13,7 @@
  *       <div id="app-shell-mount"></div>
  *       <main class="main-content">…page-specific content…</main>
  *     </div>
- *     <script src="../shared/app-shell.js?v=18"></script>
+ *     <script src="../shared/app-shell.js?v=20"></script>
  *
  * If a page omits #app-shell-mount the shell appends itself to <body>.
  *
@@ -74,11 +74,12 @@
         { href: 'key-mapping.html',     i18n: 'nav.key_mapping',     label: 'Key Mapping',     svg: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M7 13h.01M17 13h.01M10 15h4"/>' },
 
         // ===== Integrations group ===== — mirrors the native Integrations
-        // sub-page (Telegram, ABRP, MQTT, BYD Cloud).
+        // sub-page (Telegram, ABRP, MQTT, BYD Cloud); WireGuard is configured natively under Daemons.
         { divider: true, label: 'Integrations', i18n: 'nav.integrations_group', svg: '<path d="M12 22v-5M9 8V2M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/>' },
         { href: 'telegram.html',                          i18n: 'nav.telegram',       label: 'Telegram',       svg: '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
         { href: 'abrp.html',                              i18n: 'nav.abrp',           label: 'ABRP',           svg: '<path d="M9 18l6-6-6-6"/><circle cx="18" cy="12" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>' },
         { href: 'mqtt.html',                              i18n: 'nav.mqtt',           label: 'MQTT',           svg: '<circle cx="12" cy="12" r="2"/><path d="M8.46 15.54A5 5 0 0 1 7 12a5 5 0 0 1 1.46-3.54"/><path d="M15.54 8.46A5 5 0 0 1 17 12a5 5 0 0 1-1.46 3.54"/><path d="M5.64 18.36A9 9 0 0 1 3 12a9 9 0 0 1 2.64-6.36"/><path d="M18.36 5.64A9 9 0 0 1 21 12a9 9 0 0 1-2.64 6.36"/>', svgExtra: 'stroke-linecap="round"' },
+        { href: 'wireguard.html', browserOnly: true,     i18n: 'wireguard.page_title', label: 'WireGuard Tunnel', svg: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>' },
         { href: 'byd-cloud.html',                         i18n: 'nav.byd_cloud',      label: 'BYD Cloud',      svg: '<path d="M17.5 19a4.5 4.5 0 1 0-2.83-7.97A6 6 0 0 0 4 12.45a3 3 0 0 0 .5 5.95"/><path d="M17.5 19h-12"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
         { href: 'safekeep.html',                          i18n: 'nav.safekeep',       label: 'SafeKeep',       svg: '<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="9 14 11.5 16.5 16 12"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
 
@@ -100,6 +101,8 @@
         { href: 'widgets.html',                           i18n: 'nav.widgets',        label: 'Widgets',        svg: '<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="18" height="8" rx="2"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
         { href: 'widget-builder.html', browserOnly: true, i18n: 'widgetBuilder.nav', label: 'Widget Builder', svg: '<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><path d="M14 20.5l.6-2.9 5.2-5.2 2.3 2.3-5.2 5.2z"/><path d="M14 5h7M14 9h4"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
         { href: 'notifications.html',                     i18n: 'nav.notifications',  label: 'Notifications',  svg: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>' },
+        { href: 'daemons.html', browserOnly: true,       i18n: 'nav.daemons',        label: 'Daemons',        svg: '<rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01"/>' },
+        { href: 'sessions.html', browserOnly: true,      i18n: 'nav.sessions',       label: 'Signed-in Browsers', svg: '<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M9 11l2 2 4-4"/>' },
 
         // ===== About ===== — version, license, source, support links,
         // Check for Updates. Sits in its own group so the link isn't
@@ -460,9 +463,14 @@
         btn.setAttribute('data-i18n-attr', 'aria-label:common.search');
         btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>';
         var last = header.lastElementChild;
-        if (last && last.tagName === 'DIV' && !last.children.length &&
-            !(last.textContent && last.textContent.replace(/\s/g, ''))) {
+        var emptyDiv = last && last.tagName === 'DIV' && !last.children.length &&
+            !(last.textContent && last.textContent.replace(/\s/g, ''));
+        // Only an anonymous spacer is replaced. A named empty div is page state
+        // (Communicate's connection dot), so the icon goes in front of it.
+        if (emptyDiv && !last.id && !last.className) {
             header.replaceChild(btn, last);
+        } else if (emptyDiv) {
+            header.insertBefore(btn, last);
         } else {
             header.appendChild(btn);
         }
@@ -1833,7 +1841,7 @@
         if (document.querySelector('link[data-overdrive-search-css]')) return;
         var l = document.createElement('link');
         l.rel = 'stylesheet';
-        l.href = '../shared/search.css';
+        l.href = '../shared/search.css?v=1';
         l.setAttribute('data-overdrive-search-css', '1');
         document.head.appendChild(l);
     }
@@ -1842,7 +1850,7 @@
         if (document.querySelector('script[data-overdrive-search]')) return;
         ensureSearchCss();
         var s = document.createElement('script');
-        s.src = '../shared/search.js';
+        s.src = '../shared/search.js?v=3';
         s.setAttribute('data-overdrive-search', '1');
         s.async = false;
         var ref = document.querySelector('script[src*="app-shell.js"]');
@@ -1898,10 +1906,14 @@
     // Warm the palette on idle so the first open is instant and a setting
     // deep-link's arrival handler (which reads the sessionStorage handoff — no
     // query string, the static server 404s those) runs even without a trigger.
-    if (typeof window.requestIdleCallback === 'function') {
-        window.requestIdleCallback(function () { ensureSearchScript(); }, { timeout: 4000 });
-    } else {
-        setTimeout(ensureSearchScript, 1500);
+    // Not in the car app: its chrome hides every trigger, and the warm-up would
+    // crawl every page on the head unit for a palette nobody can open.
+    if (!embeddedInNativeApp) {
+        if (typeof window.requestIdleCallback === 'function') {
+            window.requestIdleCallback(function () { ensureSearchScript(); }, { timeout: 4000 });
+        } else {
+            setTimeout(ensureSearchScript, 1500);
+        }
     }
 
     if (document.readyState === 'loading') {

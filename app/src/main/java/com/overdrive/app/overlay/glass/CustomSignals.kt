@@ -30,6 +30,8 @@ object CustomSignals {
     private const val TYRES = "Tyres"
     private const val ROAD = "RoadSense"
     private const val BODY = "Body"
+    /** A cost's unit: the `currency` builtin, which the reading carries, not a fixed symbol. */
+    private const val COST = "currency"
 
     private val SIGNALS = listOf(
         num("soc", BATTERY, "Battery level", "%", 0.0, 100.0, 1.0, 72.0),
@@ -42,6 +44,8 @@ object CustomSignals {
         num("charge_limit", CHARGING, "Charge limit", "%", 0.0, 100.0, 1.0, 80.0),
         num("charging_eta_minutes", CHARGING, "Charging time left", "min", 0.0, 1440.0, 1.0, null),
         bool("is_dcfc", CHARGING, "DC fast charging", null),
+        num("charge_added_kwh", CHARGING, "Energy added this session", "kWh", 0.0, 200.0, 0.1, null),
+        num("charge_cost", CHARGING, "Cost of this charging session", COST, 0.0, 1000.0, 0.01, null),
         bool("driving", DRIVING, "Driving", false),
         bool("reversing", DRIVING, "Reversing", false),
         num("speed", DRIVING, "Speed", "km/h", 0.0, 250.0, 1.0, 0.0, live = true),
@@ -55,6 +59,7 @@ object CustomSignals {
         num("trip_wh_per_km", TRIP, "Trip consumption", "Wh/km", 0.0, 400.0, 1.0, 152.0),
         num("trip_kwh", TRIP, "Trip energy", "kWh", 0.0, 150.0, 0.1, 3.6),
         num("trip_top_kmh", TRIP, "Trip top speed", "km/h", 0.0, 250.0, 1.0, 96.0),
+        num("trip_cost", TRIP, "Trip cost", COST, 0.0, 1000.0, 0.01, 1.85),
         num("tyre_fl", TYRES, "Front-left tyre", "bar", 0.0, 4.0, 0.05, 2.48),
         num("tyre_fr", TYRES, "Front-right tyre", "bar", 0.0, 4.0, 0.05, 2.5),
         num("tyre_rl", TYRES, "Rear-left tyre", "bar", 0.0, 4.0, 0.05, 2.46),
@@ -130,6 +135,12 @@ object CustomSignals {
         m["trip_wh_per_km"] = trip?.whPerKm?.toDouble()
         m["trip_kwh"] = d(trip?.kwh)
         m["trip_top_kmh"] = s?.tripTopKmh?.toDouble()
+        m["trip_cost"] = d(trip?.cost)
+        val cc = s?.chargeCost
+        m["charge_added_kwh"] = d(cc?.addedKwh)
+        m["charge_cost"] = d(cc?.cost)
+        // the builtin both costs are shown in: the trip's currency, else the charging session's
+        m["currency"] = trip?.currency ?: cc?.currency
         m["tyre_fl"] = d(ty?.getOrNull(0))
         m["tyre_fr"] = d(ty?.getOrNull(1))
         m["tyre_rl"] = d(ty?.getOrNull(2))
@@ -157,6 +168,9 @@ object CustomSignals {
         return m
     }
 
-    // a Float reading as a Double without its float noise (2.48f, not 2.4800000190734863); NaN is unknown
-    private fun d(f: Float?): Double? = if (f == null || !f.isFinite()) null else Math.round(f * 10000.0) / 10000.0
+    // a reading as a Double without float noise (2.48f, not 2.4800000190734863); NaN is unknown
+    private fun d(v: Number?): Double? {
+        val x = v?.toDouble() ?: return null
+        return if (x.isFinite()) Math.round(x * 10000.0) / 10000.0 else null
+    }
 }

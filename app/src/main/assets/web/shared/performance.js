@@ -1137,7 +1137,8 @@ BYD.performance = {
             const gpuValueEl = document.getElementById('gpuValue');
             if (gpuValueEl) {
                 if (data.gpu.usageSource === 'freq_ratio_hardcoded') {
-                    gpuValueEl.title = 'Estimated from clock ratio (no GPU busy counter available on this firmware) — not a measured load.';
+                    gpuValueEl.title = (BYD.i18n && BYD.i18n.t && BYD.i18n.t('performance.gpu_estimated_title'))
+                        || 'Estimated from clock ratio (no GPU busy counter available on this firmware) — not a measured load.';
                     gpuValueEl.classList.add('estimated');
                 } else {
                     gpuValueEl.removeAttribute('title');
@@ -2515,6 +2516,33 @@ BYD.performance = {
         } catch (e) {
             console.error('[Performance] Battery health fetch error:', e);
         }
+        this.fetchHvCells();
+    },
+
+    // Live cell readings; the card stays hidden until the car reports cell voltages.
+    async fetchHvCells() {
+        try {
+            const res = await fetch('/api/performance/hv-cells', { cache: 'no-store' });
+            if (!res.ok) return;
+            this.renderHvCells(await res.json());
+        } catch (e) {
+            // Keep the last values; the next refresh tries again.
+        }
+    },
+
+    renderHvCells(d) {
+        const card = document.getElementById('hvCellsCard');
+        if (!card) return;
+        const num = (v) => (typeof v === 'number' && isFinite(v)) ? v : null;
+        const lo = num(d && d.cellVoltMin), hi = num(d && d.cellVoltMax);
+        const pack = num(d && d.packVolt), temp = num(d && d.tempAvg);
+        const cells = lo !== null && hi !== null && hi >= lo;
+        card.style.display = (cells || pack !== null) ? '' : 'none';
+        this.updateElement('hvCellSpread', cells ? String(Math.round((hi - lo) * 1000)) : '--');
+        this.updateElement('hvCellMin', lo !== null ? lo.toFixed(3) + ' V' : '--');
+        this.updateElement('hvCellMax', hi !== null ? hi.toFixed(3) + ' V' : '--');
+        this.updateElement('hvPackVolt', pack !== null ? Math.round(pack) + ' V' : '--');
+        this.updateElement('hvCellTemp', temp !== null ? temp.toFixed(1) + '°C' : '--');
     },
 
     updateBatteryHealthUI() {

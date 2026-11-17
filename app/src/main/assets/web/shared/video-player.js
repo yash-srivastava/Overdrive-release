@@ -1,4 +1,5 @@
-/* Shared Events video player markup. Loaded by events.html and parking.html. */
+/* Shared recording player markup (Events and Parking). Inserted where this
+   script tag sits, during parsing, so page scripts find the elements. */
 (function () {
     'use strict';
     if (document.getElementById('videoModal')) return;
@@ -7,6 +8,14 @@
         <div class="video-container">
             <div class="video-header">
                 <span class="video-title" id="videoTitle" data-i18n="events.video_title">Recording</span>
+                <span class="video-nav" id="videoNav" hidden>
+                    <button type="button" class="video-nav-btn" id="videoPrevBtn" onclick="BYD.events.navigateRecording(-1)" data-i18n-attr="title:common.nav_previous;aria-label:common.nav_previous" title="Previous" aria-label="Previous">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+                    </button>
+                    <button type="button" class="video-nav-btn" id="videoNextBtn" onclick="BYD.events.navigateRecording(1)" data-i18n-attr="title:common.nav_next;aria-label:common.nav_next" title="Next" aria-label="Next">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+                    </button>
+                </span>
                 <button class="video-close" onclick="BYD.events.closeVideo()" data-i18n-attr="title:common.close" title="Close">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"/>
@@ -22,6 +31,8 @@
                      transport chrome below this surface (see .video-transport)
                      which lives outside the zooming subtree. -->
                 <video id="videoPlayer" autoplay muted playsinline webkit-playsinline preload="auto"></video>
+                <!-- Playback-time lens dewarp canvas. Hidden by default; events.js shows it for raw clips. -->
+                <canvas id="videoDewarpCanvas" aria-hidden="true"></canvas>
                 <!-- Quadrant selector. The four AVM cameras are baked into a
                      single MP4 as a 2x2 mosaic (Front=TL, Right=TR, Rear=BL,
                      Left=BR by GpuMosaicRecorder convention). Tapping a
@@ -54,8 +65,9 @@
                 <!-- Always-visible scrubber. Markers are populated only when
                      a JSON sidecar exists; the bar itself stays so users have
                      a seek surface for plain recordings too. -->
-                <div class="timeline-scrubber" id="timelineScrubber" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Seek">
+                <div class="timeline-scrubber" id="timelineScrubber" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Seek" data-i18n-attr="aria-label:events.seek_aria">
                     <div class="timeline-track" id="timelineTrack">
+                        <div class="timeline-buffered" id="timelineBuffered"></div>
                         <div class="timeline-progress" id="timelineProgress"></div>
                     </div>
                     <div class="timeline-playhead smooth" id="timelinePlayhead"></div>
@@ -63,11 +75,14 @@
                 <!-- Event-type legend — hidden until the timeline has marker
                      data. Plain recordings show the scrubber alone. -->
                 <div class="timeline-legend" id="timelineLegend" style="display:none;">
+                    <span class="legend-item" id="timelineLegendTrigger" style="display:none;"><span class="legend-dot legend-trigger"></span><span class="legend-label"></span></span>
                     <span class="legend-item"><span class="legend-dot legend-motion"></span><span data-i18n="events.legend_motion">Motion</span></span>
                     <span class="legend-item"><span class="legend-dot legend-person"></span><span data-i18n="events.actor_person">Person</span></span>
                     <span class="legend-item"><span class="legend-dot legend-car"></span><span data-i18n="events.actor_vehicle">Vehicle</span></span>
                     <span class="legend-item"><span class="legend-dot legend-bike"></span><span data-i18n="events.actor_bike">Bike</span></span>
                     <span class="legend-item"><span class="legend-dot legend-animal"></span><span data-i18n="events.actor_animal">Animal</span></span>
+                    <span class="legend-item" id="timelineLegendCloud" style="display:none;"><span class="legend-dot legend-cloud"></span><span data-i18n="events.legend_deterrent_cloud">Cloud deterrent</span></span>
+                    <span class="legend-item" id="timelineLegendScreen" style="display:none;"><span class="legend-dot legend-screen"></span><span data-i18n="events.legend_deterrent_screen">Screen deterrent</span></span>
                 </div>
                 <div class="video-controls">
                     <button type="button" class="video-ctrl-btn" id="videoPlayPauseBtn" data-i18n-attr="title:events.player_play_pause;aria-label:events.player_play_pause" title="Play/Pause" aria-label="Play/Pause">
@@ -78,6 +93,21 @@
                         <span id="videoCurTime">0:00</span><span class="sep">/</span><span class="dur" id="videoDurTime">0:00</span>
                     </span>
                     <span class="spacer"></span>
+                    <span class="video-speed">
+                        <button type="button" class="video-ctrl-btn video-speed-btn" id="videoSpeedBtn" aria-haspopup="true" aria-expanded="false" data-i18n-attr="title:events.player_speed;aria-label:events.player_speed" title="Playback speed" aria-label="Playback speed"><span id="videoSpeedLabel">1.0×</span></button>
+                        <span class="video-speed-panel" id="videoSpeedPanel" hidden>
+                            <input type="range" class="video-speed-slider" id="videoSpeedSlider" min="0.1" max="3" step="0.1" value="1" data-i18n-attr="aria-label:events.player_speed" aria-label="Playback speed">
+                            <span class="video-speed-presets">
+                                <button type="button" data-speed="0.1">0.1×</button>
+                                <button type="button" data-speed="0.5">0.5×</button>
+                                <button type="button" data-speed="1">1.0×</button>
+                                <button type="button" data-speed="1.5">1.5×</button>
+                                <button type="button" data-speed="2">2.0×</button>
+                                <button type="button" data-speed="2.5">2.5×</button>
+                                <button type="button" data-speed="3">3.0×</button>
+                            </span>
+                        </span>
+                    </span>
                     <button type="button" class="video-ctrl-btn" id="videoMuteBtn" data-i18n-attr="title:events.player_mute;aria-label:events.player_mute" title="Mute" aria-label="Mute">
                         <svg id="videoMuteIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <!-- Initial state — muted (the player starts muted for autoplay). -->
@@ -86,11 +116,19 @@
                             <line x1="17" y1="9" x2="23" y2="15"/>
                         </svg>
                     </button>
+                    <input type="range" class="video-volume-slider" id="videoVolumeSlider" min="0" max="100" step="1" value="100" hidden
+                           data-i18n-attr="title:events.player_volume;aria-label:events.player_volume" title="Volume" aria-label="Volume">
                     <!-- Fullscreen toggle. We fullscreen the .video-container
                          (NOT the <video>) so our quadrant zoom + custom
                          transport survive. Native <video> fullscreen would
                          drop us into the browser's player chrome and lose
                          the zoom transform. -->
+                    <button type="button" class="video-ctrl-btn" id="videoOnlyFullscreenBtn" hidden data-i18n-attr="title:events.player_fullscreen_video_only;aria-label:events.player_fullscreen_video_only" title="Fullscreen, video only" aria-label="Fullscreen, video only">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <rect x="2" y="4" width="20" height="16" rx="2"/>
+                            <path d="M7 10V8h2"/><path d="M17 10V8h-2"/><path d="M7 14v2h2"/><path d="M17 14v2h-2"/>
+                        </svg>
+                    </button>
                     <button type="button" class="video-ctrl-btn" id="videoFullscreenBtn" data-i18n-attr="title:events.player_fullscreen;aria-label:events.player_fullscreen" title="Fullscreen" aria-label="Fullscreen">
                         <svg id="videoFullscreenIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <!-- Initial state — enter fullscreen (corner brackets). -->
@@ -101,6 +139,21 @@
                         </svg>
                     </button>
                 </div>
+                <!-- Must list exactly what handlePlayerKey + the page keydown handler do. -->
+                <details class="video-shortcuts" id="videoShortcuts">
+                    <summary data-i18n="events.shortcuts_title">Keyboard shortcuts</summary>
+                    <dl>
+                        <dt><kbd>Space</kbd> <kbd>K</kbd></dt><dd data-i18n="events.shortcut_play_pause">Play or pause</dd>
+                        <dt><kbd>←</kbd> <kbd>→</kbd></dt><dd data-i18n="events.shortcut_seek_5">Back or forward 5 s</dd>
+                        <dt><kbd>J</kbd> <kbd>L</kbd></dt><dd data-i18n="events.shortcut_seek_10">Back or forward 10 s</dd>
+                        <dt><kbd>[</kbd> <kbd>]</kbd></dt><dd data-i18n="events.shortcut_speed">Slower or faster</dd>
+                        <dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd data-i18n="events.shortcut_volume">Volume up or down</dd>
+                        <dt><kbd>Shift</kbd>+<kbd>P</kbd> <kbd>Shift</kbd>+<kbd>N</kbd></dt><dd data-i18n="events.shortcut_prev_next">Previous or next recording</dd>
+                        <dt><kbd>0</kbd>–<kbd>4</kbd></dt><dd data-i18n="events.shortcut_cameras">All cameras, front, right, rear, left</dd>
+                        <dt><kbd>F</kbd></dt><dd data-i18n="events.shortcut_fullscreen">Fullscreen</dd>
+                        <dt><kbd>Esc</kbd></dt><dd data-i18n="events.shortcut_close">Close the player</dd>
+                    </dl>
+                </details>
             </div>
             <div class="video-details">
                 <div class="video-meta">
@@ -140,7 +193,6 @@
             </div>
         </div>
     </div>
-
 `;
     var script = document.currentScript;
     if (script && script.parentNode) {

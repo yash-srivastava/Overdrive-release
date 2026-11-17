@@ -42,10 +42,6 @@ object ProxyConfiguration {
      */
     val DEFAULT_LISTEN: String get() = Enc.LOCALHOST
 
-    // SECURITY (run-2 fix): there is deliberately NO wildcard listen constant
-    // anymore. Client-facing inbounds bind the AP gateway address passed by the
-    // caller; a wildcard bind exposed the proxy to every interface.
-
     /**
      * Inbound port offered to tethered clients when they should be tunnelled.
      * Separate from [PROXY_PORT] so the car's own proxy keeps its behaviour: the
@@ -65,6 +61,8 @@ object ProxyConfiguration {
      * @param clientRelaySocksPort when non-null, add a second inbound on
      *   [CLIENT_TUNNEL_PORT] whose traffic is tunnelled and then handed to the
      *   cellular-bound SOCKS5 relay on this port.
+     * @param clientListen bind address of that inbound: the hotspot interface's IPv4. The inbound
+     *   has no credentials, so it never binds every interface.
      *
      * Why the extra hop is required: sing-box is an ordinary UID-2000 process, so
      * its sockets need a default network — and this device has none while the AP
@@ -78,10 +76,10 @@ object ProxyConfiguration {
     fun createConfig(
         listen: String = DEFAULT_LISTEN,
         clientRelaySocksPort: Int? = null,
-        clientListen: String? = null,
-        clientAuth: Pair<String, String>? = null,
+        clientListen: String = DEFAULT_LISTEN,
     ): String {
         val listenAddress = if (listen.isBlank()) DEFAULT_LISTEN else listen
+        val clientListenAddress = if (clientListen.isBlank()) DEFAULT_LISTEN else clientListen
         val serverIp = SERVER_IP
         val serverPort = SERVER_PORT
         val uuid = UUID
@@ -93,18 +91,13 @@ object ProxyConfiguration {
         // Second inbound + its detoured outbound + the route rule that ties them
         // together. All three are emitted only when client tunnelling is asked for,
         // so a normal config is byte-identical to before.
-        // SECURITY (run-2 fix): bind the AP gateway (never the wildcard) and, when
-        // credentials are supplied, require them on the mixed inbound.
-        val clientBind = (clientListen ?: DEFAULT_LISTEN).ifBlank { DEFAULT_LISTEN }
-        val clientUsers = if (clientAuth != null) """,
-      "users": [ { "username": "${clientAuth.first}", "password": "${clientAuth.second}" } ]""" else ""
         val clientInbound = if (clientRelaySocksPort != null) """,
     {
       "type": "mixed",
       "tag": "$CLIENT_INBOUND_TAG",
-      "listen": "$clientBind",
+      "listen": "$clientListenAddress",
       "listen_port": $CLIENT_TUNNEL_PORT,
-      "sniff": true$clientUsers
+      "sniff": true
     }""" else ""
         // NOTE: deliberately NO "domain_strategy" here. It would make sing-box resolve
         // the destination locally before dialing, and the only DNS server detours via
@@ -190,9 +183,10 @@ object ProxyConfiguration {
   ],
   "route": {
     "auto_detect_interface": true,
+    "override_android_vpn": true,
     "rules": [
       { "inbound": ["mixed-in"], "protocol": "dns", "outbound": "${Enc.OUTBOUND_PROXY}" },
-      { "ip_cidr": ["127.0.0.0/8", "10.0.0.0/8", "192.168.0.0/16", "172.16.0.0/12"], "outbound": "${Enc.OUTBOUND_DIRECT}" }$clientRule
+      { "inbound": ["mixed-in"], "ip_cidr": ["10.0.0.0/8", "192.168.0.0/16", "172.16.0.0/12"], "outbound": "${Enc.OUTBOUND_DIRECT}" }$clientRule
     ]
   }
 }

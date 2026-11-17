@@ -106,8 +106,8 @@ public class StatusOverlayService extends Service {
     private static final int ICON_OPACITY_MAX = 100;
     private static final int ICON_OPACITY_DEFAULT = 100;
     private static final int CHIP_OPACITY_DEFAULT = 100;
-    /** Live chip slider preview; when >= 0 overrides config until cleared. */
-    private volatile int chipOpacityPreview = -1;
+    /** Settings-slider preview of the indicator opacity; -1 = use the saved value. Main thread. */
+    private int chipOpacityPreview = -1;
     private static final int ICON_SIZE_MIN_DP = 12;
     private static final int ICON_SIZE_MAX_DP = 32;
     private static final int ICON_SIZE_DEFAULT_DP = 18;
@@ -151,6 +151,10 @@ public class StatusOverlayService extends Service {
     private volatile boolean tripActive = false;
     private volatile boolean daemonReachable = false;
     private volatile String currentGear = "P";
+    /** ACC-off polls in a row: Trip Briefing's card goes on the second (one can be a misread). */
+    private int briefingAccOffPolls = 0;
+    /** When the current poll's fetch began (elapsedRealtime). */
+    private volatile long pollStartedAtMs = 0L;
     private volatile boolean accOn = false;
     // User-controlled audio toggle (recording.audioEnabled in unified config)
     private volatile boolean audioEnabledConfig = false;
@@ -180,6 +184,7 @@ public class StatusOverlayService extends Service {
     // moment the user begins driving.
     private volatile boolean previousAccOn = false;
     private volatile long fastPollUntilElapsedMs = 0;
+    private volatile boolean briefingFastPoll;
     private static final long FAST_POLL_INTERVAL_MS = 1000;
     private static final long FAST_POLL_WINDOW_MS = 30_000;
 
@@ -529,10 +534,12 @@ public class StatusOverlayService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        com.overdrive.app.briefing.app.TripBriefingPrompt.setPollNow(this::rescheduleImmediatePoll);
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        activeInstance = this;
         createNotificationChannel();
         startOverlayForeground();
 
@@ -565,7 +572,6 @@ public class StatusOverlayService extends Service {
         if (windowManager == null) {
             windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
         }
-        activeInstance = this;
 
         // Arm the camera-view close-button receiver once (idempotent across restarts).
         registerCamCloseReceiver();
@@ -878,7 +884,7 @@ public class StatusOverlayService extends Service {
         }
     }
 
-    /** Fade the entire status pill (background + labels + icons) together. */
+    /** Fade the whole status pill (background, labels and icons) together. */
     private void applyChipOpacity(int opacity) {
         if (pillContainer == null || opacity == appliedChipOpacity) return;
         appliedChipOpacity = opacity;
@@ -998,10 +1004,7 @@ public class StatusOverlayService extends Service {
 
     @Override
     public void onDestroy() {
-        activeInstance = null;
-        chipOpacityPreview = -1;
-        iconOpacityPreview = -1;
-        iconSizeDpPreview = -1;
+        if (activeInstance == this) activeInstance = null;
         // Order matters here:
         //  1. Flip running BEFORE we touch the executor or the controller.
         //     Any in-flight reconcile that's already on the executor reads
@@ -1020,6 +1023,10 @@ public class StatusOverlayService extends Service {
         //     thread joins use a bounded wait inside cleanup().
         running.set(false);
         handler.removeCallbacksAndMessages(null);
+        // No more polls: a Trip Briefing card can't learn the gear, so it goes now.
+        com.overdrive.app.briefing.app.TripBriefingPrompt.setPollNow(null);
+        new android.os.Handler(android.os.Looper.getMainLooper())
+                .post(com.overdrive.app.briefing.app.TripBriefingPrompt::dismiss);
         executor.shutdownNow();
         com.overdrive.app.audio.AppAudioCaptureController
                 .setRecordingDemand(false);
@@ -1626,12 +1633,37 @@ public class StatusOverlayService extends Service {
                 // adoptReplayState treat the sample as an authoritative
                 // snapshot relative to locally-known broadcast events.
                 long fetchStartElapsedMs = android.os.SystemClock.elapsedRealtime();
+                pollStartedAtMs = fetchStartElapsedMs;
                 JSONObject status = fetchStatus();
                 if (status != null) {
                     daemonReachable = true;
                     consecutivePollFailures = 0;
                     parseStatus(status, fetchStartElapsedMs);
+                    final JSONObject tripBriefing = status.optJSONObject("tripBriefing");
+                    // Poll at 1 s while a Trip Briefing offer is being prepared or shown, or a yes waits for the gear.
+                    briefingFastPoll = tripBriefing != null || status.optBoolean("tripBriefingSoon", false)
+                            || com.overdrive.app.briefing.app.TripBriefingPrompt.wantsFastPoll();
+                    // The daemon's live gear for the briefing (absent while its reading is stale); a default "P"
+                    // in recordingStatus isn't a reading.
+                    final String briefingGear = status.optString("tripBriefingGear", "");
+                    final boolean reversing = "R".equals(briefingGear);
+                    final boolean gearKnown = !briefingGear.isEmpty();
+                    final boolean briefingSync = status.optBoolean("tripBriefingSync", false);
+                    final boolean briefingAcc = accOn || ++briefingAccOffPolls < 2;
+                    if (accOn) briefingAccOffPolls = 0;
+                    final boolean briefingMoving = status.optBoolean("tripBriefingMoving", false);
+                    final double briefingKmh = status.has("tripBriefingKmh")
+                            ? status.optDouble("tripBriefingKmh", Double.NaN) : Double.NaN;
+                    final long polledAt = fetchStartElapsedMs;
+                    handler.post(() -> com.overdrive.app.briefing.app.TripBriefingPrompt.onStatus(
+                            getApplicationContext(), tripBriefing, reversing, briefingSync, accOn,
+                            briefingMoving, polledAt, gearKnown, briefingKmh));
+                    if (!briefingAcc) handler.post(com.overdrive.app.briefing.app.TripBriefingPrompt::dismiss);
                 } else {
+                    // Keep polling fast for a card that's up (it is hidden until a poll answers), for ~10 s.
+                    briefingFastPoll = briefingFastPoll && consecutivePollFailures < 10;
+                    // No gear this poll: a Trip Briefing card steps aside in case it's now over the reverse camera.
+                    handler.post(com.overdrive.app.briefing.app.TripBriefingPrompt::onStatusLost);
                     consecutivePollFailures++;
                     if (consecutivePollFailures >= UNREACHABLE_THRESHOLD) {
                         daemonReachable = false;
@@ -1651,6 +1683,7 @@ public class StatusOverlayService extends Service {
                     Log.i(TAG, "ACC OFF→ON edge — fast-polling for "
                             + FAST_POLL_WINDOW_MS + "ms");
                 }
+                // (Trip Briefing's card goes on the second ACC-off poll in a row, above.)
                 refreshAudioConfig();
                 reconcileAudioCapture();
                 reconcileVoiceAssistant();
@@ -1679,7 +1712,10 @@ public class StatusOverlayService extends Service {
                 // FAST_POLL_WINDOW_MS to catch the daemon-startup race tight.
                 long now = android.os.SystemClock.elapsedRealtime();
                 final long interval;
-                if (fastPollUntilElapsedMs > now) {
+                if (briefingFastPoll) {
+                    // Start to start, so a slow reply doesn't stretch the gap a briefing card counts as a stale gear.
+                    interval = Math.max(100L, FAST_POLL_INTERVAL_MS - (now - pollStartedAtMs));
+                } else if (fastPollUntilElapsedMs > now) {
                     interval = FAST_POLL_INTERVAL_MS;
                 } else if (overlayFullyIdle) {
                     // Overlay disabled + no audio to reconcile: slow way down.
@@ -2056,21 +2092,15 @@ public class StatusOverlayService extends Service {
                         ICON_OPACITY_MIN, ICON_OPACITY_MAX);
                 iconSizeDp = clamp(statusOverlayCfg.optInt("iconSizeDp", ICON_SIZE_DEFAULT_DP),
                         ICON_SIZE_MIN_DP, ICON_SIZE_MAX_DP);
-                chipOpacity = StatusOverlayChipOpacity.clampStored(
-                        statusOverlayCfg.optInt("chipOpacity", CHIP_OPACITY_DEFAULT));
+                chipOpacity = clamp(statusOverlayCfg.optInt("chipOpacity", CHIP_OPACITY_DEFAULT),
+                        ICON_OPACITY_MIN, ICON_OPACITY_MAX);
             }
         } catch (Exception e) {
             Log.w(TAG, "Failed to read statusOverlay prefs: " + e.getMessage());
         }
-        if (chipOpacityPreview >= 0) {
-            chipOpacity = chipOpacityPreview;
-        }
-        if (iconOpacityPreview >= 0) {
-            iconOpacity = iconOpacityPreview;
-        }
-        if (iconSizeDpPreview >= 0) {
-            iconSizeDp = iconSizeDpPreview;
-        }
+        if (chipOpacityPreview >= 0) chipOpacity = chipOpacityPreview;
+        if (iconOpacityPreview >= 0) iconOpacity = iconOpacityPreview;
+        if (iconSizeDpPreview >= 0) iconSizeDp = iconSizeDpPreview;
 
         boolean recConfigured = !"NONE".equals(configuredMode) && !"UNKNOWN".equals(configuredMode);
         // While the user is interacting with the action bar we keep the
@@ -2279,7 +2309,7 @@ public class StatusOverlayService extends Service {
                 // continuous/drive recording; armed-but-idle proximity stays
                 // amber (see the isProximity branch below).
                 ivRecIcon.setImageResource(R.drawable.ic_overlay_rec_active);
-                tvRecLabel.setText(isProximity ? "PROX" : "REC");
+                tvRecLabel.setText(isProximity ? R.string.overlay_mode_proximity_label : R.string.overlay_rec_inactive_label);
                 tvRecLabel.setTextColor(getColor(R.color.status_success));
             } else if (isProximity) {
                 // Proximity guard is armed but not currently recording (no radar
@@ -2291,14 +2321,14 @@ public class StatusOverlayService extends Service {
                 // route the normal armed state into the red "problem" branch
                 // below and light the pill red for the whole drive.
                 ivRecIcon.setImageResource(R.drawable.ic_overlay_rec_inactive);
-                tvRecLabel.setText("PROX");
+                tvRecLabel.setText(R.string.overlay_mode_proximity_label);
                 tvRecLabel.setTextColor(getColor(R.color.status_warning));
             } else if (shouldBeRecording) {
                 // Problem — a continuous/drive mode should be recording but
                 // isn't. (Proximity is handled above: its not-recording state
                 // is armed/normal, not a fault.)
                 ivRecIcon.setImageResource(R.drawable.ic_overlay_rec_inactive);
-                tvRecLabel.setText("REC");
+                tvRecLabel.setText(R.string.overlay_rec_inactive_label);
                 tvRecLabel.setTextColor(getColor(R.color.status_danger));
             } else {
                 // Configured (e.g. drive mode) but standby — not recording is
@@ -2419,11 +2449,11 @@ public class StatusOverlayService extends Service {
             tripContainer.setVisibility(View.VISIBLE);
             if (tripActive) {
                 ivTripIcon.setImageResource(R.drawable.ic_overlay_trip_active);
-                tvTripLabel.setText("TRIP");
+                tvTripLabel.setText(R.string.overlay_trip_inactive_label);
                 tvTripLabel.setTextColor(getColor(R.color.status_success));
             } else {
                 ivTripIcon.setImageResource(R.drawable.ic_overlay_trip_inactive);
-                tvTripLabel.setText("TRIP");
+                tvTripLabel.setText(R.string.overlay_trip_inactive_label);
                 tvTripLabel.setTextColor(getColor(R.color.status_danger));
             }
         } else {
@@ -2586,8 +2616,8 @@ public class StatusOverlayService extends Service {
 
     private void createNotificationChannel() {
         NotificationChannel channel = new NotificationChannel(
-                CHANNEL_ID, "Status Overlay", NotificationManager.IMPORTANCE_LOW);
-        channel.setDescription("Recording and trip status overlay");
+                CHANNEL_ID, com.overdrive.app.util.AppLocaleContext.INSTANCE.of(this).getString(com.overdrive.app.R.string.notif_channel_status_overlay), NotificationManager.IMPORTANCE_LOW);
+        channel.setDescription(com.overdrive.app.util.AppLocaleContext.INSTANCE.of(this).getString(com.overdrive.app.R.string.notif_channel_status_overlay_desc));
         channel.setShowBadge(false);
         NotificationManager nm = getSystemService(NotificationManager.class);
         if (nm != null) nm.createNotificationChannel(channel);
@@ -2659,22 +2689,23 @@ public class StatusOverlayService extends Service {
     public static final String ACTION_REFRESH_THEME =
             "com.overdrive.app.overlay.REFRESH_THEME";
 
-    /** In-memory chip visibility while the settings slider moves (no config write). */
-    public static void previewChipOpacity(int opacityPct) {
+    /** Show an indicator opacity while the settings slider moves, without saving it. */
+    public static void previewChipOpacity(int opacity) {
         StatusOverlayService svc = activeInstance;
         if (svc == null) return;
-        int opacity = StatusOverlayChipOpacity.clampStored(opacityPct);
-        svc.runOnOverlayMain(() -> {
+        int clamped = clamp(opacity, ICON_OPACITY_MIN, ICON_OPACITY_MAX);
+        svc.handler.post(() -> {
             if (activeInstance != svc) return;
-            svc.chipOpacityPreview = opacity;
-            svc.applyChipOpacity(opacity);
+            svc.chipOpacityPreview = clamped;
+            svc.applyChipOpacity(clamped);
         });
     }
 
+    /** End the slider preview; the saved value applies again on the next update. */
     public static void clearChipOpacityPreview() {
         StatusOverlayService svc = activeInstance;
         if (svc == null) return;
-        svc.runOnOverlayMain(() -> {
+        svc.handler.post(() -> {
             if (activeInstance != svc) return;
             svc.chipOpacityPreview = -1;
             svc.appliedChipOpacity = -1;

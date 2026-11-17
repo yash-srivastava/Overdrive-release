@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Trip Briefing: the car-start "Heading to work? Want directions?" prompt. The spoken line is
+         greeting + heading + duration (or one extra that replaces it) + question, joined by spaces,
+         and read aloud by text-to-speech. -->
+    <string name="trip_briefing_greeting_morning">Доброе утро.</string>
+    <string name="trip_briefing_greeting_afternoon">Добрый день.</string>
+    <string name="trip_briefing_greeting_evening">Добрый вечер.</string>
+    <string name="trip_briefing_heading_home">Едете домой?</string>
+    <string name="trip_briefing_heading_work">Едете на работу?</string>
+    <!-- %1$s: the place's name, e.g. "Phoenix Mall". -->
+    <string name="trip_briefing_heading_place">%1$s — едете туда?</string>
+    <plurals name="trip_briefing_duration">
+        <item quantity="one">Примерно %1$d минута.</item>
+        <item quantity="few">Примерно %1$d минуты.</item>
+        <item quantity="many">Примерно %1$d минут.</item>
+        <item quantity="other">Примерно %1$d минуты.</item>
+    </plurals>
+    <!-- %1$s: range left, %2$s: the trip's length, each "31 km" or "19 mi". -->
+    <string name="trip_briefing_extra_range">Запас хода впритык: осталось %1$s на поездку в %2$s.</string>
+    <plurals name="trip_briefing_extra_hazards">
+        <item quantity="one">На пути %1$d новая опасность.</item>
+        <item quantity="few">На пути %1$d новые опасности.</item>
+        <item quantity="many">На пути %1$d новых опасностей.</item>
+        <item quantity="other">На пути %1$d новой опасности.</item>
+    </plurals>
+    <!-- %1$s: an hour of the day in the device's clock format, e.g. "7 PM" or "19:00". -->
+    <string name="trip_briefing_extra_rain">Около %1$s вероятен дождь.</string>
+    <string name="trip_briefing_question">Проложить маршрут?</string>
+    <string name="trip_briefing_distance_km">%1$d км</string>
+    <string name="trip_briefing_distance_mi">%1$d ми</string>
+
+    <!-- The destination as the AI assistant should say it. -->
+    <string name="trip_briefing_said_home">дом</string>
+    <string name="trip_briefing_said_work">работа</string>
+
+    <!-- Card -->
+    <string name="trip_briefing_title_home">Дом</string>
+    <string name="trip_briefing_title_work">Работа</string>
+    <!-- Title for a regular destination that has no name yet. -->
+    <string name="trip_briefing_title_unnamed">Ваша обычная остановка</string>
+    <string name="trip_briefing_name_place">Назвать место</string>
+    <string name="trip_briefing_no">Нет</string>
+    <string name="trip_briefing_go_failed">Маршрут не запущен. Откройте карту, чтобы начать навигацию.</string>
+    <!-- The car's own navigation app. -->
+    <string name="trip_briefing_app_car">Штатная навигация</string>
+</resources>

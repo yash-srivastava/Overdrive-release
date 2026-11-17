@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Trip Briefing: the car-start "Heading to work? Want directions?" prompt. The spoken line is
+         greeting + heading + duration (or one extra that replaces it) + question, joined by spaces,
+         and read aloud by text-to-speech. -->
+    <string name="trip_briefing_greeting_morning">早安。</string>
+    <string name="trip_briefing_greeting_afternoon">午安。</string>
+    <string name="trip_briefing_greeting_evening">晚上好。</string>
+    <string name="trip_briefing_heading_home">要回家嗎？</string>
+    <string name="trip_briefing_heading_work">要去公司嗎？</string>
+    <!-- %1$s: the place's name, e.g. "Phoenix Mall". -->
+    <string name="trip_briefing_heading_place">要去 %1$s 嗎？</string>
+    <plurals name="trip_briefing_duration">
+        <item quantity="other">大約 %1$d 分鐘。</item>
+    </plurals>
+    <!-- %1$s: range left, %2$s: the trip's length, each "31 km" or "19 mi". -->
+    <string name="trip_briefing_extra_range">續航吃緊：剩下 %1$s，這趟行程 %2$s。</string>
+    <plurals name="trip_briefing_extra_hazards">
+        <item quantity="other">沿途有 %1$d 處新的危險路段。</item>
+    </plurals>
+    <!-- %1$s: an hour of the day in the device's clock format, e.g. "7 PM" or "19:00". -->
+    <string name="trip_briefing_extra_rain">%1$s 左右可能會下雨。</string>
+    <string name="trip_briefing_question">需要導航嗎？</string>
+    <string name="trip_briefing_distance_km">%1$d 公里</string>
+    <string name="trip_briefing_distance_mi">%1$d 英里</string>
+
+    <!-- The destination as the AI assistant should say it. -->
+    <string name="trip_briefing_said_home">家</string>
+    <string name="trip_briefing_said_work">公司</string>
+
+    <!-- Card -->
+    <string name="trip_briefing_title_home">住家</string>
+    <string name="trip_briefing_title_work">公司</string>
+    <!-- Title for a regular destination that has no name yet. -->
+    <string name="trip_briefing_title_unnamed">常去的地點</string>
+    <string name="trip_briefing_name_place">命名地點</string>
+    <string name="trip_briefing_no">不用</string>
+    <string name="trip_briefing_go_failed">未能開始導航。請開啟地圖進行導航。</string>
+    <!-- The car's own navigation app. -->
+    <string name="trip_briefing_app_car">車機導航</string>
+</resources>

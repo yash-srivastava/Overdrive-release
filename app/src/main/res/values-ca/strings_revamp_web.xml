@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="web_state_retry_now">Torna-ho a provar ara</string>
+    <string name="web_state_retry_in">Reintent automàtic · proper intent d\'aquí a %1$d s</string>
+    <string name="web_state_retrying_now">Reintent automàtic · s\'està provant ara…</string>
+    <string name="web_state_sign_in_title">No s\'ha pogut iniciar la sessió en aquesta pàgina</string>
+    <string name="web_state_sign_in_body">El dimoni de la càmera s\'està executant, però no ha acceptat l\'inici de sessió de l\'aplicació. OverDrive el restaura automàticament mentre l\'ADB està connectat.</string>
+</resources>

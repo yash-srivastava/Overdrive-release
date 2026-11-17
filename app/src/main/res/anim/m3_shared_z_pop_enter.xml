@@ -1,20 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  Material 3 Shared-Axis (Z) POP ENTER. Reverse of m3_shared_z_exit:
-  the parent destination scales DOWN from 1.1x back to 1.0 and fades in.
-  Used when popping back from a drill-down child.
--->
+<!-- Back enter: the parent page returns from the leading edge. -->
 <set xmlns:android="http://schemas.android.com/apk/res/android"
-    android:interpolator="@android:interpolator/decelerate_quad"
-    android:duration="280">
+    android:duration="220"
+    android:interpolator="@android:interpolator/decelerate_quad">
+    <translate
+        android:fromXDelta="-4%p"
+        android:toXDelta="0" />
     <alpha
         android:fromAlpha="0.0"
         android:toAlpha="1.0" />
-    <scale
-        android:fromXScale="1.1"
-        android:toXScale="1.0"
-        android:fromYScale="1.1"
-        android:toYScale="1.0"
-        android:pivotX="50%"
-        android:pivotY="50%" />
 </set>

@@ -1,11 +1,11 @@
 package com.overdrive.app.ui.fragment.settings
 
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.provider.Settings
 import android.text.InputType
 import android.view.LayoutInflater
 import android.view.View
@@ -21,6 +21,12 @@ import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import com.overdrive.app.R
 import com.overdrive.app.auth.PinManager
+import com.overdrive.app.byd.dilink5.NativeVehicleAction
+import com.overdrive.app.byd.dilink5.NativeVehicleProfileAvailability
+import com.overdrive.app.byd.dilink5.NativeVehicleWriteClient
+import com.overdrive.app.byd.routing.VehicleCommandRouter
+import com.overdrive.app.camera.dilink5.DiLink5Platform
+import com.overdrive.app.config.UnifiedConfigManager
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -48,7 +54,11 @@ class SettingsSecurityFragment : Fragment() {
     private lateinit var swToggle: MaterialSwitch
     private lateinit var tvToggleSubtitle: TextView
     private lateinit var tvAutoLockValue: TextView
-
+    private lateinit var groupNativeVehicleProfile: View
+    private lateinit var rowNativeVehicleProfile: View
+    private lateinit var swNativeVehicleProfile: MaterialSwitch
+    private lateinit var tvNativeVehicleProfileSubtitle: TextView
+    private lateinit var btnNativeVehicleActions: View
     /**
      * Single-thread executor for PinManager calls. PBKDF2 is ~150ms on the
      * BYD CPU and UnifiedConfigManager.updateSection is a full JSON
@@ -76,11 +86,16 @@ class SettingsSecurityFragment : Fragment() {
         swToggle = view.findViewById(R.id.swSecurityToggle)
         tvToggleSubtitle = view.findViewById(R.id.tvSecurityToggleSubtitle)
         tvAutoLockValue = view.findViewById(R.id.tvSecurityAutoLockValue)
-
+        groupNativeVehicleProfile = view.findViewById(R.id.groupNativeVehicleProfile)
+        rowNativeVehicleProfile = view.findViewById(R.id.rowNativeVehicleProfile)
+        swNativeVehicleProfile = view.findViewById(R.id.swNativeVehicleProfile)
+        tvNativeVehicleProfileSubtitle = view.findViewById(R.id.tvNativeVehicleProfileSubtitle)
+        btnNativeVehicleActions = view.findViewById(R.id.btnNativeVehicleActions)
         rowToggle.setOnClickListener { onToggleRowTapped() }
         rowChange.setOnClickListener { onChangePinTapped() }
         rowAutoLock.setOnClickListener { onAutoLockTapped() }
-        view.findViewById<View>(R.id.btnSecurityBydAdb).setOnClickListener { openBydAdb() }
+        rowNativeVehicleProfile.setOnClickListener { onNativeVehicleProfileTapped() }
+        btnNativeVehicleActions.setOnClickListener { showNativeVehicleActions() }
         view.findViewById<View>(R.id.btnSecurityCountryCode).setOnClickListener { confirmCountryCode() }
 
         // The layout carries the legacy-root command as its static text; bind
@@ -90,11 +105,20 @@ class SettingsSecurityFragment : Fragment() {
             com.overdrive.app.auth.PinManager.recoveryCommand()
 
         renderState()
+        renderNativeVehicleProfile()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (isNativeVehicleProfileAvailable()) {
+            NativeVehicleWriteClient.requestBinder(requireContext())
+        }
     }
 
     override fun onResume() {
         super.onResume()
         renderState()
+        renderNativeVehicleProfile()
     }
 
     override fun onDestroyView() {
@@ -117,21 +141,6 @@ class SettingsSecurityFragment : Fragment() {
         }
     }
 
-    private fun openBydAdb() {
-        val packageName = "com.byd.byddevelopmenttools"
-        if (launchBydScreen(packageName, "$packageName.MainActivity", true) ||
-            launchBydScreen(packageName, "$packageName.VerificationActivity", true)) return
-        try {
-            startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            Toast.makeText(requireContext(), R.string.settings_security_byd_adb_hint,
-                Toast.LENGTH_LONG).show()
-        } catch (e: Exception) {
-            Toast.makeText(requireContext(), R.string.settings_security_byd_adb_unavailable,
-                Toast.LENGTH_LONG).show()
-        }
-    }
-
     private fun confirmCountryCode() {
         val ctx = requireContext()
         MaterialAlertDialogBuilder(ctx)
@@ -145,6 +154,139 @@ class SettingsSecurityFragment : Fragment() {
                         Toast.LENGTH_LONG).show()
                 }
             }.show()
+    }
+
+    private fun isNativeVehicleProfileAvailable(): Boolean {
+        return try {
+            DiLink5Platform.refreshActiveMode()
+            NativeVehicleProfileAvailability.visible(DiLink5Platform.isSelected())
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    private fun renderNativeVehicleProfile() {
+        val available = isNativeVehicleProfileAvailable()
+        groupNativeVehicleProfile.visibility = if (available) View.VISIBLE else View.GONE
+        rowNativeVehicleProfile.isEnabled = available
+        if (!available) {
+            swNativeVehicleProfile.isChecked = false
+            btnNativeVehicleActions.visibility = View.GONE
+            return
+        }
+        executor().execute {
+            val enabled = try {
+                UnifiedConfigManager.isNativeVehicleManualProfileEnabled()
+            } catch (_: Throwable) {
+                false
+            }
+            mainHandler.post {
+                if (!isAdded || view == null) return@post
+                val stillAvailable = isNativeVehicleProfileAvailable()
+                groupNativeVehicleProfile.visibility =
+                    if (stillAvailable) View.VISIBLE else View.GONE
+                rowNativeVehicleProfile.isEnabled = stillAvailable
+                swNativeVehicleProfile.isChecked = stillAvailable && enabled
+                tvNativeVehicleProfileSubtitle.setText(
+                    if (stillAvailable && enabled) R.string.settings_native_vehicle_profile_on
+                    else R.string.settings_native_vehicle_profile_off
+                )
+                btnNativeVehicleActions.visibility =
+                    if (stillAvailable && enabled) View.VISIBLE else View.GONE
+            }
+        }
+    }
+
+    private fun onNativeVehicleProfileTapped() {
+        if (!isNativeVehicleProfileAvailable()) return
+        executor().execute {
+            val enabled = try {
+                UnifiedConfigManager.isNativeVehicleManualProfileEnabled()
+            } catch (_: Throwable) {
+                false
+            }
+            mainHandler.post {
+                if (!isAdded) return@post
+                if (enabled) {
+                    persistNativeVehicleProfile(false)
+                } else {
+                    MaterialAlertDialogBuilder(requireContext())
+                        .setTitle(R.string.settings_native_vehicle_enable_title)
+                        .setMessage(R.string.settings_native_vehicle_enable_body)
+                        .setNegativeButton(R.string.action_cancel, null)
+                        .setPositiveButton(R.string.settings_native_vehicle_enable_action) { _, _ ->
+                            persistNativeVehicleProfile(true)
+                        }
+                        .show()
+                }
+            }
+        }
+    }
+
+    private fun persistNativeVehicleProfile(enabled: Boolean) {
+        executor().execute {
+            val saved = try {
+                !enabled || isNativeVehicleProfileAvailable()
+            } catch (_: Throwable) {
+                false
+            } && try {
+                UnifiedConfigManager.setNativeVehicleManualProfileEnabled(enabled)
+            } catch (_: Throwable) {
+                false
+            }
+            mainHandler.post {
+                if (!isAdded) return@post
+                if (!saved) {
+                    Toast.makeText(requireContext(),
+                        R.string.settings_native_vehicle_save_failed, Toast.LENGTH_LONG).show()
+                }
+                renderNativeVehicleProfile()
+            }
+        }
+    }
+
+    private fun showNativeVehicleActions() {
+        if (!isNativeVehicleProfileAvailable()) return
+        val labels = NATIVE_ACTIONS.map { getString(it.second) }.toTypedArray()
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.settings_native_vehicle_actions_title)
+            .setItems(labels) { _, which -> confirmNativeVehicleAction(NATIVE_ACTIONS[which]) }
+            .setNegativeButton(R.string.action_cancel, null)
+            .show()
+    }
+
+    private fun confirmNativeVehicleAction(action: Pair<NativeVehicleAction, Int>) {
+        if (!isNativeVehicleProfileAvailable()) return
+        val label = getString(action.second)
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.settings_native_vehicle_confirm_title)
+            .setMessage(getString(R.string.settings_native_vehicle_confirm_body, label))
+            .setNegativeButton(R.string.action_cancel, null)
+            .setPositiveButton(R.string.settings_native_vehicle_send_action) { _, _ ->
+                executeNativeVehicleAction(action.first)
+            }
+            .show()
+    }
+
+    private fun executeNativeVehicleAction(action: NativeVehicleAction) {
+        if (!isNativeVehicleProfileAvailable()) return
+        executor().execute {
+            if (!isNativeVehicleProfileAvailable()) return@execute
+            val result = VehicleCommandRouter.getInstance().executeManualNative(action)
+            val message = when (result.outcome) {
+                VehicleCommandRouter.Outcome.SUCCESS ->
+                    R.string.settings_native_vehicle_result_completed
+                VehicleCommandRouter.Outcome.ACCEPTED_UNVERIFIED ->
+                    R.string.settings_native_vehicle_result_accepted
+                VehicleCommandRouter.Outcome.REJECTED,
+                VehicleCommandRouter.Outcome.BLOCKED_DRIVING ->
+                    R.string.settings_native_vehicle_result_rejected
+                else -> R.string.settings_native_vehicle_result_unknown
+            }
+            mainHandler.post {
+                if (isAdded) Toast.makeText(requireContext(), message, Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     private fun executor(): ExecutorService =
@@ -452,6 +594,23 @@ class SettingsSecurityFragment : Fragment() {
     }
 
     private companion object {
+        private val NATIVE_ACTIONS = listOf(
+            NativeVehicleAction.TAILGATE_OPEN to R.string.settings_native_vehicle_tailgate_open,
+            NativeVehicleAction.TAILGATE_CLOSE to R.string.settings_native_vehicle_tailgate_close,
+            NativeVehicleAction.AC_ON to R.string.settings_native_vehicle_ac_on,
+            NativeVehicleAction.AC_OFF to R.string.settings_native_vehicle_ac_off,
+            NativeVehicleAction.SUNROOF_OPEN to R.string.settings_native_vehicle_sunroof_open,
+            NativeVehicleAction.SUNROOF_CLOSE to R.string.settings_native_vehicle_sunroof_close,
+            NativeVehicleAction.SUNROOF_TILT to R.string.settings_native_vehicle_sunroof_tilt,
+            NativeVehicleAction.SUNROOF_STOP to R.string.settings_native_vehicle_sunroof_stop,
+            NativeVehicleAction.SUNROOF_UPDIP to R.string.settings_native_vehicle_sunroof_updip,
+            NativeVehicleAction.SUNROOF_COMFORT to R.string.settings_native_vehicle_sunroof_comfort,
+            NativeVehicleAction.SUNSHADE_OPEN to R.string.settings_native_vehicle_sunshade_open,
+            NativeVehicleAction.SUNSHADE_CLOSE to R.string.settings_native_vehicle_sunshade_close,
+            NativeVehicleAction.HAZARDS_ON to R.string.settings_native_vehicle_hazards_on,
+            NativeVehicleAction.HAZARDS_OFF to R.string.settings_native_vehicle_hazards_off,
+        )
+
         // (autoLockMs, labelRes). Order = display order.
         private val AUTO_LOCK_OPTIONS = listOf(
             0L to R.string.settings_security_autolock_immediate,

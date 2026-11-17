@@ -53,6 +53,18 @@ object DiLink5DirectTelemetry {
     @JvmStatic
     fun currentDynamicsByField(): CarSvcTelemetry.DynamicObservation? = readDynamics(byField = true)
 
+    /**
+     * One uncached transaction-7 speed observation for a final actuator safety decision.
+     * A failed read stays unknown; this path never serves the telemetry cache and never rounds
+     * the OEM float before comparing it with a safety threshold.
+     */
+    @JvmStatic
+    fun readFreshSpeedKmh(): Double {
+        if (!DiLink5Platform.isSelected()) return Double.NaN
+        return decodeFloat(read(TX_FLOAT, DEV_SPEED, FID_SPEED), 0f, 400f)
+            ?.toDouble() ?: Double.NaN
+    }
+
     private fun readDynamics(byField: Boolean): CarSvcTelemetry.DynamicObservation? {
         if (!DiLink5Platform.isSelected()) return null
         if (dynamicsOwner == Owner.CAR_SERVICE) return null

@@ -737,7 +737,7 @@ public class AppUpdater {
 
     /**
      * Locate the first {@code .apk} asset in a release's {@code assets} array.
-     * Returns {@code {browser_download_url, name, updated_at, size}} or {@code null}
+     * Returns {@code {browser_download_url, name, updated_at, size, digest}} or {@code null}
      * when the release carries no APK (notes-only / draft). Shared by
      * {@link #checkForUpdate} (braveheart) and {@link #listVersions} (alpha)
      * so the single-asset find lives in exactly one place.
@@ -755,11 +755,52 @@ public class AppUpdater {
                         url,
                         name,
                         asset.optString("updated_at", ""),
-                        String.valueOf(Math.max(0L, asset.optLong("size", 0L)))
+                        String.valueOf(Math.max(0L, asset.optLong("size", 0L))),
+                        asset.optString("digest", "")
                 };
             }
         }
         return null;
+    }
+
+    private static final Object RUNNING_APK_SHA_LOCK = new Object();
+    private static String runningApkShaKey = "";
+    private static String runningApkSha = "";
+
+    /** True only when GitHub's {@code sha256:} asset digest matches the installed base APK. */
+    static boolean isRunningApk(Context context, String digest) {
+        if (context == null || digest == null || !digest.regionMatches(true, 0, "sha256:", 0, 7)) {
+            return false;
+        }
+        try {
+            File apk = new File(context.getPackageManager()
+                    .getApplicationInfo(BuildConfig.APPLICATION_ID, 0).sourceDir);
+            String key = apk.getPath() + ":" + apk.length() + ":" + apk.lastModified();
+            String sha;
+            synchronized (RUNNING_APK_SHA_LOCK) {
+                if (!key.equals(runningApkShaKey)) {
+                    runningApkSha = sha256Hex(apk);
+                    runningApkShaKey = key;
+                }
+                sha = runningApkSha;
+            }
+            return !sha.isEmpty() && sha.equalsIgnoreCase(digest.substring(7).trim());
+        } catch (Exception e) {
+            Log.w(TAG, "Running APK digest unavailable: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private static String sha256Hex(File file) throws Exception {
+        java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+        try (InputStream in = new java.io.FileInputStream(file)) {
+            byte[] buf = new byte[64 * 1024];
+            int n;
+            while ((n = in.read(buf)) > 0) md.update(buf, 0, n);
+        }
+        StringBuilder hex = new StringBuilder(64);
+        for (byte b : md.digest()) hex.append(String.format(java.util.Locale.ROOT, "%02x", b));
+        return hex.toString();
     }
 
     static long requiredUpdateFreeBytes(long apkSizeBytes) {
@@ -862,6 +903,7 @@ public class AppUpdater {
                     String apkUrl = apk[0];
                     String apkName = apk[1];
                     String updatedAt = apk[2];
+                    String apkDigest = apk[4];
 
                     latestDownloadUrl = apkUrl;
                     latestApkSizeBytes = Long.parseLong(apk[3]);
@@ -957,15 +999,14 @@ public class AppUpdater {
                         return;
                     }
 
-                    // DOWNGRADE PROTECTION:
-                    // If the running build has a strictly newer numeric version than the remote
-                    // release on the same channel (e.g. running 60.1, remote is 60.0), suppress
-                    // the offer. A passive update check must never offer a downgrade as a "newer" build.
-                    if (!remoteNumeric.isEmpty() && !installedNumeric.isEmpty()
-                            && isNewerVersion(remoteNumeric, installedNumeric)) {
-                        Log.i(TAG, "Installed version " + installedNumeric
-                                + " is newer than remote " + remoteNumeric
-                                + " — suppressing downgrade offer");
+                    // Never offer an older build on the same channel. BuildConfig is the running
+                    // code's own identity; VERSION_FILE can be stale-high after an adb downgrade.
+                    String runningNumeric = numericVersion(getInstalledVersion());
+                    if (installedChannel != null && !remoteNumeric.isEmpty()
+                            && !runningNumeric.isEmpty()
+                            && isNewerVersion(remoteNumeric, runningNumeric)) {
+                        Log.i(TAG, "Running " + runningNumeric + " is newer than remote "
+                                + remoteNumeric + " — not offering a downgrade");
                         runCallback(() -> callback.onNoUpdate(currentVersion));
                         return;
                     }
@@ -1059,36 +1100,22 @@ public class AppUpdater {
                         return;
                     }
 
-                    Log.i(TAG, "Channel: " + channel + ", Current: " + currentVersion +
-                            ", Remote: " + remoteVersion + ", APK updated: " + updatedAt +
-                            ", Last installed: " + lastInstalledTimestamp);
-
-                    // EQUAL-VERSION AUTO-HEALING & SUPPRESSION:
-                    // If the remote version is identical to the running version
-                    // on the same channel (e.g. both braveheart-v60.1), this is NOT a
-                    // newer update for the user. It happens either because:
-                    // 1) The user installed this build out-of-band (sideload, adb, OTA)
-                    //    so lastInstalledTimestamp in /data/local/tmp was never updated,
-                    // 2) Or upstream re-uploaded the APK/touched the rolling release
-                    //    with the same version number.
-                    // Offering an update with identical current/remote strings
-                    // ("v60.1 -> v60.1") makes no sense and spams the user with a
-                    // redundant dialog. Reconcile the local timestamp baseline silently
-                    // and report onNoUpdate.
-                    boolean isSameVersion = remoteVersion.equals(currentVersion)
-                            || (!remoteNumeric.isEmpty() && !installedNumeric.isEmpty()
-                                    && remoteNumeric.equals(installedNumeric));
-                    if (apkUpdated && isSameVersion) {
+                    // A re-upload with the same label is a real update unless the asset IS the
+                    // running APK (out-of-band install of this exact build): then just re-seed.
+                    if (apkUpdated && isRunningApk(context, apkDigest)) {
                         saveLastUpdateTimestamp(channel, updatedAt);
                         if (appInstallTime > 0) {
                             saveInstallTimeBaseline(context, channel, appInstallTime);
                         }
-                        Log.i(TAG, "Build already running (" + currentVersion
-                                + ") — reconciled timestamp baseline: " + updatedAt
-                                + ", suppressing same-version offer");
+                        Log.i(TAG, "Remote asset is the running APK (" + currentVersion
+                                + ") — re-seeded baseline " + updatedAt);
                         runCallback(() -> callback.onNoUpdate(currentVersion));
                         return;
                     }
+
+                    Log.i(TAG, "Channel: " + channel + ", Current: " + currentVersion +
+                            ", Remote: " + remoteVersion + ", APK updated: " + updatedAt +
+                            ", Last installed: " + lastInstalledTimestamp);
 
                     if (apkUpdated) {
                         runCallback(() -> callback.onUpdateAvailable(
@@ -2189,7 +2216,8 @@ public class AppUpdater {
         script.append("chmod 666 /data/local/tmp/camera_daemon.disabled 2>/dev/null\n");
         // Plant the acc-sentry sentinel so its shell watchdog
         // (start_acc_sentry.sh) bails out on its next iteration if our pkill
-        // misses a respawn race. Cleared below alongside camera_daemon.disabled.
+        // misses a respawn race. Both markers stay through pm install; the new
+        // process clears them in UpdateLifecycle's post-update reset.
         // World-readable so the watchdog (UID 2000) can stat the file when it
         // was written by the install script (running as the app UID).
         //
@@ -3616,29 +3644,8 @@ public class AppUpdater {
      * release in build.gradle.kts.
      */
     public static String getInstalledVersion() {
-        return getInstalledVersion((Context) null);
-    }
-
-    public static String getInstalledVersion(Context context) {
-        if (context == null) {
-            try {
-                context = com.overdrive.app.daemon.CameraDaemon.getAppContext();
-            } catch (Throwable ignored) {}
-        }
-        String ver = null;
-        if (context != null) {
-            try {
-                android.content.pm.PackageInfo pInfo = context.getPackageManager()
-                        .getPackageInfo(context.getPackageName(), 0);
-                if (pInfo != null && pInfo.versionName != null && !pInfo.versionName.trim().isEmpty()) {
-                    ver = pInfo.versionName.trim();
-                }
-            } catch (Throwable ignored) {}
-        }
-        if (ver == null || ver.isEmpty()) {
-            ver = BuildConfig.VERSION_NAME;
-        }
         String channel = BuildConfig.UPDATE_CHANNEL;
+        String ver = BuildConfig.VERSION_NAME;
         if (ver == null || ver.isEmpty()) return DISPLAY_VERSION_FALLBACK;
         if (channel == null || channel.isEmpty()) return "v" + ver;
         return channel + "-v" + ver;
@@ -3698,22 +3705,13 @@ public class AppUpdater {
                 && !labelChannel.equals(runningChannel)) {
             return "";   // stale cross-channel label — let the caller fall back
         }
-
-        // STALENESS GUARD (PackageManager / OS package as Source of Truth):
-        // If an update was installed (via pm install, OTA or background script)
-        // but the file in /data/local/tmp was not updated (e.g. due to SELinux
-        // isolation where the daemon wrote to ALT_DIR but the untrusted app UI reads
-        // LEGACY_DIR), the persisted label on disk is stale and must not mask the
-        // real running version. If the installed package in Android OS is equal or
-        // newer than the file label, the file label must not hold back the display version.
-        String installed = getInstalledVersion(context);
-        String installedNumeric = numericVersion(installed);
-        if (!installedNumeric.isEmpty() && !labelNumeric.equals(installedNumeric)) {
-            if (!isNewerVersion(installedNumeric, labelNumeric)) {
-                return "";   // installed package is newer or mismatching: file is stale
-            }
+        // A label older than the running build is stale (the install finished but the file was
+        // not rewritten, or this process reads another scratch root than the daemon wrote), and
+        // would loop "update available". BuildConfig is the build actually running.
+        String installedNumeric = numericVersion(getInstalledVersion());
+        if (!installedNumeric.isEmpty() && isNewerVersion(labelNumeric, installedNumeric)) {
+            return "";
         }
-
         return label;
     }
 
@@ -3742,7 +3740,7 @@ public class AppUpdater {
      */
     public static String getDisplayVersion(Context context) {
         String github = persistedGithubVersion(context);
-        return !github.isEmpty() ? github : getInstalledVersion(context);
+        return !github.isEmpty() ? github : getInstalledVersion();
     }
 
     /**
@@ -3751,10 +3749,6 @@ public class AppUpdater {
      * VERSION_FILE since the daemon has no SharedPreferences), else BuildConfig.
      */
     public static String getDisplayVersionFromFile() {
-        Context ctx = null;
-        try {
-            ctx = com.overdrive.app.daemon.CameraDaemon.getAppContext();
-        } catch (Throwable ignored) {}
-        return getDisplayVersion(ctx);
+        return getDisplayVersion(null);
     }
 }

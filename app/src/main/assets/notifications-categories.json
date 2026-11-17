@@ -93,6 +93,26 @@
       "note": "Priority results for Bluetooth proximity lock/unlock commands. Delivery requires explicit channel opt-in in Proximity; off by default."
     },
     {
+      "id": "vehicle.security.login.success",
+      "label": "New sign-in",
+      "group": "Security",
+      "defaultEnabled": true,
+      "severity": "warn",
+      "bypassQuietHours": true,
+      "defaultClickUrl": "/sessions.html",
+      "note": "A browser signed in to the web app with the access code (shows the browser and address)"
+    },
+    {
+      "id": "vehicle.security.login.failed",
+      "label": "Failed sign-in",
+      "group": "Security",
+      "defaultEnabled": true,
+      "severity": "auto",
+      "bypassQuietHours": true,
+      "defaultClickUrl": "/notifications.html",
+      "note": "Wrong access code or too many attempts. At most one alert a minute; 10 or more attempts send a critical alert"
+    },
+    {
       "id": "vehicle.security.door.opened",
       "label": "Door opened",
       "group": "Security",

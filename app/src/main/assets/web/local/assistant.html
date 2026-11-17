@@ -5,11 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title data-i18n="app.assistant_title">Assistant - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
-    <script src="../shared/theme.js?v=11"></script>
-    <script src="../shared/app-shell.js?v=19"></script>
+    <script src="../shared/theme.js?v=12"></script>
+    <script src="../shared/app-shell.js?v=23"></script>
     <script>
         window.OT_TABS = [
             { id: 'assistant', label: 'Assistant', i18n: 'genai.tab_assistant', svg: '<path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/>' },
+            { id: 'briefing', label: 'Trip Briefing', i18n: 'trip_briefing.tab', svg: '<polygon points="3 11 22 2 13 21 11 13 3 11"/>' },
             { id: 'provider', label: 'Provider', i18n: 'genai.tab_provider', svg: '<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>' },
             { id: 'privacy', label: 'Privacy', i18n: 'genai.tab_privacy', svg: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>' }
         ];
@@ -18,7 +19,7 @@
             if (button) button.click();
         };
     </script>
-    <script src="../shared/app-tabs.js?v=3"></script>
+    <script src="../shared/app-tabs.js?v=4"></script>
     <link rel="stylesheet" href="../shared/styles.css?v=38">
     <link rel="stylesheet" href="../shared/revamp.css?v=2">
     <style>
@@ -375,27 +376,27 @@
                 min-height: 180px; max-height: 720px;
             }
 
-            /* The web-only theme FAB uses the empty right side of the mobile
-               header instead of covering the composer/send control. */
-            .assistant-page #bydThemePicker {
+            /* A floating (undocked) theme FAB uses the empty right side of the
+               header instead of covering the composer; a docked one stays in the bar. */
+            .assistant-page #bydThemePicker:not(.is-docked) {
                 top: calc(12px + env(safe-area-inset-top, 0px)) !important;
                 right: 16px !important; bottom: auto !important;
                 left: auto !important; transform: none !important;
             }
             /* English sits in the empty side of the mobile header (physical right).
                Hebrew mirrors that slot to the physical left, same top and size. */
-            html[dir="rtl"] .assistant-page #bydThemePicker {
+            html[dir="rtl"] .assistant-page #bydThemePicker:not(.is-docked) {
                 right: auto !important;
                 left: 16px !important;
             }
-            .assistant-page #bydThemePicker .byd-theme-fab {
+            .assistant-page #bydThemePicker:not(.is-docked) .byd-theme-fab {
                 width: 40px; height: 40px;
             }
-            .assistant-page #bydThemePicker .byd-theme-popup {
+            .assistant-page #bydThemePicker:not(.is-docked) .byd-theme-popup {
                 top: 48px !important; right: 0 !important;
                 bottom: auto !important; left: auto !important;
             }
-            html[dir="rtl"] .assistant-page #bydThemePicker .byd-theme-popup {
+            html[dir="rtl"] .assistant-page #bydThemePicker:not(.is-docked) .byd-theme-popup {
                 right: auto !important;
                 left: 0 !important;
             }
@@ -439,6 +440,77 @@
         :root[data-android-embed="1"] .ai-composer textarea { min-height: 56px; padding: 16px 20px; }
         :root[data-android-embed="1"] .ai-result-meta,
         :root[data-android-embed="1"] .ai-voice-note { font-size: var(--fs-label); }
+
+        /* Trip Briefing tab (trip-briefing.js): routines and places are wells on the tiles. */
+        .tb-section [hidden] { display: none !important; }
+        .tb-section > * + * { margin-top: var(--card-gap); }
+        .tb-section .setting-desc + .setting-desc { margin-top: 4px; }
+        .tb-row-action { margin-top: 10px; }
+        .tb-learn-row { align-items: center; }
+        .tb-caption { color: var(--on-surface-variant); font-size: var(--fs-label); }
+        .tb-result { display: flex; align-items: center; margin-top: 16px; }
+        .tb-result-figure {
+            flex: 0 0 auto; margin-right: 16px; color: var(--primary);
+            font-size: var(--fs-display); font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums;
+        }
+        [dir="rtl"] .tb-result-figure { margin-right: 0; margin-left: 16px; }
+        .tb-result-text { flex: 1 1 auto; min-width: 0; }
+        .tb-cta {
+            display: flex; flex-wrap: wrap; align-items: center;
+            margin-top: 12px; padding: 12px 16px 4px; border-radius: var(--radius-md);
+            background: var(--primary-soft); box-shadow: inset 0 0 0 1px var(--primary);
+        }
+        .tb-cta > * { margin-bottom: 8px; }
+        .tb-cta-text {
+            flex: 1 1 220px; min-width: 0; margin-right: 12px;
+            color: var(--on-surface); font-size: var(--fs-label); line-height: 1.45;
+        }
+        [dir="rtl"] .tb-cta-text { margin-right: 0; margin-left: 12px; }
+        .tb-note-action { margin-top: 10px; }
+        .tb-list {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            grid-gap: 12px; gap: 12px; margin-top: 12px;
+        }
+        .tb-list > .ai-result-card { margin: 0; }
+        .tb-item-head { display: flex; align-items: center; }
+        .tb-route {
+            display: flex; flex-wrap: wrap; align-items: center; flex: 1 1 auto; min-width: 0;
+            color: var(--on-surface); font-size: var(--fs-body); font-weight: 600; line-height: 1.35;
+        }
+        .tb-route > * { margin-right: 6px; }
+        [dir="rtl"] .tb-route > * { margin-right: 0; margin-left: 6px; }
+        .tb-route > span { min-width: 0; overflow-wrap: break-word; }
+        .tb-route .is-unnamed { color: var(--on-surface-variant); }
+        .tb-route-arrow { flex: 0 0 auto; width: 16px; height: 16px; color: var(--on-surface-variant); }
+        [dir="rtl"] .tb-route-arrow { -webkit-transform: scaleX(-1); transform: scaleX(-1); }
+        .tb-item-head > .toggle-switch { flex: 0 0 auto; margin: -6px 0 -6px 12px; }
+        [dir="rtl"] .tb-item-head > .toggle-switch { margin: -6px 12px -6px 0; }
+        .tb-item.is-hidden .tb-route > span:not(.setting-badge),
+        .tb-item.is-hidden .ai-result-detail { opacity: .6; }
+        .tb-item .ai-result-actions { align-items: center; }
+        .tb-app {
+            display: flex; align-items: center; flex: 1 1 240px; min-width: 0;
+            color: var(--on-surface-variant); font-size: var(--fs-label);
+        }
+        .tb-app-label { flex: 0 0 auto; margin-right: 8px; }
+        [dir="rtl"] .tb-app-label { margin-right: 0; margin-left: 8px; }
+        .tb-item .text-input {
+            flex: 1 1 auto; width: auto; min-width: 0; min-height: 40px;
+            padding-top: 8px; padding-bottom: 8px; background-color: var(--tile);
+        }
+        .tb-name-form .text-input { flex: 1 1 160px; }
+        @media (pointer: coarse) {
+            .tb-item .text-input { min-height: 44px; }
+        }
+        .tb-notice { padding: 32px 20px; }
+        .tb-notice.is-error .empty-icon { color: var(--danger); }
+        .tb-notice-actions { margin-top: 16px; }
+        .tb-loading { display: flex; align-items: center; justify-content: center; }
+        @media (max-width: 600px) {
+            .tb-list { grid-template-columns: minmax(0, 1fr); }
+        }
+        :root[data-android-embed="1"] .tb-section .text-input { min-height: 56px; font-size: var(--fs-body); }
+        :root[data-android-embed="1"] .tb-route-arrow { width: 18px; height: 18px; }
     </style>
 </head>
 <body class="assistant-page">
@@ -675,6 +747,166 @@
                                 <div class="ai-actions">
                                     <button class="btn btn-primary" id="genAiInsightScheduleSaveBtn" type="button" onclick="GenAI.saveInsightSettings()" data-i18n="genai.save_settings">Save settings</button>
                                     <button class="btn btn-secondary" type="button" onclick="window.location.href='/automations'" data-i18n="genai.open_automations">Open Automations</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Trip Briefing (trip-briefing.js, /api/briefing): settings, self-test, routines, places. -->
+                <section data-tab="briefing" id="tbSection" class="tb-section" data-state="loading">
+                    <div class="r-hero tb-hero is-off" id="tbHero">
+                        <div class="r-hero-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
+                        </div>
+                        <div class="r-hero-text">
+                            <h2 class="r-hero-title" id="tbTitle" data-i18n="trip_briefing.title">Trip Briefing</h2>
+                            <div class="r-hero-sub" data-i18n="trip_briefing.intro">At car start, OverDrive suggests where you're likely going and asks if you want directions.</div>
+                        </div>
+                        <div class="r-hero-ctl">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="tbEnabled" aria-labelledby="tbTitle" disabled>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="card" id="tbNotice">
+                        <div class="loading-state tb-loading" role="status"><span class="r-btn-spinner" aria-hidden="true"></span><span data-i18n="trip_briefing.loading">Loading Trip Briefing…</span></div>
+                    </div>
+
+                    <div class="ai-local-grid" id="tbMain" hidden>
+                        <div class="card" id="tbLearnCard" hidden>
+                            <div class="card-header">
+                                <div class="card-title">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>
+                                    <span data-i18n="trip_briefing.learn_title">Learn from my trips</span>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="setting-desc" data-i18n="trip_briefing.learn_desc">Replays your past trips to check how often it would have guessed right.</div>
+                                <div class="ai-actions tb-learn-row">
+                                    <button class="btn btn-primary" id="tbLearnBtn" type="button">Learn from my trips</button>
+                                    <span class="tb-caption" id="tbLearnedAt"></span>
+                                </div>
+                                <div id="tbResult" aria-live="polite"></div>
+                                <div class="tb-cta" id="tbCta" hidden>
+                                    <div class="tb-cta-text" data-i18n="trip_briefing.cta_desc">Trip Briefing is off. Turn it on to get these suggestions at car start.</div>
+                                    <button class="btn btn-primary" id="tbCtaBtn" type="button" data-i18n="trip_briefing.cta">Turn on Trip Briefing</button>
+                                </div>
+                                <div class="info-box-warning" id="tbTripsOff" role="note" hidden>
+                                    <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                    <div>
+                                        <div class="info-note" data-i18n="trip_briefing.trips_off_note">Trip recording is off, so new trips aren't learned.</div>
+                                        <a class="btn btn-secondary tb-note-action" href="/trips#storage" data-i18n="trip_briefing.turn_on_trips">Turn on trip recording</a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card" id="tbSettingsCard">
+                            <div class="card-header">
+                                <div class="card-title">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4"/></svg>
+                                    <span data-i18n="trip_briefing.settings_title">How it asks</span>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="setting-row">
+                                    <div class="setting-info">
+                                        <div class="setting-name" id="tbVoiceName" data-i18n="trip_briefing.voice">Ask by voice</div>
+                                        <div class="setting-desc" data-i18n="trip_briefing.voice_desc">Off shows the card only.</div>
+                                        <div class="setting-desc" data-i18n="trip_briefing.voice_ai_note">In GenAI mode, and in Hybrid when your language isn't one the car understands offline, the place's name is sent to your AI provider so it can ask.</div>
+                                        <div class="setting-desc" id="tbVoiceMode"></div>
+                                        <div class="tb-row-action" id="tbVoiceSettings" hidden>
+                                            <button class="btn btn-secondary" id="tbVoiceSettingsBtn" type="button" data-i18n="trip_briefing.voice_settings">Voice settings</button>
+                                        </div>
+                                    </div>
+                                    <div class="setting-control">
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="tbVoice" aria-labelledby="tbVoiceName" disabled>
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="setting-row">
+                                    <div class="setting-info">
+                                        <label class="setting-name" for="tbDefaultApp" data-i18n="trip_briefing.app">Default navigation app</label>
+                                        <div class="setting-desc" data-i18n="trip_briefing.app_desc">Opens when you say yes. If it isn't installed, OverDrive is offered first.</div>
+                                    </div>
+                                    <div class="setting-control">
+                                        <select class="text-input" id="tbDefaultApp" disabled>
+                                            <option value="overdrive" data-i18n="trip_briefing.app_overdrive">OverDrive</option>
+                                            <option value="waze" data-i18n="trip_briefing.app_waze">Waze</option>
+                                            <option value="gmaps" data-i18n="trip_briefing.app_gmaps">Google Maps</option>
+                                            <option value="car" data-i18n="trip_briefing.app_car">Car navigation</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="setting-row">
+                                    <div class="setting-info">
+                                        <div class="setting-name" id="tbExtrasName" data-i18n="trip_briefing.extras">Range and hazard notes</div>
+                                        <div class="setting-desc" data-i18n="trip_briefing.extras_desc">Adds one short note when it matters: range too low for the trip, or new road hazards on the way. Worked out on the car.</div>
+                                    </div>
+                                    <div class="setting-control">
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="tbExtras" aria-labelledby="tbExtrasName" disabled>
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="setting-row">
+                                    <div class="setting-info">
+                                        <div class="setting-name" id="tbOnlineExtrasName" data-i18n="trip_briefing.online_extras">Rain note</div>
+                                        <div class="setting-desc" data-i18n="trip_briefing.online_extras_desc">Says when rain is likely in the next few hours. Sends the car's position to the weather service (Open-Meteo) at each car start.</div>
+                                    </div>
+                                    <div class="setting-control">
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="tbOnlineExtras" aria-labelledby="tbOnlineExtrasName" disabled>
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card" id="tbRoutinesCard" hidden>
+                        <div class="card-header">
+                            <div class="card-title">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>
+                                <span data-i18n="trip_briefing.routines_title">Your routines</span>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="setting-desc" data-i18n="trip_briefing.routines_desc">Trips you make again and again at about the same time.</div>
+                            <div class="ai-inline-note" id="tbRoutinesEmpty" data-i18n="trip_briefing.routines_empty" hidden>It stays quiet until it sees a routine at least 3 times.</div>
+                            <div class="tb-list" id="tbRoutines"></div>
+                        </div>
+                    </div>
+
+                    <div class="card" id="tbPlacesCard" hidden>
+                        <div class="card-header">
+                            <div class="card-title">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>
+                                <span data-i18n="trip_briefing.places_title">Places to name</span>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="setting-desc" data-i18n="trip_briefing.places_desc">Places you often drive to. Named places get a spoken suggestion.</div>
+                            <div class="tb-list" id="tbPlaces"></div>
+                        </div>
+                    </div>
+
+                    <div class="card" id="tbForgetCard" hidden>
+                        <div class="card-body">
+                            <div class="setting-row">
+                                <div class="setting-info">
+                                    <div class="setting-name" data-i18n="trip_briefing.forget_title">Forget my patterns</div>
+                                    <div class="setting-desc" data-i18n="trip_briefing.forget_desc">Clears place names, hidden routines, app choices and your answers. Your trips are kept.</div>
+                                </div>
+                                <div class="setting-control">
+                                    <button class="btn btn-danger-ghost" id="tbForgetBtn" type="button" data-i18n="trip_briefing.forget">Forget</button>
                                 </div>
                             </div>
                         </div>
@@ -1053,10 +1285,11 @@
     <div id="toastContainer" class="toast-container"></div>
 
     <script src="../shared/auth.js"></script>
-    <script src="../shared/core.js?v=24"></script>
+    <script src="../shared/core.js?v=27"></script>
     <script src="../shared/update-flow.js?v=3"></script>
-    <script src="../shared/genai.js?v=15"></script>
+    <script src="../shared/genai.js?v=16"></script>
     <script src="../shared/voice-assistant.js?v=9"></script>
+    <script src="../shared/trip-briefing.js?v=2"></script>
     <script>
         function toggleSidebar() {
             var sidebar = document.getElementById('sidebar');
@@ -1069,6 +1302,7 @@
                 BYD.core.init();
                 GenAI.init();
                 VoiceAssistantCard.init();
+                TripBriefing.init();
             });
         });
     </script>

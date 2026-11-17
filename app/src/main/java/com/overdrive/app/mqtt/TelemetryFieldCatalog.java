@@ -31,7 +31,7 @@ public final class TelemetryFieldCatalog {
 
     /** Time / monotonic fields: never trigger a "change" and never get an HA entity. */
     public static final Set<String> EXCLUDED = Collections.unmodifiableSet(
-            new HashSet<>(Arrays.asList("utc", "vd_timestamp")));
+            new HashSet<>(Arrays.asList("utc", "vd_timestamp", "gps_utc")));
 
     /** Immutable metadata for a single telemetry key. */
     public static final class Field {
@@ -264,6 +264,22 @@ public final class TelemetryFieldCatalog {
         add("radar_distances",      "Radar Distances",      NONE, null, null, null, null, true, 0);
         add("utc",                  "UTC",                  NONE, null, null, null, null, true, 0);
         add("vd_timestamp",         "Snapshot Timestamp",   NONE, null, null, null, null, true, 0);
+
+        // ---------- Per-slot views of the arrays (HA discovery mode, unavailable slots omitted) ----------
+        add("window_open_lf",       "Window Front Left",    SENSOR, null, MEAS, "%", "mdi:car-door", false, 1);
+        add("window_open_rf",       "Window Front Right",   SENSOR, null, MEAS, "%", "mdi:car-door", false, 1);
+        add("window_open_lr",       "Window Rear Left",     SENSOR, null, MEAS, "%", "mdi:car-door", false, 1);
+        add("window_open_rr",       "Window Rear Right",    SENSOR, null, MEAS, "%", "mdi:car-door", false, 1);
+        add("window_open_sunroof",  "Sunroof Open",         SENSOR, null, MEAS, "%", "mdi:window-shutter-open", false, 1);
+        add("window_open_sunshade", "Sunshade Open",        SENSOR, null, MEAS, "%", "mdi:blinds-open", false, 1);
+        add("window_open_any",      "Windows",              BINARY, "window", null, null, null, false, 0);
+        add("seatbelt_driver",      "Seatbelt Driver",      BINARY, null, null, null, "mdi:seatbelt", false, 0);
+        add("seatbelt_passenger",   "Seatbelt Passenger",   BINARY, null, null, null, "mdi:seatbelt", false, 0);
+        add("seat_heat_level_driver", "Seat Heat Driver",     SENSOR, null, null, null, "mdi:car-seat-heater", false, 0);
+        add("seat_heat_level_passenger", "Seat Heat Passenger",  SENSOR, null, null, null, "mdi:car-seat-heater", false, 0);
+        add("seat_cool_level_driver", "Seat Cool Driver",     SENSOR, null, null, null, "mdi:car-seat-cooler", false, 0);
+        add("seat_cool_level_passenger", "Seat Cool Passenger",  SENSOR, null, null, null, "mdi:car-seat-cooler", false, 0);
+        add("passenger_occupied",   "Passenger Seat",       BINARY, "occupancy", null, null, null, false, 0);
     }
 
     private TelemetryFieldCatalog() {}

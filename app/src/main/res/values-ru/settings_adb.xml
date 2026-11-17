@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_section_adb">ADB</string>
+    <string name="settings_adb_subtitle">Подключение, включение и автоматическое восстановление.</string>
+    <string name="settings_adb_connection_title">Подключение</string>
+    <string name="settings_adb_automatic_title">Автоматическое восстановление</string>
+    <string name="settings_adb_automatic_restore">Автоматически восстанавливать ADB</string>
+    <string name="settings_adb_automatic_description">Восстанавливает настройку ADB при запуске и после отключения. Разрешение на изменение настроек должно быть выдано заранее; Wi-Fi не нужен. DiLink 5 также поддерживает беспроводное восстановление через проверенный Wi-Fi с ранее авторизованным ключом.</string>
+    <string name="settings_adb_recover">Восстановить ADB сейчас</string>
+    <string name="settings_adb_cancel_recovery">Отменить восстановление</string>
+    <string name="settings_adb_manual_title">Ручное включение</string>
+    <string name="settings_adb_manual_description">Запросите доступ к ADB через совместимые инструменты BYD. Подключение Wi-Fi не требуется.</string>
+    <string name="settings_adb_enable">Включить ADB</string>
+    <string name="settings_adb_advanced_tools">Дополнительные инструменты</string>
+    <string name="settings_adb_hide_advanced">Скрыть дополнительные инструменты</string>
+    <string name="settings_adb_advanced_description">Проверка проблем, открытие инструментов BYD или отмена ручной попытки.</string>
+    <string name="settings_adb_open_developer">Открыть настройки разработчика</string>
+    <string name="settings_adb_developer_page">Запросить страницу разработчика BYD</string>
+    <string name="settings_adb_diagnostics">Проверить совместимость и подключение</string>
+    <string name="settings_adb_restore">Отменить изменения ручного включения</string>
+    <string name="settings_adb_export">Экспортировать APK инструментов разработчика BYD</string>
+    <string name="settings_adb_dialog_confirm">Разрешить беспроводную отладку в этой сети</string>
+    <string name="settings_adb_dialog_confirm_description">Сначала подключитесь к проверенной сети Wi-Fi. Разрешите OverDrive подтверждать диалог беспроводной отладки только для этой сети.</string>
+    <string name="settings_adb_tools_unavailable">Ручное включение недоступно для текущего режима или установленных инструментов BYD.</string>
+    <string name="settings_adb_recovery_availability">Для локального восстановления нужно разрешение на изменение настроек, выданное при настройке ADB. Wi-Fi и режим DiLink 5 не требуются.</string>
+    <string name="settings_adb_details_title">Подробности последней попытки</string>
+    <string name="settings_adb_recovery_confirm_body">Локальное восстановление использует ранее выданное разрешение на изменение настроек без Wi-Fi. DiLink 5 также может использовать проверенный Wi-Fi и ранее авторизованный ключ. Это может открыть или восстановить сетевой ADB на порту 5555, доступный другим устройствам сети автомобиля. Продолжайте только в доверенной сети. Аутентификация ключом ADB остаётся включённой.</string>
+    <string name="settings_adb_recovery_permission_missing">Нет разрешения на изменение настроек. Если ADB также недоступен, сначала используйте «Включить ADB» или параметры разработчика, затем повторно завершите настройку ADB.</string>
+    <string name="settings_adb_recovery_setting_enabled">Настройка ADB включена. Подключение ADB с подтверждённой аутентификацией не установлено.</string>
+    <string name="settings_adb_recovery_setting_failed">Не удалось включить и проверить настройку ADB. Прошивка может отклонять изменение.</string>
+    <string name="settings_adb_recovery_save_failed">Не удалось сохранить параметр автоматического восстановления. Проверьте ADB и повторите попытку.</string>
+</resources>

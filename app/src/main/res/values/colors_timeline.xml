@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Recordings Timeline: accent over the always-dark glass (matches the active speed button). -->
+<resources>
+    <color name="tl_accent_on_glass">#FF5DDBB6</color>
+</resources>

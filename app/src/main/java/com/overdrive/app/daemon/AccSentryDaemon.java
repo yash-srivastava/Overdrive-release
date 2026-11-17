@@ -2921,11 +2921,17 @@ public class AccSentryDaemon {
                     + powerLevelToString(lastPowerLevel) + ")");
             return;
         }
+        if (level < POWER_LEVEL_ON && deterrentOnHoldSinceMs != 0L) {
+            deterrentOnHoldSinceMs = 0L;
+            log("Power back to " + powerLevelToString(level)
+                    + " after an ON reading during deterrent actuation — that ON was ignored");
+        }
 
         if (level == POWER_LEVEL_OFF && lastPowerLevel != POWER_LEVEL_OFF) {
             log("ACC OFF detected");
             enterSentryMode();
         } else if (level >= POWER_LEVEL_ON && lastPowerLevel < POWER_LEVEL_ON) {
+            if (holdOnEdgeDuringDeterrentActuation(level)) return;
             log("ACC ON detected");
             exitSentryMode();
         } else if (level == POWER_LEVEL_ACC && lastPowerLevel >= POWER_LEVEL_ON) {
@@ -3595,6 +3601,7 @@ public class AccSentryDaemon {
             // Retries re-enter above; the generation keeps this to one notice per event.
             if (lowBatteryNoticeGeneration != generation) {
                 lowBatteryNoticeGeneration = generation;
+                try { com.overdrive.app.server.timeline.TimelineJournal.note("power", "stopped", "lv_low", null); } catch (Throwable ignored) { }
                 com.overdrive.app.power.PowerNotice.send(
                         com.overdrive.app.power.PowerNotice.KIND_LOW_12V_STOP, null);
             }
@@ -6111,37 +6118,11 @@ public class AccSentryDaemon {
                 < DILINK5_ADB_RECOVERY_RETRY_MS) {
             return;
         }
-        com.overdrive.app.power.AdbRecoveryLease.Parsed lease =
-                readAdbRecoveryLease(transitionGeneration, now);
-        if (lease.isFresh(com.overdrive.app.power.AdbRecoveryLease.Owner.APP)) {
-            logAdbRecoveryLeaseDeferralOnce(lease);
-            return;   // throttle stamp deliberately NOT advanced (re-check next tick)
-        }
         lastAdbRecoveryAttemptElapsedMs = now;
-        publishAdbRecoveryLease(transitionGeneration, now);
-        log("DI5 ADB port 5555 is closed; applying scoped recovery settings");
-        ShellResult result = execShellResult(
-                "settings put global adb_enabled 1"
-                        + " && settings put global adb_wifi_enabled 1"
-                        + " && settings put global adb_allowed_connection_time 0",
-                DEFAULT_SHELL_TIMEOUT_MS,
-                () -> isKeepAliveCommitCurrent(transitionGeneration));
-        if (!result.success) {
-            log("DI5 ADB recovery failed: " + result.describeFailure());
-            return;
-        }
-
-        Thread.sleep(1000L);
-        if (!isKeepAliveCommitCurrent(transitionGeneration)) {
-            return;
-        }
-        if (isLoopbackPortOpen(ADB_TCP_PORT)) {
-            lastAdbRecoveryAttemptElapsedMs =
-                    -DILINK5_ADB_RECOVERY_RETRY_MS;
-            log("DI5 ADB port 5555 recovered");
-        } else {
-            log("DI5 ADB recovery settings applied, but port 5555 remains closed");
-        }
+        // Observation only. The app-process recovery coordinator owns opt-in, validated-network,
+        // key-trust, cooldown, generation, cancellation, readback and rollback for every automatic
+        // ADB mutation. This shell daemon must never maintain a competing settings writer.
+        log("DI5 ADB port 5555 is closed; waiting for coordinated app-process recovery");
     }
 
     private static String lastAdbRecoveryLeaseDeferral = null;
@@ -6363,6 +6344,75 @@ public class AccSentryDaemon {
         return deadlineMs > now && deadlineMs <= now + DETERRENT_GATE_MAX_HORIZON_MS;
     }
 
+    // Our own deterrent frame can bounce the parked power reading: an ON first seen inside its
+    // actuation window must still read ON this long later. Written under accObservationLock.
+    private static final long DETERRENT_ON_CONFIRM_MS = 5_000L;
+    private static final long DETERRENT_ON_HOLD_STALE_MS = 15_000L;
+    private static final long DETERRENT_ACTUATION_MAX_HORIZON_MS = 60_000L;
+    private static volatile long deterrentOnHoldSinceMs = 0L;
+
+    private static boolean holdOnEdgeDuringDeterrentActuation(int level) {
+        try {
+            long now = android.os.SystemClock.elapsedRealtime();
+            long held = now - deterrentOnHoldSinceMs;
+            if (deterrentOnHoldSinceMs != 0L && held >= 0L && held < DETERRENT_ON_HOLD_STALE_MS) {
+                if (held < DETERRENT_ON_CONFIRM_MS - 500L) return true;
+                deterrentOnHoldSinceMs = 0L;
+                log("ACC ON still present " + held + " ms after deterrent actuation — accepting it");
+                return false;
+            }
+            deterrentOnHoldSinceMs = 0L;
+            if (isDilink5CameraMode() || !isDeterrentActuationWindowLive()) return false;
+            deterrentOnHoldSinceMs = now;
+            log("ACC ON during deterrent actuation — confirming in " + DETERRENT_ON_CONFIRM_MS + " ms");
+            // A genuine start must not have the panel darkened under the driver while it is confirmed.
+            try {
+                com.overdrive.app.power.StealthPanel.noteAccOnObserved();
+            } catch (Throwable ignored) {}
+            scheduleDeterrentOnConfirmation(level, now);
+            return true;
+        } catch (Throwable t) {
+            deterrentOnHoldSinceMs = 0L;
+            return false;
+        }
+    }
+
+    private static boolean isDeterrentActuationWindowLive() {
+        try {
+            String key = com.overdrive.app.byd.cloud.BydCloudDeterrent.ACTUATION_UNTIL_KEY;
+            org.json.JSONObject s = com.overdrive.app.config.UnifiedConfigManager.loadConfig()
+                    .optJSONObject("surveillance");
+            return s != null && isActuationDeadlineLive(s.optLong(key, 0L));
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static boolean isActuationDeadlineLive(long deadlineMs) {
+        long now = System.currentTimeMillis();
+        return deadlineMs > now && deadlineMs <= now + DETERRENT_ACTUATION_MAX_HORIZON_MS;
+    }
+
+    private static void scheduleDeterrentOnConfirmation(int level, long holdSinceMs) {
+        Thread confirm = new Thread(() -> {
+            try {
+                // Second attempt: a heartbeat can replace the first request in the single query slot.
+                for (int attempt = 0; attempt < 2; attempt++) {
+                    Thread.sleep(DETERRENT_ON_CONFIRM_MS);
+                    if (deterrentOnHoldSinceMs != holdSinceMs) return;
+                    requestPowerLevelSnapshot(nextAccObservationSequence(), level,
+                            "deterrent ON confirmation", false);
+                }
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            } catch (Throwable t) {
+                log("Deterrent ON confirmation could not run: " + t.getMessage());
+            }
+        }, "AccDeterrentConfirm");
+        confirm.setDaemon(true);
+        confirm.start();
+    }
+
     /**
      * True when the user has selected DiLink 4 mode for the camera. On
      * byd_apa firmware the AVMCamera HAL tears down the preview surface
@@ -6526,45 +6576,8 @@ public class AccSentryDaemon {
                         .ParkedLinkContract
                         .RESULT_STALE_GENERATION;
             }
-            int rc = sendParkedLinkBroadcast(
+            return sendParkedLinkBroadcast(
                     generation, start ? "start" : "stop");
-            if (rc == com.overdrive.app.power.ParkedLinkContract.RESULT_BROADCAST_UNKNOWN
-                    || rc == com.overdrive.app.power.ParkedLinkContract.RESULT_BIND_FAILED
-                    || rc == com.overdrive.app.power.ParkedLinkContract.RESULT_SERVICE_UNAVAILABLE) {
-                int qnxRc = tryQnxVehicleNetworkHold(generation, start);
-                if (qnxRc != Integer.MIN_VALUE) {
-                    return qnxRc;
-                }
-            }
-            return rc;
-        }
-
-        private int tryQnxVehicleNetworkHold(long generation, boolean start) {
-            try {
-                if (start && !isSentryTransitionCurrent(generation, true)) {
-                    return com.overdrive.app.power.ParkedLinkContract.RESULT_STALE_GENERATION;
-                }
-                com.overdrive.app.byd.dilink5.QnxMessageBus bus =
-                        com.overdrive.app.byd.dilink5.QnxMessageBus.get();
-                if (!bus.isAvailable()) {
-                    return Integer.MIN_VALUE;
-                }
-                int qnxResult = bus.setVehicleNetworkHold(start);
-                if (qnxResult == com.overdrive.app.byd.dilink5.QnxMessageBus.RESULT_OK) {
-                    log("Di5 keep-alive: parked link " + (start ? "START" : "STOP")
-                            + " confirmed via QnxMessageBus fallback for generation " + generation);
-                    return com.overdrive.app.power.ParkedLinkContract.RESULT_CONFIRMED;
-                }
-                if (qnxResult == com.overdrive.app.byd.dilink5.QnxMessageBus.RESULT_NO_ANSWER) {
-                    return com.overdrive.app.power.ParkedLinkContract.RESULT_DISPATCHED_UNCONFIRMED;
-                }
-                if (qnxResult == com.overdrive.app.byd.dilink5.QnxMessageBus.RESULT_FAIL) {
-                    return com.overdrive.app.power.ParkedLinkContract.RESULT_REJECTED;
-                }
-            } catch (Throwable t) {
-                log("Di5 keep-alive: QnxMessageBus fallback failed: " + t.getMessage());
-            }
-            return Integer.MIN_VALUE;
         }
 
         @Override
@@ -6573,9 +6586,6 @@ public class AccSentryDaemon {
                     generation, "detach");
         }
 
-        private long lastParkedLinkBroadcastTimeoutMs = 0L;
-        private static final long PARKED_LINK_TIMEOUT_BACKOFF_MS = 30_000L;
-
         /**
          * The receiver is exported only behind android.permission.DUMP, which is
          * held by this shell-UID daemon but not ordinary apps. Ordered broadcast
@@ -6583,16 +6593,6 @@ public class AccSentryDaemon {
          */
         private int sendParkedLinkBroadcast(
                 long generation, String command) {
-            long now = System.currentTimeMillis();
-            if (now - lastParkedLinkBroadcastTimeoutMs < PARKED_LINK_TIMEOUT_BACKOFF_MS) {
-                return com.overdrive.app.power.ParkedLinkContract.RESULT_BROADCAST_UNKNOWN;
-            }
-            if (new java.io.File(com.overdrive.app.updater.UpdateLifecycle.UPDATE_IN_PROGRESS_FILE).exists()
-                    || new java.io.File(com.overdrive.app.util.ScratchRoot.path("acc_sentry_daemon.disabled")).exists()) {
-                log("Di5 keep-alive: skipping parked link " + command
-                        + " broadcast (update in progress or daemon disabled)");
-                return com.overdrive.app.power.ParkedLinkContract.RESULT_BROADCAST_UNKNOWN;
-            }
             String shellCommand =
                     "am broadcast -W --receiver-foreground"
                             // BYD's power service force-stops the app at ACC-off, and a
@@ -6609,15 +6609,10 @@ public class AccSentryDaemon {
                     + "\n"
                     + (result.error == null ? "" : result.error);
             int parsed = parseOrderedBroadcastResult(output);
-            if (parsed != Integer.MIN_VALUE) {
-                lastParkedLinkBroadcastTimeoutMs = 0L;
-                return parsed;
-            }
-            lastParkedLinkBroadcastTimeoutMs = System.currentTimeMillis();
+            if (parsed != Integer.MIN_VALUE) return parsed;
             log("Di5 keep-alive: parked link " + command
                     + " receiver returned no result (exit="
-                    + result.exitCode + ", output=" + output.trim() + ") — backing off for "
-                    + (PARKED_LINK_TIMEOUT_BACKOFF_MS / 1000) + "s");
+                    + result.exitCode + ", output=" + output.trim() + ")");
             return com.overdrive.app.power.ParkedLinkContract.RESULT_BROADCAST_UNKNOWN;
         }
 
@@ -8263,6 +8258,7 @@ public class AccSentryDaemon {
             SentryTransitionState latest =
                     latestSentryTransition;
             if (latest.sentryMode != isAccOff) {
+                if (!isAccOff && holdOnEdgeDuringDeterrentActuation(level)) return;
                 log("ACC heartbeat: HAL state disagrees with "
                         + "generation " + latest.generation
                         + "; reconciling full transition");
@@ -9445,12 +9441,7 @@ public class AccSentryDaemon {
             return android.content.pm.PackageManager.PERMISSION_GRANTED;
         }
         @Override public Context getApplicationContext() {
-            try {
-                Context appCtx = super.getApplicationContext();
-                return appCtx != null ? appCtx : this;
-            } catch (NullPointerException e) {
-                return this;
-            }
+            try { return super.getApplicationContext(); } catch (NullPointerException e) { return this; }
         }
         @Override public String getPackageName() {
             try { return super.getPackageName(); } catch (NullPointerException e) { return APP_PACKAGE_NAME(); }

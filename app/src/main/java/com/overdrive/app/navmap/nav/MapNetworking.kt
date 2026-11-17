@@ -155,6 +155,18 @@ object MapNetworking {
         }
     }
 
+    // One client for the process, so map opens reuse its connections. 20 calls per host as the SDK's own client
+    // allows: OkHttp's default 5 queued visible tiles behind each other and behind offline-region downloads.
+    private val tileClient: OkHttpClient by lazy {
+        builder()
+            .dispatcher(okhttp3.Dispatcher().apply { maxRequestsPerHost = 20 })
+            .addInterceptor(VectorTileKeys.interceptor())
+            .addInterceptor(com.overdrive.app.navmap.google.GoogleHttp.interceptor())
+            .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+    }
+
     /**
      * Route MapLibre's OWN tile/style/glyph/sprite fetches through the proxy too.
      *
@@ -168,11 +180,6 @@ object MapNetworking {
      */
     fun installMapLibreHttpClient() {
         try {
-            val tileClient = builder()
-                .addInterceptor(com.overdrive.app.navmap.google.GoogleHttp.interceptor())
-                .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
-                .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
-                .build()
             org.maplibre.android.module.http.HttpRequestUtil.setOkHttpClient(tileClient)
         } catch (_: Throwable) {
             // Best-effort: if the MapLibre http module isn't present/changes, fall

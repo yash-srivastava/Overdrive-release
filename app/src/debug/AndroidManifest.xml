@@ -4,7 +4,7 @@
         <receiver
             android:name="com.overdrive.app.voice.VoiceOverlayDemoReceiver"
             android:exported="true"
-        android:permission="android.permission.DUMP">
+            android:permission="android.permission.DUMP">
             <intent-filter>
                 <action android:name="com.overdrive.app.debug.VOICE_OVERLAY_DEMO" />
             </intent-filter>
@@ -12,7 +12,7 @@
         <receiver
             android:name="com.overdrive.app.voice.VoiceEngineHarnessReceiver"
             android:exported="true"
-        android:permission="android.permission.DUMP">
+            android:permission="android.permission.DUMP">
             <intent-filter>
                 <action android:name="com.overdrive.app.debug.VOICE_ENGINE_HARNESS" />
             </intent-filter>

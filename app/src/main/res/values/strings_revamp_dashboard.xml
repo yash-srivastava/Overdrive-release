@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dashboard revamp strings. Translations: values-*/strings_revamp_dashboard.xml. -->
+<resources>
+    <string name="dash_vehicle_line">%1$s · %2$.1f kWh</string>
+    <string name="dash_range_caption">range</string>
+    <string name="dash_status_remote_on">Remote access on</string>
+    <string name="dash_status_remote_off">Remote access off</string>
+    <string name="dash_status_remote_state">Remote access · %1$s</string>
+    <string name="dash_status_services">%1$d of %2$d services</string>
+    <string name="dash_status_view">View</string>
+    <string name="dash_status_recording_idle">Recording idle</string>
+    <string name="dash_services_running">%1$d of %2$d running</string>
+    <string name="dash_charge_eta_left">%1$s left</string>
+    <string name="dash_charge_session_inline">%1$s this session</string>
+    <plurals name="dash_clip_count">
+        <item quantity="one">%1$d clip</item>
+        <item quantity="other">%1$d clips</item>
+    </plurals>
+    <!-- Spoken label + value, e.g. "Battery 78%". -->
+    <string name="dash_a11y_label_value" translatable="false">%1$s %2$s</string>
+</resources>

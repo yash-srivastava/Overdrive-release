@@ -31,6 +31,22 @@ object NavSession {
     var state: State = State(null, "", false)
         private set
 
+    /** elapsedRealtime of the last guidance step on either screen: guidance left running behind a closed map goes quiet. */
+    @Volatile
+    var guidanceTickAt = 0L
+        private set
+
+    /** The same for the head unit's map alone (it owns arrival). */
+    @Volatile
+    var headUnitTickAt = 0L
+        private set
+
+    fun guidanceTick(headUnit: Boolean) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        guidanceTickAt = now
+        if (headUnit) headUnitTickAt = now
+    }
+
     fun interface Listener {
         fun onNavStateChanged(state: State)
     }
@@ -68,6 +84,9 @@ object NavSession {
     }
 
     private fun update(next: State) {
+        if (!next.navigating) {
+            com.overdrive.app.navmap.cluster.ClusterGuidanceClient.clear("roadsense")
+        }
         if (next.route == null || traffic?.route !== next.route) traffic = null
         state = next
         for (l in listeners) {

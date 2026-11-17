@@ -33,6 +33,11 @@ public final class ClusterAdasController {
     private static final String ACTION = "com.byd.cluster.spi";
     private static final String EXTRA = "wholeFrame";
     private static final long RECEIVER_EXEMPTION_MS = 180_000L;
+    /** {@code surveillance.clusterAdasHideEnabled}; absent = off, so the OEM box stays visible. */
+    public static final String CONFIG_KEY = "clusterAdasHideEnabled";
+    private static final long CONFIG_TTL_MS = 1_000L;
+    private static volatile boolean hideEnabled;
+    private static volatile long hideEnabledReadAt = -CONFIG_TTL_MS;
     private static final AtomicBoolean started = new AtomicBoolean();
     private static volatile ScheduledExecutorService worker;
     private static ClusterAdasLifecycle lifecycle; // Accessed only on worker.
@@ -80,6 +85,18 @@ public final class ClusterAdasController {
         try { CameraDaemon.log(message); } catch (Throwable ignored) { }
     }
 
+    /** User opt-in, re-read at most once a second; any thread. Off blocks hide work, never restore. */
+    static boolean hideEnabled() {
+        long now = SystemClock.elapsedRealtime();
+        if (now - hideEnabledReadAt < CONFIG_TTL_MS) return hideEnabled;
+        try {
+            org.json.JSONObject s = com.overdrive.app.config.UnifiedConfigManager.getSurveillance();
+            hideEnabled = s != null && s.optBoolean(CONFIG_KEY, false);
+        } catch (Throwable keepLastValue) { }
+        hideEnabledReadAt = now;
+        return hideEnabled;
+    }
+
     private static final class Backend implements ClusterAdasLifecycle.Backend {
         private final ClusterAdasOwnershipMarker marker = new ClusterAdasOwnershipMarker(
                 new File(ScratchRoot.path("overdrive_cluster_overlay.owner")));
@@ -122,7 +139,8 @@ public final class ClusterAdasController {
             return com.overdrive.app.monitor.AccMonitor.isAccStateAuthoritative()
                     && com.overdrive.app.monitor.AccMonitor.isAccOn()
                     && !ClusterProjectionController.isLegacyRestoreInFlight()
-                    && !ClusterProjectionController.isLegacyProjectionAdmissionBlocked();
+                    && !ClusterProjectionController.isLegacyProjectionAdmissionBlocked()
+                    && hideEnabled();
         }
         @Override public long nowMs() { return SystemClock.elapsedRealtime(); }
         @Override public boolean acquireOwnership() { return marker.acquire(bootId); }

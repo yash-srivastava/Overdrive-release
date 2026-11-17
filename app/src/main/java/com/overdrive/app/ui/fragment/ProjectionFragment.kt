@@ -15,6 +15,8 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.LayoutInflater
+import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.Surface
 import android.view.TextureView
 import android.view.View
@@ -26,6 +28,7 @@ import android.widget.Button
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
+import android.widget.SeekBar
 import android.widget.Spinner
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
@@ -74,6 +77,7 @@ class ProjectionFragment : Fragment() {
 
     private val io: ExecutorService = Executors.newSingleThreadExecutor()
     private val mirrorIo: ExecutorService = Executors.newSingleThreadExecutor()
+    private val clusterInputIo: ExecutorService = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     private val mirrorSessionId = ClusterViewMirrorClient.newSessionId()
 
@@ -92,8 +96,17 @@ class ProjectionFragment : Fragment() {
     private var presetGroup: MaterialButtonToggleGroup? = null
     private var aspectLockSwitch: MaterialSwitch? = null
     private var autoStartSwitch: MaterialSwitch? = null
+    private val speedOverlaySwitch = SurveillanceSwitch(SPEED_OVERLAY_KEY)
+    private val adasHideSwitch = SurveillanceSwitch(ADAS_HIDE_KEY)
     private var transportGroup: MaterialButtonToggleGroup? = null
     private var transportStatus: TextView? = null
+    private var projectionPathGroup: MaterialButtonToggleGroup? = null
+    private var projectionTargetGroup: MaterialButtonToggleGroup? = null
+    private var projectionPathStatus: TextView? = null
+    private var projectionGeometryControls: View? = null
+    private var diLink5ProjectionControls: View? = null
+    private val projectionSliders = LinkedHashMap<String, SeekBar>()
+    private val projectionSliderValues = LinkedHashMap<String, TextView>()
     private var texture: TextureView? = null
     private var btnFullscreen: MaterialButton? = null
     private var scroll: View? = null
@@ -128,12 +141,19 @@ class ProjectionFragment : Fragment() {
     private val appPackages = ArrayList<String>()
 
     @Volatile private var casting = false
+    @Volatile private var layoutActive = false
+    @Volatile private var layoutBusy = false
+    private var layoutGeneration = 0L
     @Volatile private var diLink5ModeRequired = false
     // The package ACTUALLY on the cluster, per the daemon (empty when none). The resize box acts on
     // THIS app, not on the spinner selection — the two diverge the moment the user browses the app
     // list during a live cast. All geometry persistence/restore is keyed to this while casting, so a
     // drag can never reshape the cast app to a different app's remembered rect.
     @Volatile private var castPackage = ""
+    @Volatile private var castSessionGeneration = 0L
+    @Volatile private var resolvedProjectionTransport = ""
+    @Volatile private var activeProjectionPath = "none"
+    private var activeHostedBounds: IntArray? = null
     // The package the box's CURRENT rect actually describes — set by restoreWindowFor (the only
     // thing that binds a rect to an app) and read by geometryPackage(). Empty until the first bind.
     // This is what keeps a persist from being keyed to a browsed spinner pick or to a stale
@@ -164,6 +184,9 @@ class ProjectionFragment : Fragment() {
     private var suppressAspectListener = false
     private var suppressAutoStartListener = false
     private var suppressTransportListener = false
+    private var suppressProjectionPathListener = false
+    @Volatile private var configuredProjectionPath = "auto"
+    @Volatile private var configuredProjectionTarget = "standard"
     // The persisted projection.clusterTransport choice (auto/legacy/dilink5),
     // refreshed from the status poll so the control tracks out-of-band edits.
     @Volatile private var configuredTransport = "auto"
@@ -257,8 +280,15 @@ class ProjectionFragment : Fragment() {
             presetGroup = view.findViewById(R.id.projectionPresetGroup)
             aspectLockSwitch = view.findViewById(R.id.projectionAspectLockSwitch)
             autoStartSwitch = view.findViewById(R.id.projectionAutoStartSwitch)
+            speedOverlaySwitch.bind(view.findViewById(R.id.projectionSpeedOverlaySwitch))
+            adasHideSwitch.bind(view.findViewById(R.id.projectionAdasHideSwitch))
             transportGroup = view.findViewById(R.id.projectionTransportGroup)
             transportStatus = view.findViewById(R.id.projectionTransportStatus)
+            projectionPathGroup = view.findViewById(R.id.projectionPathGroup)
+            projectionTargetGroup = view.findViewById(R.id.projectionTargetGroup)
+            projectionPathStatus = view.findViewById(R.id.projectionPathStatus)
+            projectionGeometryControls = view.findViewById(R.id.projectionGeometryControls)
+            diLink5ProjectionControls = view.findViewById(R.id.projectionDiLink5Controls)
             texture = view.findViewById(R.id.projectionTexture)
             btnFullscreen = view.findViewById(R.id.projectionFullscreenButton)
             scroll = view.findViewById(R.id.projectionScroll)
@@ -286,6 +316,7 @@ class ProjectionFragment : Fragment() {
             requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, theaterBackCallback)
             wireAppSpinner()
             wireBounds()
+            wireClusterInputKeys()
             wireTexture()
             wireStageLayout()
             wireScaleGroup()
@@ -293,6 +324,9 @@ class ProjectionFragment : Fragment() {
             wireAspectLockSwitch()
             wireAutoStartSwitch()
             wireTransportGroup()
+            wireProjectionPathGroups()
+            wireProjectionGeometryControls(view)
+            com.overdrive.app.ui.view.ProjectionAppTools.attach(this, view) { selectedPackage() }
             restoreScaleMode()
             clipMirrorToCard()
             updateButtons()
@@ -326,7 +360,7 @@ class ProjectionFragment : Fragment() {
         // Refresh the picker so an app uninstalled since we last loaded drops out of the
         // list (a long-lived fragment would otherwise keep offering a since-removed app).
         loadApps()
-        refreshAutoStartState()
+        refreshSavedSwitches()
     }
 
     override fun onPause() {
@@ -398,6 +432,10 @@ class ProjectionFragment : Fragment() {
         statusText = null; statusDot = null; stage = null; bounds = null; progress = null
         scaleGroup = null; presetGroup = null; aspectLockSwitch = null
         autoStartSwitch = null; transportGroup = null; transportStatus = null
+        projectionPathGroup = null; projectionTargetGroup = null; projectionPathStatus = null
+        projectionGeometryControls = null; diLink5ProjectionControls = null
+        projectionSliders.clear(); projectionSliderValues.clear()
+        speedOverlaySwitch.unbind(); adasHideSwitch.unbind()
         texture = null; btnFullscreen = null; scroll = null; content = null; stageCard = null
         dock = null; settings = null; hud = null; emptyState = null
         super.onDestroyView()
@@ -406,6 +444,7 @@ class ProjectionFragment : Fragment() {
     override fun onDestroy() {
         io.shutdown()
         mirrorIo.shutdown()
+        clusterInputIo.shutdownNow()
         super.onDestroy()
     }
 
@@ -453,7 +492,8 @@ class ProjectionFragment : Fragment() {
         // The box is expressed in CLUSTER space, so it is always panel-shaped by construction
         // (never the square the old view-px + separately-resolved-aspect model produced) and needs
         // no conversion before being handed to the daemon as freeform window bounds.
-        b.onWindowChanged = { l, t, r, bot, commit ->
+        b.onWindowChanged = window@{ l, t, r, bot, commit ->
+            if (layoutActive || layoutBusy) return@window
             // The box is the cast app's FREEFORM BOUNDS on the cluster — NOT a head-unit preview
             // sub-rect. The mirror always shows the whole cluster and does not move with the box,
             // so a box change never re-casts the mirror.
@@ -468,11 +508,13 @@ class ProjectionFragment : Fragment() {
                 if (casting) submitCommit(l, t, r, bot)
             } else if (casting && resizeInFlight.compareAndSet(false, true)) {
                 val pkg = geometryPackage() ?: ""
+                val sessionGeneration = castSessionGeneration
                 // Release the gate if the task never actually got queued (executor shut down or
                 // rejected): the `finally` below only runs for a block that RAN, so without this
                 // the flag would stick true and silently disable live tracking from then on.
                 if (!submitIo {
-                        try { postClusterResize(l, t, r, bot, commit = false, pkg = pkg) }
+                        try { postClusterResize(l, t, r, bot, commit = false, pkg = pkg,
+                            sessionGeneration = sessionGeneration) }
                         finally { resizeInFlight.set(false) }
                     }) {
                     resizeInFlight.set(false)
@@ -482,8 +524,73 @@ class ProjectionFragment : Fragment() {
         // CONTROL taps/swipes are normalized to the WHOLE VIEW (= whole cluster) now, since the
         // mirror shows the full cluster. The relay maps full-surface px → full-cluster px through
         // the daemon's published projection (ClusterInputRelay → destinationToSource).
-        b.onTap = { nx, ny -> submitIo { postTap(nx, ny) } }
-        b.onSwipe = { nx1, ny1, nx2, ny2, ms -> submitIo { postSwipe(nx1, ny1, nx2, ny2, ms) } }
+        b.onTap = { nx, ny ->
+            val point = boxNormToView(nx, ny)
+            val generation = if (layoutActive) layoutGeneration else 0L
+            val epoch = ClusterViewMirrorClient.currentInputEpoch()
+            if (point != null) submitIo { postTap(point, generation, epoch) }
+        }
+        b.onSwipe = { nx1, ny1, nx2, ny2, ms ->
+            val start = boxNormToView(nx1, ny1)
+            val end = boxNormToView(nx2, ny2)
+            val generation = if (layoutActive) layoutGeneration else 0L
+            val epoch = ClusterViewMirrorClient.currentInputEpoch()
+            if (start != null && end != null) submitIo { postSwipe(start, end, ms, generation, epoch) }
+        }
+        b.onTouchFrame = stream@{ event ->
+            if (event.actionMasked == MotionEvent.ACTION_DOWN
+                && !ClusterViewMirrorClient.supportsTouchStream(mirrorSessionId)) return@stream false
+            val rect = lastPaneRect
+            val accepted = ClusterViewMirrorClient.touch(
+                mirrorSessionId, event, b.width, b.height,
+                rect[0], rect[1], rect[2], rect[3]
+            )
+            // Capability was established before DOWN. A rejected press (letterbox,
+            // teardown race) remains claimed so it cannot be replayed through HTTP.
+            accepted || event.actionMasked == MotionEvent.ACTION_DOWN
+        }
+        b.onTouchCancel = { ClusterViewMirrorClient.cancelTouch(mirrorSessionId) }
+    }
+
+    /** A compact menu fits both portrait and landscape docks and leaves the mirror fully
+     *  available for gestures. Every key follows the same live session/display as touch. */
+    private fun wireClusterInputKeys() {
+        val row = spinnerApps?.parent as? LinearLayout ?: return
+        val button = MaterialButton(requireContext()).apply {
+            text = "⋮"
+            contentDescription = getString(R.string.projection_cluster_controls)
+            minimumWidth = 0
+            setPadding(0, 0, 0, 0)
+            val size = resources.getDimensionPixelSize(R.dimen.dashboard_modern_touch_target)
+            layoutParams = LinearLayout.LayoutParams(size, size).apply {
+                marginStart = (8 * resources.displayMetrics.density).roundToInt()
+            }
+            setOnClickListener {
+                val labels = arrayOf(
+                    getString(R.string.projection_cluster_back),
+                    getString(R.string.projection_cluster_home),
+                    getString(R.string.projection_cluster_volume_down),
+                    getString(R.string.projection_cluster_volume_up)
+                )
+                val keys = intArrayOf(KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_HOME,
+                    KeyEvent.KEYCODE_VOLUME_DOWN, KeyEvent.KEYCODE_VOLUME_UP)
+                MaterialAlertDialogBuilder(requireContext())
+                    .setTitle(R.string.projection_cluster_controls)
+                    .setItems(labels) { _, index ->
+                        val eventTime = android.os.SystemClock.uptimeMillis()
+                        val inputEpoch = ClusterViewMirrorClient.currentInputEpoch()
+                        submitClusterInput {
+                            val accepted = ClusterViewMirrorClient.key(
+                                mirrorSessionId, keys[index], eventTime, inputEpoch)
+                            if (!accepted) postMain {
+                                notifyToast(getString(R.string.projection_cluster_control_unavailable),
+                                    AppToast.Kind.WARNING)
+                            }
+                        }
+                    }.show()
+            }
+        }
+        row.addView(button)
     }
 
     /**
@@ -840,7 +947,7 @@ class ProjectionFragment : Fragment() {
             ?.getBoolean(K_ASPECT_LOCK, false) ?: false
         suppressAspectListener = true
         try { sw.isChecked = locked } finally { suppressAspectListener = false }
-        bounds?.setAspectLocked(locked)
+        bounds?.setAspectLocked(locked, notifyChange = false)
         sw.setOnCheckedChangeListener { _, isChecked ->
             if (suppressAspectListener) return@setOnCheckedChangeListener
             bounds?.setAspectLocked(isChecked)   // refits + commits when turning on
@@ -948,6 +1055,130 @@ class ProjectionFragment : Fragment() {
         }
     }
 
+    private fun wireProjectionPathGroups() {
+        projectionPathGroup?.addOnButtonCheckedListener { _, id, checked ->
+            if (!checked || suppressProjectionPathListener) return@addOnButtonCheckedListener
+            val value = when (id) {
+                R.id.projectionPathHosted -> "hosted"
+                R.id.projectionPathDirect -> "direct"
+                else -> "auto"
+            }
+            if (value != configuredProjectionPath) saveProjectionChoice(
+                "di5ProjectionTransport", value, configuredProjectionPath
+            ) {
+                configuredProjectionPath = it
+                setProjectionPathChecked(it)
+                updateProjectionControlMode()
+            }
+        }
+        projectionTargetGroup?.addOnButtonCheckedListener { _, id, checked ->
+            if (!checked || suppressProjectionPathListener) return@addOnButtonCheckedListener
+            val value = if (id == R.id.projectionTargetFull) "full" else "standard"
+            if (value != configuredProjectionTarget) saveProjectionChoice(
+                "di5ProjectionTarget", value, configuredProjectionTarget
+            ) { configuredProjectionTarget = it; setProjectionTargetChecked(it) }
+        }
+    }
+
+    private data class ProjectionSliderSpec(
+        val key: String,
+        val sliderId: Int,
+        val valueId: Int,
+        val labelId: Int,
+        val minimum: Int
+    )
+
+    private fun wireProjectionGeometryControls(root: View) {
+        PROJECTION_SLIDERS.forEach { spec ->
+            val slider = root.findViewById<SeekBar>(spec.sliderId)
+            val value = root.findViewById<TextView>(spec.valueId)
+            projectionSliders[spec.key] = slider
+            projectionSliderValues[spec.key] = value
+            slider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(view: SeekBar?, progress: Int, fromUser: Boolean) {
+                    value.text = getString(
+                        R.string.projection_scale_value,
+                        getString(spec.labelId),
+                        spec.minimum + progress
+                    )
+                }
+                override fun onStartTrackingTouch(view: SeekBar?) = Unit
+                override fun onStopTrackingTouch(view: SeekBar?) {
+                    val selected = spec.minimum + (view?.progress ?: 0)
+                    submitIo {
+                        val saved = postUnified("projection", JSONObject().put(spec.key, selected))
+                        if (!saved) postMain {
+                            if (alive) notifyToast(
+                                getString(R.string.projection_setting_save_failed),
+                                AppToast.Kind.ERROR
+                            )
+                        } else if (casting) postMain {
+                            if (alive) notifyToast(
+                                getString(R.string.projection_transport_restart_required),
+                                AppToast.Kind.WARNING
+                            )
+                        }
+                    }
+                }
+            })
+        }
+        applyProjectionSliderValues(PROJECTION_SLIDER_DEFAULTS)
+        updateProjectionControlMode()
+    }
+
+    private fun applyProjectionSliderValues(values: IntArray) {
+        PROJECTION_SLIDERS.forEachIndexed { index, spec ->
+            val selected = values.getOrElse(index) { PROJECTION_SLIDER_DEFAULTS[index] }
+                .coerceIn(spec.minimum, spec.minimum + (projectionSliders[spec.key]?.max ?: 0))
+            projectionSliders[spec.key]?.progress = selected - spec.minimum
+            projectionSliderValues[spec.key]?.text = getString(
+                R.string.projection_scale_value, getString(spec.labelId), selected
+            )
+        }
+    }
+
+    private fun updateProjectionControlMode() {
+        val diLink5 = projectionUsesDiLink5Controls(resolvedProjectionTransport)
+        diLink5ProjectionControls?.visibility = if (diLink5) View.VISIBLE else View.GONE
+        val hostedEnabled = configuredProjectionPath != "direct"
+        val directEnabled = configuredProjectionPath != "hosted"
+        PROJECTION_SLIDERS.forEach { spec ->
+            projectionSliders[spec.key]?.isEnabled =
+                diLink5 && if (spec.key == "di5DirectScalePercent") directEnabled else hostedEnabled
+        }
+        projectionGeometryControls?.visibility = View.VISIBLE
+    }
+
+    private fun saveProjectionChoice(
+        key: String,
+        value: String,
+        previous: String,
+        apply: (String) -> Unit
+    ) {
+        apply(value)
+        submitIo {
+            val ok = postUnified("projection", JSONObject().put(key, value))
+            if (!ok) postMain { if (alive) apply(previous) }
+        }
+    }
+
+    private fun setProjectionPathChecked(value: String) {
+        val id = when (value) {
+            "hosted" -> R.id.projectionPathHosted
+            "direct" -> R.id.projectionPathDirect
+            else -> R.id.projectionPathAuto
+        }
+        suppressProjectionPathListener = true
+        try { projectionPathGroup?.check(id) } finally { suppressProjectionPathListener = false }
+    }
+
+    private fun setProjectionTargetChecked(value: String) {
+        val id = if (value == "full") R.id.projectionTargetFull
+        else R.id.projectionTargetStandard
+        suppressProjectionPathListener = true
+        try { projectionTargetGroup?.check(id) } finally { suppressProjectionPathListener = false }
+    }
+
     private fun setAutoStartChecked(on: Boolean) {
         val sw = autoStartSwitch ?: return
         suppressAutoStartListener = true
@@ -1006,23 +1237,69 @@ class ProjectionFragment : Fragment() {
         postUnified("projection", JSONObject().put("autoStartPackage", pkg))
     }
 
-    /** Read both auto-start flags from the unified config so the switch reflects the saved
-     *  state and the conflict dialog knows the sibling's value. */
-    private fun refreshAutoStartState() {
+    /** Read both auto-start flags and the cluster overlay flags from the unified config so the
+     *  switches reflect the saved state and the conflict dialog knows the sibling's value. */
+    private fun refreshSavedSwitches() {
+        val overlaySwitches = listOf(speedOverlaySwitch, adasHideSwitch)
+        val seqs = overlaySwitches.map { it.writeSeq }
         submitIo {
             var projOn = false
             var mapOn = false
+            var surveillance: JSONObject? = null
             try {
                 val body = httpGet("/api/settings/unified")
                 if (body != null) {
                     val cfg = JSONObject(body).optJSONObject("config") ?: JSONObject()
                     cfg.optJSONObject("projection")?.let { projOn = it.optBoolean("autoStartOnAcc", false) }
                     cfg.optJSONObject("navMap")?.let { mapOn = it.optBoolean("autoProjectCluster", false) }
+                    surveillance = cfg.optJSONObject("surveillance") ?: JSONObject()
                 }
             } catch (_: Throwable) {}
             roadSenseAutoProject = mapOn
             val on = projOn
-            postMain { setAutoStartChecked(on) }
+            val saved = surveillance
+            postMain {
+                setAutoStartChecked(on)
+                if (saved != null) overlaySwitches.forEachIndexed { i, s -> s.applySaved(saved, seqs[i]) }
+            }
+        }
+    }
+
+    /** Switch for one boolean `surveillance.*` key shared with RoadSense; the daemon applies it live. */
+    private inner class SurveillanceSwitch(private val key: String) {
+        private var view: MaterialSwitch? = null
+        private var suppress = false
+        // Main thread only. Bumped per user flip so an older config read or failed write can't repaint it.
+        var writeSeq = 0
+            private set
+
+        fun bind(sw: MaterialSwitch?) {
+            view = sw ?: return
+            sw.setOnCheckedChangeListener { _, isChecked ->
+                if (suppress) return@setOnCheckedChangeListener
+                val seq = ++writeSeq
+                val queued = submitIo {
+                    val ok = postUnified("surveillance", JSONObject().put(key, isChecked))
+                    if (!ok) postMain {
+                        if (seq != writeSeq) return@postMain
+                        setChecked(!isChecked)
+                        notifyToast(getString(R.string.projection_setting_save_failed), AppToast.Kind.ERROR)
+                    }
+                }
+                if (!queued) setChecked(!isChecked)
+            }
+        }
+
+        fun unbind() { view = null }
+
+        fun applySaved(surveillance: JSONObject, seqAtRead: Int) {
+            if (seqAtRead == writeSeq) setChecked(surveillance.optBoolean(key, false))
+        }
+
+        private fun setChecked(on: Boolean) {
+            val sw = view ?: return
+            suppress = true
+            try { sw.isChecked = on } finally { suppress = false }
         }
     }
 
@@ -1031,6 +1308,7 @@ class ProjectionFragment : Fragment() {
             JSONObject().put("section", section).put("data", data))
 
     private fun toggleAdjust() {
+        if (layoutActive || layoutBusy) return
         adjusting = !adjusting
         applyBoundsMode()
         btnAdjust?.setText(
@@ -1115,6 +1393,10 @@ class ProjectionFragment : Fragment() {
     }
 
     private fun onCastClicked() {
+        if (layoutActive || layoutBusy) {
+            notifyToast(getString(R.string.cluster_layouts_stop_first), AppToast.Kind.ERROR)
+            return
+        }
         if (diLink5ModeRequired) {
             notifyToast(
                 getString(R.string.projection_dilink5_mode_required),
@@ -1131,6 +1413,7 @@ class ProjectionFragment : Fragment() {
         updateButtons()
         submitIo {
             val result = postCast(pkg)
+            val status = if (result.success) fetchStatus() else null
             casting = result.success
             // Bind the box to this app immediately, rather than waiting for the next status poll
             // (up to STATUS_POLL_MS away): between the two, `casting` is already true, so a drag or
@@ -1140,6 +1423,7 @@ class ProjectionFragment : Fragment() {
             postMain {
                 castInFlight = false
                 setBusy(false); updateButtons()
+                if (status != null) applyStatus(status)
                 // applyStatus rebinds only when castPackage changes, and it was just set above,
                 // so a box still bound to a previously browsed app must be rebound here.
                 if (result.success && boxPackage != pkg) restoreWindowFor(pkg)
@@ -1194,16 +1478,23 @@ class ProjectionFragment : Fragment() {
     }
 
     private fun onStopClicked() {
+        val stoppingLayout = layoutActive || layoutBusy
+        if (stoppingLayout) layoutBusy = true
         setBusy(true)
         adjusting = false
         casting = false
         // Clear the geometry binding with the cast: onPause persists the box, and doing so after a
         // stop must not write the (now-ended) cast app's rect under a package it no longer describes.
         castPackage = ""
+        castSessionGeneration = 0L
+        activeHostedBounds = null
+        commitSeq++
         cancelPendingMirrorRestart()
         detachMirror()
         submitIo {
-            postStop()
+            if (stoppingLayout) {
+                httpPostSuccess("/api/cluster/layouts/stop", JSONObject())
+            } else postStop()
             mirrorMode = MODE_STOPPED
             postMain {
                 setBusy(false); updateButtons()
@@ -1248,9 +1539,22 @@ class ProjectionFragment : Fragment() {
     private fun applyStatus(st: Status) {
         val wasCasting = casting
         val previousCastPackage = castPackage
-        casting = st.casting
+        val previousCastGeneration = castSessionGeneration
+        val layoutChanged = layoutActive != st.layoutActive || layoutGeneration != st.layoutGeneration
+        layoutActive = st.layoutActive
+        layoutBusy = st.layoutBusy
+        layoutGeneration = st.layoutGeneration
+        casting = st.casting || layoutActive
+        if (layoutActive) adjusting = false
         diLink5ModeRequired = st.diLink5ModeRequired
         castPackage = st.castPackage
+        castSessionGeneration = st.castSessionGeneration
+        resolvedProjectionTransport = st.clusterTransport
+        activeProjectionPath = st.projectionPathActive
+        activeHostedBounds = st.hostedProjectionBounds
+        if (previousCastPackage != castPackage || previousCastGeneration != castSessionGeneration) {
+            commitSeq++ // late replies/retries cannot acquire the replacement session's token
+        }
         // Track the persisted transport choice + the daemon's live resolution.
         // Poll-driven (not just set-on-click) so out-of-band edits (config file,
         // another client) and post-restart resolutions stay reflected here.
@@ -1261,11 +1565,20 @@ class ProjectionFragment : Fragment() {
             }
             setTransportStatusLine(st.clusterTransport, st.clusterTransportSource)
         }
+        configuredProjectionPath = st.projectionPathConfigured
+        configuredProjectionTarget = st.projectionTargetConfigured
+        setProjectionPathChecked(configuredProjectionPath)
+        setProjectionTargetChecked(configuredProjectionTarget)
+        applyProjectionSliderValues(st.projectionValues)
+        updateProjectionControlMode()
+        projectionPathStatus?.text = getString(
+            R.string.projection_path_active,
+            st.projectionPathActive,
+            st.physicalDisplayId,
+            st.contentDisplayId
+        )
         // The cast target changed under us (a new cast started, or one ended) — rebind the box to
         // whatever is on the cluster now so it never shows/persists another app's geometry.
-        if (st.casting && st.castPackage.isNotEmpty() && st.castPackage != previousCastPackage) {
-            restoreWindowFor(st.castPackage)
-        }
         var panelChanged = false
         if (st.panelW > 0 && st.panelH > 0) {
             panelChanged = st.panelW != panelW || st.panelH != panelH
@@ -1279,9 +1592,14 @@ class ProjectionFragment : Fragment() {
             updateStageAspect(aspect)
             bounds?.setClusterSize(st.panelW, st.panelH)
         }
+        if (st.casting && st.castPackage.isNotEmpty() &&
+            (st.castPackage != previousCastPackage ||
+                st.castSessionGeneration != previousCastGeneration ||
+                (st.projectionPathActive == "hosted" && bounds?.isAdjusting() != true))
+        ) restoreWindowFor(st.castPackage)
 
         updateButtons()
-        if (!st.casting) {
+        if (!casting) {
             cancelPendingMirrorRestart()
             if (wasCasting || mirrorMode != MODE_STOPPED) detachMirror()
             if (diLink5ModeRequired) {
@@ -1302,7 +1620,7 @@ class ProjectionFragment : Fragment() {
             // mirror (full stop + re-arm) so the new panel size takes effect (a live reproject is
             // ignored on this firmware). updateStageAspect above already schedules a restart when it
             // resizes the stage; this covers a panel change that leaves the stage size unchanged.
-            if (panelChanged) restartMirrorForResize()
+            if (panelChanged || layoutChanged) restartMirrorForResize()
             renderMirrorState(MODE_ACTIVE)
         } else {
             // Covers external starts and cold projection readiness. NO_PROJECTION and
@@ -1492,21 +1810,22 @@ class ProjectionFragment : Fragment() {
         // Repositioning acts on the CLUSTER window (via the daemon), so it's available whenever an
         // app is cast — even before the head-unit mirror preview comes up. The presets + aspect
         // lock follow the same rule.
-        btnAdjust?.isEnabled = casting
-        presetGroup?.isEnabled = casting
-        aspectLockSwitch?.isEnabled = casting
+        btnAdjust?.isEnabled = casting && !layoutActive && !layoutBusy
+        presetGroup?.isEnabled = casting && !layoutActive && !layoutBusy
+        aspectLockSwitch?.isEnabled = casting && !layoutActive && !layoutBusy
     }
 
     // ── UI helpers ─────────────────────────────────────────────────────────────────
 
     private fun updateButtons() {
         btnCast?.isEnabled =
-            !casting && !diLink5ModeRequired && appPackages.isNotEmpty() && !castInFlight
-        btnStop?.isEnabled = casting
+            !casting && !diLink5ModeRequired && !layoutActive && !layoutBusy
+                && appPackages.isNotEmpty() && !castInFlight
+        btnStop?.isEnabled = casting || layoutBusy
         // One slot: Cast while idle, Stop while casting.
-        btnCast?.visibility = if (casting) View.GONE else View.VISIBLE
-        btnStop?.visibility = if (casting) View.VISIBLE else View.GONE
-        if (!casting) btnAdjust?.isEnabled = false
+        btnCast?.visibility = if (casting || layoutBusy) View.GONE else View.VISIBLE
+        btnStop?.visibility = if (casting || layoutBusy) View.VISIBLE else View.GONE
+        if (!casting || layoutActive || layoutBusy) btnAdjust?.isEnabled = false
         refreshFullscreenButton()
         refreshStageOverlay()
     }
@@ -1567,6 +1886,12 @@ class ProjectionFragment : Fragment() {
         catch (_: RejectedExecutionException) {}
     }
 
+    private fun submitClusterInput(block: () -> Unit) {
+        try {
+            if (!clusterInputIo.isShutdown) clusterInputIo.execute(block)
+        } catch (_: RejectedExecutionException) {}
+    }
+
     // ── Per-app window persistence (survives leave/return + app restart) ─────────────
     // The cluster window rect is remembered PER cast package (normalized 0..1 of the cluster) so
     // each app reopens at the size/position the user last gave it. Keyed by package so switching
@@ -1579,12 +1904,22 @@ class ProjectionFragment : Fragment() {
      *  after layout when width/height are known. Safe if the view is torn down (guards on `bounds`
      *  + alive). */
     private fun restoreWindowFor(pkg: String?) {
+        if (layoutActive || layoutBusy) return
         val b = bounds ?: return
         b.post {
-            if (!alive || bounds !== b) return@post
+            if (!alive || bounds !== b || layoutActive || layoutBusy) return@post
+            if (casting && !castPackage.isNullOrEmpty() && castPackage != pkg) return@post
             // Bind the box to this app BEFORE touching the rect, so any persist triggered by what
             // follows (applyPreset emits a commit) is keyed to the app the rect now describes.
             boxPackage = pkg ?: ""
+            if (reflectHostedProjectionWindow(
+                    casting && activeProjectionPath == "hosted",
+                    activeHostedBounds,
+                    reflect = { actual ->
+                        b.setWindowRect(actual[0], actual[1], actual[2], actual[3])
+                    },
+                )
+            ) return@post
             val n = if (pkg != null) loadNormalizedWindow(pkg) else null
             if (n != null) {
                 // setNormalizedWindow updates the box WITHOUT emitting (so it can't clobber the
@@ -1594,7 +1929,9 @@ class ProjectionFragment : Fragment() {
                 val w = b.currentWindow()
                 // A restore is authoritative (not a drag frame) — commit so the full ladder runs
                 // and we learn whether AMS actually honoured this app's remembered rect.
-                if (casting) submitCommit(w.left, w.top, w.right, w.bottom)
+                if (casting && !projectionUsesDiLink5Controls(resolvedProjectionTransport)) {
+                    submitCommit(w.left, w.top, w.right, w.bottom)
+                }
             } else {
                 // No LOCAL record for this app. Before falling back to FULL — which emits a commit
                 // and would therefore DELETE the daemon-side box — check whether the daemon still
@@ -1605,6 +1942,14 @@ class ProjectionFragment : Fragment() {
                     val remote = if (pkg != null) fetchClusterWindow(pkg) else null
                     postMain {
                         if (!alive || bounds !== b || boxPackage != (pkg ?: "")) return@postMain
+                        if (reflectHostedProjectionWindow(
+                                casting && activeProjectionPath == "hosted",
+                                activeHostedBounds,
+                                reflect = { actual ->
+                                    b.setWindowRect(actual[0], actual[1], actual[2], actual[3])
+                                },
+                            )
+                        ) return@postMain
                         // Unknown is not "nothing saved": FULL would delete the daemon's box.
                         if (remote === WINDOW_LOOKUP_FAILED) return@postMain
                         if (remote != null) {
@@ -1612,10 +1957,12 @@ class ProjectionFragment : Fragment() {
                             val w = b.currentWindow()
                             // Adopt it locally so the box survives without another round-trip.
                             persistWindowPrefsOnly(pkg!!, w.left, w.top, w.right, w.bottom)
-                            if (casting) submitCommit(w.left, w.top, w.right, w.bottom)
+                            if (casting && !projectionUsesDiLink5Controls(resolvedProjectionTransport)) {
+                                submitCommit(w.left, w.top, w.right, w.bottom)
+                            }
                         } else {
                             // Genuinely nothing saved anywhere → the FULL-panel default.
-                            b.applyPreset(ProjectionBoundsGeometry.PRESET_FULL)
+                            b.applyPreset(ProjectionBoundsGeometry.PRESET_FULL, notifyChange = false)
                         }
                     }
                 }
@@ -1671,6 +2018,7 @@ class ProjectionFragment : Fragment() {
     }
 
     private fun persistWindow(l: Int, t: Int, r: Int, bot: Int) {
+        if (layoutActive || layoutBusy) return
         val pkg = geometryPackage() ?: return
         val pw = panelW.coerceAtLeast(1).toFloat()
         val ph = panelH.coerceAtLeast(1).toFloat()
@@ -1784,7 +2132,18 @@ class ProjectionFragment : Fragment() {
         val diLink5ModeRequired: Boolean,
         val clusterTransport: String,
         val clusterTransportSource: String,
-        val clusterTransportConfigured: String
+        val clusterTransportConfigured: String,
+        val projectionPathConfigured: String,
+        val projectionTargetConfigured: String,
+        val projectionValues: IntArray,
+        val projectionPathActive: String,
+        val physicalDisplayId: Int,
+        val contentDisplayId: Int,
+        val layoutActive: Boolean,
+        val layoutBusy: Boolean,
+        val layoutGeneration: Long,
+        val castSessionGeneration: Long,
+        val hostedProjectionBounds: IntArray?,
     )
 
     private fun fetchStatus(): Status? {
@@ -1802,15 +2161,40 @@ class ProjectionFragment : Fragment() {
                             .equals("dilink5", ignoreCase = true) &&
                         !j.optString("clusterTransport", "legacy")
                             .equals("dilink5", ignoreCase = true)
+            val layouts = j.optJSONObject("layouts")
+            val layoutsActive = j.optBoolean("layoutActive", layouts?.optBoolean("active", false) ?: false)
             Status(
                 j.optBoolean("casting", false),
-                j.optInt("panelW", 0),
-                j.optInt("panelH", 0),
+                if (layoutsActive) layouts?.optInt("width", j.optInt("panelW", 0)) ?: j.optInt("panelW", 0)
+                    else j.optInt("panelW", 0),
+                if (layoutsActive) layouts?.optInt("height", j.optInt("panelH", 0)) ?: j.optInt("panelH", 0)
+                    else j.optInt("panelH", 0),
                 j.optString("castPackage", ""),
                 modeRequired,
                 j.optString("clusterTransport", ""),
                 j.optString("clusterTransportSource", ""),
-                j.optString("clusterTransportConfigured", "auto")
+                j.optString("clusterTransportConfigured", "auto"),
+                j.optString("projectionPathConfigured", "auto"),
+                j.optString("projectionTargetConfigured", "standard"),
+                intArrayOf(
+                    j.optInt("di5HostedWidthPercent", 100),
+                    j.optInt("di5HostedHeightPercent", 100),
+                    j.optInt("di5HostedXOffsetPercent", 50),
+                    j.optInt("di5HostedYOffsetPercent", 50),
+                    j.optInt("di5HostedContentScalePercent", 100),
+                    j.optInt("di5DirectScalePercent", 100)
+                ),
+                j.optString("projectionPathActive", "none"),
+                j.optInt("physicalDisplayId", -1),
+                j.optInt("contentDisplayId", -1),
+                layoutsActive,
+                j.optBoolean("layoutBusy", layouts?.optBoolean("busy", false) ?: false),
+                j.optLong("layoutGeneration", layouts?.optLong("generation", 0L) ?: 0L),
+                j.optLong("castSessionGeneration", 0L),
+                j.optJSONObject("hostedProjectionBounds")?.let {
+                    intArrayOf(it.optInt("l", -1), it.optInt("t", -1),
+                        it.optInt("r", -1), it.optInt("b", -1))
+                },
             )
         } catch (_: Throwable) { null }
     }
@@ -1854,23 +2238,29 @@ class ProjectionFragment : Fragment() {
      *  @param commit true = authoritative apply (full ladder + AMS verification) on gesture
      *    release / preset / restore; false = a live drag frame taking the cheap bounds-only path. */
     private fun postClusterResize(l: Int, t: Int, r: Int, bot: Int, commit: Boolean,
-                                  seq: Long = 0L, pkg: String = "", attempt: Int = 0) {
+                                  seq: Long = 0L, pkg: String = "", attempt: Int = 0,
+                                  sessionGeneration: Long = 0L) {
         val body = httpPostForBody("/api/vehicle/cluster-resize",
             JSONObject().put("l", l).put("t", t).put("r", r).put("b", bot).put("commit", commit)
-                .put("package", pkg))
-        if (commit) applyResizeResponse(seq, body, attempt)
+                .put("package", pkg).put("sessionGeneration", sessionGeneration))
+        if (commit) applyResizeResponse(seq, body, attempt, pkg, sessionGeneration)
     }
 
     /** Queue an authoritative resize (release / preset / restore) for the app the box is bound
      *  to. Main thread only: the sequence number lets a slow reply for an older commit be ignored. */
     private fun submitCommit(l: Int, t: Int, r: Int, bot: Int) {
+        if (layoutActive || layoutBusy) return
         val seq = ++commitSeq
         val pkg = geometryPackage() ?: ""
-        submitIo { postClusterResize(l, t, r, bot, commit = true, seq = seq, pkg = pkg) }
+        val sessionGeneration = castSessionGeneration
+        submitIo { postClusterResize(l, t, r, bot, commit = true, seq = seq, pkg = pkg,
+            sessionGeneration = sessionGeneration) }
     }
 
     /** Show the rect the cluster actually holds, and say so when it refused the box. */
-    private fun applyResizeResponse(seq: Long, body: String?, attempt: Int) {
+    private fun applyResizeResponse(
+        seq: Long, body: String?, attempt: Int, requestPackage: String, requestGeneration: Long,
+    ) {
         val j = try { if (body != null) JSONObject(body) else null } catch (_: Throwable) { null }
         if (j == null || !j.optBoolean("success", false)) return
         val applied = j.optBoolean("applied", false)
@@ -1879,17 +2269,19 @@ class ProjectionFragment : Fragment() {
         val reason = j.optString("reason", "")
         val actual = j.optJSONObject("bounds")
         postMain {
-            if (seq != commitSeq) return@postMain
+            if (seq != commitSeq || requestPackage != geometryPackage() ||
+                requestGeneration != castSessionGeneration
+            ) return@postMain
             val b = bounds ?: return@postMain
             // The cast is still starting (no task or display yet): re-send the same box shortly.
             if (retryable && casting && attempt < COMMIT_RETRY_LIMIT) {
                 val w = b.currentWindow()
                 main.postDelayed({
                     if (alive && seq == commitSeq && casting && !b.isAdjusting()) {
-                        val pkg = geometryPackage() ?: ""
                         submitIo {
                             postClusterResize(w.left, w.top, w.right, w.bottom, commit = true,
-                                seq = seq, pkg = pkg, attempt = attempt + 1)
+                                seq = seq, pkg = requestPackage, attempt = attempt + 1,
+                                sessionGeneration = requestGeneration)
                         }
                     }
                 }, COMMIT_RETRY_MS)
@@ -1927,17 +2319,18 @@ class ProjectionFragment : Fragment() {
         return doubleArrayOf(box[0] + nx * box[2], box[1] + ny * box[3])
     }
 
-    private fun postTap(nx: Double, ny: Double) {
-        val v = boxNormToView(nx, ny) ?: return
+    private fun postTap(v: DoubleArray, generation: Long, epoch: Long) {
+        if (epoch != ClusterViewMirrorClient.currentInputEpoch()) return
         httpPostSuccess("/api/vehicle/cluster-touch",
-            JSONObject().put("type", "tap").put("sx", v[0]).put("sy", v[1]))
+            JSONObject().put("type", "tap").put("sx", v[0]).put("sy", v[1])
+                .put("layoutGeneration", generation))
     }
 
-    private fun postSwipe(nx1: Double, ny1: Double, nx2: Double, ny2: Double, ms: Int) {
-        val a = boxNormToView(nx1, ny1) ?: return
-        val b = boxNormToView(nx2, ny2) ?: return
+    private fun postSwipe(a: DoubleArray, b: DoubleArray, ms: Int, generation: Long, epoch: Long) {
+        if (epoch != ClusterViewMirrorClient.currentInputEpoch()) return
         httpPostSuccess("/api/vehicle/cluster-touch", JSONObject().put("type", "swipe")
-            .put("sx", a[0]).put("sy", a[1]).put("sx2", b[0]).put("sy2", b[1]).put("ms", ms))
+            .put("sx", a[0]).put("sy", a[1]).put("sx2", b[0]).put("sy2", b[1]).put("ms", ms)
+            .put("layoutGeneration", generation))
     }
 
     private fun httpGet(path: String): String? {
@@ -1979,6 +2372,23 @@ class ProjectionFragment : Fragment() {
     }
 
     companion object {
+        private val PROJECTION_SLIDERS = listOf(
+            ProjectionSliderSpec("di5HostedWidthPercent", R.id.projectionHostedWidth,
+                R.id.projectionHostedWidthValue, R.string.projection_hosted_width, 20),
+            ProjectionSliderSpec("di5HostedHeightPercent", R.id.projectionHostedHeight,
+                R.id.projectionHostedHeightValue, R.string.projection_hosted_height, 20),
+            ProjectionSliderSpec("di5HostedXOffsetPercent", R.id.projectionHostedX,
+                R.id.projectionHostedXValue, R.string.projection_hosted_x_offset, 0),
+            ProjectionSliderSpec("di5HostedYOffsetPercent", R.id.projectionHostedY,
+                R.id.projectionHostedYValue, R.string.projection_hosted_y_offset, 0),
+            ProjectionSliderSpec("di5HostedContentScalePercent", R.id.projectionHostedScale,
+                R.id.projectionHostedScaleValue, R.string.projection_hosted_content_scale, 50),
+            ProjectionSliderSpec("di5DirectScalePercent", R.id.projectionDirectScale,
+                R.id.projectionDirectScaleValue, R.string.projection_direct_scale, 50)
+        )
+        private val PROJECTION_SLIDER_DEFAULTS = intArrayOf(100, 100, 50, 50, 100, 100)
+        private const val SPEED_OVERLAY_KEY = com.overdrive.app.surveillance.ClusterSpeedOverlay.CONFIG_KEY
+        private const val ADAS_HIDE_KEY = com.overdrive.app.surveillance.ClusterAdasController.CONFIG_KEY
         // Mirror states — MUST match ClusterViewMirrorService.STATE_* / the Binder client.
         private const val MODE_STOPPED = 0
         private const val MODE_ACTIVE = 1
@@ -2013,4 +2423,23 @@ class ProjectionFragment : Fragment() {
         private const val K_ASPECT_LOCK = "aspect_lock"
         private const val K_PICKED_PKG = "picked_pkg"
     }
+}
+
+internal fun projectionUsesDiLink5Controls(transport: String): Boolean =
+    transport.equals("dilink5", ignoreCase = true)
+
+/**
+ * An active hosted overlay owns its physical geometry. Opening this screen cannot reinterpret a
+ * remembered legacy task rectangle as a resize request; unknown bounds wait for the next poll.
+ */
+internal fun reflectHostedProjectionWindow(
+    hostedActive: Boolean,
+    actual: IntArray?,
+    reflect: (IntArray) -> Unit,
+): Boolean {
+    if (!hostedActive) return false
+    if (actual != null && actual.size == 4 &&
+        actual[0] >= 0 && actual[1] >= 0 && actual[2] > actual[0] && actual[3] > actual[1]
+    ) reflect(actual.copyOf())
+    return true
 }

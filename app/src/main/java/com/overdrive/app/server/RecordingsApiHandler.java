@@ -288,7 +288,7 @@ public class RecordingsApiHandler {
     private static void markRecordingWatched(OutputStream out, String recordingId,
                                               String body) throws Exception {
         if (!validRecordingId(recordingId)) {
-            HttpResponse.sendError(out, 400, "Invalid recording identity");
+            HttpResponse.sendError(out, 400, Messages.get("errors.recordings_invalid_filename"));
             return;
         }
         JSONObject request;
@@ -298,22 +298,22 @@ public class RecordingsApiHandler {
                 throw new IllegalArgumentException("Missing recording fingerprint");
             }
         } catch (Exception invalid) {
-            HttpResponse.sendError(out, 400, "Invalid recording fingerprint");
+            HttpResponse.sendError(out, 400, Messages.get("errors.recordings_body_required"));
             return;
         }
         long size = request.optLong("sizeBytes", -1);
         long mtime = request.optLong("mp4Mtime", -1);
         if (size < 0 || mtime < 0) {
-            HttpResponse.sendError(out, 400, "Invalid recording fingerprint");
+            HttpResponse.sendError(out, 400, Messages.get("errors.recordings_body_required"));
             return;
         }
         RecordingsIndex index = RecordingsIndex.getInstance();
         if (!index.isAvailable()) {
-            HttpResponse.sendError(out, 503, "Recordings index unavailable");
+            HttpResponse.sendError(out, 503, Messages.get("errors.recordings_index_unavailable"));
             return;
         }
         if (!index.markWatched(recordingId, size, mtime)) {
-            HttpResponse.sendError(out, 404, "Recording was removed or replaced");
+            HttpResponse.sendError(out, 404, Messages.get("errors.recordings_not_found"));
             return;
         }
         HttpResponse.sendJson(out, "{\"success\":true}");
@@ -594,6 +594,12 @@ public class RecordingsApiHandler {
 
             // Scale down to thumbnail size (320x180 for 16:9 aspect).
             scaled = Bitmap.createScaledBitmap(frame, 320, 180, true);
+            if (scaled == frame) scaled = scaled.copy(Bitmap.Config.ARGB_8888, false);
+            // Raw (player-dewarped) clips get the same lens correction as playback.
+            if (scaled != null) {
+                scaled = com.overdrive.app.surveillance.LensTag.dewarpFrameForClip(scaled, videoFile);
+            }
+            if (scaled == null) return null;
 
             // A failed compression must not be cached as a successful thumbnail.
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -1657,6 +1663,7 @@ public class RecordingsApiHandler {
             return;
         }
         
+        try { com.overdrive.app.server.timeline.TimelineLedger.noteDeleting(file, "user"); } catch (Throwable ignored) { }
         boolean deleted = file.delete();
         if (deleted) {
             deleteSidecars(file, filename);
@@ -1693,6 +1700,7 @@ public class RecordingsApiHandler {
             HttpResponse.sendJsonError(out, Messages.get("errors.recordings_not_found"));
             return;
         }
+        try { com.overdrive.app.server.timeline.TimelineLedger.noteDeleting(file, "user"); } catch (Throwable ignored) { }
         boolean deleted = file.delete();
         if (deleted) {
             deleteSidecars(file, ref.filename);
@@ -1910,6 +1918,7 @@ public class RecordingsApiHandler {
                     continue;
                 }
                 
+                try { com.overdrive.app.server.timeline.TimelineLedger.noteDeleting(file, "user"); } catch (Throwable ignored) { }
                 boolean success = file.delete();
                 if (success) {
                     deleted++;

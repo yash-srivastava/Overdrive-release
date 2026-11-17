@@ -1,5 +1,6 @@
 package com.overdrive.app.overlay.glass
 
+import com.overdrive.app.R
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
@@ -61,20 +62,20 @@ class GlassBatteryView(context: Context, env: GlassEnv, ticker: GlassTicker) : G
             // the figure on show is the other source's: it can't stand under this label
             hasKm = false
         }
-        text.labelText = if (calibrated != null) "Calibrated range" else if (s.phev) "Total range" else "Range"
+        text.labelText = if (calibrated != null) gs(R.string.glass_range_calibrated) else if (s.phev) gs(R.string.glass_range_total) else gs(R.string.glass_range)
         val t = env.theme
         // the cell shows the level; the status line gives the exact charge (a hybrid's names it, beside the fuel cell)
         val pct = "${s.socPct}%"
         when {
-            s.phev && s.fuelPct != null && s.fuelPct <= 12 -> { text.statusText = "Refuel soon"; text.statusColor = t.warn }
-            !s.phev && s.socPct <= 10 -> { text.statusText = "$pct · Very low"; text.statusColor = t.danger }
-            !s.phev && s.socPct <= 20 -> { text.statusText = "$pct · Charge soon"; text.statusColor = t.warn }
+            s.phev && s.fuelPct != null && s.fuelPct <= 12 -> { text.statusText = gs(R.string.glass_refuel_soon); text.statusColor = t.warn }
+            !s.phev && s.socPct <= 10 -> { text.statusText = gs(R.string.glass_soc_very_low, pct); text.statusColor = t.danger }
+            !s.phev && s.socPct <= 20 -> { text.statusText = gs(R.string.glass_soc_charge_soon, pct); text.statusColor = t.warn }
             // with OverDrive's figure as the headline, the car's own sits beside the charge for comparison
             !s.phev && calibrated != null && s.rangeKm != null -> {
-                text.statusText = "$pct · car ${GlassUnits.dist(s.rangeKm.toFloat(), env.miles).roundToInt()} ${GlassUnits.distUnit(env.miles)}"
+                text.statusText = gs(R.string.glass_soc_car_range, pct, GlassUnits.dist(s.rangeKm.toFloat(), env.miles).roundToInt(), GlassUnits.distUnit(env.miles))
                 text.statusColor = 0
             }
-            else -> { text.statusText = if (s.phev) "Battery $pct" else pct; text.statusColor = 0 }
+            else -> { text.statusText = if (s.phev) gs(R.string.glass_battery_pct, pct) else pct; text.statusColor = 0 }
         }
         updateValue()
         requestFrames()

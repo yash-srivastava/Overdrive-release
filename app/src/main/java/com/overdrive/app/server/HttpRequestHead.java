@@ -16,8 +16,9 @@ import java.util.Locale;
  * its readLine() has no size limit. Neither is appropriate for unauthenticated
  * network input on the always-on camera daemon.
  *
- * <p>The daemon accepts one request per connection and supports only
- * Content-Length framing (not chunked transfer encoding). Be strict about
+ * <p>The daemon accepts one request per connection and supports Content-Length
+ * framing or a lone {@code chunked} transfer coding (tunnels such as
+ * cloudflared forward body-less POSTs that way). Be strict about
  * contradictory framing before dispatching any API handler.
  */
 final class HttpRequestHead {
@@ -132,6 +133,78 @@ final class HttpRequestHead {
         return body.toString();
     }
 
+    /**
+     * Decode a {@code chunked} body (RFC 9112 §7.1) of at most {@code maxBytes};
+     * chunk extensions and trailer fields are read and dropped. Returns null for an
+     * empty body, as {@link #readUtf8Body} does for Content-Length 0.
+     */
+    static String readChunkedUtf8Body(InputStream input, int maxBytes) throws IOException {
+        ByteArrayOutputStream body = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        long total = 0;
+        while (true) {
+            String sizeLine = readBodyLine(input, MAX_REQUEST_LINE_BYTES);
+            if (sizeLine == null) throw new HeadException(400, "Incomplete request body");
+            int semicolon = sizeLine.indexOf(';');
+            String hex = (semicolon >= 0 ? sizeLine.substring(0, semicolon) : sizeLine).trim();
+            if (hex.isEmpty()) throw new HeadException(400, "Invalid chunk size");
+            long size = 0;
+            for (int i = 0; i < hex.length(); i++) {
+                int digit = Character.digit(hex.charAt(i), 16);
+                if (digit < 0) throw new HeadException(400, "Invalid chunk size");
+                size = size * 16 + digit;
+                if (total + size > maxBytes) throw new HeadException(413, "Payload too large");
+            }
+            if (size == 0) break;
+            long remaining = size;
+            while (remaining > 0) {
+                int count = input.read(buffer, 0, (int) Math.min(buffer.length, remaining));
+                if (count < 0) throw new HeadException(400, "Incomplete request body");
+                body.write(buffer, 0, count);
+                remaining -= count;
+            }
+            total += size;
+            String terminator = readBodyLine(input, 1);
+            if (terminator == null || !terminator.isEmpty()) {
+                throw new HeadException(400, "Invalid chunk terminator");
+            }
+        }
+        int trailers = 0;
+        while (true) {
+            String trailer = readBodyLine(input, MAX_HEADER_LINE_BYTES);
+            if (trailer == null) throw new HeadException(400, "Incomplete request body");
+            if (trailer.isEmpty()) break;
+            if (++trailers > MAX_HEADER_FIELDS) throw new HeadException(431, "Too many trailer fields");
+        }
+        return total == 0 ? null : new String(body.toByteArray(), StandardCharsets.UTF_8);
+    }
+
+    /** One CRLF- or LF-terminated line of at most {@code limit} bytes; null at EOF before any byte. */
+    private static String readBodyLine(InputStream input, int limit) throws IOException {
+        ByteArrayOutputStream line = new ByteArrayOutputStream(16);
+        while (true) {
+            int b = input.read();
+            if (b < 0) {
+                if (line.size() == 0) return null;
+                throw new HeadException(400, "Incomplete request body");
+            }
+            if (b == '\n') {
+                byte[] data = line.toByteArray();
+                int length = data.length;
+                if (length > 0 && data[length - 1] == '\r') length--;
+                for (int i = 0; i < length; i++) {
+                    int c = data[i] & 0xff;
+                    if ((c < 0x20 && c != '\t') || c == 0x7f) {
+                        throw new HeadException(400, "Invalid chunk framing");
+                    }
+                }
+                return new String(data, 0, length, StandardCharsets.US_ASCII);
+            }
+            if (line.size() > limit) throw new HeadException(400, "Chunk line too long");
+            line.write(b);
+        }
+    }
+
     private static final class LimitedBodyStream extends InputStream {
         private final InputStream input;
         private int remaining;
@@ -163,6 +236,7 @@ final class HttpRequestHead {
     /** Reject duplicate/ambiguous HTTP framing instead of silently taking the last value. */
     static final class Framing {
         private boolean hasLength;
+        private boolean chunked;
         private int contentLength;
 
         void accept(String line) throws HeadException {
@@ -179,11 +253,17 @@ final class HttpRequestHead {
             }
             String name = line.substring(0, colon).toLowerCase(Locale.ROOT);
             if ("transfer-encoding".equals(name)) {
-                // No chunked decoder exists here. Never reinterpret a chunked
-                // body as an empty or Content-Length-delimited body.
-                throw new HeadException(400, "Transfer-Encoding is unsupported");
+                // Only a lone "chunked" coding has a decoder; with Content-Length too the framing is ambiguous.
+                if (chunked) throw new HeadException(400, "Duplicate Transfer-Encoding");
+                if (!"chunked".equalsIgnoreCase(line.substring(colon + 1).trim())) {
+                    throw new HeadException(400, "Transfer-Encoding is unsupported");
+                }
+                if (hasLength) throw new HeadException(400, "Content-Length with Transfer-Encoding");
+                chunked = true;
+                return;
             }
             if (!"content-length".equals(name)) return;
+            if (chunked) throw new HeadException(400, "Content-Length with Transfer-Encoding");
             if (hasLength) throw new HeadException(400, "Duplicate Content-Length");
             hasLength = true;
             String value = line.substring(colon + 1).trim();
@@ -206,6 +286,10 @@ final class HttpRequestHead {
 
         int contentLength() {
             return contentLength;
+        }
+
+        boolean isChunked() {
+            return chunked;
         }
     }
 

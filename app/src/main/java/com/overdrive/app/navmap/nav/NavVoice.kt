@@ -108,6 +108,18 @@ class NavVoice(context: Context) {
         }
     }
 
+    /** Speak [text] after whatever is playing (a turn instruction isn't cut off for it). */
+    fun speakQueued(text: String) {
+        if (!ready || muted) return
+        val msg = text.trim()
+        if (msg.isEmpty()) return
+        try {
+            tts?.speak(msg, TextToSpeech.QUEUE_ADD, null, UTTERANCE_ID)
+        } catch (t: Throwable) {
+            Log.w(TAG, "speak failed: ${t.message}")
+        }
+    }
+
     /**
      * Stop any in-progress utterance and release the TTS engine. Idempotent;
      * after this the instance can no longer speak. Call from the Activity's

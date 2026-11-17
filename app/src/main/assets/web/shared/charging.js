@@ -30,6 +30,7 @@ var CHARGING = {
     pageSize: 20,
     sessions: [],
     sortOrder: 'recent',
+    _sessionNavBusy: false,
     currentSessionId: null,
     _detailSessionId: null,
     _detailGeneration: 0,
@@ -81,7 +82,10 @@ var CHARGING = {
     // Sessions-tab location filter (tariff id, or '' = all). In-memory only —
     // period chips are not persisted either.
     locationTariffFilter: '',
-    _locationFilterFetchActive: false,
+    _locationSessions: null,
+    _locationSessionsKey: null,
+    _locationLoadKey: null,
+    _locationLoadGeneration: 0,
     _liveRefreshTimer: null,
     _liveRefreshInFlight: null,
     _liveRefreshGeneration: 0,
@@ -338,6 +342,8 @@ var CHARGING = {
         this._sessionsGeneration++;
         this._tariffsGeneration++;
         this._sessionsLoadMorePending = false;
+        this._locationLoadGeneration++;
+        this._locationLoadKey = null;
     },
 
     _restartVisibleRefresh: function (useBootstrap) {
@@ -1130,8 +1136,8 @@ var CHARGING = {
         var completedAt = Date.now() + mins * 60000;
         var clock = '';
         try {
-            clock = new Date(completedAt).toLocaleTimeString(
-                [], { hour: 'numeric', minute: '2-digit' });
+            clock = BYD.clock.time(
+                new Date(completedAt), [], { hour: 'numeric', minute: '2-digit' });
         } catch (e) {
             var d = new Date(completedAt);
             clock = d.getHours() + ':'
@@ -1261,6 +1267,7 @@ var CHARGING = {
         if (offset === 0) this.sessions = sessions || [];
         else this.sessions = this.sessions.concat(sessions || []);
         this.currentOffset = offset;
+        if (offset === 0) this._ensureLocationSessions();
 
         // Track the open in-progress session (if any) so the stats period tiles
         // can classify its DC/AC tier without re-querying.
@@ -1281,8 +1288,7 @@ var CHARGING = {
         }
 
         this._renderSessionCards();
-        this._maybeLoadMoreForLocationFilter();
-        this._syncSessionEmptyForLocationFilter();
+        if (this.currentSessionId != null) this._paintSessionPager();
         if (this.currentSessionId != null) {
             for (var di = 0; di < this.sessions.length; di++) {
                 var detailRow = this.sessions[di];
@@ -1298,9 +1304,9 @@ var CHARGING = {
         // "Load more" visible only when the last page was full.
         var more = document.getElementById('loadMoreBtn');
         if (more) more.style.display = (sessions && sessions.length >= this.pageSize) ? '' : 'none';
-        if (this.locationTariffFilter && more
-                && more.style.display === 'none') {
-            this._locationFilterFetchActive = false;
+        // The filtered view already holds the whole period.
+        if (more && this.locationTariffFilter && this._locationSessions !== null) {
+            more.style.display = 'none';
         }
         this._syncSessionEmptyForLocationFilter();
     },
@@ -1442,7 +1448,7 @@ var CHARGING = {
                                 self._esc(estimateLabel) +
                               '</span>'
                             : '') +
-                        (calibration ? '<div class="calibration-badge">LFP CALIBRATION CANDIDATE</div>' : '') +
+                        (calibration ? '<div class="calibration-badge">' + self._esc(self._t('charge.lfp_candidate_badge', 'LFP CALIBRATION CANDIDATE')) + '</div>' : '') +
                         (poisoned ? '<div class="quality-warning">' + self._qualityWarningContent(
                             self._t('charge.quality_warning_short', 'Contradictory power and charging energy hidden.')) + '</div>' : '') +
                     '</div>' +
@@ -1515,68 +1521,104 @@ var CHARGING = {
 
     // ==================== LOCATION FILTER (sessions tab) ====================
 
+    // Filtered view = the whole period (_locationSessions) with the live first
+    // page layered on top, so the 15 s refresh keeps the newest rows current.
     _visibleSessions: function () {
         if (!this.locationTariffFilter) return this.sessions.slice(0);
-        var out = [];
         var id = this.locationTariffFilter;
-        for (var i = 0; i < this.sessions.length; i++) {
-            if (this._sessionMatchesLocationFilter(this.sessions[i], id)) {
-                out.push(this.sessions[i]);
-            }
+        var rows = this._locationRows();
+        var out = [];
+        for (var i = 0; i < rows.length; i++) {
+            if (this._sessionMatchesLocationFilter(rows[i], id)) out.push(rows[i]);
         }
         return out;
     },
 
-    _sessionMatchesLocationFilter: function (s, tariffId) {
-        if (!s || !tariffId) return true;
-        var owner = this._sessionTariffOwner(s);
-        return owner === tariffId;
+    _locationRows: function () {
+        var rows = [];
+        var seen = {};
+        var add = function (list) {
+            for (var i = 0; i < list.length; i++) {
+                var s = list[i];
+                if (!s || seen[String(s.id)]) continue;
+                seen[String(s.id)] = true;
+                rows.push(s);
+            }
+        };
+        add(this.sessions || []);
+        add(this._locationSessions || []);
+        return rows;
     },
 
-    /** Tariff that priced (or would in-circle-price) this session — mirrors stored tariff_id with a resolveInCircle fallback. */
+    _sessionMatchesLocationFilter: function (s, tariffId) {
+        if (!s || !tariffId) return true;
+        return this._sessionTariffOwner(s) === tariffId;
+    },
+
+    // The tariff whose circle holds this charge. The stored tariffId wins for
+    // overlapping circles, but only inside its own circle: a pinned default
+    // also prices charges outside every circle.
     _sessionTariffOwner: function (s) {
         if (!s) return '';
-        if (s.tariffId) return String(s.tariffId);
-        var resolved = this._resolveInCircleTariffId(s);
-        return resolved || '';
+        var id = s.tariffId ? String(s.tariffId) : '';
+        if (id && this._sessionInTariffCircle(s, this._tariffById(id))) return id;
+        return this._resolveInCircleTariffId(s);
+    },
+
+    _tariffById: function (id) {
+        var rows = this.tariffs || [];
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i] && rows[i].id === id) return rows[i];
+        }
+        return null;
+    },
+
+    _sessionPoint: function (s) {
+        if (!s || s.lat == null || s.lng == null) return null;
+        var lat = Number(s.lat);
+        var lng = Number(s.lng);
+        // (0,0) is the "no fix" sentinel, as in TariffManager.
+        if (!isFinite(lat) || !isFinite(lng) || (lat === 0 && lng === 0)) return null;
+        return { lat: lat, lng: lng };
+    },
+
+    _sessionInTariffCircle: function (s, p) {
+        var pt = this._sessionPoint(s);
+        if (!pt || !p) return false;
+        var d = this._haversineM(pt.lat, pt.lng, Number(p.lat), Number(p.lng));
+        return d <= Number(p.radiusM || 0);   // NaN fails closed
     },
 
     // Client mirror of TariffManager.resolveInCircle — smallest radius wins;
     // only profiles that price this gun type; (0,0) never matches.
     _resolveInCircleTariffId: function (s) {
-        if (!s || s.lat == null || s.lng == null) return '';
-        var lat = Number(s.lat);
-        var lng = Number(s.lng);
-        if (!isFinite(lat) || !isFinite(lng) || (lat === 0 && lng === 0)) {
-            return '';
-        }
-        var isDc = s.isDc === true ? 1 : 0;
+        var pt = this._sessionPoint(s);
+        if (!pt) return '';
+        var isDc = s.isDc === true;
         var rows = this.tariffs || [];
         var best = null;
-        var bestDist = null;
+        var bestR = 0;
+        var bestDist = 0;
         for (var i = 0; i < rows.length; i++) {
             var p = rows[i];
-            if (!p || p.enabled === false) continue;
-            if (this._tariffRateFor(p, isDc === 1) <= 0) continue;
-            var d = this._haversineM(lat, lng, p.lat, p.lng);
-            var r = p.radiusM != null ? p.radiusM : 0;
+            if (!p || !p.id || p.enabled === false) continue;
+            if (this._tariffRateFor(p, isDc) <= 0) continue;
+            var d = this._haversineM(pt.lat, pt.lng, Number(p.lat), Number(p.lng));
+            var r = Number(p.radiusM || 0);
             if (!(d <= r)) continue;
-            if (best === null
-                    || r < best.radiusM
-                    || (r === best.radiusM && d < bestDist)) {
+            if (best === null || r < bestR || (r === bestR && d < bestDist)) {
                 best = p;
+                bestR = r;
                 bestDist = d;
             }
         }
         return best ? best.id : '';
     },
 
+    // TariffProfile.rateFor: DC uses dcRate when set, everything else acRate.
     _tariffRateFor: function (profile, isDc) {
-        if (!profile || profile.enabled === false) return 0;
-        if (isDc) {
-            if (profile.dcRate > 0) return profile.dcRate;
-            return profile.acRate > 0 ? profile.acRate : 0;
-        }
+        if (!profile) return 0;
+        if (isDc && profile.dcRate > 0) return profile.dcRate;
         return profile.acRate > 0 ? profile.acRate : 0;
     },
 
@@ -1589,8 +1631,7 @@ var CHARGING = {
         var a = Math.sin(dPhi / 2) * Math.sin(dPhi / 2)
             + Math.cos(phi1) * Math.cos(phi2)
                 * Math.sin(dLambda / 2) * Math.sin(dLambda / 2);
-        var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return r * c;
+        return r * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     },
 
     _locationFilterTariffs: function () {
@@ -1603,107 +1644,129 @@ var CHARGING = {
     },
 
     _locationTariffLabel: function (id) {
-        var rows = this.tariffs || [];
-        for (var i = 0; i < rows.length; i++) {
-            if (rows[i] && rows[i].id === id) {
-                return (rows[i].label && rows[i].label !== '')
-                    ? rows[i].label
-                    : this._t('charge.tariff_unnamed', 'Unnamed tariff');
-            }
-        }
-        return id;
+        var t = this._tariffById(id);
+        if (!t) return id;
+        return (t.label && t.label !== '')
+            ? t.label
+            : this._t('charge.tariff_unnamed', 'Unnamed tariff');
     },
 
     _renderLocationFilterControl: function () {
-        var row = document.getElementById('chargeLocationFilterRow');
-        var hint = document.getElementById('chargeLocationFilterHint');
+        var chip = document.getElementById('chargeLocationFilterRow');
         var sel = document.getElementById('sessionLocationFilter');
-        if (!row || !sel) return;
+        if (!chip || !sel) return;
         var tariffs = this._locationFilterTariffs();
-        if (tariffs.length === 0) {
-            row.style.display = 'none';
-            if (hint) {
-                hint.style.display = '';
-                hint.textContent = this._t(
-                    'charge.filter_location_hint',
-                    'Add location tariffs in Settings to filter by place.');
-            }
-            if (this.locationTariffFilter) this.setLocationFilter('');
-            return;
-        }
-        if (hint) hint.style.display = 'none';
-        row.style.display = '';
         var prev = this.locationTariffFilter || '';
+        var still = false;
         var optionsHtml = '<option value="">' + this._esc(
             this._t('charge.filter_all_locations', 'All locations')) + '</option>';
         for (var i = 0; i < tariffs.length; i++) {
             var t = tariffs[i];
-            var label = (t.label && t.label !== '')
-                ? t.label
-                : this._t('charge.tariff_unnamed', 'Unnamed tariff');
+            if (t.id === prev) still = true;
             optionsHtml += '<option value="' + this._esc(t.id) + '">'
-                + this._esc(label) + '</option>';
+                + this._esc(this._locationTariffLabel(t.id)) + '</option>';
         }
+        chip.style.display = tariffs.length > 0 ? '' : 'none';
         sel.innerHTML = optionsHtml;
-        var still = false;
-        for (var j = 0; j < tariffs.length; j++) {
-            if (tariffs[j].id === prev) { still = true; break; }
+        if (prev && !still) {
+            // The selected tariff was deleted: go back to every session.
+            this.setLocationFilter('');
+            return;
         }
-        this.locationTariffFilter = still ? prev : '';
-        sel.value = this.locationTariffFilter;
+        sel.value = prev;
         this._syncCopySummaryButton();
+        // A tariff edit can move its circle, so re-derive the filtered view.
+        if (prev) this._renderLocationView();
     },
 
     setLocationFilter: function (value) {
-        this.locationTariffFilter = value || '';
+        var next = value || '';
         var sel = document.getElementById('sessionLocationFilter');
-        if (sel && sel.value !== this.locationTariffFilter) {
-            sel.value = this.locationTariffFilter;
-        }
+        if (sel && sel.value !== next) sel.value = next;
+        this.locationTariffFilter = next;
+        this._locationLoadGeneration++;
+        this._locationLoadKey = null;
+        this._locationSessions = null;
+        this._locationSessionsKey = null;
         this._syncCopySummaryButton();
-        this._locationFilterFetchActive = !!this.locationTariffFilter;
         this.currentOffset = 0;
         this._showSkeleton();
         this._loadCurrentLivePair();
     },
 
-    _maybeLoadMoreForLocationFilter: function () {
-        if (!this.locationTariffFilter || !this._locationFilterFetchActive) {
-            return;
-        }
-        if (this._sessionsLoadMorePending) return;
+    // Called on every first-page apply: (re)load the whole period when the
+    // filter is on and the period (or a visibility restart) changed.
+    _ensureLocationSessions: function () {
+        if (!this.locationTariffFilter) return;
+        var periodKey = this._sessionsPeriodKey;
+        if (periodKey == null || this._locationLoadKey === periodKey) return;
+        if (this._locationSessionsKey !== periodKey) this._locationSessions = null;
+        this._loadLocationSessions(periodKey);
+    },
+
+    _loadLocationSessions: function (periodKey) {
+        var self = this;
+        var generation = ++this._locationLoadGeneration;
+        var limit = 200;   // server-side page cap
+        var maxPages = 50;
+        var rows = [];
+        this._locationLoadKey = periodKey;
+        var stale = function () {
+            return generation !== self._locationLoadGeneration
+                || !self.locationTariffFilter
+                || periodKey !== self._periodKey();
+        };
+        var page = function (n) {
+            return self._fetchJson('/api/charging?' + periodKey
+                    + '&limit=' + limit + '&offset=' + (n * limit))
+                .then(function (d) {
+                    if (stale()) return null;
+                    var batch = self._payload(d, 'sessions', true, true);
+                    if (batch === null) throw new Error('invalid sessions payload');
+                    rows = rows.concat(batch);
+                    if (batch.length >= limit && n + 1 < maxPages) return page(n + 1);
+                    self._locationSessions = rows;
+                    self._locationSessionsKey = periodKey;
+                    self._renderLocationView();
+                    return true;
+                });
+        };
+        return page(0).catch(function () {
+            if (stale()) return null;
+            self._locationLoadKey = null;   // retried by the next refresh
+            self._renderLocationView();
+            return false;
+        });
+    },
+
+    _renderLocationView: function () {
+        if (!this.locationTariffFilter) return;
+        this._renderSessionCards();
         var more = document.getElementById('loadMoreBtn');
-        if (more && more.style.display !== 'none') {
-            var self = this;
-            setTimeout(function () { self.loadMore(); }, 0);
-            return;
-        }
-        this._locationFilterFetchActive = false;
-        if (this.summaryCache) {
-            this._applyLocationFilteredSessionSummary();
-        }
+        if (more && this._locationSessions !== null) more.style.display = 'none';
+        this._syncSessionEmptyForLocationFilter();
+        this._applyLocationFilteredSessionSummary();
+        if (this.currentSessionId != null) this._paintSessionPager();
     },
 
     _syncSessionEmptyForLocationFilter: function () {
         var empty = document.getElementById('sessionEmptyState');
         if (!empty) return;
-        if (this.locationTariffFilter && this._locationFilterFetchActive) {
-            empty.style.display = 'none';
-            return;
-        }
-        var visible = this._visibleSessions();
-        var show = this.locationTariffFilter
-            ? (visible.length === 0)
-            : (this.sessions.length === 0);
+        var filtered = !!this.locationTariffFilter;
+        // While the period is still loading, don't claim it is empty.
+        var show = filtered
+            ? (this._locationSessions !== null && this._visibleSessions().length === 0)
+            : this.sessions.length === 0;
         empty.style.display = show ? '' : 'none';
         var msg = empty.querySelector('[data-i18n="charge.no_sessions_yet"]');
-        if (msg && this.locationTariffFilter && show) {
-            msg.textContent = this._t(
-                'charge.no_sessions_location',
-                'No sessions at this location in the selected period');
-        } else if (msg) {
-            msg.textContent = this._t('charge.no_sessions_yet', 'No charging sessions yet');
+        if (msg) {
+            msg.textContent = filtered
+                ? this._t('charge.no_sessions_location',
+                    'No sessions at this location in the selected period')
+                : this._t('charge.no_sessions_yet', 'No charging sessions yet');
         }
+        var hint = empty.querySelector('[data-i18n="charge.no_sessions_hint"]');
+        if (hint) hint.style.display = filtered ? 'none' : '';
     },
 
     _aggregateSessionsForSummary: function (sessions) {
@@ -1732,57 +1795,54 @@ var CHARGING = {
         return out;
     },
 
-    _applyLocationFilteredSessionSummary: function () {
-        var tariffId = this.locationTariffFilter;
-        if (!tariffId || !this.summaryCache) return;
-        var matched = [];
-        for (var i = 0; i < this.sessions.length; i++) {
-            if (this._sessionMatchesLocationFilter(this.sessions[i], tariffId)) {
-                matched.push(this.sessions[i]);
-            }
-        }
-        var agg = this._aggregateSessionsForSummary(matched);
-        var live = this.summaryCache.live || {};
-        var isCharging = live.charging === true;
-        var liveMatches = this._liveSession
-            && this._sessionMatchesLocationFilter(this._liveSession, tariffId);
-        var liveKwh = (live.sessionKwh != null && live.sessionKwh > 0)
-            ? live.sessionKwh : 0;
+    // Completed sessions at the selected location plus the open one when it
+    // is charging there (same live additions as the period tiles).
+    _locationSummaryTotals: function () {
+        var agg = this._aggregateSessionsForSummary(this._visibleSessions());
+        var live = (this.summaryCache && this.summaryCache.live) || {};
+        var liveHere = live.charging === true && !!this._liveSession
+            && this._sessionMatchesLocationFilter(
+                this._liveSession, this.locationTariffFilter);
+        var liveKwh = (liveHere && live.sessionKwh > 0) ? live.sessionKwh : 0;
         var liveRate = this._liveRate();
-        var liveCost = (isCharging && liveMatches && liveKwh > 0 && liveRate > 0)
-            ? liveKwh * liveRate : 0;
-        var liveDc = 0;
-        var liveAc = 0;
-        if (isCharging && liveMatches && this._liveSession) {
-            var k = this._typeKind(this._liveSession);
-            if (k === 'dc') liveDc = 1;
-            else if (k === 'fast' || k === 'slow') liveAc = 1;
-        }
-        var liveRange = (isCharging && liveMatches && this._liveSession
-                && this._liveSession.rangeGained > 0)
-            ? this._liveSession.rangeGained : 0;
-        var liveEnergyApprox = isCharging && liveMatches && liveKwh > 0
-            && this._energyIsApproximate(live);
-        var approx = agg.approximate || liveEnergyApprox;
-        var pSessions = agg.sessions + (isCharging && liveMatches ? 1 : 0);
-        var pEnergy = agg.energy + (isCharging && liveMatches ? liveKwh : 0);
-        var pCost = agg.cost + liveCost;
-        var pRange = agg.range + liveRange;
-        this._setText('summarySessions', pSessions > 0 ? pSessions : '--');
-        this._setText('summaryEnergy', pEnergy > 0
-            ? (approx ? '~' : '') + pEnergy.toFixed(1) + ' kWh'
-            : '--');
-        this._setText('summaryCost', pCost > 0
-            ? (approx ? '~' : '') + this._money(pCost)
-            : '--');
-        this._setText('summaryDcAc',
-            (agg.dc + liveDc) + ' / ' + (agg.ac + liveAc));
-        this._setText('summaryRangeGained', pRange > 0
-            ? (approx ? '~' : '') + this._dist(pRange)
-            : '--');
-        this._showCard('summaryEstimateDisclosure',
-            approx || (isCharging && liveMatches && live.cost > 0));
+        var liveCost = (liveKwh > 0 && liveRate > 0) ? liveKwh * liveRate : 0;
+        var kind = liveHere ? this._typeKind(this._liveSession) : '';
+        return {
+            sessions: agg.sessions + (liveHere ? 1 : 0),
+            energy: agg.energy + liveKwh,
+            cost: agg.cost + liveCost,
+            dc: agg.dc + (kind === 'dc' ? 1 : 0),
+            ac: agg.ac + ((kind === 'fast' || kind === 'slow') ? 1 : 0),
+            range: agg.range + ((liveHere && this._liveSession.rangeGained > 0)
+                ? this._liveSession.rangeGained : 0),
+            approx: agg.approximate
+                || (liveKwh > 0 && this._energyIsApproximate(live)),
+            liveCost: liveCost
+        };
+    },
+
+    _applyLocationFilteredSessionSummary: function () {
+        if (!this.locationTariffFilter || !this.summaryCache) return;
         this._syncCopySummaryButton();
+        if (this._locationSessions === null) {
+            // Still loading: a first-page subtotal would understate the period.
+            var ids = ['summarySessions', 'summaryEnergy', 'summaryCost',
+                'summaryDcAc', 'summaryRangeGained'];
+            for (var i = 0; i < ids.length; i++) this._setText(ids[i], '--');
+            this._showCard('summaryEstimateDisclosure', false);
+            return;
+        }
+        var t = this._locationSummaryTotals();
+        var mark = t.approx ? '~' : '';
+        this._setText('summarySessions', t.sessions > 0 ? t.sessions : '--');
+        this._setText('summaryEnergy', t.energy > 0
+            ? mark + t.energy.toFixed(1) + ' kWh' : '--');
+        this._setText('summaryCost', t.cost > 0
+            ? mark + this._money(t.cost) : '--');
+        this._setText('summaryDcAc', t.dc + ' / ' + t.ac);
+        this._setText('summaryRangeGained', t.range > 0
+            ? mark + this._dist(t.range) : '--');
+        this._showCard('summaryEstimateDisclosure', t.approx || t.liveCost > 0);
     },
 
     _syncCopySummaryButton: function () {
@@ -1791,66 +1851,36 @@ var CHARGING = {
         if (!wrap || !btn) return;
         var show = !!this.locationTariffFilter;
         wrap.style.display = show ? '' : 'none';
-        btn.style.display = show ? '' : 'none';
+        btn.disabled = !show || this._locationSessions === null;
     },
 
     _periodLabelForCopy: function () {
+        var self = this;
+        var day = function (ms) { return self._dateKey(new Date(ms)); };
+        var now = Date.now();
         if (this._rangeFrom != null) {
-            var fromTxt = this._calFromKey
-                ? this._calFromKey
-                : (this._rangeFrom ? this._dateKey(new Date(this._rangeFrom)) : '');
-            var toTxt = this._calToKey
-                ? this._calToKey
-                : (this._rangeTo
-                    ? this._dateKey(new Date(this._rangeTo)) : '');
-            if (fromTxt && toTxt) return fromTxt + ' – ' + toTxt;
-            if (fromTxt) return fromTxt + ' –';
-            if (toTxt) return '– ' + toTxt;
-            return this._t('charge.filter_custom', 'Custom');
+            return day(this._rangeFrom) + ' – '
+                + day(this._rangeTo != null ? this._rangeTo : now);
         }
-        if (this.currentDays === 7) {
-            return this._t('charge.filter_7d', '7 days');
+        if (this.currentDays > 0) {
+            return day(now - this.currentDays * 86400000) + ' – ' + day(now);
         }
-        if (this.currentDays === 30) {
-            return this._t('charge.filter_30d', '30 days');
-        }
-        if (!this.currentDays) {
-            return this._t('charge.filter_all', 'All time');
-        }
-        return this.currentDays + ' days';
+        return this._t('charge.filter_all', 'All time');
     },
 
     copyLocationSummary: function () {
         var tariffId = this.locationTariffFilter;
-        if (!tariffId) return;
-        var label = this._locationTariffLabel(tariffId);
-        var matched = [];
-        for (var i = 0; i < this.sessions.length; i++) {
-            if (this._sessionMatchesLocationFilter(this.sessions[i], tariffId)) {
-                matched.push(this.sessions[i]);
-            }
-        }
-        var agg = this._aggregateSessionsForSummary(matched);
-        var live = this.summaryCache ? (this.summaryCache.live || {}) : {};
-        var isCharging = live.charging === true;
-        var liveMatches = this._liveSession
-            && this._sessionMatchesLocationFilter(this._liveSession, tariffId);
-        var liveKwh = (live.sessionKwh != null && live.sessionKwh > 0)
-            ? live.sessionKwh : 0;
-        var liveRate = this._liveRate();
-        var liveCost = (isCharging && liveMatches && liveKwh > 0 && liveRate > 0)
-            ? liveKwh * liveRate : 0;
-        var pSessions = agg.sessions + (isCharging && liveMatches ? 1 : 0);
-        var pEnergy = agg.energy + (isCharging && liveMatches ? liveKwh : 0);
-        var pCost = agg.cost + liveCost;
+        if (!tariffId || this._locationSessions === null) return;
+        var t = this._locationSummaryTotals();
+        var mark = t.approx ? '~' : '';
         var lines = [
-            label,
+            this._locationTariffLabel(tariffId),
             this._periodLabelForCopy(),
-            this._t('charge.summary_sessions', 'Sessions') + ': ' + pSessions,
+            this._t('charge.summary_sessions', 'Sessions') + ': ' + t.sessions,
             this._t('charge.summary_energy', 'Energy') + ': '
-                + (pEnergy > 0 ? pEnergy.toFixed(1) + ' kWh' : '--'),
+                + (t.energy > 0 ? mark + t.energy.toFixed(1) + ' kWh' : '--'),
             this._t('charge.summary_cost', 'Cost') + ': '
-                + (pCost > 0 ? this._money(pCost) : '--')
+                + (t.cost > 0 ? mark + this._money(t.cost) : '--')
         ];
         var self = this;
         this._copyTextToClipboard(lines.join('\n'), function (ok) {
@@ -1863,12 +1893,13 @@ var CHARGING = {
     },
 
     _copyTextToClipboard: function (text, done) {
+        var self = this;
         var finished = typeof done === 'function' ? done : function () {};
         if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(text).then(function () {
                 finished(true);
             }, function () {
-                CHARGING._copyTextFallback(text, finished);
+                self._copyTextFallback(text, finished);
             });
             return;
         }
@@ -2055,7 +2086,76 @@ var CHARGING = {
     },
 
     loadMore: function () {
-        this.loadSessions(this.currentOffset + this.pageSize);
+        return this.loadSessions(this.currentOffset + this.pageSize);
+    },
+
+    /** The sessions in the order _renderSessionCards shows them. */
+    _displayedSessions: function () {
+        var self = this;
+        var list = this._visibleSessions();
+        list.sort(function (a, b) {
+            var at = a && a.startTime ? a.startTime : 0;
+            var bt = b && b.startTime ? b.startTime : 0;
+            return self.sortOrder === 'oldest' ? at - bt : bt - at;
+        });
+        return list;
+    },
+
+    _sessionPagerIndex: function (list) {
+        if (this.currentSessionId == null) return -1;
+        for (var i = 0; i < list.length; i++) {
+            if (list[i] && String(list[i].id) === String(this.currentSessionId)) return i;
+        }
+        return -1;
+    },
+
+    _moreSessions: function () {
+        var more = document.getElementById('loadMoreBtn');
+        return !!more && more.style.display !== 'none';
+    },
+
+    // Previous / next follow the list as sorted; older sessions load at the end they belong to.
+    _paintSessionPager: function () {
+        var prev = document.getElementById('detailPrevBtn');
+        var next = document.getElementById('detailNextBtn');
+        if (!prev || !next) return;
+        var list = this._displayedSessions();
+        var i = this._sessionPagerIndex(list);
+        var olderFirst = this.sortOrder === 'oldest';
+        var more = this._moreSessions();
+        prev.disabled = this._sessionNavBusy || i < 0 || (i === 0 && !(olderFirst && more));
+        next.disabled = this._sessionNavBusy || i < 0
+            || (i === list.length - 1 && !(!olderFirst && more));
+    },
+
+    navigateSession: function (step) {
+        var self = this;
+        var list = this._displayedSessions();
+        var i = this._sessionPagerIndex(list);
+        if (i < 0 || this._sessionNavBusy) return;
+        var target = list[i + step];
+        if (target) {
+            this.showDetail(target.id);
+            return;
+        }
+        var wantsOlder = this.sortOrder === 'oldest' ? step < 0 : step > 0;
+        if (!wantsOlder || !this._moreSessions()) return;
+        var id = this.currentSessionId;
+        this._sessionNavBusy = true;
+        this._paintSessionPager();
+        var done = function () {
+            self._sessionNavBusy = false;
+            if (self.currentSessionId == null || String(self.currentSessionId) !== String(id)) {
+                self._paintSessionPager();
+                return;
+            }
+            var after = self._displayedSessions();
+            var j = self._sessionPagerIndex(after);
+            var following = j >= 0 ? after[j + step] : null;
+            if (following) self.showDetail(following.id);
+            else self._paintSessionPager();
+        };
+        this.loadMore().then(done, done);
     },
 
     // ==================== DETAIL DRILL-IN ====================
@@ -2064,6 +2164,7 @@ var CHARGING = {
         var self = this;
         var generation = ++this._detailGeneration;
         this.currentSessionId = id;
+        this._paintSessionPager();
         this._detailSessionId = null;
         // Fail closed until the cached or fetched row proves this session is
         // complete. This also covers a detail opened before its list page loads.
@@ -2260,8 +2361,8 @@ var CHARGING = {
         var calibration = s.calibration && s.calibration.qualified === true;
         var qualityWarning = document.getElementById('detailQualityWarning');
         if (qualityWarning) {
-            var warningText = (calibration ? 'LFP calibration candidate. ' : '') +
-                (poisoned ? 'Contradictory power and charging energy are hidden because this session contains invalid legacy power data.' : '');
+            var warningText = (calibration ? this._t('charge.lfp_candidate_note', 'LFP calibration candidate.') + ' ' : '') +
+                (poisoned ? this._t('charge.legacy_power_hidden', 'Contradictory power and charging energy are hidden because this session contains invalid legacy power data.') : '');
             qualityWarning.innerHTML = poisoned
                 ? this._qualityWarningContent(warningText)
                 : '<span class="quality-warning-text">' + this._esc(warningText) + '</span>';
@@ -2659,9 +2760,13 @@ var CHARGING = {
                         if (self.sessions[i].id !== id) kept.push(self.sessions[i]);
                     }
                     self.sessions = kept;
+                    if (self._locationSessions) {
+                        self._locationSessions = self._locationSessions.filter(function (s) {
+                            return s && s.id !== id;
+                        });
+                    }
                     self._renderSessionCards();
-                    var empty = document.getElementById('sessionEmptyState');
-                    if (empty) empty.style.display = (self.sessions.length === 0) ? '' : 'none';
+                    self._syncSessionEmptyForLocationFilter();
                     self._loadCurrentLivePair();
                 } else {
                     self._toast(self._t('charge.delete_failed', 'Could not delete session'), 'error');
@@ -4355,14 +4460,14 @@ var CHARGING = {
         try {
             var d = new Date(ts);
             return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
-                   d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+                   BYD.clock.time(d);
         } catch (e) { return ''; }
     },
 
     _fmtClock: function (ts) {
         try {
             var d = new Date(ts);
-            return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+            return BYD.clock.time(d);
         } catch (e) { return ''; }
     },
 

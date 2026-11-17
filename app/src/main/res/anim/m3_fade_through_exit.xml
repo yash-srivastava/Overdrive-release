@@ -1,13 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  Material 3 fade-through EXIT. Outgoing destination fades to 0 over 90ms
-  before the incoming arrives, then is gone. Accelerate easing matches the
-  M3 motion spec for the exit phase.
--->
+<!-- Peer navigation exit: fades out before the incoming page settles. -->
 <set xmlns:android="http://schemas.android.com/apk/res/android"
     android:interpolator="@android:interpolator/accelerate_quad">
     <alpha
+        android:duration="90"
         android:fromAlpha="1.0"
-        android:toAlpha="0.0"
-        android:duration="90" />
+        android:toAlpha="0.0" />
 </set>

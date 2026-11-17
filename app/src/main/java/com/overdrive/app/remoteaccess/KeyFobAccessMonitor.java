@@ -261,7 +261,7 @@ public final class KeyFobAccessMonitor {
                 // A callback wakes this queue; no six-second blocking wait steals
                 // scope reads, CAN frames or the existing two-second heartbeat.
                 presenceSearch.tick(SystemClock.elapsedRealtime(),
-                        initialized && !vehicleOnOnly && power >= 0 && driverLock >= 0
+                        initialized && !vehicleOnOnly && power == 0 && driverLock >= 0
                                 && config.optBoolean("keyFobLockEnabled"),
                         KeyFobPresenceCycle.shouldPause(power, driverLock));
                 if (hasCleanupFailure()) break;
@@ -290,7 +290,7 @@ public final class KeyFobAccessMonitor {
                     // The edge's fresh scope read may be the first confirmation
                     // of locking; retire active search evidence before relaying it.
                     presenceSearch.tick(SystemClock.elapsedRealtime(),
-                            initialized && !vehicleOnOnly && power >= 0 && driverLock >= 0
+                            initialized && !vehicleOnOnly && power == 0 && driverLock >= 0
                                     && config.optBoolean("keyFobLockEnabled"),
                             KeyFobPresenceCycle.shouldPause(power, driverLock));
                 }

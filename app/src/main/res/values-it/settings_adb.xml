@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_section_adb">ADB</string>
+    <string name="settings_adb_subtitle">Connessione, attivazione e ripristino automatico.</string>
+    <string name="settings_adb_connection_title">Connessione</string>
+    <string name="settings_adb_automatic_title">Ripristino automatico</string>
+    <string name="settings_adb_automatic_restore">Ripristina ADB automaticamente</string>
+    <string name="settings_adb_automatic_description">Ripristina l’impostazione ADB all’avvio e quando viene disattivata. Serve il permesso per le impostazioni già concesso; il Wi-Fi non è necessario. DiLink 5 consente anche il ripristino wireless con Wi-Fi convalidato e una chiave già autorizzata.</string>
+    <string name="settings_adb_recover">Ripristina ADB ora</string>
+    <string name="settings_adb_cancel_recovery">Annulla ripristino</string>
+    <string name="settings_adb_manual_title">Attivazione manuale</string>
+    <string name="settings_adb_manual_description">Usa gli strumenti BYD compatibili per richiedere accesso ad ADB. Non serve una connessione Wi-Fi.</string>
+    <string name="settings_adb_enable">Attiva ADB</string>
+    <string name="settings_adb_advanced_tools">Strumenti avanzati</string>
+    <string name="settings_adb_hide_advanced">Nascondi strumenti avanzati</string>
+    <string name="settings_adb_advanced_description">Diagnostica problemi, apri gli strumenti BYD o annulla un tentativo manuale.</string>
+    <string name="settings_adb_open_developer">Apri opzioni sviluppatore</string>
+    <string name="settings_adb_developer_page">Richiedi pagina sviluppatore BYD</string>
+    <string name="settings_adb_diagnostics">Verifica compatibilità e connessione</string>
+    <string name="settings_adb_restore">Annulla modifiche dell’attivazione manuale</string>
+    <string name="settings_adb_export">Esporta APK degli strumenti sviluppatore BYD</string>
+    <string name="settings_adb_dialog_confirm">Approva debug wireless su questa rete</string>
+    <string name="settings_adb_dialog_confirm_description">Connettiti prima a una rete Wi-Fi convalidata. Consenti a OverDrive di confermare la finestra di debug wireless solo per questa rete.</string>
+    <string name="settings_adb_tools_unavailable">L’attivazione manuale non è disponibile per la modalità attuale o gli strumenti BYD installati.</string>
+    <string name="settings_adb_recovery_availability">Il ripristino locale richiede il permesso per le impostazioni concesso durante la configurazione ADB. Non richiede Wi-Fi né la modalità DiLink 5.</string>
+    <string name="settings_adb_details_title">Dettagli dell’ultimo tentativo</string>
+    <string name="settings_adb_recovery_confirm_body">Il ripristino locale usa il permesso per le impostazioni già concesso, senza Wi-Fi. DiLink 5 può anche usare Wi-Fi convalidato e una chiave già autorizzata. Può aprire o ripristinare ADB di rete sulla porta 5555, raggiungibile da altri dispositivi della rete del veicolo. Continua solo su una rete fidata. L’autenticazione con chiave ADB resta attiva.</string>
+    <string name="settings_adb_recovery_permission_missing">Manca il permesso per le impostazioni. Se anche ADB non è disponibile, usa prima Abilita ADB o Opzioni sviluppatore e completa di nuovo la configurazione ADB.</string>
+    <string name="settings_adb_recovery_setting_enabled">L’impostazione ADB è attiva. Non è stata confermata una connessione ADB autenticata.</string>
+    <string name="settings_adb_recovery_setting_failed">Non è stato possibile attivare e verificare l’impostazione ADB. Il firmware potrebbe rifiutare la modifica.</string>
+    <string name="settings_adb_recovery_save_failed">Non è stato possibile salvare la preferenza di ripristino automatico. Controlla ADB e riprova.</string>
+</resources>

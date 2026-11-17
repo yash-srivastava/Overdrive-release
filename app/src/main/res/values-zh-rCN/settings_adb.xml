@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_section_adb">ADB</string>
+    <string name="settings_adb_subtitle">连接、启用与自动恢复。</string>
+    <string name="settings_adb_connection_title">连接</string>
+    <string name="settings_adb_automatic_title">自动恢复</string>
+    <string name="settings_adb_automatic_restore">自动恢复 ADB</string>
+    <string name="settings_adb_automatic_description">在启动时及 ADB 被关闭后恢复 ADB 设置。需要预先授予设置权限，无需 Wi-Fi。DiLink 5 还可通过已验证的 Wi-Fi 和此前授权的密钥进行无线恢复。</string>
+    <string name="settings_adb_recover">立即恢复 ADB</string>
+    <string name="settings_adb_cancel_recovery">取消恢复</string>
+    <string name="settings_adb_manual_title">手动启用</string>
+    <string name="settings_adb_manual_description">使用兼容的 BYD 工具请求 ADB 访问权限。无需 Wi-Fi 连接。</string>
+    <string name="settings_adb_enable">启用 ADB</string>
+    <string name="settings_adb_advanced_tools">高级工具</string>
+    <string name="settings_adb_hide_advanced">隐藏高级工具</string>
+    <string name="settings_adb_advanced_description">诊断问题、打开 BYD 工具或撤销手动尝试。</string>
+    <string name="settings_adb_open_developer">打开开发者选项</string>
+    <string name="settings_adb_developer_page">请求 BYD 开发者页面</string>
+    <string name="settings_adb_diagnostics">检查兼容性和连接</string>
+    <string name="settings_adb_restore">撤销手动启用的更改</string>
+    <string name="settings_adb_export">导出 BYD 开发者工具 APK</string>
+    <string name="settings_adb_dialog_confirm">允许在此网络上进行无线调试</string>
+    <string name="settings_adb_dialog_confirm_description">请先连接到经过验证的 Wi-Fi 网络。允许 OverDrive 仅为此网络确认无线调试对话框。</string>
+    <string name="settings_adb_tools_unavailable">当前模式或已安装的 BYD 工具不支持手动启用。</string>
+    <string name="settings_adb_recovery_availability">本地恢复需要在 ADB 设置期间授予的设置权限，无需 Wi-Fi 或 DiLink 5 模式。</string>
+    <string name="settings_adb_details_title">上次尝试的详细信息</string>
+    <string name="settings_adb_recovery_confirm_body">本地恢复使用已授予的设置权限，无需 Wi-Fi。DiLink 5 还可使用已验证的 Wi-Fi 和此前授权的密钥。 这可能打开或恢复端口 5555 的网络 ADB，车辆网络中的其他设备可能可以访问。仅在可信网络上继续。ADB 密钥认证仍保持启用。</string>
+    <string name="settings_adb_recovery_permission_missing">缺少设置权限。如果 ADB 也不可用，请先使用“启用 ADB”或开发者选项，再重新完成 ADB 设置。</string>
+    <string name="settings_adb_recovery_setting_enabled">ADB 设置已启用，但尚未确认经过身份验证的 ADB 连接。</string>
+    <string name="settings_adb_recovery_setting_failed">无法启用并验证 ADB 设置。固件可能拒绝此更改。</string>
+    <string name="settings_adb_recovery_save_failed">无法保存自动恢复选项。请检查 ADB 后重试。</string>
+</resources>

@@ -287,6 +287,9 @@ object UnifiedConfigManager {
             Log.i(TAG, "Unified config exists at $CONFIG_PATH")
             loadConfig()
         }
+        // Daemons configure DaemonLogger before init(), so the saved level is applied only
+        // here, after restore-journal recovery; later in-process changes follow a listener.
+        com.overdrive.app.logging.DaemonLogger.syncMinLevelFromConfig()
     }
 
     /** Create the lock file 0666 (daemon UID) so the app UID can later open it. */
@@ -593,6 +596,13 @@ object UnifiedConfigManager {
         config.optJSONObject("keymap") ?: JSONObject().also {
             config.put("keymap", it)
         }
+        val adbRecovery = config.optJSONObject("adbRecovery") ?: JSONObject().also {
+            config.put("adbRecovery", it)
+        }
+        if (!adbRecovery.has("automaticRestore")) adbRecovery.put("automaticRestore", false)
+        if (!adbRecovery.has("dialogAutoConfirm")) adbRecovery.put("dialogAutoConfirm", false)
+        if (!adbRecovery.has("dialogAutoConfirmNetwork")) adbRecovery.put("dialogAutoConfirmNetwork", "")
+        if (!adbRecovery.has("networkWriteTimes")) adbRecovery.put("networkWriteTimes", JSONObject())
 
         // Surveillance defaults
         if (!surveillance.has("minObjectSize")) surveillance.put("minObjectSize", 0.08)
@@ -1145,6 +1155,8 @@ object UnifiedConfigManager {
         if (!projection.has("di5SharedDisplayPreference")) {
             projection.put("di5SharedDisplayPreference", "")
         }
+        com.overdrive.app.launcher.dilink5.cluster.DiLink5ProjectionConfig
+            .applyDefaults(projection)
 
         // Vehicle appearance defaults — selected 3D model and body paint color.
         // Stored unified so AVN and remote (phone-over-tunnel) clients show the
@@ -1187,6 +1199,12 @@ object UnifiedConfigManager {
         if (!vehicle.has("assistOffLda")) vehicle.put("assistOffLda", false)
         if (!vehicle.has("assistOffElka")) vehicle.put("assistOffElka", false)
         if (!vehicle.has("assistOffDms")) vehicle.put("assistOffDms", false)
+        // Optional native vehicle writes remain unavailable until the owner explicitly selects
+        // this compatibility-unverified manual profile. This key does not change route policy or
+        // grant any automation surface access.
+        if (!vehicle.has(NATIVE_VEHICLE_PROFILE_KEY)) {
+            vehicle.put(NATIVE_VEHICLE_PROFILE_KEY, NATIVE_VEHICLE_PROFILE_DISABLED)
+        }
         if (!vehicle.has("color")) vehicle.put("color", "#E8E8EC")  // Aurora White
 
         // Geocoding (place-name tagging) defaults — opt-in, fully offline by
@@ -1375,6 +1393,7 @@ object UnifiedConfigManager {
                         // applyDefaults must run once to classify them as legacy.
                         val vehicle = config.optJSONObject("vehicle") ?: return@run true
                         if (!vehicle.has("modelSource")) return@run true
+                        if (!vehicle.has(NATIVE_VEHICLE_PROFILE_KEY)) return@run true
                         val geo = config.optJSONObject("geocoding") ?: return@run true
                         geo.has("enabled") || geo.has("allowOnline")
                             || geo.has("customNominatimBase")
@@ -2295,6 +2314,46 @@ object UnifiedConfigManager {
         return loadConfig().optJSONObject("streaming") ?: JSONObject()
     }
 
+    /**
+     * Get logging config section.
+     */
+    @JvmStatic
+    fun getLogging(): JSONObject {
+        return loadConfig().optJSONObject("logging") ?: JSONObject()
+    }
+
+    /**
+     * Get the active minimum log level (DEBUG, INFO, WARN, ERROR). Defaults to INFO.
+     */
+    @JvmStatic
+    fun getLogLevel(): String {
+        return getPersistedLogLevel() ?: "INFO"
+    }
+
+    /** The level the user saved, or null when none was ever saved (code defaults apply). */
+    @JvmStatic
+    fun getPersistedLogLevel(): String? {
+        return canonicalLogLevel(getLogging().optString("minLevel", ""))
+    }
+
+    @JvmStatic
+    fun canonicalLogLevel(level: String?): String? = when (level?.trim()?.uppercase(java.util.Locale.US)) {
+        "DEBUG" -> "DEBUG"
+        "INFO" -> "INFO"
+        "WARN" -> "WARN"
+        "ERROR" -> "ERROR"
+        else -> null
+    }
+
+    /**
+     * Persist the minimum log level for the daemons. Off the UI looper only, like every write.
+     */
+    @JvmStatic
+    fun setLogLevel(level: String): Boolean {
+        val canonical = canonicalLogLevel(level) ?: return false
+        return updateValues("logging", mapOf("minLevel" to canonical))
+    }
+
     /** Blind Spot overlay config section: {enabled, rearFov, sideFov, yaw, roll,
      *  pitch, feather}. mtime-gated loadConfig; callers needing cross-UID
      *  freshness (app reading a daemon/web write) should forceReload() first. */
@@ -3160,20 +3219,14 @@ object UnifiedConfigManager {
      */
     @JvmStatic
     fun resolveOemDashcamId(): Int {
-        val camera = loadConfig().optJSONObject("camera")
+        val camera = loadConfig().optJSONObject("camera") ?: return 0
         if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) return -1
-        if (camera != null && camera.optBoolean("oemDashcamManualOverride", false)) {
+        if (camera.optBoolean("oemDashcamManualOverride", false)) {
             return camera.optInt("oemDashcamCameraId", -1)
         }
-        // DiLink 100: the head unit's BMM camera config lists only the 360
-        // super-frame (cam_sort "pano_h:0;"), and BYD's own recorder (com.byd.cdr)
-        // reports no DVR camera; the windshield camera belongs to the ADAS
-        // controller. Auto-picking 0 opens the 360 camera and 1 is unconfigured,
-        // so there is no OEM dashcam unless the owner picks an id by hand.
-        // Checked before the missing-section default below, so a config without
-        // a camera section cannot auto-pick camera 0 either.
-        if (com.overdrive.app.camera.DiLink100Platform.isDiLink100()) return -1
-        if (camera == null) return 0
+        // BYD100F in Default mode: the camera list is only pano_h:0 and BYD's recorder reports no
+        // DVR camera (the windshield camera belongs to ADAS), so nothing is auto-picked (#741).
+        if (com.overdrive.app.camera.DiLink100Platform.isAvmPathActive()) return -1
         val panoId = if (camera.optBoolean("manualOverride", false)) {
             camera.optInt("manualCameraId", -1)
         } else {
@@ -3384,6 +3437,9 @@ object UnifiedConfigManager {
                     )
                 )
             }
+            if (!stored.has(NATIVE_VEHICLE_PROFILE_KEY)) {
+                stored.put(NATIVE_VEHICLE_PROFILE_KEY, NATIVE_VEHICLE_PROFILE_DISABLED)
+            }
             return stored
         }
         return JSONObject().apply {
@@ -3391,6 +3447,7 @@ object UnifiedConfigManager {
             put("modelSource", VehicleModelSelection.SOURCE_UNSET)
             put("color", "#E8E8EC")
             put("driveSide", "rhd")
+            put(NATIVE_VEHICLE_PROFILE_KEY, NATIVE_VEHICLE_PROFILE_DISABLED)
         }
     }
 
@@ -3585,6 +3642,27 @@ object UnifiedConfigManager {
     fun setVehicle(vehicle: JSONObject): Boolean {
         return updateSection("vehicle", vehicle)
     }
+
+    const val NATIVE_VEHICLE_PROFILE_KEY = "nativeManualProfile"
+    const val NATIVE_VEHICLE_PROFILE_DISABLED = "disabled"
+    const val NATIVE_VEHICLE_PROFILE_UNVERIFIED = "manual_unverified"
+
+    @JvmStatic
+    fun isNativeVehicleManualProfileEnabled(): Boolean =
+        isNativeVehicleManualProfileEnabled(getVehicle())
+
+    @JvmStatic
+    fun isNativeVehicleManualProfileEnabled(vehicle: JSONObject?): Boolean =
+        vehicle?.optString(NATIVE_VEHICLE_PROFILE_KEY, NATIVE_VEHICLE_PROFILE_DISABLED) ==
+            NATIVE_VEHICLE_PROFILE_UNVERIFIED
+
+    /** Persists only the profile selector. No routing or automation setting is modified. */
+    @JvmStatic
+    fun setNativeVehicleManualProfileEnabled(enabled: Boolean): Boolean =
+        setVehicle(JSONObject().put(
+            NATIVE_VEHICLE_PROFILE_KEY,
+            if (enabled) NATIVE_VEHICLE_PROFILE_UNVERIFIED else NATIVE_VEHICLE_PROFILE_DISABLED
+        ))
 
     /**
      * Web-shell appearance preference (theme picker shipped in the WebView

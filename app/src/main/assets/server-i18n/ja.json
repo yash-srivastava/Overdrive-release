@@ -167,6 +167,9 @@
     "tyre_wheel_pressure": "{0} ({1})"
   },
   "telegram": {
+    "deterrent_triggered": "威嚇を作動: {0}",
+    "deterrent_screen": "画面",
+    "deterrent_cloud": "クラウド",
     "recording_caption": " 記録 ({0}) - {1}",
     "recording_caption_no_label": " 記録 - {0}",
     "proximity_alert": "接近警報時間: {0} トリガー: {1} ({2}) 録画開始...",
@@ -476,6 +479,7 @@
   },
   "vehicle_control": {
     "blocked_driving": "この操作は車両走行中は利用できません",
+    "blocked_unconfirmed": "現在、車両が駐車中であることを確認できません。少し待ってからもう一度お試しください。",
     "cloud_required": "BYD アカウントを設定で接続する",
     "cloud_sent": "クラウドで送信される",
     "cloud_unavailable_used_local": "クラウド利用不可 直接接続使用",

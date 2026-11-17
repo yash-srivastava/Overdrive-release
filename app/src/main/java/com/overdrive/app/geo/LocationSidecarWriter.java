@@ -117,7 +117,9 @@ public final class LocationSidecarWriter {
             // per-camera zoom regions. Only stamped when non-default so
             // standard clips keep their exact pre-feature on-disk shape.
             String layout = readRecordingLayout();
-            boolean dashcam = "dashcam".equals(layout);
+            org.json.JSONObject lens = com.overdrive.app.surveillance.LensTag.forFile(mp4File);
+            // A lens-tagged clip is a 2x2 grid whatever the layout setting says now.
+            boolean dashcam = "dashcam".equals(layout) && lens == null;
 
             // Geo is writable only when the per-flow toggle is on AND we have
             // a usable fix. When it isn't, we used to skip the sidecar
@@ -127,10 +129,11 @@ public final class LocationSidecarWriter {
             boolean geoOk = isGeocodingEnabledForFlow(flow)
                     && effectiveStart != null && effectiveStart.hasFix();
             if (!geoOk) {
-                if (dashcam) {
+                if (dashcam || lens != null) {
                     JSONObject layoutOnly = new JSONObject();
                     layoutOnly.put("version", 3);
-                    layoutOnly.put("layout", layout);
+                    if (dashcam) layoutOnly.put("layout", layout);
+                    if (lens != null) layoutOnly.put("lens", lens);
                     writeJsonAtomic(mp4File, layoutOnly);
                     try {
                         com.overdrive.app.server.RecordingsIndex.getInstance().upsert(mp4File);
@@ -146,6 +149,7 @@ public final class LocationSidecarWriter {
             JSONObject root = new JSONObject();
             root.put("version", 3);
             if (dashcam) root.put("layout", layout);
+            if (lens != null) root.put("lens", lens);
             // durationMs unknown to this writer — the recorder owns it.
             // Readers tolerate absence; if a sentry reader tries
             // durationMs/0 they'll just get the default.

@@ -16,16 +16,24 @@
     var reason = '';
     var localPaused = false;
     var serverPaused = false;
+    // A listen asked for while the car is off waits for it, bounded, while the page stays open.
+    var WAIT_POLL_MS = 3000;
+    var WAIT_LIMIT_MS = 10 * 60 * 1000;
+    var STATUS_TIMEOUT_MS = 5000;
+    var waitTimer = null;
+    var waitStartedAt = 0;
 
     function snapshot() {
         return {
             state: state,
             reason: reason,
             active: state === 'connecting'
+                || state === 'waiting'
                 || state === 'live'
                 || state === 'paused',
             live: state === 'live',
-            paused: state === 'paused'
+            paused: state === 'paused',
+            waiting: state === 'waiting'
         };
     }
 
@@ -106,40 +114,21 @@
     }
 
     function start() {
-        if (state === 'connecting' || state === 'live' || state === 'paused') {
+        if (state === 'connecting' || state === 'waiting'
+                || state === 'live' || state === 'paused') {
             return Promise.resolve();
         }
         var currentGeneration = ++generation;
         localPaused = false;
         serverPaused = false;
         nextBufferAt = 0;
+        waitStartedAt = 0;
         emit('connecting', '');
 
         return prepareOutput(currentGeneration)
             .then(function () {
                 if (currentGeneration !== generation) return;
-                socket = new WebSocket(websocketUrl());
-                socket.binaryType = 'arraybuffer';
-                socket.onmessage = function (event) {
-                    if (currentGeneration !== generation) return;
-                    if (typeof event.data === 'string') {
-                        handleControl(event.data);
-                    } else if (!localPaused && !serverPaused) {
-                        playPcm(event.data);
-                    }
-                };
-                socket.onerror = function () {
-                    if (currentGeneration === generation) {
-                        fail('Cabin audio connection failed');
-                    }
-                };
-                socket.onclose = function () {
-                    if (currentGeneration === generation
-                            && state !== 'idle'
-                            && state !== 'error') {
-                        fail(reason || 'Cabin audio connection was lost');
-                    }
-                };
+                return checkCar(currentGeneration);
             })
             .catch(function (error) {
                 if (currentGeneration === generation) {
@@ -147,6 +136,92 @@
                         ? error.message : 'Could not start cabin audio');
                 }
             });
+    }
+
+    // null when the status can't be read; the socket then reports the reason, as before.
+    function readStatus() {
+        var headers = typeof BYDAuth !== 'undefined' && BYDAuth.getAuthHeaders
+            ? BYDAuth.getAuthHeaders() : {};
+        var request = fetch('/api/communicate/status', { cache: 'no-store', headers: headers })
+            .then(function (response) { return response.ok ? response.json() : null; });
+        var timeout = new Promise(function (resolve) {
+            setTimeout(function () { resolve(null); }, STATUS_TIMEOUT_MS);
+        });
+        return Promise.race([request, timeout]).catch(function () { return null; });
+    }
+
+    function checkCar(currentGeneration) {
+        return readStatus().then(function (status) {
+            if (currentGeneration !== generation) return;
+            var carOff = !!status && status.carState === 'off'
+                && status.listenerState === 'car_off';
+            if (carOff || (!status && state === 'waiting')) {
+                waitForCar(currentGeneration);
+            } else {
+                openSocket(currentGeneration);
+            }
+        });
+    }
+
+    function waitForCar(currentGeneration) {
+        if (currentGeneration !== generation) return;
+        if (!waitStartedAt) waitStartedAt = Date.now();
+        if (Date.now() - waitStartedAt >= WAIT_LIMIT_MS) {
+            fail('The car was not turned on, so listening was cancelled');
+            return;
+        }
+        if (state !== 'waiting') emit('waiting', 'Listening starts when the car turns on');
+        clearWaitTimer();
+        waitTimer = setTimeout(function () {
+            waitTimer = null;
+            if (currentGeneration !== generation || state !== 'waiting') return;
+            checkCar(currentGeneration).catch(function (error) {
+                if (currentGeneration === generation) {
+                    fail(error && error.message
+                        ? error.message : 'Could not start cabin audio');
+                }
+            });
+        }, WAIT_POLL_MS);
+    }
+
+    function clearWaitTimer() {
+        if (waitTimer !== null) {
+            clearTimeout(waitTimer);
+            waitTimer = null;
+        }
+    }
+
+    function openSocket(currentGeneration) {
+        if (currentGeneration !== generation) return;
+        if (state !== 'connecting') emit('connecting', '');
+        if (context && context.state === 'suspended') {
+            try {
+                var resumed = context.resume();
+                if (resumed && resumed.catch) resumed.catch(function () {});
+            } catch (error) {}
+        }
+        socket = new WebSocket(websocketUrl());
+        socket.binaryType = 'arraybuffer';
+        socket.onmessage = function (event) {
+            if (currentGeneration !== generation) return;
+            if (typeof event.data === 'string') {
+                handleControl(event.data);
+            } else if (!localPaused && !serverPaused) {
+                playPcm(event.data);
+            }
+        };
+        socket.onerror = function () {
+            if (currentGeneration === generation) {
+                fail('Cabin audio connection failed');
+            }
+        };
+        socket.onclose = function () {
+            if (currentGeneration === generation
+                    && state !== 'idle'
+                    && state !== 'error') {
+                fail(reason || 'Cabin audio connection was lost');
+            }
+        };
     }
 
     function handleControl(raw) {
@@ -241,6 +316,8 @@
     }
 
     function cleanup() {
+        clearWaitTimer();
+        waitStartedAt = 0;
         resetPlayback();
         var oldSocket = socket;
         socket = null;
@@ -273,7 +350,8 @@
     }
 
     function toggle() {
-        if (state === 'connecting' || state === 'live' || state === 'paused') {
+        if (state === 'connecting' || state === 'waiting'
+                || state === 'live' || state === 'paused') {
             stop();
             return Promise.resolve();
         }

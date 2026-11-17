@@ -23,7 +23,6 @@ class GoogleMapController(context: Context, private val clusterMode: Boolean, pr
 
     interface Host {
         fun isNight(): Boolean
-        fun nightPalette(): GoogleMapStyle.NightPalette
         fun backgroundHex(): String
         fun requestStyleReload()
         fun onGoogleNotice(notice: Notice, resetAtMs: Long)
@@ -70,8 +69,9 @@ class GoogleMapController(context: Context, private val clusterMode: Boolean, pr
     var trafficShown: Boolean = false
         private set
 
+    /** Traffic over the whole map; off unless the driver turns it on (the route carries its own traffic colours). */
     var trafficPref: Boolean
-        get() = prefs.getBoolean(KEY_TRAFFIC, true)
+        get() = prefs.getBoolean(KEY_TRAFFIC, false)
         set(value) { prefs.edit().putBoolean(KEY_TRAFFIC, value).apply() }
 
     var mapTypePref: GoogleMapType
@@ -95,11 +95,14 @@ class GoogleMapController(context: Context, private val clusterMode: Boolean, pr
     private var baseFailures = 0
     private var baseSuccessMs = 0L
     private var healthySinceMs = 0L
+    /** Last health check that found no network at all (wall clock): Google's windows only start after it. */
+    private var offlineAtWallMs = 0L
     private var fallbackActive = false
     private var retryAtMs = 0L
     private var backoffStep = 0
     private var keyNoticeShown = false
     private var tunedRefreshMs = 0L
+    private var tunedPrefetch = -1
     private var lastStyle: WeakReference<Style>? = null
     private var lastMap: WeakReference<MapLibreMap>? = null
     private var copyrightText: String? = null
@@ -162,7 +165,8 @@ class GoogleMapController(context: Context, private val clusterMode: Boolean, pr
         }
         // After the traffic source exists, so it is volatile with prefetch 0 on vector styles too (I6).
         tunedRefreshMs = trafficRefreshMs(n)
-        GoogleMapStyle.tuneSources(style, tunedRefreshMs)
+        tunedPrefetch = basePrefetch(n)
+        GoogleMapStyle.tuneSources(style, tunedRefreshMs, tunedPrefetch)
         applyTraffic(style, n, notify = false)
         GoogleMapStyle.applyLod(map, googleStyleActive)
         if (googleStyleActive) scheduleCopyright()
@@ -303,6 +307,10 @@ class GoogleMapController(context: Context, private val clusterMode: Boolean, pr
         return state == GoogleApiState.DISABLED || state == GoogleApiState.DENIED
     }
 
+    // Tiles from two zoom levels up fill the view, blurry, while the sharp ones load, instead of blank squares. That
+    // costs a few extra billable tiles (the same view two levels up), so not once the budget tightens.
+    private fun basePrefetch(n: Snap): Int = if (n.level == TileBudgetLevel.HEALTHY) BASE_PREFETCH_DELTA else 0
+
     private fun trafficRefreshMs(n: Snap): Long {
         val base = if (GoogleMapsBudget.paidMode()) GoogleMapStyle.TRAFFIC_REFRESH_PAID_MS else GoogleMapStyle.TRAFFIC_REFRESH_MS
         return if (n.level == TileBudgetLevel.CONSTRAINED) base * 2 else base
@@ -343,9 +351,11 @@ class GoogleMapController(context: Context, private val clusterMode: Boolean, pr
         }
         val style = lastStyle?.get()?.takeIf { it.isFullyLoaded }
         val refresh = trafficRefreshMs(n)
-        if (style != null && refresh != tunedRefreshMs) {
-            GoogleMapStyle.tuneSources(style, refresh)
+        val prefetch = basePrefetch(n)
+        if (style != null && (refresh != tunedRefreshMs || prefetch != tunedPrefetch)) {
+            GoogleMapStyle.tuneSources(style, refresh, prefetch)
             tunedRefreshMs = refresh
+            tunedPrefetch = prefetch
         }
         // One notice per event: a paused basemap already covers its traffic overlay.
         applyTraffic(style, n, notify = !mapNoticed)
@@ -377,17 +387,33 @@ class GoogleMapController(context: Context, private val clusterMode: Boolean, pr
         val wall = System.currentTimeMillis()
         val h = GoogleHttp.tileHealth()
         val fresh = if (h.lastSuccessMs != baseSuccessMs) h.consecutiveFailures else h.consecutiveFailures - baseFailures
-        val unhealthy = fresh >= FALLBACK_FAILURES &&
-            wall - maxOf(h.lastSuccessMs, activeSinceWallMs) >= FALLBACK_NO_SUCCESS_MS
+        // Failing for the whole window, not just since the last request: cached tiles make no requests, so a
+        // short data drop on a few new tiles after a long cached stretch isn't an outage.
+        val failingSince = if (h.failingSinceMs > 0L) h.failingSinceMs else wall
+        val net = network()
+        // failures with no network at all say nothing about Google: its count and windows start once it's back; unless the
+        // vector map has the streets here offline (prefetched), then a Google map that can't load gives way to it
+        if (net == Net.NONE && !vectorOfflineHere()) {
+            offlineAtWallMs = wall
+            baseFailures = h.consecutiveFailures
+            baseSuccessMs = h.lastSuccessMs
+        }
+        val since = maxOf(failingSince, h.lastSuccessMs, activeSinceWallMs, offlineAtWallMs)
+        val unhealthy = fresh >= FALLBACK_FAILURES && wall - since >= FALLBACK_NO_SUCCESS_MS
         if (unhealthy) {
             healthySinceMs = 0L
-            if (fallbackActive || !swapAllowed(now)) return
+            // 30 s of failures is reason enough, whatever the swap spacing. With no working network the vector map's
+            // tiles can't load either, so the cached Google tiles stay a while longer (the check can be wrong behind a
+            // proxy that works while the system's own connectivity check fails) — only the first time: a retry that
+            // fails again goes straight back.
+            if (fallbackActive) return
+            // (with no network at all [since] is now: the vector map couldn't load either, the cached Google view stays)
+            if (net == Net.UNVALIDATED && backoffStep == 0 && wall - since < OFFLINE_FALLBACK_MS) return
             val wait = BACKOFF_MS[backoffStep]
             backoffStep = minOf(backoffStep + 1, BACKOFF_MS.size - 1)
             fallbackActive = true
             retryAtMs = now + wait
-            // The retry then needs a fresh createSession, which doubles as a connectivity probe.
-            activeBaseSpec?.let { GoogleTileSessions.invalidate(it) }
+            // The session is kept: a new token would change every tile URL and miss the whole cache.
             requestReload(now)
             notice(Notice.MAP_UNAVAILABLE, wall + wait)
         } else if (h.consecutiveFailures == 0 && h.lastSuccessMs >= activeSinceWallMs) {
@@ -396,6 +422,27 @@ class GoogleMapController(context: Context, private val clusterMode: Boolean, pr
         } else {
             healthySinceMs = 0L
         }
+    }
+
+    private enum class Net { NONE, UNVALIDATED, VALIDATED }
+
+    private fun vectorOfflineHere(): Boolean = try {
+        lastMap?.get()?.cameraPosition?.target?.let { com.overdrive.app.navmap.MapTilePrefetcher.coversOffline(it.latitude, it.longitude) } == true
+    } catch (t: Throwable) {
+        false
+    }
+
+    private fun network(): Net = try {
+        val cm = appContext.getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
+            as android.net.ConnectivityManager
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+        when {
+            caps == null || !caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) -> Net.NONE
+            caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED) -> Net.VALIDATED
+            else -> Net.UNVALIDATED
+        }
+    } catch (t: Throwable) {
+        Net.VALIDATED
     }
 
     private fun markActivated() {
@@ -445,7 +492,7 @@ class GoogleMapController(context: Context, private val clusterMode: Boolean, pr
                     val ts = GoogleTileSessions.cached(trafficSpec())
                     if (ts != null) {
                         GoogleMapStyle.addTrafficLayer(st, ts, trafficAnchor(st))
-                        GoogleMapStyle.tuneSources(st, trafficRefreshMs(n))
+                        GoogleMapStyle.tuneSources(st, trafficRefreshMs(n), basePrefetch(n))
                     } else {
                         ensureAsync(trafficSpec(), Ready.TRAFFIC)
                     }
@@ -499,7 +546,7 @@ class GoogleMapController(context: Context, private val clusterMode: Boolean, pr
 
     private fun baseSpec(type: GoogleMapType, night: Boolean): TileSessionSpec {
         val i = specInputs()
-        val styles = if (type == GoogleMapType.ROADMAP && night) GoogleMapStyle.nightStylesJson(host.nightPalette()) else null
+        val styles = if (type == GoogleMapType.ROADMAP && night) GoogleMapStyle.nightStylesJson() else null
         return TileSessionSpec(type, false, styles, i.language, i.region, hiDpi)
     }
 
@@ -630,6 +677,7 @@ class GoogleMapController(context: Context, private val clusterMode: Boolean, pr
     companion object {
         private const val TAG = "GoogleMapController"
         private const val PREFS_NAVMAP = "navmap_ui"
+        private const val OFFLINE_FALLBACK_MS = 120_000L
         private const val KEY_TRAFFIC = "map_traffic"
         private const val KEY_MAP_TYPE = "google_map_type"
         private const val KEY_BASEMAP = "google_basemap"
@@ -640,6 +688,7 @@ class GoogleMapController(context: Context, private val clusterMode: Boolean, pr
         private const val SWAP_MIN_MS = 120_000L
         private const val RELOAD_RETRY_MS = 10_000L
         private const val FALLBACK_FAILURES = 6
+        private const val BASE_PREFETCH_DELTA = 2
         private const val FALLBACK_NO_SUCCESS_MS = 30_000L
         private const val HEALTHY_RESET_MS = 60_000L
         private const val COPYRIGHT_MIN_MS = 3_000L

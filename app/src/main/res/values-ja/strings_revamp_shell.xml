@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shell strings: rail footer remote-access popover. -->
+<resources>
+    <string name="shell_remote_details">QRコードとアクセスコード</string>
+</resources>

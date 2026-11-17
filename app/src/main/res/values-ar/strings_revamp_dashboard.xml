@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="dash_vehicle_line">%1$s · %2$.1f kWh</string>
+    <string name="dash_range_caption">مدى</string>
+    <string name="dash_status_remote_on">الوصول عن بعد مفعّل</string>
+    <string name="dash_status_remote_off">الوصول عن بعد متوقف</string>
+    <string name="dash_status_remote_state">الوصول عن بعد · %1$s</string>
+    <string name="dash_status_services">%1$d من %2$d خدمات</string>
+    <string name="dash_status_view">عرض</string>
+    <string name="dash_status_recording_idle">التسجيل متوقف</string>
+    <string name="dash_services_running">%1$d من %2$d قيد التشغيل</string>
+    <string name="dash_charge_eta_left">متبقٍ %1$s</string>
+    <string name="dash_charge_session_inline">%1$s في هذه الجلسة</string>
+    <plurals name="dash_clip_count">
+        <item quantity="zero">%1$d مقطع</item>
+        <item quantity="one">%1$d مقطع</item>
+        <item quantity="two">%1$d مقطعان</item>
+        <item quantity="few">%1$d مقاطع</item>
+        <item quantity="many">%1$d مقطعًا</item>
+        <item quantity="other">%1$d مقطع</item>
+    </plurals>
+</resources>

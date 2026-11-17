@@ -2,9 +2,12 @@ package com.overdrive.app.launcher
 
 import android.content.Context
 import com.overdrive.app.logging.LogManager
+import com.overdrive.app.launcher.adb.AdbIdentityProvider
+import com.overdrive.app.launcher.adb.DiLink5AdbAutomaticRecoveryGate
+import com.overdrive.app.launcher.adb.AdbRecoveryManager
+import com.overdrive.app.launcher.adb.DiLink5AdbRecoveryStateStore
 import dadb.AdbKeyPair
 import dadb.Dadb
-import java.io.File
 import java.net.Socket
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -55,13 +58,14 @@ import java.util.concurrent.atomic.AtomicBoolean
  * transfer can neither be killed by the shared lane's socket timeout nor
  * block/tear the control connection every other subsystem depends on.
  */
-class AdbShellExecutor(private val context: Context) {
+class AdbShellExecutor @JvmOverloads constructor(
+    private val context: Context,
+    private val automaticRecoveryRequestsAllowed: Boolean = true,
+) {
 
     companion object {
         private const val TAG = "AdbShellExecutor"
         private const val ADB_PORT = 5555
-        private const val ADB_KEY_FILE = "adbkey"
-        private const val ADB_PUB_KEY_FILE = "adbkey.pub"
 
         /** TCP connect bound passed to Dadb.create. */
         private const val CONNECT_TIMEOUT_MS = 2_000
@@ -162,10 +166,6 @@ class AdbShellExecutor(private val context: Context) {
         private val sharedDadbLock = Object()
         private val connectionGeneration = java.util.concurrent.atomic.AtomicLong(0)
 
-        @Volatile
-        private var cachedKeyPair: AdbKeyPair? = null
-        private val keyPairLock = Object()
-
         // Auth state tracking
         private val isAuthPending = AtomicBoolean(false)
         private val wasAuthGranted = AtomicBoolean(false)
@@ -206,6 +206,8 @@ class AdbShellExecutor(private val context: Context) {
 
         private val reconnectListeners =
             java.util.concurrent.CopyOnWriteArrayList<ConnectionReestablishedListener>()
+        private val stateListeners =
+            java.util.concurrent.CopyOnWriteArrayList<ConnectionStateListener>()
 
         fun addConnectionReestablishedListener(listener: ConnectionReestablishedListener) {
             reconnectListeners.addIfAbsent(listener)
@@ -213,6 +215,25 @@ class AdbShellExecutor(private val context: Context) {
 
         fun removeConnectionReestablishedListener(listener: ConnectionReestablishedListener) {
             reconnectListeners.remove(listener)
+        }
+
+        fun addConnectionStateListener(listener: ConnectionStateListener) {
+            stateListeners.addIfAbsent(listener)
+        }
+
+        fun removeConnectionStateListener(listener: ConnectionStateListener) {
+            stateListeners.remove(listener)
+        }
+
+        private fun notifyConnectionState(state: ConnectionState, generation: Long = 0L) {
+            reconnectNotifier.execute {
+                for (listener in stateListeners) {
+                    try {
+                        listener.onConnectionStateChanged(state, generation)
+                    } catch (_: Exception) {
+                    }
+                }
+            }
         }
 
         // Process-wide tiebreaker for executeScript path/delimiter nonces.
@@ -236,6 +257,14 @@ class AdbShellExecutor(private val context: Context) {
 
         /** True while a shared connection is installed. */
         fun isConnected(): Boolean = sharedConn != null
+
+        internal fun automaticReenableAllowed(isDiLink5: Boolean, optedIn: Boolean): Boolean =
+            isDiLink5 && optedIn
+
+        internal fun shouldRequestAutomaticRecovery(
+            requestsAllowed: Boolean,
+            recoveryEnabled: Boolean,
+        ): Boolean = requestsAllowed && recoveryEnabled
     }
 
     interface AdbAuthCallback {
@@ -261,6 +290,12 @@ class AdbShellExecutor(private val context: Context) {
      */
     fun interface ConnectionReestablishedListener {
         fun onConnectionReestablished(generation: Long)
+    }
+
+    enum class ConnectionState { CONNECTING, AUTH_PENDING, CONNECTED, DISCONNECTED, TRUST_LOST }
+
+    fun interface ConnectionStateListener {
+        fun onConnectionStateChanged(state: ConnectionState, generation: Long)
     }
 
     private val executor = Executors.newSingleThreadExecutor()
@@ -718,18 +753,26 @@ class AdbShellExecutor(private val context: Context) {
 
             // Check if ADB port is even listening before trying to connect
             if (!isAdbPortOpen()) {
-                requestDiLink5AdbReenable()
-                watchDiLink5AdbPort()
+                if (shouldRequestAutomaticRecovery(
+                        automaticRecoveryRequestsAllowed,
+                        isDiLink5AutomaticRestoreEnabled(),
+                    )
+                ) {
+                    requestDiLink5AdbReenable()
+                    watchDiLink5AdbPort()
+                }
                 logger.warn(TAG, "ADB port $ADB_PORT not open - ADB not enabled?")
                 throw Exception("ADB port not open")
             }
 
             val adbKeyPair = getOrCreateAdbKeyPair()
             logger.info(TAG, "Attempting ADB connection...")
+            notifyConnectionState(ConnectionState.CONNECTING)
 
             // Start polling BEFORE we try to connect (on separate executor)
             if (!isAuthPending.get() && pollingStarted.compareAndSet(false, true)) {
                 isAuthPending.set(true)
+                notifyConnectionState(ConnectionState.AUTH_PENDING)
                 authCallback?.onAuthPending()
                 startAuthPollingInternal(adbKeyPair)
             }
@@ -758,7 +801,13 @@ class AdbShellExecutor(private val context: Context) {
         isAuthPending.set(false)
         wasAuthGranted.set(true)
         pollingStarted.set(false)
+        try {
+            val provider = AdbIdentityProvider.forFilesDirectory(context.filesDir)
+            provider.markAuthenticated(provider.load().identity)
+        } catch (_: Exception) {
+        }
         logger.info(TAG, "ADB connection established successfully (gen=$gen)")
+        notifyConnectionState(ConnectionState.CONNECTED, gen)
         if (di5PortClosedSeen) di5ConnectedSinceReenable.set(true)
         authCallback?.onAuthGranted()
         // DiLink 5's first connection after a closed port is the one the listeners wait for.
@@ -802,6 +851,7 @@ class AdbShellExecutor(private val context: Context) {
             // loop, and correlate with adbd tombstones / external ADB clients.
             logger.warn(TAG, "Invalidating shared ADB connection gen=${conn.generation} " +
                 "(age=${ageMs}ms): $reason")
+            notifyConnectionState(ConnectionState.DISCONNECTED, conn.generation)
             try { conn.dadb.close() } catch (ignored: Exception) {}
         }
     }
@@ -875,48 +925,34 @@ class AdbShellExecutor(private val context: Context) {
         }
     }
 
+    private fun isDiLink5AutomaticRestoreEnabled(): Boolean {
+        val isDiLink5 = try {
+            com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+        } catch (_: Exception) {
+            false
+        }
+        val optedIn = try {
+            DiLink5AdbRecoveryStateStore().load().automaticRestore
+        } catch (_: Exception) {
+            false
+        }
+        return automaticReenableAllowed(isDiLink5, optedIn)
+    }
+
     /**
-     * DiLink 5 firmware can switch ADB off while parked, and AccSentryDaemon's recovery needs ADB to
-     * start in the first place. Re-apply the same settings through the app's WRITE_SECURE_SETTINGS
-     * grant; never blocks — the next attempt (health tick) connects. DiLink 5 only, once a minute
-     * (10 s once a connection was made since the last re-apply).
+     * A closed DiLink 5 listener is recovered only through the process-wide coordinator. The
+     * coordinator owns network validation, cooldown, setting ownership, readback, and rollback;
+     * this connection path never mutates ADB settings directly.
      */
     private fun requestDiLink5AdbReenable() {
-        if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) return
-        val now = android.os.SystemClock.elapsedRealtime()
-        val last = lastDi5AdbReenableMs.get()
-        val interval = if (di5ConnectedSinceReenable.get()) DI5_ADB_REENABLE_AFTER_CONNECT_MS
-            else DI5_ADB_REENABLE_INTERVAL_MS
-        if (last != 0L && now - last < interval) return
-        if (!lastDi5AdbReenableMs.compareAndSet(last, now)) return
-        di5ConnectedSinceReenable.set(false)
-        if (context.checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS)
-            != android.content.pm.PackageManager.PERMISSION_GRANTED
-        ) {
-            logger.warn(TAG, "DI5: ADB port closed and WRITE_SECURE_SETTINGS is not granted - cannot re-enable ADB")
-            return
-        }
+        if (!isDiLink5AutomaticRestoreEnabled() ||
+            !DiLink5AdbAutomaticRecoveryGate.allowed()
+        ) return
         try {
-            val resolver = context.contentResolver
-            val changed = mutableListOf<String>()
-            if (android.provider.Settings.Global.getInt(resolver, "adb_enabled", 0) != 1) {
-                android.provider.Settings.Global.putInt(resolver, "adb_enabled", 1)
-                changed += "adb_enabled"
-            }
-            if (android.provider.Settings.Global.getInt(resolver, "adb_wifi_enabled", 0) != 1) {
-                android.provider.Settings.Global.putInt(resolver, "adb_wifi_enabled", 1)
-                changed += "adb_wifi_enabled"
-            }
-            if (android.provider.Settings.Global.getLong(resolver, "adb_allowed_connection_time", -1L) != 0L) {
-                android.provider.Settings.Global.putLong(resolver, "adb_allowed_connection_time", 0L)
-                changed += "adb_allowed_connection_time"
-            }
-            if (changed.isNotEmpty()) lastDi5AdbSettingsAppliedMs.set(now)
-            logger.warn(TAG, "DI5: ADB port $ADB_PORT closed - re-applied ADB settings: " +
-                (if (changed.isEmpty()) "none needed (already set)" else changed.joinToString()) +
-                " (${secondsSinceBoot()}s after boot)")
+            AdbRecoveryManager.get(context.applicationContext ?: context)
+                .triggerAutomatic()
         } catch (e: Exception) {
-            logger.warn(TAG, "DI5: ADB re-enable failed: ${e.message}")
+            logger.warn(TAG, "DI5: coordinated ADB recovery could not start: ${e.message}")
         }
     }
 
@@ -925,7 +961,7 @@ class AdbShellExecutor(private val context: Context) {
      * some caller's next command. Runs until a connection exists; slows down after 15 min.
      */
     private fun watchDiLink5AdbPort() {
-        if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) return
+        if (!isDiLink5AutomaticRestoreEnabled()) return
         di5PortClosedSeen = true
         if (!di5PortWatchRunning.compareAndSet(false, true)) return
         val watcher = AdbShellExecutor(context.applicationContext ?: context)
@@ -944,8 +980,8 @@ class AdbShellExecutor(private val context: Context) {
 
     /**
      * The escalation hooks called from this loop are O(1) and never block: the escalator runs any
-     * OEM fallback on its own "Di5AdbRecoveryEscalation" thread, off [sharedDadbLock]. Settings
-     * re-enable ([requestDiLink5AdbReenable]) still runs first and unchanged on every closed hit.
+     * OEM fallback on its own "Di5AdbRecoveryEscalation" thread, off [sharedDadbLock]. Every
+     * setting write, watcher iteration, and escalation remains behind the explicit automatic opt-in.
      */
     private fun runDiLink5PortWatch() {
         val fastUntil = android.os.SystemClock.elapsedRealtime() + DI5_PORT_WATCH_FAST_MS
@@ -956,6 +992,7 @@ class AdbShellExecutor(private val context: Context) {
         try {
             while (true) {
                 Thread.sleep(nextSleepMs)
+                if (!isDiLink5AutomaticRestoreEnabled()) return
                 val fast = android.os.SystemClock.elapsedRealtime() < fastUntil
                 nextSleepMs = if (fast) DI5_PORT_WATCH_POLL_MS else DI5_PORT_WATCH_SLOW_POLL_MS
                 if (!fast && !slowLogged) {
@@ -1258,6 +1295,47 @@ class AdbShellExecutor(private val context: Context) {
     }
 
     /**
+     * Proves that the classic listener is authenticated with the shared key and
+     * installs that exact connection through the normal generation/listener path.
+     */
+    fun installFreshAuthenticatedConnection(
+        timeoutMs: Int = 5_000,
+        publishIfCurrent: ((() -> Unit) -> Boolean) = { publish -> publish(); true },
+    ): Boolean {
+        synchronized(sharedDadbLock) {
+            var candidate: Dadb? = null
+            return try {
+                val key = getOrCreateAdbKeyPair()
+                candidate = Dadb.create(
+                    "127.0.0.1",
+                    ADB_PORT,
+                    key,
+                    CONNECT_TIMEOUT_MS.coerceAtMost(timeoutMs),
+                    timeoutMs,
+                )
+                val ready = requireNotNull(candidate)
+                ready.supportsFeature("shell_v2")
+                var previous: SharedConn? = null
+                val published = publishIfCurrent {
+                    previous = sharedConn
+                    installConnectionLocked(ready)
+                    candidate = null
+                }
+                if (!published) {
+                    try { candidate?.close() } catch (_: Exception) {}
+                    candidate = null
+                    return false
+                }
+                previous?.let { try { it.dadb.close() } catch (_: Exception) {} }
+                true
+            } catch (_: Exception) {
+                try { candidate?.close() } catch (_: Exception) {}
+                false
+            }
+        }
+    }
+
+    /**
      * Shut down the per-instance executor. Call when the owning launcher
      * is being torn down — without this, every dropped AdbShellExecutor
      * leaves its single-thread executor parked for the life of the JVM
@@ -1272,34 +1350,10 @@ class AdbShellExecutor(private val context: Context) {
     }
 
     private fun getOrCreateAdbKeyPair(): AdbKeyPair {
-        cachedKeyPair?.let { return it }
-
-        synchronized(keyPairLock) {
-            cachedKeyPair?.let { return it }
-
-            val keyDir = context.filesDir
-            val privateKeyFile = File(keyDir, ADB_KEY_FILE)
-            val publicKeyFile = File(keyDir, ADB_PUB_KEY_FILE)
-
-            val keyPair = if (privateKeyFile.exists() && publicKeyFile.exists()) {
-                try {
-                    AdbKeyPair.read(privateKeyFile, publicKeyFile)
-                } catch (e: Exception) {
-                    logger.warn(TAG, "Failed to read existing keys: ${e.message}")
-                    generateAndSaveKeyPair(privateKeyFile, publicKeyFile)
-                }
-            } else {
-                logger.info(TAG, "Generating new ADB key pair")
-                generateAndSaveKeyPair(privateKeyFile, publicKeyFile)
-            }
-
-            cachedKeyPair = keyPair
-            return keyPair
+        val result = AdbIdentityProvider.forFilesDirectory(context.filesDir).load()
+        if (result.trustLost) {
+            notifyConnectionState(ConnectionState.TRUST_LOST)
         }
-    }
-
-    private fun generateAndSaveKeyPair(privateKeyFile: File, publicKeyFile: File): AdbKeyPair {
-        AdbKeyPair.generate(privateKeyFile, publicKeyFile)
-        return AdbKeyPair.read(privateKeyFile, publicKeyFile)
+        return result.identity.dadbKeyPair
     }
 }

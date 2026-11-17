@@ -30,11 +30,12 @@ import java.util.concurrent.atomic.AtomicLong;
  * <ul>
  *   <li>the arm survives rotateSegment()'s return (ownership transfer — no
  *       finally-reset), and double-arms coalesce;</li>
- *   <li>a ROTATE ticket is admitted into a FULL queue by evicting one
- *       ordinary packet, never a control entry, and admission failure is
- *       reported instead of silently dropping the ticket;</li>
+ *   <li>a ROTATE ticket is admitted into a FULL queue only by evicting one
+ *       audio packet, never video or a control entry, and admission failure
+ *       is reported instead of silently dropping the ticket;</li>
  *   <li>offerMuxerPacket reports admission (the initial-live-keyframe gate
- *       must not clear on a refused IDR) and never evicts control entries;</li>
+ *       must not clear on a refused IDR), never evicts queued video or
+ *       control entries, and audio never displaces anything;</li>
  *   <li>a stale-generation ticket is discarded WITHOUT touching a successor
  *       recording's arm flags, while a same-generation ticket arriving after
  *       close clears its own arm.</li>
@@ -125,13 +126,26 @@ public class HardwareEventRecorderGpuWriterRotationTest {
                 (Boolean) invokeOffer(recorder, "offerControlToQueue", ticket));
 
         assertTrue("control entry must never be evicted", queue.contains(history));
-        assertTrue("audio survives when a video P-frame is available",
-                queue.contains(audio));
-        assertFalse("oldest video non-keyframe is the preferred victim",
+        assertTrue("queued video is never evicted (later P-frames reference it)",
                 queue.contains(videoP));
+        assertFalse("audio is the only legal victim", queue.contains(audio));
         assertTrue("ticket must be in the queue", queue.contains(ticket));
-        assertEquals("video drop counter must record the eviction", 1L,
-                ((AtomicLong) getField(recorder, "muxerDropCount")).get());
+        assertEquals("audio drop counter must record the eviction", 1L,
+                ((AtomicLong) getField(recorder, "audioDropCount")).get());
+        assertEquals(0L, ((AtomicLong) getField(recorder, "muxerDropCount")).get());
+
+        // No audio to displace: refused, queued video untouched.
+        HardwareEventRecorderGpu recorder2 = newRecorder(2);
+        @SuppressWarnings("unchecked")
+        LinkedBlockingDeque<Object> queue2 =
+                (LinkedBlockingDeque<Object>) getField(recorder2, "muxerWriteQueue");
+        Object videoP2 = makeDataPacket(recorder2, true, false);
+        queue2.offer(makeFlushHistoryPacket());
+        queue2.offer(videoP2);
+        assertFalse("ticket must be refused rather than evict video",
+                (Boolean) invokeOffer(recorder2, "offerControlToQueue",
+                        makeRotateTicket(recorder2, 1L)));
+        assertTrue(queue2.contains(videoP2));
     }
 
     @Test
@@ -165,15 +179,36 @@ public class HardwareEventRecorderGpuWriterRotationTest {
         queue.offer(history);
         queue.offer(keyframe);
 
-        // All data entries are keyframes: the fallback evicts the keyframe,
-        // never the control entry, and admission is reported.
+        // No audio queued: the incoming frame is refused and reported; queued
+        // video and the control entry are untouched.
         Object incoming = makeDataPacket(recorder, true, false);
-        assertTrue("admission must be reported true",
+        assertFalse("refusal must be reported false",
                 (Boolean) invokeOffer(recorder, "offerMuxerPacket", incoming));
-        assertTrue("control survives the all-keyframe fallback",
-                queue.contains(history));
-        assertFalse("keyframe was the only legal victim", queue.contains(keyframe));
-        assertTrue(queue.contains(incoming));
+        assertTrue("control survives", queue.contains(history));
+        assertTrue("queued keyframe is never evicted", queue.contains(keyframe));
+        assertFalse(queue.contains(incoming));
+        assertEquals("video drop counter must record the refusal", 1L,
+                ((AtomicLong) getField(recorder, "muxerDropCount")).get());
+
+        // Audio never displaces video; video displaces the oldest audio.
+        HardwareEventRecorderGpu recorder3 = newRecorder(2);
+        @SuppressWarnings("unchecked")
+        LinkedBlockingDeque<Object> queue3 =
+                (LinkedBlockingDeque<Object>) getField(recorder3, "muxerWriteQueue");
+        Object queuedP = makeDataPacket(recorder3, true, false);
+        Object queuedAudio = makeDataPacket(recorder3, false, false);
+        queue3.offer(queuedP);
+        queue3.offer(queuedAudio);
+        assertFalse("incoming audio is refused at a full queue",
+                (Boolean) invokeOffer(recorder3, "offerMuxerPacket",
+                        makeDataPacket(recorder3, false, false)));
+        assertTrue(queue3.contains(queuedP));
+        Object incomingP = makeDataPacket(recorder3, true, false);
+        assertTrue("incoming video displaces the oldest audio",
+                (Boolean) invokeOffer(recorder3, "offerMuxerPacket", incomingP));
+        assertTrue(queue3.contains(queuedP));
+        assertFalse(queue3.contains(queuedAudio));
+        assertTrue(queue3.contains(incomingP));
 
         // Queue of ONLY control: nothing evictable — admission must report
         // false (the initial-live-keyframe gate must not clear on this).

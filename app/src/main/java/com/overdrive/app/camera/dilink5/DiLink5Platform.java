@@ -38,6 +38,32 @@ public final class DiLink5Platform {
         return MODE_DILINK5.equals(processMode);
     }
 
+    /** Durable user selection, independent of whether the camera daemon has committed it yet. */
+    public static boolean isConfiguredDiLink5() {
+        return MODE_DILINK5.equals(readDurableConfiguredMode());
+    }
+
+    /** Initial-enable fallback only when no committed runtime mode exists yet. */
+    public static boolean isConfiguredDiLink5WithoutCommittedMode() {
+        return currentActiveModeSnapshot() == null && isConfiguredDiLink5();
+    }
+
+    /** Explicit staged switch to DiLink 5, before the replacement daemon commits it. */
+    public static boolean isPendingDiLink5Selection() {
+        return isPendingDiLink5Selection(readPendingMode(), readDurableConfiguredMode());
+    }
+
+    static boolean isPendingDiLink5Selection(String pendingMode, String configuredMode) {
+        return MODE_DILINK5.equals(normalizeMode(pendingMode))
+                && MODE_DILINK5.equals(normalizeMode(configuredMode));
+    }
+
+    /** Generation of the exact staged DiLink 5 switch, or null when it is no longer current. */
+    public static String currentPendingDiLink5Generation() {
+        if (!isPendingDiLink5Selection()) return null;
+        return readModeGeneration(PENDING_MODE_PATH);
+    }
+
     /** The mode currently fenced into this process. */
     public static String currentActiveMode() {
         return processMode;
@@ -265,6 +291,69 @@ public final class DiLink5Platform {
         } catch (Exception unavailable) {
             return null;
         }
+    }
+
+    /** Read-only scope for manual OEM tools; it never selects a vehicle backend. */
+    public static final class ManualAdbModeSnapshot {
+        public final ActiveModeSnapshot active;
+        public final ActiveModeSnapshot pending;
+        public final String configuredMode;
+
+        private ManualAdbModeSnapshot(
+                ActiveModeSnapshot active, ActiveModeSnapshot pending, String configuredMode) {
+            this.active = active;
+            this.pending = pending;
+            this.configuredMode = configuredMode;
+        }
+
+        public boolean matches(ManualAdbModeSnapshot other) {
+            return other != null && configuredMode.equals(other.configuredMode)
+                    && sameMarker(active, other.active) && sameMarker(pending, other.pending);
+        }
+
+        private static boolean sameMarker(ActiveModeSnapshot first, ActiveModeSnapshot second) {
+            return first == null ? second == null : first.matches(second);
+        }
+    }
+
+    /**
+     * Missing markers permit initial manual setup; present but invalid markers do not.
+     * Keep the config-to-platform lock order used by mode staging. Re-read both marker
+     * files to reject a cross-process transition observed while reading configuration.
+     */
+    public static ManualAdbModeSnapshot currentManualAdbModeSnapshot() {
+        try {
+            return UnifiedConfigManager.runUnderConfigLock(() -> {
+                synchronized (DiLink5Platform.class) {
+                    try {
+                        byte[] active = readMarkerBytes(ACTIVE_MODE_PATH);
+                        byte[] pending = readMarkerBytes(PENDING_MODE_PATH);
+                        String configured = readDurableConfiguredMode();
+                        if (!java.util.Arrays.equals(active, readMarkerBytes(ACTIVE_MODE_PATH))
+                                || !java.util.Arrays.equals(
+                                        pending, readMarkerBytes(PENDING_MODE_PATH))) {
+                            return null;
+                        }
+                        return parseManualAdbModeSnapshot(active, pending, configured);
+                    } catch (Exception unavailable) {
+                        return null;
+                    }
+                }
+            });
+        } catch (Throwable unavailable) {
+            return null;
+        }
+    }
+
+    static ManualAdbModeSnapshot parseManualAdbModeSnapshot(
+            byte[] activeBytes, byte[] pendingBytes, String configuredMode) {
+        String configured = normalizeMode(configuredMode);
+        if (configured == null) return null;
+        ActiveModeSnapshot active = parseActiveModeMarker(activeBytes);
+        ActiveModeSnapshot pending = parseActiveModeMarker(pendingBytes);
+        if ((activeBytes != null && active == null)
+                || (pendingBytes != null && pending == null)) return null;
+        return new ManualAdbModeSnapshot(active, pending, configured);
     }
 
     static ActiveModeSnapshot parseActiveModeMarker(byte[] bytes) {

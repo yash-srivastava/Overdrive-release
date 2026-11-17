@@ -108,20 +108,15 @@ public class ExternalStorageCleaner {
         "Recorder/Normal",    // BYD built-in dashcam - normal recordings
         "Recorder",           // BYD built-in dashcam - root
         "Recorder/Video",
-        "DCIM",
-        "DCIM/Camera",
-        "DCIM/100MEDIA",
         "DVR",
         "CDR",
         "行车记录仪",
-        "Video",
         "Video/DVR",
-        "Movies",
         "Movies/DVR",
         "Record",
         "CarRecord",
-        "DashCam",
-        "Camera"
+        "DashCam"
+        // Never generic media folders (DCIM, Movies, Video, Camera): cleanup deletes.
     };
     
     // Video file extensions to clean
@@ -142,6 +137,8 @@ public class ExternalStorageCleaner {
     // ==================== State ====================
     
     private boolean enabled = false;
+    // The owner switched cleanup off: switching storage to SD never turns it back on.
+    private boolean userTurnedOff = false;
     private long reservedSpaceMb = DEFAULT_RESERVED_SPACE_MB;
     private int protectedHours = DEFAULT_PROTECTED_HOURS;
     private int minFilesKeep = DEFAULT_MIN_FILES_KEEP;
@@ -164,6 +161,11 @@ public class ExternalStorageCleaner {
     private static ExternalStorageCleaner instance;
     
     private ExternalStorageCleaner() {
+        this(false);
+    }
+
+    // A read-only UI scan must never arm the deletion monitor.
+    private ExternalStorageCleaner(boolean readOnly) {
         discoverPaths();
         loadConfig();
 
@@ -180,16 +182,205 @@ public class ExternalStorageCleaner {
         // external-storage web page. The monitor tick now self-discovers (re-runs
         // discoverPaths() while sdCardPath==null), so arming it before the SD is
         // mounted is safe: it idles until vold mounts the card, then converges.
-        if (enabled) {
+        if (!readOnly && enabled) {
             startMonitoring();
         }
     }
-    
+
     public static synchronized ExternalStorageCleaner getInstance() {
         if (instance == null) {
             instance = new ExternalStorageCleaner();
         }
         return instance;
+    }
+
+    // ==================== Read-only factory dashcam browsing ====================
+
+    private static final int FACTORY_SCAN_MAX_DEPTH = 5;
+    private static final int FACTORY_SCAN_MAX_DIRS = 400;
+    private static final int FACTORY_SCAN_MAX_ENTRIES = 20_000;
+    public static final int FACTORY_SCAN_MAX_SHOWN = 500;
+    // Dashcam-only names from CDR_SUBDIRS (no DCIM/Movies/Video/Camera).
+    private static final String[] FACTORY_DVR_FOLDERS = {
+        "Recorder", "DVR", "CDR", "行车记录仪", "Record", "CarRecord", "DashCam"
+    };
+
+    /**
+     * Newest-first clips in the factory dashcam folder. Read-only and bounded; never touches the
+     * singleton, the monitor or any delete path. Blocking file I/O: call off the UI thread.
+     */
+    public static FactoryVideoSnapshot scanFactoryVideosReadOnly() {
+        return scanFactoryVideosReadOnly(false);
+    }
+
+    /** {@code dashcamFoldersOnly} (web access): never browse a discovered non-dashcam folder such as DCIM. */
+    public static FactoryVideoSnapshot scanFactoryVideosReadOnly(boolean dashcamFoldersOnly) {
+        ExternalStorageCleaner reader = new ExternalStorageCleaner(true);
+        if (reader.sdCardPath == null) {
+            return FactoryVideoSnapshot.failed(FactoryVideoSnapshot.Status.NO_CARD, null);
+        }
+        String cdr = dashcamFoldersOnly && !isFactoryDvrFolder(reader.sdCardPath, reader.cdrPath)
+                ? null : reader.cdrPath;
+        // Discovery needs clips directly in a folder; a dashcam that nests them is found by name.
+        for (int i = 0; cdr == null && i < FACTORY_DVR_FOLDERS.length; i++) {
+            File named = new File(reader.sdCardPath, FACTORY_DVR_FOLDERS[i]);
+            if (named.isDirectory()) cdr = named.getPath();
+        }
+        if (cdr == null) {
+            return FactoryVideoSnapshot.failed(FactoryVideoSnapshot.Status.NOT_FOUND, null);
+        }
+        File root;
+        try {
+            File sd = new File(reader.sdCardPath).getCanonicalFile();
+            root = new File(cdr).getCanonicalFile();
+            String sdPrefix = sd.getPath() + File.separator;
+            // A saved cleanup-path override must not turn this into a browser for any folder.
+            if (!root.getPath().startsWith(sdPrefix)) {
+                return FactoryVideoSnapshot.failed(FactoryVideoSnapshot.Status.NOT_FOUND, null);
+            }
+            // Cleanup can target Recorder/Normal; browsing also lists its sibling folders.
+            File parent = root.getParentFile();
+            if (parent != null && "Recorder".equalsIgnoreCase(parent.getName())
+                    && ("Normal".equalsIgnoreCase(root.getName())
+                        || "Video".equalsIgnoreCase(root.getName()))
+                    && parent.getPath().startsWith(sdPrefix)) {
+                root = parent;
+            }
+        } catch (java.io.IOException | RuntimeException e) {
+            return FactoryVideoSnapshot.failed(FactoryVideoSnapshot.Status.UNREADABLE, cdr);
+        }
+        return walkFactoryVideos(root, FACTORY_SCAN_MAX_SHOWN);
+    }
+
+    /** True for an SD-root folder named in FACTORY_DVR_FOLDERS, or a folder inside SD/Recorder. */
+    private static boolean isFactoryDvrFolder(String sdCardPath, String path) {
+        if (path == null) return false;
+        try {
+            File sd = new File(sdCardPath).getCanonicalFile();
+            File dir = new File(path).getCanonicalFile();
+            File parent = dir.getParentFile();
+            if (parent == null) return false;
+            if ("Recorder".equalsIgnoreCase(parent.getName()) && sd.equals(parent.getParentFile())) {
+                return true;
+            }
+            if (!sd.equals(parent)) return false;
+            for (String name : FACTORY_DVR_FOLDERS) {
+                if (name.equalsIgnoreCase(dir.getName())) return true;
+            }
+        } catch (java.io.IOException | RuntimeException e) {
+            return false;
+        }
+        return false;
+    }
+
+    static FactoryVideoSnapshot walkFactoryVideos(File root, int maxShown) {
+        if (!root.isDirectory()) {
+            return FactoryVideoSnapshot.failed(FactoryVideoSnapshot.Status.UNREADABLE, root.getPath());
+        }
+        String rootPrefix = root.getPath() + File.separator;
+        java.util.ArrayDeque<File> dirs = new java.util.ArrayDeque<>();
+        java.util.ArrayDeque<Integer> depths = new java.util.ArrayDeque<>();
+        dirs.add(root);
+        depths.add(0);
+        java.util.PriorityQueue<FactoryVideo> newest =
+            new java.util.PriorityQueue<>(maxShown + 1, FactoryVideo.NEWEST_FIRST.reversed());
+        int queuedDirs = 1;
+        int examined = 0;
+        int found = 0;
+        boolean partial = false;
+        while (!dirs.isEmpty() && examined <= FACTORY_SCAN_MAX_ENTRIES) {
+            File dir = dirs.removeFirst();
+            int depth = depths.removeFirst();
+            File[] entries = dir.listFiles();
+            if (entries == null) {
+                if (depth == 0) {
+                    return FactoryVideoSnapshot.failed(
+                        FactoryVideoSnapshot.Status.UNREADABLE, root.getPath());
+                }
+                partial = true;
+                continue;
+            }
+            for (File entry : entries) {
+                if (++examined > FACTORY_SCAN_MAX_ENTRIES) {
+                    partial = true;
+                    break;
+                }
+                java.nio.file.attribute.BasicFileAttributes attrs;
+                try {
+                    // NOFOLLOW_LINKS: a link can never take the walk or a listed clip outside root.
+                    attrs = java.nio.file.Files.readAttributes(entry.toPath(),
+                        java.nio.file.attribute.BasicFileAttributes.class,
+                        java.nio.file.LinkOption.NOFOLLOW_LINKS);
+                } catch (java.io.IOException | RuntimeException e) {
+                    continue;
+                }
+                if (attrs.isDirectory()) {
+                    if (depth >= FACTORY_SCAN_MAX_DEPTH || queuedDirs >= FACTORY_SCAN_MAX_DIRS) {
+                        partial = true;
+                    } else {
+                        dirs.add(entry);
+                        depths.add(depth + 1);
+                        queuedDirs++;
+                    }
+                } else if (attrs.isRegularFile() && isVideoFile(entry)) {
+                    found++;
+                    newest.add(new FactoryVideo(entry,
+                        entry.getPath().substring(rootPrefix.length()),
+                        attrs.size(), attrs.lastModifiedTime().toMillis()));
+                    if (newest.size() > maxShown) newest.poll();
+                }
+            }
+        }
+        List<FactoryVideo> videos = new ArrayList<>(newest);
+        videos.sort(FactoryVideo.NEWEST_FIRST);
+        return new FactoryVideoSnapshot(FactoryVideoSnapshot.Status.OK, root.getPath(),
+            java.util.Collections.unmodifiableList(videos), found, partial);
+    }
+
+    public static final class FactoryVideo {
+        static final Comparator<FactoryVideo> NEWEST_FIRST = (a, b) -> {
+            int byTime = Long.compare(b.modifiedMs, a.modifiedMs);
+            return byTime != 0 ? byTime : a.relativePath.compareTo(b.relativePath);
+        };
+
+        public final File file;
+        public final String relativePath;
+        public final long sizeBytes;
+        public final long modifiedMs;
+
+        FactoryVideo(File file, String relativePath, long sizeBytes, long modifiedMs) {
+            this.file = file;
+            this.relativePath = relativePath;
+            this.sizeBytes = sizeBytes;
+            this.modifiedMs = modifiedMs;
+        }
+    }
+
+    public static final class FactoryVideoSnapshot {
+        public enum Status { OK, NO_CARD, NOT_FOUND, UNREADABLE }
+
+        public final Status status;
+        /** Scanned folder; null when none was found. */
+        public final String directory;
+        public final List<FactoryVideo> videos;
+        /** Clips found, including the older ones beyond the shown list. */
+        public final int totalFound;
+        /** A folder could not be read or a depth/size bound stopped the walk. */
+        public final boolean partial;
+
+        FactoryVideoSnapshot(Status status, String directory, List<FactoryVideo> videos,
+                             int totalFound, boolean partial) {
+            this.status = status;
+            this.directory = directory;
+            this.videos = videos;
+            this.totalFound = totalFound;
+            this.partial = partial;
+        }
+
+        static FactoryVideoSnapshot failed(Status status, String directory) {
+            return new FactoryVideoSnapshot(status, directory,
+                java.util.Collections.emptyList(), 0, false);
+        }
     }
     
     // ==================== Path Discovery ====================
@@ -251,59 +442,9 @@ public class ExternalStorageCleaner {
         }
         
         if (cdrPath == null) {
+            // No guessing from video counts: a wrong folder here gets deleted.
             logInfo("No CDR directory found on SD card");
-            // Try to find any directory with video files
-            cdrPath = findLargestVideoDirectory(new File(sdCardPath));
-            if (cdrPath != null) {
-                logInfo("Found video directory via scan: " + cdrPath);
-            }
         }
-    }
-    
-    /**
-     * Scan SD card root to find the directory with the most video files.
-     * Fallback when known CDR paths don't exist.
-     */
-    private String findLargestVideoDirectory(File root) {
-        if (root == null || !root.exists()) return null;
-        
-        File[] dirs = root.listFiles(File::isDirectory);
-        if (dirs == null) return null;
-        
-        String bestPath = null;
-        int maxFiles = 0;
-        
-        for (File dir : dirs) {
-            // Skip Android system directories
-            String name = dir.getName();
-            if (name.equals("Android") || name.equals(".") || name.equals("..") || 
-                name.startsWith(".") || name.equals("Overdrive")) {
-                continue;
-            }
-            
-            int videoCount = countVideoFiles(dir);
-            if (videoCount > maxFiles) {
-                maxFiles = videoCount;
-                bestPath = dir.getAbsolutePath();
-            }
-        }
-        
-        // Only return if we found at least 5 video files
-        return maxFiles >= 5 ? bestPath : null;
-    }
-    
-    /**
-     * Count video files in a directory (non-recursive, just top level).
-     */
-    private int countVideoFiles(File dir) {
-        if (dir == null || !dir.exists()) return 0;
-        
-        File[] files = dir.listFiles(file -> {
-            if (!file.isFile()) return false;
-            return isVideoFile(file);
-        });
-        
-        return files != null ? files.length : 0;
     }
     
     /**
@@ -386,12 +527,15 @@ public class ExternalStorageCleaner {
                 protectedHours = extCleanup.optInt("protectedHours", DEFAULT_PROTECTED_HOURS);
                 minFilesKeep = extCleanup.optInt("minFilesKeep", DEFAULT_MIN_FILES_KEEP);
                 
-                // Override discovered CDR path if configured
+                userTurnedOff = extCleanup.optBoolean("userTurnedOff", false);
+                // A saved path is honoured only if it is one of the known dashcam folders.
                 String configuredCdrPath = extCleanup.optString("cdrPath", "");
                 if (!configuredCdrPath.isEmpty()) {
-                    File cdrDir = new File(configuredCdrPath);
-                    if (cdrDir.exists() && cdrDir.isDirectory()) {
+                    if (isKnownDashcamFolder(configuredCdrPath)) {
                         cdrPath = configuredCdrPath;
+                    } else {
+                        logWarn("Ignoring saved cleanup folder outside the known dashcam folders: "
+                                + configuredCdrPath);
                     }
                 }
                 
@@ -430,6 +574,7 @@ public class ExternalStorageCleaner {
             extCleanup.put("reservedSpaceMb", reservedSpaceMb);
             extCleanup.put("protectedHours", protectedHours);
             extCleanup.put("minFilesKeep", minFilesKeep);
+            extCleanup.put("userTurnedOff", userTurnedOff);
             if (cdrPath != null) {
                 extCleanup.put("cdrPath", cdrPath);
             }
@@ -451,6 +596,26 @@ public class ExternalStorageCleaner {
     // ==================== Getters/Setters ====================
     
     public boolean isEnabled() { return enabled; }
+
+    public boolean wasTurnedOffByUser() { return userTurnedOff; }
+
+    /** Record an explicit owner choice (Settings toggle); persisted by the next saveConfig(). */
+    public void noteUserChoice(boolean enabled) { this.userTurnedOff = !enabled; }
+
+    /** True when path is one of CDR_SUBDIRS under the detected SD card. */
+    private boolean isKnownDashcamFolder(String path) {
+        String sd = sdCardPath;
+        if (sd == null || path == null) return false;
+        try {
+            File dir = new File(path).getCanonicalFile();
+            for (String subdir : CDR_SUBDIRS) {
+                if (dir.equals(new File(sd, subdir).getCanonicalFile())) return dir.isDirectory();
+            }
+        } catch (java.io.IOException | RuntimeException e) {
+            return false;
+        }
+        return false;
+    }
     public void setEnabled(boolean enabled) {
         setEnabledNoSave(enabled);
         saveConfig();
@@ -690,7 +855,7 @@ public class ExternalStorageCleaner {
         }
     }
     
-    private boolean isVideoFile(File file) {
+    private static boolean isVideoFile(File file) {
         String name = file.getName().toLowerCase();
         for (String ext : VIDEO_EXTENSIONS) {
             if (name.endsWith(ext)) return true;

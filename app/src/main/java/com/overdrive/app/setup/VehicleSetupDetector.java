@@ -65,6 +65,11 @@ public final class VehicleSetupDetector {
         }
         String type = evidence.vehicleType != null
                 ? evidence.vehicleType.toLowerCase(Locale.ROOT) : null;
+        if (type != null && type.startsWith("dilink100") && namesByd100f(evidence)) {
+            // BYD100F units (Atto 3 EVO, Sealion 8, New E2) refuse every Camera2 client; Default
+            // mode opens the 360 camera through BYD's AVMCamera instead (#741).
+            return new Detection(Platform.DILINK100, Confidence.HIGH, VehicleSetupPlan.MODE_DEFAULT, null, false);
+        }
         if (type != null && type.startsWith("dilink100")) {
             return new Detection(Platform.DILINK100, Confidence.HIGH, MODE_CAMERA2, null, false);
         }
@@ -125,6 +130,17 @@ public final class VehicleSetupDetector {
         String identity = (evidence.buildModel + " " + evidence.buildProduct)
                 .toLowerCase(Locale.ROOT);
         return identity.contains("shark") || identity.contains("dmo");
+    }
+
+    /** A DiLink 100 head unit whose build identity is BYD100F. */
+    public static boolean isByd100f(Evidence evidence) {
+        return evidence != null && detect(evidence).platform == Platform.DILINK100 && namesByd100f(evidence);
+    }
+
+    private static boolean namesByd100f(Evidence evidence) {
+        String identity = (evidence.buildModel + " " + evidence.buildProduct + " " + evidence.buildDevice)
+                .toLowerCase(Locale.ROOT);
+        return identity.contains("byd100f");
     }
 
     /** Core version from the build identity ("DiLink3.0" → 3); -1 when it names none. */

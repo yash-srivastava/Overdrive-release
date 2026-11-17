@@ -93,7 +93,7 @@ class DiagnosticsFragment : Fragment() {
         view.findViewById<View>(R.id.cardTraffic).setOnClickListener {
             (activity as? MainActivity)?.invokeTrafficMonitorAction()
         }
-        view.findViewById<View>(R.id.cardModuleFaults).setOnClickListener {
+        view.findViewById<View?>(R.id.cardModuleFaults)?.setOnClickListener {
             findNavController().navigateDrillDown(R.id.moduleFaultsFragment)
         }
         view.findViewById<View>(R.id.cardCameraProbe).setOnClickListener {

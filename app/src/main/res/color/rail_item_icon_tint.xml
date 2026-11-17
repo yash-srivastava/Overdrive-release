@@ -1,9 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  Rail icon colour. Selected uses colorPrimary, not the role-paired
-  colorOnPrimaryContainer, so the icon reads green in both themes.
--->
+<!-- Rail icon colour: colorOnPrimaryContainer on the selected plate. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:state_selected="true" android:color="?attr/colorPrimary" />
+    <item android:state_selected="true" android:color="?attr/colorOnPrimaryContainer" />
     <item android:color="?attr/colorOnSurfaceVariant" />
 </selector>

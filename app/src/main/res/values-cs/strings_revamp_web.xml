@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="web_state_retry_now">Zkusit znovu hned</string>
+    <string name="web_state_retry_in">Automatické opakování · další pokus za %1$d s</string>
+    <string name="web_state_retrying_now">Automatické opakování · zkouším teď…</string>
+    <string name="web_state_sign_in_title">K této stránce se nepodařilo přihlásit</string>
+    <string name="web_state_sign_in_body">Služba kamery běží, ale nepřijala přihlášení aplikace. OverDrive ho obnoví automaticky, dokud je připojeno ADB.</string>
+</resources>

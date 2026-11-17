@@ -63,6 +63,7 @@ object ConfigBackupService {
     // against a hand-edited bundle). Path form: "section.key".
     private val EPHEMERAL_KEYS = listOf(
         "navMap.clusterMapActive",   // daemon↔activity runtime flag; stale=ghost map
+        "projection.clusterDensitySuppression", // learned on this car; survives local boots, not transfers
         "chargingAnalytics.pendingTariffReprices",
         "chargingAnalytics.pendingTariffRepriceTokens",
     )
@@ -201,13 +202,18 @@ object ConfigBackupService {
     @JvmStatic
     @JvmOverloads
     fun buildBundle(appVersion: String, deviceModel: String, nowMs: Long,
-                    includeTrips: Boolean = false): JSONObject {
+                    includeTrips: Boolean = false, includeSecret: Boolean = false): JSONObject {
+        // The device secret (the login code) only for a caller holding a session; the shared config never keeps it.
+        val secret = if (includeSecret) com.overdrive.app.auth.AuthManager.getState()?.deviceSecret ?: "" else ""
         // Config and credential key material are one export snapshot. A restore
         // cannot interleave and pair settings from one revision with another DID.
         val snapshot = UnifiedConfigManager.runUnderConfigLock {
             val unified = JSONObject(
                 UnifiedConfigManager.readDurableConfigStrict().toString())
             for (sec in EXCLUDED_SECTIONS) unified.remove(sec)
+            unified.optJSONObject("auth")?.let { a ->
+                if (secret.isNotEmpty()) a.put("deviceSecret", secret) else a.remove("deviceSecret")
+            }
             stripEphemeral(unified)
             ExportSnapshot(unified, readDidSnapshotStrict())
         }
@@ -384,7 +390,21 @@ object ConfigBackupService {
      * rather than silently failing.
      */
     @JvmStatic
-    fun applyBundle(bundle: JSONObject, currentAppVersion: String, currentModel: String): ApplyResult {
+    @JvmOverloads
+    fun applyBundle(bundle: JSONObject, currentAppVersion: String, currentModel: String,
+                    secretAllowed: Boolean = false): ApplyResult {
+        // The device secret never goes into the shared config: restored by a caller holding a session it's this head
+        // unit's again (sessions from before a reset work), else this head unit keeps its own.
+        val restoredSecret = bundle.optJSONObject("settings")?.optJSONObject("unified")?.optJSONObject("auth")
+            ?.optString("deviceSecret", "") ?: ""
+        val result = applyBundleSettings(bundle, currentAppVersion, currentModel)
+        if (result.success && secretAllowed && restoredSecret.isNotEmpty()) {
+            if (!com.overdrive.app.auth.AuthManager.adoptSecret(restoredSecret)) Log.w(TAG, "restored login code not adopted")
+        }
+        return result
+    }
+
+    private fun applyBundleSettings(bundle: JSONObject, currentAppVersion: String, currentModel: String): ApplyResult {
         val validation = validateBundle(bundle, currentAppVersion, currentModel)
         if (!validation.success) return validation
         // validateBundle returns an immutable-intent list; copy so we can append
@@ -398,6 +418,7 @@ object ConfigBackupService {
         // pending durable tariff reprice.
         val incoming = JSONObject(incomingRaw.toString())
         stripEphemeral(incoming)
+        incoming.optJSONObject("auth")?.let { it.remove("deviceSecret"); it.remove("handedOff") }
 
         val fpChanged = run {
             val fp = bundle.optJSONObject("manifest")?.optString("fingerprint", "") ?: ""

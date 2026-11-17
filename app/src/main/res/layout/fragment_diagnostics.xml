@@ -83,7 +83,7 @@
 
         <com.google.android.material.card.MaterialCardView
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_weight="1"
             android:layout_marginEnd="@dimen/card_gap_horizontal_half"
             android:minHeight="@dimen/grid_tile_min_height"
@@ -124,11 +124,12 @@
                 <!-- Top line: SSID / Mobile / Ethernet / Offline. Bound at runtime. -->
                 <TextView
                     android:id="@+id/tvNetworkValue"
+                    android:fontFeatureSettings="tnum"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
                     android:ellipsize="end"
-                    android:maxLines="1"
+                    android:maxLines="2"
                     android:text="@string/diagnostics_metric_online"
                     android:textAppearance="@style/TextAppearance.Overdrive.HeadlineSmall"
                     android:textColor="?attr/colorOnSurface"
@@ -164,7 +165,7 @@
 
         <com.google.android.material.card.MaterialCardView
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_weight="1"
             android:layout_marginStart="@dimen/card_gap_horizontal_half"
             android:minHeight="@dimen/grid_tile_min_height"
@@ -205,11 +206,12 @@
                 <!-- Top line: "X clips · Y used". Bound at runtime. -->
                 <TextView
                     android:id="@+id/tvStorageUsed"
+                    android:fontFeatureSettings="tnum"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
                     android:ellipsize="end"
-                    android:maxLines="1"
+                    android:maxLines="2"
                     android:text="@string/diagnostics_metric_pending"
                     android:textAppearance="@style/TextAppearance.Overdrive.HeadlineSmall"
                     android:textColor="?attr/colorOnSurface"
@@ -218,6 +220,7 @@
                 <!-- Bottom line: "Z free". Bound at runtime. -->
                 <TextView
                     android:id="@+id/tvStorageFree"
+                    android:fontFeatureSettings="tnum"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
@@ -241,7 +244,7 @@
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/cardCameraHealth"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_weight="1"
             android:layout_marginEnd="@dimen/card_gap_horizontal_half"
             android:minHeight="@dimen/grid_tile_min_height"
@@ -308,7 +311,7 @@
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/cardBatteryHealth"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_weight="1"
             android:layout_marginStart="@dimen/card_gap_horizontal_half"
             android:minHeight="@dimen/grid_tile_min_height"
@@ -362,6 +365,7 @@
 
                 <TextView
                     android:id="@+id/tvBatteryValue"
+                    android:fontFeatureSettings="tnum"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
@@ -440,7 +444,7 @@
                     android:src="@drawable/ic_traffic_monitor"
                     app:tint="?attr/colorOnSurfaceVariant" />
 
-                <TextView
+                <com.overdrive.app.ui.widget.WordFitTextView
                     android:id="@+id/tvTrafficLabel"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
@@ -479,7 +483,7 @@
                     android:src="@drawable/ic_camera_probe"
                     app:tint="?attr/colorOnSurfaceVariant" />
 
-                <TextView
+                <com.overdrive.app.ui.widget.WordFitTextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="12dp"
@@ -526,7 +530,7 @@
                     android:src="@drawable/ic_console"
                     app:tint="?attr/colorOnSurfaceVariant" />
 
-                <TextView
+                <com.overdrive.app.ui.widget.WordFitTextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="12dp"
@@ -564,7 +568,7 @@
                     android:src="@drawable/ic_battery_health"
                     app:tint="?attr/colorOnSurfaceVariant" />
 
-                <TextView
+                <com.overdrive.app.ui.widget.WordFitTextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="12dp"
@@ -672,7 +676,7 @@
                     android:src="@drawable/ic_settings"
                     app:tint="?attr/colorOnSurfaceVariant" />
 
-                <TextView
+                <com.overdrive.app.ui.widget.WordFitTextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="12dp"
@@ -713,7 +717,7 @@
                     android:src="@drawable/ic_recording_storage"
                     app:tint="?attr/colorOnSurfaceVariant" />
 
-                <TextView
+                <com.overdrive.app.ui.widget.WordFitTextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="12dp"

@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Timeline Moments row: thumb, time + kind, camera · place · duration, status. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="@dimen/od_space_4"
+    android:background="@drawable/tl_row_bg"
+    android:clickable="true"
+    android:focusable="true"
+    android:foreground="?attr/selectableItemBackground"
+    android:gravity="center_vertical"
+    android:minHeight="68dp"
+    android:orientation="horizontal"
+    android:paddingStart="@dimen/od_space_6"
+    android:paddingTop="@dimen/od_space_6"
+    android:paddingEnd="@dimen/od_space_12"
+    android:paddingBottom="@dimen/od_space_6">
+
+    <ImageView
+        android:id="@+id/tlMomentThumb"
+        android:layout_width="84dp"
+        android:layout_height="56dp"
+        android:background="@drawable/tl_thumb_bg"
+        android:importantForAccessibility="no"
+        android:scaleType="centerCrop" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/od_space_12"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/tlMomentTime"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="sans-serif"
+                android:fontFeatureSettings="tnum"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:textColor="?attr/colorOnSurface"
+                android:textFontWeight="600"
+                android:textSize="16sp"
+                tools:text="17:21" />
+
+            <TextView
+                android:id="@+id/tlMomentKind"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/od_space_8"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:textColor="?attr/colorOnSurface"
+                android:textSize="16sp"
+                tools:text="Person" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tlMomentSubtitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/od_space_4"
+            android:ellipsize="end"
+            android:fontFeatureSettings="tnum"
+            android:maxLines="1"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:textSize="14sp"
+            tools:text="Front · Office · 0:52" />
+    </LinearLayout>
+
+    <ImageView
+        android:id="@+id/tlMomentStatusIcon"
+        android:layout_width="16dp"
+        android:layout_height="16dp"
+        android:layout_marginStart="@dimen/od_space_8"
+        android:importantForAccessibility="no"
+        android:scaleType="centerInside"
+        android:visibility="gone"
+        tools:src="@drawable/tl_status_dot"
+        tools:visibility="visible" />
+
+    <TextView
+        android:id="@+id/tlMomentStatus"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/od_space_4"
+        android:fontFamily="sans-serif-medium"
+        android:maxLines="1"
+        android:textSize="14sp"
+        android:visibility="gone"
+        tools:text="Alert"
+        tools:visibility="visible" />
+</LinearLayout>

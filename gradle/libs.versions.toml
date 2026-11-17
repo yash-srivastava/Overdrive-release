@@ -16,6 +16,7 @@ zxing = "3.5.3"
 maplibre = "11.13.5"
 dynamicanimation = "1.1.0"
 transition = "1.5.0"
+bouncyCastle = "1.79"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -27,7 +28,7 @@ material = { group = "com.google.android.material", name = "material", version.r
 firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebaseBom" }
 firebase-database = { group = "com.google.firebase", name = "firebase-database-ktx" }
 webrtc = { group = "io.getstream", name = "stream-webrtc-android", version = "1.3.0" }
-dadb = { group = "dev.mobile", name = "dadb", version = "1.2.8" }
+dadb = { group = "dev.mobile", name = "dadb", version = "2.0.0" }
 rtmp-client = { group = "com.github.pedroSG94.RootEncoder", name = "library", version = "2.4.4" }
 androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workRuntimeKtx" }
 androidx-navigation-fragment-ktx = { group = "androidx.navigation", name = "navigation-fragment-ktx", version.ref = "navigationKtx" }
@@ -38,6 +39,7 @@ zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" 
 maplibre-android-sdk = { group = "org.maplibre.gl", name = "android-sdk", version.ref = "maplibre" }
 androidx-dynamicanimation = { group = "androidx.dynamicanimation", name = "dynamicanimation", version.ref = "dynamicanimation" }
 androidx-transition = { group = "androidx.transition", name = "transition", version.ref = "transition" }
+bouncycastle-bcpkix = { group = "org.bouncycastle", name = "bcpkix-jdk18on", version.ref = "bouncyCastle" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -176,6 +176,9 @@
     "tyre_wheel_pressure": "{0} ({1})"
   },
   "telegram": {
+    "deterrent_triggered": "Caydırıcı tetiklendi: {0}",
+    "deterrent_screen": "Ekran",
+    "deterrent_cloud": "Bulut",
     "recording_caption": "📹 Kayıt ({0}) - {1} sn",
     "recording_caption_no_label": "📹 Kayıt - {0} sn",
     "proximity_alert": "🚨 *Yakınlık uyarısı*\nZaman: {0}\nTetikleyici: {1} ({2})\nKayıt başladı…",
@@ -501,6 +504,7 @@
   },
   "vehicle_control": {
     "blocked_driving": "Araç hareket halindeyken bu işlem kullanılamaz",
+    "blocked_unconfirmed": "Aracın park hâlinde olduğu şu anda doğrulanamıyor. Birazdan tekrar deneyin.",
     "cloud_required": "Bu kontrolü kullanmak için Ayarlarda BYD hesabını bağlayın",
     "cloud_sent": "Bulut yoluyla gönderilir",
     "cloud_unavailable_used_local": "Bulut kullanılamıyor  kullanılmış doğrudan bağlantı",

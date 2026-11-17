@@ -46,6 +46,16 @@ public class AvcHalWarmup {
         return com.overdrive.app.camera.camera2.Camera2Platform.isSelected();
     }
 
+    // BYD100F DiLink 100: AVMCamera streams without the BYD 360 app, so it is never relaunched
+    // periodically there (the cold-open warmup still runs as before).
+    private static boolean isDiLink100AvmPath() {
+        try {
+            return com.overdrive.app.camera.DiLink100Platform.isAvmPathActive();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     /** Time to wait after launching com.byd.avc before opening our camera. */
     private static final long HAL_WARMUP_DELAY_MS = 4000;
 
@@ -128,6 +138,16 @@ public class AvcHalWarmup {
     private static final Object WARMUP_LANE = new Object();
     private static volatile boolean coldOpenWarmupInProgress;
     private static volatile long lastWarmupCompletedNanos = Long.MIN_VALUE;
+    // Frame-dead camera: bring a running com.byd.avc to the front once, parked, at most every
+    // 10 min. elapsedRealtime ms; 0 = none. The last launch survives daemon restarts.
+    private static final java.util.concurrent.atomic.AtomicLong recoveryLaunchRequestedMs =
+            new java.util.concurrent.atomic.AtomicLong(0L);
+    private static long lastRecoveryLaunchMs = 0L;            // WARMUP_LANE
+    private static boolean lastRecoveryLaunchLoaded = false;  // WARMUP_LANE
+    private static final String RECOVERY_LAUNCH_MARKER =
+            "/data/local/tmp/overdrive_avc_recovery_launch";
+    private static final long RECOVERY_LAUNCH_REQUEST_TTL_MS = 5L * 60_000L;
+    private static final long RECOVERY_LAUNCH_MIN_INTERVAL_MS = 10L * 60_000L;
     private static final AvcHalWarmup COLD_OPEN_WARMUP = new AvcHalWarmup();
     private static final java.util.concurrent.ScheduledExecutorService
             KEEP_ALIVE_HANDOFF_SCHEDULER =
@@ -281,6 +301,8 @@ public class AvcHalWarmup {
                 }
             }
 
+            final boolean recoveryRequested =
+                    isRecoveryLaunchDue(android.os.SystemClock.elapsedRealtime());
             coldOpenWarmupInProgress = true;
             try {
                 logger.info("Warming up camera HAL via com.byd.avc (waiting " +
@@ -291,8 +313,10 @@ public class AvcHalWarmup {
                         + "suppressing launcher Activity");
                     return false;
                 }
-                boolean launchAttempted =
-                        beforeLaunch.state != AvcProbeState.RUNNING;
+                // Re-checked after the probe: the car may have left P meanwhile.
+                final boolean recoveryLaunch = recoveryRequested && isParkedForRecoveryLaunch();
+                boolean launchAttempted = recoveryLaunch
+                        || beforeLaunch.state != AvcProbeState.RUNNING;
                 boolean launched = false;
                 if (launchAttempted) {
                     if (beforeLaunch.state == AvcProbeState.UNKNOWN) {
@@ -304,7 +328,14 @@ public class AvcHalWarmup {
                                 + beforeLaunch.detail
                                 + "); retaining explicit cold-open launch");
                     }
+                    if (recoveryLaunch && beforeLaunch.state == AvcProbeState.RUNNING) {
+                        logger.warn("Camera delivered no frames across reopens — "
+                                + "bringing com.byd.avc to the front (" + beforeLaunch.detail + ")");
+                    }
                     launched = launchAvc();
+                    if (recoveryLaunch && launched) {
+                        noteRecoveryLaunch(android.os.SystemClock.elapsedRealtime());
+                    }
                 } else {
                     logger.info("AVC already running (" + beforeLaunch.detail
                             + "); skipping foreground Activity launch");
@@ -410,6 +441,88 @@ public class AvcHalWarmup {
         }
     }
 
+    /** Camera proven frame-dead: the next fresh legacy warmup brings com.byd.avc to the front. */
+    public static void requestRecoveryLaunch(String reason) {
+        long now = Math.max(1L, android.os.SystemClock.elapsedRealtime());
+        if (recoveryLaunchRequestedMs.getAndSet(now) == 0L) {
+            logger.info("AVC recovery relaunch requested (" + reason + ")");
+        }
+    }
+
+    /** The camera delivered a frame: drop any pending recovery relaunch. */
+    public static void cancelRecoveryLaunch() {
+        if (recoveryLaunchRequestedMs.get() != 0L) {
+            recoveryLaunchRequestedMs.set(0L);
+        }
+    }
+
+    /** WARMUP_LANE. A live request, outside the rate limit, with the car parked. */
+    private static boolean isRecoveryLaunchDue(long nowMs) {
+        long requested = recoveryLaunchRequestedMs.get();
+        if (requested == 0L) return false;
+        if (nowMs - requested > RECOVERY_LAUNCH_REQUEST_TTL_MS || nowMs < requested) {
+            recoveryLaunchRequestedMs.compareAndSet(requested, 0L);
+            return false;
+        }
+        long last = lastRecoveryLaunchMs();
+        if (last > 0L && last <= nowMs && nowMs - last < RECOVERY_LAUNCH_MIN_INTERVAL_MS) {
+            return false;
+        }
+        return isParkedForRecoveryLaunch();
+    }
+
+    /** WARMUP_LANE. The marker holds "bootId elapsedMs" of the last launch. */
+    private static long lastRecoveryLaunchMs() {
+        if (!lastRecoveryLaunchLoaded) {
+            lastRecoveryLaunchLoaded = true;
+            try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                    new java.io.FileReader(RECOVERY_LAUNCH_MARKER))) {
+                String line = reader.readLine();
+                String[] parts = line != null ? line.trim().split(" ") : new String[0];
+                long stored = parts.length == 2 && parts[0].equals(bootId())
+                        ? Long.parseLong(parts[1]) : 0L;
+                if (stored > 0L && stored <= android.os.SystemClock.elapsedRealtime()) {
+                    lastRecoveryLaunchMs = stored;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return lastRecoveryLaunchMs;
+    }
+
+    private static String bootId() {
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                new java.io.FileReader("/proc/sys/kernel/random/boot_id"))) {
+            String id = reader.readLine();
+            return id != null && !id.trim().isEmpty() ? id.trim() : "-";
+        } catch (Exception e) {
+            return "-";
+        }
+    }
+
+    /** WARMUP_LANE. */
+    private static void noteRecoveryLaunch(long nowMs) {
+        lastRecoveryLaunchMs = nowMs;
+        lastRecoveryLaunchLoaded = true;
+        recoveryLaunchRequestedMs.set(0L);
+        try (java.io.FileWriter writer = new java.io.FileWriter(RECOVERY_LAUNCH_MARKER, false)) {
+            writer.write(bootId() + " " + nowMs);
+        } catch (Exception e) {
+            logger.warn("AVC recovery marker not written: " + e.getMessage());
+        }
+    }
+
+    /** ACC known off, or a fresh gear reading of P: never over a reverse or driving view. */
+    private static boolean isParkedForRecoveryLaunch() {
+        try {
+            if (AccMonitor.isAccStateAuthoritative() && !AccMonitor.isAccOn()) return true;
+            return com.overdrive.app.monitor.GearMonitor.getInstance().getCurrentGearIfFresh()
+                    == com.overdrive.app.monitor.GearMonitor.GEAR_P;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     // ==================== Keep-Alive Watchdog ====================
 
     /**
@@ -427,6 +540,12 @@ public class AvcHalWarmup {
             return;
         }
         if (isCamera2Selected()) {
+            keepAliveDesired = false;
+            keepAliveGeneration++;
+            if (keepAliveThread != null) keepAliveThread.interrupt();
+            return;
+        }
+        if (isDiLink100AvmPath()) {
             keepAliveDesired = false;
             keepAliveGeneration++;
             if (keepAliveThread != null) keepAliveThread.interrupt();
@@ -1121,6 +1240,7 @@ public class AvcHalWarmup {
     public static boolean ensureAvcAlive() {
         if (isDiLink5Selected()) return false;
         if (isCamera2Selected()) return false;
+        if (isDiLink100AvmPath()) return false;
         synchronized (AVC_PROCESS_LANE) {
         if (isDiLink5Selected()) return false;
         // OEM-PARITY: oem never launches com.byd.avc. On dilink4 we make

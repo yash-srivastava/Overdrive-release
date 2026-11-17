@@ -140,6 +140,9 @@ class SettingsPrivacyFragment : Fragment() {
             // gate — afterwards the new stricter gate would drop its own audit line.
             LogManager.getInstance().warn(TAG, "Log level changed: ${existing.minLevel} → $chosen")
             cfg.updateLoggingConfig(existing.copy(minLevel = chosen))
+            // Daemons take the level from the unified config. That write is a blocking IPC call,
+            // so it runs off the UI thread; a single writer keeps rapid taps in order.
+            LOG_LEVEL_WRITER.execute { UnifiedConfigManager.setLogLevel(chosen.name) }
         }
     }
 
@@ -257,5 +260,8 @@ class SettingsPrivacyFragment : Fragment() {
 
     private companion object {
         const val TAG = "SettingsPrivacy"
+        val LOG_LEVEL_WRITER: ExecutorService = Executors.newSingleThreadExecutor { r ->
+            Thread(r, "LogLevelPersist").apply { isDaemon = true }
+        }
     }
 }

@@ -1258,7 +1258,8 @@ public final class GenAiContext {
     static final long MAX_DIAGNOSTIC_LOG_AGE_MS = 48L * 3600_000L;
     private static final java.util.regex.Pattern DIAGNOSTIC_LINE_TS_PATTERN =
             java.util.regex.Pattern.compile(
-                    "(?:([+-]\\d{4})\\s+)?(\\d{4})[-/](\\d{2})[-/](\\d{2})[T\\s](\\d{2}):(\\d{2}):(\\d{2})");
+                    // Anchored: only a leading timestamp dates the line, not one quoted in it.
+                    "^\\[?(?:([+-]\\d{4})\\s+)?(\\d{4})[-/](\\d{2})[-/](\\d{2})[T\\s](\\d{2}):(\\d{2}):(\\d{2})");
 
     static long parseDiagnosticLineTimestampMs(String line) {
         if (line == null || line.isEmpty()) return 0L;
@@ -1414,7 +1415,7 @@ public final class GenAiContext {
                 "(?i)\\b[A-Z]:\\\\[^\\s\"']+",
                 "[REDACTED_PATH]");
         value = value.replaceAll(
-                "(?i)\\b[^\\s/\\\\]+\\.(?:mp4|mkv|mov|ts|jpg|jpeg|png|webp|srt)\\b(?!\\.[A-Za-z0-9_])",
+                "(?i)(?<![^\\s/\\\\])[^\\s/\\\\]+\\.(?:mp4|mkv|mov|ts|jpg|jpeg|png|webp|srt)\\b(?!\\.[A-Za-z0-9_])",
                 "[REDACTED_MEDIA]");
         value = value.replaceAll(
                 "\\b[A-Za-z0-9_\\-+/=]{40,}\\b",

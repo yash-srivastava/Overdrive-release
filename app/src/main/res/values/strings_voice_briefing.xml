@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Trip Briefing voice turn: said once the driver answered the briefing question. -->
+    <string name="voice_brief_starting">Starting directions.</string>
+    <string name="voice_brief_opening_waze">Opening Waze.</string>
+    <string name="voice_brief_opening_gmaps">Opening Google Maps.</string>
+    <string name="voice_brief_starting_car">Starting the car\'s navigation.</string>
+    <string name="voice_brief_app_missing">That app isn\'t installed. Choose one on the screen.</string>
+</resources>

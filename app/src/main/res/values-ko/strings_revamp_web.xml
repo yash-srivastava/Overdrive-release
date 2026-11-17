@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="web_state_retry_now">지금 다시 시도</string>
+    <string name="web_state_retry_in">자동으로 다시 시도 · %1$d초 후 다시 시도</string>
+    <string name="web_state_retrying_now">자동으로 다시 시도 · 지금 시도하는 중…</string>
+    <string name="web_state_sign_in_title">이 페이지에 로그인할 수 없습니다</string>
+    <string name="web_state_sign_in_body">카메라 데몬은 실행 중이지만 앱의 로그인을 받아들이지 않았습니다. ADB가 연결되어 있으면 OverDrive가 자동으로 복구합니다.</string>
+</resources>

@@ -22,8 +22,11 @@
       at all. canPerformGestures backs the dispatchGesture coordinate-tap
       fallback, and typeWindowsChanged notices the dialog appear — the enabler
       polls as its primary mechanism, so that event is belt-and-suspenders.
+   5. Optional wireless-debugging dialog handling — typeWindowStateChanged and
+      flagReportViewIds allow the separately enabled controller to inspect only
+      the matching SystemUI event window. Existing event consumers remain active.
 
-  Event types and flags are the UNION of (2), (3) and (4). notificationTimeout
+  Event types and flags are the UNION of (2), (3), (4) and (5). notificationTimeout
   stays at the key filter's 100 ms: a longer value coalesces event delivery,
   which is wrong for a service that also filters hardware keys, and neither the
   capture hook nor the enabler depends on it.

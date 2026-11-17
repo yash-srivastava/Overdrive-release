@@ -110,6 +110,8 @@ public final class ClusterProjectionController {
     // keeping them equal at 1s avoids that risk. Total open ≈ 2×1s + settle ≈ 3s.
     private static final long DEFAULT_SIZE_STEP_MS = 1000;
     private static final long DEFAULT_OPEN_STEP_DELAY_MS = 1000;
+    // App/map/layout opens use the 3 s car-proven gaps; blind-spot keeps the faster defaults.
+    private static final long SUSTAINED_OPEN_STEP_MS = 3000;
     private static final long CLOSE_STEP_DELAY_MS = 1000;  // between 18→0
     private static final long READY_POLL_MS = 120;
     private static final long READY_TIMEOUT_MS = 8000;
@@ -179,9 +181,30 @@ public final class ClusterProjectionController {
     private static final int BOOT_RESTORE_MAX_ATTEMPTS = 3;
     private static final long[] BOOT_RESTORE_RETRY_DELAYS_MS =
             new long[] {500L, 1_500L};
-    // DI3 sendInfo plus its durable marker writes routinely takes 2-6 s; only a
-    // wedged service may reach the indeterminate path.
+    // Only a wedged service reaches this; its call stays outstanding until it returns.
     private static final long LEGACY_COMMAND_WAIT_TIMEOUT_MS = 20_000L;
+    // Completion probes of legacy commands still blocked after their wait expired.
+    private static final java.util.List<java.util.function.BooleanSupplier> sHungLegacyCommands =
+            new java.util.ArrayList<>();
+    // An answer from AutoContainer this process: a later "service absent" is then a restart, not
+    // proof that no projection was ever opened.
+    private static volatile boolean sLegacyServiceAnswered;
+    // Restore passes retried after a failed close, so hidden gauges are not left until the next open.
+    private static final long[] RESTORE_RETRY_DELAYS_MS =
+            new long[] {5_000L, 15_000L, 30_000L, 60_000L, 120_000L};
+    private static final java.util.concurrent.atomic.AtomicInteger sRestoreRetryPass =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private static final long GATE_COMMIT_WAIT_MS = 3_000L;
+    private static final long GATE_IO_WAIT_MS = 10_000L;
+    private static volatile Thread sGateIoThread;
+    // Serializes gate writes and clears so an open's write can never land after its close's clear.
+    private static final java.util.concurrent.ExecutorService GATE_IO =
+            java.util.concurrent.Executors.newSingleThreadExecutor(task -> {
+                Thread thread = new Thread(task, "ClusterProjGate");
+                thread.setDaemon(true);
+                sGateIoThread = thread;
+                return thread;
+            });
 
     private static final class BootRestoreTicket {
         final CountDownLatch completion = new CountDownLatch(1);
@@ -192,6 +215,9 @@ public final class ClusterProjectionController {
     enum LegacyCommandResult {
         ACCEPTED,
         REJECTED,
+        /** The call returned with an error; nothing is pending and a retry is safe. */
+        FAILED,
+        /** The call is still blocked in this process. */
         INDETERMINATE,
         /**
          * No AutoContainer endpoint answered the legacy transport: the direct
@@ -235,11 +261,8 @@ public final class ClusterProjectionController {
         }
 
         /**
-         * Only an unresolved same-boot command keeps admission blocked after a
-         * restore pass has FINISHED: a command that may still land must never
-         * be reordered against a fresh open. Every other outcome either
-         * restored the gauges or cannot be improved by refusing new sessions
-         * (a later successful close performs the same 18→0→profile restore).
+         * Only a command still blocked in the OEM service keeps admission blocked
+         * after a restore pass has FINISHED, and only until that call returns.
          */
         public boolean blocksAdmissionAfterRestore() {
             return this == SAME_BOOT_INDETERMINATE;
@@ -284,14 +307,9 @@ public final class ClusterProjectionController {
     private enum LegacyTransportResult {
         ACCEPTED,
         REJECTED,
+        FAILED,
         UNAVAILABLE,
         INDETERMINATE
-    }
-
-    private enum LegacyCommandMarkerResult {
-        MARKED,
-        FAILED_BEFORE_DISPATCH,
-        SAME_BOOT_INDETERMINATE
     }
 
     private static final class LegacyCommandAttempt {
@@ -510,19 +528,26 @@ public final class ClusterProjectionController {
                         .isLegacyProjectionBlockedByDiLink5Recovery();
     }
 
-    /**
-     * True only when {@code surveillance} positively records an unresolved legacy command from
-     * this kernel boot. Unreadable markers and unknown boot ids answer false.
-     */
-    public static boolean isLegacyCommandUnresolvedThisBoot(
-            org.json.JSONObject surveillance) {
-        try {
-            LegacyGateSnapshot marker = parseLegacyGateSnapshot(surveillance);
-            if (!marker.readable || !marker.commandIndeterminate) return false;
-            String origin = canonicalBootIdOrNull(marker.commandBootId);
-            return origin != null && origin.equals(readCurrentBootId());
-        } catch (Throwable ignored) {
-            return false;
+    /** Legacy open progress without constructing the controller: 1 ready, 0 opening, -1 not open. */
+    public static int legacyOpenProgress() {
+        ClusterProjectionController i = instance;
+        if (i == null || com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) return -1;
+        int state = i.projState;
+        if (state == ST_OPEN) return i.ready ? 1 : 0;
+        return state == ST_OPENING ? 0 : -1;
+    }
+
+    /** True while an earlier legacy command is still blocked inside the OEM service. */
+    static boolean legacyCommandStillBlocked() {
+        synchronized (sHungLegacyCommands) {
+            sHungLegacyCommands.removeIf(java.util.function.BooleanSupplier::getAsBoolean);
+            return !sHungLegacyCommands.isEmpty();
+        }
+    }
+
+    private static void trackHungLegacyCommand(java.util.function.BooleanSupplier finished) {
+        synchronized (sHungLegacyCommands) {
+            sHungLegacyCommands.add(finished);
         }
     }
 
@@ -615,6 +640,11 @@ public final class ClusterProjectionController {
      * is held. Re-acquiring the same token is idempotent. See {@link #releaseSustained(String)}.
      */
     public boolean acquireSustained(String token) {
+        if (!com.overdrive.app.launcher.layout.LayoutModeGate.allowsSustainedToken(
+                token, com.overdrive.app.launcher.ClusterLayouts.isActive())) {
+            logger.warn("cluster projection: Layouts owns admission");
+            return false;
+        }
         if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) {
             logger.warn("legacy cluster projection is unavailable on the DI5 "
                     + "cluster transport");
@@ -847,7 +877,11 @@ public final class ClusterProjectionController {
         watchdogHandler.removeCallbacks(maxCapTask);
         watchdogHandler.removeCallbacks(lingerTask);
         if (epoch < 0) return;
-        sLegacyBootRestoreBlocksAdmission = true;
+        synchronized (this) {
+            // A newer close may already have finished while this one detached its dependents.
+            if (seqEpoch != epoch || projState != ST_CLOSING) return;
+            sLegacyBootRestoreBlocksAdmission = true;
+        }
         if (!dependentsDetached) {
             logger.warn("projection source close deferred until every mirror "
                     + "consumer confirms detach");
@@ -861,8 +895,10 @@ public final class ClusterProjectionController {
     }
 
     private boolean detachProjectionDependents(String reason) {
+        com.overdrive.app.launcher.ClusterLayouts.invalidateForProjectionClose(reason);
         boolean viewDetached = false;
         boolean clusterDetached = false;
+        boolean layoutsDetached = false;
         try {
             viewDetached =
                     ClusterViewMirrorService
@@ -879,7 +915,12 @@ public final class ClusterProjectionController {
             logger.warn("cluster mirror pre-close detach failed: "
                     + t.getMessage());
         }
-        return viewDetached && clusterDetached;
+        try {
+            layoutsDetached = com.overdrive.app.launcher.ClusterLayouts.beforeProjectionClose(reason);
+        } catch (Throwable t) {
+            logger.warn("layout pre-close detach failed: " + t.getMessage());
+        }
+        return viewDetached && clusterDetached && layoutsDetached;
     }
 
     private void continueForceCloseAfterDependentDetach(
@@ -924,50 +965,46 @@ public final class ClusterProjectionController {
         try {
             if (shuttingDown) return;        // terminal — never issue open opcodes during teardown
             if (epoch != seqEpoch) return;   // superseded before we started
-            if (!writeGateFlags(
-                    System.currentTimeMillis() + maxProjectionMs)) {
-                logger.error("projection open refused: durable recovery "
-                        + "marker could not be committed");
-                forceClose("open-marker-failed");
-                return;
-            }
+            sRestoreRetryPass.set(0);
+            final java.util.concurrent.Future<Boolean> gate =
+                    writeGateFlagsAsync(System.currentTimeMillis() + maxProjectionMs);
             synchronized (this) {
                 if (epoch != seqEpoch
                         || projState != ST_OPENING
                         || shuttingDown) {
-                    // A concurrent close owns the durable marker and will
-                    // consume it only after its restore is confirmed.
                     return;
                 }
             }
-            final int sizeOp = sizeProfileOpcode;
-            logger.info("projection open: " + (sizeOp != 0 ? sizeOp + "→" : "") + OP_FULLSCREEN_ON + "→" + OP_DI4_MODE);
-            // Size-profile step is optional (0 = skip). Wrong profile = wrong cluster aspect.
-            if (sizeOp != 0
-                    && !sendOpenInfo(
-                            sizeOp, epoch, "open-size-failed")) {
+            // Blind-spot opens stay fast; app/map/layout opens wait for the crash-recovery gate.
+            final boolean sustained = sustainedHeld();
+            // An existing fission display only needs projection on: a size command or 35 against
+            // it can recreate the display under a new id.
+            if (fissionDisplayExists()) {
+                logger.info("projection open: " + OP_FULLSCREEN_ON
+                        + " (cluster display already present)");
+                if (sustained) awaitGateCommit(gate);
+                if (epoch != seqEpoch) return;
+                if (!sendOpenStep(OP_FULLSCREEN_ON, epoch, true)) return;
+                pollReady(0, epoch);
                 return;
             }
-            // First gap: short — size profile settles fast (0 if we skipped it).
-            final long firstGap = (sizeOp != 0) ? sizeStepMs : 0;
-            // Second gap: the critical one — 16 must establish the surface before 35.
-            final long openGap = openStepDelayMs;
+            final int sizeOp = sizeProfileOpcode;
+            final long firstGap = sizeOp == 0 ? 0
+                    : sustained ? Math.max(sizeStepMs, SUSTAINED_OPEN_STEP_MS) : sizeStepMs;
+            // 16 must establish the surface before 35 creates the display.
+            final long openGap = sustained
+                    ? Math.max(openStepDelayMs, SUSTAINED_OPEN_STEP_MS) : openStepDelayMs;
+            logger.info("projection open: " + (sizeOp != 0 ? sizeOp + "→" : "") + OP_FULLSCREEN_ON
+                    + "→" + OP_DI4_MODE + " (gaps " + firstGap + "/" + openGap + " ms)");
+            if (sizeOp != 0 && !sendOpenStep(sizeOp, epoch, false)) return;
             projHandler.postDelayed(() -> {
                 if (epoch != seqEpoch) return;   // a close/re-open superseded us
-                if (!sendOpenInfo(
-                        OP_FULLSCREEN_ON,
-                        epoch,
-                        "open-fullscreen-failed")) {
-                    return;
-                }
+                if (sustained) awaitGateCommit(gate);
+                if (epoch != seqEpoch) return;
+                if (!sendOpenStep(OP_FULLSCREEN_ON, epoch, false)) return;
                 projHandler.postDelayed(() -> {
                     if (epoch != seqEpoch) return;
-                    if (!sendOpenInfo(
-                            OP_DI4_MODE,
-                            epoch,
-                            "open-di4-failed")) {
-                        return;
-                    }
+                    if (!sendOpenStep(OP_DI4_MODE, epoch, false)) return;
                     pollReady(0, epoch);
                 }, openGap);
             }, firstGap);
@@ -977,8 +1014,12 @@ public final class ClusterProjectionController {
         }
     }
 
-    private boolean sendOpenInfo(
-            int op, int epoch, String rejectionReason) {
+    /**
+     * True when the sequence may continue. A failed step of the creation sequence does not stop
+     * it (the next opcode can still bring the display up); a missing service or a failed
+     * projection-on for an existing display ends the open.
+     */
+    private boolean sendOpenStep(int op, int epoch, boolean failureEndsOpen) {
         LegacyCommandResult result = sendInfoResult(op);
         if (result == LegacyCommandResult.ACCEPTED) return true;
         if (result == LegacyCommandResult.INDETERMINATE) {
@@ -993,21 +1034,24 @@ public final class ClusterProjectionController {
             watchdogHandler.removeCallbacks(maxCapTask);
             watchdogHandler.removeCallbacks(lingerTask);
             notifyPipelineClosed();
+            recordLegacyVerdict(LEGACY_VERDICT_INDETERMINATE,
+                    "legacy open opcode " + op + " is still blocked in the OEM service");
             logger.error("projection open opcode " + op
-                    + " is indeterminate; refusing same-boot close/reopen "
-                    + "and retaining durable ownership until a verified OS reboot");
+                    + " is still blocked; projection admission waits for it to return");
             return false;
         }
-        // Definitive refusal of an OPEN opcode: remember why for the status
-        // endpoint (the cast UI otherwise only sees "cast failed"). The close
-        // that forceClose issues next re-derives the boot-recovery verdict.
+        String detail = "legacy open opcode " + op + " " + result + " "
+                + compactShellOutput(sLastLegacyShellOutput);
+        if (result != LegacyCommandResult.UNAVAILABLE && !failureEndsOpen) {
+            logger.warn(detail + "; continuing the open sequence");
+            return true;
+        }
         recordLegacyVerdict(
-                result == LegacyCommandResult.UNAVAILABLE
-                        ? LEGACY_VERDICT_UNAVAILABLE
-                        : LEGACY_VERDICT_UNSUPPORTED,
-                "legacy open opcode " + op + " " + result + " "
-                        + compactShellOutput(sLastLegacyShellOutput));
-        forceClose(rejectionReason);
+                result == LegacyCommandResult.UNAVAILABLE ? LEGACY_VERDICT_UNAVAILABLE
+                        : result == LegacyCommandResult.REJECTED ? LEGACY_VERDICT_UNSUPPORTED
+                        : LEGACY_VERDICT_RETRYABLE,
+                detail);
+        forceClose("open-" + op + "-" + result.name().toLowerCase(java.util.Locale.ROOT));
         return false;
     }
 
@@ -1256,17 +1300,17 @@ public final class ClusterProjectionController {
             int epoch,
             boolean restoreCommandsSucceeded,
             String failureReason) {
-        final boolean fullyRestored;
         synchronized (this) {
             if (epoch != seqEpoch || projState != ST_CLOSING) return;
-            // Keep the epoch stable through the durable clear. Otherwise a
-            // concurrent newer forceClose could supersede this close after the
-            // check but before the disk write, letting this stale completion
-            // erase the newer close's crash-recovery marker.
-            boolean markerCleared =
-                    restoreCommandsSucceeded && clearGateFlagsStatic();
-            fullyRestored =
-                    restoreCommandsSucceeded && markerCleared;
+        }
+        // No open can start while CLOSING, and the gate FIFO orders any later open's write after
+        // this clear, so the clear runs outside the controller lock.
+        boolean markerCleared =
+                restoreCommandsSucceeded && clearGateFlagsStatic();
+        final boolean fullyRestored =
+                restoreCommandsSucceeded && markerCleared;
+        synchronized (this) {
+            if (epoch != seqEpoch || projState != ST_CLOSING) return;
             projState = ST_CLOSED;
             ready = false;
         }
@@ -1349,23 +1393,17 @@ public final class ClusterProjectionController {
                     return LegacyBootRecoveryResult.RETRYABLE_FAILURE;
                 }
                 if (!marker.readable) {
-                    sLegacyBootRestoreBlocksAdmission = true;
+                    // The restore is harmless on native gauges and its clear rewrites clean fields.
                     logger.warn("legacy projection recovery fields are "
-                            + "malformed; admission remains blocked");
-                    return LegacyBootRecoveryResult.RETRYABLE_FAILURE;
-                }
-                if (!marker.hasRecoveryOwnership()) {
+                            + "malformed; restoring gauges and rewriting them");
+                } else if (!marker.hasRecoveryOwnership()) {
                     sLegacyBootRestoreBlocksAdmission = false;
                     return LegacyBootRecoveryResult.RECOVERED;
                 }
-                if (legacyIndeterminateCommandMayStillComplete(
-                        marker.commandIndeterminate,
-                        marker.commandBootId,
-                        readCurrentBootId())) {
+                if (legacyCommandStillBlocked()) {
                     sLegacyBootRestoreBlocksAdmission = true;
-                    logger.warn("legacy projection command may still complete "
-                            + "in this OS boot; refusing an unordered 18→0 "
-                            + "restore until a verified reboot");
+                    logger.warn("an earlier legacy projection command is still "
+                            + "blocked; the gauge restore runs once it returns");
                     return LegacyBootRecoveryResult
                             .SAME_BOOT_INDETERMINATE;
                 }
@@ -1387,13 +1425,6 @@ public final class ClusterProjectionController {
                                 .isLegacyProjectionBlockedByDiLink5Recovery()) {
                     logger.warn("deferring legacy projection gate restore "
                             + "until DI5 ownership recovery completes");
-                    return LegacyBootRecoveryResult.RETRYABLE_FAILURE;
-                }
-                if (!ensureLegacyBootRecoveryOwnership(marker)) {
-                    sLegacyBootRestoreBlocksAdmission = true;
-                    logger.warn("stale legacy projection ownership could not "
-                            + "be promoted to a full recovery gate; refusing "
-                            + "command dispatch");
                     return LegacyBootRecoveryResult.RETRYABLE_FAILURE;
                 }
                 logger.warn("stale cluster-projection gate at boot "
@@ -1464,7 +1495,11 @@ public final class ClusterProjectionController {
                 }
                 lastCloseResult = closeResult + " "
                         + compactShellOutput(sLastLegacyShellOutput);
-                if (closeResult == LegacyCommandResult.UNAVAILABLE) {
+                if (closeResult == LegacyCommandResult.UNAVAILABLE
+                        && sLegacyServiceAnswered) {
+                    // The service answered earlier in this process, so it is restarting: retry later.
+                    lastCloseResult = closeResult + " (service answered earlier; restarting?)";
+                } else if (closeResult == LegacyCommandResult.UNAVAILABLE) {
                     // The legacy endpoint ("AutoContainer") is not registered.
                     // Every legacy command — including the open that wrote
                     // this marker — is addressed to that exact name, so no
@@ -1605,11 +1640,9 @@ public final class ClusterProjectionController {
             BootRestoreTicket ticket,
             LegacyBootRecoveryResult recoveryResult) {
         ticket.result = recoveryResult;
-        // A finished pass blocks admission only while a same-boot command may
-        // still land (ordering hazard). RETRYABLE/UNSUPPORTED keep the durable
-        // marker, so the next boot re-runs this restore and any later
-        // successful close performs the same 18→0→profile; refusing new
-        // sessions in the meantime never restored a single gauge.
+        // A finished pass blocks admission only while a command is still blocked
+        // in the OEM service. RETRYABLE/UNSUPPORTED keep the gate, so the next
+        // boot or any later successful close performs the same 18→0→profile.
         sLegacyBootRestoreBlocksAdmission =
                 recoveryResult.blocksAdmissionAfterRestore();
         ticket.completion.countDown();
@@ -1618,13 +1651,53 @@ public final class ClusterProjectionController {
                 sBootRestoreTicket = null;
             }
         }
+        if (recoveryResult == LegacyBootRecoveryResult.RETRYABLE_FAILURE) {
+            scheduleRestoreRetry();
+        } else if (recoveryResult.isTerminal()) {
+            sRestoreRetryPass.set(0);
+        }
+    }
+
+    /** Re-runs the gauge restore later; runs on projThread only while no session is open. */
+    private static void scheduleRestoreRetry() {
+        final int pass = sRestoreRetryPass.getAndIncrement();
+        if (pass >= RESTORE_RETRY_DELAYS_MS.length) {
+            logger.warn("legacy gauge restore retries exhausted; the gate is kept for the next "
+                    + "close or boot");
+            return;
+        }
+        final long delay = RESTORE_RETRY_DELAYS_MS[pass];
+        logger.info("legacy gauge restore incomplete; retrying in " + delay + " ms");
+        try {
+            Thread timer = new Thread(() -> {
+                try {
+                    Thread.sleep(delay);
+                } catch (InterruptedException interrupted) {
+                    return;
+                }
+                ClusterProjectionController current = instance;
+                if (current == null) {
+                    clearStaleGateAtBootSynchronously();
+                    return;
+                }
+                // On projThread an open that starts meanwhile queues behind this restore.
+                current.projHandler.post(() -> {
+                    if (current.shuttingDown || current.projState != ST_CLOSED) return;
+                    clearStaleGateAtBootSynchronously();
+                });
+            }, "ClusterProjRestoreRetry");
+            timer.setDaemon(true);
+            timer.start();
+        } catch (Throwable failure) {
+            logger.warn("unable to schedule the gauge restore retry: " + failure.getMessage());
+        }
     }
 
     /**
      * Called by {@code DiLink5ClusterCast} when its bounded recovery ladder is
      * exhausted for a NON-indeterminate reason. Releases the legacy admission
      * block unless a restore pass is still in flight (its own finish decides)
-     * or the durable marker proves a same-boot command may still complete.
+     * or a legacy command is still blocked in the OEM service.
      *
      * @return true when admission is no longer blocked by this controller
      */
@@ -1638,13 +1711,7 @@ public final class ClusterProjectionController {
                         UnifiedConfigManager.readDurableConfigStrict();
                 LegacyGateSnapshot marker = parseLegacyGateSnapshot(
                         root.optJSONObject("surveillance"));
-                if (!marker.readable) {
-                    return false;
-                }
-                if (legacyIndeterminateCommandMayStillComplete(
-                        marker.commandIndeterminate,
-                        marker.commandBootId,
-                        readCurrentBootId())) {
+                if (!marker.readable || legacyCommandStillBlocked()) {
                     return false;
                 }
             } catch (Throwable readFailure) {
@@ -1773,70 +1840,37 @@ public final class ClusterProjectionController {
 
     // ── UCM gate flags ──────────────────────────────────────────────────────────
 
-    /**
-     * A command-only marker from an older boot is valid evidence that the
-     * compositor may need recovery, but it is not sufficient ownership for
-     * dispatching a new command: every physical 18→0→profile step must retain
-     * {@code forceStop=true} until the complete restore is confirmed.
-     */
-    static boolean legacyBootRecoveryOwnershipNeedsPromotion(
-            LegacyGateSnapshot marker) {
-        return marker != null
-                && marker.readable
-                && marker.hasRecoveryOwnership()
-                && (!marker.forceStop || marker.commandIndeterminate);
-    }
-
-    /**
-     * Normalize legacy/partial recovery evidence into the full crash-safe gate
-     * before any boot-restore opcode is dispatched. The caller has already
-     * proved that an indeterminate command belongs to an older OS boot, so its
-     * worker cannot still complete and the command fields can be retired in
-     * the same atomic config commit that establishes {@code forceStop}.
-     */
-    private static boolean ensureLegacyBootRecoveryOwnership(
-            LegacyGateSnapshot marker) {
-        if (marker == null
-                || !marker.readable
-                || !marker.hasRecoveryOwnership()) {
-            return false;
-        }
-        if (!legacyBootRecoveryOwnershipNeedsPromotion(marker)) {
-            return marker.forceStop;
-        }
-
-        Map<String, Object> ownership = new HashMap<>();
-        ownership.put(GATE_FORCE_STOP, true);
-        ownership.put(GATE_ACTIVE_UNTIL, 0L);
-        ownership.put(GATE_COMMAND_INDETERMINATE, false);
-        ownership.put(GATE_COMMAND_BOOT_ID, "");
+    /** Queues the crash-recovery gate write; null when it could not be queued. */
+    private java.util.concurrent.Future<Boolean> writeGateFlagsAsync(long activeUntilMs) {
         try {
-            if (!UnifiedConfigManager.updateValues(
-                    "surveillance", ownership)) {
-                return false;
-            }
-            org.json.JSONObject root =
-                    UnifiedConfigManager.readDurableConfigStrict();
-            LegacyGateSnapshot promoted = parseLegacyGateSnapshot(
-                    root.optJSONObject("surveillance"));
-            boolean confirmed = promoted.readable
-                    && promoted.forceStop
-                    && promoted.activeUntilMs == 0L
-                    && !promoted.commandIndeterminate
-                    && promoted.commandBootId.isEmpty();
-            if (confirmed) {
-                logger.warn("promoted stale legacy projection ownership to "
-                        + "a full recovery gate before ordered restore");
-            }
-            return confirmed;
-        } catch (Throwable failure) {
-            logger.warn("failed to promote legacy projection recovery "
-                    + "ownership: " + failure.getMessage());
-            return false;
+            return GATE_IO.submit(() -> {
+                boolean written = writeGateFlagsNow(activeUntilMs);
+                if (!written) {
+                    logger.error("projection gate could not be persisted; a daemon crash "
+                            + "during this projection will not restore the gauges at boot");
+                }
+                return written;
+            });
+        } catch (Throwable rejected) {
+            logger.error("projection gate write could not be queued: " + rejected.getMessage());
+            return null;
         }
     }
 
-    private boolean writeGateFlags(long activeUntilMs) {
+    /** Bounded wait so 16 follows the gate commit; a slow config write never blocks the open. */
+    private static void awaitGateCommit(java.util.concurrent.Future<Boolean> gate) {
+        if (gate == null) return;
+        try {
+            gate.get(GATE_COMMIT_WAIT_MS, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        } catch (Throwable slow) {
+            logger.warn("projection gate not committed before projection-on: "
+                    + slow.getClass().getSimpleName());
+        }
+    }
+
+    private static boolean writeGateFlagsNow(long activeUntilMs) {
         Map<String, Object> m = new HashMap<>();
         m.put(GATE_FORCE_STOP, true);
         m.put(GATE_ACTIVE_UNTIL, activeUntilMs);
@@ -1853,8 +1887,7 @@ public final class ClusterProjectionController {
                     root.optJSONObject("surveillance"));
             return marker.readable
                     && marker.forceStop
-                    && marker.activeUntilMs == activeUntilMs
-                    && !marker.commandIndeterminate;
+                    && marker.activeUntilMs == activeUntilMs;
         } catch (Throwable failure) {
             logger.warn("failed to persist legacy projection ownership "
                     + "marker: " + failure.getMessage());
@@ -1862,41 +1895,38 @@ public final class ClusterProjectionController {
         }
     }
 
-    private boolean clearGateFlags() { return clearGateFlagsStatic(); }
-
+    /** Runs after any queued gate write; false keeps the gate for the boot restore. */
     private static boolean clearGateFlagsStatic() {
-        // Retiring the full recovery gate must be serialized with
-        // mark+dispatch. Otherwise this method could read C=false, a command
-        // could then durably mark+verify C=true, and this method's later write
-        // could erase both F and C immediately before the physical dispatch.
-        synchronized (LEGACY_COMMAND_DISPATCH_LOCK) {
-            return clearGateFlagsUnderCommandLock();
+        if (Thread.currentThread() == sGateIoThread) return clearGateFlagsNow();
+        try {
+            return GATE_IO.submit(ClusterProjectionController::clearGateFlagsNow)
+                    .get(GATE_IO_WAIT_MS, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (Throwable failure) {
+            logger.warn("legacy projection gate clear did not complete: "
+                    + failure.getMessage());
+            return false;
         }
     }
 
-    private static boolean clearGateFlagsUnderCommandLock() {
-        // Read-before-write: skip the full-config disk rewrite when the flags are
-        // already clear. This makes the common cases free — the head-unit-default
-        // disableBlindSpot() forceClose("bs-disabled") (projection never opened) and
-        // any forceClose that early-returns at ST_CLOSED — and is the single
-        // authoritative clear. Physical close paths retain the marker until
-        // 18→0→native-profile restoration has been confirmed.
+    private static boolean clearGateFlagsNow() {
+        // A blocked command may still change the compositor, so its gate must survive.
+        if (legacyCommandStillBlocked()) {
+            logger.warn("keeping the projection gate while a legacy command "
+                    + "is still blocked");
+            return false;
+        }
+        // Read-before-write: an already-clear gate costs no config rewrite. A malformed
+        // gate is overwritten with clean values instead of being kept forever.
         try {
             org.json.JSONObject root =
                     UnifiedConfigManager.readDurableConfigStrict();
             LegacyGateSnapshot marker = parseLegacyGateSnapshot(
                     root.optJSONObject("surveillance"));
-            if (!marker.readable) return false;
-            if (!marker.hasRecoveryOwnership()) {
+            if (marker.readable && !marker.hasRecoveryOwnership()) {
                 return true;
-            }
-            if (legacyIndeterminateCommandMayStillComplete(
-                    marker.commandIndeterminate,
-                    marker.commandBootId,
-                    readCurrentBootId())) {
-                logger.warn("refusing to clear same-boot indeterminate "
-                        + "legacy projection ownership");
-                return false;
             }
         } catch (Throwable ignored) {}
         Map<String, Object> m = new HashMap<>();
@@ -1920,139 +1950,6 @@ public final class ClusterProjectionController {
                     + failure.getMessage());
             return false;
         }
-    }
-
-    private static LegacyCommandMarkerResult
-            markLegacyCommandInFlight() {
-        String bootId = readCurrentBootId();
-        if (bootId.isEmpty()) {
-            logger.warn("cannot mark legacy projection command in flight: "
-                    + "kernel boot id is unavailable");
-            return LegacyCommandMarkerResult.FAILED_BEFORE_DISPATCH;
-        }
-        try {
-            org.json.JSONObject root =
-                    UnifiedConfigManager.readDurableConfigStrict();
-            LegacyGateSnapshot existing = parseLegacyGateSnapshot(
-                    root.optJSONObject("surveillance"));
-            if (!existing.readable) {
-                logger.warn("cannot mark legacy projection command in "
-                        + "flight: durable ownership is malformed");
-                return LegacyCommandMarkerResult
-                        .FAILED_BEFORE_DISPATCH;
-            }
-            if (legacyIndeterminateCommandMayStillComplete(
-                    existing.commandIndeterminate,
-                    existing.commandBootId,
-                    bootId)) {
-                sLegacyBootRestoreBlocksAdmission = true;
-                logger.warn("refusing a second legacy projection command "
-                        + "while the prior same-boot outcome is unknown");
-                return LegacyCommandMarkerResult
-                        .SAME_BOOT_INDETERMINATE;
-            }
-            if (!existing.forceStop) {
-                sLegacyBootRestoreBlocksAdmission = true;
-                logger.warn("cannot mark legacy projection command in "
-                        + "flight: full recovery ownership is absent");
-                return LegacyCommandMarkerResult
-                        .FAILED_BEFORE_DISPATCH;
-            }
-        } catch (Throwable readFailure) {
-            logger.warn("cannot verify legacy projection command ownership: "
-                    + readFailure.getMessage());
-            return LegacyCommandMarkerResult.FAILED_BEFORE_DISPATCH;
-        }
-        Map<String, Object> markerValues = new HashMap<>();
-        markerValues.put(GATE_COMMAND_INDETERMINATE, true);
-        markerValues.put(GATE_COMMAND_BOOT_ID, bootId);
-        try {
-            if (!UnifiedConfigManager.updateValues(
-                    "surveillance", markerValues)) {
-                return LegacyCommandMarkerResult
-                        .FAILED_BEFORE_DISPATCH;
-            }
-            org.json.JSONObject root =
-                    UnifiedConfigManager.readDurableConfigStrict();
-            LegacyGateSnapshot marker = parseLegacyGateSnapshot(
-                    root.optJSONObject("surveillance"));
-            if (marker.readable
-                    && marker.forceStop
-                    && marker.commandIndeterminate
-                    && bootId.equals(marker.commandBootId)) {
-                return LegacyCommandMarkerResult.MARKED;
-            }
-            logger.warn("legacy command marker verification failed before "
-                    + "dispatch; rolling it back");
-            return rollbackLegacyCommandMarkerBeforeDispatch()
-                    ? LegacyCommandMarkerResult.FAILED_BEFORE_DISPATCH
-                    : LegacyCommandMarkerResult
-                            .SAME_BOOT_INDETERMINATE;
-        } catch (Throwable failure) {
-            logger.warn("failed to persist legacy command in-flight marker: "
-                    + failure.getMessage());
-            return rollbackLegacyCommandMarkerBeforeDispatch()
-                    ? LegacyCommandMarkerResult.FAILED_BEFORE_DISPATCH
-                    : LegacyCommandMarkerResult
-                            .SAME_BOOT_INDETERMINATE;
-        }
-    }
-
-    /**
-     * No physical command was dispatched, so rollback only needs to prove that
-     * the command fields were retired. Requiring {@code forceStop} here caused
-     * the DI3 boot regression: a successfully cleared command-only legacy
-     * marker was falsely reported as an indeterminate physical command.
-     */
-    private static boolean rollbackLegacyCommandMarkerBeforeDispatch() {
-        return clearLegacyCommandMarker(false);
-    }
-
-    /**
-     * A command may have reached the OEM service. Clear its in-flight fields
-     * while atomically re-asserting full sequence ownership for the rest of the
-     * ordered restore. This matters for a late command completion: if another
-     * cleanup raced while the command was unresolved, the command that just
-     * completed must reclaim the recovery gate before scheduling 18→0→profile.
-     */
-    private static boolean clearLegacyCommandInFlightAfterDispatch() {
-        return clearLegacyCommandMarker(true);
-    }
-
-    private static boolean clearLegacyCommandMarker(
-            boolean retainRecoveryOwnership) {
-        Map<String, Object> markerValues = new HashMap<>();
-        if (retainRecoveryOwnership) {
-            markerValues.put(GATE_FORCE_STOP, true);
-        }
-        markerValues.put(GATE_COMMAND_INDETERMINATE, false);
-        markerValues.put(GATE_COMMAND_BOOT_ID, "");
-        try {
-            if (!UnifiedConfigManager.updateValues(
-                    "surveillance", markerValues)) {
-                return false;
-            }
-            org.json.JSONObject root =
-                    UnifiedConfigManager.readDurableConfigStrict();
-            LegacyGateSnapshot marker = parseLegacyGateSnapshot(
-                    root.optJSONObject("surveillance"));
-            return isLegacyCommandMarkerClearVerified(
-                    marker, retainRecoveryOwnership);
-        } catch (Throwable failure) {
-            logger.warn("failed to clear legacy command in-flight marker: "
-                    + failure.getMessage());
-            return false;
-        }
-    }
-
-    static boolean isLegacyCommandMarkerClearVerified(
-            LegacyGateSnapshot marker,
-            boolean requireRecoveryOwnership) {
-        return marker != null
-                && marker.readable
-                && !marker.commandIndeterminate
-                && marker.commandBootId.isEmpty()
-                && (!requireRecoveryOwnership || marker.forceStop);
     }
 
     static LegacyGateSnapshot parseLegacyGateSnapshot(
@@ -2125,30 +2022,6 @@ public final class ClusterProjectionController {
     private static LegacyGateSnapshot unreadableLegacyGateSnapshot() {
         return new LegacyGateSnapshot(
                 false, false, 0L, false, "");
-    }
-
-    static boolean legacyIndeterminateCommandMayStillComplete(
-            boolean indeterminate,
-            String originBootId,
-            String currentBootId) {
-        if (!indeterminate) return false;
-        String origin = canonicalBootIdOrNull(originBootId);
-        String current = canonicalBootIdOrNull(currentBootId);
-        return origin == null || current == null || origin.equals(current);
-    }
-
-    private static String readCurrentBootId() {
-        try (java.io.BufferedReader reader =
-                new java.io.BufferedReader(
-                        new java.io.FileReader(
-                                "/proc/sys/kernel/random/boot_id"))) {
-            String value = reader.readLine();
-            String canonical = canonicalBootIdOrNull(
-                    value == null ? "" : value.trim());
-            return canonical == null ? "" : canonical;
-        } catch (Throwable ignored) {
-            return "";
-        }
     }
 
     private static String canonicalBootIdOrNull(String value) {
@@ -2314,6 +2187,25 @@ public final class ClusterProjectionController {
         return false;
     }
 
+    /** Fission display present before the open, by name only: display 1 is the head unit on some trims. */
+    private boolean fissionDisplayExists() {
+        try {
+            Context ctx = resolveContext();
+            android.hardware.display.DisplayManager dm = ctx == null ? null
+                    : (android.hardware.display.DisplayManager)
+                            ctx.getSystemService(Context.DISPLAY_SERVICE);
+            android.view.Display[] ds = dm == null ? null : dm.getDisplays();
+            if (ds != null) {
+                for (android.view.Display d : ds) {
+                    String n = d.getName();
+                    if (d.getDisplayId() > 0 && n != null
+                            && n.toLowerCase(java.util.Locale.US).contains("fission")) return true;
+                }
+            }
+        } catch (Throwable ignored) {}
+        return clusterDisplayPresentViaDumpsys();
+    }
+
     /** Authoritative "is the fission cluster display live" via `dumpsys display`.
      *  Returns false when the model never materializes a fission display (e.g. an
      *  Atto-3-class small cluster that may not support projection at all).
@@ -2381,36 +2273,27 @@ public final class ClusterProjectionController {
     // ── AutoContainer sendInfo ──────────────────────────────────────────────────
 
     /**
-     * Send a DI3 projection opcode through the firmware-compatible direct
-     * {@code IAutoContainer} Binder path first. The synchronous vendor call runs
-     * on an isolated daemon thread, so a stall cannot pin the projection owner
-     * thread. If the wait budget expires, the worker is deliberately left alive:
-     * a later definitive reply clears its own durable in-flight marker and
-     * schedules an ordered 18→0 recovery. Only a failure that is proven to occur
-     * before Binder dispatch may fall back to the strict {@code service call}
-     * transport.
+     * Send a DI3 projection opcode through the direct {@code IAutoContainer} Binder path first,
+     * on an isolated thread so a stalled vendor call cannot pin the caller. A call that outlives
+     * the wait stays outstanding: no further command is sent until it returns, and its return
+     * schedules an ordered 18→0 recovery. Only an unavailable Binder stub falls back to
+     * {@code service call}.
      */
     private LegacyCommandResult sendInfoResult(int op) {
-        return sendInfoMarkedResult(AUTO_CONTAINER_SERVICE, op);
+        return sendLegacyInfo(AUTO_CONTAINER_SERVICE, op);
     }
 
     private static LegacyCommandResult sendInfoStaticResult(int op) {
-        return sendInfoMarkedResult(AUTO_CONTAINER_SERVICE, op);
+        return sendLegacyInfo(AUTO_CONTAINER_SERVICE, op);
     }
 
-    private static LegacyCommandResult sendInfoMarkedResult(
+    private static LegacyCommandResult sendLegacyInfo(
             String service, int op) {
         synchronized (LEGACY_COMMAND_DISPATCH_LOCK) {
             sLastLegacyShellOutput = "";
-            LegacyCommandMarkerResult markerResult =
-                    markLegacyCommandInFlight();
-            if (markerResult
-                    == LegacyCommandMarkerResult.FAILED_BEFORE_DISPATCH) {
-                return LegacyCommandResult.REJECTED;
-            }
-            if (markerResult
-                    == LegacyCommandMarkerResult
-                            .SAME_BOOT_INDETERMINATE) {
+            if (legacyCommandStillBlocked()) {
+                logger.warn("legacy projection command " + op
+                        + " not sent: an earlier command is still blocked");
                 return legacyCommandResult(
                         LegacyTransportResult.INDETERMINATE);
             }
@@ -2426,11 +2309,7 @@ public final class ClusterProjectionController {
             } catch (Throwable dispatchFailure) {
                 logger.warn("unable to dispatch direct legacy Binder command "
                         + op + ": " + dispatchFailure.getMessage());
-                if (!rollbackLegacyCommandMarkerBeforeDispatch()) {
-                    return legacyCommandResult(
-                            LegacyTransportResult.INDETERMINATE);
-                }
-                return sendInfoShellMarkedResult(service, op);
+                return sendLegacyInfoShell(service, op);
             }
 
             try {
@@ -2438,7 +2317,7 @@ public final class ClusterProjectionController {
                         LEGACY_COMMAND_WAIT_TIMEOUT_MS,
                         TimeUnit.MILLISECONDS)) {
                     logger.warn("direct legacy Binder command timed out: op="
-                            + op + "; worker retained for late resolution");
+                            + op + "; later commands wait for it to return");
                     watchLateLegacyBinderAttempt(attempt, op);
                     return legacyCommandResult(
                             LegacyTransportResult.INDETERMINATE);
@@ -2451,8 +2330,9 @@ public final class ClusterProjectionController {
             }
 
             if (attempt.result == LegacyTransportResult.UNAVAILABLE) {
-                return sendInfoShellMarkedResult(service, op);
+                return sendLegacyInfoShell(service, op);
             }
+            sLegacyServiceAnswered = true;
             return legacyCommandResult(attempt.result);
         }
     }
@@ -2462,13 +2342,7 @@ public final class ClusterProjectionController {
             String service,
             int op) {
         try {
-            LegacyTransportResult result =
-                    sendInfoBinderTransportResult(service, op);
-            if (result != LegacyTransportResult.INDETERMINATE
-                    && !clearLegacyCommandInFlightAfterDispatch()) {
-                result = LegacyTransportResult.INDETERMINATE;
-            }
-            attempt.result = result;
+            attempt.result = sendInfoBinderTransportResult(service, op);
         } finally {
             attempt.completion.countDown();
         }
@@ -2503,35 +2377,36 @@ public final class ClusterProjectionController {
             send.invoke(iface, CLUSTER_TYPE, op, "");
             return LegacyTransportResult.ACCEPTED;
         } catch (Throwable dispatchFailure) {
-            // Once Method.invoke begins, a reflected exception cannot prove
-            // whether the remote service applied the command before replying.
-            logger.warn("direct legacy Binder command " + op
-                    + " completed ambiguously: "
+            // The synchronous call has returned, so nothing can land later and a retry is safe.
+            logger.warn("direct legacy Binder command " + op + " failed: "
                     + dispatchFailure.getClass().getSimpleName()
                     + ": " + dispatchFailure.getMessage()
                     + describeReflectedCause(dispatchFailure));
-            return LegacyTransportResult.INDETERMINATE;
+            return LegacyTransportResult.FAILED;
         }
     }
 
     private static void watchLateLegacyBinderAttempt(
             LegacyCommandAttempt attempt, int op) {
+        trackHungLegacyCommand(() -> attempt.completion.getCount() == 0);
         startLateLegacyWatcher(
                 "ClusterProjBinderLate-" + op,
                 () -> {
                     awaitUninterruptibly(attempt.completion);
-                    if (attempt.result
-                            == LegacyTransportResult.INDETERMINATE) {
-                        logger.warn("late legacy Binder command " + op
-                                + " remained indeterminate; durable recovery "
-                                + "ownership retained");
-                        return;
-                    }
-                    logger.info("late legacy Binder command " + op
-                            + " resolved as " + attempt.result
-                            + "; scheduling ordered gauge recovery");
-                    scheduleRecoveryAfterLateLegacyCommand();
+                    finishLateLegacyCommand(
+                            "Binder command " + op, String.valueOf(attempt.result));
                 });
+    }
+
+    private static void finishLateLegacyCommand(String command, String result) {
+        if (legacyCommandStillBlocked()) {
+            logger.info("late legacy " + command + " returned " + result
+                    + "; other command(s) still blocked");
+            return;
+        }
+        logger.info("late legacy " + command + " returned " + result
+                + "; scheduling ordered gauge recovery");
+        scheduleRecoveryAfterLateLegacyCommand();
     }
 
     private static LegacyCommandResult legacyCommandResult(
@@ -2541,6 +2416,8 @@ public final class ClusterProjectionController {
                 return LegacyCommandResult.ACCEPTED;
             case REJECTED:
                 return LegacyCommandResult.REJECTED;
+            case FAILED:
+                return LegacyCommandResult.FAILED;
             case UNAVAILABLE:
                 // Preserved (not collapsed into REJECTED): boot recovery must
                 // be able to tell "no compositor service on this firmware"
@@ -2553,15 +2430,17 @@ public final class ClusterProjectionController {
         }
     }
 
-    private static void startLateLegacyWatcher(
+    private static boolean startLateLegacyWatcher(
             String name, Runnable watcher) {
         try {
             Thread thread = new Thread(watcher, name);
             thread.setDaemon(true);
             thread.start();
+            return true;
         } catch (Throwable failure) {
             logger.warn("unable to monitor late legacy projection command: "
                     + failure.getMessage());
+            return false;
         }
     }
 
@@ -3056,19 +2935,8 @@ public final class ClusterProjectionController {
         return output.toString();
     }
 
-    private static LegacyCommandResult sendInfoShellMarkedResult(
+    private static LegacyCommandResult sendLegacyInfoShell(
             String service, int op) {
-        LegacyCommandMarkerResult markerResult =
-                markLegacyCommandInFlight();
-        if (markerResult
-                == LegacyCommandMarkerResult.FAILED_BEFORE_DISPATCH) {
-            return LegacyCommandResult.REJECTED;
-        }
-        if (markerResult
-                == LegacyCommandMarkerResult.SAME_BOOT_INDETERMINATE) {
-            return legacyCommandResult(
-                    LegacyTransportResult.INDETERMINATE);
-        }
         Process process;
         try {
             String[] command = {
@@ -3089,10 +2957,7 @@ public final class ClusterProjectionController {
         } catch (Throwable launchFailure) {
             logger.warn("sendInfoShell(" + service + ", " + op
                     + ") could not start: " + launchFailure.getMessage());
-            return rollbackLegacyCommandMarkerBeforeDispatch()
-                    ? LegacyCommandResult.REJECTED
-                    : legacyCommandResult(
-                            LegacyTransportResult.INDETERMINATE);
+            return LegacyCommandResult.FAILED;
         }
 
         try {
@@ -3100,7 +2965,7 @@ public final class ClusterProjectionController {
                     LEGACY_COMMAND_WAIT_TIMEOUT_MS,
                     TimeUnit.MILLISECONDS)) {
                 logger.warn("sendInfoShell(" + service + ", " + op
-                        + ") timed out; child retained for late resolution");
+                        + ") timed out; later commands wait for it to return");
                 watchLateLegacyShellCommand(process, service, op);
                 return legacyCommandResult(
                         LegacyTransportResult.INDETERMINATE);
@@ -3131,30 +2996,26 @@ public final class ClusterProjectionController {
         }
         sLastLegacyShellOutput = "exit=" + exitCode + " "
                 + compactShellOutput(output);
+        if (result != LegacyCommandResult.UNAVAILABLE) sLegacyServiceAnswered = true;
         if (result != LegacyCommandResult.ACCEPTED) {
             // Log the raw reply: without it a field log cannot distinguish
             // "Service AutoContainer does not exist" from a Binder exception
-            // status word or a native -1 verdict (all used to read REJECTED).
+            // status word or a native -1 verdict.
             logger.warn("sendInfoShell(" + service + ", " + op
                     + ") result=" + result + " exit=" + exitCode
                     + " output=" + compactShellOutput(output));
         }
-        if (result == LegacyCommandResult.INDETERMINATE) {
-            return legacyCommandResult(
-                    LegacyTransportResult.INDETERMINATE);
-        }
-        return clearLegacyCommandInFlightAfterDispatch()
-                ? result
-                : legacyCommandResult(
-                        LegacyTransportResult.INDETERMINATE);
+        return result;
     }
 
     private static void watchLateLegacyShellCommand(
             Process process, String service, int op) {
+        trackHungLegacyCommand(() -> !process.isAlive());
         startLateLegacyWatcher(
                 "ClusterProjShellLate-" + op,
                 () -> {
                     boolean interrupted = false;
+                    String result = "unknown";
                     try {
                         while (true) {
                             try {
@@ -3164,30 +3025,10 @@ public final class ClusterProjectionController {
                                 interrupted = true;
                             }
                         }
-                        LegacyCommandResult result =
-                                classifyLegacyServiceCallResult(
-                                        process.exitValue(),
-                                        false,
-                                        readProcessOutput(process));
-                        if (result
-                                == LegacyCommandResult.INDETERMINATE) {
-                            logger.warn("late sendInfoShell(" + service
-                                    + ", " + op
-                                    + ") remained indeterminate; durable "
-                                    + "recovery ownership retained");
-                            return;
-                        }
-                        if (!clearLegacyCommandInFlightAfterDispatch()) {
-                            logger.warn("late sendInfoShell(" + service
-                                    + ", " + op
-                                    + ") resolved but its durable marker "
-                                    + "could not be cleared");
-                            return;
-                        }
-                        logger.info("late sendInfoShell(" + service
-                                + ", " + op + ") resolved as " + result
-                                + "; scheduling ordered gauge recovery");
-                        scheduleRecoveryAfterLateLegacyCommand();
+                        result = String.valueOf(classifyLegacyServiceCallResult(
+                                process.exitValue(),
+                                false,
+                                readProcessOutput(process)));
                     } catch (Throwable failure) {
                         logger.warn("late sendInfoShell(" + service
                                 + ", " + op + ") watcher failed: "
@@ -3197,6 +3038,8 @@ public final class ClusterProjectionController {
                             process.destroy();
                         } catch (Throwable ignored) {
                         }
+                        finishLateLegacyCommand(
+                                "sendInfoShell(" + service + ", " + op + ")", result);
                         if (interrupted) {
                             Thread.currentThread().interrupt();
                         }
@@ -3221,16 +3064,15 @@ public final class ClusterProjectionController {
         if (exitCode != 0) {
             // `service` exits non-zero with "Service X does not exist" / "not
             // found" when no such Binder is registered: nothing was dispatched.
-            // Any other non-zero exit is ambiguous (the transaction may have
-            // reached the service before the tool failed).
+            // Any other exit means the tool returned, so nothing is still pending.
             return output != null
                     && (output.contains("does not exist")
                             || output.contains("not found"))
                     ? LegacyCommandResult.UNAVAILABLE
-                    : LegacyCommandResult.INDETERMINATE;
+                    : LegacyCommandResult.FAILED;
         }
         Integer status = parseDiLink5ServiceCallStatus(output);
-        if (status == null) return LegacyCommandResult.INDETERMINATE;
+        if (status == null) return LegacyCommandResult.FAILED;
         if (status != 0) return LegacyCommandResult.REJECTED;
         // Some IAutoContainer builds expose sendInfo as void (status word
         // only); others append an integer native verdict. Accept a normal

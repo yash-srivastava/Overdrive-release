@@ -47,11 +47,15 @@ object GoogleHttp {
     private val PNG_SIGNATURE = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
     private val HEX = "0123456789ABCDEF".toCharArray()
 
-    data class TileHealth(val consecutiveFailures: Int, val lastSuccessMs: Long, val lastFailureMs: Long)
+    /** [failingSinceMs]: when the current run of failures began (0 while the last tile request succeeded). */
+    data class TileHealth(
+        val consecutiveFailures: Int, val lastSuccessMs: Long, val lastFailureMs: Long, val failingSinceMs: Long = 0L
+    )
 
     private val tileFailures = AtomicInteger(0)
     @Volatile private var tileLastSuccessMs = 0L
     @Volatile private var tileLastFailureMs = 0L
+    @Volatile private var tileFailingSinceMs = 0L
 
     private val trafficSessions = ConcurrentHashMap<String, AtomicInteger>()
     private val trafficUnsupported = AtomicBoolean(false)
@@ -128,7 +132,7 @@ object GoogleHttp {
     fun isLocalBudgetRejection(resp: Response): Boolean = resp.header(HEADER_LOCAL_BUDGET) != null
 
     @JvmStatic
-    fun tileHealth(): TileHealth = TileHealth(tileFailures.get(), tileLastSuccessMs, tileLastFailureMs)
+    fun tileHealth(): TileHealth = TileHealth(tileFailures.get(), tileLastSuccessMs, tileLastFailureMs, tileFailingSinceMs)
 
     @JvmStatic
     fun markTrafficSession(token: String) {
@@ -175,7 +179,16 @@ object GoogleHttp {
         }
         account(api, sku, url, response)
         // Callers get the keyless request back: Response.toString() prints request.url.
-        return response.newBuilder().request(request).build()
+        val out = response.newBuilder().request(request)
+        // Tiles carry max-age=86400 beside an Expires equal to Date. MapLibre lets Expires win, so every cached
+        // tile read as stale and, with must-revalidate, unusable until refetched; max-age is the rule (RFC 9111 5.3).
+        // (Traffic overlay tiles keep theirs: they refresh on their own short cycle.)
+        if (api == GoogleApi.TILES && response.header("Expires") != null &&
+            response.header("Cache-Control")?.contains("max-age", ignoreCase = true) == true &&
+            url.queryParameter("session")?.let { trafficSessions.containsKey(it) } != true) {
+            out.removeHeader("Expires")
+        }
+        return out.build()
     }
 
     private fun account(api: GoogleApi, sku: GoogleSku?, url: HttpUrl, response: Response) {
@@ -226,12 +239,15 @@ object GoogleHttp {
 
     private fun recordTileSuccess() {
         tileFailures.set(0)
+        tileFailingSinceMs = 0L
         tileLastSuccessMs = System.currentTimeMillis()
     }
 
     private fun recordTileFailure() {
-        tileFailures.incrementAndGet()
-        tileLastFailureMs = System.currentTimeMillis()
+        val now = System.currentTimeMillis()
+        // (also when a success raced in between and left the count up with no start)
+        if (tileFailures.getAndIncrement() == 0 || tileFailingSinceMs == 0L) tileFailingSinceMs = now
+        tileLastFailureMs = now
     }
 
     private fun localResponse(request: Request, code: Int, tag: String): Response =

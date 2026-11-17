@@ -1,5 +1,6 @@
 package com.overdrive.app.overlay.glass
 
+import com.overdrive.app.R
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
@@ -14,7 +15,7 @@ import kotlin.math.min
 
 /** Every widget id, in the settings page's catalog order. */
 object GlassWidgets {
-    val IDS = listOf("battery", "charging", "trip", "drive", "dynamics", "roadsense", "power", "controls", "shortcuts")
+    val IDS = listOf("battery", "charging", "trip", "drive", "dynamics", "roadsense", "power", "controls", "shortcuts", "seats")
 
     /** Id prefixes of user-designed widgets and of the ready-made ones the app ships. */
     const val CUSTOM = "custom:"
@@ -48,17 +49,18 @@ object GlassWidgets {
 
     /** The short name arrange mode's tray shows under each widget. */
     fun label(id: String): String {
-        if (isCustom(id)) return docs[id]?.name?.takeIf { it.isNotBlank() } ?: "Widget"
+        if (isCustom(id)) return docs[id]?.name?.takeIf { it.isNotBlank() } ?: gs(R.string.glass_w_widget)
         return when (id) {
-            "battery" -> "Battery & range"
-            "charging" -> "Charging"
-            "trip" -> "Live trip"
-            "drive" -> "Live drive"
-            "dynamics" -> "Drive dynamics"
+            "battery" -> gs(R.string.glass_w_battery)
+            "charging" -> gs(R.string.glass_w_charging)
+            "trip" -> gs(R.string.glass_w_trip)
+            "drive" -> gs(R.string.glass_w_drive)
+            "dynamics" -> gs(R.string.glass_w_dynamics)
             "roadsense" -> "RoadSense"
-            "power" -> "Power & tyres"
-            "controls" -> "Vehicle controls"
-            else -> "Shortcuts"
+            "power" -> gs(R.string.glass_w_power)
+            "controls" -> gs(R.string.glass_w_controls)
+            "seats" -> gs(R.string.glass_w_seats)
+            else -> gs(R.string.glass_w_shortcuts)
         }
     }
 
@@ -74,6 +76,7 @@ object GlassWidgets {
             "roadsense" -> GlassRoadSenseView(context, env, ticker)
             "power" -> GlassPowerView(context, env, ticker)
             "shortcuts" -> GlassShortcutsView(context, env, ticker)
+            "seats" -> GlassSeatsView(context, env, ticker)
             else -> GlassControlsView(context, env, ticker)
         }
     }

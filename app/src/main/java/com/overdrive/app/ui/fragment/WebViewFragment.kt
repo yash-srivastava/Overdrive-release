@@ -41,8 +41,16 @@ class WebViewFragment : Fragment() {
     companion object {
         const val ARG_PAGE_PATH = "page_path"
         private const val KEY_SAVED_URL = "saved_url"
+        private const val KEY_PENDING_TAB = "pending_tab"
+        private const val KEY_PENDING_TAB_BASE = "pending_tab_base"
+        /** Optional web tab to select once the page has loaded, without pinning a #hash in the URL. */
+        const val ARG_PAGE_TAB = "page_tab"
         /** Cap for AndroidBridge.downloadToFile (trip exports are KB to a few MB). */
         private const val MAX_BRIDGE_DOWNLOAD_BYTES = 32L * 1024 * 1024
+        /** Waits between automatic retries while the service-down card is up; the last repeats. */
+        private val AUTO_RETRY_DELAYS_S = intArrayOf(2, 4, 8, 16, 30)
+        /** How long a page the daemon refused to sign in waits for the app to recover its secret. */
+        private const val SIGN_IN_RECOVERY_WAIT_MS = 4_000L
 
         // Versioned /shared/ assets go through the WebView's own network stack (HTTP cache,
         // 304s, V8 code cache, parallel fetches) whenever no proxy can capture loopback.
@@ -85,6 +93,9 @@ class WebViewFragment : Fragment() {
             } catch (_: java.net.MalformedURLException) {
                 false
             }
+
+        /** A daemon API endpoint (e.g. a pack download) opened as a navigation: never a page of its own. */
+        private fun isApiNavigation(uri: Uri?): Boolean = uri?.path.orEmpty().startsWith("/api/")
 
         // Hides the in-page PWA chrome before the first paint. INJECT_JS runs
         // on onPageFinished, which is late enough for the sidebar to flash.
@@ -470,8 +481,33 @@ class WebViewFragment : Fragment() {
     private var loadingOverlay: View? = null
     private var errorOverlay: View? = null
     private var btnRetry: MaterialButton? = null
+    private var errorRetryStatus: android.widget.TextView? = null
+    private var errorTitle: android.widget.TextView? = null
+    private var errorBody: android.widget.TextView? = null
     private var currentUrl: String? = null
+    // The committed main-frame document is an error body; cleared only when a real page is revealed.
+    private var committedDocIsError = false
+    // Tab to select once the page at pendingTabBase has loaded (a deep link into this page).
+    private var pendingTab: String? = null
+    private var pendingTabBase: String? = null
     private var pageLoadFailed = false
+    // A main-frame daemon 5xx; newer WebViews report it before that load's onPageStarted.
+    // Cleared when that load finishes or a new load is issued.
+    private var mainFrameServerError = false
+    // Bumped by every loadPage(); a callback from an older load must not reveal or fail the new one.
+    @Volatile private var issuedLoadGen = 0
+    // Main-frame URL whose load failed; retries reload it rather than the fragment's first page.
+    private var failedPageUrl: String? = null
+    private var startedLoadGen = 0
+    // A page navigation was issued (link tap or loadPage) and has not started, failed or shown yet.
+    private var navPending = false
+    // Automatic retry while the error card is up and the fragment is resumed.
+    private val autoRetryHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val autoRetryTick = Runnable { onAutoRetryTick() }
+    private var autoRetryStep = 0
+    private var autoRetryAt = 0L
+    // The in-flight load is an automatic retry: the error card stays up until it succeeds.
+    private var quietRetry = false
     // True between onPageStarted and onPageFinished / onReceivedError. The
     // auth-cookie retry consults this so it doesn't fire a reload() during
     // an in-flight load — overlapping loadUrl + reload on Chrome 58 WebView
@@ -566,16 +602,36 @@ class WebViewFragment : Fragment() {
         loadingOverlay = view.findViewById(R.id.loadingOverlay)
         errorOverlay = view.findViewById(R.id.errorOverlay)
         btnRetry = view.findViewById(R.id.btnRetry)
-        btnRetry?.setOnClickListener { retryLoad() }
+        btnRetry?.setOnClickListener {
+            quietRetry = false
+            retryLoad()
+        }
+        errorRetryStatus = view.findViewById(R.id.webErrorRetryStatus)
+        errorTitle = view.findViewById(R.id.webErrorTitle)
+        errorBody = view.findViewById(R.id.webErrorBody)
+        view.findViewById<View>(R.id.btnWebServices)?.setOnClickListener { openBackgroundServices() }
 
         setupWebView()
         injectAuthCookie()
 
+        // failedPageUrl survives a view rebuilt from the back stack (same fragment instance).
         currentUrl = savedInstanceState?.getString(KEY_SAVED_URL)
+            ?: failedPageUrl
             ?: ("http://127.0.0.1:${CameraDaemon.HTTP_PORT}" +
                 (arguments?.getString(ARG_PAGE_PATH)
                     ?: arguments?.getString("page_path")
                     ?: "/surveillance"))
+        if (savedInstanceState != null) {
+            pendingTab = savedInstanceState.getString(KEY_PENDING_TAB)
+            pendingTabBase = savedInstanceState.getString(KEY_PENDING_TAB_BASE)
+        } else {
+            arguments?.getString(ARG_PAGE_TAB)?.let { tab ->
+                pendingTab = tab
+                pendingTabBase = currentUrl?.substringBefore('#')
+                // One-shot: a view rebuilt from the back stack must not snap back to this tab.
+                arguments?.remove(ARG_PAGE_TAB)
+            }
+        }
 
         loadPage()
     }
@@ -662,6 +718,7 @@ class WebViewFragment : Fragment() {
                     request: WebResourceRequest?
                 ): WebResourceResponse? {
                     val url = request?.url?.toString() ?: return null
+                    val requestGen = issuedLoadGen
 
                     // FILTER: Only intercept our local server and external map/CDN resources
                     val isLocalServer = isDaemonUrl(url)
@@ -845,54 +902,42 @@ class WebViewFragment : Fragment() {
                     }
 
                     try {
-                        // 1. Force Direct Connection (Bypass sing-box)
-                        val connection = java.net.URL(url).openConnection(java.net.Proxy.NO_PROXY) as java.net.HttpURLConnection
-                        connection.connectTimeout = 5000
-                        connection.readTimeout = 30000
-                        // Don't auto-follow 3xx — AuthMiddleware emits a 302
-                        // → /login.html for unauthenticated page requests, and
-                        // we need WebView to see that redirect so the address
-                        // bar / history reflects the login page. With auto-
-                        // follow, WebView sees a 200 from /login.html under
-                        // the *original* URL, breaking back navigation.
-                        connection.instanceFollowRedirects = false
+                        val sentJwt = getAuthJwt()
+                        var connection = openDaemon(url, request, sentJwt)
 
-                        // 2. Forward Range Header (VITAL for video)
-                        // Chrome sends "Range: bytes=0-" to start playback
-                        val range = request.requestHeaders["Range"]
-                        if (range != null) {
-                            connection.setRequestProperty("Range", range)
-                            android.util.Log.d("WebViewProxy", "Request Range: $range")
+                        // The daemon's only redirect is to its sign-in page: it refused this screen's session.
+                        // WebResourceResponse rejects every 3xx status, so a redirect is never passed through.
+                        if (connection.responseCode in 300..399) {
+                            connection.disconnect()
+                            if (request.isForMainFrame && isApiNavigation(request.url)) return noNavigation()
+                            if (!request.isForMainFrame) return signInRefused()
+                            com.overdrive.app.auth.AuthManager.recoverFromDaemon(SIGN_IN_RECOVERY_WAIT_MS)
+                            val freshJwt = getAuthJwt()
+                            val retried = if (freshJwt != null && freshJwt != sentJwt) {
+                                openDaemon(url, request, freshJwt)
+                            } else null
+                            if (retried == null || retried.responseCode in 300..399) {
+                                retried?.disconnect()
+                                postMainFrameDaemonFailure(requestGen, url, signInRefused = true)
+                                return signInRefused()
+                            }
+                            connection = retried
                         }
-
-                        // Forward remaining request headers, but strip
-                        // conditional-GET headers (If-None-Match /
-                        // If-Modified-Since). Reason: shouldInterceptRequest's
-                        // synthetic responses don't merge with WebView's HTTP
-                        // cache the way real network responses do, so a 304
-                        // from the daemon returns to WebView as "200 OK with
-                        // empty body" and breaks the video element. By
-                        // forcing the daemon to always 200, we let
-                        // Cache-Control: max-age + immutable on the daemon's
-                        // response satisfy repeat playback from cache without
-                        // revalidation. ETag is still useful for external
-                        // tunnel clients that bypass this intercept.
-                        request.requestHeaders?.forEach { (key, value) ->
-                            if (key.equals("Range", ignoreCase = true)) return@forEach
-                            if (key.equals("If-None-Match", ignoreCase = true)) return@forEach
-                            if (key.equals("If-Modified-Since", ignoreCase = true)) return@forEach
-                            connection.setRequestProperty(key, value)
-                        }
-
-                        // Inject Auth
-                        val jwt = getAuthJwt()
-                        if (jwt != null) {
-                            connection.setRequestProperty("Cookie", "byd_session=$jwt")
-                        }
-
-                        connection.connect()
 
                         // 3. Handle Response
+                        // Some WebViews never report HTTP errors for intercepted responses, so a
+                        // main-frame server error is signalled here rather than via onReceivedHttpError.
+                        // A failed API navigation (e.g. an expired pack download) stays on the current
+                        // page (204 = no navigation) instead of committing its error JSON as a page.
+                        if (request.isForMainFrame && isApiNavigation(request.url) &&
+                            connection.responseCode !in 200..399
+                        ) {
+                            connection.disconnect()
+                            return noNavigation()
+                        }
+                        if (request.isForMainFrame && connection.responseCode >= 500) {
+                            postMainFrameDaemonFailure(requestGen, url)
+                        }
                         val stream = if (connection.responseCode in 200..399) {
                             connection.inputStream
                         } else {
@@ -902,9 +947,12 @@ class WebViewFragment : Fragment() {
                             // system proxy (sing-box) for localhost, which
                             // hangs without firing onReceivedError.
                             connection.errorStream
-                                ?: return synthesize503(
-                                    "HTTP ${connection.responseCode} (no error body)"
-                                )
+                                ?: run {
+                                    return synthesize503(
+                                        "HTTP ${connection.responseCode} (no error body)",
+                                        upstreamStatus = connection.responseCode
+                                    )
+                                }
                         }
                         val length = connection.contentLength
 
@@ -1019,6 +1067,10 @@ class WebViewFragment : Fragment() {
                         // WebView treats it as a real error and fires
                         // onReceivedError → showError() → user sees the retry
                         // button.
+                        if (request.isForMainFrame) {
+                            if (isApiNavigation(request.url)) return noNavigation()
+                            postMainFrameDaemonFailure(requestGen, url)
+                        }
                         return synthesize503(e.message ?: "connection failed")
                     }
                 }
@@ -1029,7 +1081,53 @@ class WebViewFragment : Fragment() {
                  * onReceivedError fire and the user reach the retry overlay,
                  * instead of hanging on the system proxy fallback.
                  */
-                private fun synthesize503(reason: String): WebResourceResponse {
+                private fun noNavigation(): WebResourceResponse =
+                    WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0))).apply {
+                        setStatusCodeAndReasonPhrase(204, "No Content")
+                    }
+
+                /** Direct to the daemon (never through sing-box), redirects not followed, sent with [jwt]. */
+                private fun openDaemon(
+                    url: String, request: WebResourceRequest, jwt: String?
+                ): java.net.HttpURLConnection {
+                    val connection = java.net.URL(url).openConnection(java.net.Proxy.NO_PROXY) as java.net.HttpURLConnection
+                    connection.connectTimeout = 5000
+                    connection.readTimeout = 30000
+                    connection.instanceFollowRedirects = false
+
+                    // Forward Range (VITAL for video: Chrome sends "Range: bytes=0-" to start playback)
+                    val range = request.requestHeaders["Range"]
+                    if (range != null) {
+                        connection.setRequestProperty("Range", range)
+                        android.util.Log.d("WebViewProxy", "Request Range: $range")
+                    }
+
+                    // Conditional-GET headers are stripped: a daemon 304 reaches WebView as an empty 200 through
+                    // this intercept and breaks the video element; Cache-Control on the 200 covers repeat playback.
+                    request.requestHeaders?.forEach { (key, value) ->
+                        if (key.equals("Range", ignoreCase = true)) return@forEach
+                        if (key.equals("If-None-Match", ignoreCase = true)) return@forEach
+                        if (key.equals("If-Modified-Since", ignoreCase = true)) return@forEach
+                        connection.setRequestProperty(key, value)
+                    }
+
+                    if (jwt != null) {
+                        connection.setRequestProperty("Cookie", "byd_session=$jwt")
+                    }
+
+                    connection.connect()
+                    return connection
+                }
+
+                private fun signInRefused(): WebResourceResponse {
+                    val body = "{\"error\":\"sign_in_refused\"}".toByteArray(Charsets.UTF_8)
+                    return WebResourceResponse("application/json", "utf-8", java.io.ByteArrayInputStream(body)).apply {
+                        setStatusCodeAndReasonPhrase(401, "Unauthorized")
+                        responseHeaders = mapOf("Cache-Control" to "no-store", "Connection" to "close")
+                    }
+                }
+
+                private fun synthesize503(reason: String, upstreamStatus: Int = 0): WebResourceResponse {
                     val body = "{\"error\":\"daemon_unreachable\",\"reason\":${
                         org.json.JSONObject.quote(reason)
                     }}"
@@ -1038,7 +1136,8 @@ class WebViewFragment : Fragment() {
                     resp.setStatusCodeAndReasonPhrase(503, "Service Unavailable")
                     resp.responseHeaders = mapOf(
                         "Cache-Control" to "no-store",
-                        "Connection" to "close"
+                        "Connection" to "close",
+                        "X-Overdrive-Upstream-Status" to upstreamStatus.toString()
                     )
                     return resp
                 }
@@ -1068,6 +1167,10 @@ class WebViewFragment : Fragment() {
                     view: WebView?, url: String?, favicon: android.graphics.Bitmap?
                 ) {
                     super.onPageStarted(view, url, favicon)
+                    startedLoadGen = issuedLoadGen
+                    navPending = false
+                    // This load already failed with a 5xx reported ahead of its start.
+                    if (mainFrameServerError) return
                     // Clear the failure flag at the START of every navigation so a
                     // stale `pageLoadFailed=true` from a previous error can't
                     // suppress showContent() on the retry's onPageFinished. The
@@ -1081,14 +1184,42 @@ class WebViewFragment : Fragment() {
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
+                    if (startedLoadGen != issuedLoadGen) return
                     loadInProgress = false
+                    mainFrameServerError = false
                     if (!pageLoadFailed) revealPage(view)
                 }
 
                 override fun onReceivedError(
                     view: WebView?, request: WebResourceRequest?, error: WebResourceError?
                 ) {
-                    if (request?.isForMainFrame == true) {
+                    if (request?.isForMainFrame == true && !isApiNavigation(request.url)) {
+                        failedPageUrl = request.url?.toString()
+                        committedDocIsError = true
+                        navPending = false
+                        pageLoadFailed = true
+                        loadInProgress = false
+                        showError()
+                    }
+                }
+
+                // HTTP status errors (incl. synthesize503) arrive here, not in onReceivedError.
+                override fun onReceivedHttpError(
+                    view: WebView?, request: WebResourceRequest?, errorResponse: WebResourceResponse?
+                ) {
+                    val req = request ?: return
+                    val upstream = errorResponse?.responseHeaders
+                        ?.get("X-Overdrive-Upstream-Status")?.toIntOrNull() ?: 0
+                    if (req.isForMainFrame &&
+                        (errorResponse?.statusCode ?: 0) >= 500 &&
+                        upstream !in 400..499 &&
+                        isDaemonUrl(req.url.toString()) &&
+                        !isApiNavigation(req.url)
+                    ) {
+                        failedPageUrl = req.url.toString()
+                        committedDocIsError = true
+                        navPending = false
+                        mainFrameServerError = true
                         pageLoadFailed = true
                         loadInProgress = false
                         showError()
@@ -1126,6 +1257,21 @@ class WebViewFragment : Fragment() {
                             // to that park's clips (RecordingsFragment shows a
                             // dismissible chip for it).
                             val parkingSessionId = uri.getQueryParameter("parkingSessionId")
+                            // view=timeline links, and file= links while Timeline is the
+                            // remembered view, open the native timeline; anything else is unchanged.
+                            val timelineArgs = com.overdrive.app.ui.timeline.TimelineLinks.recordingsArgs(
+                                context,
+                                uri.getQueryParameter("view"),
+                                uri.getQueryParameter("t"),
+                                uri.getQueryParameter("end"),
+                                file,
+                                filter,
+                            )
+                            if (timelineArgs != null) {
+                                androidx.navigation.fragment.NavHostFragment.findNavController(this@WebViewFragment)
+                                    .navigate(R.id.recordingsFragment, timelineArgs)
+                                return true
+                            }
                             // A `file=` deep link (from a notification or the Log tab)
                             // means "open THIS clip", not "show the list". The native
                             // recordings fragment ignores the file arg, so resolve the
@@ -1138,6 +1284,10 @@ class WebViewFragment : Fragment() {
                                 val bundle = android.os.Bundle().apply {
                                     if (filter != null) putString("filter", filter)
                                     if (!parkingSessionId.isNullOrBlank()) putString("parkingSessionId", parkingSessionId)
+                                    // Filtered and explicit list links keep opening the list when Timeline is remembered.
+                                    if (filter != null || uri.getQueryParameter("view").equals("list", ignoreCase = true)) {
+                                        putString(com.overdrive.app.ui.timeline.TimelineLinks.ARG_VIEW, "list")
+                                    }
                                 }
                                 androidx.navigation.fragment.NavHostFragment.findNavController(this@WebViewFragment)
                                     .navigate(R.id.recordingsFragment, bundle)
@@ -1149,6 +1299,14 @@ class WebViewFragment : Fragment() {
                     }
                     
                     if (isLocalServer) {
+                        if (request?.isForMainFrame == true) {
+                            // Any main-frame tap supersedes a pending load; only page loads are awaited.
+                            issuedLoadGen++
+                            if (!isApiNavigation(request.url)) {
+                                failedPageUrl = null
+                                navPending = true
+                            }
+                        }
                         return false
                     }
                     try {
@@ -1347,6 +1505,7 @@ class WebViewFragment : Fragment() {
                         // — open the list, pre-selecting the type tab via `filter`.
                         val bundle = android.os.Bundle().apply {
                             if (filter != null) putString("filter", filter)
+                            putString(com.overdrive.app.ui.timeline.TimelineLinks.ARG_VIEW, "list")
                         }
                         nav.navigate(R.id.recordingsFragment, bundle)
                     }
@@ -1711,7 +1870,7 @@ class WebViewFragment : Fragment() {
         @android.webkit.JavascriptInterface
         fun pageReady() {
             webView?.post {
-                if (loadInProgress && !pageLoadFailed) revealPage(webView)
+                if (loadInProgress && !pageLoadFailed && startedLoadGen == issuedLoadGen) revealPage(webView)
             }
         }
 
@@ -1725,20 +1884,6 @@ class WebViewFragment : Fragment() {
                 } catch (_: Throwable) {
                     // Page closed while the write was finishing; the write itself completed.
                 }
-            }
-        }
-
-        /**
-         * Saves page-built text (e.g. a recovery kit) into Download/OverDrive/: the
-         * WebView has no download handler. Returns the absolute path, or "" on failure.
-         */
-        @android.webkit.JavascriptInterface
-        fun saveTextFile(filename: String?, text: String?): String {
-            if (text == null) return ""
-            return try {
-                writeDownload(filename, text.toByteArray(Charsets.UTF_8))
-            } catch (_: Throwable) {
-                ""
             }
         }
 
@@ -1929,10 +2074,32 @@ class WebViewFragment : Fragment() {
     }
 
     private fun loadPage() {
+        val retryingError = pageLoadFailed || errorOverlay?.visibility == View.VISIBLE
+        // An issued navigation that has not started yet (a tapped link, or a retry's pending reload).
+        val wasPending = navPending
+        issuedLoadGen++
         pageLoadFailed = false
+        mainFrameServerError = false
         nativeAssetLoads = nativeAssetLoadsAllowed()
         applyLoadChrome()
-        currentUrl?.let { webView?.loadUrl(it) }
+        val wv = webView ?: return
+        val target = (if (retryingError) failedPageUrl else null) ?: currentUrl ?: return
+        // wv.url can report a pending navigation; the history's current item is the committed page.
+        val committed = wv.copyBackForwardList().currentItem?.url ?: wv.url
+        // Same document: loadUrl would only jump to the anchor (no onPageStarted), so reload it. An error
+        // body or a pending navigation must be replaced, never revealed by an anchor jump.
+        if (committed != null && committed.substringBefore('#') == target.substringBefore('#')) {
+            if (committed == target || retryingError || committedDocIsError || wasPending) {
+                navPending = true
+                wv.reload()
+            } else {
+                startedLoadGen = issuedLoadGen
+                wv.loadUrl(target)
+            }
+        } else {
+            navPending = true
+            wv.loadUrl(target)
+        }
     }
 
     /**
@@ -1965,9 +2132,12 @@ class WebViewFragment : Fragment() {
     }
 
     /** Every WebView load shows the overlay, warm or cold, so the whole app
-     *  behaves the same way on navigation. */
+     *  behaves the same way on navigation. An automatic retry keeps the error card instead. */
     private fun applyLoadChrome() {
-        showLoading()
+        cancelAutoRetry()
+        // A quiet retry loads behind the opaque error card, so the page-ready signal still fires.
+        val keepErrorCard = quietRetry && errorOverlay?.visibility == View.VISIBLE
+        if (!keepErrorCard) showLoading() else webView?.visibility = View.VISIBLE
     }
 
     /**
@@ -1976,6 +2146,8 @@ class WebViewFragment : Fragment() {
      * idempotent.
      */
     private fun revealPage(view: WebView?) {
+        committedDocIsError = false
+        navPending = false
         showContent()
         // Theme: tag <html data-theme="…"> BEFORE INJECT_JS so any
         // CSS that depends on the variable values uses the right
@@ -1986,7 +2158,52 @@ class WebViewFragment : Fragment() {
         view?.evaluateJavascript(FETCH_BRIDGE_JS, null)
         // Hide sidebar (app drawer handles navigation).
         view?.evaluateJavascript(INJECT_JS, null)
+        val tab = pendingTab
+        if (tab != null && view?.url?.substringBefore('#') == pendingTabBase) {
+            view?.evaluateJavascript(selectTabJs(tab), null)
+        }
+        pendingTab = null
+        pendingTabBase = null
     }
+
+    /**
+     * Shows [pagePath] here. A `#tab` on the page already showing switches tab in place, so a
+     * running chat survives; otherwise the path loads and the tab is selected once it has.
+     */
+    fun showPagePath(pagePath: String) {
+        val wv = webView ?: return
+        val target = "http://127.0.0.1:${CameraDaemon.HTTP_PORT}$pagePath"
+        val base = target.substringBefore('#')
+        val tab = target.substringAfter('#', "").takeIf { it.isNotEmpty() }
+        val pageUp = !loadInProgress && !pageLoadFailed && !committedDocIsError &&
+            !navPending && errorOverlay?.visibility != View.VISIBLE
+        if (tab != null && pageUp && wv.url?.substringBefore('#') == base) {
+            val gen = issuedLoadGen
+            wv.evaluateJavascript(selectTabJs(tab)) { result ->
+                if (result != "true" && view != null && gen == issuedLoadGen) loadPagePath(target, base, tab)
+            }
+            return
+        }
+        loadPagePath(target, base, tab)
+    }
+
+    /** True when this fragment was created for [pagePath] (its nav argument; hash ignored). */
+    fun isForPagePath(pagePath: String): Boolean =
+        (arguments?.getString(ARG_PAGE_PATH) ?: arguments?.getString("page_path"))
+            ?.substringBefore('#') == pagePath.substringBefore('#')
+
+    private fun loadPagePath(target: String, base: String, tab: String?) {
+        pendingTab = tab
+        pendingTabBase = base
+        // The tab is applied once the page is in, and the page remembers it; a hash would pin it.
+        currentUrl = if (tab != null) base else target
+        failedPageUrl = null
+        loadPage()
+    }
+
+    private fun selectTabJs(tab: String): String =
+        "(function(){var f=window.OT_setActiveTab;if(typeof f!=='function')return false;f(" +
+            org.json.JSONObject.quote(tab) + ");return true;})()"
 
     private fun showLoading() {
         loadingOverlay?.animate()?.cancel()
@@ -2014,6 +2231,10 @@ class WebViewFragment : Fragment() {
     }
 
     private fun showContent() {
+        failedPageUrl = null
+        quietRetry = false
+        autoRetryStep = 0
+        cancelAutoRetry()
         if (loadingOverlay?.visibility != View.VISIBLE) {
             hideLoading()
             return
@@ -2024,16 +2245,85 @@ class WebViewFragment : Fragment() {
         webView?.visibility = View.VISIBLE
     }
 
-    private fun showError() {
+    private fun showError(signInRefused: Boolean = false) {
+        quietRetry = false
+        errorTitle?.setText(
+            if (signInRefused) R.string.web_state_sign_in_title else R.string.webview_camera_daemon_not_running
+        )
+        errorBody?.setText(
+            if (signInRefused) R.string.web_state_sign_in_body else R.string.webview_start_camera_daemon
+        )
         loadingOverlay?.animate()?.cancel()
         loadingOverlay?.visibility = View.GONE
         errorOverlay?.visibility = View.VISIBLE
         webView?.visibility = View.INVISIBLE
+        scheduleAutoRetry()
+    }
+
+    /** Arms the next automatic retry (2, 4, 8, 16, then every 30 s); no-op while one is pending. */
+    private fun scheduleAutoRetry() {
+        if (!isResumed || errorOverlay?.visibility != View.VISIBLE) return
+        if (autoRetryAt > android.os.SystemClock.uptimeMillis()) return
+        val delayS = AUTO_RETRY_DELAYS_S[minOf(autoRetryStep, AUTO_RETRY_DELAYS_S.size - 1)]
+        autoRetryStep++
+        autoRetryAt = android.os.SystemClock.uptimeMillis() + delayS * 1000L
+        onAutoRetryTick()
+    }
+
+    /** Updates the countdown once per displayed second, then retries with the card kept up. */
+    private fun onAutoRetryTick() {
+        autoRetryHandler.removeCallbacks(autoRetryTick)
+        if (!isResumed || view == null) {
+            autoRetryAt = 0L
+            return
+        }
+        val left = autoRetryAt - android.os.SystemClock.uptimeMillis()
+        if (left > 0) {
+            errorRetryStatus?.text =
+                getString(R.string.web_state_retry_in, ((left + 999) / 1000).toInt())
+            autoRetryHandler.postDelayed(autoRetryTick, (left - 1) % 1000 + 1)
+            return
+        }
+        autoRetryAt = 0L
+        errorRetryStatus?.setText(R.string.web_state_retrying_now)
+        quietRetry = true
+        retryLoad()
+    }
+
+    /** Called from the intercept thread when the main-frame request sent during load [gen] failed. */
+    private fun postMainFrameDaemonFailure(gen: Int, failedUrl: String, signInRefused: Boolean = false) {
+        autoRetryHandler.post {
+            if (gen != issuedLoadGen || view == null) return@post
+            failedPageUrl = failedUrl
+            committedDocIsError = true
+            navPending = false
+            mainFrameServerError = true
+            pageLoadFailed = true
+            loadInProgress = false
+            showError(signInRefused)
+        }
+    }
+
+    private fun cancelAutoRetry() {
+        autoRetryHandler.removeCallbacks(autoRetryTick)
+        autoRetryAt = 0L
+    }
+
+    private fun openBackgroundServices() {
+        try {
+            androidx.navigation.fragment.NavHostFragment.findNavController(this)
+                .navigateDrillDown(R.id.daemonsFragment)
+        } catch (e: IllegalStateException) {
+            android.util.Log.w("WebViewFragment", "Background services unavailable: ${e.message}")
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        currentUrl?.let { outState.putString(KEY_SAVED_URL, it) }
+        // While a page has failed (card up, or a retry under way), keep the page the user was opening.
+        (failedPageUrl ?: currentUrl)?.let { outState.putString(KEY_SAVED_URL, it) }
+        pendingTab?.let { outState.putString(KEY_PENDING_TAB, it) }
+        pendingTabBase?.let { outState.putString(KEY_PENDING_TAB_BASE, it) }
     }
 
     override fun onResume() {
@@ -2191,6 +2481,7 @@ class WebViewFragment : Fragment() {
     }
 
     override fun onPause() {
+        cancelAutoRetry()
         // Disarm key-capture when the keymap page leaves the foreground.
         // captureArmed is a process-wide static that used to be cleared only in
         // onDestroyView — arming capture then leaving the app (HOME / app-switch)
@@ -2233,6 +2524,9 @@ class WebViewFragment : Fragment() {
     }
 
     override fun onDestroyView() {
+        cancelAutoRetry()
+        autoRetryStep = 0
+        quietRetry = false
         // If a file picker is pending, release its callback so the WebView
         // doesn't hang onto a dangling handle.
         pendingFileCallback?.onReceiveValue(null)

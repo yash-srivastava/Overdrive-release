@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="dash_vehicle_line">%1$s · %2$.1f kWh</string>
+    <string name="dash_range_caption">航続距離</string>
+    <string name="dash_status_remote_on">リモートアクセス オン</string>
+    <string name="dash_status_remote_off">リモートアクセス オフ</string>
+    <string name="dash_status_remote_state">リモートアクセス · %1$s</string>
+    <string name="dash_status_services">サービス %1$d/%2$d</string>
+    <string name="dash_status_view">表示</string>
+    <string name="dash_status_recording_idle">録画待機中</string>
+    <string name="dash_services_running">%1$d/%2$d 実行中</string>
+    <string name="dash_charge_eta_left">残り %1$s</string>
+    <string name="dash_charge_session_inline">今回 %1$s</string>
+    <plurals name="dash_clip_count">
+        <item quantity="other">%1$d 件のクリップ</item>
+    </plurals>
+</resources>

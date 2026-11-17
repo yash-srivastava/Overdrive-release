@@ -1,454 +1,360 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  Recording library — v5 redesign (portrait).
-
-  This fragment is always embedded inside RecordingsFragment via
-  newInstanceEmbedded(); the parent owns the date row + chip filters via
-  the surrounding layout, so the chrome here defaults to GONE in embedded
-  mode. The standalone fallback (date row + slim filter bar) is kept for
-  any future direct nav-graph callers and any deep-link surfaces.
-
-  Vertical rhythm:
-    1. Date jump card (◀  card  ▶) — STANDALONE ONLY (GONE in embed mode).
-    2. Filter pill row (active filter chips + "Filter" trailing pill) —
-       STANDALONE ONLY.
-    3. Recordings grid OR illustrated empty state with "Clear filters" CTA.
-    4. Multi-select bottom action bar (overlays the grid bottom edge while
-       active): selected count + Select all + Share + Delete + Cancel.
-
-  IDs preserved for findViewById in RecordingLibraryFragment:
-    tvSelectedDate, recyclerRecordings, emptyStateContainer, tvEmptyState,
-    selectToolbar, tvSelectedCount, btnSelectAll, btnDeleteSelected,
-    btnCancelSelect, filterBar (active-filter strip).
-
-  New IDs:
-    btnEmptyClearFilters — empty-state CTA, calls back into the parent to
-                           drop every chip + place + date filter.
-    btnShareSelected     — multi-select share-via-chooser action.
--->
+<!-- Recording library, portrait. Always embedded by RecordingsFragment, which hides the
+     standalone date row and filter bar; the selection bar overlays the list bottom. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="?attr/colorSurface">
+    android:background="?android:attr/colorBackground">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical">
 
-    <!-- ============================================================
-         1. DATE JUMP ROW (standalone-only chrome)
-         ============================================================ -->
-    <LinearLayout
-        android:id="@+id/dateRowContainer"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingHorizontal="20dp"
-        android:paddingTop="16dp"
-        android:paddingBottom="12dp">
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnPrevDay"
-            style="@style/Widget.Overdrive.M3.HeaderIconButton"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:contentDescription="@string/cd_previous_day"
-            app:icon="@drawable/ic_chevron_left"
-            app:iconSize="24dp"
-            app:iconTint="?attr/colorOnSurfaceVariant"
-            app:iconGravity="textStart"
-            app:iconPadding="0dp" />
-
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/cardDateJump"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginHorizontal="@dimen/card_gap_vertical"
-            android:clickable="true"
-            android:focusable="true"
-            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-            app:cardElevation="0dp"
-            app:cardCornerRadius="@dimen/card_radius_accent"
-            app:rippleColor="?attr/colorPrimary"
-            app:strokeColor="?attr/colorOutlineVariant"
-            app:strokeWidth="1dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:paddingHorizontal="16dp"
-                android:paddingVertical="12dp">
-
-                <ImageView
-                    android:layout_width="20dp"
-                    android:layout_height="20dp"
-                    android:contentDescription="@null"
-                    android:src="@drawable/ic_events"
-                    app:tint="?attr/colorOnSurfaceVariant" />
-
-                <TextView
-                    android:id="@+id/tvSelectedDate"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginStart="12dp"
-                    android:textColor="?attr/colorOnSurface"
-                    android:textSize="16sp"
-                    android:fontFamily="sans-serif-medium"
-                    android:singleLine="true"
-                    android:ellipsize="end"
-                    tools:text="Today" />
-
-                <TextView
-                    android:id="@+id/tvDayClipCount"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
-                    android:paddingHorizontal="10dp"
-                    android:paddingVertical="3dp"
-                    android:background="@drawable/recording_lib_count_pill"
-                    android:textColor="?attr/colorOnSurface"
-                    android:textSize="11sp"
-                    android:fontFamily="sans-serif-medium"
-                    android:visibility="gone"
-                    tools:text="12 clips"
-                    tools:visibility="visible" />
-
-                <ImageView
-                    android:layout_width="16dp"
-                    android:layout_height="16dp"
-                    android:layout_marginStart="6dp"
-                    android:contentDescription="@null"
-                    android:src="@drawable/ic_chevron_right"
-                    app:tint="?attr/colorOnSurfaceVariant" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnNextDay"
-            style="@style/Widget.Overdrive.M3.HeaderIconButton"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:contentDescription="@string/cd_next_day"
-            app:icon="@drawable/ic_chevron_right"
-            app:iconSize="24dp"
-            app:iconTint="?attr/colorOnSurfaceVariant"
-            app:iconGravity="textStart"
-            app:iconPadding="0dp" />
-    </LinearLayout>
-
-    <!-- ============================================================
-         2. FILTER BAR (standalone-only chrome)
-         id=filterBar preserved so existing ARG_HIDE_INTERNAL_FILTERS path
-         continues to GONE the whole bar when embedded.
-         ============================================================ -->
-    <LinearLayout
-        android:id="@+id/filterBar"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingHorizontal="20dp"
-        android:paddingBottom="12dp">
-
-        <HorizontalScrollView
-            android:id="@+id/activeFiltersScroll"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:scrollbars="none"
-            android:overScrollMode="never">
-
-            <com.google.android.material.chip.ChipGroup
-                android:id="@+id/activeFiltersGroup"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                app:chipSpacingHorizontal="6dp"
-                app:singleLine="true" />
-        </HorizontalScrollView>
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnOpenFilters"
-            style="@style/Widget.Overdrive.M3.Button.Outlined"
-            android:layout_width="wrap_content"
-            android:layout_height="48dp"
-            android:layout_marginStart="8dp"
-            android:contentDescription="@string/cd_open_filters"
-            android:text="@string/recording_lib_filter_button"
-            android:textSize="13sp"
-            android:paddingHorizontal="14dp"
-            android:minHeight="48dp"
-            android:insetTop="0dp"
-            android:insetBottom="0dp"
-            app:icon="@drawable/ic_filter_list"
-            app:iconSize="18dp"
-            app:iconGravity="textStart"
-            app:cornerRadius="@dimen/card_radius_standard"
-            app:strokeColor="?attr/colorOutline" />
-    </LinearLayout>
-
-    <!-- ============================================================
-         3. RECORDINGS GRID + EMPTY STATE (hero)
-         ============================================================ -->
-    <FrameLayout
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1">
-
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/recyclerRecordings"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:clipToPadding="false"
-            android:paddingHorizontal="20dp"
-            android:paddingTop="4dp"
-            android:paddingBottom="76dp" />
-
-        <!-- First-load placeholders stand in for clip cards, so the list keeps its
-             shape instead of collapsing to a centred spinner. -->
+        <!-- Standalone-only date control. -->
         <LinearLayout
-            android:id="@+id/initialLoadingContainer"
+            android:id="@+id/dateRowContainer"
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:contentDescription="@string/recording_library_loading"
-            android:orientation="vertical"
-            android:paddingHorizontal="20dp"
-            android:paddingTop="4dp"
-            android:visibility="gone">
-
-            <include layout="@layout/skeleton_tile" />
-
-            <include
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                layout="@layout/skeleton_tile" />
-
-            <include
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                layout="@layout/skeleton_tile" />
-        </LinearLayout>
-
-        <!-- SOTA empty state: tonal icon disc + headline + body + CTA.
-             Reads like the events.html "no events match" panel rather
-             than the previous tiny grey icon. -->
-        <LinearLayout
-            android:id="@+id/emptyStateContainer"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:gravity="center"
-            android:orientation="vertical"
-            android:visibility="gone"
-            android:padding="32dp">
-
-            <FrameLayout
-                android:layout_width="80dp"
-                android:layout_height="80dp"
-                android:background="@drawable/recording_lib_empty_tile">
-
-                <ImageView
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:layout_gravity="center"
-                    android:contentDescription="@null"
-                    android:src="@drawable/ic_recording_file"
-                    app:tint="?attr/colorOnSurfaceVariant" />
-            </FrameLayout>
-
-            <TextView
-                android:id="@+id/tvEmptyState"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:gravity="center"
-                android:text="@string/recording_lib_empty_title"
-                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                android:textColor="?attr/colorOnSurface" />
-
-            <TextView
-                android:id="@+id/tvEmptyStateBody"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:gravity="center"
-                android:text="@string/recording_lib_empty_body"
-                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                android:textColor="?attr/colorOnSurfaceVariant" />
-
-            <!-- CTA: visible only when filters are narrowing the visible
-                 set. Dropped to GONE on the "no recordings on disk" empty
-                 case — clearing filters can't help when there are zero
-                 clips to begin with. The Kotlin side flips visibility per
-                 case via [setEmptyStateMode]. -->
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnEmptyClearFilters"
-                style="@style/Widget.Overdrive.M3.Button.Tonal"
-                android:layout_width="wrap_content"
-                android:layout_height="48dp"
-                android:layout_marginTop="20dp"
-                android:text="@string/recording_lib_empty_clear_filters"
-                android:textAllCaps="false"
-                android:visibility="gone"
-                app:cornerRadius="@dimen/card_radius_standard"
-                app:icon="@drawable/ic_clear"
-                app:iconSize="18dp" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnEmptyRetry"
-                style="@style/Widget.Overdrive.M3.Button.Tonal"
-                android:layout_width="wrap_content"
-                android:layout_height="48dp"
-                android:layout_marginTop="16dp"
-                android:text="@string/action_retry"
-                android:textAllCaps="false"
-                android:visibility="gone" />
-        </LinearLayout>
-
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/loadStatusBar"
-            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_gravity="bottom|center_horizontal"
-            android:layout_margin="16dp"
-            android:visibility="gone"
-            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-            app:cardCornerRadius="@dimen/card_radius_standard"
-            app:cardElevation="0dp"
-            app:strokeColor="?attr/colorOutlineVariant"
-            app:strokeWidth="1dp">
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="@dimen/od_page_padding_h"
+            android:paddingTop="@dimen/od_space_12"
+            android:paddingBottom="@dimen/od_space_4">
 
             <LinearLayout
                 android:layout_width="wrap_content"
-                android:layout_height="56dp"
+                android:layout_height="@dimen/od_touch_min"
+                android:background="@drawable/rec_pill_track"
                 android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingStart="16dp"
-                android:paddingEnd="8dp">
-
-                <ProgressBar
-                    android:id="@+id/loadStatusProgress"
-                    style="?android:attr/progressBarStyleSmall"
-                    android:layout_width="24dp"
-                    android:layout_height="24dp"
-                    android:indeterminateTint="?attr/colorPrimary" />
-
-                <TextView
-                    android:id="@+id/tvLoadStatus"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="12dp"
-                    android:maxWidth="320dp"
-                    android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                    android:textColor="?attr/colorOnSurface"
-                    tools:text="Loading more recordings" />
+                android:orientation="horizontal">
 
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnLoadRetry"
-                    style="@style/Widget.Overdrive.M3.Button.Text"
+                    android:id="@+id/btnPrevDay"
+                    style="@style/Widget.Overdrive.Rec.DateArrow"
+                    android:layout_width="@dimen/od_touch_min"
+                    android:layout_height="@dimen/od_touch_min"
+                    android:contentDescription="@string/cd_previous_day"
+                    app:icon="@drawable/ic_chevron_left" />
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cardDateJump"
                     android:layout_width="wrap_content"
-                    android:layout_height="48dp"
-                    android:layout_marginStart="8dp"
+                    android:layout_height="@dimen/od_touch_min"
+                    android:clickable="true"
+                    android:focusable="true"
+                    app:cardBackgroundColor="@android:color/transparent"
+                    app:cardCornerRadius="@dimen/od_radius_pill_48"
+                    app:cardElevation="0dp"
+                    app:rippleColor="?attr/colorControlHighlight"
+                    app:strokeWidth="0dp">
+
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="match_parent"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="@dimen/od_space_12">
+
+                        <ImageView
+                            android:layout_width="@dimen/od_icon_sm"
+                            android:layout_height="@dimen/od_icon_sm"
+                            android:contentDescription="@null"
+                            android:src="@drawable/ic_events"
+                            app:tint="?attr/colorOnSurfaceVariant" />
+
+                        <TextView
+                            android:id="@+id/tvSelectedDate"
+                            style="@style/Widget.Overdrive.Rec.RowTime"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="@dimen/od_space_6"
+                            android:ellipsize="end"
+                            android:maxWidth="160dp"
+                            tools:text="Today" />
+
+                        <TextView
+                            android:id="@+id/tvDayClipCount"
+                            style="@style/Widget.Overdrive.Rec.RowTime"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="@dimen/od_space_6"
+                            android:textColor="?attr/colorOnSurfaceVariant"
+                            android:visibility="gone"
+                            tools:text="12 clips"
+                            tools:visibility="visible" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnNextDay"
+                    style="@style/Widget.Overdrive.Rec.DateArrow"
+                    android:layout_width="@dimen/od_touch_min"
+                    android:layout_height="@dimen/od_touch_min"
+                    android:contentDescription="@string/cd_next_day"
+                    app:icon="@drawable/ic_chevron_right" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Standalone-only filter bar: active filter chips + Filter button. -->
+        <LinearLayout
+            android:id="@+id/filterBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="@dimen/od_page_padding_h"
+            android:paddingBottom="@dimen/od_space_4">
+
+            <HorizontalScrollView
+                android:id="@+id/activeFiltersScroll"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:overScrollMode="never"
+                android:scrollbars="none">
+
+                <com.google.android.material.chip.ChipGroup
+                    android:id="@+id/activeFiltersGroup"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    app:chipSpacingHorizontal="6dp"
+                    app:singleLine="true" />
+            </HorizontalScrollView>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnOpenFilters"
+                style="@style/Widget.Overdrive.Rec.FilterPill"
+                android:layout_width="wrap_content"
+                android:layout_height="@dimen/od_touch_min"
+                android:layout_marginStart="@dimen/od_space_8"
+                android:contentDescription="@string/cd_open_filters"
+                android:text="@string/recording_lib_filter_button"
+                app:icon="@drawable/ic_filter_list" />
+        </LinearLayout>
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/recyclerRecordings"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:paddingHorizontal="@dimen/od_page_padding_h"
+                android:paddingBottom="@dimen/rec_list_padding_bottom_portrait" />
+
+            <LinearLayout
+                android:id="@+id/initialLoadingContainer"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:contentDescription="@string/recording_library_loading"
+                android:orientation="vertical"
+                android:paddingHorizontal="@dimen/od_page_padding_h"
+                android:paddingTop="@dimen/od_space_4"
+                android:visibility="gone">
+
+                <include layout="@layout/skeleton_tile" />
+
+                <include
+                    layout="@layout/skeleton_tile"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/od_space_16" />
+
+                <include
+                    layout="@layout/skeleton_tile"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/od_space_16" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/emptyStateContainer"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:orientation="vertical"
+                android:padding="@dimen/od_space_32"
+                android:visibility="gone">
+
+                <FrameLayout
+                    android:layout_width="80dp"
+                    android:layout_height="80dp"
+                    android:background="@drawable/recording_lib_empty_tile">
+
+                    <ImageView
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:layout_gravity="center"
+                        android:contentDescription="@null"
+                        android:src="@drawable/ic_recording_file"
+                        app:tint="?attr/colorOnSurfaceVariant" />
+                </FrameLayout>
+
+                <TextView
+                    android:id="@+id/tvEmptyState"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/od_space_16"
+                    android:gravity="center"
+                    android:text="@string/recording_lib_empty_title"
+                    android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                    android:textColor="?attr/colorOnSurface" />
+
+                <TextView
+                    android:id="@+id/tvEmptyStateBody"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:gravity="center"
+                    android:text="@string/recording_lib_empty_body"
+                    android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnEmptyClearFilters"
+                    style="@style/Widget.Overdrive.M3.Button.Tonal"
+                    android:layout_width="wrap_content"
+                    android:layout_height="@dimen/od_touch_min"
+                    android:layout_marginTop="@dimen/od_space_20"
+                    android:text="@string/recording_lib_empty_clear_filters"
+                    android:textAllCaps="false"
+                    android:visibility="gone"
+                    app:cornerRadius="@dimen/card_radius_standard"
+                    app:icon="@drawable/ic_clear"
+                    app:iconSize="18dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnEmptyRetry"
+                    style="@style/Widget.Overdrive.M3.Button.Tonal"
+                    android:layout_width="wrap_content"
+                    android:layout_height="@dimen/od_touch_min"
+                    android:layout_marginTop="@dimen/od_space_16"
                     android:text="@string/action_retry"
                     android:textAllCaps="false"
                     android:visibility="gone" />
             </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-    </FrameLayout>
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/loadStatusBar"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom|center_horizontal"
+                android:layout_margin="@dimen/od_space_16"
+                android:visibility="gone"
+                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+                app:cardCornerRadius="@dimen/card_radius_standard"
+                app:cardElevation="0dp"
+                app:strokeColor="?attr/colorOutlineVariant"
+                app:strokeWidth="1dp">
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="56dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="@dimen/od_space_16"
+                    android:paddingEnd="@dimen/od_space_8">
+
+                    <ProgressBar
+                        android:id="@+id/loadStatusProgress"
+                        style="?android:attr/progressBarStyleSmall"
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:indeterminateTint="?attr/colorPrimary" />
+
+                    <TextView
+                        android:id="@+id/tvLoadStatus"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="@dimen/od_space_12"
+                        android:maxWidth="320dp"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                        android:textColor="?attr/colorOnSurface"
+                        tools:text="Loading more recordings" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnLoadRetry"
+                        style="@style/Widget.Overdrive.M3.Button.Text"
+                        android:layout_width="wrap_content"
+                        android:layout_height="@dimen/od_touch_min"
+                        android:layout_marginStart="@dimen/od_space_8"
+                        android:text="@string/action_retry"
+                        android:textAllCaps="false"
+                        android:visibility="gone" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+        </FrameLayout>
     </LinearLayout>
 
-    <!-- ============================================================
-         4. MULTI-SELECT BOTTOM ACTION BAR (overlay)
-         Docked at the bottom edge so the selection feedback never
-         pushes the recordings grid down — list scroll position is
-         preserved, and the action set sits closer to the user's thumb.
-         ============================================================ -->
+    <!-- Selection bar (primary container) over the list bottom; hidden while a host draws it. -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/selectToolbar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
-        android:layout_marginHorizontal="@dimen/page_padding_horizontal"
-        android:layout_marginBottom="@dimen/page_padding_bottom"
+        android:layout_marginHorizontal="@dimen/od_page_padding_h"
+        android:layout_marginBottom="@dimen/od_space_16"
         android:visibility="gone"
-        app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-        app:cardCornerRadius="@dimen/card_radius_accent"
+        app:cardBackgroundColor="?attr/colorPrimaryContainer"
+        app:cardCornerRadius="@dimen/od_radius_pill_48"
         app:cardElevation="0dp"
-        app:strokeColor="?attr/colorOutlineVariant"
-        app:strokeWidth="1dp">
+        app:strokeWidth="0dp">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:paddingHorizontal="16dp"
-            android:paddingVertical="8dp">
+            android:minHeight="@dimen/od_touch_standard"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/od_space_4"
+            android:paddingEnd="@dimen/od_space_4">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnCancelSelect"
+                style="@style/Widget.Overdrive.Rec.SelectionIcon"
+                android:layout_width="@dimen/od_touch_min"
+                android:layout_height="@dimen/od_touch_min"
+                android:contentDescription="@string/action_cancel"
+                app:icon="@drawable/ic_clear" />
 
             <TextView
                 android:id="@+id/tvSelectedCount"
+                style="@style/Widget.Overdrive.Rec.SelectionCount"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/od_space_4"
                 android:layout_weight="1"
-                android:textColor="?attr/colorOnSurface"
-                android:textSize="14sp"
-                android:fontFamily="sans-serif-medium"
                 android:text="@string/recording_lib_selected_count_zero" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnSelectAll"
-                style="@style/Widget.Overdrive.M3.Button.Text"
+                style="@style/Widget.Overdrive.Rec.SelectionAction"
                 android:layout_width="wrap_content"
-                android:layout_height="48dp"
-                android:text="@string/action_select_all_short"
-                android:textSize="12sp"
-                android:textAllCaps="false" />
+                android:layout_height="@dimen/od_touch_min"
+                android:text="@string/action_select_all_short" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnShareSelected"
-                style="@style/Widget.Overdrive.M3.Button.Text"
+                style="@style/Widget.Overdrive.Rec.SelectionAction"
                 android:layout_width="wrap_content"
-                android:layout_height="48dp"
+                android:layout_height="@dimen/od_touch_min"
                 android:contentDescription="@string/cd_share"
                 android:text="@string/action_share"
-                android:textSize="12sp"
-                android:textAllCaps="false"
-                app:icon="@drawable/ic_share"
-                app:iconSize="16dp" />
+                app:icon="@drawable/ic_share" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnDeleteSelected"
-                style="@style/Widget.Overdrive.M3.Button.Text"
+                style="@style/Widget.Overdrive.Rec.SelectionAction"
                 android:layout_width="wrap_content"
-                android:layout_height="48dp"
+                android:layout_height="@dimen/od_touch_min"
                 android:text="@string/action_delete"
-                android:textSize="12sp"
-                android:textAllCaps="false"
-                android:textColor="@color/overdrive_status_danger"
-                app:icon="@drawable/ic_delete"
-                app:iconTint="@color/overdrive_status_danger"
-                app:iconSize="16dp" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnCancelSelect"
-                style="@style/Widget.Material3.Button.IconButton"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:contentDescription="@string/action_cancel"
-                app:icon="@drawable/ic_clear"
-                app:iconSize="18dp"
-                app:iconTint="?attr/colorOnSurfaceVariant"
-                app:iconGravity="textStart"
-                app:iconPadding="0dp" />
+                app:icon="@drawable/ic_delete" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
-
 </FrameLayout>

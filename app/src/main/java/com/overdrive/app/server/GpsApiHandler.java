@@ -71,6 +71,21 @@ public class GpsApiHandler {
         } catch (Throwable ignored) {
             // No CAN collector / not initialized — GPS-only payload, as before.
         }
+        // ACC as published (absent: not known yet) and the gear while fresh (absent: unknown): the map takes the car
+        // put in P or switched off by its destination as arrived.
+        try {
+            if (com.overdrive.app.monitor.AccMonitor.isAccStateAuthoritative()) {
+                location.put("accOn", com.overdrive.app.monitor.AccMonitor.isAccOn());
+            }
+        } catch (Throwable ignored) {
+        }
+        try {
+            int gear = com.overdrive.app.monitor.GearMonitor.getInstance().getCurrentGearIfFresh();
+            if (com.overdrive.app.monitor.GearMonitor.isValidGearMode(gear)) {
+                location.put("gear", com.overdrive.app.monitor.GearMonitor.gearToString(gear));
+            }
+        } catch (Throwable ignored) {
+        }
         response.put("location", location);
         response.put("googleMapsUrl", gps.getGoogleMapsUrl());
         

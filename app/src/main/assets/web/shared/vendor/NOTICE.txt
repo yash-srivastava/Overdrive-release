@@ -1,0 +1,6 @@
+Third-party components used by the OverDrive web recordings timeline
+
+hls.js 1.7.4 (web/shared/vendor/hls.light.min.js, unmodified dist/hls.light.min.js plus a one-line banner)
+  Copyright (c) 2017 Dailymotion. Portions Copyright (c) 2013-2015 Brightcove. Apache License 2.0.
+  Full license text: web/shared/vendor/hls.js-LICENSE.txt
+  https://github.com/video-dev/hls.js

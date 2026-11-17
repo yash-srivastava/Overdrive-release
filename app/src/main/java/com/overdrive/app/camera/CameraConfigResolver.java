@@ -44,46 +44,36 @@ public final class CameraConfigResolver {
         boolean requestedAutoProfile = selectedProfileId.isEmpty()
                 || CameraProfiles.PROFILE_AUTO.equalsIgnoreCase(selectedProfileId);
         boolean autoProfile = requestedAutoProfile && !dilink5;
-        // DiLink 100 legacy mode: the head unit, not the picked model, fixes the
-        // AVMCamera geometry (an "atto3-evo" pick would otherwise infer the
-        // DiLink 3 Atto 3 slice order). Stale probe ids from other modes are
-        // ignored so camera 0 (pano_h) is always used.
-        boolean dilink100 = autoProfile && !dilink4 && DiLink100Platform.isDiLink100();
+        if (autoProfile && !dilink4 && DiLink100Platform.isAvmPathActive()) {
+            return resolveDiLink100();
+        }
         String vehicleModelHint = preferSelectedVehicleModel(
                 readSelectedVehicleModel(), vehicleModel);
         CameraProfile profile = dilink5
                 ? CameraProfiles.get(CameraProfiles.PROFILE_DILINK5_SEALION7)
-                : dilink100
-                ? CameraProfiles.get(CameraProfiles.PROFILE_DILINK100_AVM)
                 : autoProfile
                 ? CameraProfiles.infer(vehicleModelHint)
                 : CameraProfiles.get(selectedProfileId);
 
-        int persistedPanoCameraId = (dilink5 || dilink100) ? profile.getPanoCameraId()
+        int persistedPanoCameraId = dilink5 ? profile.getPanoCameraId()
                 : optNonNegative(camera, "probedCameraId", profile.getPanoCameraId());
         int panoCameraId = persistedPanoCameraId;
-        boolean fixedGeometry = dilink5 || dilink100;
-        int panoSurfaceMode = fixedGeometry ? profile.getPanoSurfaceMode()
+        int panoSurfaceMode = dilink5 ? profile.getPanoSurfaceMode()
                 : optNonNegative(camera, "probedSurfaceMode", profile.getPanoSurfaceMode());
-        // Legacy installs may have "probed" dimensions seeded from a model
-        // profile rather than observed from the producer. Never accept a
-        // partial, zero, odd, or implausibly large saved pair as geometry.
-        // Preserve valid existing pairs for compatibility: changing an
-        // ImageReader/encoder size on a running fleet is not a safe probe.
+        // Saved dimensions may have been seeded from a profile rather than observed. A partial,
+        // zero, odd or implausibly large saved pair is never geometry; valid pairs are kept.
         int savedWidth = camera.optInt("probedWidth", -1);
         int savedHeight = camera.optInt("probedHeight", -1);
         boolean savedGeometryUsable = isUsablePanoramicGeometry(savedWidth, savedHeight);
-        if (!fixedGeometry && (camera.has("probedWidth") || camera.has("probedHeight"))
-                && !savedGeometryUsable) {
-            logger.warn("Ignoring invalid saved panoramic geometry; using profile dimensions");
+        if (!dilink5 && !savedGeometryUsable && (savedWidth >= 0 || savedHeight >= 0)) {
+            logger.warn("Ignoring invalid saved panoramic geometry " + savedWidth + "x" + savedHeight
+                    + "; using profile dimensions");
         }
-        int panoWidth = !fixedGeometry && savedGeometryUsable
-                ? savedWidth : profile.getPanoWidth();
-        int panoHeight = !fixedGeometry && savedGeometryUsable
-                ? savedHeight : profile.getPanoHeight();
-        boolean manual = !fixedGeometry && camera.optBoolean("manualOverride", false);
-        boolean validated = fixedGeometry || camera.optBoolean("probedAndValidated", false);
-        boolean fallback = !fixedGeometry && camera.optBoolean("fallbackFromProbe", false);
+        int panoWidth = !dilink5 && savedGeometryUsable ? savedWidth : profile.getPanoWidth();
+        int panoHeight = !dilink5 && savedGeometryUsable ? savedHeight : profile.getPanoHeight();
+        boolean manual = !dilink5 && camera.optBoolean("manualOverride", false);
+        boolean validated = dilink5 || camera.optBoolean("probedAndValidated", false);
+        boolean fallback = !dilink5 && camera.optBoolean("fallbackFromProbe", false);
 
         if (dilink4) {
             // DIPlus panoramic recording does not use a vehicle-profile pin
@@ -119,7 +109,7 @@ public final class CameraConfigResolver {
         JSONObject mappingsJson = camera.optJSONObject("roleMappings");
         // The native DiLink 5 hook emits one fixed canonical 2x2 order.
         // Do not let stale legacy role overrides desynchronize AI/preview geometry.
-        if (!fixedGeometry && mappingsJson != null) {
+        if (!dilink5 && mappingsJson != null) {
             for (CameraRole role : CameraRole.values()) {
                 JSONObject item = mappingsJson.optJSONObject(role.getKey());
                 CameraSourceRef sourceRef = CameraSourceRef.fromJson(item);
@@ -163,6 +153,26 @@ public final class CameraConfigResolver {
                 profile,
                 profile.getId(),
                 false,
+                profile.getPanoCameraId(),
+                profile.getPanoWidth(),
+                profile.getPanoHeight(),
+                profile.getPanoSurfaceMode(),
+                false,
+                true,
+                false,
+                profile.getDefaultRoleMappings());
+    }
+
+    /**
+     * BYD100F DiLink 100, Default mode with the Auto profile: the head unit fixes the AVMCamera
+     * geometry. Probe results, manual ids and role overrides from other modes do not apply.
+     */
+    private static ResolvedCameraConfig resolveDiLink100() {
+        CameraProfile profile = CameraProfiles.dilink100Avm();
+        return new ResolvedCameraConfig(
+                profile,
+                CameraProfiles.PROFILE_AUTO,
+                true,
                 profile.getPanoCameraId(),
                 profile.getPanoWidth(),
                 profile.getPanoHeight(),
@@ -299,6 +309,33 @@ public final class CameraConfigResolver {
     public static boolean saveDecoupledEncoderLane(boolean enabled) {
         JSONObject update = new JSONObject();
         putSafely(update, "decoupledEncoderLane", enabled);
+        return UnifiedConfigManager.updateSection("camera", update);
+    }
+
+    /**
+     * Persist the recording engine (camera.recordingEngine = "cpu" / "gpu").
+     * Read when the pipeline starts, so callers restart the camera service.
+     */
+    public static boolean saveRecordingEngine(boolean cpu) {
+        return saveRecordingEngineMode(cpu ? com.overdrive.app.surveillance.RecordingEngine.CPU
+            : com.overdrive.app.surveillance.RecordingEngine.GPU);
+    }
+
+    /** "cpu", "gpu", or anything else for the platform default. */
+    public static boolean saveRecordingEngineMode(String mode) {
+        JSONObject update = new JSONObject();
+        putSafely(update, com.overdrive.app.surveillance.RecordingEngine.CONFIG_KEY,
+            com.overdrive.app.surveillance.RecordingEngine.normalize(mode));
+        // A deliberate choice retries the CPU even after a stored failure.
+        putSafely(update, com.overdrive.app.surveillance.RecordingEngine.BLOCK_KEY, "");
+        return UnifiedConfigManager.updateSection("camera", update);
+    }
+
+    /** Remember a CPU-engine failure for this app build (see RecordingEngine.BLOCK_KEY). */
+    public static boolean saveRecordingEngineBlock(String why) {
+        JSONObject update = new JSONObject();
+        putSafely(update, com.overdrive.app.surveillance.RecordingEngine.BLOCK_KEY,
+            com.overdrive.app.surveillance.RecordingEngine.blockEntry(why));
         return UnifiedConfigManager.updateSection("camera", update);
     }
 

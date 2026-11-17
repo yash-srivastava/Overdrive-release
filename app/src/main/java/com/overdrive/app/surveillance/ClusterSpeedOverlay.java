@@ -32,6 +32,7 @@ import java.util.concurrent.TimeUnit;
  * clipped by our fullscreen content. This overlay restores a current-speed readout
  * that is INDEPENDENT of what is projected underneath (the nav map, the blind-spot
  * card, or any future projected surface), so the driver always sees their speed.
+ * Opt-in via {@link #CONFIG_KEY} (default off).
  *
  * <h3>How it composites</h3>
  * A uid-2000 {@code SurfaceControl} buffer layer tagged {@code layerStack=1} (the OEM
@@ -61,6 +62,9 @@ public final class ClusterSpeedOverlay {
 
     private static final String TAG = "ClusterSpeedOverlay";
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
+
+    /** {@code surveillance.clusterSpeedEnabled}; absent = off. */
+    public static final String CONFIG_KEY = "clusterSpeedEnabled";
 
     // TOPMOST on the cluster — the speed readout must never be occluded by anything
     // projected there (the nav map, and crucially the blind-spot card, which composites
@@ -205,13 +209,23 @@ public final class ClusterSpeedOverlay {
     /** Whether a head-unit view-mirror is currently capturing the cluster stack. */
     static boolean isMirrorActive() { return sMirrorActive; }
 
+    /** Applies a saved {@link #CONFIG_KEY} change to an already-open projection. Any thread. */
+    public static void onEnabledChanged() {
+        ClusterSpeedOverlay i = instance;
+        if (i == null) return;   // only the controller's open path constructs it: nothing is open
+        int epoch = i.currentControllerEpoch();
+        i.exec.execute(() -> {
+            if (i.enabledInConfig()) i.startOnExec(epoch); else i.stopOnExec();
+        });
+    }
+
     /** Sentinel epoch meaning "no supersession check" — for callers that have no
      *  open-sequence epoch to pin against (none today; the overload is the live path). */
     private static final int EPOCH_NONE = Integer.MIN_VALUE;
 
     /**
-     * Show the badge + begin the 2 Hz speed refresh. Idempotent. No-op when the
-     * overlay is disabled via UCM ({@code surveillance.clusterSpeedEnabled=false}).
+     * Show the badge + begin the 2 Hz speed refresh. Idempotent. No-op unless the
+     * user enabled it ({@code surveillance.clusterSpeedEnabled=true}).
      * Safe to call from any thread — it just posts {@link #startOnExec} onto the
      * single {@link #exec}, where ALL lifecycle state is mutated (no cross-thread
      * races, no flag a foreign thread can clobber).
@@ -268,7 +282,7 @@ public final class ClusterSpeedOverlay {
             return;
         }
         if (!enabledInConfig()) {
-            logger.info("speed overlay disabled (surveillance.clusterSpeedEnabled=false)");
+            logger.debug("speed overlay not enabled (surveillance." + CONFIG_KEY + ")");
             return;
         }
         // Do NOT show the badge while a head-unit view-mirror is capturing the cluster stack: the
@@ -562,24 +576,13 @@ public final class ClusterSpeedOverlay {
         }
     }
 
-    /** Whether the speed badge is enabled. Default ON. {@code surveillance.clusterSpeedEnabled}
-     *  is a CONFIG/UCM-tunable flag (like the controller's sibling {@code cluster*} knobs —
-     *  clusterSizeProfile / clusterLingerMs etc. — none of which have a settings-UI toggle):
-     *  there is intentionally no web/UI surface, so disabling is done by editing the
-     *  surveillance config (e.g. via ADB) for the rare opt-out.
-     *
-     *  <p>Change-honouring is ASYMMETRIC by design: a mid-session DISABLE is honoured
-     *  within one tick (the per-tick re-check tears the badge down), but a subsequent
-     *  mid-session RE-ENABLE is only picked up at the NEXT projection open (the start-gate)
-     *  — we deliberately do NOT keep a perpetual poll running while disabled, since that
-     *  would re-introduce a parked-wakeup cost for a rarely-touched opt-out flag. Toggling
-     *  it back on therefore takes effect on the next turn-signal / map projection. */
+    /** Opt-in, default off. One key for the Projection screen and RoadSense switches. */
     private boolean enabledInConfig() {
         try {
             org.json.JSONObject s = UnifiedConfigManager.getSurveillance();
-            return s == null || s.optBoolean("clusterSpeedEnabled", true);
+            return s != null && s.optBoolean(CONFIG_KEY, false);
         } catch (Throwable t) {
-            return true;
+            return false;
         }
     }
 

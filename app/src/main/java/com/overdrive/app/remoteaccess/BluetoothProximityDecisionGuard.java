@@ -42,8 +42,10 @@ public final class BluetoothProximityDecisionGuard {
                 && "AWAY".equals(signal.optString("state"))
                 && "UNKNOWN".equals(signal.optString("candidate"))
                 && signal.optBoolean("departureEligible")
-                && signal.optInt("disconnectionSampleCount") >= 3
-                && signal.optLong("disconnectedForMs") >= 6_000
+                // The evaluator's own rule (two reads over two seconds since 20 Oct); the old 3 / 6 s
+                // here rejected departures the evaluator had already confirmed.
+                && signal.optInt("disconnectionSampleCount") >= ProximityEvaluator.DISCONNECTION_CONFIRM_READS
+                && signal.optLong("disconnectedForMs") >= ProximityEvaluator.DISCONNECTION_CONFIRM_SPAN_MS
                 && signal.optLong("observedAtElapsedMs", -1)
                     == signal.optLong("connectionObservedAtElapsedMs", -2);
     }

@@ -42,13 +42,8 @@ public final class ThumbnailBuffer {
 
     private static final DaemonLogger logger = DaemonLogger.getInstance("ThumbBuf");
 
-    /**
-     * Preserve the detector crop's native dimensions. Foveated crops are already
-     * 640×640; mosaic crops can be only 320×240. Stretching the latter to a
-     * 640×640 square adds no detail and distorts both the scene and the bbox.
-     * Keep more of the available JPEG detail because this file is shared by
-     * Telegram sendPhoto and Web Push notification images.
-     */
+    /** Long side of the output JPEG; the crop keeps its aspect ratio (640×640 foveated, 320×240 mosaic → 640×480). */
+    private static final int OUT_SIDE = 640;
     private static final int JPEG_QUALITY = 95;
 
     /** Package-visible so the caller-driven per-actor writer (see
@@ -326,6 +321,9 @@ public final class ThumbnailBuffer {
         for (Actor a : actors) {
             // Only consider actors that hit at least NOTICE in this frame's quadrant
             if (a.peakCamera != camera) continue;
+            // An unconfirmed person (a 1-2 frame class flicker) is left out of the clip's counts,
+            // so it must not burn a "person" label into the hero either. Once confirmed it is eligible.
+            if (a.classGroup == Actor.ClassGroup.PERSON && !a.confirmed) continue;
             // BACKGROUND SCENERY (parked car, a tree briefly uncovered by motion)
             // must never win the thumbnail: a bbox drawn over a static car in the
             // distance reads to the user as "the system flagged this as a threat".
@@ -993,11 +991,24 @@ public final class ThumbnailBuffer {
             }
             bmp.setPixels(pixels, 0, s.srcW, 0, 0, s.srcW, s.srcH);
 
-            // Do not upscale small mosaic crops or force them into a square.
-            // Native-size output avoids interpolation blur and preserves the
-            // source aspect ratio; foveated 640×640 crops remain unchanged.
-            out = bmp;
-            bmp = null;  // ownership transferred to `out`
+            // Fit the long side to OUT_SIDE without changing the aspect, so the label stays legible.
+            float fit = (float) OUT_SIDE / Math.max(s.srcW, s.srcH);
+            int outW = Math.max(1, Math.round(s.srcW * fit));
+            int outH = Math.max(1, Math.round(s.srcH * fit));
+            if (s.srcW != outW || s.srcH != outH) {
+                out = Bitmap.createScaledBitmap(bmp, outW, outH, true);
+                // bmp is now redundant — recycle eagerly (and null it so the
+                // finally block doesn't double-recycle). createScaledBitmap
+                // can also return the same bitmap if dims happened to match;
+                // guard by identity.
+                if (out != bmp) {
+                    bmp.recycle();
+                    bmp = null;
+                }
+            } else {
+                out = bmp;
+                bmp = null;  // ownership transferred to `out`
+            }
 
             // Draw bbox + label
             Canvas canvas = new Canvas(out);
@@ -1006,8 +1017,8 @@ public final class ThumbnailBuffer {
             stroke.setStrokeWidth(4f);
             stroke.setColor(severityColor(s.severity));
 
-            float scaleX = 1f;
-            float scaleY = 1f;
+            float scaleX = (float) out.getWidth() / s.srcW;
+            float scaleY = (float) out.getHeight() / s.srcH;
             Rect r = new Rect(
                     Math.round(s.bboxX * scaleX),
                     Math.round(s.bboxY * scaleY),

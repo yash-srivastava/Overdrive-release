@@ -13,6 +13,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -520,9 +521,9 @@ public final class AppLauncher {
         // firmware range. A following "<pkg>/" component line ties a task to its
         // package. (`.` in pkg is a regex any-char here but charset-limited so the
         // over-match is benign; attribution below re-checks with a literal "<pkg>/".)
-        String out = runShellCapture(
+        ShellCaptureResult capture = runShellCaptureResult(
                 "dumpsys activity activities | grep -E 'TaskRecord\\{|Task\\{|" + pkg + "/'");
-        return taskIdInDump(out, pkg);
+        return taskIdInDump(capture, pkg);
     }
 
     /**
@@ -543,8 +544,14 @@ public final class AppLauncher {
 
     /** Package-private parser seam for the JVM regression test. */
     static int taskIdInDump(String out, String pkg) {
+        return taskIdInDump(out == null ? null : ShellCaptureResult.complete(out), pkg);
+    }
+
+    /** Positive evidence survives an incomplete capture; negative evidence requires completeness. */
+    static int taskIdInDump(ShellCaptureResult capture, String pkg) {
         if (!isValidPackageName(pkg)) return -1;
-        if (out == null) return TASK_LOOKUP_FAILED;   // shell/dumpsys failure — unverifiable
+        if (capture == null) return TASK_LOOKUP_FAILED;
+        String out = capture.output;
         int pendingTaskId = -1;
         boolean sawTaskHeader = false;
         for (String line : out.split("\\r?\\n")) {
@@ -572,7 +579,7 @@ public final class AppLauncher {
         // ZERO task headers is dumpsys erroring out (AMS not up yet, permission refusal),
         // not proof of absence. Only a parsed dump that contains other tasks but none for
         // this package confirms the task is gone.
-        return sawTaskHeader ? -1 : TASK_LOOKUP_FAILED;
+        return sawTaskHeader && capture.isComplete() ? -1 : TASK_LOOKUP_FAILED;
     }
 
     /** {@code mLastPausedActivity: ...}, {@code mResumedActivity: ...}, {@code topResumedActivity=...}
@@ -912,43 +919,99 @@ public final class AppLauncher {
      * keep the stream small, and this is a hard backstop. Used by the split-screen
      * re-dock parse; mirrors the capture pattern already in {@link #resolveLauncherComponent}.
      */
+    /** Metadata-bearing result for shell evidence whose negative conclusions require completeness. */
+    static final class ShellCaptureResult {
+        final String output;
+        final boolean timedOut;
+        final int exitCode;
+        final boolean readerComplete;
+        final boolean truncated;
+        final boolean readFailed;
+
+        ShellCaptureResult(String output, boolean timedOut, int exitCode,
+                boolean readerComplete, boolean truncated, boolean readFailed) {
+            this.output = output != null ? output : "";
+            this.timedOut = timedOut;
+            this.exitCode = exitCode;
+            this.readerComplete = readerComplete;
+            this.truncated = truncated;
+            this.readFailed = readFailed;
+        }
+
+        static ShellCaptureResult complete(String output) {
+            return new ShellCaptureResult(output, false, 0, true, false, false);
+        }
+
+        boolean isComplete() {
+            return !timedOut && exitCode == 0 && readerComplete && !truncated && !readFailed;
+        }
+    }
+
+    /** Compatibility wrapper for positive-only parsers. */
     private static String runShellCapture(String cmd) {
+        ShellCaptureResult result = runShellCaptureResult(cmd);
+        return result != null && result.isComplete() ? result.output : null;
+    }
+
+    private static ShellCaptureResult runShellCaptureResult(String cmd) {
         Process p = null;
         InputStream is = null;
+        final java.util.concurrent.atomic.AtomicBoolean truncated =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
+        final java.util.concurrent.atomic.AtomicBoolean readFailed =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
+        final java.util.concurrent.atomic.AtomicBoolean readerComplete =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
+        final ByteArrayOutputStream captured = new ByteArrayOutputStream();
+        boolean timedOut = false;
+        int exitCode = -1;
         try {
-            p = new ProcessBuilder("sh", "-c", com.overdrive.app.util.ScratchRoot.remap(cmd)).redirectErrorStream(true).start();
+            p = new ProcessBuilder("sh", "-c", com.overdrive.app.util.ScratchRoot.remap(cmd))
+                    .redirectErrorStream(true).start();
             is = p.getInputStream();
             final InputStream captureStream = is;
-            final StringBuffer sb = new StringBuffer();
             Thread reader = new Thread(() -> {
                 byte[] buf = new byte[4096];
                 try {
                     int n;
                     while ((n = captureStream.read(buf)) != -1) {
-                        int remaining = SHELL_CAPTURE_CAP_BYTES - sb.length();
-                        if (remaining > 0) {
-                            sb.append(new String(buf, 0, Math.min(n, remaining)));
-                        }
-                        // Keep draining past the cap so the child never blocks on a full pipe.
+                        int remaining = SHELL_CAPTURE_CAP_BYTES - captured.size();
+                        if (remaining > 0) captured.write(buf, 0, Math.min(n, remaining));
+                        if (n > remaining) truncated.set(true);
                     }
-                } catch (Throwable ignored) {
+                    readerComplete.set(true);
+                } catch (Throwable failure) {
+                    readFailed.set(true);
                 }
             }, "applauncher-capture");
             reader.setDaemon(true);
             reader.start();
 
             boolean done = p.waitFor(5, TimeUnit.SECONDS);
+            timedOut = !done;
             if (!done) p.destroyForcibly();
             reader.join(500);
             if (reader.isAlive()) {
                 try { is.close(); } catch (Throwable ignored) { }
                 reader.join(500);
             }
-            if (!done) return null;
-            return sb.toString();
+            if (done) exitCode = p.exitValue();
+            return new ShellCaptureResult(
+                    new String(captured.toByteArray(), java.nio.charset.StandardCharsets.UTF_8),
+                    timedOut,
+                    exitCode,
+                    readerComplete.get() && !reader.isAlive(),
+                    truncated.get(),
+                    readFailed.get());
         } catch (Throwable t) {
             logger.warn("runShellCapture failed: " + t.getMessage());
-            return null;
+            return new ShellCaptureResult(
+                    new String(captured.toByteArray(), java.nio.charset.StandardCharsets.UTF_8),
+                    timedOut,
+                    exitCode,
+                    readerComplete.get(),
+                    truncated.get(),
+                    true);
         } finally {
             if (is != null) { try { is.close(); } catch (Throwable ignored) { } }
             if (p != null) { try { p.destroy(); } catch (Throwable ignored) { } }

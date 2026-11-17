@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Status-bar notifications and channel names of the background services. -->
+<resources>
+    <string name="notif_channel_roadsense_overlay">RoadSense overlay</string>
+    <string name="notif_roadsense_overlay_text">Hazard overlay active</string>
+    <string name="notif_channel_roadsense_imu">RoadSense IMU</string>
+    <string name="notif_roadsense_imu_text">Road sensing active</string>
+    <string name="notif_channel_onscreen_messages">On-screen messages</string>
+    <string name="notif_onscreen_message_title">On-screen message</string>
+    <string name="notif_channel_parked_impact">Parked impact watch</string>
+    <string name="notif_parked_impact_title">Sentry</string>
+    <string name="notif_parked_impact_text">Watching for impacts while parked</string>
+    <string name="notif_network_hotspot">Network &amp; Hotspot</string>
+    <string name="notif_channel_media_playback">Media Playback</string>
+    <string name="notif_roadsense_chime_title">RoadSense warning</string>
+    <string name="notif_roadsense_chime_text">Playing a safety chime</string>
+    <string name="notif_channel_location">Location Service</string>
+    <string name="notif_channel_location_desc">GPS tracking for surveillance</string>
+    <string name="notif_location_title">Location Active</string>
+    <string name="notif_location_text">GPS tracking running</string>
+    <string name="notif_vehicle_control">Vehicle control</string>
+    <string name="notif_media_title">Playing audio</string>
+    <string name="notif_media_text">OverDrive automation</string>
+    <string name="notif_channel_keepalive">Daemon Keepalive</string>
+    <string name="notif_channel_keepalive_desc">Keeps daemons running in background</string>
+    <string name="notif_channel_summary">Overdrive Status</string>
+    <string name="notif_channel_summary_desc">Combined status row for Overdrive\'s background services</string>
+    <string name="notif_channel_remote_voice">Remote voice</string>
+    <string name="notif_channel_status_overlay">Status Overlay</string>
+    <string name="notif_channel_status_overlay_desc">Recording and trip status overlay</string>
+</resources>

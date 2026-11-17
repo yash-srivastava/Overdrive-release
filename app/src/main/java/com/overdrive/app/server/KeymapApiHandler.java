@@ -754,7 +754,7 @@ public final class KeymapApiHandler {
                     + "session, so that setting was not changed. Sign in again on the car, "
                     + "or reload this page; it cannot be enabled over a tunnel.");
         }
-        if (!ok) response.put("error", "Failed to persist keymap config");
+        if (!ok) response.put("error", Messages.get("errors.keymap_persist_failed"));
         HttpResponse.sendJson(out, response.toString());
     }
 

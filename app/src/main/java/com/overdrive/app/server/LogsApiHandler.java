@@ -21,6 +21,7 @@ import java.io.OutputStream;
  * Endpoints:
  *   GET  /api/logs/available           → {available, daemons:[key,…], descriptions:{key:{name,component,sendWhen}}}
  *   POST /api/logs/upload?daemon=camera → {code} | {error}
+ *   GET|POST /api/logs/level            → {minLevel, savedLevel} (also /api/settings/logging)
  *
  * Public-mode is hard-blocked for /upload (mirrors /api/update/install): a
  * tunnel visitor must not be able to exfiltrate logs. /available is read-only.
@@ -35,6 +36,52 @@ public class LogsApiHandler {
         }
         if (path.startsWith("/api/logs/upload") && method.equals("POST")) {
             handleUpload(path, out);
+            return true;
+        }
+        if (path.split("\\?", 2)[0].equals("/api/logs/level")) {
+            return handleLevel(method, body, out);
+        }
+        return false;
+    }
+
+    /**
+     * GET/POST /api/logs/level, mirrored at /api/settings/logging: the daemons' minimum log level.
+     * POST saves it; this daemon applies it at once through the config listener, the other daemons
+     * on their next start. POST is blocked in public mode, like /upload.
+     */
+    static boolean handleLevel(String method, String body, OutputStream out) throws Exception {
+        if (method.equals("GET")) {
+            String saved = com.overdrive.app.config.UnifiedConfigManager.getPersistedLogLevel();
+            JSONObject r = new JSONObject();
+            r.put("success", true);
+            r.put("minLevel", com.overdrive.app.logging.DaemonLogger.getConfig().minLevel.name());
+            r.put("savedLevel", saved != null ? saved : JSONObject.NULL);
+            r.put("availableLevels", new JSONArray().put("DEBUG").put("INFO").put("WARN").put("ERROR"));
+            HttpResponse.sendJson(out, 200, r.toString());
+            return true;
+        }
+        if (method.equals("POST")) {
+            if (CameraDaemon.isPublicMode()) {
+                HttpResponse.sendJsonError(out, Messages.get("errors.update_disabled_in_public_mode"));
+                return true;
+            }
+            JSONObject req;
+            try {
+                req = new JSONObject(body == null ? "" : body);
+            } catch (Exception e) {
+                req = new JSONObject();
+            }
+            String level = com.overdrive.app.config.UnifiedConfigManager.canonicalLogLevel(
+                    req.optString("minLevel", req.optString("level", "")));
+            if (level == null) {
+                HttpResponse.sendJson(out, 400, "{\"success\":false,\"error\":\"Invalid level. Expected DEBUG, INFO, WARN, or ERROR.\"}");
+                return true;
+            }
+            boolean ok = com.overdrive.app.config.UnifiedConfigManager.setLogLevel(level);
+            JSONObject r = new JSONObject();
+            r.put("success", ok);
+            r.put("minLevel", level);
+            HttpResponse.sendJson(out, ok ? 200 : 500, r.toString());
             return true;
         }
         return false;

@@ -135,12 +135,14 @@ class ExpertTourCoach(
             // Anchor on the steady-state segmented toggle (heroHeader/filterStrip can be
             // GONE during the landscape fullscreen player; segmentedSource is reliable).
             val seg = root?.findViewById<View>(R.id.segmentedSource)
-            spotlightOrCenter(seg)
+            // In Timeline view the toggle is hidden: point at (and describe) the List | Timeline switch instead.
+            val timelineView = seg?.isShown != true && root?.findViewById<View>(R.id.recViewToggle)?.isShown == true
+            spotlightOrCenter(if (timelineView) root?.findViewById<View>(R.id.recViewToggle) else seg)
             overlay.consumeCutoutTouch = false
             card(
                 Chapter.RECORDINGS,
                 R.string.onboarding_expert_recordings_title,
-                R.string.onboarding_expert_recordings_body,
+                if (timelineView) R.string.onboarding_expert_recordings_timeline_body else R.string.onboarding_expert_recordings_body,
             )
         }
     }
@@ -250,16 +252,21 @@ class ExpertTourCoach(
     }
 
     private fun integrationsBydCloudStep(root: View?) {
-        val card = root?.findViewById<View>(R.id.cardBydCloud)
-        spotlightOrCenter(card)
-        // BYD Cloud unlocks remote lock/flash/horn — flag the stakes (informational, not
-        // a footgun fire). Touch passes through so the user can open it if they want.
-        overlay.consumeCutoutTouch = false
-        card(
-            Chapter.INTEGRATIONS,
-            R.string.onboarding_expert_bydcloud_title,
-            R.string.onboarding_expert_bydcloud_body,
-        )
+        val target = root?.findViewById<View>(R.id.cardBydCloud)
+        // The card sits on the second grid row in landscape; bring it on screen before spotlighting.
+        target?.requestRectangleOnScreen(android.graphics.Rect(0, 0, target.width, target.height), true)
+        val show = {
+            spotlightOrCenter(target)
+            // BYD Cloud unlocks remote lock/flash/horn — flag the stakes (informational, not
+            // a footgun fire). Touch passes through so the user can open it if they want.
+            overlay.consumeCutoutTouch = false
+            card(
+                Chapter.INTEGRATIONS,
+                R.string.onboarding_expert_bydcloud_title,
+                R.string.onboarding_expert_bydcloud_body,
+            )
+        }
+        if (target != null) target.post { show() } else show()
     }
 
     // ---- Chapter 4: Surveillance & recording -----------------------------------------

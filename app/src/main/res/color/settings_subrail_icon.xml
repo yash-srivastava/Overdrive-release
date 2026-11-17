@@ -1,10 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  Sub-rail row leading icon color.
-    selected → onSecondaryContainer (matches active pill foreground)
-    default  → onSurfaceVariant (the M3 secondary-icon token)
--->
+<!-- Sub-rail leading icon: primary on the selected row, onSurfaceVariant otherwise. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:state_selected="true" android:color="?attr/colorOnSecondaryContainer" />
+    <item android:state_selected="true" android:color="?attr/colorPrimary" />
     <item android:color="?attr/colorOnSurfaceVariant" />
 </selector>

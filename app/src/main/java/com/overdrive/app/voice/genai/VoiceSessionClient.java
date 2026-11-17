@@ -58,6 +58,10 @@ public final class VoiceSessionClient {
         void onActionProposal(JSONObject proposal);
         void onContextRequest(JSONObject request);
         void onEnded(String reason);                  // "done" | "busy" | "unavailable" | "failed" | "connect_failed" | "setup_failed" | "cancelled"
+
+        /** Trip Briefing sessions only: the model called trip_briefing_answer ("yes" | "no", app or null). */
+        default void onBriefingAnswer(String answer, String app) {
+        }
     }
 
     private static final String TAG = "VoiceSession";
@@ -86,6 +90,8 @@ public final class VoiceSessionClient {
     private final Context app;
     private final String language;
     private final String audioChannel;
+    /** Trip Briefing context (JSON) for the daemon, or null for an ordinary session. */
+    private final String brief;
     private final Listener listener;
     private final AtomicBoolean ended = new AtomicBoolean();
     private final AtomicBoolean connectStarted = new AtomicBoolean();
@@ -134,10 +140,11 @@ public final class VoiceSessionClient {
     private final Set<String> confirmedTokens = new HashSet<>();
 
     private VoiceSessionClient(Context app, String language, String audioChannel, int frameMs,
-                               Listener listener) {
+                               String brief, Listener listener) {
         this.app = app;
         this.language = language == null ? "" : language.trim();
         this.audioChannel = audioChannel == null ? "media" : audioChannel;
+        this.brief = brief;
         this.listener = listener;
         this.events = new ScheduledThreadPoolExecutor(1, r -> {
             Thread t = new Thread(r, "VoiceSessionEvents");
@@ -152,11 +159,17 @@ public final class VoiceSessionClient {
     /** {@code frameMs} sizes uplink frames per provider rate; 0 keeps the legacy 2048-sample frame. */
     public static VoiceSessionClient open(Context ctx, String language, String audioChannel,
                                           int frameMs, Listener listener) {
+        return open(ctx, language, audioChannel, frameMs, null, listener);
+    }
+
+    /** {@code brief} (Trip Briefing context JSON) makes the daemon run a briefing session. */
+    public static VoiceSessionClient open(Context ctx, String language, String audioChannel,
+                                          int frameMs, String brief, Listener listener) {
         if (listener == null) throw new IllegalArgumentException("listener is required");
         Context app = ctx == null ? null
                 : (ctx.getApplicationContext() != null ? ctx.getApplicationContext() : ctx);
         VoiceSessionClient client = new VoiceSessionClient(app, language, audioChannel, frameMs,
-                listener);
+                brief, listener);
         client.start();
         return client;
     }
@@ -342,6 +355,7 @@ public final class VoiceSessionClient {
             // A cabin microphone is far-field; the bridge's default noise reduction is for headsets.
             String path = "/ws/genai?mic=far";
             if (!language.isEmpty()) path += "&lang=" + URLEncoder.encode(language, "UTF-8");
+            if (brief != null) path += "&brief=" + URLEncoder.encode(brief, "UTF-8");
             Request request = new Request.Builder()
                     .url(DaemonHttpClient.webSocketUrl(path))
                     .header("Cookie", cookie)
@@ -497,6 +511,12 @@ public final class VoiceSessionClient {
                 case "retrying":
                     rearmLiveTimerLocked(m.optString("route", ""));
                     break;
+                case "briefing_answer": {
+                    final String answer = m.optString("answer", "");
+                    final String chosen = m.isNull("app") ? null : m.optString("app", null);
+                    post(() -> listener.onBriefingAnswer(answer, chosen));
+                    break;
+                }
                 case "failed":
                     onFailedLocked(m);
                     break;

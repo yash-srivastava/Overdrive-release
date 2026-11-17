@@ -105,9 +105,10 @@ public final class ScreenDeterrent {
     private static final long GATE_REFRESH_INTERVAL_MS = 1_000;
     private static final long INPUT_READY_TIMEOUT_MS = 4_000;
     private static final long INPUT_READY_POLL_MS = 50;
-    static final long MOTION_COOLDOWN_MS = 30_000;
+    /** DI5: pause after the app saw the car awake when it was asked to show a deterrent. */
     static final long DILINK5_APP_AWAKE_HOLD_MS = 60_000;
-    static final long DILINK5_WALKAWAY_AFTER_LOCK_MS = 15_000;
+    // Stays under the in-car WebView bridge's 10 s read timeout.
+    private static final long PREVIEW_CONFIRM_TIMEOUT_MS = INPUT_READY_TIMEOUT_MS + 3_000;
 
     private static volatile ScreenDeterrent instance;
 
@@ -139,7 +140,9 @@ public final class ScreenDeterrent {
     /** A terminal stop drops motion extensions that race visual teardown. */
     private final AtomicBoolean terminalStopRequested = new AtomicBoolean(false);
     private volatile long previewDeadlineElapsedMs = 0;
-    private volatile long cooldownUntilElapsedMs = 0;
+    /** Set only while a manual preview runs: completes with null once its first frame is drawn, else a message key. */
+    private volatile java.util.concurrent.CompletableFuture<String> previewOutcome;
+    private volatile boolean inputWaitTimedOut;
     private volatile Thread renderThread;
     private final Object inputCaptureLock = new Object();
     private long inputCaptureSequence = 0;
@@ -380,7 +383,7 @@ public final class ScreenDeterrent {
                 }
             };
 
-    /** Door edges come from the listener; this adds doors left open and unlocked state. */
+    /** Door edges come from the listener; this adds doors left open and unlock edges. */
     private static void refreshDiLink5OwnerAtCar() {
         if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled()) return;
         com.overdrive.app.byd.BydDataCollector collector =
@@ -389,51 +392,19 @@ public final class ScreenDeterrent {
         int lock = collector.readDiLink5GateDoorLockState();
         synchronized (DILINK5_OWNER_LOCK) {
             long now = SystemClock.elapsedRealtime();
-            diLink5OwnerActivityElapsedMs = updateDiLink5OwnerActivityTimestamp(
-                    now, diLink5OwnerActivityElapsedMs, doorOpen, diLink5DoorWasOpen,
-                    lock, diLink5LastLockState);
+            boolean unlocked = lock == com.overdrive.app.byd.BydDataCollector.DOOR_STATE_UNLOCK
+                    && diLink5LastLockState == com.overdrive.app.byd.BydDataCollector.DOOR_STATE_LOCK;
+            if ((doorOpen && !diLink5DoorWasOpen) || unlocked) {
+                diLink5OwnerActivityElapsedMs = now;
+            }
             diLink5DoorWasOpen = doorOpen;
             if (lock != com.overdrive.app.byd.BydDataCollector.DOOR_STATE_INVALID) {
                 diLink5LastLockState = lock;
             }
-            setDiLink5OwnerAtCar(isDiLink5OwnerHoldActive(
-                    now, diLink5OwnerActivityElapsedMs, doorOpen, lock));
+            long since = now - diLink5OwnerActivityElapsedMs;
+            setDiLink5OwnerAtCar(diLink5OwnerActivityElapsedMs > 0L && since >= 0L
+                    && since < (doorOpen ? DILINK5_OPEN_DOOR_HOLD_MS : DILINK5_OWNER_HOLD_MS));
         }
-    }
-
-    static long updateDiLink5OwnerActivityTimestamp(
-            long nowElapsedMs,
-            long previousActivityElapsedMs,
-            boolean doorOpen,
-            boolean doorWasOpen,
-            int lockState,
-            int lastLockState) {
-        if (doorOpen || lockState == com.overdrive.app.byd.BydDataCollector.DOOR_STATE_UNLOCK) {
-            return nowElapsedMs;
-        }
-        // When the owner explicitly locks the vehicle with all doors closed, cap any
-        // prior unlock hold to a short walk-away grace so Sentry re-arms promptly.
-        if (lockState == com.overdrive.app.byd.BydDataCollector.DOOR_STATE_LOCK
-                && (doorWasOpen || lastLockState == com.overdrive.app.byd.BydDataCollector.DOOR_STATE_UNLOCK)
-                && previousActivityElapsedMs > 0L) {
-            long walkAwayBase = Math.max(1L,
-                    nowElapsedMs - (DILINK5_OWNER_HOLD_MS - DILINK5_WALKAWAY_AFTER_LOCK_MS));
-            return Math.min(previousActivityElapsedMs, walkAwayBase);
-        }
-        return previousActivityElapsedMs;
-    }
-
-    static boolean isDiLink5OwnerHoldActive(
-            long nowElapsedMs,
-            long activityElapsedMs,
-            boolean doorOpen,
-            int lockState) {
-        if (doorOpen || lockState == com.overdrive.app.byd.BydDataCollector.DOOR_STATE_UNLOCK) {
-            return true;
-        }
-        long since = nowElapsedMs - activityElapsedMs;
-        return activityElapsedMs > 0L && since >= 0L
-                && since < (doorOpen ? DILINK5_OPEN_DOOR_HOLD_MS : DILINK5_OWNER_HOLD_MS);
     }
 
     /** Caller holds DILINK5_OWNER_LOCK. */
@@ -450,11 +421,12 @@ public final class ScreenDeterrent {
      * volatile reads + atomic CAS only. NO I/O, NO locks, NO allocations.
      * The hot cache is kept fresh by cacheScheduler on a separate thread.
      */
-    public void onMotionDetected() {
-        if (!hotCacheEnabled) return;
+    /** @return true while the warning is showing (started now or extended), false when it stays off. */
+    public boolean onMotionDetected() {
+        if (!hotCacheEnabled) return false;
         // DI5 owner present: surveillance keeps running there, so stay quiet (logged on the edge).
-        if (diLink5CarAwake) return;
-        if (diLink5OwnerAtCar) return;
+        if (diLink5CarAwake) return false;
+        if (diLink5OwnerAtCar) return false;
 
         // SAFETY (deterrent-while-driving): the deterrent renders a full-screen
         // SurfaceControl layer at z=Integer.MAX_VALUE that occludes the ENTIRE
@@ -468,16 +440,11 @@ public final class ScreenDeterrent {
         // an unknown or stale state fails closed.
         if (isAccUnsafe()) {
             logger.warn("Screen deterrent suppressed — ACC is ON or unknown");
-            return;
-        }
-
-        long nowElapsed = SystemClock.elapsedRealtime();
-        if (!inFlight.get() && nowElapsed < cooldownUntilElapsedMs) {
-            return;
+            return false;
         }
 
         long durationMs = hotCacheDurationSec * 1000L;
-        long newDeadline = nowElapsed + durationMs;
+        long newDeadline = SystemClock.elapsedRealtime() + durationMs;
 
         while (true) {
             long current = extendDeadlineElapsedMs.get();
@@ -485,16 +452,15 @@ public final class ScreenDeterrent {
             if (extendDeadlineElapsedMs.compareAndSet(current, newDeadline)) break;
         }
 
-        if (!inFlight.compareAndSet(false, true)) return;
+        if (!inFlight.compareAndSet(false, true)) return true;
 
         restorePanelAfterSession = false;
-        cooldownUntilElapsedMs = 0;
         cancelled.set(false);
         if (terminalStopRequested.get()) {
             extendDeadlineElapsedMs.set(0);
             inFlight.set(false);
             terminalStopRequested.compareAndSet(true, false);
-            return;
+            return false;
         }
         executor.execute(() -> {
             renderThread = Thread.currentThread();
@@ -506,6 +472,7 @@ public final class ScreenDeterrent {
                 cleanup();
             }
         });
+        return true;
     }
 
     private void cleanup() {
@@ -552,7 +519,7 @@ public final class ScreenDeterrent {
         inFlight.set(false);
         long pendingDeadline = extendDeadlineElapsedMs.get();
         long now = SystemClock.elapsedRealtime();
-        if (pendingDeadline > now && now >= cooldownUntilElapsedMs) {
+        if (pendingDeadline > now) {
             // Re-enter via the public API so we hit inFlight CAS again
             // cleanly. The executor will queue our next fire() task.
             // Note: at this point another GL-thread motion call could ALSO
@@ -587,10 +554,29 @@ public final class ScreenDeterrent {
     }
 
     /**
-     * Manual preview for the settings page. Returns null when accepted, or a
-     * user-facing error when the preview cannot start safely.
+     * Manual preview for the settings page. Waits for the warning's first frame on the
+     * screen: returns null once it is drawn, else the user-facing reason it did not start
+     * safely or did not appear.
      */
     public String previewNow() {
+        java.util.concurrent.CompletableFuture<String> outcome =
+                new java.util.concurrent.CompletableFuture<>();
+        String error = startPreview(outcome);
+        if (error != null) return error;
+        String reasonKey;
+        try {
+            reasonKey = outcome.get(PREVIEW_CONFIRM_TIMEOUT_MS,
+                    java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            reasonKey = "errors.surveillance_preview_unconfirmed";
+        } catch (Exception notConfirmed) {
+            reasonKey = "errors.surveillance_preview_unconfirmed";
+        }
+        return reasonKey == null ? null : com.overdrive.app.server.Messages.get(reasonKey);
+    }
+
+    private String startPreview(java.util.concurrent.CompletableFuture<String> outcome) {
         if (previewBlocked()) {
             return com.overdrive.app.server.Messages.get("errors.surveillance_preview_blocked");
         }
@@ -604,7 +590,6 @@ public final class ScreenDeterrent {
         }
 
         restorePanelAfterSession = false;
-        cooldownUntilElapsedMs = 0;
         cancelled.set(false);
         if (terminalStopRequested.get()) {
             inFlight.set(false);
@@ -622,6 +607,8 @@ public final class ScreenDeterrent {
             return com.overdrive.app.server.Messages.get("errors.surveillance_preview_gate_failed");
         }
 
+        inputWaitTimedOut = false;
+        previewOutcome = outcome;
         try {
             executor.execute(() -> {
                 renderThread = Thread.currentThread();
@@ -630,11 +617,13 @@ public final class ScreenDeterrent {
                 } catch (Throwable t) {
                     logger.warn("Screen deterrent preview failed: " + t.getMessage());
                 } finally {
+                    settlePreviewOnExit();
                     cleanup();
                 }
             });
             return null;
         } catch (RuntimeException unavailable) {
+            previewOutcome = null;
             clearSessionGate();
             inFlight.set(false);
             terminalStopRequested.set(false);
@@ -659,6 +648,20 @@ public final class ScreenDeterrent {
             logger.info("Screen deterrent preview showing on " + size.x + "x" + size.y);
         }
         renderAsset(size.x, size.y, this::shouldStopPreview, this::maybeReassertWake);
+    }
+
+    private void notePreviewShown() {
+        java.util.concurrent.CompletableFuture<String> outcome = previewOutcome;
+        if (outcome != null) outcome.complete(null);
+    }
+
+    private void settlePreviewOnExit() {
+        java.util.concurrent.CompletableFuture<String> outcome = previewOutcome;
+        previewOutcome = null;
+        if (outcome == null || outcome.isDone()) return;
+        outcome.complete(inputWaitTimedOut ? "errors.surveillance_preview_no_touch_capture"
+                : previewBlocked() ? "errors.surveillance_preview_blocked"
+                : "errors.surveillance_preview_not_shown");
     }
 
     public void cancel() {
@@ -687,7 +690,6 @@ public final class ScreenDeterrent {
             clearInputCapture();
         }
         cancelled.set(false);
-        cooldownUntilElapsedMs = 0;
         // Force the cache scheduler to refresh on its next tick by writing
         // through the same code path (idempotent).
         refreshHotCacheFromDisk();
@@ -745,31 +747,28 @@ public final class ScreenDeterrent {
             terminateCurrentSession();
             return;
         }
-        try {
-            restorePanelAfterSession = panelIsAlreadyDark(ctx);
-            wakePanel(ctx);
-            launchActivity(inputToken);  // touch-capture in app process
-            if (!waitForInputCapture(false)) {
-                logger.warn("Screen deterrent aborted — touch capture did not become ready");
-                terminateCurrentSession();
-                return;
-            }
-
-            // Resolve the real panel size once per fire() so portrait-rotated
-            // Seal (1080×1920) and other models (Tang, Atto3, etc.) get a buffer
-            // matched to the panel instead of a stretched/clipped 1920×1080
-            // landscape canvas.
-            Point size = resolveDisplaySize(ctx);
-            final int dispW = size.x;
-            final int dispH = size.y;
-
-            if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
-                logger.info("Screen deterrent showing on " + dispW + "x" + dispH);
-            }
-            renderAsset(dispW, dispH, this::shouldStop, this::maybeReassertWake);
-        } finally {
-            cooldownUntilElapsedMs = SystemClock.elapsedRealtime() + MOTION_COOLDOWN_MS;
+        restorePanelAfterSession = panelIsAlreadyDark(ctx);
+        wakePanel(ctx);
+        launchActivity(inputToken);  // touch-capture in app process
+        if (!waitForInputCapture(false)) {
+            logger.warn("Screen deterrent aborted — touch capture did not become ready");
+            terminateCurrentSession();
+            return;
         }
+
+        // Resolve the real panel size once per fire() so portrait-rotated
+        // Seal (1080×1920) and other models (Tang, Atto3, etc.) get a buffer
+        // matched to the panel instead of a stretched/clipped 1920×1080
+        // landscape canvas.
+        Point size = resolveDisplaySize(ctx);
+        final int dispW = size.x;
+        final int dispH = size.y;
+
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            logger.info("Screen deterrent showing on " + dispW + "x" + dispH);
+        }
+        EventTimelineCollector.recordDeterrentFired(EventTimelineCollector.DETERRENT_SCREEN, null);
+        renderAsset(dispW, dispH, this::shouldStop, this::maybeReassertWake);
     }
 
     private void renderAsset(int dispW, int dispH, ScreenDeterrentVideo.StopSignal stop,
@@ -778,7 +777,7 @@ public final class ScreenDeterrent {
         String imagePath = getImagePath();
         if (!imagePath.isEmpty() && ScreenDeterrentVideo.isMp4File(imagePath)) {
             boolean played = ScreenDeterrentVideo.play(
-                    imagePath, dispW, dispH, stop, onFrame);
+                    imagePath, dispW, dispH, stop, onFrame, this::notePreviewShown);
             if (played || stop.shouldStop()) return;
             logger.warn("Deterrent video failed — falling back to the default screen");
             imagePath = "";
@@ -808,7 +807,6 @@ public final class ScreenDeterrent {
                 terminateCurrentSession();
                 return;
             }
-            com.overdrive.app.notifications.DeterrentNotificationStatus.markScreenFired();
 
             if (movie != null && movie.duration() > 0) {
                 renderGifLoop(surface, movie, dispW, dispH, stop);
@@ -833,6 +831,7 @@ public final class ScreenDeterrent {
             terminateCurrentSession();
             return;
         }
+        notePreviewShown();
         while (!stop.shouldStop()) {
             maybeReassertWake();
             try {
@@ -876,6 +875,7 @@ public final class ScreenDeterrent {
                     terminateCurrentSession();
                     return;
                 }
+                notePreviewShown();
                 maybeReassertWake();
 
                 try {
@@ -1005,6 +1005,7 @@ public final class ScreenDeterrent {
     }
 
     private boolean waitForInputCapture(boolean preview) {
+        inputWaitTimedOut = false;
         long waitUntil = SystemClock.elapsedRealtime() + INPUT_READY_TIMEOUT_MS;
         while (SystemClock.elapsedRealtime() < waitUntil) {
             long now = SystemClock.elapsedRealtime();
@@ -1039,6 +1040,7 @@ public final class ScreenDeterrent {
                 return false;
             }
         }
+        inputWaitTimedOut = true;
         logger.warn("Screen deterrent touch-capture readiness timed out");
         return false;
     }

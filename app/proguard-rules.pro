@@ -170,6 +170,7 @@
     java.lang.Object settingDevice;
     java.lang.Object lightDevice;
     java.lang.Object bodyworkDevice;
+    java.lang.Object adasDevice;
 }
 
 # Keep class names for daemon subpackages (for Class.forName if used internally)
@@ -212,6 +213,9 @@
     native <methods>;
 }
 -keep class com.overdrive.app.camera.camera2.Camera2AvmBackend {
+    native <methods>;
+}
+-keep class com.overdrive.app.surveillance.CpuMosaicCompositor {
     native <methods>;
 }
 -keep class com.overdrive.app.audio.VoiceFrontend {

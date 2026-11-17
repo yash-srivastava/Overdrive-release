@@ -94,6 +94,10 @@ object HotspotManager {
     @Volatile private var appopGranted: Boolean = false
     /** Last applied state of the client tunnel inbound, to avoid pointless restarts. */
     @Volatile private var clientTunnelApplied: Boolean = false
+    // Address the tunnel inbound was last bound to; null = not listening.
+    @Volatile private var clientTunnelListen: String? = null
+    @Volatile private var clientTunnelAwaitingAddress = false
+    @Volatile private var relayAwaitingAddress = false
 
     // The vehicle owns the AP name and key and refuses writes, so they cannot change
     // under us. Cache them: snapshot() runs every 5s while the screen is open and
@@ -345,36 +349,15 @@ object HotspotManager {
         val apUp = synchronized(lock) { apState == AP_ENABLED || apState == AP_ENABLING }
         val ctx = appContext
         if (wanted && apUp && ctx != null) {
-            if (!CellularRelay.isRunning()) CellularRelay.start(ctx, ensureClientProxyToken())
-        } else if (CellularRelay.isRunning()) {
-            CellularRelay.stop()
+            if (!CellularRelay.isRunning()) CellularRelay.start(ctx)
+            // Hotspot devices reach the relay on the AP's own address; it has none while enabling.
+            CellularRelay.bindHotspot(clientTunnelBindAddress())
+            relayAwaitingAddress = CellularRelay.isRunning() && !CellularRelay.isHotspotBound()
+        } else {
+            relayAwaitingAddress = false
+            if (CellularRelay.isRunning()) CellularRelay.stop()
         }
     }
-
-    /**
-     * SECURITY (run-2 fix): the client-facing relay/tunnel ports require a
-     * per-install credential. Generated once, persisted in the hotspot config
-     * section, and surfaced to the owner via GET /api/hotspot so tethered clients
-     * can be configured with it. Returns the existing token when already set.
-     */
-    private fun ensureClientProxyToken(): String {
-        val existing = try {
-            UnifiedConfigManager.getHotspot().optString("clientProxyToken", "")
-        } catch (t: Throwable) { "" }
-        if (existing.length >= 24) return existing
-        val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-        val rnd = java.security.SecureRandom()
-        val token = (1..24).map { chars[rnd.nextInt(chars.length)] }.joinToString("")
-        try {
-            UnifiedConfigManager.updateHotspot(mapOf("clientProxyToken" to token))
-        } catch (t: Throwable) {
-            log.warn(TAG, "could not persist clientProxyToken: ${t.message}")
-        }
-        return token
-    }
-
-    /** AP gateway address string for binding client-facing listeners. */
-    internal fun apGateway(): String = apSubnetPrefix()?.let { "$it.1" } ?: AP_GATEWAY
 
     /**
      * Rewrite the sing-box config so the tethered-client tunnel inbound is present
@@ -394,19 +377,22 @@ object HotspotManager {
             false
         }
         val apUp = synchronized(lock) { apState == AP_ENABLED || apState == AP_ENABLING }
-        val enable = wanted && apUp && CellularRelay.isRunning()
-        if (enable == clientTunnelApplied) return
-        val relayPort = if (enable) CellularRelay.PORT else null
-        // SECURITY (run-2 fix): the clients-in inbound binds the AP gateway only
-        // (never the wildcard) and requires the per-install client credential.
-        val clientListen = if (enable) apGateway() else null
-        val clientAuth = if (enable) ("odclient" to ensureClientProxyToken()) else null
+        val requested = wanted && apUp && CellularRelay.isRunning()
+        // The inbound has no credentials: it waits for the hotspot address (the sampler retries)
+        // rather than listening on every interface.
+        val listen = if (requested) clientTunnelBindAddress() else null
+        val enable = listen != null
+        clientTunnelAwaitingAddress = requested && !enable
+        if (enable == clientTunnelApplied && listen == clientTunnelListen) return
         val cfg = try {
-            com.overdrive.app.daemon.proxy.ProxyConfiguration.createConfig(
-                clientRelaySocksPort = relayPort,
-                clientListen = clientListen,
-                clientAuth = clientAuth
-            )
+            if (listen != null) {
+                com.overdrive.app.daemon.proxy.ProxyConfiguration.createConfig(
+                    clientRelaySocksPort = CellularRelay.PORT,
+                    clientListen = listen
+                )
+            } else {
+                com.overdrive.app.daemon.proxy.ProxyConfiguration.createConfig()
+            }
         } catch (t: Throwable) {
             log.warn(TAG, "client tunnel config build failed: ${t.message}")
             return
@@ -436,8 +422,11 @@ object HotspotManager {
         val out = runShellScript(script)
         val ok = out != null &&
             (out.contains("applied") || out.contains("configured-stopped"))
-        if (ok) clientTunnelApplied = enable
-        log.info(TAG, "client tunnel ${if (enable) "enabled" else "disabled"} -> $ok")
+        if (ok) {
+            clientTunnelApplied = enable
+            clientTunnelListen = listen
+        }
+        log.info(TAG, "client tunnel ${if (enable) "enabled on $listen" else "disabled"} -> $ok")
     }
 
     /**
@@ -475,7 +464,10 @@ object HotspotManager {
             (out.contains("cleared") || out.contains("cleared-stopped"))
         // Only drop the flag once the rewrite is confirmed, so a failed teardown is
         // retried rather than remembered as done while :8122 still listens.
-        if (ok) clientTunnelApplied = false
+        if (ok) {
+            clientTunnelApplied = false
+            clientTunnelListen = null
+        }
         log.info(TAG, "client tunnel cleared -> $ok")
     }
 
@@ -911,6 +903,8 @@ object HotspotManager {
             // us — establish the session baseline before measuring.
             if (!wasEnabled && startedAtMs == 0L) beginSession()
             if (tetherIface == null) resolveTetherIface()
+            if (relayAwaitingAddress) syncClientRelay()
+            if (clientTunnelAwaitingAddress) syncClientTunnel()
             sampleCounters()
             enrichClientIps()
             enforceDataCap()
@@ -1310,6 +1304,51 @@ object HotspotManager {
         }
     }
 
+    /**
+     * Whether a connection from [addr] is from a device on the hotspot (a subnet of the tethering interface) or from
+     * this head unit itself (sing-box's client tunnel dials the relay on loopback).
+     */
+    fun isHotspotClient(addr: java.net.InetAddress?): Boolean {
+        if (addr == null) return false
+        if (addr.isLoopbackAddress) return true
+        val raw = addr.address ?: return false
+        // (an IPv4 client on a dual-stack socket can show as ::ffff:a.b.c.d)
+        val v4 = when {
+            raw.size == 4 -> raw
+            raw.size == 16 && (0 until 10).all { raw[it].toInt() == 0 } && raw[10].toInt() == -1 && raw[11].toInt() == -1 ->
+                raw.copyOfRange(12, 16)
+            else -> return false
+        }
+        val prefix = "${v4[0].toInt() and 0xff}.${v4[1].toInt() and 0xff}.${v4[2].toInt() and 0xff}."
+        return hotspotPrefixes().contains(prefix)
+    }
+
+    // The /24s of the tethering interface's IPv4 addresses (the default hotspot's when none yet), kept a few seconds:
+    // a browser through the relay opens many connections.
+    private fun hotspotPrefixes(): Set<String> {
+        val now = android.os.SystemClock.elapsedRealtime()
+        cachedPrefixes?.let { if (now - cachedPrefixesAt < PREFIX_CACHE_MS) return it }
+        if (synchronized(lock) { tetherIface } == null) resolveTetherIface()
+        val iface = synchronized(lock) { tetherIface }
+        val out = HashSet<String>()
+        try {
+            if (iface != null) {
+                java.net.NetworkInterface.getByName(iface)?.inetAddresses?.toList()
+                    ?.filterIsInstance<java.net.Inet4Address>()
+                    ?.mapNotNull { it.hostAddress?.substringBeforeLast('.', "")?.takeIf { p -> p.isNotEmpty() } }
+                    ?.forEach { out.add("$it.") }
+            }
+        } catch (t: Throwable) {
+        }
+        if (out.isEmpty()) out.add(AP_GATEWAY.substringBeforeLast('.') + ".")
+        cachedPrefixes = out
+        cachedPrefixesAt = now
+        return out
+    }
+    @Volatile private var cachedPrefixes: Set<String>? = null
+    @Volatile private var cachedPrefixesAt = 0L
+    private const val PREFIX_CACHE_MS = 5_000L
+
     /** Trust getTetheredIfaces(); fall back to the known AP interface name. */
     private fun resolveTetherIface() {
         val ctx = appContext ?: return
@@ -1389,6 +1428,28 @@ object HotspotManager {
         (apSubnetPrefix() ?: AP_GATEWAY.substringBeforeLast('.')) + "."
 
     /** First three octets of the tethered iface's IPv4 address, or null. */
+    /** The hotspot's own IPv4 once the AP is serving, so the unauthenticated tunnel inbound is hotspot-only. */
+    private fun clientTunnelBindAddress(): String? {
+        if (synchronized(lock) { apState } != AP_ENABLED) return null
+        val ctx = appContext ?: return null
+        return try {
+            // Only an interface Android reports as tethered; the cached name can fall back to the station's.
+            val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE)
+            @Suppress("UNCHECKED_CAST")
+            val tethered = cm?.javaClass?.getMethod("getTetheredIfaces")?.invoke(cm) as? Array<String>
+            val iface = tethered?.firstOrNull { name -> AP_IFACE_HINTS.any { name.startsWith(it) } }
+                ?: return null
+            java.net.NetworkInterface.getByName(iface)
+                ?.inetAddresses
+                ?.toList()
+                ?.filterIsInstance<java.net.Inet4Address>()
+                ?.firstOrNull { !it.isLoopbackAddress && !it.isAnyLocalAddress && !it.isLinkLocalAddress }
+                ?.hostAddress
+        } catch (t: Throwable) {
+            null
+        }
+    }
+
     private fun apSubnetPrefix(): String? {
         val iface = synchronized(lock) { tetherIface } ?: return null
         return try {

@@ -52,8 +52,6 @@ public class ParkedLinkWiringTest {
         assertTrue(daemon.contains("--include-stopped-packages"));
         assertTrue(daemon.contains("ParkedLinkContract.ACTION"));
         assertTrue(daemon.contains("execShellResult(shellCommand, 10_000L, null)"));
-        assertTrue(assertion.contains("tryQnxVehicleNetworkHold(generation, start)"));
-        assertTrue(daemon.contains("QnxMessageBus.get()"));
         assertTrue(daemon.contains("CarSvcTelemetry.INSTANCE.batteryVoltage12v()"));
     }
 

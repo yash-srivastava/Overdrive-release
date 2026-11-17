@@ -19,6 +19,8 @@ class CustomDoc private constructor(
     val layers: List<Spec>,
     /** Every car signal the file reads (names that aren't builtins or colour tokens). */
     val signals: Set<String>,
+    /** The MQTT channels its `mqtt('…')` calls name; their values arrive as data keys "mqtt:<channel>". */
+    val mqttChannels: Set<String>,
 ) {
     /** True when the file reads a signal only the live poll carries. */
     val needsLive: Boolean = signals.any { it in CustomSignals.LIVE_KEYS }
@@ -62,9 +64,9 @@ class CustomDoc private constructor(
         /** The theme colours a file may name; they follow night and day. */
         val COLOR_TOKENS = setOf("accent", "good", "warn", "danger", "glowAccent", "glowGood", "glowWarn", "glowDanger",
             "fuel", "regen", "regenText", "text", "text2", "text3", "etch", "white", "black")
-        /** Names the renderer answers itself: theme, motion state, and the car's own units. */
+        /** Names the renderer or the reading answers: theme, motion state, the car's own units, the costs' currency. */
         val BUILTINS = setOf("night", "driving", "parked", "pi", CustomExpr.MILES, "dist_unit", "speed_unit", "near_unit", "height_unit",
-            "consumption_unit", CustomExpr.TYRE_UNIT)
+            "consumption_unit", CustomExpr.TYRE_UNIT, "currency")
 
         private const val GEO = 0
         private const val NUM = 1
@@ -163,6 +165,7 @@ class CustomDoc private constructor(
             val specs = ArrayList<Spec>()
             val outLayers = if (strict) JSONArray() else null
             val names = HashSet<String>()
+            val channels = LinkedHashSet<String>()
             var objects = 0
             for (i in 0 until arr.length()) {
                 val l = arr.opt(i) as? JSONObject ?: if (strict) throw Invalid("Layer ${i + 1} isn't a layer") else continue
@@ -189,8 +192,8 @@ class CustomDoc private constructor(
                     props[k.name] = c.prop
                     ol?.put(k.name, c.json)
                     when (val p = c.prop) {
-                        is Bound -> CustomExpr.names(p.node, names)
-                        is Template -> for (part in p.parts) if (part is CustomExpr.Hole) CustomExpr.names(part.node, names)
+                        is Bound -> { CustomExpr.names(p.node, names); CustomExpr.channels(p.node, channels) }
+                        is Template -> for (part in p.parts) if (part is CustomExpr.Hole) { CustomExpr.names(part.node, names); CustomExpr.channels(part.node, channels) }
                         is Fixed -> {}
                     }
                 }
@@ -204,7 +207,7 @@ class CustomDoc private constructor(
                 out.put("layers", outLayers)
             }
             val signals = names.filterTo(LinkedHashSet()) { it !in BUILTINS && it !in COLOR_TOKENS }
-            return CustomDoc(id, name, size, about, w, HEIGHT, specs, signals)
+            return CustomDoc(id, name, size, about, w, HEIGHT, specs, signals, channels)
         }
 
         // a value as the file keeps it, or null to leave the key out (an empty layer name); [raw] is never null

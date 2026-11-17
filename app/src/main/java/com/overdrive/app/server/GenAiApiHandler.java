@@ -121,9 +121,9 @@ public final class GenAiApiHandler {
                 sendError(out, 500,
                         response.optString(
                                 "error", "routine_reset_failed"),
-                        routineError(response,
-                                "routine_reset_failed",
-                                "Could not reset routine learning."));
+                        // Reset shares the learner's routine_persist_failed code with
+                        // decisions, so its text is keyed here, not by code.
+                        text("routine_reset_failed", "Could not reset routine learning."));
                 return true;
             }
             response.put("message", text("routine_reset_done", "Learned routine patterns reset."));

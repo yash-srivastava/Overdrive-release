@@ -78,6 +78,10 @@ class ProjectionBoundsView @JvmOverloads constructor(
     var onTap: ((nx: Double, ny: Double) -> Unit)? = null
     /** CONTROL-mode swipe, normalized (0..1) within the VIEW/stage, with duration ms. */
     var onSwipe: ((nx1: Double, ny1: Double, nx2: Double, ny2: Double, ms: Int) -> Unit)? = null
+    /** Live CONTROL frames. Returning true for DOWN claims the entire gesture; a failed
+     *  later frame cancels it and never falls back to replaying a completed swipe. */
+    var onTouchFrame: ((MotionEvent) -> Boolean)? = null
+    var onTouchCancel: (() -> Unit)? = null
 
     // ── paints ──
     private val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -117,6 +121,8 @@ class ProjectionBoundsView @JvmOverloads constructor(
     private var cDownX = 0f
     private var cDownY = 0f
     private var cDownT = 0L
+    private var streamedControl = false
+    private var streamedControlFailed = false
 
     // ── public config ──
 
@@ -147,22 +153,22 @@ class ProjectionBoundsView @JvmOverloads constructor(
         invalidate()
     }
 
-    fun setAspectLocked(locked: Boolean) {
+    fun setAspectLocked(locked: Boolean, notifyChange: Boolean = true) {
         if (aspectLocked == locked) return
         aspectLocked = locked
         if (locked && boxInitialized) {
             box = ProjectionBoundsGeometry.refitAspect(box, panelAspect(), clusterW, clusterH)
             invalidate()
-            emitWindow(commit = true)
+            if (notifyChange) emitWindow(commit = true)
         }
     }
 
     /** Apply a named preset ([ProjectionBoundsGeometry.PRESET_*]) and commit it. */
-    fun applyPreset(which: Int) {
+    fun applyPreset(which: Int, notifyChange: Boolean = true) {
         box = ProjectionBoundsGeometry.preset(which, clusterW, clusterH)
         boxInitialized = true
         invalidate()
-        emitWindow(commit = true)
+        if (notifyChange) emitWindow(commit = true)
     }
 
     /** Current window rect in cluster px (copy-safe: Rect is immutable). */
@@ -199,6 +205,7 @@ class ProjectionBoundsView @JvmOverloads constructor(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
+        if (oldw > 0 && oldh > 0 && (w != oldw || h != oldh)) cancelActiveGesture()
         // Box is in CLUSTER space, independent of view size — nothing to remap. Just repaint.
         if (!boxInitialized && clusterW > 0 && clusterH > 0) {
             box = ProjectionBoundsGeometry.preset(
@@ -268,6 +275,7 @@ class ProjectionBoundsView @JvmOverloads constructor(
             }
         } catch (t: Throwable) {
             android.util.Log.e("ProjectionBoundsView", "onTouchEvent failed", t)
+            try { cancelActiveGesture() } catch (_: Throwable) {}
             false
         }
     }
@@ -347,6 +355,25 @@ class ProjectionBoundsView @JvmOverloads constructor(
     }
 
     private fun handleControlTouch(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            resetControlGesture()
+            streamedControl = onTouchFrame?.invoke(event) == true
+        } else if (streamedControl) {
+            if (!streamedControlFailed && onTouchFrame?.invoke(event) != true) {
+                streamedControlFailed = true
+                onTouchCancel?.invoke()
+            }
+            if (event.actionMasked == MotionEvent.ACTION_POINTER_DOWN) controlMultiTouch = true
+            if (event.actionMasked == MotionEvent.ACTION_UP
+                || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                val click = event.actionMasked == MotionEvent.ACTION_UP && !controlMultiTouch
+                    && hypot((event.x - cDownX).toDouble(), (event.y - cDownY).toDouble()) <= gestureSlop
+                streamedControl = false
+                resetControlGesture()
+                if (click) performClick()
+            }
+            return true
+        }
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 val index = event.actionIndex
@@ -485,6 +512,9 @@ class ProjectionBoundsView @JvmOverloads constructor(
     }
 
     private fun resetControlGesture() {
+        if (streamedControl) onTouchCancel?.invoke()
+        streamedControl = false
+        streamedControlFailed = false
         controlTracking = false
         controlMultiTouch = false
         controlPointerId = MotionEvent.INVALID_POINTER_ID

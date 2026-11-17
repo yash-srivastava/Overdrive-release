@@ -392,10 +392,8 @@ public class StorageManager {
     // runs under the nested recordings→surveillance→proximity locks, and a degenerate
     // FUSE volume can make each deleteAnchorAndSidecars() fork an `rm` that blocks up to
     // 4 s (deleteFileViaShell waitForBounded). With the 8-attempt budget that is a ~32 s
-    // worst-case lock hold — which would stall the surveillance trigger path now that it
-    // resolves its event dir through getLiveSurveillanceDir() (surveillanceCleanupLock).
-    // Bound the per-tick delete work to ~2 s so the trigger thread is never blocked long
-    // enough to overrun the finite pre-record ring buffer; the reap simply resumes on the
+    // worst-case lock hold for every surveillanceCleanupLock waiter (volume refresh, mount
+    // watchdog). Bound the per-tick delete work to ~2 s; the reap simply resumes on the
     // next 30 s tick. This complements (does not replace) the file-count/consec-fail caps.
     private static final long PHYSICAL_REAP_MAX_LOCK_HOLD_MS = 2_000L;
 
@@ -451,6 +449,7 @@ public class StorageManager {
         volatile long retestAtMs;     // elapsedRealtime
         long retestDelayMs;           // under writeFaultLock
         boolean confirmed;            // user alerted for this latch; under writeFaultLock
+        volatile String reason;       // the latest failed test's error, null if unknown
 
         WriteFault(String volumePath, File testDir, long nowMs, long delayMs, boolean confirmed) {
             this.volumePath = volumePath;
@@ -467,6 +466,7 @@ public class StorageManager {
         volatile boolean ran;
         volatile boolean ok;
         volatile long freeBytesOnFail = -1;  // measured in the test thread, so it stays bounded
+        volatile String failure;             // the exception, e.g. "open failed: EROFS (Read-only file system)"
     }
     private static final int WRITE_TEST_PASS = 1, WRITE_TEST_FAIL = 0, WRITE_TEST_FULL = 2,
             WRITE_TEST_UNKNOWN = -1;
@@ -547,6 +547,11 @@ public class StorageManager {
     
     // Background cleanup scheduler
     private ScheduledExecutorService cleanupScheduler;
+    // Coalesces the card-space reap requested when a clip falls back off a full card.
+    private final java.util.concurrent.atomic.AtomicBoolean earlyEmergencyReapQueued =
+            new java.util.concurrent.atomic.AtomicBoolean();
+    // Display-only: the newest surveillance clip went to internal because the card was full.
+    private volatile boolean surveillanceEnospcRedirected;
     private final AtomicBoolean recordingActive = new AtomicBoolean(false);
     private final AtomicBoolean surveillanceActive = new AtomicBoolean(false);
 
@@ -1061,6 +1066,11 @@ public class StorageManager {
                         if (isProtectedTripFile(f) || isParkedClip(f)) {
                             continue;
                         }
+                        if (com.overdrive.app.surveillance.SegmentRecovery.isPending(f)) continue;
+                        if (f.getName().endsWith(".mp4.tmp.jnl") && new File(f.getPath().substring(
+                                0, f.getPath().length() - ".jnl".length())).exists()) {
+                            continue;  // goes with its .mp4.tmp
+                        }
                         if (f.lastModified() > cutoff) continue;  // grace window
                         if ("surveillance".equals(category) && isShortHopName(f.getName())) {
                             hopLeftovers.add(f);
@@ -1072,6 +1082,9 @@ public class StorageManager {
                         if (ok) {
                             deleted++;
                             bytesFreed += size;
+                            if (f.getName().endsWith(".mp4.tmp")) {
+                                new File(f.getPath() + ".jnl").delete();
+                            }
                         } else {
                             logWarn("Orphan tmp delete failed: " + f.getAbsolutePath());
                         }
@@ -2117,6 +2130,10 @@ public class StorageManager {
         return isSd ? sdCardAvailable : usbAvailable;
     }
 
+    // sysfs card entry; the MMC/eMMC split is still made from each candidate's type file.
+    private static final java.util.regex.Pattern MMC_CARD_ENTRY =
+            java.util.regex.Pattern.compile("mmc\\d+:[0-9a-fA-F]+");
+
     /**
      * Probe whether the SD slot has a physical card inserted, independent of
      * vold/sm state. Used by the kernel-level mount fallback to distinguish
@@ -2165,11 +2182,6 @@ public class StorageManager {
      *
      * @return true if a card is physically present in the SD slot
      */
-    // Reuse the immutable sysfs card-entry pattern across kernel fallback probes.
-    // The MMC/eMMC distinction is still made by reading each candidate's type file.
-    private static final java.util.regex.Pattern MMC_CARD_ENTRY =
-            java.util.regex.Pattern.compile("mmc\\d+:[0-9a-fA-F]+");
-
     private boolean isSdCardPhysicallyPresent() {
         // Signal 1 (vendor prop, EXPECTED bus-agnostic + SD-specific): the BYD
         // firmware's own SD-slot occupancy flag. Intended to cover SCSI/USB-
@@ -2332,6 +2344,75 @@ public class StorageManager {
             return false;
         }
         return isMountWritable(usbPath);
+    }
+
+    private static final long MOUNT_WRITE_PROBE_TIMEOUT_MS = 3_000L;
+    private final java.util.concurrent.ConcurrentHashMap<String, Thread> mountWriteProbeInFlight =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.AtomicBoolean backgroundRemountInFlight =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+
+    /**
+     * {@link #isSdCardMounted()} / {@link #isUsbMounted()} on a probe thread bounded to
+     * {@link #MOUNT_WRITE_PROBE_TIMEOUT_MS}. Null when the volume did not answer in time or an
+     * earlier probe of it is still stuck in the kernel.
+     */
+    public Boolean isMountWritableBounded(StorageType type) {
+        final String path = (type == StorageType.SD_CARD) ? sdCardPath
+                : (type == StorageType.USB) ? usbPath : null;
+        if (path == null) return Boolean.FALSE;
+        Thread prior = mountWriteProbeInFlight.get(path);
+        if (prior != null && prior.isAlive()) return null;
+        final boolean[] writable = {false};
+        Thread probe = new Thread(() -> {
+            try {
+                writable[0] = isMountWritable(path);
+            } catch (Throwable ignored) {
+                // writable stays false
+            } finally {
+                mountWriteProbeInFlight.remove(path, Thread.currentThread());
+            }
+        }, "MountWriteProbe");
+        probe.setDaemon(true);
+        mountWriteProbeInFlight.put(path, probe);
+        try {
+            probe.start();
+        } catch (Throwable t) {
+            mountWriteProbeInFlight.remove(path, probe);
+            return null;
+        }
+        try {
+            probe.join(MOUNT_WRITE_PROBE_TIMEOUT_MS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+        if (probe.isAlive()) return null;
+        return writable[0];
+    }
+
+    /** {@code ensure*Mounted(true)} on a background thread; a request while one is running is dropped. */
+    public void remountInBackground(StorageType type) {
+        if (type != StorageType.SD_CARD && type != StorageType.USB) return;
+        if (!backgroundRemountInFlight.compareAndSet(false, true)) return;
+        final String label = (type == StorageType.SD_CARD) ? "SD card" : "USB";
+        Thread remount = new Thread(() -> {
+            try {
+                boolean mounted = (type == StorageType.SD_CARD)
+                        ? ensureSdCardMounted(true) : ensureUsbMounted(true);
+                if (!mounted) logWarn(label + " background remount failed");
+            } catch (Throwable t) {
+                logWarn(label + " background remount failed: " + t.getMessage());
+            } finally {
+                backgroundRemountInFlight.set(false);
+            }
+        }, "BackgroundRemount");
+        remount.setDaemon(true);
+        try {
+            remount.start();
+        } catch (Throwable t) {
+            backgroundRemountInFlight.set(false);
+        }
     }
 
     /**
@@ -3933,6 +4014,7 @@ public class StorageManager {
                     // Executor shutting down — the 30s ticker + post-save cleanup still bound internal.
                 }
             }
+            requestEarlyEmergencyReap();
             return internalDir;
         } catch (Throwable t) {
             logWarn("resolveTargetWithEnospcFallback failed, using target as-is: " + t.getMessage());
@@ -3987,6 +4069,7 @@ public class StorageManager {
             }
 
             if (targetFree >= reserveBytes) {
+                surveillanceEnospcRedirected = false;
                 return targetDir;  // external has room for THIS clip
             }
 
@@ -3998,6 +4081,7 @@ public class StorageManager {
                     + formatSize(targetFree) + " free < " + formatSize(reserveBytes)
                     + " reserve) AND internal is also short (" + formatSize(internalFree)
                     + " free) — cannot fall back; event may fail to save");
+                surveillanceEnospcRedirected = false;
                 return targetDir;
             }
 
@@ -4007,6 +4091,8 @@ public class StorageManager {
                 + " reserve) — redirecting THIS event to internal surveillance "
                 + internalDir.getAbsolutePath() + " (" + formatSize(internalFree)
                 + " free) so the event is not lost");
+            surveillanceEnospcRedirected = true;
+            requestEarlyEmergencyReap();
             return internalDir;
         } catch (Throwable t) {
             logWarn("resolveSurveillanceTargetWithEnospcFallback failed, using target as-is: " + t.getMessage());
@@ -4042,11 +4128,12 @@ public class StorageManager {
                 || !isPathLikelyMounted(volume)) {
             return false;
         }
-        int result = writeTest(type, dir);
+        String[] why = new String[1];
+        int result = writeTest(type, dir, why);
         if (result == WRITE_TEST_UNKNOWN) return false;  // caller cancelled / no thread
         if (result == WRITE_TEST_FULL) {
-            logInfo("Write test failed in " + dir + " on a nearly full card — treated as full,"
-                + " not faulty (the ENOSPC fallback handles it)");
+            logInfo("Write test failed in " + dir + writeTestReason(why[0])
+                + " on a nearly full card — treated as full, not faulty (the ENOSPC fallback handles it)");
             return false;
         }
         boolean passed = result == WRITE_TEST_PASS;
@@ -4076,6 +4163,7 @@ public class StorageManager {
                         ? Math.min(writeFaultClearedDelayMs[i] * 2, WRITE_FAULT_RETEST_MAX_MS)
                         : WRITE_FAULT_RETEST_MIN_MS;
                 latched = new WriteFault(volume, dir, now, delayMs, flapping);
+                latched.reason = why[0];
                 if (sd) sdWriteFault = latched; else usbWriteFault = latched;
                 writeFailFirstMs[i] = 0;
             }
@@ -4083,12 +4171,13 @@ public class StorageManager {
         String card = sd ? "SD card" : "USB drive";
         if (latched == null) {
             if (runStarted) {
-                logInfo("Write test failed in " + dir + " shortly after the " + card
-                    + " mounted — treating it as faulty only if this persists");
+                logInfo("Write test failed in " + dir + writeTestReason(why[0]) + " shortly after the "
+                    + card + " mounted — treating it as faulty only if this persists");
             }
             return false;
         }
-        logWarn(card + " refuses writes (write test failed in " + dir + ") — everything"
+        logWarn(card + " refuses writes (write test failed in " + dir + writeTestReason(why[0])
+            + ") — everything"
             + " stored on it now goes to internal storage until a re-test passes"
             + (flapping ? " (failed again soon after recovering; re-test in "
                 + delayMs / 60_000 + " min)" : ""));
@@ -5151,6 +5240,7 @@ public class StorageManager {
         for (String sidecarExt : sidecarExts) doomed.add(new File(dir, stem + sidecarExt));
         List<File> aux = auxIndex.get(stem);
         if (aux != null) doomed.addAll(aux);
+        try { com.overdrive.app.server.timeline.TimelineLedger.noteDeleting(event, "relief"); } catch (Throwable ignored) { }
         deleteAllForRelief(doomed);
         try {
             com.overdrive.app.server.RecordingsIndex.getInstance().removeByPath(event.getAbsolutePath());
@@ -5340,8 +5430,9 @@ public class StorageManager {
      * concurrent callers share it, and a test still stuck past the timeout fails.
      * FULL = failed on a card with under WRITE_FAULT_MIN_FREE_BYTES free (ENOSPC);
      * UNKNOWN = caller interrupted, or the test thread couldn't start.
+     * A FAIL or FULL leaves the error and the free space in {@code why[0]}.
      */
-    private int writeTest(StorageType type, File dir) {
+    private int writeTest(StorageType type, File dir, String[] why) {
         int i = type == StorageType.USB ? 1 : 0;
         WriteTest test = writeTests.get(i);
         if (test == null || test.done.getCount() == 0) {
@@ -5367,6 +5458,7 @@ public class StorageManager {
         }
         try {
             if (!test.done.await(WRITE_TEST_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                why[0] = "no answer within " + WRITE_TEST_TIMEOUT_MS / 1000 + " s";
                 return WRITE_TEST_FAIL;  // stuck in the kernel: the card is not taking writes
             }
         } catch (InterruptedException e) {
@@ -5376,7 +5468,12 @@ public class StorageManager {
         if (!test.ran) return WRITE_TEST_UNKNOWN;
         if (test.ok) return WRITE_TEST_PASS;
         long free = test.freeBytesOnFail;
+        why[0] = test.failure + (free >= 0 ? ", " + free / (1024 * 1024) + " MB free" : "");
         return free >= 0 && free < WRITE_FAULT_MIN_FREE_BYTES ? WRITE_TEST_FULL : WRITE_TEST_FAIL;
+    }
+
+    private static String writeTestReason(String why) {
+        return why == null ? "" : ": " + why;
     }
 
     private static void runWriteTest(WriteTest test, File dir, String volumeRoot) {
@@ -5389,7 +5486,10 @@ public class StorageManager {
                 out.getFD().sync();
             }
             test.ok = true;
-        } catch (Throwable ignored) {
+        } catch (Throwable e) {
+            String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            String prefix = probe.getPath() + ": ";
+            test.failure = msg.startsWith(prefix) ? msg.substring(prefix.length()) : msg;
             try {
                 // The volume root: dir itself may not exist on a card too full to mkdir.
                 test.freeBytesOnFail = new StatFs(
@@ -5436,7 +5536,9 @@ public class StorageManager {
             clearWriteFault(type, f, card + " path changed", false);
             return;
         }
-        int result = writeTest(type, f.testDir);
+        String[] failure = new String[1];
+        int result = writeTest(type, f.testDir, failure);
+        if (failure[0] != null) f.reason = failure[0];
         if (result == WRITE_TEST_PASS || result == WRITE_TEST_FULL) {
             // FULL: no longer faulty, just full — the ENOSPC fallback and the reaper take over.
             String why = result == WRITE_TEST_PASS ? card + " accepts writes again"
@@ -5470,8 +5572,8 @@ public class StorageManager {
             }
             f.retestAtMs = now + delayMs;
         }
-        logWarn(card + " still refuses writes (" + f.testDir + "); next re-test in "
-            + delayMs / 1000 + " s");
+        logWarn(card + " still refuses writes (" + f.testDir + writeTestReason(failure[0])
+            + "); next re-test in " + delayMs / 1000 + " s");
         // Alert only once a re-test confirms it, so a one-off glitch stays silent.
         if (alert) notifyWriteFault(type, f);
     }
@@ -5519,6 +5621,7 @@ public class StorageManager {
                 .put("volume", type.name())
                 .put("path", f.testDir.getAbsolutePath())
                 .put("internalFreeBytes", getInternalFreeSpace());
+            if (f.reason != null) data.put("reason", f.reason);
             com.overdrive.app.notifications.NotificationBus.get().publish(
                 new com.overdrive.app.notifications.NotificationEvent(
                     "storage.write.error",
@@ -5714,7 +5817,7 @@ public class StorageManager {
                     recordingsLimitMb = recordingsLimitMb == 0 ? 0 : Math.max(MIN_LIMIT_MB, Math.min(loadTimeCeilingMb(recordingsStorageType),   recordingsLimitMb));
                     surveillanceLimitMb = surveillanceLimitMb == 0 ? 0 : Math.max(MIN_LIMIT_MB, Math.min(loadTimeCeilingMb(surveillanceStorageType), surveillanceLimitMb));
                     proximityLimitMb = proximityLimitMb == 0 ? 0 : Math.max(MIN_LIMIT_MB, Math.min(loadTimeCeilingMb(recordingsStorageType), proximityLimitMb));  // proximity follows recordings (ACC-ON) volume
-                    tripsLimitMb = tripsLimitMb == 0 ? 0 : Math.max(MIN_LIMIT_MB, Math.min(loadTimeCeilingMb(tripsStorageType),        tripsLimitMb));
+                    tripsLimitMb        = Math.max(MIN_LIMIT_MB, Math.min(loadTimeCeilingMb(tripsStorageType),        tripsLimitMb));
                     
                     logInfo("Loaded storage config: recordings=" + recordingsLimitMb + "MB (" + recordingsStorageType + 
                         "), surveillance=" + surveillanceLimitMb + "MB (" + surveillanceStorageType + 
@@ -5794,11 +5897,10 @@ public class StorageManager {
      * new recorder session that has no explicit output-dir override.
      */
     public File getLiveRecordingsDir() {
-        synchronized (recordingsCleanupLock) {
-            ResolvedDir resolved = resolveActive(recordingsStorageType,
-                internalRecordingsDir, sdCardRecordingsDir, usbRecordingsDir, "recordings");
-            return resolved.dir;
-        }
+        // No recordingsCleanupLock: the recorder start must never wait behind a cleanup walk,
+        // and the inputs are volatile (same as getLiveSurveillanceDirUnlocked).
+        return resolveActive(recordingsStorageType,
+            internalRecordingsDir, sdCardRecordingsDir, usbRecordingsDir, "recordings").dir;
     }
 
     /**
@@ -5863,11 +5965,24 @@ public class StorageManager {
     }
 
     /**
+     * {@link #getLiveSurveillanceDir()} without {@code surveillanceCleanupLock}. Its inputs are
+     * volatile and written under {@code mountLock}, so the lock only adds a wait behind cleanup walks.
+     */
+    public File getLiveSurveillanceDirUnlocked() {
+        return resolveActive(surveillanceStorageType,
+            internalSurveillanceDir, sdCardSurveillanceDir, usbSurveillanceDir, "surveillance").dir;
+    }
+
+    public File getInternalSurveillanceDir() {
+        return internalSurveillanceDir;
+    }
+
+    /**
      * {@link #getLiveSurveillanceDir()}, but internal when its SD/USB fails the cheap liveness
      * probe right now: the availability flag lags a card that just dropped by up to two watchdog ticks.
      */
     public File getLiveSurveillanceDirIfMounted() {
-        File live = getLiveSurveillanceDir();
+        File live = getLiveSurveillanceDirUnlocked();
         StorageType volume = externalVolumeOf(live);
         if (volume == null) return live;
         String root = (volume == StorageType.SD_CARD) ? sdCardPath : usbPath;
@@ -6118,7 +6233,7 @@ public class StorageManager {
 
     public void setTripsLimitMb(long limitMb) {
         synchronized (configChangeLock) {
-            tripsLimitMb = limitMb == 0 ? 0 : Math.max(MIN_LIMIT_MB, Math.min(loadTimeCeilingMb(tripsStorageType), limitMb));
+            tripsLimitMb = Math.max(MIN_LIMIT_MB, Math.min(loadTimeCeilingMb(tripsStorageType), limitMb));
             saveConfig();
         }
         markStorageDirty();  // idle gate: a lowered cap may need a reap
@@ -6168,6 +6283,14 @@ public class StorageManager {
         // to internal + its clamped limit instead of reaping it against the SD limit.
         if (isWriteFaulted(surveillanceStorageType)) return StorageType.INTERNAL;
         return normalizeStorageType(surveillanceStorageType);
+    }
+
+    /** The surveillance type for status display: a full-card redirect reads as INTERNAL. Never used for cleanup scope. */
+    public StorageType getReportedSurveillanceStorageType() {
+        if (surveillanceEnospcRedirected && surveillanceStorageType != StorageType.INTERNAL) {
+            return StorageType.INTERNAL;
+        }
+        return getActiveSurveillanceStorageType();
     }
 
     public StorageType getActiveTripsStorageType() {
@@ -6220,6 +6343,7 @@ public class StorageManager {
         synchronized (configChangeLock) {
         if (!ensureExternalAvailable(type, "recordings")) return false;
 
+        final StorageType previousRecordingsType = recordingsStorageType;
         recordingsStorageType = type;
         // Clear any stale ENOSPC full-fallback signal: the user just (re)chose
         // a target, so the next segment re-evaluates free space fresh. Without
@@ -6355,7 +6479,8 @@ public class StorageManager {
             logWarn("setRecordingsStorageType: could not push recorder dir: " + t.getMessage());
         }
 
-        if (type == StorageType.SD_CARD) {
+        // Only a switch to SD offers cleanup; re-saving the same type must not undo "off".
+        if (type == StorageType.SD_CARD && previousRecordingsType != StorageType.SD_CARD) {
             autoEnableCdrCleanup();
         }
 
@@ -6397,6 +6522,7 @@ public class StorageManager {
         synchronized (configChangeLock) {
         if (!ensureExternalAvailable(type, "surveillance")) return false;
 
+        final StorageType previousSurveillanceType = surveillanceStorageType;
         surveillanceStorageType = type;
         // FIX (audit, MEDIUM): only DOWN-clamp on a genuinely positive live
         // StatFs read — see setRecordingsStorageType for the full rationale (a
@@ -6432,7 +6558,7 @@ public class StorageManager {
             logWarn("setSurveillanceStorageType: could not re-arm volume watchdog: " + t.getMessage());
         }
 
-        if (type == StorageType.SD_CARD) {
+        if (type == StorageType.SD_CARD && previousSurveillanceType != StorageType.SD_CARD) {
             autoEnableCdrCleanup();
         }
 
@@ -6476,7 +6602,7 @@ public class StorageManager {
             // Reuse the single guard-clearing read; getEffectiveMaxLimitMb(type)
             // would do a second StatFs read that can race to 0 and collapse to
             // internal's ~8GB ceiling (see setRecordingsStorageType).
-            tripsLimitMb = tripsLimitMb == 0 ? 0 : Math.max(MIN_LIMIT_MB, Math.min(volumeCeilingMb(liveTotal), tripsLimitMb));
+            tripsLimitMb = Math.max(MIN_LIMIT_MB, Math.min(volumeCeilingMb(liveTotal), tripsLimitMb));
         }
         updateActiveDirectories();
         saveConfig();
@@ -6542,7 +6668,7 @@ public class StorageManager {
     private void autoEnableCdrCleanup() {
         try {
             ExternalStorageCleaner cleaner = ExternalStorageCleaner.getInstance();
-            if (!cleaner.isEnabled() && cleaner.isSdCardAvailable()) {
+            if (!cleaner.isEnabled() && !cleaner.wasTurnedOffByUser() && cleaner.isSdCardAvailable()) {
                 // Calculate recommended reserved space based on our limits
                 long totalNeeded = 0;
                 if (recordingsStorageType == StorageType.SD_CARD) {
@@ -9566,13 +9692,13 @@ public class StorageManager {
             // proximity dirs too (getReapableDirs), and proximity events write a
             // hero thumb. sweepOrphanTempFiles claims each dir once, recordings
             // first, so a partial this list omits would be swept by nothing.
-            case "recordings":   return new String[]{".mp4.tmp", ".broken", ".json.tmp", ".srt.tmp", ".jpg.tmp"};
-            case "surveillance": return new String[]{".mp4.tmp", ".broken", ".jpg.tmp", ".json.tmp", ".srt.tmp"};
+            case "recordings":   return new String[]{".mp4.tmp", ".broken", ".json.tmp", ".srt.tmp", ".jpg.tmp", ".mp4.tmp.jnl"};
+            case "surveillance": return new String[]{".mp4.tmp", ".broken", ".jpg.tmp", ".json.tmp", ".srt.tmp", ".mp4.tmp.jnl"};
             // .json.tmp added so the geo-backfill sidecar rewrite (SidecarGeoUpdater,
             // which sweeps proximity dirs too) leaves no unreaped orphan on a
             // SIGKILL in its write→rename window; .jpg.tmp mirrors the surveillance
             // hero-thumb partial since proximity events write the same sidecar/thumb set.
-            case "proximity":    return new String[]{".mp4.tmp", ".broken", ".json.tmp", ".jpg.tmp", ".srt.tmp"};
+            case "proximity":    return new String[]{".mp4.tmp", ".broken", ".json.tmp", ".jpg.tmp", ".srt.tmp", ".mp4.tmp.jnl"};
             case "trips":        return new String[]{".jsonl.gz.tmp"};
             default:             return new String[]{};
         }
@@ -9941,6 +10067,7 @@ public class StorageManager {
             }
 
             long fileSize = file.length();
+            try { com.overdrive.app.server.timeline.TimelineLedger.noteDeleting(file, "retention"); } catch (Throwable ignored) { }
             boolean deleted = file.delete();
             if (!deleted) {
                 deleted = deleteFileViaShell(file);
@@ -11459,6 +11586,7 @@ public class StorageManager {
         final String[] auxPrefixes = auxiliaryPrefixesForCategory(category);
 
         long fileSize = file.length();
+        try { com.overdrive.app.server.timeline.TimelineLedger.noteDeleting(file, "free_space"); } catch (Throwable ignored) { }
         boolean deleted = file.delete();
         // Whether the anchor's fast in-process unlink failed and we had to fall through
         // to (or are about to skip) the bounded shell `rm`. A failed fast unlink is the
@@ -11575,6 +11703,25 @@ public class StorageManager {
      *
      * @return true if any reap freed space (caller may re-snapshot sizes).
      */
+    /** A clip just fell back off a full card: free card space now, not on the next 30 s tick. */
+    private void requestEarlyEmergencyReap() {
+        ScheduledExecutorService scheduler = cleanupScheduler;
+        if (scheduler == null || !earlyEmergencyReapQueued.compareAndSet(false, true)) return;
+        try {
+            scheduler.execute(() -> {
+                earlyEmergencyReapQueued.set(false);
+                try {
+                    // Same precondition as the periodic tick: never reap before the encoder probe is bound.
+                    if (probeWired.get()) runPhysicalFreeSpaceEmergencyReap();
+                } catch (Throwable t) {
+                    logWarn("Early emergency reap failed: " + t.getMessage());
+                }
+            });
+        } catch (Throwable rejected) {
+            earlyEmergencyReapQueued.set(false);
+        }
+    }
+
     private boolean runPhysicalFreeSpaceEmergencyReap() {
         // The media categories share at most ONE external volume + internal. Build
         // the distinct set of volumes PHYSICALLY backing media right now, driven by

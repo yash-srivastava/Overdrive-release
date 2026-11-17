@@ -2,6 +2,7 @@ package com.overdrive.app.byd
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DiLink5DirectTelemetryTest {
@@ -19,6 +20,15 @@ class DiLink5DirectTelemetryTest {
         assertEquals(9, observation.brakePercent)
         assertEquals(4, observation.gear)
         assertEquals(0L, observation.ageMs)
+    }
+
+    @Test
+    fun exactSpeedDecodePreservesFractionAboveSafetyLimit() {
+        val decoded = DiLink5DirectTelemetry.decodeFloat(
+            DiLink5DirectTelemetry.RawRead(0, 80.4f.toBits()), 0f, 400f)
+
+        assertEquals(80.4f, decoded!!, 0.0001f)
+        assertTrue(decoded > 80f)
     }
 
     @Test

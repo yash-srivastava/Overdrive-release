@@ -634,11 +634,13 @@ public class VehicleControlApiHandler {
                     installed && diLink5Hardware && !diLink5Mode && !diLink5;
             boolean ok = false;
             if (installed && !modeRequired) {
+                // Legacy: wait out a running close, then for the app to reach the cluster
+                // (within the Projection screen's 70 s read timeout).
                 ok = diLink5
                         ? com.overdrive.app.launcher.ClusterCast
                                 .startAndAwait(pkg, 60000L)
                         : com.overdrive.app.launcher.ClusterCast
-                                .startAfterSettle(pkg, 45000L);
+                                .startAfterSettleAndAwait(pkg, 20000L, 45000L);
             }
             response.put("success", ok);
             if (diLink5) {
@@ -680,11 +682,12 @@ public class VehicleControlApiHandler {
                     reason = "cast_failed";
                 }
                 response.put("reason", reason);
-                String detail = diLink5
-                        ? com.overdrive.app.launcher.ClusterCast.getLastStartFailure()
-                        : com.overdrive.app.surveillance
-                                .ClusterProjectionController
-                                .legacyProtocolVerdictDetail();
+                String detail = com.overdrive.app.launcher.ClusterCast.getLastStartFailure();
+                if (!diLink5 && (detail == null || detail.isEmpty())) {
+                    detail = com.overdrive.app.surveillance
+                            .ClusterProjectionController
+                            .legacyProtocolVerdictDetail();
+                }
                 response.put("error", !installed
                         ? "app is not installed"
                         : (modeRequired
@@ -750,6 +753,7 @@ public class VehicleControlApiHandler {
             // isActive() through the current transport, and the idle check
             // also covers a transient blind-spot open with no holder token.
             boolean busy = com.overdrive.app.launcher.ClusterCast.isActive()
+                    || com.overdrive.app.launcher.layout.LayoutModeGate.layoutOwnsAdmission()
                     || com.overdrive.app.navmap.ClusterMapProjector.isActive()
                     || !com.overdrive.app.surveillance.ClusterProjectionController
                             .isProjectionIdleStatic();
@@ -811,9 +815,15 @@ public class VehicleControlApiHandler {
             int l = req.optInt("l", 0), t = req.optInt("t", 0);
             int r = req.optInt("r", 0), b = req.optInt("b", 0);
             boolean commit = req.optBoolean("commit", true);
+            long expectedGeneration = req.has("sessionGeneration")
+                    ? req.getLong("sessionGeneration") : 0L;
+            if (expectedGeneration < 0L) {
+                throw new IllegalArgumentException("Invalid cast session generation");
+            }
             com.overdrive.app.launcher.ClusterCast.ResizeResult result =
                     com.overdrive.app.launcher.ClusterCast.resizeWithResult(
-                            l, t, r, b, commit, req.optString("package", ""));
+                            l, t, r, b, commit, req.optString("package", ""),
+                            expectedGeneration);
             response.put("success", true);
             response.put("applied", result.applied);
             if (result.deferred) response.put("deferred", true);
@@ -911,6 +921,12 @@ public class VehicleControlApiHandler {
         try {
             response.put("success", true);
             response.put("casting", com.overdrive.app.launcher.ClusterCast.isActive());
+            JSONObject layouts = com.overdrive.app.launcher.ClusterLayouts.status();
+            response.put("layouts", layouts);
+            response.put("layoutActive", layouts.optBoolean("active"));
+            response.put("layoutBusy", layouts.optBoolean("busy"));
+            response.put("layoutGeneration", layouts.optLong("generation"));
+            response.put("layoutPresetId", layouts.optString("presetId"));
             response.put("vehicleMode",
                     com.overdrive.app.camera.dilink5.DiLink5Platform
                             .currentActiveMode());
@@ -943,7 +959,39 @@ public class VehicleControlApiHandler {
                 if (normalized != null) configuredTransport = normalized;
             } catch (Throwable ignored) {}
             response.put("clusterTransportConfigured", configuredTransport);
+            JSONObject di5AppProjectionSnapshot = null;
             if (transport.isDiLink5()) {
+                org.json.JSONObject projectionConfig = null;
+                try {
+                    projectionConfig = com.overdrive.app.config.UnifiedConfigManager
+                            .loadConfig().optJSONObject("projection");
+                } catch (Throwable ignored) {}
+                com.overdrive.app.launcher.dilink5.cluster.DiLink5ProjectionConfig di5Config =
+                        com.overdrive.app.launcher.dilink5.cluster.DiLink5ProjectionConfig
+                                .from(projectionConfig);
+                response.put("projectionPathConfigured", di5Config.getTransport().getWire());
+                response.put("projectionTargetConfigured", di5Config.getTarget().getWire());
+                response.put("di5HostedWidthPercent", di5Config.getWidthPercent());
+                response.put("di5HostedHeightPercent", di5Config.getHeightPercent());
+                response.put("di5HostedXOffsetPercent", di5Config.getXOffsetPercent());
+                response.put("di5HostedYOffsetPercent", di5Config.getYOffsetPercent());
+                response.put("di5HostedContentScalePercent", di5Config.getContentScalePercent());
+                response.put("di5DirectScalePercent", di5Config.getDirectScalePercent());
+                di5AppProjectionSnapshot =
+                        com.overdrive.app.launcher.DiLink5ClusterCast
+                                .currentAppProjectionSnapshot();
+                response.put("projectionPathActive",
+                        di5AppProjectionSnapshot.get("projectionPathActive"));
+                response.put("castSessionGeneration",
+                        di5AppProjectionSnapshot.get("castSessionGeneration"));
+                response.put("hostedProjectionBounds",
+                        di5AppProjectionSnapshot.get("hostedProjectionBounds"));
+                response.put("physicalDisplayId",
+                        com.overdrive.app.launcher.DiLink5ClusterCast
+                                .currentTargetDisplayId());
+                response.put("contentDisplayId",
+                        com.overdrive.app.launcher.DiLink5ClusterCast
+                                .currentContentDisplayId());
                 response.put("castPhase",
                         com.overdrive.app.launcher.ClusterCast.getStartPhase());
                 response.put("castError",
@@ -970,7 +1018,9 @@ public class VehicleControlApiHandler {
             // the user browses the list during a live cast. Without it the UI would key its geometry
             // (and its restore-on-select) to the spinner and reshape the cast app to another app's
             // remembered rect. Empty string when nothing is cast.
-            String castPkg = com.overdrive.app.launcher.ClusterCast.getCastPackage();
+            String castPkg = di5AppProjectionSnapshot != null
+                    ? di5AppProjectionSnapshot.optString("castPackage", "")
+                    : com.overdrive.app.launcher.ClusterCast.getCastPackage();
             response.put("castPackage", castPkg != null ? castPkg : "");
             // Real cluster panel size: prefer the live view-mirror's resolved value, else
             // resolve it directly (so the box aspect-locks correctly even before the first
@@ -1016,10 +1066,11 @@ public class VehicleControlApiHandler {
                 ok = com.overdrive.app.surveillance.ClusterInputRelay.swipe(
                         req.optDouble("sx", 0), req.optDouble("sy", 0),
                         req.optDouble("sx2", 0), req.optDouble("sy2", 0),
-                        req.optInt("ms", 0));
+                        req.optInt("ms", 0), req.optLong("layoutGeneration", 0L));
             } else {
                 ok = com.overdrive.app.surveillance.ClusterInputRelay.tap(
-                        req.optDouble("sx", 0), req.optDouble("sy", 0));
+                        req.optDouble("sx", 0), req.optDouble("sy", 0),
+                        req.optLong("layoutGeneration", 0L));
             }
             response.put("success", ok);
             if (!ok) response.put("error", "no safe cluster display target");
@@ -1186,6 +1237,16 @@ public class VehicleControlApiHandler {
         // `overall` only for states OTA cannot see — e.g. all-locked
         // confirmation or a REAR door left unlocked while LF is locked.
         if (otaLf != -1) {
+            // A cloud snapshot whose driver door disagrees with the live read predates the latest
+            // lock change (it can be up to 5 min old), so its other doors are stale too: show
+            // them as unknown rather than as unlocked doors on a car that was just locked.
+            int cloudDriver = cloudAvailable ? doors.optInt(driverCell, -1) : -1;
+            if (cloudDriver != -1 && cloudDriver != otaLf) {
+                doors.put("lf", -1);
+                doors.put("rf", -1);
+                doors.put("lr", -1);
+                doors.put("rr", -1);
+            }
             doors.put(driverCell, otaLf);
             if (cloudAvailable) {
                 // Derive `overall` from the MERGED per-door cells, not from
@@ -1808,8 +1869,9 @@ public class VehicleControlApiHandler {
             response.put("success", confirmed).put("commandSuccess", confirmed)
                     .put("confirmation", confirmed ? "local" : "none")
                     .put("outcome", confirmed ? "success" : "unconfirmed");
-            String message = r.displayMessage + (confirmed ? " · confirmed by the car"
-                    : " · vehicle power change not confirmed by the car");
+            String message = r.displayMessage + " · " + Messages.get(confirmed
+                    ? "vehicle_control.power_confirmed_by_car"
+                    : "vehicle_control.power_not_confirmed_by_car");
             response.put("message", message);
             if (!confirmed) response.put("error", message);
         }
@@ -2309,6 +2371,16 @@ public class VehicleControlApiHandler {
                 case "purify_off": cmd = new VehicleCommandRouter.AirPurifyCommand(false); break;
                 case "steering_heat_on":  cmd = new VehicleCommandRouter.SteeringWheelHeatCommand(true);  break;
                 case "steering_heat_off": cmd = new VehicleCommandRouter.SteeringWheelHeatCommand(false); break;
+                case "set_airflow": {
+                    Integer modeValue = jsonInteger(req, "mode");
+                    if (modeValue == null || modeValue.intValue() < BydDataCollector.AC_WIND_MODE_MIN
+                            || modeValue.intValue() > BydDataCollector.AC_WIND_MODE_MAX) {
+                        sendClimateInputError(out, response, "mode must be an integer from 1 to 7");
+                        return;
+                    }
+                    cmd = new VehicleCommandRouter.AcAirflowCommand(modeValue.intValue());
+                    break;
+                }
                 case "recirculate_on":  cmd = new VehicleCommandRouter.AcRecirculationCommand(true);  break;   // recirculation
                 case "recirculate_off": cmd = new VehicleCommandRouter.AcRecirculationCommand(false); break;   // fresh air
                 case "defrost_front_on":  cmd = new VehicleCommandRouter.FrontDefrostCommand(true);  break;
@@ -3132,7 +3204,8 @@ public class VehicleControlApiHandler {
                 HttpResponse.sendJson(out, response.toString());
                 return;
             }
-            boolean ok = com.overdrive.app.byd.AudioPlaybackController.speak(text, channel);
+            boolean queue = "queue".equals(req.optString("ifPlaying", ""));
+            boolean ok = com.overdrive.app.byd.AudioPlaybackController.speak(text, channel, queue);
             response.put("success", ok);
             HttpResponse.sendJson(out, response.toString());
         } catch (Exception e) {
@@ -3264,15 +3337,14 @@ public class VehicleControlApiHandler {
 
                         if (bootId == null || bootId.isEmpty()) {
                             response.put("success", false);
-                            response.put("error", "IVI reboot safety guard is unavailable");
+                            response.put("error", Messages.get("errors.vehicle_ivi_reboot_guard_unavailable"));
                         } else if (remainingMs > 0L) {
                             response.put("success", false);
-                            response.put("error", "IVI reboot cooldown active ("
-                                    + ((remainingMs + 999L) / 1000L)
-                                    + " seconds remaining)");
+                            response.put("error", Messages.get("errors.vehicle_ivi_reboot_cooldown",
+                                    String.valueOf((remainingMs + 999L) / 1000L)));
                         } else if (!persistIviRebootGuard(bootId, elapsedMs)) {
                             response.put("success", false);
-                            response.put("error", "Could not persist IVI reboot safety guard");
+                            response.put("error", Messages.get("errors.vehicle_ivi_reboot_guard_persist_failed"));
                         } else if (DrivingSafetyGuard.getIviRebootBlockReason() != null) {
                             // Re-check after persistence at the final actuation boundary.
                             response.put("success", false);
@@ -3284,7 +3356,7 @@ public class VehicleControlApiHandler {
                                             + "sleep 2; reboot >/dev/null 2>&1"))
                                     .start();
                             response.put("success", true);
-                            response.put("message", "IVI reboot requested");
+                            response.put("message", Messages.get("vehicle_control.ivi_reboot_requested"));
                             logger.info("IVI reboot requested from "
                                     + (automationRequest
                                     ? "automation/key mapping" : "Vehicle Control"));
@@ -3423,7 +3495,7 @@ public class VehicleControlApiHandler {
                                 .isSelected()
                                 ? com.overdrive.app.launcher.ClusterCast
                                         .startAndAwait(pkg, 60000L)
-                                : com.overdrive.app.launcher.ClusterCast.start(pkg);
+                                : com.overdrive.app.launcher.ClusterCast.startWhenSettled(pkg);
                     } else {
                         // Head unit: a normal launch. If an app was cast to the cluster,
                         // moving back to the head unit releases that hold so the gauges
@@ -3577,6 +3649,8 @@ public class VehicleControlApiHandler {
             }
             String channel = onScreen ? "media" : req.optString("channel", "media");
             boolean loop = req.optBoolean("loop", false);
+            // "queue" waits for the current sound; screen video is not part of the audio queue.
+            boolean queue = !onScreen && "queue".equals(req.optString("ifPlaying", ""));
             // Prefer a library "name"; fall back to an explicit "path".
             String name = req.optString("name", null);
             String path = req.optString("path", null);
@@ -3612,7 +3686,7 @@ public class VehicleControlApiHandler {
             }
             boolean ok = onScreen
                     ? com.overdrive.app.byd.AudioPlaybackController.playVideoOnScreen(resolved, loop)
-                    : com.overdrive.app.byd.AudioPlaybackController.play(resolved, channel, loop);
+                    : com.overdrive.app.byd.AudioPlaybackController.play(resolved, channel, loop, queue);
             response.put("success", ok);
             response.put("path", resolved);
             response.put("channel", channel);
@@ -4176,13 +4250,13 @@ public class VehicleControlApiHandler {
             BydDataCollector collector = BydDataCollector.getInstance();
             BydDataCollector.AcChargingCurrentLimitStatus status =
                     collector.getAcChargingCurrentLimitStatus();
-            if (status.supported == null || (!status.available && !collector.isDiLink5Vehicle())) {
+            if (status.supported == null || !status.available) {
                 response.put("success", false);
                 response.put("supported", status.supported != null
                         ? status.supported.booleanValue() : JSONObject.NULL);
                 response.put("available", false);
                 response.put("configState", status.configState);
-                response.put("error", Messages.get("vehicle_data_unavailable"));
+                response.put("error", Messages.get("errors.vehicle_data_unavailable"));
                 HttpResponse.sendJson(out, response.toString());
                 return;
             }
@@ -4199,7 +4273,11 @@ public class VehicleControlApiHandler {
                     new VehicleCommandRouter.AcChargeCurrentLimitCommand(state.intValue()));
             JSONObject routed = routedResponse(result, "ac-charge-current-limit");
             int readBack = collector.getAcChargingCurrentLimitState();
-            boolean confirmed = readBack == state.intValue();
+            boolean readBackAvailable = readBack >= BydDataCollector.AC_CHARGE_CURRENT_6A
+                    && readBack <= BydDataCollector.AC_CHARGE_CURRENT_MAX;
+            boolean commandSucceeded = result.outcome == VehicleCommandRouter.Outcome.SUCCESS;
+            boolean confirmed = readBack == state.intValue()
+                    || (commandSucceeded && !readBackAvailable);
             // The final HAL state is the automation/manual command contract. This also handles a
             // delayed app-process retry: it may apply after the daemon-side route timed out, or a
             // newer command may supersede this one before the response is serialized.
@@ -4207,22 +4285,24 @@ public class VehicleControlApiHandler {
             routed.put("commandSuccess", confirmed);
             routed.put("outcome", confirmed ? "success" : "failed");
             if (confirmed) {
-                routed.put("path", "sdk");
-                routed.put("message", Messages.get("vehicle_control.local_sent"));
+                if (readBack == state.intValue()) {
+                    routed.put("path", "sdk");
+                }
+                if (routed.optString("message", "").isEmpty()) {
+                    routed.put("message", Messages.get("vehicle_control.local_sent"));
+                }
                 routed.remove("error");
             } else {
                 String error = Messages.get("vehicle_control.local_failed");
                 routed.put("message", error);
                 routed.put("error", error);
             }
+            int effectiveState = readBackAvailable ? readBack : state.intValue();
             routed.put("supported", true);
-            routed.put("available", readBack >= BydDataCollector.AC_CHARGE_CURRENT_6A
-                    && readBack <= BydDataCollector.AC_CHARGE_CURRENT_MAX);
-            routed.put("state", readBack >= BydDataCollector.AC_CHARGE_CURRENT_6A
-                    && readBack <= BydDataCollector.AC_CHARGE_CURRENT_MAX
-                    ? readBack : JSONObject.NULL);
-            String label = BydDataCollector.acChargingCurrentLimitLabel(readBack);
-            routed.put("label", label != null ? label : JSONObject.NULL);
+            routed.put("available", readBackAvailable || confirmed);
+            routed.put("state", (readBackAvailable || confirmed) ? effectiveState : JSONObject.NULL);
+            String label = BydDataCollector.acChargingCurrentLimitLabel(effectiveState);
+            routed.put("label", (readBackAvailable || confirmed) && label != null ? label : JSONObject.NULL);
             HttpResponse.sendJson(out, routed.toString());
         } catch (Exception e) {
             logger.warn("AC charge current limit command failed: " + e.getMessage());

@@ -480,6 +480,7 @@ public class MqttPublisherService implements MqttCallback {
      */
     public synchronized boolean publishTelemetry(JSONObject snapshot) {
         if (!running) return false;
+        if (config.isHomeAssistant()) snapshot = withArraySlots(snapshot);
 
         // Apply a deferred reset requested by the Paho callback thread (HA birth).
         // Done here, on the publish thread, so the differ's HashMap is only ever
@@ -774,6 +775,72 @@ public class MqttPublisherService implements MqttCallback {
         }
         connected = false;
         return reconnectIfDue();
+    }
+
+    private static final String[] WINDOW_SLOTS = {"lf", "rf", "lr", "rr", "sunroof", "sunshade"};
+    private static final String[] SEAT_SLOTS = {"driver", "passenger"};
+
+    /** HA has no array entities: a copy of the snapshot that also carries one key per known array slot. */
+    static JSONObject withArraySlots(JSONObject snapshot) {
+        if (snapshot == null) return null;
+        JSONArray windows = snapshot.optJSONArray("window_open");
+        JSONArray belts = snapshot.optJSONArray("seatbelt");
+        JSONArray heat = snapshot.optJSONArray("seat_heat");
+        JSONArray cool = snapshot.optJSONArray("seat_cool");
+        JSONArray occupancy = snapshot.optJSONArray("passenger_detection");
+        if (windows == null && belts == null && heat == null && cool == null && occupancy == null) {
+            return snapshot;
+        }
+        try {
+            JSONObject out = new JSONObject();
+            Iterator<String> it = snapshot.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                out.put(k, snapshot.opt(k));
+            }
+            if (windows != null) {
+                // Like door_open: 1 once any window reads open, null until all four side windows read.
+                boolean anyOpen = false;
+                boolean sideUnknown = windows.length() < 4;
+                for (int i = 0; i < WINDOW_SLOTS.length && i < windows.length(); i++) {
+                    int v = slotInt(windows, i);
+                    if (v >= 0 && v <= 100) {
+                        out.put("window_open_" + WINDOW_SLOTS[i], v);
+                        if (v > 0) anyOpen = true;
+                    } else if (i < 4) {
+                        sideUnknown = true;
+                    }
+                }
+                out.put("window_open_any", anyOpen ? (Object) 1 : sideUnknown ? JSONObject.NULL : (Object) 0);
+            }
+            putSeatSlots(out, belts, "seatbelt_", 1);
+            putSeatSlots(out, heat, "seat_heat_level_", 9);
+            putSeatSlots(out, cool, "seat_cool_level_", 9);
+            if (occupancy != null && occupancy.length() > 0) {
+                int v = slotInt(occupancy, 0);
+                if (v == 0 || v == 1) out.put("passenger_occupied", v);
+            }
+            return out;
+        } catch (Exception e) {
+            return snapshot;
+        }
+    }
+
+    private static void putSeatSlots(JSONObject out, JSONArray values, String prefix, int maxValue)
+            throws Exception {
+        if (values == null) return;
+        for (int i = 0; i < SEAT_SLOTS.length && i < values.length(); i++) {
+            int v = slotInt(values, i);
+            if (v >= 0 && v <= maxValue) out.put(prefix + SEAT_SLOTS[i], v);
+        }
+    }
+
+    /** Integer slot value, or -1 for null, non-numeric or fractional entries. */
+    private static int slotInt(JSONArray values, int index) {
+        Object v = values.opt(index);
+        if (!(v instanceof Number)) return -1;
+        double d = ((Number) v).doubleValue();
+        return d == Math.rint(d) && d >= Integer.MIN_VALUE && d <= Integer.MAX_VALUE ? (int) d : -1;
     }
 
     private Set<String> discoverableKeys(JSONObject snap) {

@@ -52,7 +52,7 @@ public class ScreenshotPrivacyModeAssetTest {
     public void allCoreConsumersLoadThePrivacyBundleVersion() throws IOException {
         String[] pages = {
                 "about.html", "abrp.html", "automations.html", "byd-cloud.html",
-                "charging.html", "communicate.html", "events.html", "index.html",
+                "charging.html", "communicate.html", "daemons.html", "events.html", "index.html",
                 "key-mapping.html", "live-view.html", "login.html", "mqtt.html",
                 "network.html", "notifications.html", "performance.html",
                 "recording.html", "road-sense.html", "seat-positions.html",
@@ -62,7 +62,7 @@ public class ScreenshotPrivacyModeAssetTest {
         for (String page : pages) {
             assertTrue(page, readRepositoryFile(
                     "app/src/main/assets/web/local/" + page)
-                    .contains("../shared/core.js?v=24"));
+                    .contains("../shared/core.js?v=27"));
         }
     }
 

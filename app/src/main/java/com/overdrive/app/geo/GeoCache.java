@@ -191,6 +191,7 @@ public final class GeoCache {
         try {
             pendingFlush = flushExecutor.schedule(() -> {
                 synchronized (GeoCache.this) {
+                    // This task is finishing: let the retry below schedule a new one.
                     pendingFlush = null;
                     flushDirty();
                     // Retry transient errors on the same daemon executor, with

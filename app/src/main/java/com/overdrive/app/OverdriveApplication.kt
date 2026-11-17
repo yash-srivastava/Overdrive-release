@@ -24,8 +24,19 @@ class OverdriveApplication : Application() {
     override fun onCreate() {
         super.onCreate()
 
-        // Before anything that resolves a shared path.
+        // Resolve the shared root before either the minimal worker path or the main app loads
+        // generation markers. Workers still return before every heavyweight subsystem.
         com.overdrive.app.util.ScratchRoot.bootstrap(this)
+
+        // Private account-service workers must not initialize the app stack.
+        // Exact matching preserves the main process and the existing warning worker.
+        if (com.overdrive.app.launcher.dilink5.enable.DiLink5AdbWorkerProcess.isCurrentProcess()) {
+            return
+        }
+
+        // The device secret's private copy (the shared config only hands it over).
+        com.overdrive.app.auth.AuthManager.useAppPrivateDir(filesDir)
+        com.overdrive.app.auth.AuthManager.useDaemonSecretReader(com.overdrive.app.auth.DaemonSecretShellReader(this))
 
         try {
             startService(Intent(this, com.overdrive.app.remote.RemoteDevViewBridgeService::class.java))
@@ -104,6 +115,7 @@ class OverdriveApplication : Application() {
         // receivers and a second 60s re-assert timer, doubling the relay POSTs for
         // values the daemon already has. Same idiom as BydDataCollector.
         if (packageName == android.app.Application.getProcessName()) {
+            com.overdrive.app.launcher.adb.AdbRecoveryManager.start(this)
             com.overdrive.app.remoteaccess.SharedBluetoothKeepAliveController.resume(this)
             com.overdrive.app.remoteaccess.KeyFobAccessMonitor.resumeIfEnabled(this)
             com.overdrive.app.remoteaccess.BluetoothAccessMonitor.resumeIfEnabled(this)

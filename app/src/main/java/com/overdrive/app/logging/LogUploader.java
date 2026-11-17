@@ -126,16 +126,16 @@ public final class LogUploader {
         // Bearer / Authorization tokens
         Pattern.compile("(?i)(bearer\\s+)[A-Za-z0-9._-]{12,}"),
         // key=value or "key":"value" / key: value for sensitive key names.
-        // Require a leading word boundary so camelCase identifiers such as
-        // `resolveLeaseSpecialDevice: BYDAutoSpecialDevice` or `isAccStateAuthoritative`
-        // do not match mid-identifier, while still redacting `Device: <id>` prose lines
-        // when `Device` is a standalone token and the value is not a dotted Java FQN.
-        Pattern.compile("(?i)\\b(token|secret|password|passwd|apikey|api_key|authorization|auth_?token|deviceid|device_id|did|chat_?id)" +
+        // No leading \\b: prefixed keys (access_token, wifiPassword, client_secret,
+        // geminiApiKey) must stay masked. Bare `device` is handled by the prose rule below.
+        Pattern.compile("(?i)(token|secret|password|passwd|apikey|api_key|auth|deviceid|device_id|did|chat_?id)" +
                 "(\"?\\s*[:=]\\s*\"?)([A-Za-z0-9._:\\-]{4,})"),
     };
 
+    // "Device: <id>" prose (AuthManager). Skips camelCase keys (SpecialDevice:) and dotted
+    // FQN values, but still masks an id that ends a sentence.
     private static final Pattern PROSE_DEVICE_ID_REDACTOR =
-            Pattern.compile("(?i)(?<![A-Za-z0-9_.])(device)(\\s*:\\s*)([A-Za-z0-9_\\-]{8,})(?![A-Za-z0-9_.])");
+            Pattern.compile("(?i)(?<![A-Za-z0-9_.])(device)(\\s*:\\s*)([A-Za-z0-9_\\-]{4,})(?![A-Za-z0-9_]|\\.[A-Za-z0-9_])");
 
     // Signed thumb / parking-asset tokens in a logged request line: /thumb/x.jpg?t=<jws>.
     // The key name is a bare "t" so the sensitive-key pattern above misses it. Length bound

@@ -1,10 +1,13 @@
 package com.overdrive.app.overlay.glass
 
+import com.overdrive.app.R
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.LinearGradient
+import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Shader
 import android.view.MotionEvent
@@ -32,6 +35,12 @@ class GlassPickerSheet(
     private val selected: String?,
     private val onPick: (Item) -> Unit,
     private val onRemove: () -> Unit,
+    /** The line under the title once the list is in; null keeps the shortcut key's. */
+    private val subtitle: String? = null,
+    /** Each row's mode badge (an automation's); off for a plain list. */
+    private val badges: Boolean = true,
+    /** Every row's glyph instead of its item's, in chrome; [SEAT] is the seats widget's seat. */
+    private val icon: String? = null,
 ) : GlassWidgetView(context, env, ticker, W, heightFor(items, selected != null)) {
 
     data class Item(val id: String, val name: String, val mode: String, val glyph: String)
@@ -166,7 +175,7 @@ class GlassPickerSheet(
         titleP.color = t.text
         c.drawText(title, 24f, 34f, titleP)
         sub.color = t.text2
-        c.drawText(when { failed -> "Couldn't load automations"; items == null -> "Loading automations…"; else -> "Tap one to put it on this key" }, 24f, 54f, sub)
+        c.drawText(when { failed -> gs(R.string.glass_picker_failed); items == null -> gs(R.string.glass_picker_loading); else -> subtitle ?: gs(R.string.glass_picker_hint) }, 24f, 54f, sub)
         s.color = t.etch; s.strokeWidth = 1f
         c.drawLine(16f, HEAD - 1f, W - 16f, HEAD - 1f, s)
         if (canRemove) {
@@ -181,13 +190,13 @@ class GlassPickerSheet(
             c.drawLine(35f, cy, 45f, cy, s)
             name.color = t.warn
             name.getFontMetrics(fm)
-            c.drawText("Remove from this key", 64f, cy - (fm.ascent + fm.descent) / 2f, name)
+            c.drawText(gs(R.string.glass_picker_remove), 64f, cy - (fm.ascent + fm.descent) / 2f, name)
         }
         if (items != null && items.isEmpty()) {
             note.color = t.text2
-            c.drawText("No automations yet", W / 2f, (listTop + listBottom) / 2f - 4f, note)
+            c.drawText(gs(R.string.glass_picker_empty), W / 2f, (listTop + listBottom) / 2f - 4f, note)
             note.color = t.text3
-            c.drawText("Create one in OverDrive → Automations", W / 2f, (listTop + listBottom) / 2f + 18f, note)
+            c.drawText(gs(R.string.glass_picker_empty_hint), W / 2f, (listTop + listBottom) / 2f + 18f, note)
         }
     }
 
@@ -219,18 +228,19 @@ class GlassPickerSheet(
             c.drawCircle(40f, cy, 16.5f, s)
             c.save(); c.translate(40f - 11f, cy - 11f); c.scale(22f / 32f, 22f / 32f)
             val off = it.mode == "disabled"
-            val glyph = it.glyph
-            GlassGlyphs.draw(c, rowSlots[i].get(glyph, t, d * 22f / 32f, if (off) GlassGlyphs.Tone.CHROME else GlassGlyphs.Tone.TINT,
-                if (off) 0 else GlassIcons.hue(glyph), bright = sel) { GlassIcons.outline(glyph) }, if (off) 110 else 255)
+            val glyph = icon ?: it.glyph
+            val chrome = off || icon != null
+            GlassGlyphs.draw(c, rowSlots[i].get(glyph, t, d * 22f / 32f, if (chrome) GlassGlyphs.Tone.CHROME else GlassGlyphs.Tone.TINT,
+                if (chrome) 0 else GlassIcons.hue(glyph), bright = sel) { if (glyph == SEAT) seatShape() else GlassIcons.outline(glyph) }, if (off) 110 else 255)
             c.restore()
-            val right = if (sel) W - 52f else W - 96f
-            val label = shownNames[i] ?: fit(it.name.ifBlank { "Automation" }, right - 72f).also { n -> shownNames[i] = n }
+            val right = if (sel) W - 52f else if (badges) W - 96f else W - 40f
+            val label = shownNames[i] ?: fit(it.name.ifBlank { gs(R.string.glass_automation) }, right - 72f).also { n -> shownNames[i] = n }
             name.color = if (it.mode == "disabled") t.text3 else t.text
             c.drawText(label, 68f, cy - (fm.ascent + fm.descent) / 2f, name)
             if (sel) {
                 s.color = t.accent; s.strokeWidth = 2.6f
                 c.drawLine(W - 40f, cy, W - 34f, cy + 6f, s); c.drawLine(W - 34f, cy + 6f, W - 24f, cy - 6f, s)
-            } else {
+            } else if (badges) {
                 badge.color = t.text3
                 badge.getFontMetrics(fm)
                 c.drawText(modeLabel(it.mode), W - 26f, cy - (fm.ascent + fm.descent) / 2f, badge)
@@ -262,12 +272,14 @@ class GlassPickerSheet(
         return "$e…"
     }
 
-    private fun modeLabel(mode: String) = when (mode) { "manual" -> "Manual"; "disabled" -> "Off"; else -> "Auto" }
+    private fun modeLabel(mode: String) = when (mode) { "manual" -> gs(R.string.glass_mode_manual); "disabled" -> gs(R.string.glass_mode_off); else -> gs(R.string.glass_mode_auto) }
 
     override fun drawFront(c: Canvas) {}
 
     companion object {
         const val W = 440f
+        /** [icon] for the seats widget's list: its seat, in the 32-unit glyph box. */
+        const val SEAT = "picker.seat"
         private const val HEAD = 70f
         private const val ROW = 56f
         private const val FOOT_GAP = 14f
@@ -276,6 +288,18 @@ class GlassPickerSheet(
         fun heightFor(items: List<Item>?, canRemove: Boolean): Float {
             val rows = if (items.isNullOrEmpty()) 2.2f else items.size.toFloat()
             return min(MAX_H, HEAD + rows * ROW + (if (canRemove) ROW + FOOT_GAP else 10f) + 4f)
+        }
+
+        // the seats widget's seat: back, headrest and cushion
+        private fun seatShape(): Path {
+            val back = Path(GlassPaths.svg("M7.6 21 L8.6 11.1 C8.8 9.4 10 8.2 11.5 8.2 C13 8.2 14.2 9.4 14.4 11.1 L15.4 21 C15.5 22.5 14.6 23.6 13.2 23.6 H9.8 C8.4 23.6 7.5 22.5 7.6 21 Z"))
+            back.op(Path().apply { addRoundRect(RectF(9f, 2.6f, 14f, 6.6f), 2f, 2f, Path.Direction.CW) }, Path.Op.UNION)
+            back.op(Path().apply { addRect(10.3f, 6.2f, 12.7f, 8.8f, Path.Direction.CW) }, Path.Op.UNION)
+            back.transform(Matrix().apply { setRotate(-13f, 11.5f, 23.6f) })
+            val shape = Path().apply { addRoundRect(RectF(10.6f, 20.6f, 27f, 26.2f), 2.8f, 2.8f, Path.Direction.CW) }
+            shape.op(back, Path.Op.UNION)
+            shape.op(Path().apply { addRoundRect(RectF(13.2f, 27.6f, 24.8f, 29.4f), 0.9f, 0.9f, Path.Direction.CW) }, Path.Op.UNION)
+            return shape
         }
     }
 }

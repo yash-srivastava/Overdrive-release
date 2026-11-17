@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shell tokens: navigation rail, rail footer, sub-page header, remote-access popover. -->
+<resources>
+    <dimen name="shell_rail_compact_width">80dp</dimen>
+    <dimen name="shell_rail_expanded_width">216dp</dimen>
+    <dimen name="shell_rail_brand_height">52dp</dimen>
+    <dimen name="shell_rail_brand_inset">24dp</dimen>
+    <dimen name="shell_rail_mark_width">74dp</dimen>
+    <dimen name="shell_rail_mark_height">20dp</dimen>
+    <dimen name="shell_rail_wordmark_gap">10dp</dimen>
+
+    <!-- A row is a 52dp plate with 2dp above and below; the whole 56dp is the touch target. -->
+    <dimen name="shell_rail_row_height">56dp</dimen>
+    <dimen name="shell_rail_footer_row_height">48dp</dimen>
+    <dimen name="shell_rail_plate_inset_h">12dp</dimen>
+    <dimen name="shell_rail_plate_inset_v">2dp</dimen>
+    <dimen name="shell_rail_plate_radius">12dp</dimen>
+    <!-- Plate inset + 16dp: a 24dp icon centred 40dp from the rail's leading edge at every width. -->
+    <dimen name="shell_rail_content_inset">28dp</dimen>
+    <dimen name="shell_rail_label_gap">16dp</dimen>
+    <dimen name="shell_rail_section_height">28dp</dimen>
+    <dimen name="shell_rail_section_rule_width">24dp</dimen>
+    <dimen name="shell_rail_section_label_bottom">6dp</dimen>
+    <dimen name="shell_rail_fading_edge">24dp</dimen>
+
+    <dimen name="shell_remote_dot">10dp</dimen>
+    <dimen name="shell_remote_halo">18dp</dimen>
+    <dimen name="shell_popover_width">300dp</dimen>
+    <dimen name="shell_popover_padding">16dp</dimen>
+    <dimen name="shell_popover_url_radius">10dp</dimen>
+    <dimen name="shell_popover_url_padding_v">10dp</dimen>
+    <dimen name="shell_popover_elevation">8dp</dimen>
+    <dimen name="shell_popover_gap">8dp</dimen>
+
+    <style name="TextAppearance.Overdrive.Shell.Wordmark" parent="TextAppearance.Material3.TitleMedium">
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textSize">17sp</item>
+        <item name="android:letterSpacing">-0.01</item>
+        <item name="android:textColor">?attr/colorPrimary</item>
+    </style>
+    <style name="TextAppearance.Overdrive.Shell.RailLabel" parent="TextAppearance.Material3.LabelLarge">
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:letterSpacing">0</item>
+    </style>
+    <style name="TextAppearance.Overdrive.Shell.RemoteTitle" parent="TextAppearance.Material3.LabelLarge">
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:letterSpacing">0</item>
+        <item name="android:textColor">?attr/colorOnSurface</item>
+    </style>
+    <style name="TextAppearance.Overdrive.Shell.RemoteUrl" parent="TextAppearance.Material3.BodySmall">
+        <item name="android:fontFamily">monospace</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:letterSpacing">0</item>
+        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
+    </style>
+    <style name="TextAppearance.Overdrive.Shell.PopoverUrl" parent="TextAppearance.Material3.BodyMedium">
+        <item name="android:fontFamily">monospace</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:letterSpacing">0</item>
+        <item name="android:textColor">?attr/colorPrimary</item>
+    </style>
+</resources>

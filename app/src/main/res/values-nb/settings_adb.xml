@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_section_adb">ADB</string>
+    <string name="settings_adb_subtitle">Tilkobling, aktivering og automatisk gjenoppretting.</string>
+    <string name="settings_adb_connection_title">Tilkobling</string>
+    <string name="settings_adb_automatic_title">Automatisk gjenoppretting</string>
+    <string name="settings_adb_automatic_restore">Gjenopprett ADB automatisk</string>
+    <string name="settings_adb_automatic_description">Gjenoppretter ADB-innstillingen ved oppstart og når den slås av. Tillatelsen for innstillinger må allerede være gitt; Wi-Fi er ikke nødvendig. DiLink 5 støtter også trådløs gjenoppretting med validert Wi-Fi og en tidligere autorisert nøkkel.</string>
+    <string name="settings_adb_recover">Gjenopprett ADB nå</string>
+    <string name="settings_adb_cancel_recovery">Avbryt gjenoppretting</string>
+    <string name="settings_adb_manual_title">Manuell aktivering</string>
+    <string name="settings_adb_manual_description">Bruk kompatible BYD-verktøy for å be om ADB-tilgang. Wi-Fi-tilkobling er ikke nødvendig.</string>
+    <string name="settings_adb_enable">Aktiver ADB</string>
+    <string name="settings_adb_advanced_tools">Avanserte verktøy</string>
+    <string name="settings_adb_hide_advanced">Skjul avanserte verktøy</string>
+    <string name="settings_adb_advanced_description">Diagnostiser problemer, åpne BYD-verktøy eller angre et manuelt forsøk.</string>
+    <string name="settings_adb_open_developer">Åpne utvikleralternativer</string>
+    <string name="settings_adb_developer_page">Be om BYDs utviklerside</string>
+    <string name="settings_adb_diagnostics">Sjekk kompatibilitet og tilkobling</string>
+    <string name="settings_adb_restore">Angre endringer fra manuell aktivering</string>
+    <string name="settings_adb_export">Eksporter APK for BYDs utviklerverktøy</string>
+    <string name="settings_adb_dialog_confirm">Godkjenn trådløs feilsøking på dette nettverket</string>
+    <string name="settings_adb_dialog_confirm_description">Koble til et validert Wi-Fi-nettverk først. Tillat at OverDrive bekrefter dialogen for trådløs feilsøking bare for dette nettverket.</string>
+    <string name="settings_adb_tools_unavailable">Manuell aktivering er ikke tilgjengelig for gjeldende modus eller installerte BYD-verktøy.</string>
+    <string name="settings_adb_recovery_availability">Lokal gjenoppretting trenger tillatelsen for innstillinger som ble gitt under ADB-oppsettet. Den trenger verken Wi-Fi eller DiLink 5-modus.</string>
+    <string name="settings_adb_details_title">Detaljer om siste forsøk</string>
+    <string name="settings_adb_recovery_confirm_body">Lokal gjenoppretting bruker tillatelsen for innstillinger som allerede er gitt, uten Wi-Fi. DiLink 5 kan også bruke validert Wi-Fi og en tidligere autorisert nøkkel. Dette kan åpne eller gjenopprette ADB på port 5555, som kan nås av andre enheter i bilnettet. Fortsett bare på et klarert nettverk. ADB-nøkkelautentisering forblir aktiv.</string>
+    <string name="settings_adb_recovery_permission_missing">Tillatelsen for innstillinger mangler. Hvis ADB også er utilgjengelig, bruk først Aktiver ADB eller Utvikleralternativer og fullfør ADB-oppsettet på nytt.</string>
+    <string name="settings_adb_recovery_setting_enabled">ADB-innstillingen er aktivert. En autentisert ADB-tilkobling er ikke bekreftet.</string>
+    <string name="settings_adb_recovery_setting_failed">ADB-innstillingen kunne ikke aktiveres og bekreftes. Fastvaren kan avvise endringen.</string>
+    <string name="settings_adb_recovery_save_failed">Valget for automatisk gjenoppretting kunne ikke lagres. Kontroller ADB og prøv igjen.</string>
+</resources>

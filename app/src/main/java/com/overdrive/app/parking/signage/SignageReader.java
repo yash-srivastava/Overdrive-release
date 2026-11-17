@@ -25,10 +25,13 @@ import java.util.List;
  */
 public final class SignageReader {
 
-    /** Hard cap on frames per session (each frame ≈ det + n×rec inferences). */
-    static final int MAX_FRAMES = 14;
-    static final int DRIVE_TAIL_FRAMES = 6;
+    /** Hard cap on camera views per session (each ≈ 5 detector tiles + n×rec inferences). */
+    static final int MAX_FRAMES = 20;
+    /** Approach-clip frames to decode; a 2×2 grid recording yields four views each. */
+    static final int DRIVE_TAIL_FRAMES = 3;
     static final long DRIVE_TAIL_MS = 60_000L;
+    /** The approach clip stops being read once the level is this sure. */
+    static final float CLIP_DONE_LEVEL_CONF = 0.6f;
     /** Lines below this recogniser confidence never reach the grammar. */
     static final float MIN_LINE_CONF = 0.30f;
 
@@ -63,14 +66,20 @@ public final class SignageReader {
         }
         // Two phases, cheapest first. The stills already on disk are closest to
         // the bay and cost no video decode; the approach clip (a decoder
-        // instance + 6 frames) is only opened when the stills leave the LEVEL
-        // unknown — the ramp sign is usually the only place it is printed.
+        // instance + 3 frames) is only opened when the stills leave the LEVEL
+        // unknown and the car parked without sky (a garage).
         List<SignageGrammar.Observation> obs = new ArrayList<>();
         int frames = ocr(collectStills(sessionDir), obs, 0, backend);
         SignageGrammar.Result r = SignageGrammar.parse(obs);
-        if (r.level == null) {
-            frames += ocr(collectDriveTail(s, MAX_FRAMES - frames), obs, frames, backend);
-            r = SignageGrammar.parse(obs);
+        int clipViews = 0;
+        if (r.level == null && approachWorthReading(s)) {
+            for (byte[] view : collectDriveTail(s, MAX_FRAMES - frames)) {
+                if (isEventRecording()) break;
+                frames += ocr(java.util.Collections.singletonList(view), obs, frames, backend);
+                clipViews++;
+                r = SignageGrammar.parse(obs);
+                if (r.level != null && r.levelConf >= CLIP_DONE_LEVEL_CONF) break;
+            }
         }
         if (frames == 0) {
             return new Outcome(ParkingSession.SIGNAGE_SKIPPED, null, 0);
@@ -78,10 +87,22 @@ public final class SignageReader {
         JSONObject json = r.toJson();
         try {
             json.put("framesRead", frames);
+            json.put("clipFramesRead", clipViews);
             json.put("linesRead", obs.size());
             json.put("readMs", env.nowMs());
         } catch (Exception ignored) {}
+        env.log("Signage " + (s != null ? s.sessionId : "?") + ": " + frames + " views (" + clipViews + " from the approach clip), "
+                + obs.size() + " lines → " + (r.isEmpty() ? "nothing" : r.label()));
         return new Outcome(ParkingSession.SIGNAGE_DONE, json, frames);
+    }
+
+    /** A fix under a minute old when parking means open sky: no garage approach worth decoding. */
+    static boolean approachWorthReading(ParkingSession s) {
+        return s != null && !ParkingSession.GPS_FRESH.equals(s.gpsQuality);
+    }
+
+    private boolean isEventRecording() {
+        try { return env.isEventRecording(); } catch (Throwable t) { return false; }
     }
 
     /** OCR each frame into {@code obs}; returns the number of frames processed. */
@@ -98,7 +119,7 @@ public final class SignageReader {
             if (lines != null) {
                 for (TextOcrBackend.TextLine l : lines) {
                     if (l == null || l.text == null || l.confidence < MIN_LINE_CONF) continue;
-                    obs.add(new SignageGrammar.Observation(l.text, l.confidence, idx, l.h));
+                    obs.add(new SignageGrammar.Observation(l.text, l.confidence, idx, l.cx, l.cy, l.w, l.h));
                 }
             }
             idx++;

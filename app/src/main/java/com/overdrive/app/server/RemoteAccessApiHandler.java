@@ -61,6 +61,14 @@ public final class RemoteAccessApiHandler {
     private static long nextBluetoothDiagnosticAt;
     private static KeyFobEventEvaluator keyFob;
     private static KeyFobPresenceEvaluator keyFobPresence;
+    // Lock-with-key-inside latch: set by a phone lock that passed a detected key, cleared once the car is unlocked.
+    private static final com.overdrive.app.remoteaccess.KeyInsideLock KEY_INSIDE =
+            new com.overdrive.app.remoteaccess.KeyInsideLock(com.overdrive.app.remoteaccess.KeyInsideLock.fileStore(
+                    com.overdrive.app.util.ScratchRoot.path("od_key_inside_lock")));
+    static final String FOB_LOCK_PHONE_NEAR_TEXT =
+            "A trusted phone is near the car; phone priority blocks keyfob locking";
+    static final String FOB_UNLOCK_KEY_INSIDE_TEXT =
+            "The key was left inside after a phone lock; unlock with a trusted phone";
     private static String presenceModeGeneration;
     private static String lastKeyFobDiagnostic = "";
     private static long nextKeyFobDiagnosticAt;
@@ -78,6 +86,18 @@ public final class RemoteAccessApiHandler {
         if (state == com.overdrive.app.byd.bodywork.BodyworkConstants.STATE_OPEN)
             lastDoorOpenedElapsed = SystemClock.elapsedRealtime();
     };
+    // Legacy switch-off carry-over, one per live PhoneState (guarded by STATE), and its door-quiet input.
+    private static final Map<PhoneState, com.overdrive.app.remoteaccess.SwitchOffRadioDropCarry> SWITCH_OFF_CARRY =
+            new java.util.WeakHashMap<>();
+    private static final Map<PhoneState, com.overdrive.app.remoteaccess.SwitchOffNearCarry> SWITCH_OFF_NEAR =
+            new java.util.WeakHashMap<>();
+    // Last reconnect failure detail logged per live PhoneState, and when (guarded by STATE).
+    private static final Map<PhoneState, String> RECONNECT_DETAIL_LOGGED = new java.util.WeakHashMap<>();
+    private static final Map<PhoneState, Long> RECONNECT_DETAIL_LOGGED_AT = new java.util.WeakHashMap<>();
+    private static volatile long lastDoorActivityElapsed = -1;
+    private static volatile boolean doorActivityObserverRegistered;
+    private static final BydDataCollector.DoorStateListener DOOR_ACTIVITY_OBSERVER =
+            (area, state) -> lastDoorActivityElapsed = SystemClock.elapsedRealtime();
     // ACTION serializes dispatches; the authenticated relay reads this without acquiring ACTION.
     private static volatile PendingActuation pendingActuation;
     private static final class PendingActuation {
@@ -320,7 +340,7 @@ public final class RemoteAccessApiHandler {
                 if (!UnifiedConfigManager.updateSection(RemoteAccessSettings.SECTION, persisted))
                     throw new IllegalStateException("Settings could not be saved");
                 next = RemoteAccessSettings.read();
-                synchronized (STATE) { reset(next); }
+                synchronized (STATE) { reset(next); keyInsideHolds(effectiveConfig); }
             }
             if (patch.has("keepBluetoothOn")) reconcileBluetoothKeepAlive(true);
             JSONObject applied = bridge("apply");
@@ -387,9 +407,14 @@ public final class RemoteAccessApiHandler {
         }
         if (!"remoteAccessObservation".equals(sample.optString("command")))
             throw new SecurityException("Invalid signal envelope");
-        Integer diLink5Power = null;
+        Integer observedPower = null;
         boolean nonceRemembered = false;
-        if (DiLink5Platform.isSelected()) {
+        boolean readSwitchOffClosures = !DiLink5Platform.isSelected()
+                && BluetoothConnectionEvidence.hasAny(sample)
+                && Boolean.FALSE.equals(sample.opt("connected"));
+        boolean switchOffDoorsClosed = false;
+        if (DiLink5Platform.isSelected() || readSwitchOffClosures) {
+            long closureStaleMs;
             synchronized (STATE) {
                 rememberNonce(authenticated.nonce, authenticated.timestampMs);
                 nonceRemembered = true;
@@ -403,10 +428,13 @@ public final class RemoteAccessApiHandler {
                             new JSONObject().put("success", false).put("revoked", true).toString());
                     return;
                 }
+                closureStaleMs = effectiveConfig.optLong("staleMs");
             }
             // Native car-service reads must not hold up the app's independent
             // power query, UI snapshots or settings revocation on STATE.
-            diLink5Power = readVehiclePowerNow();
+            observedPower = readVehiclePowerNow();
+            if (readSwitchOffClosures && observedPower == 0)
+                switchOffDoorsClosed = readSwitchOffClosures(sample, closureStaleMs);
         }
         ProximityEvaluator.Snapshot evaluated;
         JSONObject settings;
@@ -480,14 +508,44 @@ public final class RemoteAccessApiHandler {
                 if (Double.isFinite(value) && value == Math.rint(value) && value >= -127 && value <= 20) raw = (int) value;
             }
             // Only a fresh, confirmed OFF observation can arm either platform.
-            int power = diLink5Power == null ? readVehiclePowerNow() : diLink5Power;
+            int power = observedPower == null ? readVehiclePowerNow() : observedPower;
             boolean eligible = power == 0
                     && !UnifiedConfigManager.isVehicleOnOnlyMode()
                     && UnifiedConfigManager.isBluetoothKeepAliveEnabled();
+            com.overdrive.app.remoteaccess.SwitchOffRadioDropCarry switchOff =
+                    nativeProof && !DiLink5Platform.isSelected() ? SWITCH_OFF_CARRY.computeIfAbsent(phone,
+                            ignored -> new com.overdrive.app.remoteaccess.SwitchOffRadioDropCarry()) : null;
+            if (switchOff != null) {
+                boolean restoreHistory = observeSwitchOff(switchOff, sample, proof, healthyNativeProof,
+                        connected, power, eligible, observed, now, phone.sourceInstance,
+                        modeGeneration, settings.optLong("revision"), settings.optLong("staleMs"),
+                        switchOffDoorsClosed);
+                if (switchOff.takeHistoryRevocation()) {
+                    phone.evaluator.reset();
+                    phone.calibration.clear();
+                    phone.satisfiedEpisodeId = 0;
+                }
+                if (restoreHistory)
+                    phone.evaluator.adoptConnectionHistory(phone.profile.getString("address"));
+            }
+            com.overdrive.app.remoteaccess.SwitchOffNearCarry switchOffNear = DiLink5Platform.isSelected() ? null
+                    : SWITCH_OFF_NEAR.computeIfAbsent(phone,
+                            ignored -> new com.overdrive.app.remoteaccess.SwitchOffNearCarry());
+            if (switchOffNear != null && switchOffNear.observe(observed, power, eligible, connected, raw,
+                    phone.evaluator.nearThreshold(), settings.optLong("revision")))
+                phone.evaluator.adoptNearVisit(phone.profile.getString("address"));
             evaluated = nativeProof
                     ? phone.evaluator.observe(phone.profile.getString("address"), raw, observed,
                             connected, eligible, healthyNativeProof ? proof : null)
                     : phone.evaluator.observe(phone.profile.getString("address"), raw, observed, connected, eligible);
+            if (switchOff != null) {
+                switchOff.evaluated(evaluated.event == ProximityEvaluator.Event.DEPARTURE, evaluated.reason);
+                logSwitchOff(phone, switchOff, sample, observed);
+            }
+            if (switchOffNear != null) {
+                switchOffNear.evaluated(evaluated.event == ProximityEvaluator.Event.DEPARTURE);
+                logSwitchOffNear(phone, switchOffNear, observed);
+            }
             if (!evaluated.state.name().equals(phone.signal.optString("state")))
                 phone.stateSequence = serial;
             // Absence evidence keeps its native lease; HTTP delivery cannot renew it.
@@ -518,8 +576,12 @@ public final class RemoteAccessApiHandler {
                 phone.signal.remove("radioOn");
             }
             JSONObject reconnect = sample.optJSONObject("reconnect");
-            if (reconnect != null)
-                phone.signal.put("reconnect", new JSONObject(reconnect.toString()));
+            if (reconnect != null) {
+                // The native failure text is for the daemon log only, never the status API.
+                JSONObject stored = new JSONObject(reconnect.toString());
+                stored.remove("errorDetail");
+                phone.signal.put("reconnect", stored);
+            }
             if (evaluated.rawRssi == null || !connected) {
                 if ("missing_signal".equals(evaluated.reason)
                         || !nativeProof && "disconnected".equals(evaluated.reason))
@@ -680,6 +742,7 @@ public final class RemoteAccessApiHandler {
             }
             logKeyFobDiagnostic(observation, evaluated, settings, "accepted");
             logKeyFobPresenceDiagnostic(presence, settings, presenceObservation, authenticated.request);
+            noteKeyInsideObservation(observation.driverLock, settings, presence);
             changed();
         }
         HttpResponse.sendJson(out, new JSONObject().put("success", true).toString());
@@ -739,7 +802,11 @@ public final class RemoteAccessApiHandler {
                 + " requestAccepted=" + diagnosticBoolean(search, "requestAccepted")
                 + " requestReturnCode=" + diagnosticInteger(search, "requestReturnCode")
                 + " progressObserved=" + diagnosticBoolean(search, "progressObserved")
-                + " lastCallbackRaw=" + diagnosticInteger(search, "lastCallbackRaw"));
+                + " lastCallbackRaw=" + diagnosticInteger(search, "lastCallbackRaw")
+                + (search != null && search.has("keyModule")
+                        ? " keyModule=" + diagnosticCode(search.optString("keyModule")) : "")
+                + (search != null && search.has("otherKeyResultRaw")
+                        ? " otherKeyResultRaw=" + diagnosticInteger(search, "otherKeyResultRaw") : ""));
     }
 
     private static void logKeyFobDiagnostic(KeyFobEventEvaluator.Observation observation,
@@ -902,6 +969,11 @@ public final class RemoteAccessApiHandler {
     private static void performKeyFob(KeyFobEventEvaluator.Observation reading, JSONObject settings,
                                       ProximityEvaluator.Event event) throws Exception {
         boolean locking = event == ProximityEvaluator.Event.DEPARTURE;
+        if (!locking && keyInsideHolds(settings)) {
+            com.overdrive.app.daemon.CameraDaemon.log("Proximity: fob arrival ignored reason=key_left_inside");
+            recordAction("unlock", "blocked", FOB_UNLOCK_KEY_INSIDE_TEXT);
+            return;
+        }
         performDecision(new ActionDecision(locking ? "lock" : "unlock", "key_fob_proximity", "Physical key fob",
                 locking ? "Fresh physical key fob departure" : "Fresh physical key fob arrival",
                 reading.eventElapsed, KeyFobEventEvaluator.FRESH_MS, false) {
@@ -930,6 +1002,15 @@ public final class RemoteAccessApiHandler {
 
     private static void performKeyFobPresence(KeyFobPresenceEvaluator.Observation reading,
                                               JSONObject settings, boolean firstDeparture) throws Exception {
+        boolean phoneNear;
+        synchronized (STATE) {
+            refreshSettings();
+            phoneNear = settings.optBoolean("lockEnabled") && phonePriorityVetoesFobLock(SystemClock.elapsedRealtime());
+        }
+        if (phoneNear) {
+            recordAction("lock", "blocked", FOB_LOCK_PHONE_NEAR_TEXT);
+            return;
+        }
         performDecision(new ActionDecision("lock", "key_fob_presence", "Physical key fob",
                 "Confirmed physical key fob absence", reading.observed, KeyFobEventEvaluator.FRESH_MS, false) {
             @Override boolean publishesTransition() { return firstDeparture; }
@@ -1614,6 +1695,7 @@ public final class RemoteAccessApiHandler {
                                            ProximityEvaluator.Snapshot evaluated,
                                            boolean eligible, int power, long now) {
         JSONObject reconnect = sample.optJSONObject("reconnect");
+        logReconnectDetail(phone, reconnect, now);
         String diagnostic = "connected=" + sample.optBoolean("connected")
                 + " reason=" + diagnosticCode(evaluated.reason)
                 + " state=" + evaluated.state.name() + " eligible=" + eligible
@@ -1641,7 +1723,66 @@ public final class RemoteAccessApiHandler {
         }
         com.overdrive.app.daemon.CameraDaemon.log("Proximity: phone=" + index
                 + " mode=" + com.overdrive.app.camera.dilink5.DiLink5Platform.currentActiveMode()
-                + " sdk=" + android.os.Build.VERSION.SDK_INT + " " + diagnostic);
+                + " sdk=" + android.os.Build.VERSION.SDK_INT + " " + diagnostic
+                + reconnectErrorSuffix(reconnect));
+    }
+
+    /** Appended only after a reconnect failure, so healthy log lines stay unchanged. */
+    private static String reconnectErrorSuffix(JSONObject reconnect) {
+        String error = reconnect == null ? "" : reconnect.optString("errorClass");
+        return error.matches("[A-Za-z0-9_]{1,64}") ? " error=" + error : "";
+    }
+
+    /** Once per failure episode and detail, at most every 30 s per phone: the native text behind the error class. */
+    private static void logReconnectDetail(PhoneState phone, JSONObject reconnect, long now) {
+        String detail = reconnect == null ? "" : reconnect.optString("errorDetail");
+        if (detail.isEmpty()) {
+            RECONNECT_DETAIL_LOGGED.remove(phone);
+            return;
+        }
+        Long loggedAt = RECONNECT_DETAIL_LOGGED_AT.get(phone);
+        if (detail.equals(RECONNECT_DETAIL_LOGGED.get(phone))
+                || loggedAt != null && now >= loggedAt && now - loggedAt < 30_000) return;
+        RECONNECT_DETAIL_LOGGED.put(phone, detail);
+        RECONNECT_DETAIL_LOGGED_AT.put(phone, now);
+        int index = 1;
+        for (PhoneState value : PHONES.values()) {
+            if (value == phone) break;
+            index++;
+        }
+        String loggable;
+        // A diagnostic must never fail the relay that carries the observation.
+        try { loggable = loggableReconnectDetail(detail); }
+        catch (RuntimeException unavailable) { loggable = "unavailable"; }
+        com.overdrive.app.daemon.CameraDaemon.log("Proximity: phone=" + index + " reconnectDetail stage="
+                + diagnosticCode(reconnect.optString("errorStage")) + reconnectErrorSuffix(reconnect)
+                + " detail=\"" + loggable + "\"");
+    }
+
+    /** Bounded ASCII (other characters \\u-escaped) without Bluetooth addresses or roster phone names. */
+    private static String loggableReconnectDetail(String detail) {
+        String text = detail.length() > 2_400 ? detail.substring(0, 2_400) : detail;
+        text = text.replaceAll("(?i)(?:[0-9a-fx]{2}[:-]){5}[0-9a-fx]{2}", "<mac>")
+                .replaceAll("(?i)(?<![0-9a-f])[0-9a-f]{12}(?![0-9a-f])", "<mac>");
+        java.util.List<String> names = new java.util.ArrayList<>();
+        for (PhoneState value : PHONES.values()) {
+            String name = value.profile.optString("name").trim();
+            if (name.length() >= 3) names.add(name);
+        }
+        // Longest first, so a name that contains another roster name is still removed whole.
+        java.util.Collections.sort(names, (left, right) -> right.length() - left.length());
+        for (String name : names)
+            text = java.util.regex.Pattern.compile(java.util.regex.Pattern.quote(name),
+                    java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.UNICODE_CASE)
+                    .matcher(text).replaceAll("<phone>");
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < text.length() && out.length() < 600; i++) {
+            char c = text.charAt(i);
+            if (c == '"') out.append('\'');
+            else if (c >= 0x20 && c <= 0x7E) out.append(c);
+            else out.append(String.format(java.util.Locale.US, "\\u%04x", (int) c));
+        }
+        return out.length() > 600 ? out.substring(0, 600) : out.toString();
     }
 
     private static String diagnosticCode(String code) {
@@ -1656,6 +1797,88 @@ public final class RemoteAccessApiHandler {
     private static String diagnosticBoolean(JSONObject value, String key) {
         Object scalar = value == null ? null : value.opt(key);
         return scalar instanceof Boolean ? scalar.toString() : "unknown";
+    }
+
+    /** Feeds one accepted reading to the phone's switch-off carry-over; true means adopt the history now. */
+    private static boolean observeSwitchOff(com.overdrive.app.remoteaccess.SwitchOffRadioDropCarry carry,
+            JSONObject sample, BluetoothConnectionEvidence proof, boolean healthy, boolean connected, int power,
+            boolean eligible, long observed, long now, String instance, String modeGeneration,
+            long revision, long staleMs, boolean doorsClosed) {
+        if (healthy && (power > 0 && connected || eligible && !connected))
+            ensureDoorActivityObserver();
+        String reason = sample.optString("reason");
+        // An unavailable radio read cannot stand in for a witnessed shutdown.
+        boolean radioDown = proof != null && proof.radioReadKnown && !proof.radioOn
+                && "radio_off".equals(reason);
+        long proofTime = healthy && proof != null ? proof.observedAtElapsedMs : observed;
+        return carry.observe(proofTime, Math.max(now, SystemClock.elapsedRealtime()), power, eligible,
+                instance, modeGeneration, revision, healthy, connected,
+                radioDown, doorsClosed, lastDoorActivityElapsed, staleMs);
+    }
+
+    /** Called outside STATE; the relay rechecks consent, revision, scope and native freshness afterward. */
+    private static boolean readSwitchOffClosures(JSONObject sample, long staleMs) {
+        try {
+            if (UnifiedConfigManager.isVehicleOnOnlyMode()
+                    || !UnifiedConfigManager.isBluetoothKeepAliveEnabled()) return false;
+            BluetoothConnectionEvidence proof = BluetoothConnectionEvidence.parse(sample);
+            JSONObject reportedRuntime = sample.optJSONObject("runtime");
+            String generation = activeModeGeneration();
+            if (proof.state != BluetoothConnectionEvidence.State.DISCONNECTED
+                    || !proof.healthyAt(SystemClock.elapsedRealtime(), staleMs)
+                    || generation == null || !generation.equals(proof.modeGeneration)
+                    || reportedRuntime == null || !Boolean.TRUE.equals(reportedRuntime.opt("active")))
+                return false;
+            ensureDoorActivityObserver();
+            if (!doorActivityObserverRegistered) return false;
+            int[] closures = BydDataCollector.getInstance().readAllDoorOpenStates();
+            if (closures == null || closures.length < 6) return false;
+            for (int i = 0; i < 6; i++) if (closures[i] != 0) return false;
+            return true;
+        } catch (Exception | LinkageError unavailable) {
+            // Missing or failed closure reads restart the verified quiet period.
+            return false;
+        }
+    }
+
+    private static void logSwitchOff(PhoneState phone, com.overdrive.app.remoteaccess.SwitchOffRadioDropCarry carry,
+                                     JSONObject sample, long observed) {
+        String transitions = carry.takeTransitions();
+        if (transitions.isEmpty()) return;
+        JSONObject reconnect = sample.optJSONObject("reconnect");
+        int index = 1;
+        for (PhoneState value : PHONES.values()) {
+            if (value == phone) break;
+            index++;
+        }
+        com.overdrive.app.daemon.CameraDaemon.log("Proximity: phone=" + index + " switchOff=" + transitions
+                + " sinceOffMs=" + carry.sinceOffMs(observed)
+                + " reconnect=" + diagnosticCode(reconnect == null ? "" : reconnect.optString("reason"))
+                + " failures=" + diagnosticInteger(reconnect, "failures"));
+    }
+
+    private static void logSwitchOffNear(PhoneState phone, com.overdrive.app.remoteaccess.SwitchOffNearCarry carry,
+                                         long observed) {
+        String transitions = carry.takeTransitions();
+        if (transitions.isEmpty()) return;
+        int index = 1;
+        for (PhoneState value : PHONES.values()) {
+            if (value == phone) break;
+            index++;
+        }
+        com.overdrive.app.daemon.CameraDaemon.log("Proximity: phone=" + index + " switchOffNear=" + transitions
+                + " sinceOffMs=" + carry.sinceOffMs(observed));
+    }
+
+    /** Door and lid edges for the switch-off carry-over's quiet window; idempotent, never throws. */
+    private static void ensureDoorActivityObserver() {
+        if (doorActivityObserverRegistered) return;
+        try {
+            BydDataCollector.getInstance().addDoorStateListener(DOOR_ACTIVITY_OBSERVER);
+            doorActivityObserverRegistered = true;
+        } catch (Throwable ignored) {
+            // Passive recovery remains blocked until both closure reads and edge observation work.
+        }
     }
 
     /** Existing daemon/watchdog lanes share the app's one radio owner. */
@@ -1907,7 +2130,9 @@ public final class RemoteAccessApiHandler {
                 .put("runtime", currentRuntime)
                 .put("keyFob", keyFob.current(now).toJson(now, effectiveConfig.optString("unlockTrigger", "away_to_near"))
                         .put("enabled", config.optBoolean("keyFobEnabled"))
-                        .put("presence", keyFobPresence.current(now).toJson()))
+                        .put("presence", keyFobPresence.current(now).toJson())
+                        .put("keyInsideLocked", RemoteAccessSettings.lockWithKeyInside(effectiveConfig)
+                                && KEY_INSIDE.latched()))
                 .put("bluetooth", BluetoothRadioStatusReader.cached())
                 .put("safeZones", safeZoneSnapshot(effectiveConfig).toJson())
                 .put("devices", pairedDevices == null ? new JSONArray() : pairedDevices)
@@ -2053,16 +2278,26 @@ public final class RemoteAccessApiHandler {
         long age = observed < 0 ? -1 : now - observed;
         signal.put("ageMs", age < 0 ? JSONObject.NULL : age);
         boolean nativeProof = BluetoothConnectionEvidence.hasAny(signal);
-        if (!config.optBoolean("enabled") || !phone.profile.optBoolean("enabled"))
-            revokePhoneSignal(phone, "disabled", nativeProof);
-        else if (age < 0 || age > effectiveConfig.optLong("staleMs"))
-            revokePhoneSignal(phone, age < 0 ? signal.optString("reason") : "stale", nativeProof);
-        else if (nativeProof && !BluetoothProximityDecisionGuard.nativeProofHealthy(
-                signal, now, effectiveConfig.optLong("staleMs"), activeModeGeneration()))
-            revokePhoneSignal(phone, "connection_proof_unavailable", true);
+        com.overdrive.app.remoteaccess.ProximitySignalAgingPolicy.Revocation revocation =
+                com.overdrive.app.remoteaccess.ProximitySignalAgingPolicy.evaluate(
+                signal, config.optBoolean("enabled") && phone.profile.optBoolean("enabled"),
+                config.optBoolean("keepBluetoothOn")
+                        && !UnifiedConfigManager.isVehicleOnOnlyMode()
+                        && UnifiedConfigManager.isBluetoothKeepAliveEnabled(),
+                phone.lastProof, phone.lastProofHealthy, activeModeGeneration(), now,
+                effectiveConfig.optLong("staleMs"));
+        if (revocation.required())
+            revokePhoneSignal(phone, revocation.reason, nativeProof, revocation.invalidateRecovery);
     }
 
     private static void revokePhoneSignal(PhoneState phone, String reason, boolean nativeProof) throws Exception {
+        revokePhoneSignal(phone, reason, nativeProof, true);
+    }
+
+    private static void revokePhoneSignal(PhoneState phone, String reason, boolean nativeProof,
+            boolean invalidateRecovery) throws Exception {
+        com.overdrive.app.remoteaccess.SwitchOffRadioDropCarry switchOff = SWITCH_OFF_CARRY.get(phone);
+        if (invalidateRecovery && switchOff != null) switchOff.invalidateProof();
         phone.evaluator.reset();
         phone.calibration.clear();
         phone.activeModeGeneration = null;
@@ -2142,8 +2377,18 @@ public final class RemoteAccessApiHandler {
     }
 
     private static boolean lockConsensus(boolean phoneDeparture, long now) {
+        if (phoneDeparture) {
+            for (PhoneState phone : PHONES.values()) {
+                if (!phone.profile.optBoolean("enabled")) continue;
+                com.overdrive.app.remoteaccess.SwitchOffRadioDropCarry carry = SWITCH_OFF_CARRY.get(phone);
+                if (carry != null && carry.requiresLockGuard()
+                        && !carry.lockEvidenceValid(now, lastDoorActivityElapsed)) return false;
+            }
+        }
         boolean fobDetection = config.optBoolean("keyFobEnabled") && KeyFobAccessMonitor.platformSupported();
         boolean fobConfigured = fobDetection && config.optBoolean("keyFobLockEnabled");
+        if (RemoteAccessSettings.lockWithKeyInside(effectiveConfig) || RemoteAccessSettings.phonePriority(effectiveConfig))
+            return priorityLockConsensus(phoneDeparture, now, fobDetection, fobConfigured);
         if (fobDetection && (hasFreshKeyFobApproach(now) || hasFreshKeyFobPresence(now))) return false;
         // 20 Oct: a phone departure waits for confirmed key absence only with lockWaitsForKeyAbsence (Advanced,
         // off by default and in normal mode); the fresh key approach/presence veto above still applies.
@@ -2151,6 +2396,40 @@ public final class RemoteAccessApiHandler {
                 !phoneDeparture || (fobConfigured && RemoteAccessSettings.lockWaitsForKeyAbsence(effectiveConfig)),
                 fobConfigured && keyFobPresence.allowsLock(now), phoneDepartureStates(), now,
                 effectiveConfig.optLong("staleMs"));
+    }
+
+    /** lockConsensus with phone priority or key-inside consent on (see MultiPhoneProximityPolicy.consensus). */
+    private static boolean priorityLockConsensus(boolean phoneDeparture, long now, boolean fobDetection,
+                                                 boolean fobConfigured) {
+        boolean keyDetected = fobDetection && (hasFreshKeyFobApproach(now) || hasFreshKeyFobPresence(now));
+        boolean keyInside = RemoteAccessSettings.lockWithKeyInside(effectiveConfig);
+        boolean fobAway = fobConfigured && keyFobPresence.allowsLock(now);
+        boolean consensus = MultiPhoneProximityPolicy.consensus(phoneDeparture, keyDetected, keyInside,
+                RemoteAccessSettings.phonePriority(effectiveConfig), fobConfigured,
+                effectiveConfig.optBoolean(RemoteAccessSettings.LOCK_WAITS_FOR_KEY_ABSENCE_KEY,
+                        RemoteAccessSettings.LOCK_WAITS_FOR_KEY_ABSENCE_DEFAULT),
+                fobAway, phoneDepartureStates(), now, effectiveConfig.optLong("staleMs"));
+        // A CAN detection is fresh for only 5 s, so a key left inside is often not "detected": with the
+        // consent, a phone lock latches unless the key search confirmed the key gone.
+        if (consensus && phoneDeparture && keyInside && !fobAway) KEY_INSIDE.noteKeyBypass(now);
+        return consensus;
+    }
+
+    /** Phone priority would veto a keyfob departure lock now: a trusted phone is confirmed Near. Caller holds STATE. */
+    private static boolean phonePriorityVetoesFobLock(long now) {
+        return RemoteAccessSettings.phonePriority(effectiveConfig)
+                && MultiPhoneProximityPolicy.anyConfirmedNear(phoneDepartureStates(), now,
+                        effectiveConfig.optLong("staleMs"));
+    }
+
+    /** The key-inside latch holds only while its consent is on; turning the consent off clears it. */
+    private static boolean keyInsideHolds(JSONObject settings) {
+        if (!RemoteAccessSettings.lockWithKeyInside(settings)) {
+            if (KEY_INSIDE.clear())
+                com.overdrive.app.daemon.CameraDaemon.log("Proximity: key-inside lock cleared reason=setting_off");
+            return false;
+        }
+        return KEY_INSIDE.latched();
     }
 
     private static boolean hasFreshKeyFobPresence(long now) {
@@ -2167,6 +2446,13 @@ public final class RemoteAccessApiHandler {
      *  so it is the car's own "key not found": seed the away_to_near rail with a 15 s quiet period. */
     private static void seedKeyFobArmingAfterProximityLock(ActionDecision decision) {
         if (DiLink5Platform.isSelected()) return;
+        // Locked past a detected key: the key is inside, so absence must not be seeded.
+        if (decision.requiresBluetooth && KEY_INSIDE.onPhoneLockDispatched(SystemClock.elapsedRealtime())
+                || KEY_INSIDE.latched()) {
+            com.overdrive.app.daemon.CameraDaemon.log("Proximity: fob armingSeeded source=" + decision.source
+                    + " skipped=key_left_inside");
+            return;
+        }
         try {
             boolean applied;
             long quietMs;
@@ -2252,8 +2538,31 @@ public final class RemoteAccessApiHandler {
         return null;
     }
 
+    /**
+     * Key-inside latch bookkeeping from a fob observation (caller holds STATE): a key search that confirmed
+     * absence voids a pending bypass, the car seen unlocked clears the latch, and the car seen locked right
+     * after OverDrive's own lock that passed a detected key sets it.
+     */
+    private static void noteKeyInsideObservation(int driverLock, JSONObject settings,
+                                                 KeyFobPresenceEvaluator.Snapshot presence) {
+        boolean latched = keyInsideHolds(settings);
+        if (!RemoteAccessSettings.lockWithKeyInside(settings)) return;
+        long now = SystemClock.elapsedRealtime();
+        if (presence != null && presence.lockCandidate) KEY_INSIDE.cancelBypass();
+        if (driverLock == 1) {
+            if (KEY_INSIDE.onCarSeenUnlocked(now))
+                com.overdrive.app.daemon.CameraDaemon.log("Proximity: key-inside lock cleared reason=car_unlocked");
+        } else if (driverLock == 2 && "lock".equals(lastActionKind) && lastActionElapsed >= 0
+                && now - lastActionElapsed <= com.overdrive.app.remoteaccess.KeyInsideLock.BYPASS_WINDOW_MS
+                && !latched && KEY_INSIDE.onPhoneLockDispatched(now)) {
+            com.overdrive.app.daemon.CameraDaemon.log("Proximity: key-inside lock set reason=car_locked");
+        }
+    }
+
     /** B4: make sure door edges are observed from the first proximity unlock on; idempotent, never throws. */
     private static void noteProximityUnlockDispatched(BydDataCollector collector) {
+        if (KEY_INSIDE.clear())
+            com.overdrive.app.daemon.CameraDaemon.log("Proximity: key-inside lock cleared reason=unlock_sent");
         if (DiLink5Platform.isSelected() || doorOpenObserverRegistered) return;
         try {
             collector.addDoorStateListener(DOOR_OPEN_OBSERVER);
@@ -2289,10 +2598,13 @@ public final class RemoteAccessApiHandler {
                     position = new ProximitySafeZonePolicy.Fix(fix.latitude, fix.longitude,
                             fix.accuracy, com.overdrive.app.monitor.GpsMonitor.fixAgeMs(fix));
                 com.overdrive.app.monitor.ParkedPosition.Fix standing =
-                        com.overdrive.app.monitor.ParkedPosition.get().current();
+                        ProximitySafeZonePolicy.liveUsable(position) ? null
+                                : com.overdrive.app.monitor.ParkedPosition.get().current();
                 if (standing != null)
                     parked = new ProximitySafeZonePolicy.Fix(standing.latitude, standing.longitude,
-                            standing.accuracyM, SystemClock.elapsedRealtime() - standing.fixElapsedMs);
+                            standing.accuracyM,
+                            standing.ageMs(SystemClock.elapsedRealtime(), System.currentTimeMillis()),
+                            standing.driftM);
             }
         } catch (Exception unavailable) {
             position = null;
@@ -2309,10 +2621,19 @@ public final class RemoteAccessApiHandler {
             case "safe_zone_missing": return "A selected safe zone was removed; review the safe-zone selection";
             case "safe_zone_invalid": return "Selected safe-zone geometry is unavailable or invalid";
             case "no_safe_zones_selected": return "Choose a safe zone before restricting automatic actions";
-            case "gps_fix_stale": return "Automatic action paused because the GPS fix is stale";
-            case "gps_accuracy_poor": return "Automatic action paused because GPS accuracy is insufficient";
+            case "gps_fix_stale": return withoutParkedPosition("Automatic action paused because the GPS fix is stale");
+            case "gps_accuracy_poor": return withoutParkedPosition("Automatic action paused because GPS accuracy is insufficient");
             case "disabled": return "Proximity is disabled";
-            default: return "Automatic action paused until a fresh, reliable GPS position is available";
+            default: return withoutParkedPosition("Automatic action paused until a fresh, reliable GPS position is available");
+        }
+    }
+
+    private static String withoutParkedPosition(String message) {
+        try {
+            return message + "; no parked position ("
+                    + com.overdrive.app.monitor.ParkedPosition.get().unavailableReason() + ")";
+        } catch (Throwable unavailable) {
+            return message;
         }
     }
 

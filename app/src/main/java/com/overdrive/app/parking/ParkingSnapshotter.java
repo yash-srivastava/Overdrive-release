@@ -145,6 +145,10 @@ public final class ParkingSnapshotter {
         if (dir.isDirectory()) return true;
         if (!dir.mkdirs() && !dir.isDirectory()) return false;
         try { dir.setReadable(true, false); dir.setExecutable(true, false); } catch (Throwable ignored) {}
+        File nomedia = new File(dir, ".nomedia");
+        if (!nomedia.exists()) {
+            try { nomedia.createNewFile(); } catch (Throwable ignored) {}
+        }
         return true;
     }
 

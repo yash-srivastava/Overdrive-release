@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_section_adb">ADB</string>
+    <string name="settings_adb_subtitle">कनेक्शन, सक्रियण और अपने-आप पुनर्स्थापना।</string>
+    <string name="settings_adb_connection_title">कनेक्शन</string>
+    <string name="settings_adb_automatic_title">अपने-आप पुनर्स्थापना</string>
+    <string name="settings_adb_automatic_restore">ADB अपने-आप पुनर्स्थापित करें</string>
+    <string name="settings_adb_automatic_description">ऐप शुरू होने पर और ADB बंद होने पर उसकी सेटिंग बहाल करें। सेटिंग बदलने की अनुमति पहले से मिली होनी चाहिए; Wi-Fi आवश्यक नहीं है। DiLink 5 सत्यापित Wi-Fi और पहले अधिकृत कुंजी से वायरलेस बहाली भी कर सकता है।</string>
+    <string name="settings_adb_recover">ADB अभी पुनर्स्थापित करें</string>
+    <string name="settings_adb_cancel_recovery">पुनर्स्थापना रद्द करें</string>
+    <string name="settings_adb_manual_title">मैन्युअल सक्रियण</string>
+    <string name="settings_adb_manual_description">ADB का ऐक्सेस माँगने के लिए संगत BYD टूल इस्तेमाल करें। Wi-Fi कनेक्शन ज़रूरी नहीं है।</string>
+    <string name="settings_adb_enable">ADB सक्रिय करें</string>
+    <string name="settings_adb_advanced_tools">उन्नत टूल</string>
+    <string name="settings_adb_hide_advanced">उन्नत टूल छिपाएँ</string>
+    <string name="settings_adb_advanced_description">समस्याओं की जाँच करें, BYD टूल खोलें या मैन्युअल प्रयास के बदलाव वापस लें।</string>
+    <string name="settings_adb_open_developer">डेवलपर विकल्प खोलें</string>
+    <string name="settings_adb_developer_page">BYD डेवलपर पेज का अनुरोध करें</string>
+    <string name="settings_adb_diagnostics">संगतता और कनेक्शन जाँचें</string>
+    <string name="settings_adb_restore">मैन्युअल सक्रियण के बदलाव वापस लें</string>
+    <string name="settings_adb_export">BYD डेवलपर टूल का APK निर्यात करें</string>
+    <string name="settings_adb_dialog_confirm">इस नेटवर्क पर वायरलेस डीबगिंग की अनुमति दें</string>
+    <string name="settings_adb_dialog_confirm_description">पहले किसी सत्यापित Wi-Fi नेटवर्क से कनेक्ट करें। OverDrive को केवल इस नेटवर्क के लिए वायरलेस डीबगिंग डायलॉग की पुष्टि करने दें।</string>
+    <string name="settings_adb_tools_unavailable">मौजूदा मोड या स्थापित BYD टूल के लिए मैन्युअल सक्रियण उपलब्ध नहीं है।</string>
+    <string name="settings_adb_recovery_availability">स्थानीय बहाली के लिए ADB सेटअप के दौरान मिली सेटिंग बदलने की अनुमति चाहिए। Wi-Fi या DiLink 5 मोड आवश्यक नहीं है।</string>
+    <string name="settings_adb_details_title">पिछले प्रयास का विवरण</string>
+    <string name="settings_adb_recovery_confirm_body">स्थानीय बहाली पहले से मिली सेटिंग बदलने की अनुमति का उपयोग करती है; Wi-Fi आवश्यक नहीं है। DiLink 5 सत्यापित Wi-Fi और पहले अधिकृत कुंजी का भी उपयोग कर सकता है। यह पोर्ट 5555 पर नेटवर्क ADB खोल या बहाल कर सकता है, जिसे वाहन नेटवर्क के अन्य डिवाइस पहुँच सकते हैं। केवल विश्वसनीय नेटवर्क पर जारी रखें। ADB कुंजी प्रमाणीकरण चालू रहेगा।</string>
+    <string name="settings_adb_recovery_permission_missing">सेटिंग बदलने की अनुमति नहीं है। यदि ADB भी उपलब्ध नहीं है, तो पहले ADB सक्षम करें या डेवलपर विकल्पों का उपयोग करें, फिर ADB सेटअप दोबारा पूरा करें।</string>
+    <string name="settings_adb_recovery_setting_enabled">ADB की सेटिंग सक्षम है। प्रमाणित ADB कनेक्शन की पुष्टि नहीं हुई है।</string>
+    <string name="settings_adb_recovery_setting_failed">ADB की सेटिंग सक्षम करके सत्यापित नहीं की जा सकी। फ़र्मवेयर यह बदलाव अस्वीकार कर सकता है।</string>
+    <string name="settings_adb_recovery_save_failed">स्वचालित बहाली की प्राथमिकता सहेजी नहीं जा सकी। ADB जाँचें और फिर प्रयास करें।</string>
+</resources>

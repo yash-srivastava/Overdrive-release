@@ -147,6 +147,8 @@
     sigE('charge_limit', 'Charging', 'Charge limit', '%', 0, 100, 1, 80),
     sigE('charging_eta_minutes', 'Charging', 'Charging time left', 'min', 0, 1440, 1, null),
     flagE('is_dcfc', 'Charging', 'DC fast charging', null),
+    sigE('charge_added_kwh', 'Charging', 'Energy added this session', 'kWh', 0, 200, 0.1, null),
+    sigE('charge_cost', 'Charging', 'Cost of this charging session', 'currency', 0, 1000, 0.01, null),
     flagE('driving', 'Driving', 'Driving', false),
     flagE('reversing', 'Driving', 'Reversing', false),
     sigE('speed', 'Driving', 'Speed', 'km/h', 0, 250, 1, 0, true),
@@ -160,6 +162,7 @@
     sigE('trip_wh_per_km', 'Trip', 'Trip consumption', 'Wh/km', 0, 400, 1, 152),
     sigE('trip_kwh', 'Trip', 'Trip energy', 'kWh', 0, 150, 0.1, 3.6),
     sigE('trip_top_kmh', 'Trip', 'Trip top speed', 'km/h', 0, 250, 1, 96),
+    sigE('trip_cost', 'Trip', 'Trip cost', 'currency', 0, 1000, 0.01, 1.85),
     sigE('tyre_fl', 'Tyres', 'Front-left tyre', 'bar', 0, 4, 0.05, 2.48),
     sigE('tyre_fr', 'Tyres', 'Front-right tyre', 'bar', 0, 4, 0.05, 2.5),
     sigE('tyre_rl', 'Tyres', 'Rear-left tyre', 'bar', 0, 4, 0.05, 2.46),
@@ -181,18 +184,18 @@
     soc: 72, ev_range_km: 318, calibrated_range_km: 305, fuel_pct: null, is_phev: false, is_charging: false, charge_power: null,
     charge_limit: 80, charging_eta_minutes: null, is_dcfc: false, driving: false, reversing: false, speed: 0, power: 0,
     accel_pct: 0, brake_pct: 0, motor_front_rpm: 0, motor_rear_rpm: 0, trip_km: 23.4, trip_minutes: 31, trip_wh_per_km: 152,
-    trip_kwh: 3.6, trip_top_kmh: 96, tyre_fl: 2.48, tyre_fr: 2.5, tyre_rl: 2.46, tyre_rr: 2.5, tyre_low_bar: 2.34,
+    trip_kwh: 3.6, trip_top_kmh: 96, trip_cost: 1.85, charge_added_kwh: null, charge_cost: null, tyre_fl: 2.48, tyre_fr: 2.5, tyre_rl: 2.46, tyre_rr: 2.5, tyre_low_bar: 2.34,
     tyre_high_bar: 3.1, locked: true, altitude_m: 214, grade_pct: 0, hazard_ahead: false, hazard_type: 0, hazard_m: 320,
     hazard_sev: 2, hazard_count: 1,
   };
   const STILL = { driving: false, reversing: false, speed: 0, power: 0, accel_pct: 0, brake_pct: 0, motor_front_rpm: 0, motor_rear_rpm: 0 };
-  const NOT_CHARGING = { is_charging: false, is_dcfc: false, charge_power: null, charging_eta_minutes: null };
+  const NOT_CHARGING = { is_charging: false, is_dcfc: false, charge_power: null, charging_eta_minutes: null, charge_added_kwh: null, charge_cost: null };
   const SCEN = {
     parked: { set: Object.assign({ hazard_ahead: false }, STILL, NOT_CHARGING) },
     town: { drive: 'town', set: Object.assign({ driving: true, reversing: false, hazard_ahead: false }, NOT_CHARGING) },
     highway: { drive: 'highway', set: Object.assign({ driving: true, reversing: false, hazard_ahead: false }, NOT_CHARGING) },
-    ac: { charge: 'ac', set: Object.assign({}, STILL, { is_charging: true, is_dcfc: false, charge_power: 7.2, soc: 46, ev_range_km: 202, calibrated_range_km: 194, charging_eta_minutes: 142, hazard_ahead: false }) },
-    dc: { charge: 'dc', set: Object.assign({}, STILL, { is_charging: true, is_dcfc: true, charge_power: 88, soc: 34, ev_range_km: 150, calibrated_range_km: 143, charging_eta_minutes: 26, hazard_ahead: false }) },
+    ac: { charge: 'ac', set: Object.assign({}, STILL, { is_charging: true, is_dcfc: false, charge_power: 7.2, soc: 46, ev_range_km: 202, calibrated_range_km: 194, charging_eta_minutes: 142, charge_added_kwh: 12.4, charge_cost: 3.1, hazard_ahead: false }) },
+    dc: { charge: 'dc', set: Object.assign({}, STILL, { is_charging: true, is_dcfc: true, charge_power: 88, soc: 34, ev_range_km: 150, calibrated_range_km: 143, charging_eta_minutes: 26, charge_added_kwh: 21.8, charge_cost: 10.9, hazard_ahead: false }) },
     low: { set: Object.assign({}, STILL, NOT_CHARGING, { soc: 14, ev_range_km: 58, calibrated_range_km: 55, hazard_ahead: false }) },
     hazard: { drive: 'town', hazards: true, set: Object.assign({ driving: true, reversing: false, hazard_ahead: true, hazard_type: 0, hazard_m: 320, hazard_sev: 2, hazard_count: 1 }, NOT_CHARGING) },
   };
@@ -233,6 +236,8 @@
   const readSignal = raw => { const m = typeof raw === 'string' && new RegExp('^=(' + ID + ')$').exec(raw); return m ? m[1] : null; };
   const UNIT_FNS = ['dist', 'near', 'height', 'consumption', 'tyre'];
   const readReading = raw => {
+    const q = typeof raw === 'string' && /^\{mqtt\((['"])([A-Za-z0-9._-]{1,64})\1\)(?::(\d))?\}$/.exec(raw);
+    if (q) return { fn: 'mqtt', mqtt: q[2], sig: 'mqtt:' + q[2], dec: q[3] ? +q[3] : 0 };
     const m = typeof raw === 'string' && new RegExp('^\\{(?:(' + UNIT_FNS.join('|') + ')\\((' + ID + ')\\)|(' + ID + '))(?::(\\d))?\\}$').exec(raw);
     return m ? { fn: m[1] || null, sig: m[2] || m[3], dec: m[4] ? +m[4] : 0 } : null;
   };
@@ -298,7 +303,7 @@
     sel: -1, theme: 'night', zoom: 1, scenario: 'parked', tab: 'props', panel: 'layers', mode: 'design', narrow: false,
     data: Object.create(null), unknown: new Set(), stale: false, reduceMotion: false, hist: [], hidden: new WeakSet(),
     catalog: [], templates: [], tpl: null, mine: [], mineState: 'loading', limits: { maxWidgets: 32, maxBytes: 16384 },
-    saving: false, ready: false, units: { distance: 'km', tyre: 'psi' }, carUnits: { distance: 'km', tyre: 'psi' }, pendingId: null,
+    saving: false, ready: false, units: { distance: 'km', tyre: 'psi' }, carUnits: { distance: 'km', tyre: 'psi' }, pendingId: null, mqttList: [], mqttAt: 0,
   };
   // keyed by names from widget files: no prototype, so "constructor" or "__proto__" is just unknown
   let SIG = Object.create(null);
@@ -314,6 +319,7 @@
     S.catalog = ok.length ? ok : BUNDLED_SIGNALS;
     SIG = Object.create(null);
     S.catalog.forEach(s => { SIG[s.key] = s; });
+    if (!Object.prototype.hasOwnProperty.call(S.data, 'currency')) S.data.currency = '$';
     S.catalog.forEach(s => {
       if (Object.prototype.hasOwnProperty.call(S.data, s.key)) return;
       if (Object.prototype.hasOwnProperty.call(SIM_DEFAULTS, s.key)) S.data[s.key] = SIM_DEFAULTS[s.key];
@@ -340,6 +346,7 @@
   /** How the car's units show a reading: its converting function, unit word and usual decimals; null when it has none. */
   function unitFor(key) {
     const u = sigUnit(key);
+    if (u === 'currency') return { fn: null, unit: '{currency}', dec: 2 };
     if (u === 'bar') return { fn: 'tyre', unit: '{tyre_unit}', dec: 0 };
     if (u === 'km') return { fn: 'dist', unit: '{dist_unit}', dec: 1 };
     if (u === 'km/h') return { fn: 'dist', unit: '{speed_unit}', dec: 0 };
@@ -350,21 +357,27 @@
   function setReading(src, key, dec) {
     const uf = unitFor(key);
     const d = uf && uf.fn === 'tyre' ? 0 : dec;
-    src.text = '{' + (uf ? uf.fn + '(' + key + ')' : key) + (d ? ':' + d : '') + '}';
+    src.text = '{' + (uf && uf.fn ? uf.fn + '(' + key + ')' : key) + (d ? ':' + d : '') + '}';
     const unit = uf ? uf.unit : sigUnit(key);
     if (unit) src.unit = unit; else delete src.unit;
   }
   // a sample reading as this widget would show it in the simulated units
   function sampleIn(key, v, d) {
     const uf = unitFor(key);
-    let x = v, unit = sigUnit(key);
-    if (uf && W) {
-      x = num(ODW.evaluate(ODW.parse(uf.fn + '(' + v + ')'), W.lookup));
+    let x = v, unit = unitLabel(sigUnit(key));
+    if (uf && uf.fn && W) {
+      x = num(ODW.evaluate(ODW.parse(uf.fn + '(v)'), id => (id === 'v' ? v : W.lookup(id))));
       unit = String(W.lookup(uf.unit.slice(1, -1)) || unit);
     }
     return (x == null ? '–' : x.toFixed(d)) + (unit ? ' ' + unit : '');
   }
   const tyreUnit = () => String((W && W.lookup('tyre_unit')) || 'psi');
+  // a unit as shown: costs carry the currency the car reports
+  function unitLabel(u) {
+    if (u !== 'currency') return u;
+    const c = effective().currency;
+    return typeof c === 'string' && c ? c : tr('currency_word');
+  }
   const objectCount = () => (S.doc ? S.doc.layers.filter(l => l && TYPES[l.type] && TYPES[l.type].object).length : 0);
   function usedSignals() {
     return W ? W.names().filter(k => SIG[k] || (!ODW.BUILTINS.has(k) && TOKENS.night[k] === undefined)) : [];
@@ -435,6 +448,8 @@
     d.ev_range_km = Math.round(d.soc * 4.4);
     d.calibrated_range_km = Math.round(d.soc * 4.2);
     d.charging_eta_minutes = Math.max(0, Math.round((limit - d.soc) / 100 * 60 / kw * 60));
+    d.charge_added_kwh = +(nz(d.charge_added_kwh) + kw / 3600 * 8).toFixed(2);
+    d.charge_cost = +(d.charge_added_kwh * (kind === 'dc' ? 0.5 : 0.25)).toFixed(2);
     if (d.soc >= limit) Object.assign(d, NOT_CHARGING);
   }
 
@@ -452,13 +467,45 @@
       const next = Object.create(null);
       Object.keys(v).forEach(k => {
         if (!/^[a-z_][a-z0-9_]*$/.test(k) || k in Object.prototype) return;
-        const x = v[k];
-        next[k] = (typeof x === 'number' && isFinite(x)) || typeof x === 'boolean' ? x : null;
+        next[k] = cleanReading(v[k]);
       });
+      const chans = W ? W.mqttChannels().slice(0, 16) : [];
+      Object.keys(live.values).forEach(k => { if (k.indexOf('mqtt:') === 0 && chans.indexOf(k.slice(5)) >= 0) next[k] = live.values[k]; });
       live.values = next;
       live.fails = 0;
       live.ok = true;
-      if (live.on) liveChanged();
+      if (!chans.length) { live.busy = false; if (live.on) liveChanged(); return true; }
+      live.busy = true;
+      return api('GET', '/api/widgets/mqtt?channels=' + chans.map(encodeURIComponent).join(',')).then(r2 => {
+        live.busy = false;
+        const mv = r2.ok && r2.data && r2.data.values;
+        if (mv && typeof mv === 'object' && !Array.isArray(mv)) chans.forEach(c => { live.values['mqtt:' + c] = Object.prototype.hasOwnProperty.call(mv, c) ? cleanReading(mv[c]) : null; });
+        if (live.on) liveChanged();
+        return true;
+      });
+    });
+  }
+  // a reading from the car: numbers, flags and short text only (text is untrusted and only ever shown as text)
+  function cleanReading(x) {
+    if (typeof x === 'number') return isFinite(x) ? x : null;
+    if (typeof x === 'boolean') return x;
+    if (typeof x === 'string') return x.replace(/[\u0000-\u001F\u007F-\u009F]/g, '').trim().slice(0, 256);
+    return null;
+  }
+  /** The Home Assistant channels the car has seen, for the pickers (GET /api/widgets/mqtt). */
+  function loadMqtt() {
+    if (S.mqttAt && Date.now() - S.mqttAt < 15000) return Promise.resolve(false);
+    S.mqttAt = Date.now();
+    return api('GET', '/api/widgets/mqtt').then(r => {
+      const list = r.ok && r.data && Array.isArray(r.data.channels) ? r.data.channels : null;
+      if (!list) return false;
+      const next = [];
+      list.forEach(c => {
+        if (c && typeof c.channel === 'string' && ODW.MQTT_CHANNEL.test(c.channel) && next.length < 64 && !next.some(x => x.channel === c.channel)) next.push({ channel: c.channel, value: ODW.mqttValue(cleanReading(c.value)) });
+      });
+      const was = JSON.stringify(S.mqttList);
+      S.mqttList = next;
+      if (S.ready && JSON.stringify(next) !== was) { renderInspector(); renderSim(); }
       return true;
     });
   }
@@ -493,7 +540,7 @@
     if (type === 'enum' && sigOptions(k).length) return { v: optLabel(k, v), u: '' };
     const x = num(v), uf = unitFor(k);
     if (x == null) return null;
-    if (!uf || !W) return { v: fmtSim(s, x), u: s.unit || '' };
+    if (!uf || !uf.fn || !W) return { v: uf ? x.toFixed(uf.dec) : fmtSim(s, x), u: unitLabel(s.unit || '') };
     const at = id => (id === 'v' ? x : W.lookup(id));
     const unit = String(W.lookup(uf.unit.slice(1, -1)) || '');
     if (uf.fn === 'tyre') return { v: ODW.tyreText(x, String(W.lookup('tyre_unit'))), u: unit };
@@ -1249,8 +1296,25 @@
     const s = document.createElement('select');
     s.className = 'wb-select wb-pick';
     s.innerHTML = groupedSignals(filter).map(gr => '<optgroup label="' + esc(groupLabel(gr[0])) + '">' + gr[1].map(x =>
-      '<option value="' + esc(x.key) + '"' + (x.key === cur ? ' selected' : '') + '>' + esc(sigLabel(x.key)) + (x.unit ? ' (' + esc(x.unit) + ')' : '') + '</option>').join('') + '</optgroup>').join('');
+      '<option value="' + esc(x.key) + '"' + (x.key === cur ? ' selected' : '') + '>' + esc(sigLabel(x.key)) + (x.unit ? ' (' + esc(unitLabel(x.unit)) + ')' : '') + '</option>').join('') + '</optgroup>').join('');
     return s;
+  }
+  // Home Assistant channels with their last message; payloads are untrusted, so they only ever go in as text
+  function mqttOptions(select, valueOf, keep) {
+    const og = document.createElement('optgroup');
+    og.setAttribute('label', tr('mqtt_group'));
+    const add = (value, text, disabled) => {
+      const o = document.createElement('option');
+      o.setAttribute('value', value);
+      o.textContent = text;
+      if (disabled) o.disabled = true;
+      og.appendChild(o);
+    };
+    const list = S.mqttList.slice();
+    if (keep && !list.some(c => c.channel === keep)) list.unshift({ channel: keep, value: null });
+    list.forEach(c => add(valueOf(c.channel), c.channel + (c.value == null ? '' : ' · ' + String(c.value))));
+    if (!list.length) add('', tr('mqtt_none'), true);
+    select.appendChild(og);
   }
 
   function simpleLevel(host, src, key) {
@@ -1282,9 +1346,9 @@
   function simpleText(host, src) {
     const reading = readReading(src.text);
     const words = typeof src.text === 'string' && !isFormula(src.text) && src.text.indexOf('{') < 0;
-    if ((!reading && !words) || (reading && !numeric(reading.sig))) { customNote(host, tr('this_text')); return null; }
+    if ((!reading && !words) || (reading && !reading.mqtt && !numeric(reading.sig))) { customNote(host, tr('this_text')); return null; }
     seg(host, [['words', tr('text_words')], ['reading', tr('text_reading')]], reading ? 'reading' : 'words', v => {
-      if (v === 'words' && reading) { src.text = sigLabel(reading.sig); delete src.unit; }
+      if (v === 'words' && reading) { src.text = reading.mqtt || sigLabel(reading.sig); delete src.unit; }
       if (v === 'reading' && !reading) setReading(src, 'soc', 0);
       changed(); renderInspector();
     });
@@ -1296,18 +1360,24 @@
       return null;
     }
     const p = prop(host, tr('reading'));
-    const sel = signalPicker(reading.sig, numeric); p.appendChild(sel);
+    const sel = signalPicker(reading.mqtt ? null : reading.sig, numeric);
+    mqttOptions(sel, ch => 'mqtt:' + ch, reading.mqtt);
+    if (reading.mqtt) sel.value = reading.sig;
+    p.appendChild(sel);
     sel.setAttribute('aria-label', tr('reading'));
-    const uf = unitFor(reading.sig);
-    if (uf && uf.fn === 'tyre') el('div', 'wb-note', host, esc(tr('tyre_unit_note')));
+    const uf = reading.mqtt ? null : unitFor(reading.sig);
+    if (reading.mqtt) el('div', 'wb-note', host, esc(tr('mqtt_note')));
+    else if (uf && uf.fn === 'tyre') el('div', 'wb-note', host, esc(tr('tyre_unit_note')));
     else {
       const fmt = prop(host, tr('shown_as'));
       const now = num(effective()[reading.sig]);
       const sample = now == null ? 72.4 : now;
-      seg(fmt, [[0, sampleIn(reading.sig, sample, 0)], [1, sampleIn(reading.sig, sample, 1)]], reading.dec, d => { setReading(src, reading.sig, d); changed(); renderInspector(); });
+      const ds = uf && uf.dec === 2 ? [0, 2] : [0, 1];
+      seg(fmt, ds.map(d => [d, sampleIn(reading.sig, sample, d)]), reading.dec, d => { setReading(src, reading.sig, d); changed(); renderInspector(); });
     }
-    el('div', 'wb-note', host, esc(tr('reading_note')));
+    if (!reading.mqtt) el('div', 'wb-note', host, esc(tr('reading_note')));
     sel.addEventListener('change', () => {
+      if (sel.value.indexOf('mqtt:') === 0) { src.text = "{mqtt('" + sel.value.slice(5) + "')}"; delete src.unit; changed(); renderInspector(); return; }
       const u2 = unitFor(sel.value);
       setReading(src, sel.value, u2 ? u2.dec : reading.dec);
       changed(); renderInspector();
@@ -1512,7 +1582,9 @@
     el('div', 'wb-note', g1, esc(tr('size_note')));
     const g3 = group(host, tr('h_reads'));
     const sigs = usedSignals();
-    el('div', 'wb-note', g3, sigs.length ? sigs.map(k => code(k) + ' ' + (SIG[k] ? esc(sigLabel(k)) : '<span class="wb-warnt">' + esc(tr('unknown_word')) + '</span>')).join('<br>') : esc(tr('reads_none')));
+    const reads = sigs.map(k => code(k) + ' ' + (SIG[k] ? esc(sigLabel(k)) : '<span class="wb-warnt">' + esc(tr('unknown_word')) + '</span>'))
+      .concat(W.mqttChannels().map(ch => code("mqtt('" + ch + "')") + ' ' + esc(tr('mqtt_group'))));
+    el('div', 'wb-note', g3, reads.length ? reads.join('<br>') : esc(tr('reads_none')));
   }
 
   function propEditor(host, src, key, kind) {
@@ -1575,6 +1647,7 @@
           ta.value = before + padL + v + padR + after;
           caret = (before + padL + v).length - (fn ? 1 : 0);
         }
+        if (v === "mqtt('')") caret -= 2;
         ins.value = '';
         onInput();
         try { ta.focus(); ta.setSelectionRange(caret, caret); } catch (e) { /* not focusable */ }
@@ -1642,8 +1715,13 @@
     s.setAttribute('aria-label', tr('insert_reading'));
     s.innerHTML = '<option value="">' + esc(tr('insert_reading')) + '</option>' + groupedSignals().map(gr =>
       '<optgroup label="' + esc(groupLabel(gr[0])) + '">' + gr[1].map(x => '<option value="' + esc(x.key) + '">' + esc(sigLabel(x.key)) + (x.unit ? ' (' + esc(x.unit) + ')' : '') + ' · ' + esc(x.key) + '</option>').join('') + '</optgroup>').join('') +
-      '<optgroup label="' + esc(tr('ins_units')) + '">' + ODW.UNIT_WORDS.map(w => '<option value="' + w + '">' + esc(w + ' · ' + tr('unitw_' + w)) + '</option>').join('') + '</optgroup>' +
+      '<optgroup label="' + esc(tr('ins_units')) + '">' + ODW.UNIT_WORDS.concat(['currency']).map(w => '<option value="' + w + '">' + esc(w + ' · ' + tr('unitw_' + w)) + '</option>').join('') + '</optgroup>' +
       '<optgroup label="' + esc(tr('ins_functions')) + '">' + INSERT_FNS.map(f => '<option value="' + f + '()">' + esc(f + '(…) · ' + tr('fn_' + f)) + '</option>').join('') + '</optgroup>';
+    mqttOptions(s, ch => "mqtt('" + ch + "')");
+    const any = document.createElement('option');
+    any.setAttribute('value', "mqtt('')");
+    any.textContent = "mqtt('…') · " + tr('mqtt_any');
+    s.lastChild.insertBefore(any, s.lastChild.firstChild);
     return s;
   }
 
@@ -1656,13 +1734,13 @@
     res.className = 'wb-res';
     markBad(false);
     const v = L ? (kind === 'txt' ? W.str(L, key) : L.vals[key]) : null;
-    let out;
+    let text, sw = null;
     if (kind === 'col') {
-      out = v && typeof v === 'object' ? '<span class="wb-sw" style="background:' + color.css(v.col) + '"></span> <b dir="ltr">' + color.hex(v.col) + '</b>'
-        : typeof v === 'string' ? '<b dir="ltr">' + esc(v) + '</b>' : '<b>' + esc(tr('res_col_none')) + '</b>';
-    } else if (kind === 'txt') out = '<b dir="auto">“' + esc(v) + '”</b>';
-    else if (kind === 'bool') out = '<b>' + esc(tr(v == null ? 'res_bool_none' : ODW.truthy(v) ? 'res_shown' : 'res_hidden')) + '</b>';
-    else out = v == null ? '<b>' + esc(tr('res_num_none')) + '</b>' : '<b dir="ltr">' + (typeof v === 'number' ? +v.toFixed(3) : esc(String(v))) + '</b>';
+      if (v && typeof v === 'object') { sw = color.css(v.col); text = color.hex(v.col); } else text = typeof v === 'string' ? v : tr('res_col_none');
+    } else if (kind === 'txt') text = '“' + String(v == null ? '' : v) + '”';
+    else if (kind === 'bool') text = tr(v == null ? 'res_bool_none' : ODW.truthy(v) ? 'res_shown' : 'res_hidden');
+    else text = v == null ? tr('res_num_none') : typeof v === 'number' ? String(+v.toFixed(3)) : String(v);
+    const out = (sw ? '<span class="wb-sw"></span> ' : '') + '<b class="wb-rv" dir="' + (kind === 'txt' ? 'auto' : 'ltr') + '"></b>';
     const idents = new Set();
     try {
       const raw = src[key];
@@ -1674,6 +1752,9 @@
     const known = reads.filter(id => SIG[id]);
     setHtml(res, trHtml('right_now', { value: out }) + (known.length ? ' · ' + esc(tr('from_signals', { list: known.map(id => sigLabel(id)).join(', ') })) : '') +
       (bad.length ? ' <span class="wb-warnt">· ' + friendlyUnknown(bad[0]) + '</span>' : ''));
+    const rv = res.querySelector('.wb-rv'), swatch = res.querySelector('.wb-sw');
+    if (rv) setText(rv, text);
+    if (swatch && sw) swatch.style.background = sw;
   }
 
   // a name the car doesn't publish: two readings run together, a typo, or simply unknown (HTML)
@@ -1713,6 +1794,7 @@
     if (c === 'long') return esc(tr('err_long', { n: a }));
     if (c === 'brace') return esc(tr('err_brace'));
     if (c === 'deep') return esc(tr('err_deep'));
+    if (c === 'mqtt') return trHtml('err_mqtt', { example: code("mqtt('garage')") });
     return esc(e.message || String(e));
   }
 
@@ -1885,9 +1967,35 @@
         feed(true); updateSimValues(); updateResults();
       });
     });
+    textRows(host, keys);
     const note = $('#wbSimNote');
     if (note) note.textContent = live.on ? tr('live_note') : tr('sim_note') + (SCEN[S.scenario] && SCEN[S.scenario].charge ? ' ' + tr('sim_note_charge') : '');
     updateSimValues();
+  }
+
+  // text readings: the currency costs are shown in, and Home Assistant channels (free text when simulating)
+  function textRows(host, keys) {
+    const rows = [];
+    if (W.names().indexOf('currency') >= 0 || keys.some(k => SIG[k] && SIG[k].unit === 'currency')) rows.push({ key: 'currency', label: tr('sim_currency'), code: 'currency', hint: tr('currency_hint') });
+    W.mqttChannels().forEach(ch => rows.push({ key: 'mqtt:' + ch, label: tr('mqtt_channel', { channel: ch }), code: "mqtt('" + ch + "')", hint: tr('mqtt_free'), ch }));
+    rows.forEach(x => {
+      if (x.ch && !Object.prototype.hasOwnProperty.call(S.data, x.key)) {
+        const seen = S.mqttList.find(c => c.channel === x.ch);
+        S.data[x.key] = seen && seen.value != null ? String(seen.value) : null;
+      }
+      const row = el('div', 'setting-row wb-sig wb-sig-text' + (live.on ? ' wb-sig-live' : ''), host);
+      row.setAttribute('data-key', x.key);
+      const info = el('div', 'setting-info', row);
+      setText(el('b', '', el('div', 'setting-name wb-nm', info)), x.label);
+      el('div', 'setting-desc', info, code(x.code));
+      const ctl = el('div', 'setting-control wb-sigctl', row);
+      if (live.on) { const v = el('span', 'slider-value wb-v', ctl); el('span', 'wb-vv', v, ''); el('small', 'wb-vu', v, ''); return; }
+      const input = el('input', 'text-input wb-free wb-ctl', ctl);
+      input.type = 'text'; input.maxLength = x.ch ? 256 : 8; input.placeholder = x.hint; input.setAttribute('dir', 'auto');
+      input.setAttribute('aria-label', x.label);
+      input.value = S.data[x.key] == null ? '' : String(S.data[x.key]);
+      input.addEventListener('input', () => { S.data[x.key] = input.value === '' ? null : input.value; manual(); });
+    });
   }
 
   function manual() {
@@ -1906,6 +2014,14 @@
     $$('#wbSigs .wb-sig').forEach(row => {
       const k = row.getAttribute('data-key'), s = SIG[k], v = S.data[k];
       const vv = $('.wb-vv', row), vu = $('.wb-vu', row);
+      if (row.classList.contains('wb-sig-text')) {
+        if (!live.on || !vv) return;
+        const raw = live.values[k], t = k.indexOf('mqtt:') === 0 ? ODW.mqttValue(raw) : raw;
+        row.classList.toggle('isnone', t == null || t === '');
+        setText(vv, t == null || t === '' ? tr(k.indexOf('mqtt:') === 0 ? 'mqtt_nothing' : 'live_none') : String(t));
+        setText(vu, '');
+        return;
+      }
       if (!s || !vv) return;
       if (live.on) {
         const t = liveText(k, live.values[k]);
@@ -1918,7 +2034,7 @@
       const type = sigType(s);
       if (type === 'bool') { setText(vv, tr(v ? 'yes' : 'no')); setText(vu, ''); }
       else if (type === 'enum' && sigOptions(k).length) { setText(vv, optLabel(k, v)); setText(vu, ''); }
-      else { setText(vv, fmtSim(s, v)); setText(vu, s.unit || ''); }
+      else { setText(vv, fmtSim(s, v)); setText(vu, unitLabel(s.unit || '')); }
       const input = row.querySelector('input[type=range]');
       if (input && document.activeElement !== input) input.value = v;
       const sel2 = row.querySelector('select');
@@ -2004,14 +2120,16 @@
   /** Everything the car would refuse on save, as HTML lines. Kinds it doesn't know are skipped, not refused. */
   function blockers() {
     const out = [];
+    // points from the layer to its field in reading order, so it flips under RTL
+    const arrow = document.documentElement.getAttribute('dir') === 'rtl' ? ' ← ' : ' → ';
     W.layers.forEach((L, i) => {
       if (L.error) return;
-      Object.keys(L.errors).forEach(k => out.push(esc(layerName(i)) + ' → ' + esc(propLabel(k)) + ': ' + friendlyError(L.errors[k])));
+      Object.keys(L.errors).forEach(k => out.push(esc(layerName(i)) + arrow + esc(propLabel(k)) + ': ' + friendlyError(L.errors[k])));
     });
     ODW.docProblems(ODW.cleanDoc(S.doc)).forEach(p => {
       if (p.code === 'prop') {
         const what = p.key === 'name' ? tr('layer_name') : propLabel(p.key);
-        out.push(esc(layerName(p.layer)) + ' → ' + esc(what) + ': ' + esc(tr('why_' + p.why, { n: p.why === 'text_long' ? ODW.MAX_TEXT : ODW.MAX_NAME })));
+        out.push(esc(layerName(p.layer)) + arrow + esc(what) + ': ' + esc(tr('why_' + p.why, { n: p.why === 'text_long' ? ODW.MAX_TEXT : ODW.MAX_NAME })));
       } else out.push(esc(tr('cap_' + p.code, { n: p.n == null ? (p.layer == null ? '' : p.layer + 1) : p.n })));
     });
     return out;
@@ -2038,6 +2156,8 @@
     if (known.length) add('ok', esc(tr('chk_reads', { n: known.length })), known.map(k => code(k)).join(', ') + ' ' + esc(tr('chk_reads_body')));
     const live = known.filter(k => SIG[k].live);
     if (live.length) add('info', esc(tr('chk_live')), live.map(k => code(k)).join(', ') + ' ' + esc(tr('chk_live_body')));
+    const chans = W.mqttChannels();
+    if (chans.length) add('info', esc(tr('chk_mqtt')), trHtml('chk_mqtt_body', { list: chans.map(c => code(c)).join(', ') }));
     add('ok', esc(tr('chk_safe')), esc(tr('chk_safe_body')));
     const n = S.doc.layers.length;
     add(n > MAX_LAYERS ? 'bad' : 'ok', esc(tr('chk_layers', { n, max: MAX_LAYERS })), esc(tr('chk_layers_body')));
@@ -2185,6 +2305,7 @@
       kick();
       renderTemplates();
       startLive();
+      if (S.ready) loadMqtt();
     }
   }
 
@@ -2368,6 +2489,7 @@
       renderStatus();
       // the car's own readings when it can share them; older car apps keep the simulator
       fetchLive().then(ok => { if (ok) goLive(true); });
+      loadMqtt();
     });
     loadMine().then(ok => { if (ok && q.get('edit')) waitReady(() => openMine(q.get('edit'))); });
   }

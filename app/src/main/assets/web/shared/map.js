@@ -6,6 +6,8 @@
  * - User location with route to car
  * - Google Maps directions integration
  * - Real-time GPS updates from consolidated /status endpoint
+ * - Follow mode: map re-centers on the car as it moves; dragging the map
+ *   pauses it (auto-resumes after idle, or via the follow button)
  */
 
 window.BYD = window.BYD || {};
@@ -25,6 +27,16 @@ BYD.map = {
     
     // Default center (will be updated with car position)
     DEFAULT_ZOOM: 18,
+
+    // Follow mode: keep the car centered while it moves. Paused while the
+    // user is panning the map by hand, then resumed after FOLLOW_RESUME_MS
+    // of inactivity (or immediately via the follow button / centerOnCar()).
+    followCar: true,
+    FOLLOW_RESUME_MS: 15000,
+    FOLLOW_MIN_MOVE_M: 15,
+    _lastFollowLatLng: null,
+    _followResumeTimer: null,
+    _followBtn: null,
     
     /**
      * Initialize the map
@@ -54,6 +66,12 @@ BYD.map = {
         
         // Add zoom control to bottom right
         L.control.zoom({ position: 'bottomright' }).addTo(this.map);
+
+        // Follow-vehicle toggle (sits above the zoom buttons) and pause on
+        // manual drag. 'dragstart' only fires for user drags, never for
+        // our own panTo()/setView() calls.
+        this._addFollowControl();
+        this.map.on('dragstart', () => this.pauseFollow());
         
         // Create car marker with custom icon
         this.carMarker = L.marker([0, 0], {
@@ -276,6 +294,13 @@ BYD.map = {
         if (!this.hasInitialPosition) {
             this.map.setView([lat, lng], this.DEFAULT_ZOOM);
             this.hasInitialPosition = true;
+            this._lastFollowLatLng = [lat, lng];
+        } else if (this.followCar && this._followTargetMoved(lat, lng)) {
+            // Keep the car centered as it moves. Keep the user's zoom, and
+            // skip the animation: the marker jumps to its new fix, so an
+            // animated pan would make it slide off-center and back each tick.
+            this.map.panTo([lat, lng], { animate: false });
+            this._lastFollowLatLng = [lat, lng];
         }
         
         // Update route if user position exists
@@ -328,7 +353,9 @@ BYD.map = {
                 // Draw route to car
                 this.drawRoute();
                 
-                // Fit bounds to show both markers
+                // Fit bounds to show both markers. Hold follow off so the
+                // next GPS tick doesn't snap the view back onto the car.
+                this.pauseFollow({ hold: true });
                 this.fitBounds();
                 
                 if (btn) btn.classList.remove('loading');
@@ -431,6 +458,101 @@ BYD.map = {
     centerOnCar() {
         if (!this.map || !this.carPosition.lat) return;
         this.map.setView([this.carPosition.lat, this.carPosition.lng], this.DEFAULT_ZOOM);
+        this._setFollow(true);
+    },
+
+    /**
+     * Pause follow mode (user took control of the map).
+     * Auto-resumes after FOLLOW_RESUME_MS unless opts.hold is set.
+     */
+    pauseFollow(opts) {
+        this._clearFollowTimer();
+        this._setFollow(false);
+        if (!(opts && opts.hold)) {
+            this._followResumeTimer = setTimeout(() => {
+                this._followResumeTimer = null;
+                this.resumeFollow(false);
+            }, this.FOLLOW_RESUME_MS);
+        }
+    },
+
+    /**
+     * Resume follow mode (keeps current zoom). An idle auto-resume waits for
+     * the car to move instead of snapping back to a parked car.
+     */
+    resumeFollow(panNow = true) {
+        this._clearFollowTimer();
+        this._setFollow(true);
+        if (!this.map || !this.carPosition.lat) return;
+        this._lastFollowLatLng = [this.carPosition.lat, this.carPosition.lng];
+        if (panNow) this.map.panTo(this._lastFollowLatLng);
+    },
+
+    // GPS jitter on a parked car must not re-center the map.
+    _followTargetMoved(lat, lng) {
+        const last = this._lastFollowLatLng;
+        if (!last) return true;
+        return this.map.distance(last, [lat, lng]) > this.FOLLOW_MIN_MOVE_M;
+    },
+
+    toggleFollow() {
+        if (this.followCar) {
+            this.pauseFollow({ hold: true });
+        } else {
+            this.resumeFollow();
+        }
+    },
+
+    _clearFollowTimer() {
+        if (this._followResumeTimer) {
+            clearTimeout(this._followResumeTimer);
+            this._followResumeTimer = null;
+        }
+    },
+
+    _setFollow(on) {
+        this.followCar = !!on;
+        const btn = this._followBtn;
+        if (!btn) return;
+        btn.setAttribute('aria-pressed', this.followCar ? 'true' : 'false');
+        btn.style.color = this.followCar ? 'var(--primary, #00D4AA)' : '';
+    },
+
+    /**
+     * Leaflet control: round-the-car crosshair button that toggles follow.
+     * Reuses the zoom control's classes so it picks up the existing
+     * theme styling on both index.html and live-view.html.
+     */
+    _addFollowControl() {
+        const self = this;
+        const FollowControl = L.Control.extend({
+            options: { position: 'bottomright' },
+            onAdd() {
+                const bar = L.DomUtil.create('div', 'leaflet-bar leaflet-control-zoom leaflet-control-follow');
+                const a = L.DomUtil.create('a', '', bar);
+                const key = 'map.follow_vehicle';
+                let label = (BYD.i18n && BYD.i18n.t) ? BYD.i18n.t(key) : null;
+                if (!label || label === key) label = 'Follow vehicle';
+                a.href = '#';
+                a.setAttribute('role', 'button');
+                a.title = label;
+                a.setAttribute('aria-label', label);
+                a.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" ' +
+                    'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+                    'style="vertical-align:middle" aria-hidden="true">' +
+                    '<circle cx="12" cy="12" r="3.5"/><circle cx="12" cy="12" r="8"/>' +
+                    '<path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3"/></svg>';
+                L.DomEvent.disableClickPropagation(bar);
+                L.DomEvent.on(a, 'click', (e) => {
+                    L.DomEvent.preventDefault(e);
+                    self.toggleFollow();
+                });
+                self._followBtn = a;
+                return bar;
+            }
+        });
+        new FollowControl().addTo(this.map);
+        this._setFollow(this.followCar);
     },
     
     /**
@@ -487,6 +609,9 @@ BYD.map = {
      * Cleanup
      */
     destroy() {
+        this._clearFollowTimer();
+        this._followBtn = null;
+        this._lastFollowLatLng = null;
         if (this.map) {
             this.map.remove();
             this.map = null;

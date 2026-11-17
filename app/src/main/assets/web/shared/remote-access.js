@@ -26,6 +26,7 @@ var RemoteAccess = (function () {
         'raUnlockOnArrival', 'raLockOnDeparture', 'raKeepBluetoothOn',
         'raNotifyPush', 'raNotifyTelegram', 'raAdvancedMode', 'raUnlockTrigger', 'raKeyFobEnabled', 'raKeyFobLockEnabled',
         'raKeyFobLockSamples', 'raLockWaitsForKeyAbsence',
+        'raPhonePriority', 'raLockWithKeyInside',
         'raKeyFobLockSeconds', 'raRestrictLockSafeZones', 'raRestrictUnlockSafeZones', 'raCloudFallback',
         'raConfirmWithVehicle', 'raRelockGraceSeconds', 'raPostLockQuietSeconds',
         'raKeyFobUnlockNear'
@@ -214,6 +215,8 @@ var RemoteAccess = (function () {
         el('raUnlockTrigger').value = config.unlockTrigger === 'near' ? 'near' : 'away_to_near';
         el('raKeyFobEnabled').checked = config.keyFobEnabled === true;
         el('raKeyFobLockEnabled').checked = config.keyFobEnabled === true && config.keyFobLockEnabled === true;
+        el('raPhonePriority').checked = config.keyFobEnabled === true && config.phonePriority === true;
+        el('raLockWithKeyInside').checked = config.keyFobEnabled === true && config.lockWithKeyInside === true;
         el('raLockOnDeparture').checked = !!config.lockEnabled;
         el('raRestrictLockSafeZones').checked = config.restrictLockToOutsideSafeZones === true;
         el('raRestrictUnlockSafeZones').checked = config.restrictUnlockToOutsideSafeZones === true;
@@ -566,6 +569,7 @@ var RemoteAccess = (function () {
             roster.appendChild(empty); return;
         }
         var vehicleOn = vehicleOnPaused();
+        var collectorLive = !!(state.status && state.status.runtime && state.status.runtime.active);
         state.phones.forEach(function (profile) {
             var row = document.createElement('div'); row.className = 'ra-roster-row' + (profile.address === state.viewAddress ? ' is-selected' : '');
             var name = document.createElement('button'); name.type = 'button'; name.className = 'ra-roster-name'; name.disabled = state.saving;
@@ -576,6 +580,8 @@ var RemoteAccess = (function () {
             detail.textContent = !profile.enabled ? tr('state_disabled', 'Disabled') : !state.enabled ? tr('keyfob_monitoring_off', 'Monitoring off') :
                 signal.reason === 'save_phone_first' ? tr('phone_save_to_start', 'Save to start monitoring') :
                 vehicleOn ? tr('phone_vehicle_on', 'Paused · car is on') :
+                !proof.fresh && collectorLive && signal.reason === 'disconnected_without_connection_history' ?
+                    tr('phone_awaiting_connection', 'Disconnected / awaiting connection') :
                 !proof.fresh ? tr('phone_reading_expired', 'Unknown · reading expired') :
                 proof.confirmedAway ? tr('phone_disconnection_away', 'Away · disconnection confirmed') :
                 proof.pendingDisconnect ? tr('phone_disconnection_pending', 'Disconnected · confirming departure') :
@@ -630,6 +636,9 @@ var RemoteAccess = (function () {
             unlockTrigger: el('raUnlockTrigger').value === 'near' ? 'near' : 'away_to_near',
             keyFobEnabled: el('raKeyFobEnabled').checked,
             keyFobLockEnabled: el('raKeyFobEnabled').checked && el('raKeyFobLockEnabled').checked,
+            phonePriority: el('raKeyFobEnabled').checked && el('raKeyFobLockEnabled').checked &&
+                el('raPhonePriority').checked,
+            lockWithKeyInside: el('raKeyFobEnabled').checked && el('raLockWithKeyInside').checked,
             lockEnabled: el('raLockOnDeparture').checked,
             restrictLockToOutsideSafeZones: el('raRestrictLockSafeZones').checked,
             restrictUnlockToOutsideSafeZones: el('raRestrictUnlockSafeZones').checked,
@@ -737,6 +746,8 @@ var RemoteAccess = (function () {
         el('raKeyFobLockSeconds').disabled = !state.ready || state.saving || !el('raAdvancedMode').checked || !fobLock;
         el('raKeyFobLockSamples').disabled = !state.ready || state.saving || !el('raAdvancedMode').checked || !fobLock;
         el('raLockWaitsForKeyAbsence').disabled = !state.ready || state.saving || !el('raAdvancedMode').checked || !fobLock;
+        el('raPhonePriority').disabled = !state.ready || state.saving || !fobLock && !el('raPhonePriority').checked;
+        el('raLockWithKeyInside').disabled = !state.ready || state.saving || !fob && !el('raLockWithKeyInside').checked;
         // The keyfob trigger is an Advanced switch; normal mode runs the default (unlock on the first fresh detection).
         el('raKeyFobUnlockNear').disabled = !state.ready || state.saving || !el('raAdvancedMode').checked || !fobDraft;
         var fobNear = keyFobUnlocksOnDetection();
@@ -779,7 +790,11 @@ var RemoteAccess = (function () {
             tr('lock_no_active_sources', 'Departure locking is inactive. Enable parked Bluetooth with an approved phone, or enable keyfob departure locking.');
     }
     function toggleKeyFob() {
-        if (!el('raKeyFobEnabled').checked) el('raKeyFobLockEnabled').checked = false;
+        if (!el('raKeyFobEnabled').checked) {
+            el('raKeyFobLockEnabled').checked = false;
+            el('raPhonePriority').checked = false;
+            el('raLockWithKeyInside').checked = false;
+        }
         markDirty();
     }
     // 19 Oct: the keyfob rail's effective trigger — the Advanced switch, or the default (near) in normal mode.
@@ -873,6 +888,8 @@ var RemoteAccess = (function () {
             connection_timeout: 'Phone did not reconnect · waiting before retrying',
             connection_failed: 'Phone did not connect · retrying shortly',
             profile_unavailable: 'Phone reconnect is unavailable on this car',
+            permission_denied: 'This car refused automatic reconnect · waiting for its own connection',
+            recovery_context_changed: 'Bluetooth service changed · checking reconnect support',
             connected: 'Phone connection restored · waiting for a fresh signal',
             stopped: 'Phone reconnect stopped',
             unexpected_profile: 'Phone reconnect service is unavailable'
@@ -1017,7 +1034,10 @@ var RemoteAccess = (function () {
         var panel = el('raKeyFobPanel'), view = keyFobView();
         panel.hidden = supports('keyFob') && el('raKeyFobEnabled').checked !== true;
         panel.setAttribute('data-state', view.style);
-        text('raKeyFobState', view.label); text('raKeyFobDetail', view.detail);
+        text('raKeyFobState', view.label);
+        text('raKeyFobDetail', view.fob.keyInsideLocked === true ?
+            tr('keyfob_key_inside_locked', 'The key was left inside after a phone lock. It will not unlock the car until the car is unlocked another way, such as a trusted phone returning.') :
+            view.detail);
         text('raKeyFobMask', finite(view.fob.lastMask) && view.fob.lastMask >= 0 && Math.floor(view.fob.lastMask) === view.fob.lastMask ?
             '0x' + view.fob.lastMask.toString(16).toUpperCase() : '—');
         text('raKeyFobAge', eventAgeText(view.age));
@@ -1059,6 +1079,8 @@ var RemoteAccess = (function () {
         else if (!state.config || state.config.keyFobLockEnabled !== true) label = tr('keyfob_lock_save_first', 'Save to apply');
         else if (!state.enabled) label = tr('keyfob_monitoring_off', 'Monitoring off');
         else if (pausedKeyFobPresence(presence)) label = tr('keyfob_presence_paused_locked', 'Paused while locked');
+        else if (!fresh && presence.active === false && presence.reason === 'presence_vehicle_on')
+            label = tr('phone_vehicle_on_title', 'Paused while the car is on');
         else if (!fresh) label = tr('keyfob_presence_unavailable', 'Waiting for a fresh search');
         else if (presence.reason === 'fresh_key_approach')
             label = tr('keyfob_presence_nearby_paused', 'Nearby keyfob · locking paused');
@@ -1747,6 +1769,8 @@ var RemoteAccess = (function () {
             changes.deviceAddress = device.address; changes.deviceName = device.name || '';
             changes.keyFobEnabled = pending.keyFobEnabled;
             changes.keyFobLockEnabled = pending.keyFobLockEnabled;
+            changes.phonePriority = pending.phonePriority;
+            changes.lockWithKeyInside = pending.lockWithKeyInside;
             changes.restrictLockToOutsideSafeZones = pending.restrictLockToOutsideSafeZones;
             changes.restrictUnlockToOutsideSafeZones = pending.restrictUnlockToOutsideSafeZones;
             changes.proximitySafeZoneIds = pending.proximitySafeZoneIds;

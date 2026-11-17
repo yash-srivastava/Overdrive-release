@@ -264,7 +264,7 @@ public final class AutomationApiHandler {
         JSONObject resp = new JSONObject();
         resp.put("success", count > 0);
         resp.put("imported", count);
-        if (count == 0) resp.put("error", "No valid automations found in the file");
+        if (count == 0) resp.put("error", Messages.get("errors.automation_import_none_valid"));
         HttpResponse.sendJson(out, resp.toString());
         return true;
     }
@@ -315,7 +315,7 @@ public final class AutomationApiHandler {
         JSONObject resp = new JSONObject();
         resp.put("success", count > 0);
         resp.put("imported", count);
-        if (count == 0) resp.put("error", "No valid action groups found in the file");
+        if (count == 0) resp.put("error", Messages.get("errors.automation_import_no_groups_valid"));
         HttpResponse.sendJson(out, resp.toString());
         return true;
     }

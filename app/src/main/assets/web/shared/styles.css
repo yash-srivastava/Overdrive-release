@@ -547,6 +547,15 @@ textarea:focus,
        truncate cleanly when very long. */
     max-width: 140px;
 }
+/* Network address alone in the value; the label names Wi-Fi or Mobile Data. */
+.status-value.net-addr {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.85em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 140px;
+}
 .net-ip {
     font-size: 0.7em;
     color: var(--text-muted);

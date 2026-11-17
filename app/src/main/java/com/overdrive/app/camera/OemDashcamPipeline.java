@@ -704,14 +704,14 @@ public class OemDashcamPipeline {
             // issues its own splice IDR, so strided pre-roll frames stay valid.
             recorderDrawStride = 1;
         }
-        String path = generateOutputPath();
+        String path = generateOutputPath(eventOwned);
         long clampedPost = Math.max(0L, postRecordMs);
         HardwareEventRecorderGpu.VideoUploadPolicy uploadPolicy = uploadPolicyFor(eventOwned);
         boolean ok = encoder != null
                 && encoder.triggerEventRecording(path, clampedPost, uploadPolicy);
         if (!ok && encoder != null && reportWriteFaultFor(path)) {
             // The card refuses writes: the path now resolves to internal — retry this clip once.
-            String internalPath = generateOutputPath();
+            String internalPath = generateOutputPath(eventOwned);
             if (!internalPath.equals(path)) {
                 logger.warn("OEM clip refused by a card that refuses writes — retrying on " + internalPath);
                 ok = encoder.triggerEventRecording(internalPath, clampedPost, uploadPolicy);
@@ -2205,7 +2205,8 @@ public class OemDashcamPipeline {
         }
     }
 
-    private String generateOutputPath() {
+    /** Surveillance-owned clips are named {@code dvr_p_<stamp>}: same folder and prefix rules, listed as Surveillance. */
+    private String generateOutputPath(boolean surveillanceOwned) {
         String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
         // FIX (false-GREEN / dvr_ stranded on dead volume): re-resolve the LIVE
         // recordings dir at each segment open instead of using the dir latched
@@ -2236,7 +2237,7 @@ public class OemDashcamPipeline {
             logger.warn("generateOutputPath: live recordings dir unavailable, "
                 + "using construction-time outputDir: " + t.getMessage());
         }
-        File f = new File(dir, "dvr_" + stamp + ".mp4");
+        File f = new File(dir, (surveillanceOwned ? "dvr_p_" : "dvr_") + stamp + ".mp4");
         return f.getAbsolutePath();
     }
 

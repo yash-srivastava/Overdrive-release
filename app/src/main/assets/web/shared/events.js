@@ -96,6 +96,9 @@ BYD.events = {
     // the timer. Mirrors VideoPlayerFragment.OVERLAY_HIDE_DELAY (3 s).
     _QUADRANT_HIDE_MS: 3000,
     _quadrantHideTimer: null,
+    _activeRecordingKey: null,
+    _recordingNavBusy: false,
+    _timelineSeq: 0,
 
     recordingKey(rec) {
         // SECURITY (run-2 fix): the filename fallback must never carry markup or
@@ -107,12 +110,94 @@ BYD.events = {
     /** Escape a value for embedding inside a single-quoted JS string in an HTML attribute. */
     _jsStr(s) { return String(s).replace(/[\\'"\r\n<>&]/g, ''); },
 
-    /** HTML-escape for attribute/text interpolation (same technique as BYD.core._esc). */
-    _esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; },
+    /** HTML-escape for attribute and text interpolation, quotes included. */
+    _esc(s) {
+        return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    },
 
     findRecording(key) {
         return this.recordings.find(rec => this.recordingKey(rec) === key)
             || this.recordings.find(rec => rec.filename === key);
+    },
+
+    _activeRecordingIndex() {
+        if (!this._activeRecordingKey) return -1;
+        for (let i = 0; i < this.recordings.length; i++) {
+            if (this.recordingKey(this.recordings[i]) === this._activeRecordingKey) return i;
+        }
+        return -1;
+    },
+
+    /** Previous / next follow the list as displayed, across its pages. */
+    _refreshRecordingNav() {
+        const nav = document.getElementById('videoNav');
+        if (!nav) return;
+        const index = this._activeRecordingIndex();
+        const total = Math.max(this.totalCount || 0, this.recordings.length);
+        const shown = index >= 0 && total > 1;
+        nav.hidden = !shown;
+        const header = nav.parentNode;
+        if (header && header.classList) header.classList.toggle('has-nav', shown);
+        const prev = document.getElementById('videoPrevBtn');
+        const next = document.getElementById('videoNextBtn');
+        const busy = this._recordingNavBusy;
+        if (prev) prev.disabled = busy || index < 0 || (index === 0 && this.currentPage <= 1);
+        if (next) next.disabled = busy || index < 0
+            || (index === this.recordings.length - 1 && this.currentPage >= this.totalPages);
+    },
+
+    async navigateRecording(step) {
+        const index = this._activeRecordingIndex();
+        if (index < 0 || this._recordingNavBusy) return;
+        const target = index + step;
+        if (target >= 0 && target < this.recordings.length) {
+            this._openAdjacentRecording(this.recordingKey(this.recordings[target]));
+            return;
+        }
+        const page = this.currentPage + step;
+        if (page < 1 || page > this.totalPages) return;
+        const openedKey = this._activeRecordingKey;
+        const previousPage = this.currentPage;
+        const previousRecordings = this.recordings;
+        this._recordingNavBusy = true;
+        this._refreshRecordingNav();
+        try {
+            this.currentPage = page;
+            await this.loadRecordings();
+        } finally {
+            this._recordingNavBusy = false;
+        }
+        if (this.recordings === previousRecordings) {
+            // The page did not load; keep the list the user came from.
+            this.currentPage = previousPage;
+            this.renderRecordings();
+            this.updatePagination();
+        }
+        const open = document.getElementById('videoModal').classList.contains('active');
+        if (!open || this._activeRecordingKey !== openedKey
+                || this.recordings === previousRecordings || !this.recordings.length) {
+            this._refreshRecordingNav();
+            return;
+        }
+        const rec = step < 0 ? this.recordings[this.recordings.length - 1] : this.recordings[0];
+        this._openAdjacentRecording(this.recordingKey(rec));
+    },
+
+    /** Switches the open player to another clip, keeping fullscreen and the chosen speed. */
+    _openAdjacentRecording(key) {
+        const player = document.getElementById('videoPlayer');
+        const box = document.querySelector('.video-container');
+        const rate = player.playbackRate || 1;
+        const keep = box ? ['is-fullscreen', 'is-video-only'].filter(c => box.classList.contains(c)) : [];
+        player.pause();
+        this.playVideo(key);
+        keep.forEach(c => box.classList.add(c));
+        const t = this._transport;
+        if (t) {
+            t.handlers.onFullscreenChange();
+            if (rate !== 1) t.handlers.setRate(rate);
+        }
     },
 
     /**
@@ -160,6 +245,7 @@ BYD.events = {
             const isFormTarget = /^(input|textarea|select)$/i.test(tag) ||
                 (e.target && e.target.isContentEditable);
             if (isFormTarget || e.altKey || e.ctrlKey || e.metaKey) return;
+            if (this.handlePlayerKey(e)) { e.preventDefault(); return; }
             if (e.key === '0') this.setQuadrant('all');
             else if (e.key === '1') this.setQuadrant('front');
             else if (e.key === '2') this.setQuadrant('right');
@@ -571,6 +657,13 @@ BYD.events = {
     },
 
     async init() {
+        // Back from Timeline mode (html.tlv-on hides this list): the pollers it held start again.
+        let listHidden = this._listHidden();
+        new MutationObserver(() => {
+            if (listHidden === this._listHidden()) return;
+            listHidden = !listHidden;
+            if (!listHidden) this._resumeHeldPolls();
+        }).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
         const urlParams = new URLSearchParams(window.location.search);
         const filterParam = urlParams.get('filter');
         if (filterParam && ['all', 'sentry', 'normal', 'proximity', 'replay'].includes(filterParam)) {
@@ -669,6 +762,25 @@ BYD.events = {
         });
     },
 
+    // Timeline mode hides the list: a poll falling due there is held (no request) until the list shows again.
+    _listHidden() {
+        return document.documentElement.classList.contains('tlv-on');
+    },
+
+    _holdPoll(kind) {
+        (this._heldPolls = this._heldPolls || {})[kind] = true;
+    },
+
+    _resumeHeldPolls() {
+        const held = this._heldPolls || {};
+        this._heldPolls = {};
+        // Starting the inflight poll clears a pending index-down retry, so note that one first and re-arm it after.
+        const indexDown = held.indexDown || !!this._indexDownRetryTimer;
+        if (held.inflight && this.inflightFilename && !this.inflightPollHandle) this.startInflightPolling();
+        if (indexDown && this._indexDown && !this._indexDownRetryTimer) this.scheduleIndexDownRetry(0);
+        if (held.warming && !this._warmingPollTimer && this.loadStorageStats) this.loadStorageStats();
+    },
+
     /**
      * Inserts a full-bleed hero banner at the top of the page using the
      * pre-signed snapshot URL forwarded from the notification. Used as the
@@ -750,6 +862,7 @@ BYD.events = {
         var self = this;
         this._indexDownRetryTimer = setTimeout(function () {
             self._indexDownRetryTimer = null;
+            if (self._listHidden()) { self._holdPoll('indexDown'); return; }
             self.loadRecordings();
         }, delay);
     },
@@ -1435,6 +1548,7 @@ BYD.events = {
                     this._warmingPollAttempt = (this._warmingPollAttempt || 0) + 1;
                     this._warmingPollTimer = setTimeout(function () {
                         self._warmingPollTimer = null;
+                        if (self._listHidden()) { self._holdPoll('warming'); return; }
                         if (self.loadStorageStats) self.loadStorageStats();
                     }, delay);
                 } else {
@@ -1522,13 +1636,26 @@ BYD.events = {
                 this.stopInflightPolling();
                 return;
             }
+            if (this._listHidden()) {
+                // Only this interval stops (stopInflightPolling would drop the index-down retry too).
+                this._holdPoll('inflight');
+                clearInterval(this.inflightPollHandle);
+                this.inflightPollHandle = null;
+                return;
+            }
             if (this._inflightPollRequestPending) return;
 
             this._inflightPollRequestPending = true;
+            let inflightTimer = null;
             try {
                 const filename = this.inflightFilename;
-                const res = await fetch('/api/recordings/inflight/' +
-                    encodeURIComponent(filename));
+                // fetch() has no timeout: a hung request must not stop the polling.
+                const res = await Promise.race([
+                    fetch('/api/recordings/inflight/' + encodeURIComponent(filename)),
+                    new Promise((_, reject) => {
+                        inflightTimer = setTimeout(() => reject(new Error('Inflight status timeout')), 8000);
+                    })
+                ]);
                 if (!res.ok) throw new Error('Inflight status HTTP ' + res.status);
                 const data = await res.json();
                 // Ignore a late response if the tracked recording changed while
@@ -1562,6 +1689,7 @@ BYD.events = {
             } catch (e) {
                 // Network blip — keep polling, don't bail.
             } finally {
+                clearTimeout(inflightTimer);
                 if (pollGeneration === this._inflightPollGeneration) {
                     this._inflightPollRequestPending = false;
                 }
@@ -1680,6 +1808,7 @@ BYD.events = {
                 this.totalCount = data.totalCount || this.recordings.length;
                 this.renderRecordings();
                 this.updatePagination();
+                if (this._activeRecordingKey) this._refreshRecordingNav();
                 document.getElementById('recordingsCount').textContent =
                     BYD.i18n.plural('events.video_count', this.totalCount);
                 // Server signal: the recordings index was empty but the
@@ -1847,6 +1976,10 @@ BYD.events = {
             if (animalCount > 0)  actorPills += '<span class="pill" title="' + BYD.i18n.t('events.actor_animal') + '">' + icons.animal + animalCount + '</span>';
             actorPills += sevBadge;
             if (proxLabel)        actorPills += '<span class="pill prox-' + (rec.peakProximity || 'UNKNOWN') + '">' + proxLabel + '</span>';
+            // deterrentFlags: 1 = Cloud deterrent sent, 2 = Screen deterrent shown during this clip.
+            const deterrentFlags = rec.deterrentFlags || 0;
+            if (deterrentFlags & 1) actorPills += '<span class="pill">' + BYD.i18n.t('events.legend_deterrent_cloud') + '</span>';
+            if (deterrentFlags & 2) actorPills += '<span class="pill">' + BYD.i18n.t('events.legend_deterrent_screen') + '</span>';
             const actorRow = actorPills ? '<div class="actor-summary">' + actorPills + '</div>' : '';
 
             // v3 geo enrichment — server-side parser populates rec.place
@@ -1974,7 +2107,7 @@ BYD.events = {
         this._watchListenersReady = true;
         const schedule = () => {
             const key = this._watchActiveKey;
-            if (!key || this._watchTimer !== null || document.hidden) return;
+            if (!key || this._watchTimer !== null || document.hidden || player.paused) return;
             const rec = this.findRecording(key);
             if (!rec || rec.watched || !rec.id) return;
             // Start the threshold only when playback genuinely begins;
@@ -2088,6 +2221,8 @@ BYD.events = {
         player.src = rec.videoUrl;
         document.getElementById('videoModal').classList.add('active');
         player.load();
+        this._activeRecordingKey = this.recordingKey(rec);
+        this._refreshRecordingNav();
 
         // Bind the external transport (play/pause, mute, time, scrubber)
         // BEFORE the first frame so the controls reflect state from the
@@ -2116,6 +2251,10 @@ BYD.events = {
         player.oncanplay = function() {
             player.play().catch(function() {});
             try {
+                // Saved listening level (1..100); muting is kept separately below.
+                const savedVolume = localStorage.getItem('byd.events.volume');
+                const level = savedVolume === null ? NaN : Number(savedVolume);
+                if (isFinite(level) && level >= 1 && level <= 100) player.volume = level / 100;
                 const stored = localStorage.getItem('byd.events.unmuted');
                 if (stored !== null) {
                     player.muted = stored !== '1';
@@ -2146,7 +2285,12 @@ BYD.events = {
         const player = document.getElementById('videoPlayer');
         player.pause();
         player.src = '';
+        if (this._lensDewarp) { try { this._lensDewarp.detach(); } catch (e) {} }
+        const _lensWrap = document.getElementById('videoPlayerWrap');
+        if (_lensWrap) _lensWrap.classList.remove('lens-dewarp');
         document.getElementById('videoModal').classList.remove('active');
+        this._activeRecordingKey = null;
+        this._refreshRecordingNav();
         // Restore the theme FAB (and any other body-level chrome the
         // .video-modal-open class hides).
         document.documentElement.classList.remove('video-modal-open');
@@ -2183,17 +2327,22 @@ BYD.events = {
     async createIncidentPack(recordingKey) {
         const rec = this.findRecording(recordingKey);
         if (!rec || !rec.id || !/^[a-f0-9]{32}$/i.test(rec.id)) return;
-        const body = 'OverDrive sends only filtered event metadata to your configured AI provider. '
-            + 'The video stays local and is added only to the downloaded evidence pack.';
+        const tEv = (key, fallback, vars) => {
+            const v = (BYD.i18n && BYD.i18n.t) ? BYD.i18n.t(key, vars) : null;
+            return (v && v !== key) ? v : fallback;
+        };
+        const body = tEv('events.pack_confirm_body',
+            'OverDrive sends only filtered event metadata to your configured AI provider. '
+            + 'The video stays local and is added only to the downloaded evidence pack.');
         const confirmed = window.BYD && BYD.utils
                 && BYD.utils.confirmDialog
             ? await BYD.utils.confirmDialog({
-                title: 'Create evidence pack?',
+                title: tEv('events.pack_confirm_title', 'Create evidence pack?'),
                 body: body,
-                confirmLabel: 'Create pack',
-                cancelLabel: 'Cancel'
+                confirmLabel: tEv('events.pack_create', 'Create pack'),
+                cancelLabel: tEv('common.cancel', 'Cancel')
             })
-            : confirm('Create an incident evidence pack? ' + body);
+            : confirm(tEv('events.pack_confirm_fallback', 'Create an incident evidence pack? ' + body, {body: body}));
         if (!confirmed) return;
         try {
             const response = await fetch('/api/genai/incidents', {
@@ -2206,14 +2355,14 @@ BYD.events = {
             });
             const data = await response.json().catch(() => ({}));
             if (!response.ok || data.success === false) {
-                throw new Error(data.error || 'Could not create evidence pack');
+                throw new Error(data.error || tEv('events.pack_failed', 'Could not create evidence pack'));
             }
             const packId = String(data.id || data.packId || '');
             if (!/^[a-f0-9-]{36}$/i.test(packId)) {
-                throw new Error('The daemon returned an invalid pack id');
+                throw new Error(tEv('events.pack_invalid_id', 'The daemon returned an invalid pack id'));
             }
             if (BYD.core && BYD.core.toast) {
-                BYD.core.toast('Evidence pack ready', 'success');
+                BYD.core.toast(tEv('events.pack_ready', 'Evidence pack ready'), 'success');
             }
             window.location.href = '/api/genai/incidents/'
                 + encodeURIComponent(packId) + '/download';
@@ -2413,6 +2562,8 @@ BYD.events = {
 
         // Guard: old cached page without the new chrome — skip silently.
         if (!scrubber || !track || !playhead) return;
+        // A newer clip owns the overlay once another load starts or the player closes.
+        const seq = ++this._timelineSeq;
 
         // Reset visual state but KEEP the scrubber visible — it's now the
         // primary seek surface, not just an event-marker overlay. Event-only
@@ -2427,13 +2578,18 @@ BYD.events = {
         // drops back to the 2x2 zoom regions.
         this._layout = 'standard';
         var _wrapReset = document.getElementById('videoPlayerWrap');
-        if (_wrapReset) _wrapReset.classList.remove('dashcam');
+        if (_wrapReset) {
+            _wrapReset.classList.remove('dashcam');
+            _wrapReset.classList.remove('lens-dewarp');
+        }
+        if (this._lensDewarp) { try { this._lensDewarp.detach(); } catch (e) {} }
 
         try {
             const eventUrl = recording.eventUrl
                 || ('/api/events/' + encodeURIComponent(recording.filename));
             const res = await fetch(eventUrl);
             const data = await res.json();
+            if (seq !== this._timelineSeq) return;
             // Composition layout drives the per-camera zoom regions: toggle the
             // `dashcam` class so the dashcam CSS zoom rects apply, and store it
             // for the double-tap hit-test (_quadrantAtFit).
@@ -2442,25 +2598,110 @@ BYD.events = {
                 var _wrap = document.getElementById('videoPlayerWrap');
                 if (_wrap) _wrap.classList.add('dashcam');
             }
+            // Raw CPU-engine clip: dewarp at playback with the live slider.
+            if (data && data.lens && data.lens.raw === true && window.BYD && window.BYD.LensDewarp) {
+                try {
+                    const strength = await window.BYD.LensDewarp.fetchRectifyStrength();
+                    const spec = window.BYD.LensDewarp.specFromSidecar(data, strength);
+                    if (spec && seq === this._timelineSeq) {
+                        const canvas = document.getElementById('videoDewarpCanvas');
+                        var _wrapLens = document.getElementById('videoPlayerWrap');
+                        if (canvas && _wrapLens) {
+                            if (!this._lensDewarp) {
+                                const dewarp = new window.BYD.LensDewarp(canvas);
+                                // Can't draw any more: show the plain video. A lost context
+                                // stays lost on its canvas, so the next clip gets a fresh one.
+                                dewarp.onFail = (reason) => {
+                                    _wrapLens.classList.remove('lens-dewarp');
+                                    if (this._lensDewarp === dewarp) this._lensDewarp = null;
+                                    if (reason === 'contextlost' && canvas.parentNode) {
+                                        canvas.parentNode.replaceChild(canvas.cloneNode(false), canvas);
+                                    }
+                                };
+                                this._lensDewarp = dewarp;
+                            }
+                            if (this._lensDewarp.attach(videoEl, spec)) {
+                                _wrapLens.classList.add('lens-dewarp');
+                            }
+                        }
+                    }
+                } catch (e) { /* dewarp optional */ }
+            }
 
-            if (data && data.events && data.events.length > 0) {
+            const deterrents = data && Array.isArray(data.deterrents) ? data.deterrents : [];
+            // First segment only: the pre-roll actually saved before the trigger, and what was asked for.
+            const preRollMs = data ? Number(data.preRecordMs) : NaN;
+            const requestedPreRollMs = data ? Number(data.requestedPreRecordMs) : NaN;
+            const hasTrigger = Number.isFinite(preRollMs) && preRollMs >= 0
+                && Number.isFinite(requestedPreRollMs) && requestedPreRollMs > 0;
+            if (data && ((data.events && data.events.length > 0) || deterrents.length > 0 || hasTrigger)) {
                 this._timelineEvents = data;
 
                 const renderMarkers = () => {
+                    if (seq !== this._timelineSeq) return;
                     const duration = videoEl.duration;
                     if (!duration || duration <= 0) return;
                     const durationMs = data.durationMs > 0 ? data.durationMs : duration * 1000;
                     Array.from(track.querySelectorAll('.timeline-marker')).forEach(n => n.remove());
-                    for (const ev of data.events) {
+                    // The legend lists only the kinds this clip actually has, whatever today's settings.
+                    const kinds = ['motion', 'person', 'car', 'bike', 'animal'];
+                    const seen = {};
+                    for (const ev of (data.events || [])) {
+                        const type = String((ev && ev.type) || '').toLowerCase();
+                        if (kinds.indexOf(type) === -1) continue;
+                        seen[type] = true;
                         const marker = document.createElement('div');
-                        marker.className = 'timeline-marker type-' + ev.type;
+                        marker.className = 'timeline-marker type-' + type;
                         const leftPct = (ev.start / durationMs) * 100;
                         const widthPct = Math.max(((ev.end - ev.start) / durationMs) * 100, 0.5);
                         marker.style.left = leftPct + '%';
                         marker.style.width = widthPct + '%';
                         track.appendChild(marker);
                     }
-                    if (legend) legend.style.display = 'flex';
+                    // Deterrent fire points (cloud = lights / horn sent, screen = shown on the panel).
+                    const fired = { cloud: false, screen: false };
+                    for (const d of deterrents) {
+                        if (!d || (d.type !== 'cloud' && d.type !== 'screen')) continue;
+                        if (!(d.tMs >= 0) || d.tMs > durationMs) continue;
+                        const pin = document.createElement('div');
+                        pin.className = 'timeline-marker deterrent-' + d.type;
+                        pin.style.left = Math.min((d.tMs / durationMs) * 100, 100) + '%';
+                        track.appendChild(pin);
+                        fired[d.type] = true;
+                    }
+                    const cloudKey = document.getElementById('timelineLegendCloud');
+                    const screenKey = document.getElementById('timelineLegendScreen');
+                    if (cloudKey) cloudKey.style.display = fired.cloud ? '' : 'none';
+                    if (screenKey) screenKey.style.display = fired.screen ? '' : 'none';
+                    const showTrigger = hasTrigger && preRollMs <= durationMs;
+                    if (showTrigger) {
+                        const pin = document.createElement('div');
+                        pin.className = 'timeline-marker trigger';
+                        pin.style.left = (preRollMs / durationMs) * 100 + '%';
+                        track.appendChild(pin);
+                    }
+                    const triggerKey = document.getElementById('timelineLegendTrigger');
+                    if (triggerKey) {
+                        triggerKey.style.display = showTrigger ? '' : 'none';
+                        const label = triggerKey.querySelector('.legend-label');
+                        if (showTrigger && label) {
+                            const suffix = (BYD.units && BYD.units.secondSuffix) ? BYD.units.secondSuffix(true) : 's';
+                            const sec = ms => Math.round(ms / 1000) + suffix;
+                            // Within one GOP of the request counts as the full window.
+                            const short = preRollMs + 2000 < requestedPreRollMs;
+                            label.textContent = short
+                                ? BYD.i18n.t('events.legend_trigger_short', {pre: sec(preRollMs), requested: sec(requestedPreRollMs)})
+                                : BYD.i18n.t('events.legend_trigger', {pre: sec(preRollMs)});
+                            triggerKey.classList.toggle('short', short);
+                        }
+                    }
+                    let anyKind = fired.cloud || fired.screen || showTrigger;
+                    for (const type of kinds) {
+                        const dot = legend ? legend.querySelector('.legend-' + type) : null;
+                        if (dot && dot.parentNode) dot.parentNode.style.display = seen[type] ? '' : 'none';
+                        if (seen[type]) anyKind = true;
+                    }
+                    if (legend) legend.style.display = anyKind ? 'flex' : 'none';
                 };
 
                 if (videoEl.readyState >= 1) {
@@ -2471,7 +2712,7 @@ BYD.events = {
             }
         } catch (e) {
             // Best-effort marker overlay; no events file is fine.
-            console.debug('No timeline data for', recording.filename);
+            console.debug('No timeline data for', recording && recording.filename, e);
         }
     },
 
@@ -2481,6 +2722,21 @@ BYD.events = {
      * destroyTimeline tears the listeners down. Idempotent: re-binding is
      * safe because we always remove the prior handler set first.
      */
+    // iPhone Safari ignores media volume (the hardware buttons own it), so the slider stays hidden there.
+    _volumeAdjustable() {
+        if (typeof this._volumeAdjustableCache === 'boolean') return this._volumeAdjustableCache;
+        let ok = false;
+        try {
+            const probe = document.createElement('video');
+            probe.volume = 0.5;
+            ok = Math.abs(probe.volume - 0.5) < 0.01;
+        } catch (e) {
+            ok = false;
+        }
+        this._volumeAdjustableCache = ok;
+        return ok;
+    },
+
     bindTransport(videoEl) {
         this.unbindTransport();
 
@@ -2491,8 +2747,17 @@ BYD.events = {
         const playPauseBtn = document.getElementById('videoPlayPauseBtn');
         const muteBtn = document.getElementById('videoMuteBtn');
         const fullscreenBtn = document.getElementById('videoFullscreenBtn');
+        const videoOnlyBtn = document.getElementById('videoOnlyFullscreenBtn');
         const surface = document.getElementById('videoPlayer');
         if (!scrubber || !playhead || !playPauseBtn || !muteBtn) return;
+        const volumeSlider = document.getElementById('videoVolumeSlider');
+        const volumeAdjustable = !!volumeSlider && this._volumeAdjustable();
+        if (volumeSlider) volumeSlider.hidden = !volumeAdjustable;
+        const speedBtn = document.getElementById('videoSpeedBtn');
+        const speedLabel = document.getElementById('videoSpeedLabel');
+        const speedPanel = document.getElementById('videoSpeedPanel');
+        const speedSlider = document.getElementById('videoSpeedSlider');
+        const bufferedEl = document.getElementById('timelineBuffered');
 
         const setPct = (pct) => {
             const p = Math.max(0, Math.min(1, pct));
@@ -2599,6 +2864,46 @@ BYD.events = {
             refreshMuteIcon();
         };
 
+        // 0 mutes and keeps the last level, so unmuting returns to it.
+        const syncVolumeSlider = () => {
+            if (!volumeAdjustable) return;
+            volumeSlider.value = String(videoEl.muted ? 0 : Math.round(videoEl.volume * 100));
+        };
+        const onVolumeInput = () => {
+            const level = Math.max(0, Math.min(100, Math.round(Number(volumeSlider.value) || 0)));
+            if (level > 0) {
+                videoEl.volume = level / 100;
+                videoEl.muted = false;
+            } else {
+                videoEl.muted = true;
+            }
+            try {
+                if (level > 0) localStorage.setItem('byd.events.volume', String(level));
+                localStorage.setItem('byd.events.unmuted', videoEl.muted ? '0' : '1');
+                self._lastMutedState = videoEl.muted;
+            } catch (_) {}
+            refreshMuteIcon();
+        };
+        const onVolumeClick = (e) => { if (e) e.stopPropagation(); };
+        // Keyboard steps follow the slider: a muted player reads as 0.
+        const nudgeVolume = (delta) => {
+            const current = videoEl.muted ? 0 : Math.round(videoEl.volume * 100);
+            const level = Math.max(0, Math.min(100, current + delta));
+            if (level > 0) {
+                videoEl.volume = level / 100;
+                videoEl.muted = false;
+            } else {
+                videoEl.muted = true;
+            }
+            try {
+                if (level > 0) localStorage.setItem('byd.events.volume', String(level));
+                localStorage.setItem('byd.events.unmuted', videoEl.muted ? '0' : '1');
+                self._lastMutedState = videoEl.muted;
+            } catch (_) {}
+            refreshMuteIcon();
+            syncVolumeSlider();
+        };
+
         const onTimeUpdate = () => {
             if (self._scrubbing) return;
             if (videoEl.duration > 0) {
@@ -2647,7 +2952,7 @@ BYD.events = {
         const onPlay = () => { refreshPlayPauseIcon(); playhead.classList.add('smooth'); };
         const onPause = () => { refreshPlayPauseIcon(); playhead.classList.remove('smooth'); };
         const onEnded = () => refreshPlayPauseIcon();
-        const onVolumeChange = () => refreshMuteIcon();
+        const onVolumeChange = () => { refreshMuteIcon(); syncVolumeSlider(); };
 
         // Pointer-driven scrub: down → seek immediately + start tracking;
         // move → live seek (RAF-coalesced, dragging class amplifies playhead);
@@ -2808,6 +3113,24 @@ BYD.events = {
             refreshFullscreenIcon();
             if (fsContainer) {
                 fsContainer.classList.toggle('show-handle', isFsActive());
+                if (!isFsActive()) fsContainer.classList.remove('is-video-only');
+            }
+        };
+
+        // Video-only fullscreen needs the real Fullscreen API: Esc or the browser's own exit
+        // is the only way out once the transport is hidden, so the class fallback never offers it.
+        const videoOnlySupported = !!(fsContainer
+            && (fsContainer.requestFullscreen || fsContainer.webkitRequestFullscreen));
+        if (videoOnlyBtn) videoOnlyBtn.hidden = !videoOnlySupported;
+        const onVideoOnlyFullscreen = (e) => {
+            if (e) e.stopPropagation();
+            if (!fsContainer || !videoOnlySupported || isFsActive()) return;
+            fsContainer.classList.add('is-video-only');
+            const fail = () => fsContainer.classList.remove('is-video-only');
+            if (fsContainer.requestFullscreen) {
+                fsContainer.requestFullscreen().catch(fail);
+            } else {
+                try { fsContainer.webkitRequestFullscreen(); } catch (_) { fail(); }
             }
         };
 
@@ -2956,9 +3279,121 @@ BYD.events = {
             }
         }
 
+        // Playback speed: each clip opens at 1.0×; the label always shows the element's actual rate.
+        const SPEED_PRESETS = [0.1, 0.5, 1, 1.5, 2, 2.5, 3];
+        const formatRate = (rate) => {
+            try {
+                return rate.toLocaleString(document.documentElement.lang || undefined,
+                    { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '×';
+            } catch (_) {
+                return rate.toFixed(1) + '×';
+            }
+        };
+        const refreshSpeed = () => {
+            const rate = Math.round((videoEl.playbackRate || 1) * 10) / 10;
+            if (speedLabel) speedLabel.textContent = formatRate(rate);
+            if (speedSlider) speedSlider.value = String(rate);
+            if (speedPanel) {
+                Array.prototype.forEach.call(speedPanel.querySelectorAll('[data-speed]'), (b) => {
+                    b.classList.toggle('active', Math.abs(Number(b.getAttribute('data-speed')) - rate) < 0.05);
+                });
+            }
+        };
+        const setRate = (rate) => {
+            const next = Math.max(0.1, Math.min(3, Math.round(rate * 10) / 10));
+            if (!isFinite(next)) return;
+            try { videoEl.playbackRate = next; } catch (_) {}
+            refreshSpeed();
+        };
+        const stepRate = (direction) => {
+            const rate = videoEl.playbackRate || 1;
+            let next = rate;
+            if (direction > 0) {
+                for (let i = 0; i < SPEED_PRESETS.length; i++) {
+                    if (SPEED_PRESETS[i] > rate + 0.001) { next = SPEED_PRESETS[i]; break; }
+                }
+            } else {
+                for (let i = SPEED_PRESETS.length - 1; i >= 0; i--) {
+                    if (SPEED_PRESETS[i] < rate - 0.001) { next = SPEED_PRESETS[i]; break; }
+                }
+            }
+            setRate(next);
+        };
+        const setSpeedPanel = (open) => {
+            if (!speedPanel || !speedBtn) return;
+            speedPanel.hidden = !open;
+            speedBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        };
+        const onSpeedBtn = (e) => {
+            if (e) e.stopPropagation();
+            if (speedPanel) setSpeedPanel(speedPanel.hidden);
+        };
+        const onSpeedInput = () => setRate(Number(speedSlider.value));
+        const onSpeedPanelClick = (e) => {
+            e.stopPropagation();
+            const preset = e.target && e.target.closest ? e.target.closest('[data-speed]') : null;
+            if (preset) setRate(Number(preset.getAttribute('data-speed')));
+        };
+        const onSpeedOutsideClick = (e) => {
+            if (!speedPanel || speedPanel.hidden) return;
+            if (speedPanel.contains(e.target) || (speedBtn && speedBtn.contains(e.target))) return;
+            setSpeedPanel(false);
+        };
+        const onRateChange = () => refreshSpeed();
+        const seekBy = (seconds) => {
+            const dur = videoEl.duration;
+            let target = (videoEl.currentTime || 0) + seconds;
+            if (isFinite(dur) && dur > 0) target = Math.min(dur, target);
+            videoEl.currentTime = Math.max(0, target);
+        };
+        if (speedPanel) {
+            Array.prototype.forEach.call(speedPanel.querySelectorAll('[data-speed]'), (b) => {
+                b.textContent = formatRate(Number(b.getAttribute('data-speed')));
+            });
+        }
+        try {
+            videoEl.defaultPlaybackRate = 1;
+            videoEl.playbackRate = 1;
+        } catch (_) {}
+        setSpeedPanel(false);
+
+        // Loaded ranges as the browser reports them; this never asks for more data.
+        const renderBuffered = () => {
+            if (!bufferedEl) return;
+            const dur = videoEl.duration;
+            const ranges = videoEl.buffered;
+            const count = ranges && isFinite(dur) && dur > 0 ? ranges.length : 0;
+            while (bufferedEl.children.length > count) bufferedEl.removeChild(bufferedEl.lastChild);
+            while (bufferedEl.children.length < count) bufferedEl.appendChild(document.createElement('span'));
+            for (let i = 0; i < count; i++) {
+                let start = 0, end = 0;
+                try {
+                    start = Math.max(0, Math.min(1, ranges.start(i) / dur));
+                    end = Math.max(start, Math.min(1, ranges.end(i) / dur));
+                } catch (_) {}
+                const segment = bufferedEl.children[i];
+                segment.style.left = (start * 100) + '%';
+                segment.style.width = ((end - start) * 100) + '%';
+            }
+        };
+        if (bufferedEl) bufferedEl.textContent = '';
+
         playPauseBtn.addEventListener('click', onPlayPause);
         muteBtn.addEventListener('click', onMute);
+        if (speedBtn) speedBtn.addEventListener('click', onSpeedBtn);
+        if (speedSlider) speedSlider.addEventListener('input', onSpeedInput);
+        if (speedPanel) speedPanel.addEventListener('click', onSpeedPanelClick);
+        document.addEventListener('click', onSpeedOutsideClick);
+        videoEl.addEventListener('ratechange', onRateChange);
+        ['progress', 'loadedmetadata', 'durationchange', 'seeked', 'emptied'].forEach((type) => {
+            videoEl.addEventListener(type, renderBuffered);
+        });
+        if (volumeAdjustable) {
+            volumeSlider.addEventListener('input', onVolumeInput);
+            volumeSlider.addEventListener('click', onVolumeClick);
+        }
         if (fullscreenBtn) fullscreenBtn.addEventListener('click', onFullscreen);
+        if (videoOnlyBtn) videoOnlyBtn.addEventListener('click', onVideoOnlyFullscreen);
         document.addEventListener('fullscreenchange', onFullscreenChange);
         document.addEventListener('webkitfullscreenchange', onFullscreenChange);
         videoEl.addEventListener('timeupdate', onTimeUpdate);
@@ -2990,8 +3425,11 @@ BYD.events = {
         // Initial paint.
         refreshPlayPauseIcon();
         refreshMuteIcon();
+        syncVolumeSlider();
         refreshFullscreenIcon();
         refreshTime();
+        refreshSpeed();
+        renderBuffered();
 
         this._transport = {
             videoEl: videoEl,
@@ -2999,16 +3437,54 @@ BYD.events = {
             surface: surface,
             playPauseBtn: playPauseBtn,
             muteBtn: muteBtn,
+            volumeSlider: volumeAdjustable ? volumeSlider : null,
             fullscreenBtn: fullscreenBtn,
+            videoOnlyBtn: videoOnlyBtn,
+            speedBtn: speedBtn,
+            speedSlider: speedSlider,
+            speedPanel: speedPanel,
+            bufferedEl: bufferedEl,
             handlers: {
-                onPlayPause, onMute, onFullscreen, onFullscreenChange,
+                onPlayPause, onMute, onFullscreen, onFullscreenChange, onVideoOnlyFullscreen,
                 onTimeUpdate, onDurationChange, onLoadedMetadata,
                 onPlay, onPause, onEnded, onVolumeChange,
+                onVolumeInput, onVolumeClick,
                 onScrubDown, onScrubMove, onScrubUp, onSurfaceClick,
-                onDragStart, onDragMove, onDragEnd
+                onDragStart, onDragMove, onDragEnd,
+                onSpeedBtn, onSpeedInput, onSpeedPanelClick, onSpeedOutsideClick, onRateChange,
+                renderBuffered, seekBy, stepRate, setRate, nudgeVolume
             },
             headerEl: headerEl
         };
+    },
+
+    /** Player keyboard shortcuts; true when the key was handled. */
+    handlePlayerKey(e) {
+        const t = this._transport;
+        if (!t) return false;
+        const h = t.handlers;
+        // A focused control (incl. the shortcuts <summary>) keeps Space for itself.
+        const onButton = !!e.target && /^(button|a|summary)$/i.test(e.target.tagName || '');
+        switch (e.key) {
+            case ' ':
+            case 'Spacebar':
+                if (onButton) return false;
+                h.onPlayPause();
+                return true;
+            case 'k': case 'K': h.onPlayPause(); return true;
+            case 'f': case 'F': h.onFullscreen(); return true;
+            case 'ArrowLeft': case 'Left': h.seekBy(-5); return true;
+            case 'ArrowRight': case 'Right': h.seekBy(5); return true;
+            case 'ArrowUp': case 'Up': h.nudgeVolume(5); return true;
+            case 'ArrowDown': case 'Down': h.nudgeVolume(-5); return true;
+            case 'j': case 'J': h.seekBy(-10); return true;
+            case 'l': case 'L': h.seekBy(10); return true;
+            case '[': case '<': h.stepRate(-1); return true;
+            case ']': case '>': h.stepRate(1); return true;
+            case 'P': if (!e.shiftKey) return false; this.navigateRecording(-1); return true;
+            case 'N': if (!e.shiftKey) return false; this.navigateRecording(1); return true;
+            default: return false;
+        }
     },
 
     /**
@@ -3022,7 +3498,25 @@ BYD.events = {
         try {
             playPauseBtn.removeEventListener('click', handlers.onPlayPause);
             muteBtn.removeEventListener('click', handlers.onMute);
+            if (t.speedBtn) t.speedBtn.removeEventListener('click', handlers.onSpeedBtn);
+            if (t.speedSlider) t.speedSlider.removeEventListener('input', handlers.onSpeedInput);
+            if (t.speedPanel) {
+                t.speedPanel.removeEventListener('click', handlers.onSpeedPanelClick);
+                t.speedPanel.hidden = true;
+            }
+            if (t.speedBtn) t.speedBtn.setAttribute('aria-expanded', 'false');
+            document.removeEventListener('click', handlers.onSpeedOutsideClick);
+            videoEl.removeEventListener('ratechange', handlers.onRateChange);
+            ['progress', 'loadedmetadata', 'durationchange', 'seeked', 'emptied'].forEach((type) => {
+                videoEl.removeEventListener(type, handlers.renderBuffered);
+            });
+            if (t.bufferedEl) t.bufferedEl.textContent = '';
+            if (t.volumeSlider) {
+                t.volumeSlider.removeEventListener('input', handlers.onVolumeInput);
+                t.volumeSlider.removeEventListener('click', handlers.onVolumeClick);
+            }
             if (fullscreenBtn) fullscreenBtn.removeEventListener('click', handlers.onFullscreen);
+            if (t.videoOnlyBtn) t.videoOnlyBtn.removeEventListener('click', handlers.onVideoOnlyFullscreen);
             document.removeEventListener('fullscreenchange', handlers.onFullscreenChange);
             document.removeEventListener('webkitfullscreenchange', handlers.onFullscreenChange);
             // Drop the manual-fallback class + any in-flight drag styles
@@ -3032,6 +3526,7 @@ BYD.events = {
             const fsContainer = document.querySelector('.video-container');
             if (fsContainer) {
                 fsContainer.classList.remove('is-fullscreen');
+                fsContainer.classList.remove('is-video-only');
                 fsContainer.classList.remove('show-handle');
                 fsContainer.style.transform = '';
             }
@@ -3083,6 +3578,7 @@ BYD.events = {
      * Tear down timeline + transport for closeVideo / clip switch.
      */
     destroyTimeline() {
+        this._timelineSeq++;
         if (this._timelineRaf) {
             cancelAnimationFrame(this._timelineRaf);
             this._timelineRaf = null;

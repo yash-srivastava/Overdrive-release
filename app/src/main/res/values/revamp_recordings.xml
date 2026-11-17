@@ -1,0 +1,396 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Recordings page tokens. Shared tokens live in revamp_tokens.xml. -->
+<resources>
+    <!-- Header: 48dp touch rows; row 2 paints 40dp pills through a 4dp inset. -->
+    <dimen name="rec_header_padding_top">16dp</dimen>
+    <dimen name="rec_header_row_height">48dp</dimen>
+    <dimen name="rec_header_row_gap">4dp</dimen>
+    <dimen name="rec_summary_max_width">320dp</dimen>
+    <dimen name="rec_pill_inset">4dp</dimen>
+    <dimen name="rec_segment_inset">7dp</dimen>
+    <dimen name="rec_segment_padding_h">11dp</dimen>
+    <dimen name="rec_segment_radius">17dp</dimen>
+    <dimen name="rec_skeleton_summary_width">196dp</dimen>
+    <dimen name="rec_skeleton_summary_height">14dp</dimen>
+    <dimen name="rec_side_sheet_width">372dp</dimen>
+    <dimen name="rec_filter_badge_size">20dp</dimen>
+    <dimen name="rec_filter_badge_text">12sp</dimen>
+
+    <!-- Body + preview card -->
+    <dimen name="rec_body_padding_top">12dp</dimen>
+    <dimen name="rec_body_padding_bottom">16dp</dimen>
+    <dimen name="rec_pane_gap">12dp</dimen>
+    <dimen name="rec_preview_padding">12dp</dimen>
+    <dimen name="rec_video_radius">8dp</dimen>
+    <dimen name="rec_video_min_height">120dp</dimen>
+
+    <!-- List rows: two stacked 48dp actions set the row height. -->
+    <dimen name="rec_row_height">96dp</dimen>
+    <dimen name="rec_row_padding_start">6dp</dimen>
+    <dimen name="rec_thumb_width">96dp</dimen>
+    <dimen name="rec_thumb_height">54dp</dimen>
+    <dimen name="rec_thumb_radius">8dp</dimen>
+    <dimen name="rec_severity_stripe">4dp</dimen>
+    <dimen name="rec_badge_height">20dp</dimen>
+    <dimen name="rec_badge_small_height">16dp</dimen>
+    <dimen name="rec_active_marker_width">3dp</dimen>
+    <dimen name="rec_active_marker_height">28dp</dimen>
+    <dimen name="rec_list_padding_bottom">72dp</dimen>
+    <dimen name="rec_list_padding_bottom_portrait">88dp</dimen>
+
+    <!-- Player chrome -->
+    <dimen name="rec_player_padding">6dp</dimen>
+    <dimen name="rec_player_play_size">56dp</dimen>
+    <dimen name="rec_player_quad_width">44dp</dimen>
+    <dimen name="rec_player_track_inset">12dp</dimen>
+    <dimen name="rec_player_event_band">16dp</dimen>
+    <dimen name="rec_player_time_min_width">36dp</dimen>
+
+    <!-- Player chrome sits over arbitrary video frames, so it stays dark in both themes. -->
+    <color name="rec_player_bg">#FF000000</color>
+    <color name="rec_player_glass">#A60A1410</color>
+    <color name="rec_player_glass_stroke">#24FFFFFF</color>
+    <color name="rec_player_quad_selected">#40FFFFFF</color>
+    <color name="rec_player_scrim">#8C000000</color>
+    <color name="rec_player_scrim_clear">#00000000</color>
+    <color name="rec_player_on_glass">#FFFFFFFF</color>
+    <color name="rec_player_on_glass_variant">#B3FFFFFF</color>
+    <color name="rec_player_track_inactive">#55FFFFFF</color>
+    <color name="rec_player_panel">#E61C1B1F</color>
+    <color name="rec_thumb_scrim">#99000000</color>
+    <color name="rec_thumb_text_shadow">#B3000000</color>
+    <color name="rec_check_unchecked_fill">#59000000</color>
+
+    <!-- Text -->
+    <style name="Widget.Overdrive.Rec.Summary" parent="">
+        <item name="android:textSize">14sp</item>
+        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
+        <item name="android:fontFeatureSettings">tnum</item>
+        <item name="android:maxLines">2</item>
+        <item name="android:ellipsize">end</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.RowTime" parent="">
+        <item name="android:textSize">14sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textColor">?attr/colorOnSurface</item>
+        <item name="android:fontFeatureSettings">tnum</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:includeFontPadding">false</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.RowMeta" parent="">
+        <item name="android:textSize">12sp</item>
+        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
+        <item name="android:fontFeatureSettings">tnum</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.Badge" parent="">
+        <item name="android:layout_height">@dimen/rec_badge_height</item>
+        <item name="android:background">@drawable/rec_badge_bg</item>
+        <item name="android:gravity">center</item>
+        <item name="android:paddingStart">7dp</item>
+        <item name="android:paddingEnd">7dp</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:letterSpacing">0.02</item>
+        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:includeFontPadding">false</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.Badge.Small">
+        <item name="android:layout_height">@dimen/rec_badge_small_height</item>
+        <item name="android:paddingStart">5dp</item>
+        <item name="android:paddingEnd">5dp</item>
+        <item name="android:textSize">11sp</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.ThumbLabel" parent="">
+        <item name="android:textSize">11sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:letterSpacing">0.04</item>
+        <item name="android:textAllCaps">true</item>
+        <item name="android:textColor">@color/rec_player_on_glass</item>
+        <item name="android:shadowColor">@color/rec_thumb_text_shadow</item>
+        <item name="android:shadowDy">1</item>
+        <item name="android:shadowRadius">2</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:includeFontPadding">false</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.ThumbDuration" parent="">
+        <item name="android:layout_height">14dp</item>
+        <item name="android:background">@drawable/rec_thumb_chip_bg</item>
+        <item name="android:gravity">center</item>
+        <item name="android:paddingStart">5dp</item>
+        <item name="android:paddingEnd">5dp</item>
+        <item name="android:textSize">11sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:fontFeatureSettings">tnum</item>
+        <item name="android:textColor">@color/rec_player_on_glass</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:includeFontPadding">false</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.SafeKeepBadge" parent="">
+        <item name="android:layout_height">@dimen/rec_badge_small_height</item>
+        <item name="android:minWidth">@dimen/rec_badge_small_height</item>
+        <item name="android:maxWidth">72dp</item>
+        <item name="android:background">@drawable/rec_safekeep_badge_bg</item>
+        <item name="android:gravity">center</item>
+        <item name="android:paddingStart">3dp</item>
+        <item name="android:paddingEnd">4dp</item>
+        <item name="android:textSize">11sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:fontFeatureSettings">tnum</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:includeFontPadding">false</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.PreviewTitle" parent="">
+        <item name="android:textSize">15sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textColor">?attr/colorOnSurface</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.Filename" parent="">
+        <item name="android:textSize">12sp</item>
+        <item name="android:fontFamily">monospace</item>
+        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">middle</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.DetailLabel" parent="">
+        <item name="android:textSize">12sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:letterSpacing">0.07</item>
+        <item name="android:textAllCaps">true</item>
+        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.DetailValue" parent="">
+        <item name="android:textSize">13sp</item>
+        <item name="android:textColor">?attr/colorOnSurface</item>
+        <item name="android:fontFeatureSettings">tnum</item>
+        <item name="android:maxLines">2</item>
+        <item name="android:ellipsize">end</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.SelectionCount" parent="">
+        <item name="android:textSize">15sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textColor">?attr/colorOnPrimaryContainer</item>
+        <item name="android:fontFeatureSettings">tnum</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.PlayerTime" parent="">
+        <item name="android:minWidth">@dimen/rec_player_time_min_width</item>
+        <item name="android:gravity">center</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:fontFeatureSettings">tnum</item>
+        <item name="android:textColor">@color/rec_player_on_glass</item>
+        <item name="android:maxLines">1</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.PlayerCaption" parent="">
+        <item name="android:textSize">12sp</item>
+        <item name="android:textColor">@color/rec_player_on_glass_variant</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+    </style>
+
+    <!-- Buttons -->
+    <style name="Widget.Overdrive.Rec.Segment" parent="Widget.Material3.Button.TextButton">
+        <item name="android:minHeight">@dimen/od_touch_min</item>
+        <item name="android:minWidth">@dimen/od_touch_min</item>
+        <item name="android:insetTop">@dimen/rec_segment_inset</item>
+        <item name="android:insetBottom">@dimen/rec_segment_inset</item>
+        <!-- No vertical padding: the insets alone centre a 34dp pill, leaving the label room at any font scale. -->
+        <item name="android:paddingTop">0dp</item>
+        <item name="android:paddingBottom">0dp</item>
+        <item name="android:paddingLeft">@dimen/rec_segment_padding_h</item>
+        <item name="android:paddingRight">@dimen/rec_segment_padding_h</item>
+        <item name="android:paddingStart">@dimen/rec_segment_padding_h</item>
+        <item name="android:paddingEnd">@dimen/rec_segment_padding_h</item>
+        <item name="cornerRadius">@dimen/rec_segment_radius</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:letterSpacing">0</item>
+        <item name="android:fontFeatureSettings">tnum</item>
+        <item name="android:maxLines">1</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.TonalPill" parent="Widget.Material3.Button.TonalButton.Icon">
+        <item name="android:minHeight">@dimen/od_touch_min</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:paddingLeft">14dp</item>
+        <item name="android:paddingRight">18dp</item>
+        <item name="android:paddingStart">14dp</item>
+        <item name="android:paddingEnd">18dp</item>
+        <item name="cornerRadius">@dimen/od_radius_pill_48</item>
+        <item name="iconSize">20dp</item>
+        <item name="iconPadding">8dp</item>
+        <item name="iconGravity">textStart</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:letterSpacing">0</item>
+        <item name="android:maxLines">1</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.HeaderIcon" parent="Widget.Overdrive.Revamp.PillIconButton">
+        <item name="android:minWidth">@dimen/od_touch_min</item>
+        <item name="android:minHeight">@dimen/od_touch_min</item>
+        <item name="android:paddingLeft">0dp</item>
+        <item name="android:paddingRight">0dp</item>
+        <item name="android:paddingStart">0dp</item>
+        <item name="android:paddingEnd">0dp</item>
+        <item name="cornerRadius">@dimen/od_radius_pill_48</item>
+        <item name="iconGravity">textStart</item>
+        <item name="iconPadding">0dp</item>
+    </style>
+    <!-- 40dp pill painted inside a 48dp touch target. -->
+    <style name="Widget.Overdrive.Rec.FilterPill" parent="Widget.Material3.Button.TonalButton.Icon">
+        <item name="android:minHeight">@dimen/od_touch_min</item>
+        <item name="android:insetTop">@dimen/rec_pill_inset</item>
+        <item name="android:insetBottom">@dimen/rec_pill_inset</item>
+        <item name="android:paddingLeft">10dp</item>
+        <item name="android:paddingRight">12dp</item>
+        <item name="android:paddingStart">10dp</item>
+        <item name="android:paddingEnd">12dp</item>
+        <item name="cornerRadius">@dimen/od_radius_pill_40</item>
+        <item name="backgroundTint">?attr/colorSurfaceContainerHigh</item>
+        <item name="android:textColor">?attr/colorOnSurface</item>
+        <item name="iconTint">?attr/colorOnSurfaceVariant</item>
+        <item name="iconSize">20dp</item>
+        <item name="iconPadding">6dp</item>
+        <item name="iconGravity">textStart</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:letterSpacing">0</item>
+        <item name="android:fontFeatureSettings">tnum</item>
+        <item name="android:maxLines">1</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.DateArrow" parent="Widget.Material3.Button.IconButton">
+        <item name="android:minWidth">@dimen/od_touch_min</item>
+        <item name="android:minHeight">@dimen/od_touch_min</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:insetLeft">0dp</item>
+        <item name="android:insetRight">0dp</item>
+        <item name="android:paddingLeft">0dp</item>
+        <item name="android:paddingRight">0dp</item>
+        <item name="android:paddingStart">0dp</item>
+        <item name="android:paddingEnd">0dp</item>
+        <item name="iconSize">20dp</item>
+        <item name="iconPadding">0dp</item>
+        <item name="iconGravity">textStart</item>
+        <item name="iconTint">?attr/colorOnSurfaceVariant</item>
+        <item name="cornerRadius">@dimen/od_radius_pill_48</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.SelectionAction" parent="Widget.Material3.Button.TextButton.Icon">
+        <item name="android:minHeight">@dimen/od_touch_min</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:paddingLeft">14dp</item>
+        <item name="android:paddingRight">14dp</item>
+        <item name="android:paddingStart">14dp</item>
+        <item name="android:paddingEnd">14dp</item>
+        <item name="cornerRadius">@dimen/od_radius_pill_48</item>
+        <item name="android:textColor">?attr/colorOnPrimaryContainer</item>
+        <item name="iconTint">?attr/colorOnPrimaryContainer</item>
+        <item name="rippleColor">?attr/colorControlHighlight</item>
+        <item name="iconSize">20dp</item>
+        <item name="iconPadding">8dp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:letterSpacing">0</item>
+        <item name="android:maxLines">1</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.SelectionIcon" parent="Widget.Overdrive.Rec.DateArrow">
+        <item name="iconSize">22dp</item>
+        <item name="iconTint">?attr/colorOnPrimaryContainer</item>
+        <item name="rippleColor">?attr/colorControlHighlight</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.SheetCancel" parent="Widget.Material3.Button.TonalButton">
+        <item name="android:minHeight">@dimen/od_touch_min</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:paddingLeft">20dp</item>
+        <item name="android:paddingRight">20dp</item>
+        <item name="cornerRadius">@dimen/od_radius_pill_48</item>
+        <item name="android:textAllCaps">false</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.SheetApply" parent="Widget.Material3.Button">
+        <item name="android:minHeight">@dimen/od_touch_min</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:paddingLeft">24dp</item>
+        <item name="android:paddingRight">24dp</item>
+        <item name="cornerRadius">@dimen/od_radius_pill_48</item>
+        <item name="android:textAllCaps">false</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.SheetReset" parent="Widget.Material3.Button.TextButton">
+        <item name="android:minHeight">@dimen/od_touch_min</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="cornerRadius">@dimen/od_radius_pill_48</item>
+        <item name="android:textAllCaps">false</item>
+    </style>
+    <!-- 40dp visual circle inside a 48dp hit area. -->
+    <style name="Widget.Overdrive.Rec.RowAction" parent="">
+        <item name="android:layout_width">@dimen/od_touch_min</item>
+        <item name="android:layout_height">@dimen/od_touch_min</item>
+        <item name="android:background">@drawable/rec_icon_ripple_40</item>
+        <item name="android:scaleType">center</item>
+        <item name="tint">?attr/colorOnSurfaceVariant</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.PlayerGlassButton" parent="">
+        <item name="android:layout_width">@dimen/od_touch_min</item>
+        <item name="android:layout_height">@dimen/od_touch_min</item>
+        <item name="android:background">@drawable/rec_player_glass_btn</item>
+        <item name="android:scaleType">center</item>
+        <item name="tint">@color/rec_player_on_glass</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.PlayerQuadButton" parent="">
+        <item name="android:layout_width">@dimen/rec_player_quad_width</item>
+        <item name="android:layout_height">@dimen/od_touch_min</item>
+        <item name="android:background">@drawable/rec_player_quad_item</item>
+        <item name="android:padding">12dp</item>
+        <item name="android:scaleType">centerInside</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.PlayerTransport" parent="">
+        <item name="android:layout_width">@dimen/od_touch_min</item>
+        <item name="android:layout_height">@dimen/od_touch_min</item>
+        <item name="android:background">@drawable/rec_icon_ripple_40</item>
+        <item name="android:scaleType">center</item>
+        <item name="tint">@color/rec_player_on_glass</item>
+    </style>
+
+    <!-- Pill segments: the TextButton checked/unchecked roles mapped to the mock's colours. -->
+    <style name="ThemeOverlay.Overdrive.Rec.Segments" parent="">
+        <item name="colorSecondaryContainer">?attr/colorPrimaryContainer</item>
+        <item name="colorOnSecondaryContainer">?attr/colorOnPrimaryContainer</item>
+        <item name="colorOnSurface">?attr/colorOnSurfaceVariant</item>
+    </style>
+    <!-- Filter options: checked chips use primary container like the segments. -->
+    <style name="ThemeOverlay.Overdrive.Rec.FilterOptions" parent="">
+        <item name="colorSecondaryContainer">?attr/colorPrimaryContainer</item>
+        <item name="colorOnSecondaryContainer">?attr/colorOnPrimaryContainer</item>
+    </style>
+
+    <!-- Landscape filters side sheet (end edge). -->
+    <style name="ShapeAppearance.Overdrive.Rec.SideSheet" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">@dimen/od_radius_panel</item>
+    </style>
+    <style name="Widget.Overdrive.Rec.SideSheet" parent="Widget.Material3.SideSheet.Modal">
+        <item name="android:layout_width">@dimen/rec_side_sheet_width</item>
+        <item name="backgroundTint">?attr/colorSurfaceContainerHigh</item>
+        <item name="shapeAppearance">@style/ShapeAppearance.Overdrive.Rec.SideSheet</item>
+    </style>
+    <style name="ThemeOverlay.Overdrive.Rec.SideSheet" parent="ThemeOverlay.Material3.SideSheetDialog">
+        <item name="sideSheetModalStyle">@style/Widget.Overdrive.Rec.SideSheet</item>
+    </style>
+</resources>

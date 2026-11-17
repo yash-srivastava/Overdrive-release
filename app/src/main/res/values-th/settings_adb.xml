@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_section_adb">ADB</string>
+    <string name="settings_adb_subtitle">การเชื่อมต่อ การเปิดใช้ และการกู้คืนอัตโนมัติ</string>
+    <string name="settings_adb_connection_title">การเชื่อมต่อ</string>
+    <string name="settings_adb_automatic_title">การกู้คืนอัตโนมัติ</string>
+    <string name="settings_adb_automatic_restore">กู้คืน ADB อัตโนมัติ</string>
+    <string name="settings_adb_automatic_description">คืนค่าการตั้งค่า ADB เมื่อเริ่มแอปและเมื่อถูกปิด ต้องได้รับสิทธิ์เปลี่ยนการตั้งค่าไว้ก่อน โดยไม่ต้องใช้ Wi-Fi ส่วน DiLink 5 รองรับการกู้คืนแบบไร้สายผ่าน Wi-Fi ที่ตรวจสอบแล้วและคีย์ที่เคยอนุญาต</string>
+    <string name="settings_adb_recover">กู้คืน ADB ตอนนี้</string>
+    <string name="settings_adb_cancel_recovery">ยกเลิกการกู้คืน</string>
+    <string name="settings_adb_manual_title">เปิดใช้ด้วยตนเอง</string>
+    <string name="settings_adb_manual_description">ใช้เครื่องมือ BYD ที่เข้ากันได้เพื่อขอเข้าถึง ADB ไม่จำเป็นต้องเชื่อมต่อ Wi-Fi</string>
+    <string name="settings_adb_enable">เปิดใช้ ADB</string>
+    <string name="settings_adb_advanced_tools">เครื่องมือขั้นสูง</string>
+    <string name="settings_adb_hide_advanced">ซ่อนเครื่องมือขั้นสูง</string>
+    <string name="settings_adb_advanced_description">ตรวจสอบปัญหา เปิดเครื่องมือ BYD หรือเลิกทำการลองเปิดใช้ด้วยตนเอง</string>
+    <string name="settings_adb_open_developer">เปิดตัวเลือกสำหรับนักพัฒนา</string>
+    <string name="settings_adb_developer_page">ขอเปิดหน้านักพัฒนา BYD</string>
+    <string name="settings_adb_diagnostics">ตรวจสอบความเข้ากันได้และการเชื่อมต่อ</string>
+    <string name="settings_adb_restore">เลิกทำการเปลี่ยนแปลงจากการเปิดใช้ด้วยตนเอง</string>
+    <string name="settings_adb_export">ส่งออก APK ของเครื่องมือนักพัฒนา BYD</string>
+    <string name="settings_adb_dialog_confirm">อนุญาตการแก้ไขข้อบกพร่องแบบไร้สายบนเครือข่ายนี้</string>
+    <string name="settings_adb_dialog_confirm_description">เชื่อมต่อกับเครือข่าย Wi-Fi ที่ผ่านการตรวจสอบก่อน อนุญาตให้ OverDrive ยืนยันกล่องโต้ตอบการแก้ไขข้อบกพร่องแบบไร้สายสำหรับเครือข่ายนี้เท่านั้น</string>
+    <string name="settings_adb_tools_unavailable">การเปิดใช้ด้วยตนเองไม่พร้อมใช้งานสำหรับโหมดปัจจุบันหรือเครื่องมือ BYD ที่ติดตั้งไว้</string>
+    <string name="settings_adb_recovery_availability">การกู้คืนภายในเครื่องต้องใช้สิทธิ์เปลี่ยนการตั้งค่าที่ได้รับระหว่างตั้งค่า ADB ไม่ต้องใช้ Wi-Fi หรือโหมด DiLink 5</string>
+    <string name="settings_adb_details_title">รายละเอียดการลองครั้งล่าสุด</string>
+    <string name="settings_adb_recovery_confirm_body">การกู้คืนภายในเครื่องใช้สิทธิ์เปลี่ยนการตั้งค่าที่ได้รับไว้แล้ว โดยไม่ต้องใช้ Wi-Fi ส่วน DiLink 5 สามารถใช้ Wi-Fi ที่ตรวจสอบแล้วและคีย์ที่เคยอนุญาตได้ด้วย อาจเปิดหรือคืนค่า ADB เครือข่ายที่พอร์ต 5555 ซึ่งอุปกรณ์อื่นในเครือข่ายรถอาจเข้าถึงได้ ทำต่อเฉพาะเครือข่ายที่ไว้ใจ การยืนยันด้วยคีย์ ADB ยังเปิดอยู่</string>
+    <string name="settings_adb_recovery_permission_missing">ไม่มีสิทธิ์เปลี่ยนการตั้งค่า หาก ADB ใช้ไม่ได้ด้วย ให้ใช้ เปิดใช้ ADB หรือตัวเลือกสำหรับนักพัฒนาก่อน แล้วตั้งค่า ADB ให้เสร็จอีกครั้ง</string>
+    <string name="settings_adb_recovery_setting_enabled">เปิดการตั้งค่า ADB แล้ว แต่ยังไม่ได้ยืนยันการเชื่อมต่อ ADB ที่ผ่านการตรวจสอบสิทธิ์</string>
+    <string name="settings_adb_recovery_setting_failed">ไม่สามารถเปิดและตรวจสอบการตั้งค่า ADB ได้ เฟิร์มแวร์อาจปฏิเสธการเปลี่ยนแปลง</string>
+    <string name="settings_adb_recovery_save_failed">บันทึกตัวเลือกการกู้คืนอัตโนมัติไม่ได้ ตรวจสอบ ADB แล้วลองอีกครั้ง</string>
+</resources>

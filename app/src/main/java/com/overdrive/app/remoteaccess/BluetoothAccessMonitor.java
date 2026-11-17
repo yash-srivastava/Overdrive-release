@@ -224,10 +224,13 @@ public final class BluetoothAccessMonitor {
 
     private JSONObject reconnectSnapshot(String address) throws Exception {
         BluetoothPhoneReconnectController.Snapshot value = reconnect.snapshot(address);
-        return new JSONObject().put("state", value.state).put("reason", value.reason)
+        JSONObject json = new JSONObject().put("state", value.state).put("reason", value.reason)
                 .put("lastAttemptMs", value.lastAttemptMs).put("retryInMs", value.retryInMs)
                 .put("attemptCount", value.attemptCount)
-                .put("errorStage", value.errorStage).put("errorClass", value.errorClass);
+                .put("errorStage", value.errorStage).put("errorClass", value.errorClass)
+                .put("failures", reconnect.failures(address));
+        if (!value.errorDetail.isEmpty()) json.put("errorDetail", value.errorDetail);
+        return json;
     }
 
     /** Consent is reread at each native connection-proof boundary. */

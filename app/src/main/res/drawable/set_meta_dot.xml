@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Separator dot between two values on one meta line. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+    <size android:width="3dp" android:height="3dp" />
+    <solid android:color="?attr/colorOnSurfaceVariant" />
+</shape>

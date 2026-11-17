@@ -55,6 +55,8 @@ set(SURVEILLANCE_SOURCES
     # Camera/EGL: AHardwareBuffer → EGLImage → GL_TEXTURE_EXTERNAL_OES
     # binding for the ImageReader-based zero-copy camera path.
     camera/HardwareBufferTextureBinder.cpp
+    # CPU recording engine: camera strip -> encoder YUV 2x2 grid + overlay.
+    camera/CpuMosaicCompositor.cpp
 )
 
 add_library(surveillance SHARED ${SURVEILLANCE_SOURCES})

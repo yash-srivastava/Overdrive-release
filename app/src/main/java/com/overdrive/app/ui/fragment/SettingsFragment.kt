@@ -24,6 +24,7 @@ import com.overdrive.app.roadsense.overlay.RoadSenseOverlayService
 import com.overdrive.app.ui.MainActivity
 import com.overdrive.app.updater.AppUpdater
 import com.overdrive.app.ui.dialog.LanguagePickerDialog
+import com.overdrive.app.ui.fragment.settings.SettingsAdbFragment
 import com.overdrive.app.ui.fragment.settings.SettingsAppearanceFragment
 import com.overdrive.app.ui.fragment.settings.SettingsDaemonsFragment
 import com.overdrive.app.ui.fragment.settings.SettingsOverlayFragment
@@ -82,8 +83,9 @@ class SettingsFragment : Fragment() {
         SURVEILLANCE(R.string.settings_section_surveillance, R.drawable.ic_sentry, navigates = true),
         STORAGE(R.string.recording_lib_filter_section_storage, R.drawable.ic_recording_storage, navigates = true),
         OVERLAY(R.string.settings_section_overlay, R.drawable.ic_overlay_rec_active),
+        ADB(R.string.settings_section_adb, R.drawable.ic_diagnostics),
         SECURITY(R.string.settings_section_security, R.drawable.ic_security_lock),
-        DAEMONS(R.string.settings_section_daemons, R.drawable.ic_services),
+        DAEMONS(R.string.daemons_hero_title, R.drawable.ic_services),
         PRIVACY(R.string.settings_section_privacy, R.drawable.ic_delete),
     }
 
@@ -259,6 +261,7 @@ class SettingsFragment : Fragment() {
         Section.SURVEILLANCE -> SettingsSurveillanceFragment()
         Section.STORAGE -> SettingsStorageFragment()
         Section.OVERLAY -> SettingsOverlayFragment()
+        Section.ADB -> SettingsAdbFragment()
         Section.SECURITY -> SettingsSecurityFragment()
         Section.DAEMONS -> SettingsDaemonsFragment()
         Section.PRIVACY -> SettingsPrivacyFragment()
@@ -348,6 +351,9 @@ class SettingsFragment : Fragment() {
         }
         view.findViewById<View>(R.id.cardSectionStorage)?.setOnClickListener {
             findNavController().navigateDrillDown(R.id.storageSettingsWebFragment)
+        }
+        view.findViewById<View>(R.id.cardSectionAdb)?.setOnClickListener {
+            findNavController().navigateDrillDown(R.id.settingsAdbFragment)
         }
         view.findViewById<View>(R.id.cardSectionSecurity)?.setOnClickListener {
             findNavController().navigateDrillDown(R.id.settingsSecurityFragment)

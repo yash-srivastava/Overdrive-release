@@ -65,7 +65,7 @@ public final class AutomationCategories {
         put(CLIMATE, "setAc", "setAcTemp", "stepAcTemp", "setAcFan", "stepAcFan", "ac", "temperature", "outsideTemp",
                 "seat", "seatClimate", "seat_heat_driver", "seat_heat_passenger",
                 "seat_vent_driver", "seat_vent_passenger",
-                "acAuto", "acSync", "acAutoOff", "fanOnly", "steeringHeat", "recirculation",
+                "acAuto", "acSync", "acAutoOff", "fanOnly", "steeringHeat", "recirculation", "airflow",
                 "frontDefrost", "rearDefrost", "maxCool", "airPurify", "acFanLevel");
         // ── Windows / body / openings ──
         put(WINDOWS_BODY, "windows", "windowsAll", "windowsPreset", "windowState",
@@ -102,7 +102,7 @@ public final class AutomationCategories {
                 "charge_cap_enabled", "charge_cap_percent", "battery_hold", "target_soc",
                 "acChargeCurrentLimit");
         // ── Media / audio ──
-        put(MEDIA, "mediaVolume", "channelVolume", "volumeStep", "mediaControl",
+        put(MEDIA, "mediaVolume", "channelVolume", "engineSound", "volumeStep", "mediaControl",
                 "playAudio", "playVideo", "stopAudio", "speak");
         // ── Displays ──
         put(DISPLAYS, "screenBrightness", "clusterBrightness", "hudBrightness",

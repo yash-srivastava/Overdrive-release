@@ -312,7 +312,8 @@ final class TranscriptMatcher {
         s = AC.matcher(s).replaceAll(" ac ");
         Matcher deg = DEGREES.matcher(s);
         s = deg.replaceAll("$1 degrees");
-        s = NON_WORD.matcher(s.replace("'", "")).replaceAll(" ");
+        s = NON_WORD.matcher(s.replace("'", "").replace("\u2019", "").replace("\u2018", "").replace("\u02bc", "")
+                .replace("`", "")).replaceAll(" ");
         String[] raw = s.trim().split("\\s+");
         List<String> out = new ArrayList<>(raw.length);
         for (int i = 0; i < raw.length; i++) {
@@ -365,6 +366,19 @@ final class TranscriptMatcher {
             else if (!FILLERS.contains(w)) return false;
         }
         return marker;
+    }
+
+    /** Any negation word in the transcript ("don't", "not", "never", "no", ...). */
+    static boolean saysNegation(String text) {
+        if (text == null) return false;
+        List<String> t = normalize(text);
+        for (int i = 0; i < t.size(); i++) {
+            if (!NEGATIONS.contains(t.get(i))) continue;
+            // the emphatic "don't forget to ..."
+            if ("dont".equals(t.get(i)) && i + 1 < t.size() && "forget".equals(t.get(i + 1))) continue;
+            return true;
+        }
+        return false;
     }
 
     /** A negation word earlier in the clause, unless it is the emphatic "don't forget to ...". */

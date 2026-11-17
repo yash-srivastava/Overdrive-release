@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Trip Briefing: the car-start "Heading to work? Want directions?" prompt. The spoken line is
+         greeting + heading + duration (or one extra that replaces it) + question, joined by spaces,
+         and read aloud by text-to-speech. -->
+    <string name="trip_briefing_greeting_morning">Dobré ráno.</string>
+    <string name="trip_briefing_greeting_afternoon">Dobré odpoledne.</string>
+    <string name="trip_briefing_greeting_evening">Dobrý večer.</string>
+    <string name="trip_briefing_heading_home">Jedete domů?</string>
+    <string name="trip_briefing_heading_work">Jedete do práce?</string>
+    <!-- %1$s: the place's name, e.g. "Phoenix Mall". -->
+    <string name="trip_briefing_heading_place">%1$s – jedete tam?</string>
+    <plurals name="trip_briefing_duration">
+        <item quantity="one">Asi %1$d minuta.</item>
+        <item quantity="few">Asi %1$d minuty.</item>
+        <item quantity="many">Asi %1$d minuty.</item>
+        <item quantity="other">Asi %1$d minut.</item>
+    </plurals>
+    <!-- %1$s: range left, %2$s: the trip's length, each "31 km" or "19 mi". -->
+    <string name="trip_briefing_extra_range">Dojezd je na hraně: zbývá %1$s na cestu dlouhou %2$s.</string>
+    <plurals name="trip_briefing_extra_hazards">
+        <item quantity="one">Na trase je %1$d nové nebezpečí.</item>
+        <item quantity="few">Na trase jsou %1$d nová nebezpečí.</item>
+        <item quantity="many">Na trase je %1$d nového nebezpečí.</item>
+        <item quantity="other">Na trase je %1$d nových nebezpečí.</item>
+    </plurals>
+    <!-- %1$s: an hour of the day in the device's clock format, e.g. "7 PM" or "19:00". -->
+    <string name="trip_briefing_extra_rain">Kolem %1$s bude nejspíš pršet.</string>
+    <string name="trip_briefing_question">Mám spustit navigaci?</string>
+    <string name="trip_briefing_distance_km">%1$d km</string>
+    <string name="trip_briefing_distance_mi">%1$d mi</string>
+
+    <!-- The destination as the AI assistant should say it. -->
+    <string name="trip_briefing_said_home">domov</string>
+    <string name="trip_briefing_said_work">práce</string>
+
+    <!-- Card -->
+    <string name="trip_briefing_title_home">Domov</string>
+    <string name="trip_briefing_title_work">Práce</string>
+    <!-- Title for a regular destination that has no name yet. -->
+    <string name="trip_briefing_title_unnamed">Váš obvyklý cíl</string>
+    <string name="trip_briefing_name_place">Pojmenovat místo</string>
+    <string name="trip_briefing_no">Ne</string>
+    <string name="trip_briefing_go_failed">Navigace se nespustila. Otevřete mapu a spusťte ji.</string>
+    <!-- The car's own navigation app. -->
+    <string name="trip_briefing_app_car">Navigace auta</string>
+</resources>

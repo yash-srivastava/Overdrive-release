@@ -455,10 +455,114 @@ public final class LauncherApiHandler {
             }
             o.put("schedule", schedule);
 
+            putSessionCost(o, active);
+
             return o;
         } catch (Throwable t) {
             return JSONObject.NULL;
         }
+    }
+
+    /**
+     * addedKwh / cost / currency / costEstimated as the Charging page's live tile derives them: the open
+     * session row first, else the live session energy at the live rate (estimated); null when unknown or
+     * the row's power data is poisoned. Nothing is read while not charging.
+     */
+    private static void putSessionCost(JSONObject o, boolean active) throws Exception {
+        Object added = JSONObject.NULL;
+        Object cost = JSONObject.NULL;
+        Object currency = JSONObject.NULL;
+        boolean costEstimated = false;
+        if (active) {
+            try {
+                com.overdrive.app.monitor.SocHistoryDatabase db =
+                        com.overdrive.app.monitor.SocHistoryDatabase.getInstance();
+                if (db != null) {
+                    com.overdrive.app.charging.ChargingApiHandler.LivePublication live =
+                            com.overdrive.app.charging.ChargingApiHandler.readLivePublication(db);
+                    JSONObject s = openSessionRow(db, live.charging);
+                    double liveKwh = live.sessionKwh > 0 ? live.sessionKwh : 0;
+                    boolean poisoned = s != null && "poisoned".equals(s.optString("powerDataQuality", ""));
+                    double rowKwh = positive(s, "energyAdded");
+                    if (!poisoned && rowKwh > 0) added = round2(rowKwh);
+                    else if (!poisoned && liveKwh > 0) added = round2(liveKwh);
+                    double rowCost = positive(s, "cost");
+                    double rate = rowCost > 0 || poisoned || liveKwh <= 0 ? 0 : liveRate(s);
+                    if (rowCost > 0) {
+                        cost = round2(rowCost);
+                        costEstimated = energyApproximate(s);
+                    } else if (rate > 0) {
+                        cost = round2(liveKwh * rate);
+                        costEstimated = true;
+                    }
+                    if (cost != JSONObject.NULL) currency = pageCurrency();
+                }
+            } catch (Throwable ignored) {}
+        }
+        o.put("addedKwh", added);
+        o.put("cost", cost);
+        o.put("currency", currency);
+        o.put("costEstimated", costEstimated);
+    }
+
+    /** The open row the page prices: the newest session, while in progress and charging (as the overview marks it). */
+    private static JSONObject openSessionRow(com.overdrive.app.monitor.SocHistoryDatabase db, boolean liveCharging) {
+        JSONArray rows = db.getChargingSessionsV2(7, 1, 0);
+        JSONObject row = rows != null ? rows.optJSONObject(0) : null;
+        if (row == null || !row.optBoolean("inProgress", false)) return null;
+        return row.optBoolean("chargingNow", false) || liveCharging ? row : null;
+    }
+
+    /** The page's live rate: the row's own, else the DC tariff for a DC-fast row, else the base rate. */
+    private static double liveRate(JSONObject s) {
+        double own = positive(s, "electricityRate");
+        if (own > 0) return own;
+        JSONObject cfg = com.overdrive.app.config.UnifiedConfigManager.loadConfig();
+        JSONObject charging = cfg != null ? cfg.optJSONObject("chargingAnalytics") : null;
+        double dc = charging != null ? charging.optDouble("dcRate", 0) : 0;
+        if (Double.isFinite(dc) && dc > 0 && s != null && s.optInt("gunState", -1) == 3
+                && positive(s, "peakPower") >= 15) {
+            return dc;
+        }
+        JSONObject from = pricingSection(cfg, "electricityRate");
+        double base = from != null ? from.optDouble("electricityRate", 0) : 0;
+        return Double.isFinite(base) ? base : 0;
+    }
+
+    /** The configured currency as the Charging page shows it ("$" when none is set). */
+    private static String pageCurrency() {
+        JSONObject from = pricingSection(com.overdrive.app.config.UnifiedConfigManager.loadConfig(), "currency");
+        String c = from != null ? from.optString("currency", "") : "";
+        if (!com.overdrive.app.charging.ChargingConfig.isValidCurrency(c)) c = "";
+        return c.isEmpty() ? "$" : c;
+    }
+
+    // Rate and currency live in tripAnalytics, else the legacy chargingAnalytics copy (as ChargingConfig reads them).
+    private static JSONObject pricingSection(JSONObject cfg, String key) {
+        if (cfg == null) return null;
+        JSONObject trip = cfg.optJSONObject("tripAnalytics");
+        if (trip != null && trip.has(key)) return trip;
+        return cfg.optJSONObject("chargingAnalytics");
+    }
+
+    /** The page's _energyIsApproximate for a session row. */
+    private static boolean energyApproximate(JSONObject s) {
+        if (s.optBoolean("energyIncomplete", false) || s.optBoolean("energyEstimated", false)) return true;
+        String source = s.isNull("energySource") ? "" : s.optString("energySource", "");
+        if (!source.isEmpty()) {
+            return !com.overdrive.app.charging.SessionEnergyResolver.SRC_METERED.equals(source);
+        }
+        return positive(s, "energyAdded") > 0;
+    }
+
+    private static double positive(JSONObject o, String key) {
+        if (o == null || !o.has(key) || o.isNull(key)) return 0;
+        double v = o.optDouble(key, 0);
+        return Double.isFinite(v) && v > 0 ? v : 0;
+    }
+
+    private static double round2(double v) {
+        return Math.round(v * 100.0) / 100.0;
     }
 
     /** trip: the live trip when one is active, else the most recent completed

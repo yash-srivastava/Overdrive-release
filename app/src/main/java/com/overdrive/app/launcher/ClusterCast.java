@@ -57,10 +57,26 @@ public final class ClusterCast {
     // app owns its own task affinity, so NEW_TASK is sufficient and correct.
     private static final String LAUNCH_FLAGS = "0x10000000";
 
-    // Poll budget for the fission display to appear after the projection opens
-    // (materialises ~1-3s after the open opcodes). Mirrors ClusterMapProjector.
+    // The open's opcode sequence runs first; the display then gets the car-proven 20 s window,
+    // and a display that arrives within the following minute retries the cast once.
     private static final int READY_POLL_MS = 250;
-    private static final int READY_TIMEOUT_MS = 8000;
+    private static final long OPEN_WAIT_MS = 60_000L;
+    private static final long DISPLAY_WAIT_MS = 20_000L;
+    private static final long LATE_DISPLAY_WATCH_MS = 60_000L;
+    private static final long LATE_DISPLAY_POLL_MS = 2_000L;
+    private static final int DISPLAY_NOT_OPENED = -2;
+    private static final int DISPLAY_TIMED_OUT = -1;
+    // Post-launch guard: apps that relaunch onto the head unit are moved back (500 ms polls,
+    // 30 s guard, +15 s after each move, 90 s cap).
+    private static final long GUARD_POLL_MS = 500L;
+    private static final long GUARD_INITIAL_MS = 30_000L;
+    private static final long GUARD_AFTER_MOVE_MS = 15_000L;
+    private static final long GUARD_MAX_MS = 90_000L;
+    // An app that bounces straight back this many times is fighting the move; stop moving it.
+    private static final int GUARD_MAX_CONSECUTIVE_MOVES = 10;
+    private static final long QUEUED_START_SETTLE_MS = 45_000L;
+    private static final long SESSION_WATCH_POLL_MS = 5_000L;
+    private static final int SESSION_WATCH_MISSES = 3;
     // Post-launch resume verify+retry (am start exits on ACCEPT, not RESUMED-on-display).
     private static final int LAUNCH_VERIFY_ATTEMPTS = 3;
     private static final int LAUNCH_VERIFY_POLLS_PER_ATTEMPT = 6;
@@ -124,7 +140,55 @@ public final class ClusterCast {
     // display 0 (stop's CLEAR_AFFINITY / FOREGROUND) or after the boot sweep reparents it.
     private static final String CAST_STRANDED_PKG = "clusterCastStrandedPkg";
 
+    // Legacy outcome of the session accepted by start(): 0 pending, 1 on the cluster, -1 failed.
+    private static final Object OUTCOME_LOCK = new Object();
+    private static long outcomeGeneration;
+    private static int outcomeState;
+    private static volatile String lastLegacyFailure = "";
+    private static final ThreadLocal<Long> ACCEPTED_GENERATION = new ThreadLocal<>();
+    // Bumped by every legacy start()/stop(); a late-display retry fires only if neither happened since.
+    private static volatile long castIntentEpoch;
+
     private ClusterCast() {}
+
+    private static void beginOutcome(long generation) {
+        synchronized (OUTCOME_LOCK) {
+            outcomeGeneration = generation;
+            outcomeState = 0;
+        }
+    }
+
+    private static void resolveOutcome(long generation, boolean onCluster, String reason) {
+        synchronized (OUTCOME_LOCK) {
+            if (generation != outcomeGeneration || outcomeState != 0) return;
+            outcomeState = onCluster ? 1 : -1;
+            if (!onCluster) lastLegacyFailure = reason == null ? "" : reason;
+            OUTCOME_LOCK.notifyAll();
+        }
+    }
+
+    /** 1 when the app reached the cluster, -1 when the cast failed, 0 when still pending. */
+    private static int awaitOutcome(long generation, long timeoutMs) {
+        long deadline = android.os.SystemClock.elapsedRealtime() + Math.max(0L, timeoutMs);
+        synchronized (OUTCOME_LOCK) {
+            while (generation == outcomeGeneration && outcomeState == 0) {
+                long left = deadline - android.os.SystemClock.elapsedRealtime();
+                if (left <= 0) return 0;
+                try {
+                    OUTCOME_LOCK.wait(left);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    return 0;
+                }
+            }
+            return generation == outcomeGeneration ? outcomeState : -1;
+        }
+    }
+
+    private static boolean refuse(String reason) {
+        lastLegacyFailure = reason;
+        return false;
+    }
 
     /** True when the freeform-on-cluster resize feature is enabled (UCM
      *  surveillance.clusterFreeformResize, default {@link #FREEFORM_RESIZE_DEFAULT} = ON). Read
@@ -335,8 +399,14 @@ public final class ClusterCast {
      */
     public static ResizeResult resizeWithResult(int l, int t, int r, int b, boolean commit,
                                                 String forPkg) {
+        return resizeWithResult(l, t, r, b, commit, forPkg, 0L);
+    }
+
+    public static ResizeResult resizeWithResult(int l, int t, int r, int b, boolean commit,
+                                                String forPkg, long expectedGeneration) {
         if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) {
-            return ResizeResult.of(DiLink5ClusterCast.resize(l, t, r, b, commit));
+            return ResizeResult.of(DiLink5ClusterCast.resize(
+                    l, t, r, b, commit, forPkg, expectedGeneration));
         }
         if (!freeformResizeEnabled()) return ResizeResult.of(false);
         if (r - l <= 0 || b - t <= 0) return ResizeResult.of(false);
@@ -359,6 +429,9 @@ public final class ClusterCast {
             // to the head unit.
             if (castPkg == null || castStopInProgress) return ResizeResult.of(false);
             if (forPkg != null && !forPkg.isEmpty() && !forPkg.equals(castPkg)) {
+                return ResizeResult.of(false);
+            }
+            if (expectedGeneration != 0L && expectedGeneration != castSessionGeneration) {
                 return ResizeResult.of(false);
             }
             pkg = castPkg;
@@ -757,6 +830,8 @@ public final class ClusterCast {
                 // SurfaceFlinger hazard the ACC-off path exists to avoid. The residue dies with the
                 // projection close, and the boot sweep reparents anything left stranded.
                 logger.info("cluster cast: projection dropped our token — reconciling " + pkg);
+                ClusterAppDensity.deferRestoration("legacy:" + castSessionGeneration);
+                resolveOutcome(castSessionGeneration, false, "the cluster projection was closed");
                 castPkg = null;
                 launchThread = null;
                 try { ClusterFreeformWindow.invalidateTaskCache(); } catch (Throwable ignored) {}
@@ -778,28 +853,46 @@ public final class ClusterCast {
      * the async resume race.
      */
     public static synchronized boolean start(String pkg) {
+        com.overdrive.app.launcher.layout.LayoutModeGate.StandardStart admission =
+                com.overdrive.app.launcher.layout.LayoutModeGate.enterStandard();
+        if (admission == null) {
+            logger.warn("cluster cast: stop Layouts before starting a single app");
+            return refuse("stop the cluster layout first");
+        }
+        try {
+            return startAdmitted(pkg);
+        } finally {
+            admission.close();
+        }
+    }
+
+    private static boolean startAdmitted(String pkg) {
         if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) {
             return DiLink5ClusterCast.start(pkg);
         }
+        ACCEPTED_GENERATION.remove();
+        castIntentEpoch++;
         if (ClusterProjectionController
                 .isLegacyProjectionAdmissionBlocked()) {
             logger.warn("cluster cast: legacy projection blocked by "
                     + "unresolved cluster recovery ownership");
-            return false;
+            return refuse(ClusterProjectionController.isLegacyRestoreInFlight()
+                    ? "the cluster is still restoring the gauges; try again in a moment"
+                    : "a previous cluster command has not returned yet");
         }
         if (castStopInProgress) {
             logger.warn("cluster cast: start deferred while previous cast is stopping");
-            return false;
+            return refuse("the previous cast is still stopping");
         }
         if (pkg == null || pkg.trim().isEmpty() || !AppLauncher.isValidPackageName(pkg.trim())) {
             logger.warn("cluster cast: missing/invalid package");
-            return false;
+            return refuse("invalid package");
         }
         pkg = pkg.trim();
         final String component = AppLauncher.resolveLauncherComponent(pkg);
         if (component == null) {
             logger.warn("cluster cast: could not resolve launcher component for " + pkg);
-            return false;
+            return refuse("the app has no launchable activity");
         }
         // REPLACING A LIVE CAST: undo the outgoing app's freeform state FIRST. Without this the old
         // app stays parked on the cluster in FREEFORM at its old box (stop() only ever acts on the
@@ -837,7 +930,7 @@ public final class ClusterCast {
                     .acquireSustained(TOKEN)) {
                 logger.warn("cluster cast: sustained projection was not admitted");
                 castPkg = null;
-                return false;
+                return refuse("the cluster projection is busy; try again in a moment");
             }
         } catch (Throwable t) {
             logger.warn("cluster cast: acquireSustained failed: " + t.getMessage());
@@ -849,8 +942,11 @@ public final class ClusterCast {
             try { ClusterProjectionController.getInstance().releaseSustained(TOKEN); }
             catch (Throwable ignored) {}
             castPkg = null;
-            return false;
+            return refuse("the cluster projection could not be opened");
         }
+        final long generation = castSessionGeneration;
+        beginOutcome(generation);
+        ACCEPTED_GENERATION.set(generation);
         // Now stop any active nav-map projection. ORDER MATTERS: our "castapp" hold is
         // already in place, so the map's releaseSustained("map") sees a remaining holder
         // and leaves the projection OPEN (no close→reopen churn, no new fission id, no
@@ -881,7 +977,7 @@ public final class ClusterCast {
         final String castComponent = component;
         final String replaced = outgoing != null && !outgoing.equals(pkg) ? outgoing
                 : (!stranded.isEmpty() && !stranded.equals(pkg) ? stranded : null);
-        launchThread = new Thread(() -> waitAndLaunch(castComponent, replaced),
+        launchThread = new Thread(() -> waitAndLaunch(castComponent, replaced, generation),
                 "ClusterCastLaunch");
         launchThread.setDaemon(true);
         launchThread.start();
@@ -940,14 +1036,88 @@ public final class ClusterCast {
                     + (android.os.SystemClock.elapsedRealtime() - startedAt) + "ms settle");
         }
         if (Thread.currentThread().isInterrupted()) return false;
+        if (accKnownOff()) return refuse("the car is off");
         return start(pkg);
+    }
+
+    private static boolean accKnownOff() {
+        return com.overdrive.app.monitor.AccMonitor.isAccStateAuthoritative()
+                && !com.overdrive.app.monitor.AccMonitor.isAccOn();
+    }
+
+    /** True while a legacy stop is still re-homing the app and holding the projection. */
+    static boolean isStopping() {
+        synchronized (ClusterCast.class) {
+            return castStopInProgress;
+        }
+    }
+
+    /**
+     * Legacy request/response start: queues behind a running stop or restore, then waits until
+     * the app is on the cluster (true) or the cast failed or is still pending (false).
+     */
+    public static boolean startAfterSettleAndAwait(String pkg, long settleMs, long awaitMs) {
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) {
+            return DiLink5ClusterCast.startAndAwait(pkg, settleMs + awaitMs);
+        }
+        lastLegacyFailure = "";
+        ACCEPTED_GENERATION.remove();
+        if (!startAfterSettle(pkg, settleMs)) {
+            if (lastLegacyFailure.isEmpty()) lastLegacyFailure = "the cast was not accepted";
+            return false;
+        }
+        Long generation = ACCEPTED_GENERATION.get();
+        ACCEPTED_GENERATION.remove();
+        if (generation == null) return false;
+        int outcome = awaitOutcome(generation, awaitMs);
+        if (outcome == 0) {
+            lastLegacyFailure = "the cluster has not shown the app yet; it is still trying";
+        } else if (outcome < 0 && lastLegacyFailure.isEmpty()) {
+            lastLegacyFailure = "a newer cluster request replaced this cast";
+        }
+        return outcome > 0;
+    }
+
+    /** Non-blocking start; a stop or gauge restore still running is waited out on its own thread. */
+    public static boolean startWhenSettled(String pkg) {
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()
+                || !legacyStartSettling()) {
+            return start(pkg);
+        }
+        final long intent = castIntentEpoch;
+        try {
+            Thread queued = new Thread(() -> {
+                long deadline = android.os.SystemClock.elapsedRealtime() + QUEUED_START_SETTLE_MS;
+                while (legacyStartSettling()
+                        && android.os.SystemClock.elapsedRealtime() < deadline) {
+                    try {
+                        Thread.sleep(SETTLE_POLL_MS);
+                    } catch (InterruptedException interrupted) {
+                        return;
+                    }
+                }
+                if (castIntentEpoch != intent || accKnownOff()
+                        || com.overdrive.app.navmap.ClusterMapProjector.isActive()
+                        || ClusterLayouts.isActive()) {
+                    logger.info("cluster cast: queued start of " + pkg + " dropped (superseded)");
+                    return;
+                }
+                start(pkg);
+            }, "ClusterCastQueued");
+            queued.setDaemon(true);
+            queued.start();
+            logger.info("cluster cast: " + pkg + " queued behind the running stop/restore");
+            return true;
+        } catch (Throwable t) {
+            return start(pkg);
+        }
     }
 
     private static boolean legacyStartSettling() {
         synchronized (ClusterCast.class) {
             if (castStopInProgress) return true;
         }
-        return ClusterProjectionController.isLegacyRestoreInFlight();
+        return ClusterProjectionController.isLegacyRestoreInFlight() || ClusterLayouts.isBusy();
     }
 
     public static String getStartPhase() {
@@ -957,7 +1127,7 @@ public final class ClusterCast {
 
     public static String getLastStartFailure() {
         return com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()
-                ? DiLink5ClusterCast.getLastFailureReason() : "";
+                ? DiLink5ClusterCast.getLastFailureReason() : lastLegacyFailure;
     }
 
     /**
@@ -1014,6 +1184,7 @@ public final class ClusterCast {
                 return DiLink5ClusterCast.stop(rehomeMode == FOREGROUND);
             }
         }
+        if (expectedGeneration <= 0L) castIntentEpoch++;
         // Capture + clear state UNDER the lock, but do the slow shell reparent OUTSIDE it:
         // reparentToDisplay0 / launchOnDisplay spawn dumpsys + am (up to several seconds), and
         // holding the ClusterCast monitor that long would block isActive()/getCastPackage()/
@@ -1028,12 +1199,14 @@ public final class ClusterCast {
             }
             pkg = castPkg;
             logger.info("cluster cast: stop " + pkg + " (rehomeMode=" + rehomeMode + ")");
+            castIntentEpoch++;
             castPkg = null;
             launchThread = null;   // supersede any in-flight verify loop
             freeformBounds = null; // forget the box; next cast starts full-panel unless re-set
             stoppingGeneration = castSessionGeneration;
             castStopGeneration = stoppingGeneration;
             castStopInProgress = true;
+            resolveOutcome(stoppingGeneration, false, "the cast was stopped");
         }
         // Freeform hygiene (feature-gated): if we converted the app to freeform, restore it to
         // FULLSCREEN + clear its freeform bounds BEFORE the reparent, while the task is still on
@@ -1057,6 +1230,11 @@ public final class ClusterCast {
             try { ClusterFreeformWindow.invalidateTaskCache(); } catch (Throwable ignored) {}
             scheduleDockResidueCleanup(castDisplayId);
         }
+        // ACC-off deliberately performs no wm/AMS work in the compositor teardown
+        // window. Its durable density lease is retried at boot or before the next launch.
+        if (rehomeMode == NO_REHOME) {
+            ClusterAppDensity.deferRestoration("legacy:" + stoppingGeneration);
+        }
         // Reparent BEFORE releaseSustained so the fission display is still live — reparenting
         // between two LIVE displays is the well-supported AMS case; doing it after the source
         // is torn down would orphan the task. `rehomed` = the app is confirmed off the cluster:
@@ -1075,6 +1253,19 @@ public final class ClusterCast {
             // a failure leaves it possibly on the cluster, so we keep the recovery flag.
             try { rehomed = AppLauncher.reparentToDisplay0(pkg); }
             catch (Throwable t) { rehomed = false; logger.warn("cluster cast: clear affinity failed: " + t.getMessage()); }
+        }
+        boolean densityRestored = rehomeMode == NO_REHOME;
+        if (rehomeMode != NO_REHOME) {
+            if (rehomed) {
+                densityRestored = ClusterAppDensity.restoreForSession(
+                        "legacy:" + stoppingGeneration);
+                if (!densityRestored) {
+                    logger.warn("cluster cast: density restoration remains pending after task rehome");
+                }
+            } else {
+                ClusterAppDensity.deferRestoration("legacy:" + stoppingGeneration);
+                densityRestored = false;
+            }
         }
         // Drop the boot-recovery flag only once the app is confirmed off the cluster. NO_REHOME
         // (ACC-off) intentionally leaves the app on the cluster to avoid the SurfaceFlinger
@@ -1095,7 +1286,7 @@ public final class ClusterCast {
             // map-restart for the cluster foreground. ClusterMapProjector.start is itself
             // non-blocking + idempotent. NO_REHOME (ACC-off) intentionally skips
             // this — the car is powering down and the ACC-off teardown ordering must not be disturbed.
-            if (rehomeMode != NO_REHOME) {
+            if (rehomeMode != NO_REHOME && densityRestored) {
                 try {
                     org.json.JSONObject cfg = com.overdrive.app.config.UnifiedConfigManager.forceReload();
                     org.json.JSONObject nav = cfg != null ? cfg.optJSONObject("navMap") : null;
@@ -1127,7 +1318,7 @@ public final class ClusterCast {
                 }
             }
         }
-        return rehomed && projectionReleased;
+        return rehomed && densityRestored && projectionReleased;
     }
 
     /**
@@ -1157,6 +1348,8 @@ public final class ClusterCast {
                     logger.info("cluster cast: projection no longer holds our token "
                             + "(closed via a direct forceClose — relayout / bs-disable / retarget); "
                             + "aborting launch without repaint");
+                    ClusterAppDensity.deferRestoration("legacy:" + castSessionGeneration);
+                    resolveOutcome(castSessionGeneration, false, "the cluster projection was closed");
                     castPkg = null;
                     launchThread = null;
                     // Same reasoning as isActive(): cache-only cleanup, no AMS work in a teardown
@@ -1170,20 +1363,13 @@ public final class ClusterCast {
         return true;
     }
 
-    private static void waitAndLaunch(String component, String replaced) {
+    private static void waitAndLaunch(String component, String replaced, long generation) {
         final Thread self = Thread.currentThread();
-        int waited = 0;
-        int displayId = -1;
-        // Wait for a POSITIVE fission displayId (never 0 = built-in head unit). The
-        // VirtualDisplay materialises 1-3s after the open opcodes, so an early resolve
-        // transiently returns -1.
-        while (stillOurs(self) && waited < READY_TIMEOUT_MS) {
-            int id = resolveFissionDisplayId();
-            if (id > 0) { displayId = id; break; }
-            try { Thread.sleep(READY_POLL_MS); } catch (InterruptedException e) { return; }
-            waited += READY_POLL_MS;
+        int displayId = awaitClusterDisplay(self);
+        if (!stillOurs(self)) {
+            resolveOutcome(generation, false, "the cast was stopped");
+            return;   // stopped / superseded / projection torn down
         }
-        if (!stillOurs(self)) return;   // stopped / superseded / projection torn down
         // Publish the resolved cluster display so resize() can scope its task lookup to it. Set
         // BEFORE the launch so a box-commit racing the launch already scopes correctly.
         synchronized (ClusterCast.class) {
@@ -1191,17 +1377,25 @@ public final class ClusterCast {
             if (displayId > 0) castDisplayId = displayId;
         }
         if (displayId <= 0) {
-            // No fission display materialised — non-fission trim, or display 1 is the
-            // head unit here. Do NOT blind-fall-back to 1 (would clobber infotainment).
-            // Abort + release so the controller restores the gauges.
-            logger.warn("cluster cast: fission display not resolved (>0) in " + READY_TIMEOUT_MS
-                    + "ms — aborting (no clobber of display 0)");
-            stop();
+            // Never fall back to display 1: on some trims it is the head unit.
+            String reason = displayId == DISPLAY_TIMED_OUT
+                    ? "the cluster display did not appear within "
+                            + (DISPLAY_WAIT_MS / 1000) + " s"
+                    : "the cluster projection did not open";
+            logger.warn("cluster cast: " + reason + " — aborting (no clobber of display 0)");
+            resolveOutcome(generation, false, reason);
+            stopIfSession(generation);
+            if (displayId == DISPLAY_TIMED_OUT) {
+                armLateDisplayRetry(component.substring(0, component.indexOf('/')),
+                        castIntentEpoch);
+            }
             return;
         }
         // The replaced app's task would otherwise stay on the cluster behind the new one, where a
         // docked placement would show it in the space beside the new app.
         // Under PLACEMENT_LOCK so an in-flight placement of the replaced app finishes first.
+        final long densityGeneration = currentSessionGeneration();
+        final boolean densityReady;
         synchronized (PLACEMENT_LOCK) {
             if (!stillOurs(self)) return;
             if (replaced != null && !OWN_PACKAGE.equals(replaced)) {
@@ -1218,40 +1412,235 @@ public final class ClusterCast {
             // A docked cast whose teardown skipped AMS work (ACC-off) would resolve this launch
             // into split-screen-secondary.
             ClusterFreeformWindow.clearDisplayDock(displayId);
+            densityReady = ClusterAppDensity.restoreForDisplay(displayId,
+                    () -> stillOurs(self) && currentSessionGeneration() == densityGeneration);
+            if (densityReady) {
+                ClusterAppDensity.applyForLaunch(component.substring(0, component.indexOf('/')), displayId,
+                        "legacy:" + densityGeneration, () -> stillOurs(self)
+                                && currentSessionGeneration() == densityGeneration);
+            }
         }
-        launchOnDisplay(component, displayId, self);
+        if (!densityReady) {
+            logger.warn("cluster cast: previous density could not be restored; launch aborted");
+            resolveOutcome(generation, false, "the previous cluster density could not be restored");
+            stopIfSession(densityGeneration);
+            return;
+        }
+        launchOnDisplay(component, displayId, self, generation);
     }
 
-    /** {@code am start --display N} the app, then verify it RESUMED on that display,
-     *  retrying if it lost the resume race (same rationale as ClusterMapProjector). */
-    private static void launchOnDisplay(String component, int displayId, Thread self) {
+    /**
+     * Waits for the open sequence to commit, then for the fission display. Returns its id,
+     * {@link #DISPLAY_TIMED_OUT}, or {@link #DISPLAY_NOT_OPENED} (projection failed or the cast
+     * ended).
+     */
+    private static int awaitClusterDisplay(Thread self) {
+        long openDeadline = android.os.SystemClock.elapsedRealtime() + OPEN_WAIT_MS;
+        while (true) {
+            if (!stillOurs(self)) return DISPLAY_NOT_OPENED;
+            int progress = ClusterProjectionController.legacyOpenProgress();
+            if (progress > 0) break;
+            if (progress < 0 || android.os.SystemClock.elapsedRealtime() >= openDeadline) {
+                return DISPLAY_NOT_OPENED;
+            }
+            if (!sleepWhileActive(READY_POLL_MS, self)) return DISPLAY_NOT_OPENED;
+        }
+        long displayDeadline = android.os.SystemClock.elapsedRealtime() + DISPLAY_WAIT_MS;
+        while (stillOurs(self)) {
+            int id = resolveFissionDisplayId();
+            if (id > 0) return id;
+            if (android.os.SystemClock.elapsedRealtime() >= displayDeadline) return DISPLAY_TIMED_OUT;
+            if (!sleepWhileActive(READY_POLL_MS, self)) break;
+        }
+        return DISPLAY_NOT_OPENED;
+    }
+
+    /** One retry when the fission display shows up after the cast gave up on it. */
+    private static void armLateDisplayRetry(String pkg, long intent) {
+        try {
+            Thread watcher = new Thread(() -> {
+                long deadline = android.os.SystemClock.elapsedRealtime() + LATE_DISPLAY_WATCH_MS;
+                while (android.os.SystemClock.elapsedRealtime() < deadline) {
+                    try {
+                        Thread.sleep(LATE_DISPLAY_POLL_MS);
+                    } catch (InterruptedException interrupted) {
+                        return;
+                    }
+                    synchronized (ClusterCast.class) {
+                        if (castPkg != null || castIntentEpoch != intent) return;
+                    }
+                    if (!com.overdrive.app.monitor.AccMonitor.isAccStateAuthoritative()
+                            || !com.overdrive.app.monitor.AccMonitor.isAccOn()) return;
+                    if (com.overdrive.app.navmap.ClusterMapProjector.isActive()
+                            || ClusterLayouts.isActive() || ClusterLayouts.isBusy()) return;
+                    if (resolveFissionDisplayId() <= 0) continue;
+                    if (pkg.equals(resumedPackageOnDisplay(0))) {
+                        logger.info("cluster cast: cluster display appeared late, but " + pkg
+                                + " is in use on the head unit — not retrying");
+                        return;
+                    }
+                    logger.info("cluster cast: cluster display appeared late — retrying " + pkg);
+                    startWhenSettled(pkg);
+                    return;
+                }
+            }, "ClusterCastLateDisplay");
+            watcher.setDaemon(true);
+            watcher.start();
+        } catch (Throwable t) {
+            logger.warn("cluster cast: late display watch failed: " + t.getMessage());
+        }
+    }
+
+    /** {@code am start --display N} the app, verify it RESUMED on that display (retries start a
+     *  fresh process), then guard it against relaunching onto the head unit. */
+    private static void launchOnDisplay(String component, int displayId, Thread self,
+                                        long generation) {
+        final boolean ownApp = component.startsWith(OWN_PACKAGE + "/");
+        boolean resumed = false;
         for (int attempt = 1; stillOurs(self) && attempt <= LAUNCH_VERIFY_ATTEMPTS; attempt++) {
-            if (!issueLaunch(component, displayId, attempt, self)) {
-                if (!sleepWhileActive(LAUNCH_VERIFY_POLL_MS, self)) return;
+            // An existing task can stay in its head-unit stack; a fresh process lands on the target.
+            boolean restart = attempt > 1 && !ownApp;
+            if (!issueLaunch(component, displayId, attempt, self, restart)) {
+                if (!sleepWhileActive(LAUNCH_VERIFY_POLL_MS, self)) break;
                 continue;
             }
             for (int poll = 0; stillOurs(self) && poll < LAUNCH_VERIFY_POLLS_PER_ATTEMPT; poll++) {
-                if (!sleepWhileActive(LAUNCH_VERIFY_POLL_MS, self)) return;
+                if (!sleepWhileActive(LAUNCH_VERIFY_POLL_MS, self)) break;
                 if (isResumedOnDisplay(component, displayId)) {
                     logger.info("cluster cast: RESUMED on displayId " + displayId
                             + " (attempt " + attempt + ")");
-                    // Freeform conversion (feature-gated): the app is now RESUMED fullscreen on
-                    // the cluster — the reliable moment to convert it to freeform at the user's
-                    // box bounds (never bare `am start --windowingMode 5`). No-op when the flag
-                    // is off or no bounds were set (full panel = leave it fullscreen). Best-effort;
-                    // a failure just leaves it fullscreen (the pre-existing behaviour).
-                    maybeApplyFreeform(component, self);
-                    return;   // no keep-alive for a foreign app (see class doc)
+                    resumed = true;
+                    break;
                 }
             }
-            logger.warn("cluster cast: NOT resumed on displayId " + displayId
-                    + " after attempt " + attempt + " — re-launching");
+            if (resumed) break;
+            if (stillOurs(self)) {
+                logger.warn("cluster cast: NOT resumed on displayId " + displayId
+                        + " after attempt " + attempt + " — re-launching with a fresh process");
+            }
         }
-        if (stillOurs(self)) {
+        if (!stillOurs(self)) {
+            resolveOutcome(generation, false, "the cast was stopped");
+            return;
+        }
+        if (resumed) {
+            resolveOutcome(generation, true, "");
+            // Freeform conversion runs once the app is RESUMED fullscreen (never bare
+            // `am start --windowingMode 5`). No-op when the flag is off or no box was set.
+            maybeApplyFreeform(component, self);
+        } else {
             logger.warn("cluster cast: failed to confirm resume on displayId " + displayId
                     + " after " + LAUNCH_VERIFY_ATTEMPTS + " attempts (projection stays up; "
                     + "gauges restore on the normal stop / ACC-off path)");
         }
+        if (ownApp) {
+            if (!resumed) {
+                resolveOutcome(generation, false, "the app did not come to the front on the cluster");
+            }
+            return;
+        }
+        guardTask(component, displayId, self, generation, resumed);
+    }
+
+    /**
+     * Moves the cast app back while its task lands on another display, until it stays put; then
+     * keeps watching at a slow rate and ends the cast once the app has left the cluster, so the
+     * gauges are never left hidden behind nothing.
+     */
+    private static void guardTask(String component, int displayId, Thread self, long generation,
+                                  boolean resumed) {
+        final String pkg = component.substring(0, component.indexOf('/'));
+        final long started = android.os.SystemClock.elapsedRealtime();
+        final long hardDeadline = started + GUARD_MAX_MS;
+        long completeAt = started + GUARD_INITIAL_MS;
+        boolean confirmed = resumed;
+        boolean lastOnCluster = resumed;
+        int moves = 0, consecutiveMoves = 0, polls = 0, frontRequests = 0;
+        while (stillOurs(self) && android.os.SystemClock.elapsedRealtime() < hardDeadline) {
+            if (!sleepWhileActive((int) GUARD_POLL_MS, self)) return;
+            polls++;
+            ClusterFreeformWindow.TaskLocation where =
+                    ClusterFreeformWindow.findTaskLocation(pkg, displayId);
+            if (!where.known || where.displayId < 0 && where.taskId > 0) continue;
+            if (where.taskId <= 0) {
+                lastOnCluster = false;
+                continue;
+            }
+            long now = android.os.SystemClock.elapsedRealtime();
+            if (where.displayId == displayId) {
+                consecutiveMoves = 0;
+                lastOnCluster = true;
+                if (!confirmed && polls % 4 == 0) {
+                    // Another activity resumed on top means nothing of ours is visible.
+                    String top = resumedPackageOnDisplay(displayId);
+                    if (top == null || pkg.equals(top)) {
+                        confirmed = true;
+                        resolveOutcome(generation, true, "");
+                    } else if (frontRequests < 3) {
+                        frontRequests++;
+                        ClusterFreeformWindow.focusTask(where.taskId, displayId);
+                    }
+                }
+                if (confirmed && now >= completeAt) {
+                    logger.info("cluster cast: " + pkg + " stable on displayId " + displayId
+                            + " (moved back " + moves + "x)");
+                    watchSession(pkg, displayId, self, generation);
+                    return;
+                }
+                continue;
+            }
+            lastOnCluster = false;
+            if (consecutiveMoves >= GUARD_MAX_CONSECUTIVE_MOVES) {
+                endCast(generation, pkg + " keeps leaving the cluster");
+                return;
+            }
+            completeAt = Math.max(completeAt, Math.min(hardDeadline, now + GUARD_AFTER_MOVE_MS));
+            moves++;
+            consecutiveMoves++;
+            boolean moved = false;
+            synchronized (PLACEMENT_LOCK) {
+                // ACC-off forbids task moves during its compositor teardown.
+                if (!stillOurs(self) || accKnownOff()) return;
+                moved = ClusterFreeformWindow.moveTaskToDisplay(where.taskId, displayId);
+            }
+            if (!moved && !accKnownOff()) moved = issueLaunch(component, displayId, 0, self, false);
+            if (moves <= 5 || moves % 20 == 0) {
+                logger.warn("cluster cast: " + pkg + " task " + where.taskId + " moved to displayId "
+                        + where.displayId + " — returned to " + displayId + ": " + moved
+                        + " (" + moves + "x)");
+            }
+            if (moved) maybeApplyFreeform(component, self);
+        }
+        if (!stillOurs(self)) return;
+        if (!confirmed || !lastOnCluster) {
+            endCast(generation, "the app did not stay in front on the cluster");
+            return;
+        }
+        watchSession(pkg, displayId, self, generation);
+    }
+
+    /** Slow session watch: three straight checks without the app on the cluster end the cast. */
+    private static void watchSession(String pkg, int displayId, Thread self, long generation) {
+        int misses = 0;
+        while (stillOurs(self)) {
+            if (!sleepWhileActive((int) SESSION_WATCH_POLL_MS, self)) return;
+            if (accKnownOff()) return;
+            Boolean onCluster = ClusterFreeformWindow.packageTaskOnDisplay(pkg, displayId);
+            if (onCluster == null) continue;
+            if (onCluster) {
+                misses = 0;
+            } else if (++misses >= SESSION_WATCH_MISSES) {
+                endCast(generation, pkg + " left the cluster");
+                return;
+            }
+        }
+    }
+
+    /** Ends this cast (gauges restore) unless a newer cast already replaced it. */
+    private static void endCast(long generation, String reason) {
+        logger.warn("cluster cast: " + reason + " — ending the cast");
+        resolveOutcome(generation, false, reason);
+        stopIfSession(generation);
     }
 
     /** After the app resumes fullscreen on the cluster, convert it to freeform at the
@@ -1319,25 +1708,28 @@ public final class ClusterCast {
         }
     }
 
-    /** Issue one {@code am start --display N}. Returns true iff it exited 0. */
-    private static boolean issueLaunch(String component, int displayId, int attempt, Thread self) {
+    /** Issue one {@code am start --display N} ({@code -S} restarts the app first). Returns true
+     *  iff it exited 0. */
+    private static boolean issueLaunch(String component, int displayId, int attempt, Thread self,
+                                       boolean restart) {
         try {
             // Final liveness re-check IMMEDIATELY before exec: shrinks the check-then-act
             // window between the loop guard and the launch to microseconds, so a forceClose
             // (relayout / bs-disable / retarget) that landed in between aborts here instead
             // of firing one stray `am start` over the just-restored gauges.
             if (!stillOurs(self)) return false;
-            String[] cmd = {
-                "am", "start",
+            java.util.List<String> cmd = new java.util.ArrayList<>();
+            java.util.Collections.addAll(cmd, "am", "start");
+            if (restart) cmd.add("-S");
+            java.util.Collections.addAll(cmd,
                 "--user", "0",
                 "--display", String.valueOf(displayId),
                 "--windowingMode", WINDOWING_MODE_FULLSCREEN,
                 "-f", LAUNCH_FLAGS,
-                "-n", component
-            };
+                "-n", component);
             logger.info("cluster cast: launching " + component + " onto displayId " + displayId
-                    + " (attempt " + attempt + ")");
-            Process proc = Runtime.getRuntime().exec(cmd);
+                    + " (attempt " + attempt + (restart ? ", fresh process" : "") + ")");
+            Process proc = Runtime.getRuntime().exec(cmd.toArray(new String[0]));
             boolean done = proc.waitFor(5, TimeUnit.SECONDS);
             if (!done) { proc.destroy(); logger.warn("cluster cast: am start did not exit in 5s"); return false; }
             if (proc.exitValue() != 0) { logger.warn("cluster cast: am start exited " + proc.exitValue()); return false; }

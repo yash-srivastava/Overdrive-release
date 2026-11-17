@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="dash_vehicle_line">%1$s · %2$.1f kWh</string>
+    <string name="dash_range_caption">dojezd</string>
+    <string name="dash_status_remote_on">Vzdálený přístup zapnut</string>
+    <string name="dash_status_remote_off">Vzdálený přístup vypnut</string>
+    <string name="dash_status_remote_state">Vzdálený přístup · %1$s</string>
+    <string name="dash_status_services">%1$d z %2$d služeb</string>
+    <string name="dash_status_view">Zobrazit</string>
+    <string name="dash_status_recording_idle">Nahrávání neaktivní</string>
+    <string name="dash_services_running">Běží %1$d z %2$d</string>
+    <string name="dash_charge_eta_left">zbývá %1$s</string>
+    <string name="dash_charge_session_inline">%1$s v této relaci</string>
+    <plurals name="dash_clip_count">
+        <item quantity="one">%1$d klip</item>
+        <item quantity="few">%1$d klipy</item>
+        <item quantity="many">%1$d klipu</item>
+        <item quantity="other">%1$d klipů</item>
+    </plurals>
+</resources>

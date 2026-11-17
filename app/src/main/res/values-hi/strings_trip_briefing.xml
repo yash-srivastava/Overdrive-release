@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Trip Briefing: the car-start "Heading to work? Want directions?" prompt. The spoken line is
+         greeting + heading + duration (or one extra that replaces it) + question, joined by spaces,
+         and read aloud by text-to-speech. -->
+    <string name="trip_briefing_greeting_morning">सुप्रभात।</string>
+    <string name="trip_briefing_greeting_afternoon">शुभ दोपहर।</string>
+    <string name="trip_briefing_greeting_evening">शुभ संध्या।</string>
+    <string name="trip_briefing_heading_home">क्या आप घर जा रहे हैं?</string>
+    <string name="trip_briefing_heading_work">क्या आप काम पर जा रहे हैं?</string>
+    <!-- %1$s: the place's name, e.g. "Phoenix Mall". -->
+    <string name="trip_briefing_heading_place">क्या आप %1$s जा रहे हैं?</string>
+    <plurals name="trip_briefing_duration">
+        <item quantity="one">लगभग %1$d मिनट।</item>
+        <item quantity="other">लगभग %1$d मिनट।</item>
+    </plurals>
+    <!-- %1$s: range left, %2$s: the trip's length, each "31 km" or "19 mi". -->
+    <string name="trip_briefing_extra_range">रेंज कम है: %2$s की यात्रा के लिए सिर्फ़ %1$s बचे हैं।</string>
+    <plurals name="trip_briefing_extra_hazards">
+        <item quantity="one">रास्ते में %1$d नया खतरा है।</item>
+        <item quantity="other">रास्ते में %1$d नए खतरे हैं।</item>
+    </plurals>
+    <!-- %1$s: an hour of the day in the device's clock format, e.g. "7 PM" or "19:00". -->
+    <string name="trip_briefing_extra_rain">%1$s के आसपास बारिश हो सकती है।</string>
+    <string name="trip_briefing_question">क्या मैं रास्ता दिखाऊँ?</string>
+    <string name="trip_briefing_distance_km">%1$d किमी</string>
+    <string name="trip_briefing_distance_mi">%1$d मील</string>
+
+    <!-- The destination as the AI assistant should say it. -->
+    <string name="trip_briefing_said_home">घर</string>
+    <string name="trip_briefing_said_work">काम</string>
+
+    <!-- Card -->
+    <string name="trip_briefing_title_home">घर</string>
+    <string name="trip_briefing_title_work">काम</string>
+    <!-- Title for a regular destination that has no name yet. -->
+    <string name="trip_briefing_title_unnamed">आपका नियमित पड़ाव</string>
+    <string name="trip_briefing_name_place">जगह का नाम दें</string>
+    <string name="trip_briefing_no">नहीं</string>
+    <string name="trip_briefing_go_failed">दिशा-निर्देश शुरू नहीं हुए। नेविगेट करने के लिए मैप खोलें।</string>
+    <!-- The car's own navigation app. -->
+    <string name="trip_briefing_app_car">कार नेविगेशन</string>
+</resources>

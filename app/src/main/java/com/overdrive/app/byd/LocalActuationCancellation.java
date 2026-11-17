@@ -2,6 +2,7 @@ package com.overdrive.app.byd;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Callable;
 
 /** One request's cancellation ticket, including cancellation before its remote worker registers. */
 public final class LocalActuationCancellation {
@@ -14,6 +15,13 @@ public final class LocalActuationCancellation {
     }
 
     public synchronized boolean isCancelled() { return cancelled; }
+
+    /** Linearizes a final setter with cancellation for this one request. */
+    public synchronized <T> T callIfActive(Callable<T> action, T cancelledResult)
+            throws Exception {
+        if (cancelled || action == null) return cancelledResult;
+        return action.call();
+    }
 
     public void onRemoteCancellation(Runnable cancelRemote) {
         boolean alreadyCancelled;

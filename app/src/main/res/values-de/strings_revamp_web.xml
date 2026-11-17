@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="web_state_retry_now">Jetzt wiederholen</string>
+    <string name="web_state_retry_in">Automatische Wiederholung · nächster Versuch in %1$d s</string>
+    <string name="web_state_retrying_now">Automatische Wiederholung · wird jetzt versucht…</string>
+    <string name="web_state_sign_in_title">Anmeldung für diese Seite fehlgeschlagen</string>
+    <string name="web_state_sign_in_body">Der Kamera-Daemon läuft, hat die Anmeldung der App aber nicht akzeptiert. OverDrive stellt sie automatisch wieder her, solange ADB verbunden ist.</string>
+</resources>

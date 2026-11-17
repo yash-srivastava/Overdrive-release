@@ -64,11 +64,13 @@ public class ConfigBackupApiHandler {
         // the bundle; default is settings-only.
         boolean includeTrips = path != null && path.contains("trips=true");
         try {
+            // (the login code only for a caller holding a session, not a loopback caller without one)
             JSONObject bundle = ConfigBackupService.buildBundle(
                     AppUpdater.getInstalledVersion(),
                     deviceModel(),
                     System.currentTimeMillis(),
-                    includeTrips);
+                    includeTrips,
+                    HttpServer.callerHasSession());
             HttpResponse.sendJson(out, bundle.toString());
         } catch (Exception e) {
             HttpResponse.sendJsonError(out, "Could not build backup: " + e.getMessage());
@@ -112,7 +114,7 @@ public class ConfigBackupApiHandler {
 
         ConfigBackupService.ApplyResult result = preview
                 ? ConfigBackupService.validateBundle(bundle, appVer, model)
-                : ConfigBackupService.applyBundle(bundle, appVer, model);
+                : ConfigBackupService.applyBundle(bundle, appVer, model, HttpServer.callerHasSession());
 
         JSONObject r = new JSONObject();
         r.put("valid", result.getSuccess());

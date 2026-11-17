@@ -168,6 +168,9 @@
     "tyre_wheel_pressure": "{0} ({1})"
   },
   "telegram": {
+    "deterrent_triggered": "Abschreckung ausgelöst: {0}",
+    "deterrent_screen": "Bildschirm",
+    "deterrent_cloud": "Cloud",
     "recording_caption": " Aufnahme ({0}) - {1}s",
     "recording_caption_no_label": " Aufnahme - {0}s",
     "proximity_alert": " Nähewarnzeit: {0} Auslöser: {1} ({2}) Aufnahme begann...",
@@ -477,6 +480,7 @@
   },
   "vehicle_control": {
     "blocked_driving": "Diese Aktion ist nicht verfügbar, während sich das Fahrzeug bewegt",
+    "blocked_unconfirmed": "Derzeit lässt sich nicht bestätigen, dass das Fahrzeug geparkt ist. Versuchen Sie es gleich noch einmal.",
     "cloud_required": "Verbinden Sie ein BYD-Konto in Einstellungen, um diese Steuerung zu verwenden",
     "cloud_sent": "Über die Wolke gesendet",
     "cloud_unavailable_used_local": "Cloud nicht verfügbar  Direktverbindung verwendet",

@@ -65,6 +65,8 @@ public class NetworkMonitor {
     private static volatile boolean wifiMeteredHintKnown;
     private static volatile String ipAddress = "";
     private static volatile int signalPercent = -1;
+    // Wi-Fi RSSI in dBm; Integer.MIN_VALUE when not on Wi-Fi or unknown.
+    private static volatile int rssiDbm = Integer.MIN_VALUE;
     private static volatile long lastUpdate = 0;
     private static volatile Context appContext;
     private static volatile boolean shellFallbackLogged = false;
@@ -183,6 +185,7 @@ public class NetworkMonitor {
     private static void readWifiDetailsAndroid() {
         wifiMeteredHint = false; // only the shell probe below can read it
         wifiMeteredHintKnown = false;
+        rssiDbm = Integer.MIN_VALUE;
         try {
             WifiManager wm = (WifiManager) appContext.getSystemService(Context.WIFI_SERVICE);
             if (wm == null) {
@@ -207,6 +210,7 @@ public class NetworkMonitor {
             }
             int rssi = info.getRssi();
             signalPercent = Math.max(0, Math.min(100, (rssi + 90) * 100 / 60));
+            rssiDbm = usableRssi(rssi);
         } catch (Exception e) {
             CameraDaemon.log("NetworkMonitor: WifiInfo error: " + e.getMessage());
             wifiSsid = SSID_UNKNOWN_PLACEHOLDER;
@@ -217,6 +221,7 @@ public class NetworkMonitor {
     private static void clearWifiDetails() {
         wifiSsid = "";
         signalPercent = -1;
+        rssiDbm = Integer.MIN_VALUE;
         wifiMeteredHint = false;
         wifiMeteredHintKnown = false;
     }
@@ -277,7 +282,7 @@ public class NetworkMonitor {
      * entries; preserve the first valid IPv4 address for each interface.
      */
     private static java.util.Map<String, String> shellInterfaceIpv4Snapshot() {
-        String output = BoundedShell.run("ip addr show", SHELL_DEADLINE_MS).output;
+        String output = BoundedShell.run("ip addr show 2>/dev/null", SHELL_DEADLINE_MS).output;
         java.util.Map<String, String> addresses = new java.util.HashMap<>();
         String currentIface = null;
         for (String line : output.split("\n")) {
@@ -397,6 +402,7 @@ public class NetworkMonitor {
         Integer probed = lastShellRssi;
         if (probed != null) {
             signalPercent = Math.max(0, Math.min(100, (probed + 90) * 100 / 60));
+            rssiDbm = usableRssi(probed);
             return;
         }
         String wpa = firstLine(BoundedShell.run(
@@ -405,10 +411,17 @@ public class NetworkMonitor {
             try {
                 int rssi = Integer.parseInt(wpa.substring(5).trim());
                 signalPercent = Math.max(0, Math.min(100, (rssi + 90) * 100 / 60));
+                rssiDbm = usableRssi(rssi);
                 return;
             } catch (NumberFormatException ignored) {}
         }
         signalPercent = -1;
+        rssiDbm = Integer.MIN_VALUE;
+    }
+
+    // -127 is Android's "no reading"; anything at or above 0 dBm is not a real signal.
+    private static int usableRssi(int rssi) {
+        return rssi > -127 && rssi < 0 ? rssi : Integer.MIN_VALUE;
     }
 
     private static String firstLine(String text) {
@@ -441,6 +454,8 @@ public class NetworkMonitor {
             net.put("signal", signalPercent);
             net.put("meteredHint", wifiMeteredHint);
             net.put("meteredHintKnown", wifiMeteredHintKnown);
+            int rssi = rssiDbm;
+            if ("wifi".equals(networkType) && rssi != Integer.MIN_VALUE) net.put("rssiDbm", rssi);
         } catch (Exception ignored) {}
         return net;
     }

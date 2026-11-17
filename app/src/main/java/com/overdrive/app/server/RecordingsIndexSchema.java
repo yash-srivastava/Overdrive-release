@@ -19,8 +19,9 @@ final class RecordingsIndexSchema {
     // confidence filters). Added via ALTER TABLE ADD COLUMN IF NOT EXISTS in
     // ensure(); the v4 identity migration is untouched.
     // v6: SORT_INDEX, created by createIndexes() IF NOT EXISTS (no data migration).
-    // v7: independent watched-recordings table; survives recording row upserts.
-    static final int VERSION = 7;
+    // v7: nullable deterrent_flags (1 cloud, 2 screen) from the sidecar deterrents[] marks.
+    // v8: independent watched-recordings table; survives recording row upserts.
+    static final int VERSION = 8;
 
     // H2 only index-sorts when the index STARTS with the ORDER BY column, so this
     // cannot be folded into idx_rec_available_ts.
@@ -83,6 +84,10 @@ final class RecordingsIndexSchema {
             if (!columnExists(connection, "RECORDINGS", "PEAK_CONFIDENCE")) {
                 statement.execute("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS"
                         + " peak_confidence DOUBLE");
+            }
+            if (!columnExists(connection, "RECORDINGS", "DETERRENT_FLAGS")) {
+                statement.execute("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS"
+                        + " deterrent_flags INT");
             }
         }
     }
@@ -200,6 +205,7 @@ final class RecordingsIndexSchema {
             "  parking_session_id VARCHAR(64)," +
             "  event_cameras   VARCHAR(32)," +
             "  peak_confidence DOUBLE," +
+            "  deterrent_flags INT," +
             "  UNIQUE(volume_id, relative_path)" +
             ")"
         );

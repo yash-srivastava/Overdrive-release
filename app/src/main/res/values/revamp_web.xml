@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Web page states (loading, service down) and the floating map chrome. -->
+<resources>
+    <!-- State card: 468dp wide where it fits; text stays within the card padding. -->
+    <dimen name="web_state_card_width">468dp</dimen>
+    <dimen name="web_state_text_max_width">412dp</dimen>
+    <dimen name="web_state_card_elevation">12dp</dimen>
+    <dimen name="web_state_spinner">44dp</dimen>
+    <dimen name="web_state_spinner_track">4dp</dimen>
+    <dimen name="web_skeleton_gap">12dp</dimen>
+
+    <!-- Map floats: 56dp pills and capsules, 16dp from the edges, 10dp apart. -->
+    <dimen name="map_float_size">56dp</dimen>
+    <dimen name="map_float_margin">16dp</dimen>
+    <dimen name="map_float_elevation">6dp</dimen>
+    <!-- Kept clear on each side of the search pill: edge margin + 56dp float + gap. -->
+    <dimen name="map_search_inset">82dp</dimen>
+    <dimen name="map_search_max_width">440dp</dimen>
+    <!-- Zoom capsule bottom: edge margin + recenter button + gap. -->
+    <dimen name="map_zoom_bottom">82dp</dimen>
+
+    <style name="TextAppearance.Overdrive.Web.StateTitle" parent="TextAppearance.Material3.TitleLarge">
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textSize">22sp</item>
+        <item name="android:letterSpacing">0</item>
+        <item name="android:textColor">?attr/colorOnSurface</item>
+    </style>
+    <style name="TextAppearance.Overdrive.Web.StateBody" parent="TextAppearance.Material3.BodyLarge">
+        <item name="android:textSize">15sp</item>
+        <item name="android:letterSpacing">0</item>
+        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
+    </style>
+    <style name="TextAppearance.Overdrive.Web.StateStatus" parent="TextAppearance.Material3.BodySmall">
+        <item name="android:textSize">12sp</item>
+        <item name="android:letterSpacing">0</item>
+        <item name="android:fontFeatureSettings">tnum</item>
+        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
+    </style>
+
+    <!-- 48dp pill buttons of the state card. -->
+    <style name="Widget.Overdrive.Web.StateButton.Tonal" parent="Widget.Material3.Button.TonalButton">
+        <item name="cornerRadius">24dp</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:paddingLeft">20dp</item>
+        <item name="android:paddingRight">20dp</item>
+        <item name="android:paddingStart">20dp</item>
+        <item name="android:paddingEnd">20dp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textSize">15sp</item>
+    </style>
+    <style name="Widget.Overdrive.Web.StateButton.Outlined" parent="Widget.Material3.Button.OutlinedButton">
+        <item name="cornerRadius">24dp</item>
+        <item name="strokeColor">?attr/colorOutline</item>
+        <item name="android:textColor">?attr/colorOnSurface</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:paddingLeft">20dp</item>
+        <item name="android:paddingRight">20dp</item>
+        <item name="android:paddingStart">20dp</item>
+        <item name="android:paddingEnd">20dp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textSize">15sp</item>
+    </style>
+
+    <!-- Flat 56dp map button inside a capsule; the idle tint matches the capsule surface,
+         which is the tint RoadSenseMapActivity restores when a toggle turns off. -->
+    <style name="Widget.Overdrive.Map.CapsuleButton" parent="Widget.Material3.FloatingActionButton.Primary">
+        <item name="fabCustomSize">@dimen/map_float_size</item>
+        <item name="backgroundTint">?attr/colorSurfaceContainerHighest</item>
+        <item name="tint">?attr/colorOnSurface</item>
+        <item name="rippleColor">?attr/colorControlHighlight</item>
+        <item name="borderWidth">0dp</item>
+        <item name="elevation">0dp</item>
+        <item name="hoveredFocusedTranslationZ">0dp</item>
+        <item name="pressedTranslationZ">0dp</item>
+        <item name="shapeAppearanceOverlay">@style/ShapeAppearance.Material3.Corner.Full</item>
+        <item name="android:stateListAnimator">@null</item>
+    </style>
+    <!-- Stand-alone round map float (recenter). -->
+    <style name="Widget.Overdrive.Map.FloatButton" parent="Widget.Overdrive.Map.CapsuleButton">
+        <item name="elevation">@dimen/map_float_elevation</item>
+    </style>
+</resources>

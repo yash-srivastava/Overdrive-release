@@ -60,16 +60,17 @@ object NavRouting {
     }
 
     @JvmStatic
-    fun routeVia(points: List<GeoPoint>): List<NavRoute> {
+    @JvmOverloads
+    fun routeVia(points: List<GeoPoint>, startHeading: Double? = null): List<NavRoute> {
         if (points.size < 2 || points.size - 2 > MAX_INTERMEDIATES || !googleActive()) {
-            return fromValhalla { ValhallaRouteClient.routeVia(points) }
+            return fromValhalla { ValhallaRouteClient.routeVia(points, startHeading) }
         }
         val out = GoogleRoutesClient.computeOutcome(
             points[0], points[points.size - 1], ArrayList(points.subList(1, points.size - 1)),
-            false, null, GoogleRoutesClient.Quality.FAST, arrivalInstruction
+            false, startHeading, GoogleRoutesClient.Quality.FAST, arrivalInstruction
         )
         if (out.routes.isNotEmpty()) return fromGoogle(out.routes.take(1))
-        return afterGoogleFailure(out) { ValhallaRouteClient.routeVia(points) }
+        return afterGoogleFailure(out) { ValhallaRouteClient.routeVia(points, startHeading) }
     }
 
     /** Background re-query of the remaining trip ([origin, stops…, destination]); leaves [lastError] untouched. */

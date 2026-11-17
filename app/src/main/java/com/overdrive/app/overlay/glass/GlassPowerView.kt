@@ -1,5 +1,6 @@
 package com.overdrive.app.overlay.glass
 
+import com.overdrive.app.R
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
@@ -313,15 +314,15 @@ class GlassPowerView(context: Context, env: GlassEnv, ticker: GlassTicker) : Gla
 
     private fun updateText() {
         val t = env.theme
-        text.labelText = if (mode == Mode.CHARGING) "Charging power" else "Power"
+        text.labelText = if (mode == Mode.CHARGING) gs(R.string.glass_charging_power) else gs(R.string.glass_power)
         var word: String; var color: Int
         when (mode) {
-            Mode.DRIVE -> { word = "Driving"; color = t.accent }
-            Mode.REGEN -> { word = "Regen · charging battery"; color = t.regenText }
-            Mode.HYBRID -> { word = "Engine + battery"; color = t.fuel }
-            Mode.CHARGING -> { word = "Charging"; color = t.accent }
-            Mode.PARKED -> { word = "Parked"; color = t.text2 }
-            Mode.COAST -> { word = "Coasting"; color = t.text2 }
+            Mode.DRIVE -> { word = gs(R.string.glass_state_driving); color = t.accent }
+            Mode.REGEN -> { word = gs(R.string.glass_state_regen); color = t.regenText }
+            Mode.HYBRID -> { word = gs(R.string.glass_state_hybrid); color = t.fuel }
+            Mode.CHARGING -> { word = gs(R.string.glass_state_charging); color = t.accent }
+            Mode.PARKED -> { word = gs(R.string.glass_state_parked); color = t.text2 }
+            Mode.COAST -> { word = gs(R.string.glass_state_coasting); color = t.text2 }
             Mode.UNKNOWN -> { word = ""; color = 0 }
         }
         // the glowing wheel and its tag say which tyre; the words stay short enough for the text column
@@ -332,21 +333,22 @@ class GlassPowerView(context: Context, env: GlassEnv, ticker: GlassTicker) : Gla
         }
         worst?.info?.let { inf ->
             val many = wheels.count { it.info.rank >= 2 }
-            val dir = if (inf.kind == GlassTyres.Kind.LOW) "low" else "high"
+            val low = inf.kind == GlassTyres.Kind.LOW
             word = when {
-                inf.kind == GlassTyres.Kind.MISSING -> "Tyre sensor offline"
-                many > 1 -> "$many tyres $dir"
-                else -> "Tyre ${if (inf.crit) "very " else ""}$dir"
+                inf.kind == GlassTyres.Kind.MISSING -> gs(R.string.glass_tyre_sensor_offline)
+                many > 1 -> gs(if (low) R.string.glass_tyres_low_n else R.string.glass_tyres_high_n, many)
+                low -> gs(if (inf.crit) R.string.glass_tyre_very_low else R.string.glass_tyre_low)
+                else -> gs(if (inf.crit) R.string.glass_tyre_very_high else R.string.glass_tyre_high)
             }
             color = if (inf.kind == GlassTyres.Kind.MISSING) t.text2 else if (inf.crit) t.danger else t.warn
         }
         // a vehicle beside the car outranks everything while it's there
         if (bsOn && (state.bsLeft > 0 || state.bsRight > 0 || state.bsAny > 0)) {
             word = when {
-                state.bsLeft > 0 && state.bsRight > 0 -> "Vehicles on both sides"
-                state.bsLeft > 0 -> "Vehicle on the left"
-                state.bsRight > 0 -> "Vehicle on the right"
-                else -> "Vehicle in blind spot"
+                state.bsLeft > 0 && state.bsRight > 0 -> gs(R.string.glass_bs_both)
+                state.bsLeft > 0 -> gs(R.string.glass_bs_left)
+                state.bsRight > 0 -> gs(R.string.glass_bs_right)
+                else -> gs(R.string.glass_bs_unknown)
             }
             color = t.warn
         }
@@ -360,7 +362,7 @@ class GlassPowerView(context: Context, env: GlassEnv, ticker: GlassTicker) : Gla
     // formats only when the shown value changes, not every animation frame
     private fun updateValue() {
         if (mode == Mode.UNKNOWN || mode == Mode.PARKED) {
-            val w = if (mode == Mode.PARKED) "Parked" else "Driving"
+            val w = if (mode == Mode.PARKED) gs(R.string.glass_state_parked) else gs(R.string.glass_state_driving)
             if (!text.isWord || text.wordText != w) text.setWord(w)
             return
         }

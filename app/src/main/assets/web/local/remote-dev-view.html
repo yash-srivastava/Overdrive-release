@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title data-i18n="remote_dev.page_title">Remote Dev View</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
-    <script src="../shared/theme.js?v=11"></script>
-    <script src="../shared/app-shell.js?v=19"></script>
+    <script src="../shared/theme.js?v=12"></script>
+    <script src="../shared/app-shell.js?v=23"></script>
     <link rel="stylesheet" href="../shared/styles.css?v=38">
     <link rel="stylesheet" href="../shared/revamp.css?v=2">
     <style>
@@ -47,16 +47,32 @@
         #message:empty { visibility: hidden; }
         #message.error { color: var(--danger); }
         .fullscreen-toolbar { display: none; position: absolute; z-index: 3; top: max(10px, env(safe-area-inset-top)); right: max(10px, env(safe-area-inset-right)); max-width: calc(100vw - 20px); flex-wrap: wrap; justify-content: flex-end; gap: 7px; padding: 6px; border-radius: 10px; background: rgba(8, 11, 16, .78); backdrop-filter: blur(10px); }
-        #viewerCard:fullscreen, #viewerCard:-webkit-full-screen, body.dev-view-focus #viewerCard { width: 100vw; height: 100vh; max-width: none; margin: 0; padding: 0; border: 0; border-radius: 0; background: #050608; }
+        #viewerCard:fullscreen,
+        body.dev-view-focus #viewerCard { width: 100vw; height: 100vh; max-width: none; margin: 0; padding: 0; border: 0; border-radius: 0; background: #050608; }
+        #viewerCard:-webkit-full-screen { width: 100vw; height: 100vh; max-width: none; margin: 0; padding: 0; border: 0; border-radius: 0; background: #050608; }
         body.dev-view-focus { overflow: hidden; }
         body.dev-view-focus #viewerCard { position: fixed; inset: 0; z-index: 10000; }
-        #viewerCard:fullscreen .head-unit-bezel, #viewerCard:-webkit-full-screen .head-unit-bezel, body.dev-view-focus #viewerCard .head-unit-bezel { flex: 1 1 auto; min-height: 0; padding: 0; border: 0; border-radius: 0; background: #050608; box-shadow: none; }
-        #viewerCard:fullscreen .head-unit-bezel::before, #viewerCard:-webkit-full-screen .head-unit-bezel::before, body.dev-view-focus #viewerCard .head-unit-bezel::before,
-        #viewerCard:fullscreen .head-unit-bezel::after, #viewerCard:-webkit-full-screen .head-unit-bezel::after, body.dev-view-focus #viewerCard .head-unit-bezel::after { display: none; }
-        #viewerCard:fullscreen .frame-shell, #viewerCard:-webkit-full-screen .frame-shell, body.dev-view-focus #viewerCard .frame-shell { flex: 1 1 auto; min-height: 0; aspect-ratio: auto; border-radius: 0; }
-        #viewerCard:fullscreen #remoteFrame, #viewerCard:-webkit-full-screen #remoteFrame, body.dev-view-focus #viewerCard #remoteFrame { width: 100%; height: 100%; object-fit: contain; }
-        #viewerCard:fullscreen .viewer-footer, #viewerCard:-webkit-full-screen .viewer-footer, body.dev-view-focus #viewerCard .viewer-footer { display: none; }
-        #viewerCard:fullscreen .fullscreen-toolbar, #viewerCard:-webkit-full-screen .fullscreen-toolbar, body.dev-view-focus #viewerCard .fullscreen-toolbar { display: flex; }
+        #viewerCard:fullscreen .head-unit-bezel,
+        body.dev-view-focus #viewerCard .head-unit-bezel { flex: 1 1 auto; min-height: 0; padding: 0; border: 0; border-radius: 0; background: #050608; box-shadow: none; }
+        #viewerCard:-webkit-full-screen .head-unit-bezel { flex: 1 1 auto; min-height: 0; padding: 0; border: 0; border-radius: 0; background: #050608; box-shadow: none; }
+        #viewerCard:fullscreen .head-unit-bezel::before,
+        body.dev-view-focus #viewerCard .head-unit-bezel::before,
+        #viewerCard:fullscreen .head-unit-bezel::after,
+        body.dev-view-focus #viewerCard .head-unit-bezel::after { display: none; }
+        #viewerCard:-webkit-full-screen .head-unit-bezel::before,
+        #viewerCard:-webkit-full-screen .head-unit-bezel::after { display: none; }
+        #viewerCard:fullscreen .frame-shell,
+        body.dev-view-focus #viewerCard .frame-shell { flex: 1 1 auto; min-height: 0; aspect-ratio: auto; border-radius: 0; }
+        #viewerCard:-webkit-full-screen .frame-shell { flex: 1 1 auto; min-height: 0; aspect-ratio: auto; border-radius: 0; }
+        #viewerCard:fullscreen #remoteFrame,
+        body.dev-view-focus #viewerCard #remoteFrame { width: 100%; height: 100%; object-fit: contain; }
+        #viewerCard:-webkit-full-screen #remoteFrame { width: 100%; height: 100%; object-fit: contain; }
+        #viewerCard:fullscreen .viewer-footer,
+        body.dev-view-focus #viewerCard .viewer-footer { display: none; }
+        #viewerCard:-webkit-full-screen .viewer-footer { display: none; }
+        #viewerCard:fullscreen .fullscreen-toolbar,
+        body.dev-view-focus #viewerCard .fullscreen-toolbar { display: flex; }
+        #viewerCard:-webkit-full-screen .fullscreen-toolbar { display: flex; }
         @media (max-width: 980px) {
             .dev-view-page { padding: 14px; }
             .viewer-footer { align-items: flex-start; flex-direction: column; }
@@ -133,8 +149,9 @@
 </div>
 
 <script src="../shared/auth.js"></script>
-<script src="../shared/core.js?v=24"></script>
-<script src="../shared/remote-dev-view.js?v=12"></script>
+<script src="../shared/core.js?v=27"></script>
+<script src="../shared/update-flow.js?v=3"></script>
+<script src="../shared/remote-dev-view.js?v=13"></script>
 <script>
     document.addEventListener('DOMContentLoaded', function () {
         BYD.i18n.init().then(function () {

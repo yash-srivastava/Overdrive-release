@@ -89,6 +89,12 @@ public final class NotificationStore {
     // across restarts (same defense SocHistoryDatabase documents).
     private volatile boolean isRunning = false;
     private ScheduledExecutorService scheduler;
+    // Dead-store reopen state, guarded by `lock`.
+    private static final long HEAL_COOLDOWN_NANOS = 10_000_000_000L;
+    private boolean healAttempted;
+    private long lastHealAttemptNanos;
+    private boolean inHealRetry;
+    private boolean deadDuringRetry;
 
     private NotificationStore() {
         try {
@@ -236,6 +242,9 @@ public final class NotificationStore {
      */
     private void reconnect() {
         if (!isRunning) return;
+        // After a heal attempt the heal owns reopening; this path has no throttle of its own,
+        // and an interrupted thread's open would kill the store it opens.
+        if (inHealCooldown() || Thread.currentThread().isInterrupted()) return;
         try {
             if (connection == null || connection.isClosed()) {
                 connection = DriverManager.getConnection(JDBC_URL, "sa", "");
@@ -245,6 +254,61 @@ public final class NotificationStore {
         } catch (Exception e) {
             logger.error("NotificationStore reconnect failed: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Reopen a store H2 killed under a still-open connection (isClosed() stays false, so
+     * reconnect() can't see it). Caller holds {@link #lock} and runs its one retry through
+     * retryAfterHeal().
+     */
+    private boolean healDeadStore(Exception failure) {
+        if (inHealRetry) {
+            // The retry failed too: keep the cooldown, never heal recursively.
+            if (com.overdrive.app.storage.H2StoreFaults.isStoreDead(failure)) deadDuringRetry = true;
+            return false;
+        }
+        if (!isRunning || !com.overdrive.app.storage.H2StoreFaults.isStoreDead(failure)) return false;
+        // An interrupted thread would kill the reopened store on its next file read; a later
+        // caller heals instead, and this thread keeps its interrupt.
+        if (Thread.currentThread().isInterrupted()) return false;
+        if (inHealCooldown()) return false;
+        logger.warn("NotificationStore died under a live connection, reopening: "
+                + com.overdrive.app.storage.H2StoreFaults.describe(failure));
+        if (connection != null) {
+            try { connection.close(); } catch (Exception ignored) { /* a dead store throws here */ }
+        }
+        try {
+            connection = DriverManager.getConnection(JDBC_URL, "sa", "");
+            try (Statement stmt = connection.createStatement()) {
+                stmt.execute("SET CACHE_SIZE 4096");
+            }
+            createTable();
+            isInitialized = true;
+            return true;
+        } catch (Exception e) {
+            logger.error("NotificationStore reopen failed: " + e.getMessage(), e);
+            return false;
+        } finally {
+            // Stamped after the attempt; retryAfterHeal clears it again if the retry finds the store healthy.
+            healAttempted = true;
+            lastHealAttemptNanos = System.nanoTime();
+        }
+    }
+
+    /** Runs the caller's single retry; a retry that never meets a dead store lifts the cooldown. */
+    private <T> T retryAfterHeal(java.util.function.Supplier<T> retry) {
+        inHealRetry = true;
+        deadDuringRetry = false;
+        try {
+            return retry.get();
+        } finally {
+            inHealRetry = false;
+            if (!deadDuringRetry) healAttempted = false;
+        }
+    }
+
+    private boolean inHealCooldown() {
+        return healAttempted && System.nanoTime() - lastHealAttemptNanos < HEAL_COOLDOWN_NANOS;
     }
 
     public void stop() {
@@ -310,6 +374,7 @@ public final class NotificationStore {
                 ps.setString(8, event.data != null ? event.data.toString() : null);
                 ps.executeUpdate();
             } catch (Exception e) {
+                if (healDeadStore(e)) { retryAfterHeal(() -> { insert(event, resolvedUrl); return null; }); return; }
                 logger.error("NotificationStore.insert failed: " + e.getMessage(), e);
                 reconnect();   // self-heal a stale connection for the next write
             }
@@ -382,6 +447,10 @@ public final class NotificationStore {
                     }
                 }
             } catch (Exception e) {
+                if (healDeadStore(e)) {
+                    final int pageLimit = limit, pageOffset = offset;
+                    return retryAfterHeal(() -> listWithCount(fromMs, toMs, categoryPrefix, severity, pageLimit, pageOffset));
+                }
                 logger.error("NotificationStore.listWithCount failed: " + e.getMessage(), e);
                 reconnect();
                 return new Page(new JSONArray(), 0);
@@ -425,6 +494,7 @@ public final class NotificationStore {
                 ps.executeUpdate();
                 return true;
             } catch (Exception e) {
+                if (healDeadStore(e)) return retryAfterHeal(() -> deleteById(id));
                 logger.error("NotificationStore.deleteById failed: " + e.getMessage(), e);
                 reconnect();
                 return false;
@@ -455,6 +525,11 @@ public final class NotificationStore {
                     }
                 }
             } catch (Exception e) {
+                // Chunks committed before the failure stay counted; the retry removes the rest.
+                if (healDeadStore(e)) {
+                    final int done = removed;
+                    return retryAfterHeal(() -> done + deleteBulk(ids));
+                }
                 logger.error("NotificationStore.deleteBulk failed: " + e.getMessage(), e);
                 reconnect();
             }
@@ -474,6 +549,7 @@ public final class NotificationStore {
                 logger.info("NotificationStore.clear removed " + n + " rows");
                 return n;
             } catch (Exception e) {
+                if (healDeadStore(e)) return retryAfterHeal(() -> clear(fromMs, toMs));
                 logger.error("NotificationStore.clear failed: " + e.getMessage(), e);
                 reconnect();
                 return 0;
@@ -532,6 +608,7 @@ public final class NotificationStore {
                     }
                 }
             } catch (Exception e) {
+                if (healDeadStore(e)) { retryAfterHeal(() -> { cleanupOldData(); return null; }); return; }
                 logger.error("NotificationStore.cleanupOldData failed: " + e.getMessage(), e);
                 reconnect();
             }

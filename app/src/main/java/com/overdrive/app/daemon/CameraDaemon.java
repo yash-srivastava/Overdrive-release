@@ -34,12 +34,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * - AccMonitor: Sentry mode when ACC goes off
  */
 public class CameraDaemon {
-    /** SECURITY (V60-05): never log the raw DID — it is the CredentialCipher key seed. */
-    static String redactDid(String did) {
-        if (did == null || did.length() <= 8) return "****";
-        return did.substring(0, 4) + "…" + did.substring(did.length() - 4) + " (redacted)";
-    }
-
 
     private static final String TAG = "CameraDaemon";
 
@@ -620,6 +614,7 @@ public class CameraDaemon {
         // restarts after the mode marker changed), this synchronously raises the
         // cross-mode fence while stale DI5 compositor ownership is recovered.
         try {
+            com.overdrive.app.launcher.ClusterLayouts.initializeRecoveryFence();
             com.overdrive.app.launcher.ClusterCast.reparentStrandedCastAtBoot();
         } catch (Exception ignored) {}
 
@@ -754,7 +749,7 @@ public class CameraDaemon {
         generateDeviceId();
 
         log("Output dir: " + outputDir);
-        log("Device ID: " + redactDid(deviceId));
+        log("Device ID: " + didForLog(deviceId));
 
         // Camera scan disabled — opening/closing all camera IDs can briefly
         // disrupt the BYD dashcam. Camera ID is auto-detected in GpuSurveillancePipeline.init()
@@ -832,6 +827,17 @@ public class CameraDaemon {
             try {
                 sharedAppContext = createAppContext();
             } catch (Throwable ignored) {}
+        }
+
+        try {
+            com.overdrive.app.launcher.ClusterAppDensity.recoverAtBoot();
+        } catch (Throwable failure) {
+            log("Cluster density boot recovery unavailable: " + failure.getClass().getSimpleName());
+        }
+        try {
+            com.overdrive.app.launcher.ClusterLayouts.recoverAtBoot();
+        } catch (Throwable failure) {
+            log("Cluster layout boot recovery unavailable: " + failure.getClass().getSimpleName());
         }
 
         // Dark-panel recovery (boot). If a previous session turned the backlight
@@ -1069,12 +1075,14 @@ public class CameraDaemon {
             Thread dataLayerThread = new Thread(() -> {
                 try {
                     log("Initializing RecordingsIndex (parallel)...");
+                    try { com.overdrive.app.server.timeline.TimelineJournal.daemonStarted(); } catch (Throwable ignored) { }
                     long t0 = System.currentTimeMillis();
                     boolean idxOk = com.overdrive.app.server.RecordingsIndex.getInstance().init();
                     if (idxOk) {
                         log("RecordingsIndex initialized in "
                                 + (System.currentTimeMillis() - t0) + "ms — kicking off async warmup");
                         com.overdrive.app.server.RecordingsIndex.getInstance().warmupAsync();
+                        try { com.overdrive.app.server.timeline.TimelineEnricher.start(); } catch (Throwable ignored) { }
                         try {
                             RecordingsIndexFileWatcher.getInstance().start();
                         } catch (Throwable t) {
@@ -1283,6 +1291,8 @@ public class CameraDaemon {
                         tam.shutdown();
                         return;
                     }
+                    // Outside the lifecycle lock: shutdown joins this thread's future instead.
+                    replayAccStateToTripAnalytics(tam);
                     log("Trip Analytics initialized in "
                             + (System.currentTimeMillis() - t0) + "ms (enabled="
                             + initializedEnabled + ")");
@@ -1298,6 +1308,13 @@ public class CameraDaemon {
         } catch (Throwable t) {
             log("Trip Analytics thread spawn failed: " + t.getMessage());
             tripAnalyticsInitFuture.complete(null);
+        }
+
+        // Trip Briefing: learns on its own threads once the trip database above is usable.
+        try {
+            com.overdrive.app.briefing.daemon.TripBriefingService.get().start();
+        } catch (Throwable t) {
+            log("Trip Briefing start failed: " + t.getMessage());
         }
 
         // SafeKeep: installs its config listener; starts its engine only when the master
@@ -1546,6 +1563,13 @@ public class CameraDaemon {
             com.overdrive.app.surveillance.ClusterViewMirrorService.register();
         } catch (Throwable t) {
             log("ClusterViewMirrorService register failed: " + t.getMessage());
+        }
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            try {
+                com.overdrive.app.byd.dilink5.NativeVehicleWriteService.register(getAppContext());
+            } catch (Throwable t) {
+                log("Native vehicle service register failed: " + t.getMessage());
+            }
         }
 
         log("Daemon ready on TCP:" + TCP_PORT + " HTTP:" + HTTP_PORT);
@@ -4300,6 +4324,45 @@ public class CameraDaemon {
         }
     }
 
+    /** Background, low priority: recovers journaled clips in every recording folder. */
+    private static void startInterruptedClipRecovery() {
+        // Set before the startup sweeps run so they keep every journaled orphan for the passes.
+        com.overdrive.app.surveillance.SegmentRecovery.beginStartupPasses();
+        Thread t = new Thread(() -> {
+            try {
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
+            } catch (Throwable ignored) {
+            }
+            try {
+                // Re-read the folders each pass: an SD/USB card can mount after startup.
+                long[] delaysMs = {0L, 15_000L, 60_000L, 180_000L};
+                for (long delayMs : delaysMs) {
+                    if (delayMs > 0) Thread.sleep(delayMs);
+                    com.overdrive.app.storage.StorageManager sm =
+                            com.overdrive.app.storage.StorageManager.getInstance();
+                    java.util.LinkedHashSet<String> seen = new java.util.LinkedHashSet<>();
+                    java.util.List<java.io.File> dirs = new java.util.ArrayList<>();
+                    dirs.addAll(sm.getAllSurveillanceDirs());
+                    dirs.addAll(sm.getAllProximityDirs());
+                    dirs.addAll(sm.getAllRecordingsDirs());
+                    int recovered = 0;
+                    for (java.io.File dir : dirs) {
+                        if (dir != null && seen.add(dir.getAbsolutePath())) {
+                            recovered += com.overdrive.app.surveillance.SegmentRecovery.recoverOrphans(dir);
+                        }
+                    }
+                    if (recovered > 0) log("Interrupted-clip recovery: " + recovered + " clip(s) rebuilt");
+                }
+            } catch (Throwable t2) {
+                log("Interrupted-clip recovery error: " + t2.getMessage());
+            } finally {
+                com.overdrive.app.surveillance.SegmentRecovery.endStartupPasses();
+            }
+        }, "ClipRecovery");
+        t.setDaemon(true);
+        t.start();
+    }
+
     private static void markTripAnalyticsShutdownRequested() {
         synchronized (TRIP_ANALYTICS_LIFECYCLE_LOCK) {
             TRIP_ANALYTICS_SHUTDOWN_REQUESTED.set(true);
@@ -4835,6 +4898,9 @@ public class CameraDaemon {
                 + " -> " + resolvedCamera.getProfile().getEncoderWidth()
                 + "x" + resolvedCamera.getProfile().getEncoderHeight() + " (mosaic)");
 
+            // Rebuild clips a crash left unfinished (journaled .mp4.tmp) before any sweep reaps them.
+            startInterruptedClipRecovery();
+
             // Clean up orphaned .tmp files from previous crashed recordings
             try {
                 com.overdrive.app.storage.StorageManager sm = com.overdrive.app.storage.StorageManager.getInstance();
@@ -5337,6 +5403,7 @@ public class CameraDaemon {
                         lease, source + " AVC keep-alive")) {
                     return false;
                 }
+                try { com.overdrive.app.server.timeline.TimelineJournal.surveillanceOn(); } catch (Throwable ignored) { }
                 log("Surveillance mode activated successfully (AVC keep-alive on)");
                 return true;
             } catch (Throwable e) {
@@ -5364,6 +5431,11 @@ public class CameraDaemon {
             return latestAccIsOff.booleanValue()
                 ? accTransitionGeneration : -1L;
         }
+    }
+
+    /** Lock-free read of the admitted ACC state: TRUE off, FALSE on, null not yet known. */
+    public static Boolean admittedAccOffHint() {
+        return latestAccIsOff;
     }
 
     /** False while ACC is ON or not yet known; {@link #enableSurveillance()} arms nothing then. */
@@ -5500,6 +5572,7 @@ public class CameraDaemon {
             }
         } catch (Throwable ignored) {}
         log("Disabling surveillance mode (caller=" + caller + ")");
+        try { com.overdrive.app.server.timeline.TimelineJournal.surveillanceOff(caller); } catch (Throwable ignored) { }
         surveillanceEnabled = false;
 
         if (gpuPipeline != null) {
@@ -5843,6 +5916,7 @@ public class CameraDaemon {
                     // teardown so its "returned" stills race ahead of the
                     // camera stop; non-blocking hand-off, null check when off.
                     com.overdrive.app.parking.ParkingHooks.onUnlockWhileParked();
+                    try { com.overdrive.app.server.timeline.TimelineJournal.reasonHint("owner_returned"); } catch (Throwable ignored) { }
                     disableSurveillance();
                     doorLockListenerArmed = false;
                     if (stopStaleAccTransition(
@@ -5939,6 +6013,7 @@ public class CameraDaemon {
             worker = new Thread(() -> {
                 try {
                     log("ACC-ON disarm watchdog started");
+                    boolean deterrentOnPending = false;
                     while (true) {
                         try {
                             Thread.sleep(
@@ -6012,6 +6087,13 @@ public class CameraDaemon {
                             return;
                         }
                         if (!probe.accIsOff && probe.trustworthy) {
+                            // Our own deterrent frame can bounce the reading: require the next probe too.
+                            if (!deterrentOnPending
+                                    && com.overdrive.app.byd.cloud.BydCloudDeterrent.isActuationWindowLive()) {
+                                deterrentOnPending = true;
+                                log("ACC-ON disarm watchdog: ON during deterrent actuation — confirming on the next probe");
+                                continue;
+                            }
                             log("ACC-ON disarm watchdog: clean hardware ON observation");
                             onObservedAccStateChanged(
                                 false,
@@ -6019,6 +6101,7 @@ public class CameraDaemon {
                                 "disarm-watchdog");
                             return;
                         }
+                        if (probe.accIsOff) deterrentOnPending = false;
                         if (!probe.accIsOff && !probe.trustworthy
                                 && surveillanceEnabled) {
                             log("ACC-ON disarm watchdog: ignoring untrustworthy ON default");
@@ -7119,7 +7202,8 @@ public class CameraDaemon {
      */
     private static long accReconciliationRevision;
     /** Latest ACC edge admitted at method ingress, including one still running its side effects. */
-    private static Boolean latestAccIsOff;
+    // volatile: written under parkTerminateLock; onGearChanged reads it lock-free.
+    private static volatile Boolean latestAccIsOff;
     /**
      * Elapsed-realtime stamp of the latest admitted ACC edge. Duplicate IPCs
      * and pending replays do not refresh it, so an ignition hint from before
@@ -8105,6 +8189,34 @@ public class CameraDaemon {
     }
 
     /**
+     * ACC and gear edges admitted before publication hit a null manager; re-deliver the current
+     * state. Unknown ACC replays nothing: its first edge still comes.
+     */
+    private static void replayAccStateToTripAnalytics(
+            com.overdrive.app.trips.TripAnalyticsManager manager) {
+        if (TRIP_ANALYTICS_SHUTDOWN_REQUESTED.get() || shutdownStarted.get() || !running.get()) {
+            return;
+        }
+        Boolean accIsOff;
+        synchronized (parkTerminateLock) {
+            accIsOff = latestAccIsOff;
+        }
+        if (accIsOff == null) return;
+        try {
+            if (!accIsOff) {
+                // Probes the live gear: starts an IDLE trip, resumes a PARK_PENDING one.
+                manager.onAccOn();
+            }
+            // Re-read: ends a trip started above if ACC went OFF meanwhile, never one a newer ACC ON started.
+            if (isAccOffAdmitted()) {
+                manager.onAccOff();
+            }
+        } catch (Throwable failure) {
+            log("Trip Analytics ACC replay error: " + failure.getMessage());
+        }
+    }
+
+    /**
      * Queue a transition whose generation has already been admitted.
      */
     private static boolean queuePendingAccState(
@@ -8304,6 +8416,9 @@ public class CameraDaemon {
 
     private static void runAdmittedAccTransition(
             boolean accIsOff, long transitionGeneration) {
+        // Recording engine follows ACC (CPU while on, GPU in sentry); non-blocking.
+        com.overdrive.app.surveillance.GpuSurveillancePipeline enginePipeline = gpuPipeline;
+        if (enginePipeline != null) enginePipeline.onAccEdgeForRecordingEngine();
         AccTransitionLease lease = claimAccTransitionLease(
             transitionGeneration, accIsOff);
         if (lease == null) {
@@ -8320,7 +8435,6 @@ public class CameraDaemon {
             requestAccTransitionReconciliation(false);
             return;
         }
-
         AccApplyContext context = new AccApplyContext(
             transitionGeneration, accIsOff, lease.token, lease.revision);
         ACC_APPLY_CONTEXT.set(context);
@@ -8348,9 +8462,23 @@ public class CameraDaemon {
             // protected by a monitor held across external IPC; a newer generation
             // can run immediately, and the post-call currency check re-drives it.
             com.overdrive.app.monitor.AccMonitor.setAccState(!accIsOff);
+            if (!accIsOff) {
+                try {
+                    com.overdrive.app.launcher.ClusterAppDensity.recoverWhenAccOn();
+                    com.overdrive.app.launcher.ClusterLayouts.recoverWhenAccOn();
+                } catch (Throwable densityRecoveryFailure) {
+                    log("Cluster density recovery deferred: " + densityRecoveryFailure.getMessage());
+                }
+            }
             if (stopStaleAccTransition(
                     transitionGeneration, accIsOff, "ACC cache publication")) {
                 return;
+            }
+            try {
+                com.overdrive.app.navmap.cluster.ClusterGuidanceDaemon.onAccStateChanged(
+                        accIsOff, transitionGeneration);
+            } catch (Throwable failure) {
+                log("Cluster guidance ACC cleanup unavailable: " + failure.getClass().getSimpleName());
             }
             reconcileDi5CloudKeepAliveForAccState(
                     transitionGeneration, accIsOff, "ACC transition");
@@ -8573,6 +8701,13 @@ public class CameraDaemon {
 
         log("ACC state changed: " + (accIsOff ? "OFF (entering sentry)" : "ON (exiting sentry)"));
         com.overdrive.app.telenav.DeferredNavManager.onAccStateChanged(accIsOff);
+        try {
+            com.overdrive.app.briefing.daemon.TripBriefingService.get().onAccChanged(!accIsOff);
+        } catch (Throwable t) {
+            log("Trip Briefing ACC edge failed: " + t.getMessage());
+        }
+        // A scheduled AI insight the car slept through (or the provider kept refusing) is made at the next start.
+        if (!accIsOff) com.overdrive.app.genai.GenAiInsights.catchUpAsync();
 
         if (accIsOff) {
             // DiLink 5 must retain an independent local ACC-ON recovery path
@@ -9329,6 +9464,9 @@ public class CameraDaemon {
         try {
             com.overdrive.app.monitor.ParkedPosition.get().onGear(gear);
         } catch (Throwable ignored) {}
+        try {
+            com.overdrive.app.briefing.daemon.DaemonBriefingEnv.onGear(gear);
+        } catch (Throwable ignored) {}
 
         // DiLink 5 deliberately does NOT arbitrate the cameras on gear changes.
         // The Qualcomm AIS server multiplexes the QCarCam inputs to every
@@ -9343,7 +9481,13 @@ public class CameraDaemon {
         // here; the detector re-probes the live gear on publication.
         com.overdrive.app.trips.TripAnalyticsManager tripManager =
                 tripAnalyticsManager;
-        if (tripManager != null) {
+        // While ACC is known OFF a driving gear must not open a trip; the ACC-ON probe starts it.
+        boolean tripGearGated = Boolean.TRUE.equals(latestAccIsOff)
+                && gear != com.overdrive.app.monitor.GearMonitor.GEAR_P;
+        if (tripManager != null && tripGearGated && !redundant) {
+            log("Trip Analytics: gear " + gearName + " ignored while ACC is OFF");
+        }
+        if (tripManager != null && !tripGearGated) {
             try {
                 tripManager.onGearChanged(gear);
             } catch (Throwable failure) {
@@ -9517,6 +9661,7 @@ public class CameraDaemon {
                             }
                             log("SCHEDULE: Time window ended (" + schedule.getSummary() +
                                 ") — stopping surveillance");
+                            try { com.overdrive.app.server.timeline.TimelineJournal.reasonHint("schedule_end"); } catch (Throwable ignored) { }
                             disableSurveillance();
                             if (stopStaleAccTransition(
                                     transitionGeneration,
@@ -9636,7 +9781,7 @@ public class CameraDaemon {
 
         gpuPipeline.getConfig().setRecordingQuality(tier);
         int effectiveBitrate = gpuPipeline.getConfig().getEffectiveBitrate();
-        gpuPipeline.applyBitrateChange(effectiveBitrate);
+        gpuPipeline.applyTierBitrate();
         log("Recording quality set to: " + tier
             + " (" + effectiveBitrate / 1_000_000 + " Mbps for "
             + gpuPipeline.getConfig().getVideoCodec() + ")");
@@ -10170,7 +10315,7 @@ public class CameraDaemon {
                 reader.close();
                 if (fileId != null && !fileId.isEmpty() && fileId.startsWith("byd-")) {
                     deviceId = fileId;
-                    log("Device ID loaded from file: " + redactDid(deviceId));
+                    log("Device ID loaded from file: " + didForLog(deviceId));
                     return;
                 }
             }
@@ -10194,7 +10339,12 @@ public class CameraDaemon {
         }
         deviceId = hex.toString();
         saveDeviceId(deviceId);
-        log("Device ID generated randomly: " + redactDid(deviceId));
+        log("Device ID generated randomly: " + didForLog(deviceId));
+    }
+
+    /** The ID seeds the credential cipher, so logs only show its last 4 characters. */
+    static String didForLog(String id) {
+        return id == null || id.length() <= 8 ? "****" : "…" + id.substring(id.length() - 4);
     }
 
     private static void saveDeviceId(String id) {

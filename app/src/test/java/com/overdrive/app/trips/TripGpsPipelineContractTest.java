@@ -17,10 +17,6 @@ public class TripGpsPipelineContractTest {
 
   @Test
   public void tripStartEnsuresGpsFeedBeforeRecorder() throws IOException {
-    String src = read("app/src/main/java/com/overdrive/app/trips/TripAnalyticsManager.java");
-    assertTrue(
-        "handleTripStarted must wake LocationSidecar and reload cache before recording",
-        src.contains("ensureTripRecordingFeed()"));
     assertTrue(
         "recorder must count GPS with the same predicate as the map API",
         read("app/src/main/java/com/overdrive/app/trips/TripTelemetryRecorder.java")

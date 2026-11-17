@@ -25,12 +25,19 @@ public final class ProximitySafeZonePolicy {
     public static final class Fix {
         public final double latitude, longitude, accuracyMeters;
         public final long ageMs;
+        /** Added to the uncertainty margin for movement the fix did not see. */
+        public final double driftMeters;
 
         public Fix(double latitude, double longitude, double accuracyMeters, long ageMs) {
+            this(latitude, longitude, accuracyMeters, ageMs, 0.0);
+        }
+
+        public Fix(double latitude, double longitude, double accuracyMeters, long ageMs, double driftMeters) {
             this.latitude = latitude;
             this.longitude = longitude;
             this.accuracyMeters = accuracyMeters;
             this.ageMs = ageMs;
+            this.driftMeters = driftMeters;
         }
     }
 
@@ -193,7 +200,7 @@ public final class ProximitySafeZonePolicy {
         if (usingParked) fix = parked;
         else if (fixFailure != null)
             return result(true, restrictLock, restrictUnlock, "UNKNOWN", fixFailure, fix, ids, selected, scope);
-        double uncertainty = Math.max(10.0, fix.accuracyMeters * 2.0);
+        double uncertainty = Math.max(10.0, fix.accuracyMeters * 2.0) + fix.driftMeters;
         boolean boundary = false;
         for (Zone zone : selected) {
             double distance = distanceMeters(fix.latitude, fix.longitude, zone.latitude, zone.longitude);
@@ -212,12 +219,18 @@ public final class ProximitySafeZonePolicy {
         return new Result(enabled, restrictLock, restrictUnlock, state, reason, fix, false, ids, selected, scope);
     }
 
+    /** True when a live fix passes the gate's own age and accuracy checks. */
+    public static boolean liveUsable(Fix fix) {
+        return fixFailure(fix, false) == null;
+    }
+
     private static String fixFailure(Fix fix, boolean parked) {
         if (fix == null || !validCoordinate(fix.latitude, fix.longitude))
             return "gps_unavailable";
         if (fix.ageMs < 0) return "gps_time_unknown";
         if (!parked && fix.ageMs > MAX_FIX_AGE_MS) return "gps_fix_stale";
-        if (!finite(fix.accuracyMeters) || fix.accuracyMeters <= 0) return "gps_accuracy_unavailable";
+        if (!finite(fix.accuracyMeters) || fix.accuracyMeters <= 0
+                || !finite(fix.driftMeters) || fix.driftMeters < 0) return "gps_accuracy_unavailable";
         return fix.accuracyMeters > MAX_ACCURACY_METERS ? "gps_accuracy_poor" : null;
     }
 

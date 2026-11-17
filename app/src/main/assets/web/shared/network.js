@@ -16,6 +16,7 @@ const NetworkPage = {
     uiTimer: null,
     pollTimer: null,
     _refreshInFlight: false,
+    _refreshAgain: false,
     status: null,
     statusAt: 0,
     // Text inputs are seeded from config once, then left to the user.
@@ -51,9 +52,13 @@ const NetworkPage = {
 
     // ============== Fetch / render ==============
 
-    async refresh() {
-        // A slow daemon response must not accumulate overlapping status requests.
-        if (document.hidden || this._refreshInFlight) return;
+    async refresh(afterAction) {
+        // One status request at a time; a refresh asked for by an action re-runs once it ends.
+        if (document.hidden) return;
+        if (this._refreshInFlight) {
+            if (afterAction) this._refreshAgain = true;
+            return;
+        }
         this._refreshInFlight = true;
         try {
             const resp = await fetch('/api/hotspot');
@@ -66,6 +71,10 @@ const NetworkPage = {
             console.warn('[Network] status fetch failed:', e);
         } finally {
             this._refreshInFlight = false;
+            if (this._refreshAgain) {
+                this._refreshAgain = false;
+                this.refresh();
+            }
         }
     },
 
@@ -310,7 +319,7 @@ const NetworkPage = {
         } catch (e) {
             BYD.core.toast(this.t('common.error', 'Something went wrong'), 'error');
         }
-        this.refresh();
+        this.refresh(true);
     },
 
     async post(path, body, successKey) {
@@ -330,7 +339,7 @@ const NetworkPage = {
             BYD.core.toast(this.t('common.error', 'Something went wrong'), 'error');
         }
         // Give the radio a moment to transition before re-reading.
-        setTimeout(() => this.refresh(), 1500);
+        setTimeout(() => this.refresh(true), 1500);
     },
 
     // ============== Helpers ==============

@@ -116,6 +116,13 @@ public class PerformanceApiHandler {
             return handleSocHistory(path, out);
         }
         
+        // GET /api/performance/hv-cells - live cell voltages / pack voltage / average cell temperature
+        if ((path.equals("/api/performance/hv-cells") || path.startsWith("/api/performance/hv-cells?"))
+                && method.equals("GET")) {
+            HttpResponse.sendJson(out, hvCellsJson().toString());
+            return true;
+        }
+
         // GET /api/performance/battery - Battery health report
         if (path.startsWith("/api/performance/battery") && method.equals("GET")) {
             return handleBatteryHealth(path, out);
@@ -596,6 +603,31 @@ public class PerformanceApiHandler {
         }
     }
     
+    /** Live pack readings, each only when the car reports a plausible value (same bands as MQTT). */
+    static JSONObject hvCellsJson() {
+        JSONObject r = new JSONObject();
+        try {
+            r.put("success", true);
+            com.overdrive.app.byd.BydDataCollector collector =
+                    com.overdrive.app.byd.BydDataCollector.getInstance();
+            com.overdrive.app.byd.BydVehicleData vd =
+                    collector != null && collector.isInitialized() ? collector.getData() : null;
+            if (vd == null) return r;
+            putInRange(r, "cellVoltMin", vd.lowCellVoltage, 2.0, 4.5);
+            putInRange(r, "cellVoltMax", vd.highCellVoltage, 2.0, 4.5);
+            putInRange(r, "packVolt", vd.hvPackVoltage, 100, 1000);
+            putInRange(r, "tempAvg", vd.avgCellTempC, -40, 80);
+            if (vd.timestamp > 0) r.put("ageMs", Math.max(0L, System.currentTimeMillis() - vd.timestamp));
+        } catch (Exception ignored) {
+            // Best effort: an empty reply hides the card.
+        }
+        return r;
+    }
+
+    private static void putInRange(JSONObject o, String key, double v, double min, double max) throws Exception {
+        if (!Double.isNaN(v) && !Double.isInfinite(v) && v >= min && v <= max) o.put(key, v);
+    }
+
     /**
      * Handle battery health requests.
      * GET /api/performance/battery?hours=72&points=200 - Full battery health report
@@ -990,7 +1022,7 @@ public class PerformanceApiHandler {
                 if (!Double.isFinite(kwh) || kwh < 5.0 || kwh > 120.0) {
                     JSONObject err = new JSONObject();
                     err.put("success", false);
-                    err.put("error", "nominalKwh must be between 5 and 120");
+                    err.put("error", Messages.get("errors.performance_nominal_kwh_range"));
                     HttpResponse.sendJson(out, err.toString());
                     return true;
                 }

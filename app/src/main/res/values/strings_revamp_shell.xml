@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shell strings: rail footer remote-access popover. -->
+<resources>
+    <string name="shell_remote_details">QR &amp; access code</string>
+    <!-- Title plus a detail, e.g. "Remote access · Zrok". -->
+    <string name="shell_title_with_detail" translatable="false">%1$s · %2$s</string>
+</resources>

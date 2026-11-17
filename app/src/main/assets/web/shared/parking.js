@@ -17,7 +17,9 @@
     var PAGE = 24;
     var state = {
         status: null, days: 30, offset: 0, total: 0, loading: false,
-        sessions: [], blobs: [], listRequest: 0, detail: null
+        sessions: [], blobs: [], listRequest: 0,
+        detailRequest: 0, detailId: null, navLoading: false, detail: null,
+        readingId: null
     };
 
     // ---------------------------------------------------------------- i18n / utils
@@ -36,7 +38,7 @@
         'parking.sentry_armed': 'Sentry armed', 'parking.sentry_lock_wait': 'Waiting for lock', 'parking.sentry_pipeline_down': 'Camera off',
         'parking.sentry_suppressed_safe_zone': 'Safe zone', 'parking.sentry_suppressed_schedule': 'Outside schedule',
         'parking.sentry_surveillance_off': 'Surveillance off', 'parking.sentry_vehicle_on_only': 'Vehicle-on only', 'parking.sentry_unknown': 'Sentry unknown',
-        'parking.back': 'All sessions', 'parking.started': 'Parked', 'parking.ended': 'Returned', 'parking.duration': 'Duration',
+        'parking.back': 'All sessions', 'common.nav_previous': 'Previous', 'common.nav_next': 'Next', 'parking.started': 'Parked', 'parking.ended': 'Returned', 'parking.duration': 'Duration',
         'parking.trigger': 'Return signal', 'parking.stills': 'Stills', 'parking.arrived': 'Arrived', 'parking.returned': 'Returned',
         'parking.no_stills': 'No stills for this session', 'parking.signage': 'Garage signage',
         'parking.signage_pending': 'Not read yet — reads about two minutes after the next drive starts, or while charging.',
@@ -44,6 +46,7 @@
         'parking.signage_skipped': 'No frames were available to read.', 'parking.signage_none': 'No level / zone / bay text found.',
         'parking.signage_confidence': 'confidence {p}%', 'parking.read_again': 'Read again', 'parking.neighbours': 'Neighbours',
         'parking.signage_state_pending': 'Pending', 'parking.signage_state_done': 'Not found', 'parking.signage_state_skipped': 'No frames',
+        'parking.signage_reading': 'Reading signs…', 'parking.signage_state_reading': 'Reading',
         'parking.signage_state_unavailable': 'No models', 'status.on': 'ON', 'status.off': 'OFF',
         'parking.no_neighbours': 'No neighbouring vehicles were tracked. Sentry must be armed for this.',
         'parking.side_front': 'Front', 'parking.side_right': 'Right', 'parking.side_rear': 'Rear', 'parking.side_left': 'Left',
@@ -63,6 +66,7 @@
         'parking.energy_used': 'Energy used', 'parking.soc_charged': 'Charged while parked',
         'trip.filter.days_7': '7 Days', 'trip.filter.days_30': '30 Days'
     };
+    FALLBACK['tlview.watchSession'] = 'Watch this session';
     function fallback(key, vars) {
         var s = FALLBACK[key] || key;
         if (vars) s = s.replace(/\{(\w+)\}/g, function (m, n) { return vars[n] != null ? vars[n] : m; });
@@ -83,7 +87,7 @@
         if (h > 0) return h + BYD.units.hourSuffix(true) + ' ' + (m < 10 ? '0' : '') + m + s;
         return m + s;
     }
-    function fmtTime(ms) { return ms ? new Date(ms).toLocaleTimeString(lang(), { hour: '2-digit', minute: '2-digit' }) : ''; }
+    function fmtTime(ms) { return ms ? BYD.clock.time(ms, lang()) : ''; }
     function fmtDay(ms) { return new Date(ms).toLocaleDateString(lang(), { weekday: 'long', month: 'short', day: 'numeric' }); }
     function fmtDate(ms) { return new Date(ms).toLocaleDateString(lang(), { weekday: 'long', month: 'long', day: 'numeric' }); }
 
@@ -115,6 +119,8 @@
         camera: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>',
         battery: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="16" height="10" rx="2" ry="2"/><line x1="22" y1="11" x2="22" y2="13"/></svg>',
         back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>',
+        prev: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>',
+        next: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>',
         trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
         map: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>',
         calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg>',
@@ -334,7 +340,7 @@
     }
 
     function loadSessions(append) {
-        if (state.loading) return;
+        if (state.loading) return Promise.resolve();
         state.loading = true;
         var req = ++state.listRequest;
         var box = $('pkSessions'), empty = $('pkEmptyState'), more = $('pkMoreBtn');
@@ -348,7 +354,7 @@
         var url = '/api/parking/sessions?limit=' + PAGE + '&offset=' + state.offset;
         var from = rangeFrom();
         if (from > 0) url += '&from=' + from;
-        fetch(url, { cache: 'no-store' })
+        return fetch(url, { cache: 'no-store' })
             .then(function (r) { return r.json(); })
             .then(function (d) {
                 if (req !== state.listRequest) return;      // a newer filter owns the list
@@ -367,6 +373,7 @@
                 // The range filter narrows client-visible rows; keep paging while the
                 // last page was full (the server total counts ALL sessions).
                 more.style.display = (list.length === PAGE) ? 'block' : 'none';
+                if (state.detailId != null) paintPager();
             })
             .catch(function () {
                 if (req !== state.listRequest) return;
@@ -377,6 +384,8 @@
     }
 
     function showList() {
+        state.detailRequest++;
+        state.detailId = null;
         $('pkListView').classList.remove('hidden');
         var detail = $('pkDetailView');
         detail.classList.remove('active');
@@ -398,6 +407,8 @@
     // ---------------------------------------------------------------- detail
 
     function showDetail(id) {
+        var req = ++state.detailRequest;
+        state.detailId = id;
         $('pkListView').classList.add('hidden');
         var view = $('pkDetailView');
         view.classList.add('active');
@@ -406,20 +417,74 @@
         try { window.scrollTo(0, 0); } catch (e) { /* ignore */ }
         fetch('/api/parking/sessions/' + encodeURIComponent(id), { cache: 'no-store' })
             .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
-            .then(function (d) { state.detail = d; renderDetail(d); })
-            .catch(function () { view.innerHTML = detailHeader(null) + '<div class="empty-state"><div class="empty-title">' + esc(t('parking.no_sessions_title')) + '</div></div>'; hydrateImages(view); });
+            .then(function (d) { if (req === state.detailRequest) { state.detail = d; renderDetail(d); } })
+            .catch(function () {
+                if (req !== state.detailRequest) return;
+                view.innerHTML = detailHeader(null) + '<div class="empty-state"><div class="empty-title">' + esc(t('parking.no_sessions_title')) + '</div></div>';
+                hydrateImages(view);
+            });
+        // A detail opened by link still pages through the list it belongs to.
+        if (!state.sessions.length && !state.loading) loadSessions(false);
         if (!state.status) {
             fetch('/api/parking/status', { cache: 'no-store' }).then(function (r) { return r.json(); })
                 .then(function (st) { state.status = st; renderHeader(); }).catch(function () { /* ignore */ });
         }
     }
 
+    function sessionIndex(id) {
+        for (var i = 0; i < state.sessions.length; i++) {
+            if (String(state.sessions[i].sessionId) === String(id)) return i;
+        }
+        return -1;
+    }
+
+    function moreSessions() {
+        var more = $('pkMoreBtn');
+        return !!more && more.style.display !== 'none';
+    }
+
+    // Previous / next follow the list's order, loading the next page at its end.
+    function paintPager() {
+        var prev = $('pkPrevSession'), next = $('pkNextSession');
+        if (!prev || !next) return;
+        var i = sessionIndex(state.detailId);
+        prev.disabled = state.navLoading || i <= 0;
+        next.disabled = state.navLoading || i < 0 || (i + 1 >= state.sessions.length && !moreSessions());
+    }
+
+    function navigateSession(step) {
+        var id = state.detailId, i = sessionIndex(id);
+        if (i < 0 || state.navLoading) return;
+        var target = state.sessions[i + step];
+        if (target) {
+            location.hash = '#/session/' + encodeURIComponent(target.sessionId);
+            return;
+        }
+        if (step < 0 || !moreSessions()) return;
+        state.navLoading = true;
+        paintPager();
+        loadSessions(true).then(function () {
+            state.navLoading = false;
+            if (String(state.detailId) !== String(id)) return;
+            var following = state.sessions[i + 1];
+            if (following) location.hash = '#/session/' + encodeURIComponent(following.sessionId);
+            else paintPager();
+        });
+    }
+
     function detailHeader(s) {
         var actions = '';
         if (s) {
+            actions += '<span class="detail-pager">' +
+                '<button type="button" class="detail-back-btn detail-pager-btn" id="pkPrevSession" disabled>' + ICON.prev + esc(t('common.nav_previous')) + '</button>' +
+                '<button type="button" class="detail-back-btn detail-pager-btn detail-pager-next" id="pkNextSession" disabled>' + esc(t('common.nav_next')) + ICON.next + '</button>' +
+            '</span>';
             var maps = mapsUrl(s);
             if (maps) actions += '<a class="detail-back-btn" target="_blank" rel="noopener" href="' + esc(maps) + '">' + ICON.map + esc(t('parking.map')) + '</a>';
             actions += '<a class="detail-back-btn" href="events.html?filter=sentry&parkingSessionId=' + encodeURIComponent(s.sessionId) + '">' + ICON.video + esc(t('parking.open_events')) + '</a>';
+            var tlStart = Number(s.startedMs), tlEnd = Number(s.endedMs);
+            if (isFinite(tlStart) && tlStart > 0) actions += '<a class="detail-back-btn" href="events.html?view=timeline&t=' + tlStart + (isFinite(tlEnd) && tlEnd > tlStart ? '&end=' + tlEnd : '') + '">' +
+                '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>' + esc(t('tlview.watchSession')) + '</a>';
         }
         return '<div class="detail-header">' +
             '<a class="detail-back-btn" href="#/">' + ICON.back + esc(t('parking.back')) + '</a>' +
@@ -457,14 +522,21 @@
             (!s.open ? '<button class="detail-delete-btn" id="pkDeleteBtn">' + ICON.trash + esc(t('parking.delete')) + '</button>' : '');
         view.innerHTML = html;
         hydrateImages(view);
+        $('pkPrevSession').addEventListener('click', function () { navigateSession(-1); });
+        $('pkNextSession').addEventListener('click', function () { navigateSession(1); });
+        paintPager();
         var del = $('pkDeleteBtn');
         if (del) del.addEventListener('click', function () { deleteSession(s.sessionId); });
+        bindReadAgain(s);
+    }
+
+    function bindReadAgain(s) {
         var rr = $('pkReadAgainBtn');
         if (rr) rr.addEventListener('click', function () { requeueSignage(s.sessionId); });
     }
 
-    function cardShell(title, icon, body, right) {
-        return '<div class="summary-card"><div class="pk-card-title"><div class="card-title">' + ICON[icon] + '<span>' + esc(title) + '</span></div>' +
+    function cardShell(title, icon, body, right, id) {
+        return '<div class="summary-card"' + (id ? ' id="' + id + '"' : '') + '><div class="pk-card-title"><div class="card-title">' + ICON[icon] + '<span>' + esc(title) + '</span></div>' +
             (right || '') + '</div>' + body + '</div>';
     }
 
@@ -492,7 +564,12 @@
     function signageCard(s) {
         var st = s.signageState || 'pending';
         var found = st === 'done' && s.signage && s.signage.found;
+        var reading = st === 'pending' && String(state.readingId) === String(s.sessionId);
         var body;
+        if (reading) {
+            return cardShell(t('parking.signage'), 'level',
+                '<div class="pk-muted">' + esc(t('parking.signage_reading')) + '</div>', tag(t('parking.signage_state_reading'), ''), 'pkSignageCard');
+        }
         if (found) {
             var ev = (s.signage.evidence || []).slice(0, 4).map(function (e) { return '“' + esc(e.text) + '”'; }).join(', ');
             body = '<div class="pk-signage-value">' + esc(s.signage.label) + '</div>' +
@@ -504,7 +581,7 @@
         var canRead = state.status && state.status.running && state.status.signageModels;
         if (canRead) body += '<button class="load-more-btn" id="pkReadAgainBtn" style="margin-top:12px;">' + esc(t('parking.read_again')) + '</button>';
         var right = tag(found ? s.signage.label : t('parking.signage_state_' + st), found ? 'good' : '');
-        return cardShell(t('parking.signage'), 'level', body, right);
+        return cardShell(t('parking.signage'), 'level', body, right, 'pkSignageCard');
     }
 
     function classLabel(g) {
@@ -518,7 +595,7 @@
     }
     function clipLink(name) {
         if (!validClipFilename(name)) return '';
-        return ' · <a href="#" data-parking-clip="' + esc(name) + '">' + esc(t('parking.clip')) + '</a>';
+        return ' · <a href="events.html?file=' + encodeURIComponent(name) + '" data-parking-clip="' + esc(name) + '">' + esc(t('parking.clip')) + '</a>';
     }
 
     function validClipFilename(name) {
@@ -606,7 +683,7 @@
                 if (r.bikeCount) counts.push(countGlyph('bike', t('parking.bike'), r.bikeCount));
                 if (r.animalCount) counts.push(countGlyph('paw', t('parking.animal'), r.animalCount));
                 var cams = r.cameras ? String(r.cameras).split(',').map(function (c) { return t('parking.side_' + c); }).join(' · ') : '';
-                return '<a class="pk-event" href="#" data-parking-clip="' + esc(r.filename || '') + '">' +
+                return '<a class="pk-event" href="events.html?file=' + encodeURIComponent(r.filename || '') + '" data-parking-clip="' + esc(r.filename || '') + '">' +
                     '<div class="pk-ev-thumb"' + (thumb ? ' data-img="' + esc(thumb) + '"' : '') + '></div>' +
                     '<div class="pk-ev-main"><div class="pk-ev-title">' + esc(fmtTime(r.timestamp)) + sev + '</div>' +
                     '<div class="pk-ev-sub">' + counts.join('') + (cams ? (counts.length ? '· ' : '') + esc(cams) : '') + '</div></div></a>';
@@ -629,8 +706,44 @@
     function requeueSignage(id) {
         fetch('/api/parking/sessions/' + encodeURIComponent(id) + '/signage', { method: 'POST' })
             .then(function (r) { return r.json(); })
-            .then(function (d) { toast(d && d.success ? t('parking.requeued') : t('parking.requeue_failed'), d && d.success ? 'success' : 'error'); })
+            .then(function (d) {
+                toast(d && d.success ? t('parking.requeued') : t('parking.requeue_failed'), d && d.success ? 'success' : 'error');
+                if (!(d && d.success)) return;
+                state.readingId = id;
+                var card = $('pkSignageCard');
+                if (card && state.detail && state.detail.session && String(state.detail.session.sessionId) === String(id)) {
+                    state.detail.session.signageState = 'pending';
+                    card.outerHTML = signageCard(state.detail.session);
+                }
+                pollSignage(id, Date.now());
+            })
             .catch(function () { toast(t('parking.requeue_failed'), 'error'); });
+    }
+
+    // A read takes from seconds to a minute or two (sentry clips defer it): follow it to its result.
+    function pollSignage(id, since) {
+        setTimeout(function () {
+            if (String(state.readingId) !== String(id)) return;
+            fetch('/api/parking/sessions/' + encodeURIComponent(id), { cache: 'no-store' })
+                .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+                .then(function (d) {
+                    if (String(state.readingId) !== String(id)) return;
+                    var pending = d && d.session && d.session.signageState === 'pending';
+                    if (pending && Date.now() - since < 180000) { pollSignage(id, since); return; }
+                    state.readingId = null;
+                    var i = sessionIndex(id);
+                    if (i >= 0 && d && d.session) state.sessions[i] = d.session;
+                    if (String(state.detailId) === String(id) && /^#\/session\//.test(location.hash || '')) {
+                        state.detail = d;
+                        revokeAll();
+                        renderDetail(d);
+                    }
+                })
+                .catch(function () {
+                    if (Date.now() - since < 180000) pollSignage(id, since);
+                    else state.readingId = null;
+                });
+        }, 3000);
     }
     function selectTab(id) {
         var btn = document.querySelector('.bottom-tabs [data-tab-target="' + id + '"]');
@@ -661,6 +774,9 @@
                         target = target.parentNode;
                     }
                     if (!target || target === detailView) return;
+                    // The car app opens events.html?file= in its native player; let the link through.
+                    if (typeof window.AndroidBridge !== 'undefined'
+                            || document.documentElement.getAttribute('data-android-embed') === '1') return;
                     e.preventDefault();
                     e.stopPropagation();
                     playClip(target.getAttribute('data-parking-clip'));
@@ -668,6 +784,10 @@
                 detailView._parkingClipHandler = true;
             }
             window.addEventListener('hashchange', route);
+            // Head unit 12/24-hour switch changed: redraw the hero; cards (blob thumbnails) pick it up on next load.
+            window.addEventListener('byd:clock-changed', function () {
+                if (state.status && !/^#\/session\//.test(location.hash || '')) renderHero(state.status.current || null);
+            });
             // Switching bottom tabs while in the detail drill-in returns to the list.
             document.addEventListener('ot-tabs:active-changed', function () {
                 if ($('pkDetailView').classList.contains('active')) location.hash = '#/';

@@ -263,7 +263,8 @@ public final class KeyFobPresenceEvaluator {
             clearEvidence();
             reason = !enabled ? "presence_disabled" : source.revision != expectedRevision ? "presence_revoked"
                     : pausedLocked ? "presence_search_paused_locked"
-                    : !value.provided ? "presence_source_unavailable" : !value.active ? "presence_source_unavailable"
+                    : !value.provided ? "presence_source_unavailable"
+                    : !value.active ? power > 0 && power <= 3 ? "presence_vehicle_on" : "presence_source_unavailable"
                     : power < 0 || power > 3 ? "presence_power_unknown"
                     : driverLock != 1 && driverLock != 2 ? "presence_lock_unknown" : "presence_scope_stale";
             return new Snapshot(this, now, ProximityEvaluator.Event.NONE);

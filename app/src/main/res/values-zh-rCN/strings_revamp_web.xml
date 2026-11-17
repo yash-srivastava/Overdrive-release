@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="web_state_retry_now">立即重试</string>
+    <string name="web_state_retry_in">自动重试中 · %1$d 秒后再次尝试</string>
+    <string name="web_state_retrying_now">自动重试中 · 正在尝试…</string>
+    <string name="web_state_sign_in_title">无法登录此页面</string>
+    <string name="web_state_sign_in_body">摄像头守护进程正在运行，但未接受应用的登录。ADB 连接时，OverDrive 会自动恢复。</string>
+</resources>

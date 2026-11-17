@@ -78,6 +78,11 @@ public final class TelegramSink implements NotificationBus.Sink {
                     && !com.overdrive.app.telegram.config.UnifiedTelegramConfig.isTyreAlerts()) {
                 return;
             }
+            // New sign-ins have their own toggle; wrong access codes stay on Critical alerts.
+            if ("vehicle.security.login.success".equals(event.category)
+                    && !com.overdrive.app.telegram.config.UnifiedTelegramConfig.isLoginAlerts()) {
+                return;
+            }
             // Parking Intelligence ("Parked", "Back at car") publishes at INFO
             // on purpose — it is a summary, not an alert — yet it is the one
             // INFO stream a Telegram-only user explicitly asked for by turning

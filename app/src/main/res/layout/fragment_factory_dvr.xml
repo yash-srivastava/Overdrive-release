@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- BYD's own dashcam clips on the microSD card. Read-only: play or save a copy, never modify. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:paddingHorizontal="@dimen/page_padding_horizontal"
+        android:paddingTop="@dimen/od_space_8">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:minHeight="@dimen/od_touch_min"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tvFactoryDvrSummary"
+                    style="@style/Widget.Overdrive.Rec.Summary"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    tools:text="214 clips · /storage/1234-ABCD/Recorder" />
+
+                <TextView
+                    android:id="@+id/tvFactoryDvrNote"
+                    style="@style/Widget.Overdrive.Rec.RowMeta"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:maxLines="2"
+                    android:visibility="gone"
+                    tools:text="Some folders could not be scanned in full."
+                    tools:visibility="visible" />
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnFactoryDvrRefresh"
+                style="@style/Widget.Overdrive.Rec.HeaderIcon"
+                android:layout_width="@dimen/od_touch_min"
+                android:layout_height="@dimen/od_touch_min"
+                android:layout_marginStart="@dimen/od_space_8"
+                android:contentDescription="@string/factory_dvr_refresh"
+                android:tooltipText="@string/factory_dvr_refresh"
+                app:icon="@drawable/ic_refresh" />
+        </LinearLayout>
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginTop="@dimen/od_space_8"
+            android:layout_weight="1">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rvFactoryDvr"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:paddingBottom="@dimen/page_padding_bottom"
+                android:scrollbars="vertical"
+                tools:listitem="@layout/item_factory_dvr_clip" />
+
+            <LinearLayout
+                android:id="@+id/factoryDvrState"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:gravity="center_horizontal"
+                android:orientation="vertical"
+                android:padding="@dimen/od_space_16"
+                android:visibility="gone"
+                tools:visibility="visible">
+
+                <com.google.android.material.progressindicator.CircularProgressIndicator
+                    android:id="@+id/factoryDvrProgress"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="@dimen/od_space_12"
+                    android:indeterminate="true" />
+
+                <TextView
+                    android:id="@+id/tvFactoryDvrState"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
+                    android:textColor="?attr/colorOnSurfaceVariant"
+                    tools:text="Looking for BYD dashcam clips on the microSD card…" />
+            </LinearLayout>
+        </FrameLayout>
+    </LinearLayout>
+
+    <include layout="@layout/app_toast" />
+</FrameLayout>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Trip Briefing voice turn: said once the driver answered the briefing question. -->
+    <string name="voice_brief_starting">Inicio la navegació.</string>
+    <string name="voice_brief_opening_waze">Obro Waze.</string>
+    <string name="voice_brief_opening_gmaps">Obro Google Maps.</string>
+    <string name="voice_brief_starting_car">Inicio el GPS del cotxe.</string>
+    <string name="voice_brief_app_missing">Aquesta aplicació no està instal·lada. Trieu-ne una a la pantalla.</string>
+</resources>

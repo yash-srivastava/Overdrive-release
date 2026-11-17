@@ -49,7 +49,8 @@ public class HardwareEventRecorderGpuPreRecordOwnershipTest {
 
         sharedEncoder.setPreRecordDuration(10);
 
-        assertEquals(10_000_000L, sharedRing.getMaxDurationUs());
+        // 10 s window plus the GOP it starts in.
+        assertEquals(12_000_000L, sharedRing.getMaxDurationUs());
     }
 
     @Test
@@ -64,7 +65,7 @@ public class HardwareEventRecorderGpuPreRecordOwnershipTest {
         oemEncoder.setPreRecordDuration(10);
 
         assertEquals(62_000_000L, sharedRing.getMaxDurationUs());
-        assertEquals(10_000_000L, privateRing.getMaxDurationUs());
+        assertEquals(12_000_000L, privateRing.getMaxDurationUs());
     }
 
     private static HardwareEventRecorderGpu newEncoder() throws Exception {

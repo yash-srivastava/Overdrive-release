@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Trip Briefing: the car-start "Heading to work? Want directions?" prompt. The spoken line is
+         greeting + heading + duration (or one extra that replaces it) + question, joined by spaces,
+         and read aloud by text-to-speech. -->
+    <string name="trip_briefing_greeting_morning">صباح الخير.</string>
+    <string name="trip_briefing_greeting_afternoon">مساء الخير.</string>
+    <string name="trip_briefing_greeting_evening">مساء الخير.</string>
+    <string name="trip_briefing_heading_home">هل تتجه إلى المنزل؟</string>
+    <string name="trip_briefing_heading_work">هل تتجه إلى العمل؟</string>
+    <!-- %1$s: the place's name, e.g. "Phoenix Mall". -->
+    <string name="trip_briefing_heading_place">هل تتجه إلى %1$s؟</string>
+    <plurals name="trip_briefing_duration">
+        <item quantity="zero">حوالي %1$d دقيقة.</item>
+        <item quantity="one">حوالي %1$d دقيقة.</item>
+        <item quantity="two">حوالي %1$d دقيقة.</item>
+        <item quantity="few">حوالي %1$d دقائق.</item>
+        <item quantity="many">حوالي %1$d دقيقة.</item>
+        <item quantity="other">حوالي %1$d دقيقة.</item>
+    </plurals>
+    <!-- %1$s: range left, %2$s: the trip's length, each "31 km" or "19 mi". -->
+    <string name="trip_briefing_extra_range">المدى محدود: يتبقى %1$s لرحلة طولها %2$s.</string>
+    <plurals name="trip_briefing_extra_hazards">
+        <item quantity="zero">%1$d خطر جديد على الطريق.</item>
+        <item quantity="one">%1$d خطر جديد على الطريق.</item>
+        <item quantity="two">%1$d خطر جديد على الطريق.</item>
+        <item quantity="few">%1$d مخاطر جديدة على الطريق.</item>
+        <item quantity="many">%1$d خطرًا جديدًا على الطريق.</item>
+        <item quantity="other">%1$d خطر جديد على الطريق.</item>
+    </plurals>
+    <!-- %1$s: an hour of the day in the device's clock format, e.g. "7 PM" or "19:00". -->
+    <string name="trip_briefing_extra_rain">يُتوقع هطول المطر نحو الساعة %1$s.</string>
+    <string name="trip_briefing_question">هل تريد الاتجاهات؟</string>
+    <string name="trip_briefing_distance_km">%1$d كم</string>
+    <string name="trip_briefing_distance_mi">%1$d ميل</string>
+
+    <!-- The destination as the AI assistant should say it. -->
+    <string name="trip_briefing_said_home">المنزل</string>
+    <string name="trip_briefing_said_work">العمل</string>
+
+    <!-- Card -->
+    <string name="trip_briefing_title_home">المنزل</string>
+    <string name="trip_briefing_title_work">العمل</string>
+    <!-- Title for a regular destination that has no name yet. -->
+    <string name="trip_briefing_title_unnamed">وجهتك المعتادة</string>
+    <string name="trip_briefing_name_place">تسمية المكان</string>
+    <string name="trip_briefing_no">لا</string>
+    <string name="trip_briefing_go_failed">لم تبدأ الاتجاهات. افتح الخريطة للتنقل.</string>
+    <!-- The car's own navigation app. -->
+    <string name="trip_briefing_app_car">ملاحة السيارة</string>
+</resources>

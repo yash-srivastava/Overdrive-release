@@ -369,6 +369,177 @@ public class CloudFallbackContractTest {
     }
 
     @Test
+    public void cloudMutationUncertaintySuppressesSdkFallback() {
+        assertFalse(VehicleCommandRouter.cloudFailureAllowsSdkFallback(true));
+        assertTrue(VehicleCommandRouter.cloudFailureAllowsSdkFallback(false));
+    }
+
+    @Test
+    public void tailgateFallbackExecutesTerminalAndCapabilityDecisions() {
+        VehicleCommandRouter router = VehicleCommandRouter.getInstance();
+        long now = System.currentTimeMillis();
+        java.util.concurrent.atomic.AtomicInteger admissions =
+                new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicInteger cloudCalls =
+                new java.util.concurrent.atomic.AtomicInteger();
+
+        for (int timeoutCode : new int[] {
+                -10, 2, com.byd.datasource.feature.Status.STATUS_TIMEOUT}) {
+            com.overdrive.app.byd.DiLink5VehicleReadiness.Outcome timeoutOutcome =
+                    com.overdrive.app.byd.BydDataCollector.classifyDiLink5SdkResult(
+                            Integer.valueOf(timeoutCode));
+            com.overdrive.app.byd.LocalActuationAbort timeoutAbort =
+                    com.overdrive.app.byd.BydDataCollector.diLink5SdkAbortForOutcome(
+                            timeoutOutcome);
+            assertEquals(com.overdrive.app.byd.DiLink5VehicleReadiness.Outcome.UNCERTAIN,
+                    timeoutOutcome);
+            assertTrue(timeoutAbort != null);
+
+            VehicleCommandRouter.CommandResult uncertain = router.completeTrunkOpenAttempt(
+                    new VehicleCommandRouter.TrunkOpenCommand(), now,
+                    com.overdrive.app.byd.BydDataCollector.DOOR_STATE_UNLOCK,
+                    new VehicleCommandRouter.SdkLeg(false, timeoutAbort),
+                    () -> false,
+                    () -> { admissions.incrementAndGet(); return true; },
+                    () -> {
+                        cloudCalls.incrementAndGet();
+                        return VehicleCommandRouter.CommandResult.success(
+                                VehicleCommandRouter.Path.SDK_THEN_CLOUD, "cloud", 0L);
+                    });
+
+            assertEquals(VehicleCommandRouter.Outcome.FAILED, uncertain.outcome);
+            assertEquals(VehicleCommandRouter.Path.SDK, uncertain.path);
+            assertTrue(uncertain.error instanceof com.overdrive.app.byd.LocalActuationAbort);
+            assertEquals(0, admissions.get());
+            assertEquals(0, cloudCalls.get());
+        }
+
+        VehicleCommandRouter.CommandResult rejectedWithoutCapability =
+                router.completeTrunkOpenAttempt(
+                        new VehicleCommandRouter.TrunkOpenCommand(), now,
+                        com.overdrive.app.byd.BydDataCollector.DOOR_STATE_UNLOCK,
+                        new VehicleCommandRouter.SdkLeg(false, null),
+                        () -> false,
+                        () -> { admissions.incrementAndGet(); return false; },
+                        () -> {
+                            cloudCalls.incrementAndGet();
+                            return VehicleCommandRouter.CommandResult.success(
+                                    VehicleCommandRouter.Path.SDK_THEN_CLOUD, "cloud", 0L);
+                        });
+        assertEquals(VehicleCommandRouter.Outcome.FAILED,
+                rejectedWithoutCapability.outcome);
+        assertEquals(1, admissions.get());
+        assertEquals(0, cloudCalls.get());
+
+        VehicleCommandRouter.CommandResult rejectedWithCapability =
+                router.completeTrunkOpenAttempt(
+                        new VehicleCommandRouter.TrunkOpenCommand(), now,
+                        com.overdrive.app.byd.BydDataCollector.DOOR_STATE_UNLOCK,
+                        new VehicleCommandRouter.SdkLeg(false, null),
+                        () -> false,
+                        () -> { admissions.incrementAndGet(); return true; },
+                        () -> {
+                            cloudCalls.incrementAndGet();
+                            return VehicleCommandRouter.CommandResult.success(
+                                    VehicleCommandRouter.Path.SDK_THEN_CLOUD, "cloud", 0L);
+                        });
+        assertEquals(VehicleCommandRouter.Outcome.SUCCESS, rejectedWithCapability.outcome);
+        assertEquals(VehicleCommandRouter.Path.SDK_THEN_CLOUD, rejectedWithCapability.path);
+        assertEquals(2, admissions.get());
+        assertEquals(1, cloudCalls.get());
+    }
+
+    @Test
+    public void stopDuringAdapterAcquisitionRevokesTheOwnedSetter() throws Exception {
+        VehicleCommandRouter router = VehicleCommandRouter.getInstance();
+        long stopGeneration = router.captureTailgateOpenStopGeneration();
+        java.util.concurrent.CountDownLatch sleeping = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicInteger setters =
+                new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.ExecutorService executor =
+                java.util.concurrent.Executors.newSingleThreadExecutor();
+        try {
+            java.util.concurrent.Future<VehicleCommandRouter.SdkLeg> pending = executor.submit(
+                    () -> router.invokeDiLink5TailgateOpen(
+                            unrestrictedTailgateTestCommand(), stopGeneration, () -> {
+                                com.overdrive.app.byd.DiLink5VehicleReadiness.Outcome outcome =
+                                        awaitUnavailableTailgateAdapter(
+                                                com.overdrive.app.byd.VehicleActuatorBridge
+                                                        ::isRemoteKeyRequestCancelled,
+                                                () -> true,
+                                                setters,
+                                                ignored -> {
+                                                    sleeping.countDown();
+                                                    try {
+                                                        release.await(2,
+                                                                java.util.concurrent.TimeUnit.SECONDS);
+                                                    } catch (InterruptedException interrupted) {
+                                                        Thread.currentThread().interrupt();
+                                                    }
+                                                });
+                                return outcome == com.overdrive.app.byd.DiLink5VehicleReadiness
+                                        .Outcome.ACCEPTED;
+                            }));
+
+            assertTrue(sleeping.await(2, java.util.concurrent.TimeUnit.SECONDS));
+            router.abortPendingTailgateOpen();
+            release.countDown();
+            assertFalse(pending.get(2, java.util.concurrent.TimeUnit.SECONDS).success);
+            assertEquals(0, setters.get());
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    public void generationRevocationDuringAdapterAcquisitionDispatchesNoSetter() {
+        VehicleCommandRouter router = VehicleCommandRouter.getInstance();
+        java.util.concurrent.atomic.AtomicBoolean generationCurrent =
+                new java.util.concurrent.atomic.AtomicBoolean(true);
+        java.util.concurrent.atomic.AtomicInteger setters =
+                new java.util.concurrent.atomic.AtomicInteger();
+
+        VehicleCommandRouter.SdkLeg result = router.invokeDiLink5TailgateOpen(
+                unrestrictedTailgateTestCommand(),
+                router.captureTailgateOpenStopGeneration(),
+                () -> awaitUnavailableTailgateAdapter(
+                        com.overdrive.app.byd.VehicleActuatorBridge
+                                ::isRemoteKeyRequestCancelled,
+                        generationCurrent::get,
+                        setters,
+                        ignored -> generationCurrent.set(false))
+                        == com.overdrive.app.byd.DiLink5VehicleReadiness.Outcome.ACCEPTED);
+
+        assertFalse(result.success);
+        assertEquals(0, setters.get());
+    }
+
+    private static com.overdrive.app.byd.DiLink5VehicleReadiness.Outcome
+            awaitUnavailableTailgateAdapter(
+                    com.overdrive.app.byd.DiLink5VehicleReadiness.Cancellation cancellation,
+                    com.overdrive.app.byd.DiLink5VehicleReadiness.CurrentCheck current,
+                    java.util.concurrent.atomic.AtomicInteger setters,
+                    com.overdrive.app.byd.DiLink5VehicleReadiness.Sleeper sleeper) {
+        return com.overdrive.app.byd.DiLink5VehicleReadiness.awaitAndDispatch(
+                5, 1L, Long.MAX_VALUE, System::currentTimeMillis,
+                cancellation, current, () -> null, ignored -> true,
+                () -> true, () -> true,
+                ignored -> {
+                    setters.incrementAndGet();
+                    return com.overdrive.app.byd.DiLink5VehicleReadiness.Outcome.ACCEPTED;
+                },
+                sleeper);
+    }
+
+    private static VehicleCommandRouter.VehicleCommand unrestrictedTailgateTestCommand() {
+        return new VehicleCommandRouter.VehicleCommand() {
+            @Override public String name() { return "tailgate-open-behavior"; }
+        };
+    }
+
+    @Test
     public void seatCommandsSerializeBothLocalAndCloudLegs() throws Exception {
         String source = readRouterSource();
 

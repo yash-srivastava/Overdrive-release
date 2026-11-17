@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="dash_vehicle_line">%1$s · %2$.1f kWh</string>
+    <string name="dash_range_caption">טווח</string>
+    <string name="dash_status_remote_on">גישה מרחוק פעילה</string>
+    <string name="dash_status_remote_off">גישה מרחוק כבויה</string>
+    <string name="dash_status_remote_state">גישה מרחוק · %1$s</string>
+    <string name="dash_status_services">%1$d מתוך %2$d שירותים</string>
+    <string name="dash_status_view">הצג</string>
+    <string name="dash_status_recording_idle">ההקלטה לא פעילה</string>
+    <string name="dash_services_running">%1$d מתוך %2$d פועלים</string>
+    <string name="dash_charge_eta_left">נותרו %1$s</string>
+    <string name="dash_charge_session_inline">%1$s בטעינה זו</string>
+    <plurals name="dash_clip_count">
+        <item quantity="one">%1$d קליפ</item>
+        <item quantity="two">%1$d קליפים</item>
+        <item quantity="many">%1$d קליפים</item>
+        <item quantity="other">%1$d קליפים</item>
+    </plurals>
+</resources>

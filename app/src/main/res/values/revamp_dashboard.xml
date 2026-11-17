@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dashboard-only dimens and styles. Shared tokens live in revamp_tokens.xml. -->
+<resources>
+    <!-- Hero, landscape: render anchored bottom-end above the status strip. -->
+    <dimen name="dash_hero_min_height_land">248dp</dimen>
+    <dimen name="dash_hero_pad_start_land">28dp</dimen>
+    <dimen name="dash_hero_car_width_land">300dp</dimen>
+    <dimen name="dash_hero_car_height_land">169dp</dimen>
+    <dimen name="dash_hero_car_margin_end_land">44dp</dimen>
+    <!-- The text column ends here, so the bar and labels never reach the render. -->
+    <dimen name="dash_hero_car_reserve_land">340dp</dimen>
+    <dimen name="dash_hero_ribbon_width_land">640dp</dimen>
+
+    <!-- Hero, portrait: render beside the numbers, bar full width below it. -->
+    <dimen name="dash_hero_pad_start_port">24dp</dimen>
+    <dimen name="dash_hero_pad_end_port">20dp</dimen>
+    <dimen name="dash_hero_car_width_port">176dp</dimen>
+    <dimen name="dash_hero_car_height_port">99dp</dimen>
+    <dimen name="dash_hero_car_reserve_port">172dp</dimen>
+    <dimen name="dash_hero_ribbon_width_port">480dp</dimen>
+    <dimen name="dash_hero_ribbon_height_port">213dp</dimen>
+
+    <!-- First-pass ceiling only: the 900x400 nodpi ribbon must not size the hero. -->
+    <dimen name="dash_hero_ribbon_measure_cap">40dp</dimen>
+    <dimen name="dash_strip_height">48dp</dimen>
+    <dimen name="dash_strip_gap_land">22dp</dimen>
+    <dimen name="dash_strip_gap_port">18dp</dimen>
+    <dimen name="dash_qr_size">104dp</dimen>
+
+    <!-- Light values; values-night/dashboard_modern_resources.xml overrides. -->
+    <item name="dash_hero_glow_alpha" format="float" type="dimen">0.10</item>
+    <item name="dash_hero_floor_alpha" format="float" type="dimen">0.22</item>
+
+    <style name="TextAppearance.Overdrive.Dashboard.Tile" parent="TextAppearance.Material3.TitleSmall">
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:letterSpacing">0</item>
+        <item name="android:textColor">?attr/colorOnSurface</item>
+    </style>
+
+    <style name="TextAppearance.Overdrive.Dashboard.Meta" parent="TextAppearance.Material3.BodySmall">
+        <item name="android:textSize">12sp</item>
+        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
+    </style>
+
+    <!-- Status strip item: tinted dot + label, no container. -->
+    <style name="Widget.Overdrive.Dashboard.StatusChip" parent="Widget.Material3.Chip.Assist">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:checkable">false</item>
+        <item name="android:clickable">false</item>
+        <item name="android:focusable">false</item>
+        <item name="android:stateListAnimator">@null</item>
+        <item name="android:elevation">0dp</item>
+        <item name="android:textAppearance">@style/TextAppearance.Overdrive.Status</item>
+        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
+        <item name="android:fontFeatureSettings">tnum</item>
+        <item name="chipSurfaceColor">@android:color/transparent</item>
+        <item name="chipBackgroundColor">@android:color/transparent</item>
+        <item name="chipStrokeWidth">0dp</item>
+        <item name="rippleColor">@android:color/transparent</item>
+        <item name="chipMinHeight">@dimen/dash_strip_height</item>
+        <item name="ensureMinTouchTargetSize">false</item>
+        <item name="chipIcon">@drawable/od_status_dot</item>
+        <item name="chipIconVisible">true</item>
+        <item name="chipIconSize">@dimen/od_status_dot</item>
+        <item name="chipIconTint">@color/status_stopped</item>
+        <item name="chipStartPadding">0dp</item>
+        <item name="iconStartPadding">0dp</item>
+        <item name="iconEndPadding">0dp</item>
+        <item name="textStartPadding">@dimen/od_space_8</item>
+        <item name="textEndPadding">0dp</item>
+        <item name="chipEndPadding">0dp</item>
+    </style>
+
+    <!-- Inline action after a status item: 32dp pill inside a 48dp touch target. -->
+    <style name="Widget.Overdrive.Dashboard.StatusAction" parent="Widget.Material3.Button.TonalButton">
+        <item name="android:minWidth">@dimen/od_touch_min</item>
+        <item name="android:minHeight">@dimen/dash_strip_height</item>
+        <item name="android:insetTop">8dp</item>
+        <item name="android:insetBottom">8dp</item>
+        <item name="android:paddingStart">@dimen/od_space_12</item>
+        <item name="android:paddingEnd">@dimen/od_space_12</item>
+        <item name="android:paddingTop">0dp</item>
+        <item name="android:paddingBottom">0dp</item>
+        <item name="android:textAppearance">@style/TextAppearance.Overdrive.Status</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textColor">?attr/colorOnPrimaryContainer</item>
+        <item name="backgroundTint">?attr/colorPrimaryContainer</item>
+        <item name="cornerRadius">@dimen/od_radius_pill_32</item>
+    </style>
+
+    <!-- One value in the hero's charging row. -->
+    <style name="Widget.Overdrive.Dashboard.ChargeValue" parent="Widget.Overdrive.Metric.Inline">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
+    </style>
+
+    <style name="Widget.Overdrive.Dashboard.ChargeDot" parent="">
+        <item name="android:layout_width">3dp</item>
+        <item name="android:layout_height">3dp</item>
+        <item name="android:layout_marginEnd">@dimen/od_space_6</item>
+        <item name="android:contentDescription">@null</item>
+        <item name="android:importantForAccessibility">no</item>
+        <item name="android:src">@drawable/dash_sep_dot</item>
+    </style>
+
+    <!-- 48dp icon button in the access-code row. -->
+    <style name="Widget.Overdrive.Dashboard.TokenButton" parent="">
+        <item name="android:layout_width">@dimen/od_touch_min</item>
+        <item name="android:layout_height">@dimen/od_touch_min</item>
+        <item name="android:background">?attr/selectableItemBackgroundBorderless</item>
+        <item name="android:padding">@dimen/od_space_12</item>
+        <item name="android:scaleType">fitCenter</item>
+        <item name="tint">?attr/colorOnSurfaceVariant</item>
+    </style>
+    <!-- One 68sp line (includeFontPadding off): autosize needs a fixed box to grow back into. -->
+    <dimen name="dash_hero_soc_height">80dp</dimen>
+</resources>

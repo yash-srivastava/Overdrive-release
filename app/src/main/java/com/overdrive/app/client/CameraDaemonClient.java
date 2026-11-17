@@ -44,6 +44,9 @@ public class CameraDaemonClient {
      * Connect to CameraDaemon via TCP socket on localhost.
      */
     public synchronized boolean connect() {
+        // A socket left behind by a read timeout is still open; release it
+        // before replacing it (the daemon parks a handler thread on it).
+        try { if (socket != null) socket.close(); } catch (Exception ignored) {}
         try {
             socket = new Socket();
             socket.connect(new InetSocketAddress(HOST, PORT), CONNECT_TIMEOUT_MS);

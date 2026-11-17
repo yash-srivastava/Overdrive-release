@@ -5,8 +5,8 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.GridLayout
 import android.widget.ImageView
-import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatDelegate
@@ -19,7 +19,7 @@ import com.overdrive.app.ui.dialog.LanguagePickerDialog
 import com.overdrive.app.ui.fragment.WebViewFragment
 import com.overdrive.app.ui.navigation.NavigationRailCatalog
 import com.overdrive.app.ui.util.PreferencesManager
-import com.google.android.material.switchmaterial.SwitchMaterial
+import com.google.android.material.materialswitch.MaterialSwitch
 import java.util.Locale
 
 /**
@@ -33,7 +33,7 @@ import java.util.Locale
  * The three theme tiles share the same R.id.themeAuto / themeLight /
  * themeDark IDs the older MaterialButtonToggleGroup used; we just rewired
  * them as plain click targets and drive selection state by toggling each
- * tile's `isSelected` flag (which the theme_preview_tile_bg selector
+ * tile's `isSelected` flag (which the set_theme_tile_bg selector
  * picks up automatically).
  */
 class SettingsAppearanceFragment : Fragment() {
@@ -184,23 +184,27 @@ class SettingsAppearanceFragment : Fragment() {
     }
 
     private fun renderNavigationOptions(root: View) {
-        val container = root.findViewById<LinearLayout>(R.id.navigationOptionsContainer)
+        val container = root.findViewById<GridLayout>(R.id.navigationOptionsContainer)
         container.removeAllViews()
         val visibleKeys = PreferencesManager.getVisibleNavigationKeys(
             NavigationRailCatalog.customizableKeys
         )
+        // Column count follows the window width (@integer/set_nav_columns).
+        val columns = container.columnCount.coerceAtLeast(1)
+        val halfGap = resources.getDimensionPixelSize(R.dimen.set_nav_column_gap) / 2
 
-        NavigationRailCatalog.customizableOptions.forEach { option ->
+        NavigationRailCatalog.customizableOptions.forEachIndexed { index, option ->
             val row = layoutInflater.inflate(
                 R.layout.item_navigation_toggle,
                 container,
                 false,
             )
+            row.layoutParams = gridCellParams(row.layoutParams.height, index % columns, columns, halfGap)
             row.findViewById<ImageView>(R.id.navigationOptionIcon)
                 .setImageResource(option.iconRes)
             row.findViewById<TextView>(R.id.navigationOptionLabel)
                 .setText(option.labelRes)
-            val toggle = row.findViewById<SwitchMaterial>(R.id.navigationOptionSwitch)
+            val toggle = row.findViewById<MaterialSwitch>(R.id.navigationOptionSwitch)
             toggle.isChecked = option.key in visibleKeys
 
             fun updateAccessibility(checked: Boolean) {
@@ -231,4 +235,16 @@ class SettingsAppearanceFragment : Fragment() {
             container.addView(row)
         }
     }
+
+    // Equal weighted columns; the column gap is split between neighbouring cells.
+    private fun gridCellParams(height: Int, column: Int, columns: Int, halfGap: Int) =
+        GridLayout.LayoutParams(
+            GridLayout.spec(GridLayout.UNDEFINED, GridLayout.FILL),
+            GridLayout.spec(GridLayout.UNDEFINED, GridLayout.FILL, 1f),
+        ).apply {
+            width = 0
+            this.height = height
+            marginStart = if (column > 0) halfGap else 0
+            marginEnd = if (column < columns - 1) halfGap else 0
+        }
 }

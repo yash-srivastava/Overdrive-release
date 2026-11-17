@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title data-i18n="sessions.page_title">Signed-in Browsers — OverDrive</title>
+    <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
+    <script src="../shared/theme.js?v=12"></script>
+    <script src="../shared/app-shell.js?v=23"></script>
+    <link rel="stylesheet" href="../shared/styles.css?v=38">
+    <link rel="stylesheet" href="../shared/revamp.css?v=2">
+    <style>
+        .ss-note { margin-top: 6px; }
+        .ss-empty { padding: 14px 0 4px; }
+    </style>
+</head>
+<body class="r-settings">
+    <div class="app-layout">
+        <div id="app-shell-mount"></div>
+        <main class="main-content">
+            <div class="mobile-header">
+                <button class="menu-toggle" onclick="toggleSidebar()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
+                </button>
+                <span style="font-weight:600;" data-i18n="sessions.nav">Signed-in Browsers</span>
+                <div style="width:40px;"></div>
+            </div>
+            <header class="page-header">
+                <h1 class="page-title" data-i18n="sessions.page_title">Signed-in Browsers</h1>
+            </header>
+            <div class="page-body">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                            <span data-i18n="sessions.this_browser_title">This browser</span>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="setting-row">
+                            <div class="setting-info">
+                                <div class="setting-name" id="currentName">—</div>
+                                <div class="setting-desc" id="currentDesc"></div>
+                            </div>
+                            <div class="setting-control">
+                                <button class="btn btn-secondary" id="currentAction" type="button" hidden></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="14" height="10" rx="2"/><rect x="8" y="11" width="14" height="10" rx="2"/></svg>
+                            <span data-i18n="sessions.others_title">Other browsers</span>
+                        </div>
+                        <span class="card-badge" id="othersCount">0</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="setting-desc" data-i18n="sessions.subtitle">Browsers signed in to this car's web app. Sign out any you don't recognise.</div>
+                        <div class="setting-desc ss-note" data-i18n="sessions.legacy_note">Browsers that signed in before this update aren't listed. To sign out everything, use Regenerate Token on the head unit.</div>
+                        <div id="sessionList"></div>
+                        <div class="setting-desc ss-empty" id="emptyNote" style="display:none" data-i18n="sessions.empty">No other browsers are signed in.</div>
+                        <div class="setting-desc ss-empty" id="loadError" style="display:none" data-i18n="sessions.load_failed">Couldn't load the list.</div>
+                        <div class="setting-row" id="signOutOthersRow" style="display:none">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="sessions.sign_out_others">Sign out all other browsers</div>
+                                <div class="setting-desc" data-i18n="sessions.sign_out_others_desc">They'll need the access code to sign in again.</div>
+                            </div>
+                            <div class="setting-control">
+                                <button class="btn btn-danger-ghost" id="signOutOthersBtn" type="button" data-i18n="sessions.sign_out_all">Sign out all</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+    <div id="toastContainer" class="toast-container"></div>
+    <script src="../shared/auth.js"></script>
+    <script src="../shared/core.js?v=27"></script>
+    <script src="../shared/update-flow.js?v=3"></script>
+    <script src="../shared/sessions.js?v=2"></script>
+    <script>
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('open');
+            document.getElementById('sidebarOverlay').classList.toggle('show');
+        }
+        document.addEventListener('DOMContentLoaded', function () {
+            if (window.BYD && BYD.core && BYD.i18n) {
+                BYD.i18n.init().then(function () {
+                    BYD.core.init();
+                    BYD.sessions.refresh();
+                });
+            }
+            document.getElementById('signOutOthersBtn').addEventListener('click', function () { BYD.sessions.signOutOthers(); });
+            document.addEventListener('visibilitychange', function () { if (!document.hidden) BYD.sessions.refresh(); });
+        });
+    </script>
+</body>
+</html>

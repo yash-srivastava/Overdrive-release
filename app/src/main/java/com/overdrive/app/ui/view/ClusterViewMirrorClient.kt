@@ -2,10 +2,14 @@ package com.overdrive.app.ui.view
 
 import android.os.Binder
 import android.os.IBinder
+import android.os.Looper
 import android.os.Parcel
+import android.os.SystemClock
 import android.util.Log
 import android.view.Surface
+import android.view.MotionEvent
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.Executors
 
 /**
  * App-process ([uid 1000]) client for the daemon's cluster-view mirror service.
@@ -33,6 +37,10 @@ object ClusterViewMirrorClient {
     private const val TXN_ATTACH = FIRST
     private const val TXN_REPROJECT = FIRST + 1
     private const val TXN_DETACH = FIRST + 2
+    private const val TXN_INPUT_CAPABILITIES = FIRST + 4
+    private const val TXN_TOUCH = FIRST + 5
+    private const val TXN_KEY = FIRST + 6
+    private const val TXN_INPUT_CANCEL = FIRST + 7
 
     const val STATE_STOPPED = 0
     const val STATE_ACTIVE = 1
@@ -59,6 +67,157 @@ object ClusterViewMirrorClient {
     // a Surface is attached, it can tear down the mirror instead of retaining a dead producer.
     // The cast itself has an independent daemon-owned lifecycle and is not owned by this token.
     private val ownerToken = Binder()
+    private val nextInputSequence = AtomicLong(1L)
+    private val inputEpoch = AtomicLong(1L)
+    @Volatile private var inputCapabilitiesBinder: IBinder? = null
+    @Volatile private var streamingSupported = false
+    @Volatile private var sourceLayoutGeneration = 0L
+    private val touchWorker = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "ClusterMirrorTouch").apply { isDaemon = true }
+    }
+    private val touchDispatcher = ClusterTouchDispatcher(
+        touchWorker, { SystemClock.uptimeMillis() },
+        object : ClusterTouchDispatcher.Sender {
+            override fun send(frame: ClusterTouchDispatcher.Frame): Boolean =
+                synchronized(this@ClusterViewMirrorClient) {
+                    if (!isSessionActive(frame.sessionId) || frame.inputEpoch != inputEpoch.get()
+                        || frame.layoutGeneration != sourceLayoutGeneration) {
+                        return@synchronized false
+                    }
+                    inputTransaction(frame.sessionId, TXN_TOUCH) { data ->
+                        data.writeLong(frame.eventTime)
+                        data.writeInt(frame.action)
+                        data.writeInt(frame.actionIndex)
+                        data.writeInt(frame.ids.size)
+                        for (i in frame.ids.indices) {
+                            data.writeInt(frame.ids[i])
+                            data.writeFloat(frame.xs[i]); data.writeFloat(frame.ys[i])
+                        }
+                        data.writeLong(frame.layoutGeneration)
+                    }
+                }
+
+            override fun cancel(sessionId: Long) {
+                synchronized(this@ClusterViewMirrorClient) {
+                    if (isSessionActive(sessionId)) inputTransaction(sessionId, TXN_INPUT_CANCEL) {}
+                }
+            }
+        }, 16, 250L
+    )
+
+    /**
+     * UI-side capability read only. The probe happens on the mirror attach worker, before
+     * any streaming DOWN. No Binder transaction or monitor wait runs in a touch callback.
+     */
+    fun supportsTouchStream(sessionId: Long): Boolean =
+        isSessionActive(sessionId) && streamingSupported && inputCapabilitiesBinder === cached
+
+    fun touch(
+        sessionId: Long, event: MotionEvent, viewW: Int, viewH: Int,
+        surfaceX: Int, surfaceY: Int, surfaceW: Int, surfaceH: Int
+    ): Boolean {
+        val epoch = inputEpoch.get()
+        if (!isSessionActive(sessionId) || viewW <= 0 || viewH <= 0
+            || surfaceW <= 0 || surfaceH <= 0 || event.pointerCount !in 1..10) return false
+        // Copy primitive pointer data now. The worker never retains a framework
+        // MotionEvent, which Android recycles as soon as this callback returns.
+        val ids = IntArray(event.pointerCount)
+        val xs = FloatArray(event.pointerCount)
+        val ys = FloatArray(event.pointerCount)
+        for (i in ids.indices) {
+            ids[i] = event.getPointerId(i)
+            xs[i] = surfaceX + event.getX(i) * surfaceW / viewW
+            ys[i] = surfaceY + event.getY(i) * surfaceH / viewH
+        }
+        if (inputEpoch.get() != epoch) return false
+        return touchDispatcher.offer(ClusterTouchDispatcher.Frame(
+            sessionId, event.eventTime, event.actionMasked, event.actionIndex, ids, xs, ys,
+            epoch, sourceLayoutGeneration))
+    }
+
+    fun cancelTouch(sessionId: Long) {
+        if (activeSessionId == sessionId) inputEpoch.incrementAndGet()
+        touchDispatcher.cancel(sessionId)
+    }
+
+    /** Capture on the UI thread with a key click; a later worker cannot target a
+     *  reattached mirror just because that Fragment retained the same session id. */
+    fun currentInputEpoch(): Long = inputEpoch.get()
+
+    /** Called by the attach worker. Defensive asynchronous fallback covers any future
+     * caller that accidentally attaches on the UI thread. */
+    private fun warmInputCapabilities(sessionId: Long, svc: IBinder) {
+        val probe = {
+            synchronized(this) {
+                if (activeSessionId == sessionId && cached === svc) {
+                    val supported = inputTransaction(
+                        sessionId, TXN_INPUT_CAPABILITIES, numbered = false,
+                        readExtra = { reply ->
+                            sourceLayoutGeneration = if (reply.dataAvail() >= 8) reply.readLong() else 0L
+                        }) {}
+                    if (activeSessionId == sessionId && cached === svc) {
+                        inputCapabilitiesBinder = svc
+                        streamingSupported = supported
+                    }
+                }
+            }
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) touchWorker.execute(probe)
+        else probe()
+    }
+
+    @Synchronized
+    fun key(
+        sessionId: Long, keyCode: Int, eventTime: Long = SystemClock.uptimeMillis(),
+        expectedEpoch: Long = inputEpoch.get()
+    ): Boolean =
+        expectedEpoch == inputEpoch.get() && isSessionActive(sessionId)
+            && inputTransaction(sessionId, TXN_KEY) {
+            it.writeLong(eventTime)
+            it.writeInt(keyCode)
+            it.writeLong(sourceLayoutGeneration)
+        }
+
+    private fun inputTransaction(
+        sessionId: Long, code: Int, numbered: Boolean = true,
+        readExtra: ((Parcel) -> Unit)? = null, write: (Parcel) -> Unit
+    ): Boolean {
+        val svc = service() ?: return false
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
+        return try {
+            data.writeInterfaceToken(DESCRIPTOR)
+            writeSessionIdentity(data, sessionId)
+            if (numbered) data.writeLong(nextInputSequence.getAndIncrement())
+            write(data)
+            if (!svc.transact(code, data, reply, 0)) return false
+            reply.readException()
+            val accepted = reply.readInt() == 1
+            readExtra?.invoke(reply)
+            accepted
+        } catch (t: Throwable) {
+            Log.w(TAG, "cluster input transaction failed: ${t.message}")
+            // A reply can fail after DOWN was accepted. Cancel on the same Binder before
+            // discarding it; never replay that uncertain gesture through the HTTP fallback.
+            if (code == TXN_TOUCH || code == TXN_KEY) {
+                val cleanup = Parcel.obtain()
+                try {
+                    cleanup.writeInterfaceToken(DESCRIPTOR)
+                    writeSessionIdentity(cleanup, sessionId)
+                    cleanup.writeLong(nextInputSequence.getAndIncrement())
+                    svc.transact(TXN_INPUT_CANCEL, cleanup, null, IBinder.FLAG_ONEWAY)
+                } catch (_: Throwable) {
+                    // Owner death/mirror teardown provides the final cleanup path.
+                } finally {
+                    cleanup.recycle()
+                }
+            }
+            invalidateService(svc)
+            false
+        } finally {
+            data.recycle(); reply.recycle()
+        }
+    }
 
     fun newSessionId(): Long {
         val id = nextSessionId.getAndIncrement()
@@ -125,6 +284,8 @@ object ClusterViewMirrorClient {
             cached = null
             cachedDeathRecipient = null
             activeSessionId = 0L
+            inputCapabilitiesBinder = null
+            streamingSupported = false
         }
     }
 
@@ -138,6 +299,8 @@ object ClusterViewMirrorClient {
             cached = null
             cachedDeathRecipient = null
             activeSessionId = 0L
+            inputCapabilitiesBinder = null
+            streamingSupported = false
         }
     }
 
@@ -165,6 +328,10 @@ object ClusterViewMirrorClient {
     ): Int {
         if (surface == null || !surface.isValid || bw <= 0 || bh <= 0) return STATE_STOPPED
         if (sessionId != newestSessionId.get()) return STATE_STOPPED
+        streamingSupported = false
+        inputCapabilitiesBinder = null
+        inputEpoch.incrementAndGet()
+        touchDispatcher.cancel(sessionId)
         val svc = service() ?: return STATE_SERVICE_DOWN
         val data = Parcel.obtain()
         val reply = Parcel.obtain()
@@ -181,6 +348,9 @@ object ClusterViewMirrorClient {
             reply.readException()
             reply.readInt().also { state ->
                 activeSessionId = if (state == STATE_ACTIVE) sessionId else 0L
+                inputCapabilitiesBinder = null
+                streamingSupported = false
+                if (state == STATE_ACTIVE) warmInputCapabilities(sessionId, svc)
             }
         } catch (t: Throwable) {
             Log.w(TAG, "attach transact failed: ${t.message}")
@@ -198,6 +368,8 @@ object ClusterViewMirrorClient {
         if (sessionId != newestSessionId.get() || activeSessionId != sessionId) {
             return STATE_STOPPED
         }
+        inputEpoch.incrementAndGet()
+        touchDispatcher.cancel(sessionId)
         val svc = service() ?: return STATE_SERVICE_DOWN
         val data = Parcel.obtain()
         val reply = Parcel.obtain()
@@ -234,6 +406,8 @@ object ClusterViewMirrorClient {
         // so a delayed Fragment cannot detach a replacement, including against a legacy daemon
         // that ignores the additive session trailer.
         if (activeSessionId != sessionId && newestSessionId.get() != sessionId) return
+        inputEpoch.incrementAndGet()
+        touchDispatcher.cancel(sessionId)
         val svc = service()
         if (svc == null) {
             activeSessionId = 0L

@@ -887,7 +887,7 @@ class RoadSenseOverlayService : Service() {
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(CHANNEL, "RoadSense overlay", NotificationManager.IMPORTANCE_LOW)
+            val ch = NotificationChannel(CHANNEL, com.overdrive.app.util.AppLocaleContext.of(this).getString(R.string.notif_channel_roadsense_overlay), NotificationManager.IMPORTANCE_LOW)
             ch.setShowBadge(false)
             getSystemService(NotificationManager::class.java)?.createNotificationChannel(ch)
         }
@@ -897,7 +897,7 @@ class RoadSenseOverlayService : Service() {
         val b = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.Builder(this, CHANNEL)
         else @Suppress("DEPRECATION") Notification.Builder(this)
         return b.setContentTitle("RoadSense")
-            .setContentText("Hazard overlay active")
+            .setContentText(com.overdrive.app.util.AppLocaleContext.of(this).getString(R.string.notif_roadsense_overlay_text))
             .setSmallIcon(R.drawable.ic_roadsense)
             .setOngoing(true)
             .setGroup(DaemonKeepaliveService.NOTIFICATION_GROUP_KEY)

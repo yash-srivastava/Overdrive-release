@@ -10,6 +10,8 @@ import java.util.Deque;
 final class AutomationExecutionHistory {
     private static final int CAPACITY = 100;
     private static final int MAX_DETAIL_LENGTH = 240;
+    /** A repeat of the newest entry (same rule, stage and status) this soon updates it instead. */
+    private static final long COALESCE_MS = 10_000L;
     private static final Deque<JSONObject> entries = new ArrayDeque<>();
 
     private AutomationExecutionHistory() { }
@@ -19,7 +21,18 @@ final class AutomationExecutionHistory {
             long durationMs, String detail) {
         JSONObject item = new JSONObject();
         try {
-            item.put("timestamp", System.currentTimeMillis());
+            long now = System.currentTimeMillis();
+            JSONObject head = entries.peekFirst();
+            if (head != null && head.optString("automationId").equals(safe(automationId))
+                    && head.optString("stage").equals(safe(stage))
+                    && head.optString("status").equals(safe(status))
+                    && now >= head.optLong("timestamp") && now - head.optLong("timestamp") < COALESCE_MS) {
+                head.put("timestamp", now);
+                head.put("durationMs", Math.max(0L, durationMs));
+                head.put("repeats", head.optInt("repeats", 1) + 1);
+                return;
+            }
+            item.put("timestamp", now);
             item.put("automationId", safe(automationId));
             item.put("stage", safe(stage));
             item.put("status", safe(status));

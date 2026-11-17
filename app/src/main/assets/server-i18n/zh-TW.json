@@ -168,6 +168,9 @@
     "tyre_wheel_pressure": "{0}（{1}）"
   },
   "telegram": {
+    "deterrent_triggered": "已觸發威嚇：{0}",
+    "deterrent_screen": "螢幕",
+    "deterrent_cloud": "雲端",
     "recording_caption": "錄音 ({0}) - {1}",
     "recording_caption_no_label": " 錄音 - {0}",
     "proximity_alert": "近距離警報時間: {0} 引發器: {1} ({2}) 錄音開始...",
@@ -477,6 +480,7 @@
   },
   "vehicle_control": {
     "blocked_driving": "車輛行駛中無法使用此操作",
+    "blocked_unconfirmed": "目前無法確認車輛已停妥，請稍後再試。",
     "cloud_required": "在設定中連接BYD帳戶,",
     "cloud_sent": "透過雲端發送",
     "cloud_unavailable_used_local": "雲端無法使用 使用直接連接",

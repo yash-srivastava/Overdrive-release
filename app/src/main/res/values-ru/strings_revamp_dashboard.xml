@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="dash_vehicle_line">%1$s · %2$.1f kWh</string>
+    <string name="dash_range_caption">запас хода</string>
+    <string name="dash_status_remote_on">Дистанционный доступ включён</string>
+    <string name="dash_status_remote_off">Дистанционный доступ выключен</string>
+    <string name="dash_status_remote_state">Дистанционный доступ · %1$s</string>
+    <string name="dash_status_services">%1$d из %2$d служб</string>
+    <string name="dash_status_view">Открыть</string>
+    <string name="dash_status_recording_idle">Запись не ведётся</string>
+    <string name="dash_services_running">Запущено %1$d из %2$d</string>
+    <string name="dash_charge_eta_left">осталось %1$s</string>
+    <string name="dash_charge_session_inline">%1$s за сеанс</string>
+    <plurals name="dash_clip_count">
+        <item quantity="one">%1$d клип</item>
+        <item quantity="few">%1$d клипа</item>
+        <item quantity="many">%1$d клипов</item>
+        <item quantity="other">%1$d клипа</item>
+    </plurals>
+</resources>

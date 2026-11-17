@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Rail footer "Remote access" row: colorPrimary plate (MainActivity drops it to 10% alpha), ripple on the same plate. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="?attr/colorControlHighlight">
+
+    <item>
+        <inset
+            android:insetLeft="@dimen/shell_rail_plate_inset_h"
+            android:insetRight="@dimen/shell_rail_plate_inset_h">
+            <shape android:shape="rectangle">
+                <solid android:color="?attr/colorPrimary" />
+                <corners android:radius="@dimen/shell_rail_plate_radius" />
+            </shape>
+        </inset>
+    </item>
+
+    <item android:id="@android:id/mask">
+        <inset
+            android:insetLeft="@dimen/shell_rail_plate_inset_h"
+            android:insetRight="@dimen/shell_rail_plate_inset_h">
+            <shape android:shape="rectangle">
+                <solid android:color="@android:color/white" />
+                <corners android:radius="@dimen/shell_rail_plate_radius" />
+            </shape>
+        </inset>
+    </item>
+</ripple>

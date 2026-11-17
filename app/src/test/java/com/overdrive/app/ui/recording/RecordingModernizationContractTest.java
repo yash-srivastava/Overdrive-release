@@ -53,8 +53,8 @@ public class RecordingModernizationContractTest {
         String landscapeItem = read("app/src/main/res/layout-land/item_recording.xml");
         String player = read("app/src/main/res/layout/fragment_video_player.xml");
 
-        assertTrue(portraitItem.contains("RecordingAspectRatioFrameLayout"));
-        assertTrue(landscapeItem.contains("android:layout_width=\"144dp\""));
+        assertTrue(portraitItem.contains("android:layout_width=\"@dimen/rec_thumb_width\""));
+        assertTrue(landscapeItem.contains("android:layout_width=\"@dimen/rec_thumb_width\""));
         assertTrue(player.contains("@+id/playerLoadingContainer"));
         assertTrue(player.contains("@+id/playerErrorContainer"));
         assertTrue(player.contains("@+id/btnPlayerRetry"));
@@ -122,27 +122,23 @@ public class RecordingModernizationContractTest {
         String adapter = read(
                 "app/src/main/java/com/overdrive/app/ui/adapter/RecordingAdapter.kt");
 
+        String styles = read("app/src/main/res/values/revamp_recordings.xml");
         for (String layout : new String[] {portrait, landscape}) {
+            assertTrue("rows are a fixed height",
+                    layout.contains("android:layout_height=\"@dimen/rec_row_height\""));
             String location = openingTagForId(layout, "tvLocation");
-            assertTrue(location.contains("android:minLines=\"1\""));
             assertTrue(location.contains("android:visibility=\"invisible\""));
         }
-        String actor = openingTagForId(landscape, "tvActorSummary");
-        assertTrue(actor.contains("android:minLines=\"1\""));
-        assertTrue(actor.contains("android:visibility=\"invisible\""));
-        assertTrue(openingTagForId(portrait, "tvSize")
-                .contains("android:singleLine=\"true\""));
-        for (String id : new String[] {
-                "tvTypeBadge", "tvSeverity", "tvStorageBadge", "tvSize"
-        }) {
-            String metadata = openingTagForId(landscape, id);
-            assertTrue(id + " must not increase repeated tile height",
-                    metadata.contains("android:singleLine=\"true\""));
-            assertTrue(id + " must truncate safely",
-                    metadata.contains("android:ellipsize=\"end\""));
+        for (String style : new String[] {"Widget.Overdrive.Rec.RowMeta", "Widget.Overdrive.Rec.Badge"}) {
+            int at = styles.indexOf("<style name=\"" + style + "\"");
+            assertTrue(style, at >= 0);
+            String body = styles.substring(at, styles.indexOf("</style>", at));
+            assertTrue(style + " must not increase repeated tile height",
+                    body.contains("<item name=\"android:maxLines\">1</item>"));
+            assertTrue(style + " must truncate safely",
+                    body.contains("<item name=\"android:ellipsize\">end</item>"));
         }
         assertTrue(adapter.contains("tvLocation?.visibility = View.INVISIBLE"));
-        assertTrue(adapter.contains("tvActorSummary?.visibility = View.INVISIBLE"));
     }
 
     @Test
@@ -151,9 +147,9 @@ public class RecordingModernizationContractTest {
         String row = read(
                 "app/src/main/res/layout/item_recording_landscape.xml");
 
-        assertTrue(row.contains("android:layout_height=\"136dp\""));
+        assertTrue(row.contains("android:layout_height=\"@dimen/rec_row_height\""));
         assertTrue(openingTagForId(row, "tvFilename")
-                .contains("android:maxLines=\"1\""));
+                .contains("android:visibility=\"gone\""));
     }
 
     @Test
@@ -248,9 +244,9 @@ public class RecordingModernizationContractTest {
                 "app/src/main/java/com/overdrive/app/ui/fragment/RecordingsFragment.kt");
 
         assertTrue(openingTagForId(landscape, "libraryContainer")
-                .contains("android:layout_weight=\"11\""));
+                .contains("android:layout_weight=\"10\""));
         assertTrue(openingTagForId(landscape, "previewCard")
-                .contains("android:layout_weight=\"9\""));
+                .contains("android:layout_weight=\"11\""));
         assertTrue(openingTagForId(landscape, "previewInsightsToggle")
                 .contains("android:layout_height=\"48dp\""));
         assertTrue(openingTagForId(landscape, "previewInsights")
@@ -259,9 +255,14 @@ public class RecordingModernizationContractTest {
         assertTrue(host.contains("setPreviewDetailsExpanded(root, !expanded)"));
         assertTrue(host.contains(
                 "previewInsightsToggle?.visibility = if (fullscreen) View.GONE else View.VISIBLE"));
-        assertTrue(host.contains("params.weight = if (fullscreen) 0f else 11f"));
-        assertTrue(player.contains(
-                "val chrome = listOfNotNull(topBar, quadrantBar, bottomControls)"));
+        assertTrue(host.contains("params.weight = if (fullscreen) 0f else LIBRARY_PANE_WEIGHT"));
+        assertTrue(host.contains("LIBRARY_PANE_WEIGHT = 10f"));
+        int chrome = player.indexOf("val chrome = listOfNotNull(");
+        assertTrue(chrome >= 0);
+        String chromeList = player.substring(chrome, player.indexOf(")", chrome));
+        assertTrue(chromeList.contains("topBar"));
+        assertTrue(chromeList.contains("quadrantBar"));
+        assertTrue(chromeList.contains("bottomControls"));
         assertTrue(player.contains(
                 "handler.postDelayed(hideOverlayRunnable, OVERLAY_HIDE_DELAY)"));
     }

@@ -8,6 +8,7 @@ import com.overdrive.app.roadsense.detect.Severity
 import com.overdrive.app.roadsense.detect.StoredHazard
 import com.overdrive.app.roadsense.detect.altitudeKnown
 import com.overdrive.app.roadsense.detect.altitudeMatches
+import com.overdrive.app.storage.H2StoreFaults
 import java.io.File
 import java.sql.Connection
 import java.sql.DriverManager
@@ -160,6 +161,9 @@ class RoadSenseStore private constructor() {
         /** Retention prune cadence — mirrors SocHistoryDatabase's daily sweep. */
         private const val PRUNE_INTERVAL_HOURS = 24L
 
+        /** Minimum gap between reopen attempts of a dead store. */
+        private const val HEAL_COOLDOWN_NANOS = 10_000_000_000L
+
         @Volatile
         private var instance: RoadSenseStore? = null
         private val singletonLock = Any()
@@ -189,6 +193,16 @@ class RoadSenseStore private constructor() {
 
     @Volatile
     private var running = false
+
+    /** True while [stop] waits out the prune it interrupted: that dying prune must not reopen the store. */
+    @Volatile
+    private var stopping = false
+
+    // Dead-store reopen state, guarded by [lock].
+    private var healAttempted = false
+    private var lastHealAttemptNanos = 0L
+    private var inHealRetry = false
+    private var deadDuringRetry = false
 
     init {
         // Load the pure-Java H2 driver. Same as SocHistoryDatabase's ctor.
@@ -304,6 +318,7 @@ class RoadSenseStore private constructor() {
      */
     fun stop() {
         running = false
+        stopping = true
         scheduler?.let { s ->
             s.shutdown()
             try {
@@ -324,6 +339,7 @@ class RoadSenseStore private constructor() {
             }
             connection = null
             initialized = false
+            stopping = false
         }
         logger.info("RoadSense store stopped")
     }
@@ -354,6 +370,13 @@ class RoadSenseStore private constructor() {
      * avoid orphaning the lock file at JVM exit). Mirrors the Java reconnect().
      */
     private fun reconnect() {
+        // Once a heal has run it owns reopening: throttled, schema re-asserted, and also
+        // while the feature is off (lazy open), where a failed reopen would otherwise stick.
+        if (healAttempted) {
+            // No retry follows this reopen, so a good one must not keep the cooldown.
+            if (!isConnectionOpen() && reopenThrottled()) healAttempted = false
+            return
+        }
         if (!running) return
         try {
             if (connection == null || connection!!.isClosed) {
@@ -362,6 +385,70 @@ class RoadSenseStore private constructor() {
             }
         } catch (e: Exception) {
             logger.error("Failed to reconnect to H2", e)
+        }
+    }
+
+    private fun isConnectionOpen(): Boolean =
+        try {
+            connection != null && !connection!!.isClosed
+        } catch (e: Exception) {
+            false
+        }
+
+    /**
+     * Reopen a store H2 killed under a still-open connection (isClosed stays false, so
+     * [reconnect] can't see it). Caller holds [lock] and runs its one retry via [retryAfterHeal].
+     */
+    private fun healDeadStore(failure: Exception): Boolean {
+        if (inHealRetry) {
+            // The retry failed too: keep the cooldown, never heal recursively.
+            if (H2StoreFaults.isStoreDead(failure)) deadDuringRetry = true
+            return false
+        }
+        if (!H2StoreFaults.isStoreDead(failure)) return false
+        return reopenThrottled(failure)
+    }
+
+    /** [failure] is the dead-store error, or null when [reconnect] retries a failed reopen. */
+    private fun reopenThrottled(failure: Exception? = null): Boolean {
+        if (!initialized || stopping) return false
+        // An interrupted thread would kill the reopened store on its next file read; a later
+        // caller heals instead, and this thread keeps its interrupt.
+        if (Thread.currentThread().isInterrupted) return false
+        if (healAttempted && System.nanoTime() - lastHealAttemptNanos < HEAL_COOLDOWN_NANOS) return false
+        logger.warn(
+            if (failure != null) "RoadSense store died under a live connection, reopening: " + H2StoreFaults.describe(failure)
+            else "RoadSense store reopening after a failed reopen"
+        )
+        try {
+            connection?.close()
+        } catch (ignored: Exception) {
+            // a dead store throws here
+        }
+        return try {
+            connection = DriverManager.getConnection(JDBC_URL, "sa", "")
+            connection!!.createStatement().use { it.execute("SET CACHE_SIZE 8192") }
+            createSchema()
+            true
+        } catch (e: Exception) {
+            logger.error("RoadSense store reopen failed: " + e.message, e)
+            false
+        } finally {
+            // Stamped after the attempt; retryAfterHeal clears it again if the retry finds the store healthy.
+            healAttempted = true
+            lastHealAttemptNanos = System.nanoTime()
+        }
+    }
+
+    /** Runs the caller's single retry; a retry that never meets a dead store lifts the cooldown. */
+    private fun <T> retryAfterHeal(retry: () -> T): T {
+        inHealRetry = true
+        deadDuringRetry = false
+        try {
+            return retry()
+        } finally {
+            inHealRetry = false
+            if (!deadDuringRetry) healAttempted = false
         }
     }
 
@@ -461,6 +548,7 @@ class RoadSenseStore private constructor() {
      */
     @JvmOverloads
     fun upsertDetection(hazard: RoadSenseHazard, nowMs: Long, source: Int = SOURCE_LOCAL): String {
+        try { if (source == SOURCE_LOCAL) com.overdrive.app.server.timeline.TimelineJournal.noteRoad(hazard.type.name, hazard.severity.name, nowMs) } catch (ignored: Throwable) { }
         synchronized(lock) {
             if (!ensureOpen()) return ""
             try {
@@ -511,6 +599,7 @@ class RoadSenseStore private constructor() {
                 logger.debug("Inserted candidate $id type=${hazard.type} sev=${hazard.severity.level} conf=${hazard.confidence}")
                 return id
             } catch (e: Exception) {
+                if (healDeadStore(e)) return retryAfterHeal { upsertDetection(hazard, nowMs, source) }
                 logger.error("upsertDetection failed: " + e.message, e)
                 reconnect()
                 return ""
@@ -699,6 +788,10 @@ class RoadSenseStore private constructor() {
                 }
                 checkpointLocked()
             } catch (e: Exception) {
+                if (healDeadStore(e)) {
+                    retryAfterHeal { markHumanVerified(id, confirmed, correctedSeverity, correctedType, nowMs) }
+                    return
+                }
                 logger.error("markHumanVerified failed: " + e.message, e)
                 reconnect()
             }
@@ -710,6 +803,8 @@ class RoadSenseStore private constructor() {
         try {
             connection?.createStatement()?.use { it.execute("CHECKPOINT") }
         } catch (e: Exception) {
+            // A dying store only buffered the change: fail the action so it heals and re-applies.
+            if (H2StoreFaults.isStoreDead(e)) throw e
             logger.warn("checkpoint failed (persists within WRITE_DELAY): " + e.message)
         }
     }
@@ -748,6 +843,7 @@ class RoadSenseStore private constructor() {
                     ps.executeQuery().use { rs -> return readHazards(rs) }
                 }
             } catch (e: Exception) {
+                if (healDeadStore(e)) return retryAfterHeal { queryAhead(lat, lng, bearingDeg, maxResults) }
                 logger.error("queryAhead failed: " + e.message, e)
                 reconnect()
                 return emptyList()
@@ -780,6 +876,7 @@ class RoadSenseStore private constructor() {
                     ps.executeQuery().use { rs -> return readHazards(rs) }
                 }
             } catch (e: Exception) {
+                if (healDeadStore(e)) return retryAfterHeal { queryForUpload(minConfidence, sinceMs) }
                 logger.error("queryForUpload failed: " + e.message, e)
                 reconnect()
                 return emptyList()
@@ -817,6 +914,7 @@ class RoadSenseStore private constructor() {
                     ps.executeQuery().use { rs -> return readHazards(rs) }
                 }
             } catch (e: Exception) {
+                if (healDeadStore(e)) return retryAfterHeal { queryByBbox(minLat, minLng, maxLat, maxLng, maxResults) }
                 logger.error("queryByBbox failed: " + e.message, e)
                 reconnect()
                 return emptyList()
@@ -882,6 +980,7 @@ class RoadSenseStore private constructor() {
                     return n.toLong()
                 }
             } catch (e: Exception) {
+                if (healDeadStore(e)) return retryAfterHeal { deleteAllLocal() }
                 logger.error("deleteAllLocal failed: " + e.message, e)
                 return -1
             }
@@ -908,6 +1007,10 @@ class RoadSenseStore private constructor() {
                     if (n > 0) logger.info("Pruned $n stale candidate hazards (older than ${CANDIDATE_RETENTION_DAYS}d)")
                 }
             } catch (e: Exception) {
+                if (healDeadStore(e)) {
+                    retryAfterHeal { pruneStaleCandidates() }
+                    return
+                }
                 logger.error("pruneStaleCandidates failed: " + e.message, e)
                 reconnect()
             }

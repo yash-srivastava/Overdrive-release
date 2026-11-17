@@ -47,6 +47,9 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
     private static volatile KeepAliveAccessibilityService instance;
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final WifiDebuggingDialogController.Lifecycle wifiDebuggingDialogLifecycle =
+            new WifiDebuggingDialogController.Lifecycle(
+                    () -> new WifiDebuggingDialogController(this, mainHandler));
 
     /** The bound service, or null when the a11y service isn't enabled or connected. */
     public static KeepAliveAccessibilityService getInstance() {
@@ -68,6 +71,7 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
     @Override
     public void onServiceConnected() {
         super.onServiceConnected();
+        wifiDebuggingDialogLifecycle.attach();
 
         Log.i(TAG, "AccessibilityService connected — process is now protected");
 
@@ -215,6 +219,7 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
         final int type = event.getEventType();
 
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            wifiDebuggingDialogLifecycle.onAccessibilityEvent(event);
             try {
                 KeyMapDispatcher.INSTANCE.onForegroundPackageChanged(
                         stringValue(event.getPackageName()));
@@ -451,6 +456,7 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
     @Override
     public boolean onUnbind(Intent intent) {
         Log.i(TAG, "AccessibilityService unbound — clearing instance");
+        wifiDebuggingDialogLifecycle.unbind();
         // Only if it is still OURS: a reconnect can construct the new instance before the old
         // one unbinds, and an unguarded null would erase the live service's registration.
         if (instance == this) instance = null;
@@ -466,6 +472,7 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
     public void onDestroy() {
         Log.w(TAG, "AccessibilityService destroyed — attempting restart");
         if (instance == this) instance = null;
+        wifiDebuggingDialogLifecycle.destroy();
 
         // Non-daemon single-thread pool with no core timeout: every disable/re-enable cycle
         // that captured a position would otherwise strand one more idle thread for the life

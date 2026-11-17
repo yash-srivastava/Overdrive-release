@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="web_state_retry_now">Повторить сейчас</string>
+    <string name="web_state_retry_in">Автоматический повтор · следующая попытка через %1$d с</string>
+    <string name="web_state_retrying_now">Автоматический повтор · пробуем сейчас…</string>
+    <string name="web_state_sign_in_title">Не удалось войти на эту страницу</string>
+    <string name="web_state_sign_in_body">Служба камеры работает, но не приняла вход приложения. OverDrive восстановит его автоматически, пока подключён ADB.</string>
+</resources>

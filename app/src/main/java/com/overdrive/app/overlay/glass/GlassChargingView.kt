@@ -1,5 +1,6 @@
 package com.overdrive.app.overlay.glass
 
+import com.overdrive.app.R
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
@@ -64,11 +65,11 @@ class GlassChargingView(context: Context, env: GlassEnv, ticker: GlassTicker) : 
         val t = env.theme
         when {
             // shownEta = -1: the next session's first time-to-full snaps instead of counting from this one
-            !s.active -> { text.labelText = "Not charging"; text.setWord("Unplugged", t.text2); shownEta = -1 }
-            !charging -> { text.labelText = "Limit reached"; text.setValue("Full", ""); shownEta = -1 }
-            s.etaMin == null -> { text.labelText = "Full in"; text.setWord("Estimating", t.text2); shownEta = -1 }
+            !s.active -> { text.labelText = gs(R.string.glass_not_charging); text.setWord(gs(R.string.glass_unplugged), t.text2); shownEta = -1 }
+            !charging -> { text.labelText = gs(R.string.glass_limit_reached); text.setValue(gs(R.string.glass_full), ""); shownEta = -1 }
+            s.etaMin == null -> { text.labelText = gs(R.string.glass_full_in); text.setWord(gs(R.string.glass_estimating), t.text2); shownEta = -1 }
             else -> {
-                text.labelText = "Full in"
+                text.labelText = gs(R.string.glass_full_in)
                 if (instant || shownEta < 0) eta.snap(s.etaMin.toFloat()) else eta.set(s.etaMin.toFloat(), false)
                 shownEta = -1
                 updateEta()
@@ -77,10 +78,10 @@ class GlassChargingView(context: Context, env: GlassEnv, ticker: GlassTicker) : 
         val pct = if (s.socKnown) "${s.socPct}%" else null
         if (charging) {
             text.statusIcon = GlassPaths.svg(BOLT)
-            val source = when (s.dc) { true -> "DC fast"; false -> "AC"; null -> null }
+            val source = when (s.dc) { true -> gs(R.string.glass_dc_fast); false -> "AC"; null -> null }
             text.statusText = when {
                 pct != null && source != null -> "$pct · $source"
-                else -> pct ?: source ?: "Charging"
+                else -> pct ?: source ?: gs(R.string.glass_state_charging)
             }
             text.statusColor = if (s.dc == true) t.accent else t.text2
         } else if (pct != null) {
@@ -96,9 +97,9 @@ class GlassChargingView(context: Context, env: GlassEnv, ticker: GlassTicker) : 
         val m = eta.value.roundToInt().coerceAtLeast(0)
         if (m == shownEta) return
         shownEta = m
-        if (m < 60) text.setValue(m.toString(), "min")
-        else if (m % 60 == 0) text.setValue((m / 60).toString(), "h")
-        else text.setValue((m / 60).toString(), "h", (m % 60).toString(), "min")
+        if (m < 60) text.setValue(m.toString(), gs(R.string.glass_unit_min))
+        else if (m % 60 == 0) text.setValue((m / 60).toString(), gs(R.string.glass_unit_h))
+        else text.setValue((m / 60).toString(), gs(R.string.glass_unit_h), (m % 60).toString(), gs(R.string.glass_unit_min))
     }
 
     private fun painter(): CellPainter {

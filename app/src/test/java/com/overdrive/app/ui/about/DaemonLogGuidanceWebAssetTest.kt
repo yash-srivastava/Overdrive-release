@@ -15,7 +15,7 @@ class DaemonLogGuidanceWebAssetTest {
         val api = readRepositoryFile("app/src/main/java/com/overdrive/app/server/LogsApiHandler.java")
 
         assertTrue(html.contains("send the tunnel you use"))
-        assertTrue(html.contains("send-logs.js?v=4"))
+        assertTrue(html.contains("send-logs.js?v=5"))
         assertTrue(script.contains("res.descriptions"))
         assertTrue(script.contains("diag-component"))
         assertTrue(script.contains("diag-when"))

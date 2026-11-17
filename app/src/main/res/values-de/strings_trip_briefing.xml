@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Trip Briefing: the car-start "Heading to work? Want directions?" prompt. The spoken line is
+         greeting + heading + duration (or one extra that replaces it) + question, joined by spaces,
+         and read aloud by text-to-speech. -->
+    <string name="trip_briefing_greeting_morning">Guten Morgen.</string>
+    <string name="trip_briefing_greeting_afternoon">Guten Tag.</string>
+    <string name="trip_briefing_greeting_evening">Guten Abend.</string>
+    <string name="trip_briefing_heading_home">Auf dem Weg nach Hause?</string>
+    <string name="trip_briefing_heading_work">Auf dem Weg zur Arbeit?</string>
+    <!-- %1$s: the place's name, e.g. "Phoenix Mall". -->
+    <string name="trip_briefing_heading_place">Auf dem Weg zu %1$s?</string>
+    <plurals name="trip_briefing_duration">
+        <item quantity="one">Etwa %1$d Minute.</item>
+        <item quantity="other">Etwa %1$d Minuten.</item>
+    </plurals>
+    <!-- %1$s: range left, %2$s: the trip's length, each "31 km" or "19 mi". -->
+    <string name="trip_briefing_extra_range">Die Reichweite ist knapp: noch %1$s für %2$s Fahrt.</string>
+    <plurals name="trip_briefing_extra_hazards">
+        <item quantity="one">%1$d neue Gefahrenstelle auf der Strecke.</item>
+        <item quantity="other">%1$d neue Gefahrenstellen auf der Strecke.</item>
+    </plurals>
+    <!-- %1$s: an hour of the day in the device's clock format, e.g. "7 PM" or "19:00". -->
+    <string name="trip_briefing_extra_rain">Gegen %1$s wird es wahrscheinlich regnen.</string>
+    <string name="trip_briefing_question">Navigation starten?</string>
+    <string name="trip_briefing_distance_km">%1$d km</string>
+    <string name="trip_briefing_distance_mi">%1$d mi</string>
+
+    <!-- The destination as the AI assistant should say it. -->
+    <string name="trip_briefing_said_home">Zuhause</string>
+    <string name="trip_briefing_said_work">Arbeit</string>
+
+    <!-- Card -->
+    <string name="trip_briefing_title_home">Zuhause</string>
+    <string name="trip_briefing_title_work">Arbeit</string>
+    <!-- Title for a regular destination that has no name yet. -->
+    <string name="trip_briefing_title_unnamed">Ihr übliches Ziel</string>
+    <string name="trip_briefing_name_place">Ort benennen</string>
+    <string name="trip_briefing_no">Nein</string>
+    <string name="trip_briefing_go_failed">Die Navigation wurde nicht gestartet. Öffnen Sie die Karte, um zu navigieren.</string>
+    <!-- The car's own navigation app. -->
+    <string name="trip_briefing_app_car">Fahrzeug-Navi</string>
+</resources>

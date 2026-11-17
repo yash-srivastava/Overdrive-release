@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_section_adb">ADB</string>
+    <string name="settings_adb_subtitle">الاتصال والتمكين والاستعادة التلقائية.</string>
+    <string name="settings_adb_connection_title">الاتصال</string>
+    <string name="settings_adb_automatic_title">الاستعادة التلقائية</string>
+    <string name="settings_adb_automatic_restore">استعادة ADB تلقائيًا</string>
+    <string name="settings_adb_automatic_description">استعادة إعداد ADB عند بدء التشغيل وكلما تم إيقافه. يلزم منح إذن الإعدادات مسبقًا، ولا يلزم Wi-Fi. يدعم DiLink 5 أيضًا الاستعادة اللاسلكية على Wi-Fi موثوق باستخدام مفتاح سبق السماح له.</string>
+    <string name="settings_adb_recover">استعادة ADB الآن</string>
+    <string name="settings_adb_cancel_recovery">إلغاء الاستعادة</string>
+    <string name="settings_adb_manual_title">التمكين اليدوي</string>
+    <string name="settings_adb_manual_description">استخدم أدوات BYD المتوافقة لطلب الوصول إلى ADB. لا يلزم اتصال Wi-Fi.</string>
+    <string name="settings_adb_enable">تمكين ADB</string>
+    <string name="settings_adb_advanced_tools">أدوات متقدمة</string>
+    <string name="settings_adb_hide_advanced">إخفاء الأدوات المتقدمة</string>
+    <string name="settings_adb_advanced_description">تشخيص المشكلات أو فتح أدوات BYD أو التراجع عن محاولة يدوية.</string>
+    <string name="settings_adb_open_developer">فتح خيارات المطوّر</string>
+    <string name="settings_adb_developer_page">طلب صفحة مطوّر BYD</string>
+    <string name="settings_adb_diagnostics">فحص التوافق والاتصال</string>
+    <string name="settings_adb_restore">التراجع عن تغييرات التمكين اليدوي</string>
+    <string name="settings_adb_export">تصدير APK لأدوات مطوّر BYD</string>
+    <string name="settings_adb_dialog_confirm">السماح بتصحيح الأخطاء اللاسلكي على هذه الشبكة</string>
+    <string name="settings_adb_dialog_confirm_description">اتصل أولًا بشبكة Wi-Fi تم التحقق من اتصالها. اسمح لـ OverDrive بتأكيد حوار تصحيح الأخطاء اللاسلكي لهذه الشبكة فقط.</string>
+    <string name="settings_adb_tools_unavailable">التمكين اليدوي غير متاح للوضع الحالي أو لأدوات BYD المثبتة.</string>
+    <string name="settings_adb_recovery_availability">تحتاج الاستعادة المحلية إلى إذن الإعدادات الممنوح أثناء إعداد ADB. لا تحتاج إلى Wi-Fi أو وضع DiLink 5.</string>
+    <string name="settings_adb_details_title">تفاصيل المحاولة الأخيرة</string>
+    <string name="settings_adb_recovery_confirm_body">تستخدم الاستعادة المحلية إذن الإعدادات الممنوح مسبقًا دون الحاجة إلى Wi-Fi. يمكن لـ DiLink 5 أيضًا استخدام Wi-Fi موثوق ومفتاح سبق السماح له. قد يفتح هذا وصول ADB عبر المنفذ 5555 أو يستعيده، وقد تتمكن أجهزة أخرى على شبكة السيارة من الوصول إليه. تابع فقط على شبكة تثق بها. تظل مصادقة مفتاح ADB مفعلة.</string>
+    <string name="settings_adb_recovery_permission_missing">إذن الإعدادات مفقود. إذا كان ADB غير متاح أيضًا، استخدم تمكين ADB أو خيارات المطوّر أولًا، ثم أكمل إعداد ADB مجددًا.</string>
+    <string name="settings_adb_recovery_setting_enabled">إعداد ADB مفعّل. لم يتم تأكيد اتصال ADB موثّق الهوية.</string>
+    <string name="settings_adb_recovery_setting_failed">تعذّر تمكين إعداد ADB والتحقق منه. قد يرفض البرنامج الثابت هذا التغيير.</string>
+    <string name="settings_adb_recovery_save_failed">تعذّر حفظ خيار الاستعادة التلقائية. تحقق من ADB وحاول مجددًا.</string>
+</resources>

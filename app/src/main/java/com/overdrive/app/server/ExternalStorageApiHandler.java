@@ -190,6 +190,7 @@ public class ExternalStorageApiHandler {
             if (config.has("enabled")) {
                 enabledValue = config.getBoolean("enabled");
                 cleaner.setEnabledNoSave(enabledValue);
+                cleaner.noteUserChoice(enabledValue);
                 enabledChanged = true;
             }
             if (config.has("reservedSpaceMb")) {

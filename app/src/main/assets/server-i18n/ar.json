@@ -167,6 +167,9 @@
     "tyre_wheel_pressure": "{0} ({1})"
   },
   "telegram": {
+    "deterrent_triggered": "تم تشغيل الردع: {0}",
+    "deterrent_screen": "الشاشة",
+    "deterrent_cloud": "السحابة",
     "recording_caption": "📹 التسجيل ({0}) - {1}ثانية",
     "recording_caption_no_label": "📹 التسجيل - {0}ثانية",
     "proximity_alert": "بدأ التسجيل 🚨 تنبيه الاقتراب\nالوقت: {0}\nالمشغل: {1} ({2})\n",
@@ -460,6 +463,7 @@
   },
   "vehicle_control": {
     "blocked_driving": "هذا الإجراء غير متاح أثناء تحرك السيارة",
+    "blocked_unconfirmed": "تعذّر التأكد من أن السيارة متوقفة الآن. حاول مرة أخرى بعد قليل.",
     "cloud_required": "قم بتوصيل حساب BYD في الإعدادات لاستخدام هذا التحكم",
     "cloud_sent": "أرسلت عبر السحابة",
     "cloud_unavailable_used_local": "السحابة غير متوفرة — استخدام الاتصال المباشر",

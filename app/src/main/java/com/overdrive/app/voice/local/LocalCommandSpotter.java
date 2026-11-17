@@ -88,6 +88,8 @@ public final class LocalCommandSpotter implements AutoCloseable {
          * -1 when the spotter gave no usable timestamp.
          */
         public final long phraseStartOffset;
+        /** The same for the phrase's last token (where its final syllable begins); -1 when unknown. */
+        public final long phraseEndOffset;
 
         Match(String intent, JSONObject slots, String phrase) {
             this(intent, slots, phrase, -1);
@@ -98,11 +100,16 @@ public final class LocalCommandSpotter implements AutoCloseable {
         }
 
         Match(String intent, JSONObject slots, String phrase, int start, long phraseStartOffset) {
+            this(intent, slots, phrase, start, phraseStartOffset, -1);
+        }
+
+        Match(String intent, JSONObject slots, String phrase, int start, long phraseStartOffset, long phraseEndOffset) {
             this.intent = intent;
             this.slots = slots;
             this.phrase = phrase;
             this.start = start;
             this.phraseStartOffset = phraseStartOffset;
+            this.phraseEndOffset = phraseEndOffset;
         }
 
         @Override
@@ -117,6 +124,16 @@ public final class LocalCommandSpotter implements AutoCloseable {
 
     /** Pseudo-intent: "OverDrive" said again inside a command window. */
     public static final String INTENT_WAKE = "assistant.wake";
+    /** Pseudo-intent of a {@link #beginPhrases} window: {@code phrase} is the spotted line's tag. */
+    public static final String INTENT_PHRASE = "assistant.phrase";
+    private static final String NEGATION_TAG = "neg";
+    // {@link #hearsNegation}: "don't", "do not", "not", "never"; 不 / 别 alone and 不要 / 不用 / 不想 (each set is
+    // its own stream: in one, the long lines drown out a short 不).
+    private static final String[] NEGATION_CHECK_EN = {
+            "D OW1 N T #0.15 @neg/D OW1 N #0.15 @neg/D UW1 N AA1 T #0.15 @neg/N AA1 T #0.15 @neg/N EH1 V ER0 #0.15 @neg"};
+    private static final String[] NEGATION_CHECK_ZH = {
+            "b ù #0.15 @neg/b ú #0.15 @neg/b ié #0.15 @neg",
+            "b ú y ào #0.15 @neg/b ù y ào #0.15 @neg/b ú y òng #0.15 @neg/b ù y òng #0.15 @neg/b ù x iǎng #0.15 @neg/b ié #0.15 @neg"};
     /** Tag of the lines wake-word enrollment learned from the driver's own voice. */
     public static final String PERSONAL_WAKE_TAG = "overdrive_p";
 
@@ -129,11 +146,18 @@ public final class LocalCommandSpotter implements AutoCloseable {
     private OnlineStream ahead;
     private String windowKeywords = "";
     private String windowLanguage = CommandCatalog.EN;
+    private boolean phraseWindow;
     private float[] samples = new float[0];
     // Samples fed to each stream since it was created or last reset: keyword timestamps count
     // from there, so this is what turns them into a position in the window's audio.
     private long fedMain;
     private long fedAhead;
+    // Decodes since the stream was created or last reset. A reset restarts the timestamps at the decoder's
+    // position, which lags the fed audio: each decode consumes one chunk of it.
+    private int decodesMain;
+    private int decodesAhead;
+    /** Audio one decode consumes for the bundled chunk-8 model (measured: 25 decodes per 4.0 s). */
+    private static final long SAMPLES_PER_DECODE = 2560;
     private boolean closed;
     private boolean streamFailureLogged;
 
@@ -261,6 +285,27 @@ public final class LocalCommandSpotter implements AutoCloseable {
         openWindow(resolveLanguage(locale), true);
     }
 
+    /**
+     * Opens a window over the given tokenized lines ('/'-joined, each with its own {@code @tag})
+     * plus "OverDrive"; every hit is an {@link #INTENT_PHRASE} match carrying its tag.
+     */
+    public synchronized void beginPhrases(String keywords) {
+        if (closed) return;
+        releaseStream();
+        String lines = keywords == null ? "" : keywords.trim();
+        windowKeywords = lines.isEmpty() ? wakeKeywords() : lines + "/" + wakeKeywords();
+        windowLanguage = CommandCatalog.EN;
+        phraseWindow = true;
+        fedMain = 0;
+        decodesMain = 0;
+        try {
+            stream = spotter.createStream(windowKeywords);
+        } catch (Throwable t) {
+            stream = null;
+            Log.w(TAG, "Could not open a phrase window: " + t);
+        }
+    }
+
     /** Feeds 16 kHz mono PCM; returns the first phrase completed in this audio, or null. */
     public synchronized Match process(short[] pcm, int offset, int length) {
         if (closed || stream == null || pcm == null || length <= 0
@@ -298,12 +343,16 @@ public final class LocalCommandSpotter implements AutoCloseable {
         try {
             ahead = spotter.createStream(windowKeywords);
             fedAhead = 0;
+            decodesAhead = 0;
             if (length > 0) {
                 float[] audio = new float[length];
                 for (int i = 0; i < length; i++) audio[i] = lead[offset + i] / 32768f;
                 ahead.acceptWaveform(audio, SAMPLE_RATE);
                 fedAhead = length;
-                while (spotter.isReady(ahead)) spotter.decode(ahead);
+                while (spotter.isReady(ahead)) {
+                    spotter.decode(ahead);
+                    decodesAhead++;
+                }
             }
         } catch (Throwable t) {
             releaseAhead();
@@ -314,24 +363,48 @@ public final class LocalCommandSpotter implements AutoCloseable {
         releaseStream();
     }
 
+    /**
+     * Restarts the window's timestamps during silence before a reply. The model does so by itself after
+     * about 1.5 s of silence without saying, which would misplace the hits of a reply that starts late.
+     */
+    public synchronized void restartIdle() {
+        if (closed || stream == null) return;
+        try {
+            spotter.reset(stream);
+            fedMain = Math.max(0L, fedMain - decodesMain * SAMPLES_PER_DECODE);
+            decodesMain = 0;
+        } catch (Throwable t) {
+            Log.w(TAG, "Keyword stream restart failed: " + t);
+        }
+    }
+
     private Match decode(OnlineStream s, boolean isAhead) {
         s.acceptWaveform(samples, SAMPLE_RATE);
         long fed = (isAhead ? fedAhead : fedMain) + samples.length;
+        int decodes = isAhead ? decodesAhead : decodesMain;
         Match found = null;
         while (spotter.isReady(s)) {
             spotter.decode(s);
+            decodes++;
             KeywordSpotterResult result = spotter.getResult(s);
             String tag = result.getKeyword();
             if (tag == null || tag.isEmpty()) continue;
             long offset = phraseStartOffset(result, fed);
+            long endOffset = phraseLastTokenOffset(result, fed);
             spotter.reset(s);
-            // Timestamps restart after a reset, so the fed count restarts with them.
-            fed = 0;
-            Match match = toMatch(tag.trim(), offset);
+            // The new timestamps start where the decoder was: only the audio it hadn't consumed is ahead of them.
+            fed = Math.max(0L, fed - decodes * SAMPLES_PER_DECODE);
+            decodes = 0;
+            Match match = toMatch(tag.trim(), offset, endOffset);
             if (match != null && found == null) found = match;
         }
-        if (isAhead) fedAhead = fed;
-        else fedMain = fed;
+        if (isAhead) {
+            fedAhead = fed;
+            decodesAhead = decodes;
+        } else {
+            fedMain = fed;
+            decodesMain = decodes;
+        }
         return found;
     }
 
@@ -343,6 +416,14 @@ public final class LocalCommandSpotter implements AutoCloseable {
         float[] times = result.getTimestamps();
         if (times == null || times.length == 0) return -1;
         long offset = fed - Math.round(times[0] * SAMPLE_RATE);
+        return offset < 0 || offset > fed ? -1 : offset;
+    }
+
+    /** As {@link #phraseStartOffset}, for the last token. */
+    private static long phraseLastTokenOffset(KeywordSpotterResult result, long fed) {
+        float[] times = result.getTimestamps();
+        if (times == null || times.length == 0) return -1;
+        long offset = fed - Math.round(times[times.length - 1] * SAMPLE_RATE);
         return offset < 0 || offset > fed ? -1 : offset;
     }
 
@@ -358,6 +439,56 @@ public final class LocalCommandSpotter implements AutoCloseable {
      */
     public synchronized int verifyWake(short[] pcm, int offset, int length) {
         return verifyWith(pcm, offset, length, wakeKeywords());
+    }
+
+    /**
+     * Whether the audio said just before a command (16 kHz mono) holds a negation ("don't …", 不要…, 别…) that starts
+     * by {@code latestStart} samples in, in the command language of {@code locale} (a later one is the command's own
+     * first syllable: 把, 播, 玻 sound like 不). Its own fresh streams, so the open window is untouched.
+     */
+    public synchronized boolean hearsNegation(short[] pcm, int offset, int length, String locale, int latestStart) {
+        if (closed || pcm == null || length <= 0 || offset < 0 || offset > pcm.length - length) return false;
+        String[] sets = resolveLanguage(locale).startsWith("zh") ? NEGATION_CHECK_ZH : NEGATION_CHECK_EN;
+        for (String lines : sets) {
+            OnlineStream s = null;
+            try {
+                s = spotter.createStream(lines);
+                float[] audio = new float[length];
+                for (int i = 0; i < length; i++) audio[i] = pcm[offset + i] / 32768f;
+                s.acceptWaveform(audio, SAMPLE_RATE);
+                s.acceptWaveform(new float[SAMPLE_RATE / 2], SAMPLE_RATE);
+                s.inputFinished();
+                // after a reset the timestamps count from where the decoder was: [base] carries them on
+                long base = 0;
+                int decodes = 0;
+                while (spotter.isReady(s)) {
+                    spotter.decode(s);
+                    decodes++;
+                    KeywordSpotterResult result = spotter.getResult(s);
+                    String tag = result.getKeyword();
+                    if (tag == null || tag.isEmpty()) continue;
+                    float[] times = result.getTimestamps();
+                    if (NEGATION_TAG.equals(tag.trim()) && times != null && times.length > 0
+                            && base + Math.round(times[0] * SAMPLE_RATE) <= latestStart) {
+                        return true;
+                    }
+                    // keywords-default.txt rides along in every stream; a late negation may be followed by an early one
+                    spotter.reset(s);
+                    base += (long) decodes * SAMPLES_PER_DECODE;
+                    decodes = 0;
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "Negation check failed: " + t);
+            } finally {
+                if (s != null) {
+                    try {
+                        s.release();
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     /** {@link #verifyWake} against the given keyword lines only (enrollment cross-checks its takes). */
@@ -435,7 +566,9 @@ public final class LocalCommandSpotter implements AutoCloseable {
         if (!cancelOnly) keywords = keywords.isEmpty() ? wakeKeywords() : keywords + "/" + wakeKeywords();
         windowKeywords = keywords;
         windowLanguage = language;
+        phraseWindow = false;
         fedMain = 0;
+        decodesMain = 0;
         try {
             stream = spotter.createStream(keywords);
         } catch (Throwable t) {
@@ -468,8 +601,10 @@ public final class LocalCommandSpotter implements AutoCloseable {
         }
     }
 
-    private Match toMatch(String tag, long phraseStartOffset) {
-        if (isWakeTag(tag)) return new Match(INTENT_WAKE, new JSONObject(), "OverDrive");
+    private Match toMatch(String tag, long phraseStartOffset, long phraseEndOffset) {
+        if (phraseWindow) return new Match(INTENT_PHRASE, new JSONObject(), tag, -1, phraseStartOffset, phraseEndOffset);
+        // with its position: a re-arm needs where the word ended
+        if (isWakeTag(tag)) return new Match(INTENT_WAKE, new JSONObject(), "OverDrive", -1, phraseStartOffset, phraseEndOffset);
         CommandCatalog.Entry entry = CommandCatalog.find(windowLanguage, tag);
         // keywords-default.txt (always active) carries the English cancel phrase.
         if (entry == null) entry = CommandCatalog.find(CommandCatalog.EN, tag);

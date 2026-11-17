@@ -168,6 +168,9 @@
     "tyre_wheel_pressure": "{0} ({1})"
   },
   "telegram": {
+    "deterrent_triggered": "Afschrikking geactiveerd: {0}",
+    "deterrent_screen": "Scherm",
+    "deterrent_cloud": "Cloud",
     "recording_caption": " Opname ({0}) - {1}s",
     "recording_caption_no_label": " Opname - {0}'s",
     "proximity_alert": " Nabijheid Alert Tijd: {0} Trigger: {1} ({2}) Opname begint...",
@@ -477,6 +480,7 @@
   },
   "vehicle_control": {
     "blocked_driving": "Deze actie is niet beschikbaar terwijl het voertuig rijdt",
+    "blocked_unconfirmed": "Er kan nu niet worden bevestigd dat het voertuig geparkeerd staat. Probeer het zo opnieuw.",
     "cloud_required": "Verbind een BYD-account in Instellingen om deze bediening te gebruiken",
     "cloud_sent": "Gestuurd via de wolk",
     "cloud_unavailable_used_local": "Cloud niet beschikbaar  Gebruikte directe verbinding",

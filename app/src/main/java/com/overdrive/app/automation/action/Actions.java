@@ -273,6 +273,21 @@ public class Actions {
                 new EnumType(new Label("mode", "automation.air_intake"),
                         new Label("on", "automation.recirculate"),
                         new Label("off", "automation.fresh_air"))));
+        // Air outlets: the SDK wind-mode axis, one fixed pattern per action.
+        addAction(new ApiAction(
+                new Label("airflow", "automation.set_airflow"),
+                "automation.set_airflow_description",
+                "POST",
+                "/api/vehicle/climate",
+                "{\"action\":\"set_airflow\",\"mode\":${mode}}",
+                new EnumType(new Label("mode", "automation.airflow"),
+                        new Label("1", "automation.airflow_face"),
+                        new Label("2", "automation.airflow_face_feet"),
+                        new Label("3", "automation.airflow_feet"),
+                        new Label("4", "automation.airflow_feet_windscreen"),
+                        new Label("5", "automation.airflow_windscreen"),
+                        new Label("6", "automation.airflow_face_feet_windscreen"),
+                        new Label("7", "automation.airflow_face_windscreen"))));
         // ── Lighting breadth: welcome / reading / ambient-music (on/off), headlight level ──
         // Lights use target + enable(bool); the enum value maps to true/false in the body.
         addAction(new ApiAction(
@@ -707,6 +722,14 @@ public class Actions {
                 // Absolute step 0-40 (car's own volume scale), clamped to the chosen
                 // channel's real stream max daemon-side.
                 new DynamicIntType(new Label("level", "automation.volume_level"), 0, 40)));
+        // Exterior engine-sound simulator on/off (same endpoint as Vehicle Control); the preset is kept.
+        addAction(new ApiAction(
+                new Label("engineSound", "automation.set_engine_sound"),
+                "automation.set_engine_sound_description",
+                "POST",
+                "/api/audio/engine-sound",
+                "{\"on\":${action}}",
+                new EnumType(new Label("action", "automation.action"), new Label("false", "automation.off"), new Label("true", "automation.on"))));
         // Brake feel (comfort vs sport/strong) — BYDAutoADASDevice brake foot-sense.
         // Catalog key "brake_feel" must match the VehicleControlCatalog entity.
         addAction(new VehicleControlAction(
@@ -786,7 +809,7 @@ public class Actions {
                 "automation.play_audio_description",
                 "POST",
                 "/api/vehicle/play-audio",
-                "{\"name\":\"${name}\",\"channel\":\"${channel}\",\"display\":\"speakers\",\"loop\":${loop}}",
+                "{\"name\":\"${name}\",\"channel\":\"${channel}\",\"display\":\"speakers\",\"loop\":${loop},\"ifPlaying\":\"${ifPlaying}\"}",
                 new AudioType(new Label("name", "automation.audio_file")),
                 new EnumType(
                         new Label("channel", "automation.audio_channel"),
@@ -799,7 +822,8 @@ public class Actions {
                 new EnumType(
                         new Label("loop", "automation.audio_loop"),
                         new Label("false", "automation.audio_loop_off"),
-                        new Label("true", "automation.audio_loop_on"))));
+                        new Label("true", "automation.audio_loop_on")),
+                audioIfPlayingType()));
         // Play an uploaded VIDEO (MP4) with its picture shown on the head-unit screen.
         // Video audio is deliberately fixed to Media: this TextureView player must retain
         // the default media attributes or this DiLink build can play audio without video
@@ -831,14 +855,15 @@ public class Actions {
                 "automation.speak_description",
                 "POST",
                 "/api/vehicle/speak",
-                "{\"text\":\"${text}\",\"channel\":\"${channel}\"}",
+                "{\"text\":\"${text}\",\"channel\":\"${channel}\",\"ifPlaying\":\"${ifPlaying}\"}",
                 new StringType(new Label("text", "automation.speak_text"), 200),
                 new EnumType(
                         new Label("channel", "automation.audio_channel"),
                         new Label("voice", "automation.channel_voice"),
                         new Label("media", "automation.channel_media"),
                         new Label("navigation", "automation.channel_navigation"),
-                        new Label("alarm", "automation.channel_alarm"))));
+                        new Label("alarm", "automation.channel_alarm")),
+                audioIfPlayingType()));
         // Show a brief on-screen TOAST (auto-dismissing pill). Renders as an app-process
         // overlay that floats over the current app WITHOUT stealing focus (safe while
         // driving). User sets the message, how long it shows, where, and a severity tint.
@@ -1461,6 +1486,15 @@ public class Actions {
      * pre-zoning behaviour. The stored value is the zone token the daemon maps to a BYD IAL area
      * (front=1 / rear=2 / both=3); a fresh EnumType per action keeps each schema independent.
      */
+    // Play Audio / Speak: "replace" (stop the current sound) or "queue" (play after it).
+    // "replace" stays first; saved actions without the field load as "replace".
+    private static EnumType audioIfPlayingType() {
+        return new EnumType(
+                new Label("ifPlaying", "automation.audio_if_playing"),
+                new Label("replace", "automation.audio_if_playing_replace"),
+                new Label("queue", "automation.audio_if_playing_queue"));
+    }
+
     private static EnumType ambientZoneType() {
         return new EnumType(
                 new Label("zone", "automation.area"),

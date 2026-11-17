@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Integrations + Settings revamp strings. -->
+<resources>
+    <!-- Integrations header pill: connected services out of the total. -->
+    <string name="integrations_hero_connected_count">%1$d of %2$d connected</string>
+    <!-- Single-line theme tile label; settings_theme_auto keeps the long form. -->
+    <string name="settings_theme_auto_short">Auto</string>
+</resources>

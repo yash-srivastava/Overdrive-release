@@ -98,6 +98,66 @@ public class AuthManager {
     // keep whatever is already persisted, so no device has to be re-paired.
     private static final int DEVICE_SECRET_LENGTH = 20;
 
+    // ==================== WHERE THE SECRET LIVES ====================
+    //
+    // The secret is the typed access code and the key of every session: whoever reads it can log in. The daemons
+    // (UID 2000) keep it in an owner-only file and the app its own private copy. The shared config, which every app on
+    // the head unit can read and write, carries it only as a handoff (a new secret, the move from an older version, a
+    // regenerate) until the app shows it holds it: a session it signs with it is accepted (POST /api/auth/handoff).
+    // Older versions kept it there for good; the same secret moves, so no session ends.
+    private static final String DAEMON_SECRET_NAME = ".overdrive_auth_secret.json";
+    private static final String DAEMON_SECRET_FILE =
+            com.overdrive.app.util.ScratchRoot.path(DAEMON_SECRET_NAME);
+    private static final String KEY_HANDED_OFF = "handedOff";
+    private static volatile File appSecretFile = null;
+    // when the copy cachedState came from was written (0: not from one)
+    private static volatile long cachedOwnMtime = 0;
+    // the daemon couldn't keep a private file: the shared config holds the secret, as in older versions
+    private static volatile boolean ownFileUnavailable = false;
+    // the shared config's mtime when the daemon last made sure it carries the secret only while it should
+    private static volatile long checkedConfigMtime = 0;
+    private static volatile long configCheckedAtMs = 0;
+    private static final long CONFIG_RECHECK_MS = 30_000L;
+    // the app: a handoff the daemon refused (stale, or not the daemon's), and when one was last checked
+    private static volatile String refusedHandoff = null;
+    private static volatile String checkedHandoff = null;
+    private static volatile long handoffCheckAt = 0;
+    private static final long HANDOFF_RETRY_MS = 10_000L;
+    private static final java.util.concurrent.atomic.AtomicBoolean handoffChecking =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+    // the app: reads the daemon's own file as shell, when it holds no secret the daemon accepts (its copy lost)
+    private static volatile DaemonSecretReader daemonSecretReader = null;
+    private static volatile long recoverAt = 0;
+    private static final long RECOVER_RETRY_MS = 10_000L;
+    private static final java.util.concurrent.atomic.AtomicReference<java.util.concurrent.CountDownLatch> recovering =
+            new java.util.concurrent.atomic.AtomicReference<>();
+    private static final java.util.concurrent.ExecutorService AUX =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread th = new Thread(r, "auth-sync");
+                th.setDaemon(true);
+                return th;
+            });
+
+    /** The app's private copy lives in {@code dir} (its own files dir); called at app start. */
+    public static void useAppPrivateDir(File dir) {
+        appSecretFile = dir == null ? null : new File(dir, "auth_secret.json");
+    }
+
+    /** Reads a shell-owned file over the app's ADB link; null when it can't. */
+    public interface DaemonSecretReader {
+        String read(String path);
+    }
+
+    /** How the app reads the daemon's own secret file; called at app start. */
+    public static void useDaemonSecretReader(DaemonSecretReader reader) {
+        daemonSecretReader = reader;
+    }
+
+    // The daemons run as shell (or root); the app under its own UID.
+    private static boolean daemonSide() {
+        return android.os.Process.myUid() < android.os.Process.FIRST_APPLICATION_UID;
+    }
+
     // In-memory cache. UnifiedConfigManager already mtime-invalidates its
     // own cache, but a tiny per-instance cache lets us hand out the same
     // AuthState reference for repeated calls within a single request and
@@ -118,6 +178,7 @@ public class AuthManager {
         public String deviceId;
         public String deviceSecret;      // Random secret for token generation
         public long lastAccess;          // Last successful auth timestamp
+        public boolean handedOff;        // daemon's file only: the app has shown it holds this secret
 
         public String getDeviceToken() {
             return deviceId + "-" + deviceSecret;
@@ -148,7 +209,17 @@ public class AuthManager {
             state.deviceId = json.optString(KEY_DEVICE_ID, "");
             state.deviceSecret = json.optString(KEY_DEVICE_SECRET, "");
             state.lastAccess = json.optLong(KEY_LAST_ACCESS, 0);
+            state.handedOff = json.optBoolean(KEY_HANDED_OFF, false);
             return state;
+        }
+
+        AuthState copy() {
+            AuthState s = new AuthState();
+            s.deviceId = deviceId;
+            s.deviceSecret = deviceSecret;
+            s.lastAccess = lastAccess;
+            s.handedOff = handedOff;
+            return s;
         }
     }
 
@@ -182,6 +253,47 @@ public class AuthManager {
      * Call this on app/daemon startup.
      */
     public static synchronized AuthState initialize() {
+        if (!daemonSide()) return getStateApp();
+        if (!ownFileUnavailable) {
+            AuthState s = initializeDaemon();
+            if (s != null || !ownFileUnavailable) return s;
+        }
+        return initializeFromConfig();
+    }
+
+    // Daemon: its own file; at first the secret older versions kept in the shared config (or the legacy file), so no
+    // session ends, else a new one; then the shared config carries it until the app has it.
+    private static AuthState initializeDaemon() {
+        AuthState state = readOwn();
+        if (state == null) {
+            state = loadFromConfig();
+            if (state == null) state = loadLegacyAuthFile();
+            if (state == null) state = new AuthState();
+            if (state.deviceSecret == null || state.deviceSecret.isEmpty()) {
+                state.deviceSecret = generateSecret(DEVICE_SECRET_LENGTH);
+                log("Generated new device secret");
+            }
+            if (state.deviceId == null || state.deviceId.isEmpty()) state.deviceId = loadDeviceId();
+            state.handedOff = false;
+            AuthState kept = createOwn(state);
+            if (kept == null) {
+                log("WARN: cannot keep the secret in a private file; the shared config holds it as before");
+                ownFileUnavailable = true;
+                return null;
+            }
+            state = kept;
+            if (new File(LEGACY_AUTH_FILE).delete()) log("Removed the legacy auth file");
+        }
+        cachedState = state;
+        cachedOwnMtime = new File(DAEMON_SECRET_FILE).lastModified();
+        stateVersion++;
+        syncConfig(state);
+        log("Auth initialized. Device: " + state.deviceId);
+        return state;
+    }
+
+    // Older versions' behaviour: the shared config holds the secret (also this daemon's, if it can't keep a file).
+    private static AuthState initializeFromConfig() {
         AuthState state = loadFromConfig();
 
         // Migration: if unified config has no auth yet but the legacy
@@ -254,6 +366,42 @@ public class AuthManager {
      * cheap to call on every JWT validation.
      */
     public static AuthState getState() {
+        if (!daemonSide()) return getStateApp();
+        if (!ownFileUnavailable) {
+            AuthState cur = cachedState;
+            long own = new File(DAEMON_SECRET_FILE).lastModified();
+            if (cur != null && own != 0 && own == cachedOwnMtime) {
+                // (the shared config changed, or a while passed — its mtime moves in whole seconds: make sure it
+                // carries the secret only while it should, off this path)
+                long cfg = UnifiedConfigManager.getLastModified();
+                long now = System.currentTimeMillis();
+                if (cfg != checkedConfigMtime || now - configCheckedAtMs > CONFIG_RECHECK_MS) {
+                    checkedConfigMtime = cfg;
+                    configCheckedAtMs = now;
+                    AUX.execute(() -> {
+                        AuthState s = cachedState;
+                        if (s != null && !ownFileUnavailable) syncConfig(s);
+                    });
+                }
+                return cur;
+            }
+            synchronized (AuthManager.class) {
+                AuthState fresh = readOwn();
+                if (fresh != null) {
+                    if (cachedState == null || !equalsSafe(cachedState.deviceSecret, fresh.deviceSecret)
+                            || !equalsSafe(cachedState.deviceId, fresh.deviceId)) stateVersion++;
+                    cachedState = fresh;
+                    cachedOwnMtime = new File(DAEMON_SECRET_FILE).lastModified();
+                    return fresh;
+                }
+                AuthState made = initializeDaemon();
+                if (made != null || !ownFileUnavailable) return made;
+            }
+        }
+        return getStateFromConfig();
+    }
+
+    private static AuthState getStateFromConfig() {
         AuthState cur = cachedState;
         long fileMtime = UnifiedConfigManager.getLastModified();
         if (cur != null && fileMtime != 0 && fileMtime == cachedConfigMtime) {
@@ -280,7 +428,7 @@ public class AuthManager {
                 return cachedState;
             }
             // Config has no auth yet — initialize (handles migration too).
-            return initialize();
+            return initializeFromConfig();
         }
     }
 
@@ -328,7 +476,34 @@ public class AuthManager {
      * pressing "Regenerate".
      */
     public static synchronized String regenerateToken() {
-        AuthState state = getState();
+        if (!daemonSide()) return regenerateApp();
+        if (!ownFileUnavailable) {
+            AuthState cur = getState();
+            if (!ownFileUnavailable) {
+                AuthState fresh = new AuthState();
+                fresh.deviceId = cur != null && cur.deviceId != null && !cur.deviceId.isEmpty() ? cur.deviceId : loadDeviceId();
+                fresh.lastAccess = cur != null ? cur.lastAccess : 0;
+                fresh.deviceSecret = generateSecret(DEVICE_SECRET_LENGTH);
+                fresh.handedOff = false;
+                if (!writeOwn(fresh)) {
+                    log("ERROR: regenerateToken failed to persist new secret — keeping previous state");
+                    return null;
+                }
+                cachedState = fresh;
+                cachedOwnMtime = new File(DAEMON_SECRET_FILE).lastModified();
+                stateVersion++;
+                // the app takes it from the response; the config carries it until the app says so
+                syncConfig(fresh);
+                log("Token regenerated for device: " + fresh.deviceId);
+                return fresh.getDeviceToken();
+            }
+        }
+        return regenerateViaConfig();
+    }
+
+    // Older versions' regenerate: a new secret written to the shared config (an app with an older daemon).
+    private static String regenerateViaConfig() {
+        AuthState state = getStateFromConfigOrApp();
         if (state == null) {
             state = new AuthState();
             state.deviceId = loadDeviceId();
@@ -363,21 +538,391 @@ public class AuthManager {
         return state.getDeviceToken();
     }
 
+    private static AuthState getStateFromConfigOrApp() {
+        return daemonSide() ? getStateFromConfig() : getStateApp();
+    }
+
+    // ==================== DAEMON: OWN FILE, HANDOFF ====================
+
+    /** The app has shown it holds the current secret (a session signed with it): the shared config stops carrying it. */
+    public static synchronized boolean handoffDone() {
+        if (!daemonSide() || ownFileUnavailable) return false;
+        AuthState cur = getState();
+        if (cur == null || ownFileUnavailable) return false;
+        if (!cur.handedOff) {
+            AuthState s = cur.copy();
+            s.handedOff = true;
+            if (!writeOwn(s)) return false;
+            cachedState = s;
+            cachedOwnMtime = new File(DAEMON_SECRET_FILE).lastModified();
+        }
+        syncConfig(cachedState);
+        return true;
+    }
+
+    /** A restored backup's secret, for a caller holding a session: sessions from before the reset work again. */
+    public static synchronized boolean adoptSecret(String secret) {
+        if (!daemonSide() || secret == null || secret.isEmpty()) return false;
+        AuthState cur = getState();
+        if (cur != null && secret.equals(cur.deviceSecret)) return true;
+        AuthState s = new AuthState();
+        s.deviceId = cur != null && cur.deviceId != null && !cur.deviceId.isEmpty() ? cur.deviceId : loadDeviceId();
+        s.lastAccess = cur != null ? cur.lastAccess : 0;
+        s.deviceSecret = secret;
+        s.handedOff = false;
+        if (ownFileUnavailable) {
+            if (!writeToConfig(s)) return false;
+            invalidateCache();
+            return true;
+        }
+        if (!writeOwn(s)) return false;
+        cachedState = s;
+        cachedOwnMtime = new File(DAEMON_SECRET_FILE).lastModified();
+        stateVersion++;
+        syncConfig(s);
+        return true;
+    }
+
+    // The shared config carries the secret only while the app hasn't shown it holds it; then never (an older version's
+    // copy, a restored backup's, another app's write all go).
+    private static void syncConfig(AuthState state) {
+        try {
+            // (from disk: another process's write in the same second as our last read isn't in the cache)
+            UnifiedConfigManager.forceReload();
+            JSONObject section = UnifiedConfigManager.loadConfig().optJSONObject(CONFIG_SECTION);
+            String inConfig = section == null ? "" : section.optString(KEY_DEVICE_SECRET, "");
+            String want = state.handedOff ? "" : state.deviceSecret;
+            String idInConfig = section == null ? "" : section.optString(KEY_DEVICE_ID, "");
+            if (!want.equals(inConfig) || !equalsSafe(state.deviceId, idInConfig)) {
+                JSONObject s = new JSONObject();
+                s.put(KEY_DEVICE_ID, state.deviceId);
+                s.put(KEY_DEVICE_SECRET, want);
+                s.put(KEY_LAST_ACCESS, state.lastAccess);
+                UnifiedConfigManager.updateSection(CONFIG_SECTION, s);
+            }
+            checkedConfigMtime = UnifiedConfigManager.getLastModified();
+        } catch (Exception e) {
+            log("Auth config sync failed: " + e.getMessage());
+        }
+    }
+
+    private static AuthState readOwn() {
+        return readStateFile(new File(DAEMON_SECRET_FILE));
+    }
+
+    // Owner-only (0600), written whole then renamed in.
+    private static boolean writeOwn(AuthState state) {
+        File file = new File(DAEMON_SECRET_FILE);
+        File tmp = new File(file.getPath() + ".tmp");
+        try {
+            if (!writeOwnerOnly(tmp, ownJson(state))) return false;
+            if (!tmp.renameTo(file)) {
+                tmp.delete();
+                return false;
+            }
+            return true;
+        } catch (Exception e) {
+            log("Failed to write the private auth file: " + e.getMessage());
+            tmp.delete();
+            return false;
+        }
+    }
+
+    // The file made only if no daemon made it first (both start at boot): the one on disk then. Under a lock the
+    // daemons share (a hard link, the atomic way, is refused in /data/local/tmp).
+    private static AuthState createOwn(AuthState state) {
+        File lock = new File(DAEMON_SECRET_FILE + ".lock");
+        try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(lock, "rw");
+             java.nio.channels.FileLock ignored = raf.getChannel().lock()) {
+            AuthState made = readOwn();
+            if (made != null) return made;
+            return writeOwn(state) ? readOwn() : null;
+        } catch (Exception e) {
+            log("Failed to create the private auth file: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private static String ownJson(AuthState state) throws Exception {
+        JSONObject json = state.toJson();
+        json.put(KEY_HANDED_OFF, state.handedOff);
+        return json.toString();
+    }
+
+    private static boolean writeOwnerOnly(File file, String content) throws Exception {
+        file.delete();
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(file)) {
+            android.system.Os.chmod(file.getPath(), 0600);
+            out.write(content.getBytes(StandardCharsets.UTF_8));
+            out.getFD().sync();
+        }
+        return true;
+    }
+
+    private static AuthState readStateFile(File file) {
+        try {
+            if (file == null || !file.exists()) return null;
+            StringBuilder sb = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+                String line;
+                while ((line = reader.readLine()) != null) sb.append(line);
+            }
+            AuthState s = AuthState.fromJson(new JSONObject(sb.toString()));
+            return s.deviceSecret == null || s.deviceSecret.isEmpty() ? null : s;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // ==================== APP: PRIVATE COPY ====================
+
+    // The app's private copy; the shared config's secret while there is none yet (as before), and one that differs is
+    // taken once the daemon accepts a session signed with it (another app could have put it there).
+    private static AuthState getStateApp() {
+        File own = appSecretFile;
+        AuthState mine = null;
+        if (own != null) {
+            long mtime = own.lastModified();
+            AuthState cur = cachedState;
+            if (cur != null && mtime != 0 && mtime == cachedOwnMtime) mine = cur;
+            else if (mtime != 0) {
+                mine = readStateFile(own);
+                if (mine != null) cachedOwnMtime = mtime;
+            }
+        }
+        AuthState offered = loadFromConfig();
+        if (offered != null && (mine == null || !offered.deviceSecret.equals(mine.deviceSecret))
+                && !offered.deviceSecret.equals(refusedHandoff)) {
+            checkHandoff(offered);
+            if (mine == null) return publishApp(offered, false);
+        }
+        if (mine == null) {
+            recoverFromDaemon(0);
+            return null;
+        }
+        return publishApp(mine, true);
+    }
+
+    private static AuthState publishApp(AuthState s, boolean fromOwnCopy) {
+        AuthState cur = cachedState;
+        if (cur == null || !equalsSafe(cur.deviceSecret, s.deviceSecret) || !equalsSafe(cur.deviceId, s.deviceId)) {
+            cachedState = s;
+            stateVersion++;
+        }
+        if (!fromOwnCopy) cachedOwnMtime = 0;
+        return cachedState;
+    }
+
+    // Asks the daemon, off the caller's thread, whether a session signed with [offered] is accepted; if so it becomes the
+    // app's copy and the shared config stops carrying it.
+    private static void checkHandoff(AuthState offered) {
+        long now = System.currentTimeMillis();
+        if (offered.deviceSecret.equals(checkedHandoff) && now - handoffCheckAt < HANDOFF_RETRY_MS) return;
+        if (!handoffChecking.compareAndSet(false, true)) return;
+        checkedHandoff = offered.deviceSecret;
+        handoffCheckAt = now;
+        AuthState s = offered.copy();
+        AUX.execute(() -> {
+            try {
+                int code = postLocal("/api/auth/handoff", jwtFor(s), null);
+                if (code == 200) {
+                    if (writeAppCopy(s)) log("Auth: took the handed-off secret into the app's own copy");
+                    publishApp(s, true);
+                } else if (code == 401 || code == 403) {
+                    // (not the daemon's: stale, or planted by another app)
+                    refusedHandoff = s.deviceSecret;
+                    log("Auth: the daemon refused a handed-off secret (" + code + ")");
+                }
+                // else an older daemon (404) or none yet: the shared config's, as before, checked again later
+            } finally {
+                handoffChecking.set(false);
+            }
+        });
+    }
+
+    /**
+     * The app holds no secret the daemon accepts: takes the daemon's own, read as shell, once the daemon accepts a
+     * session signed with it. One attempt at a time, at most every {@link #RECOVER_RETRY_MS}; waits up to
+     * {@code waitMs} for it, never on the main thread.
+     */
+    public static void recoverFromDaemon(long waitMs) {
+        if (daemonSide() || daemonSecretReader == null || appSecretFile == null) return;
+        java.util.concurrent.CountDownLatch done = recovering.get();
+        if (done == null) {
+            long now = System.currentTimeMillis();
+            if (now - recoverAt < RECOVER_RETRY_MS) return;
+            java.util.concurrent.CountDownLatch mine = new java.util.concurrent.CountDownLatch(1);
+            if (recovering.compareAndSet(null, mine)) {
+                recoverAt = now;
+                done = mine;
+                AUX.execute(() -> {
+                    try {
+                        takeDaemonSecret();
+                    } catch (Throwable t) {
+                        log("Auth: reading the daemon's secret failed: " + t.getClass().getSimpleName());
+                    } finally {
+                        recovering.compareAndSet(mine, null);
+                        mine.countDown();
+                    }
+                });
+            } else {
+                done = recovering.get();
+            }
+        }
+        android.os.Looper main = android.os.Looper.getMainLooper();
+        if (done == null || waitMs <= 0 || (main != null && main == android.os.Looper.myLooper())) return;
+        try {
+            done.await(waitMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static void takeDaemonSecret() throws Exception {
+        DaemonSecretReader reader = daemonSecretReader;
+        if (reader == null) return;
+        String raw = reader.read(com.overdrive.app.util.ScratchRoot.path(DAEMON_SECRET_NAME));
+        if (raw == null || raw.trim().isEmpty()) return;
+        AuthState read = AuthState.fromJson(new JSONObject(raw.trim()));
+        if (read.deviceSecret == null || read.deviceSecret.isEmpty()) return;
+        AuthState s = new AuthState();
+        s.deviceId = read.deviceId == null || read.deviceId.isEmpty() ? loadDeviceId() : read.deviceId;
+        s.deviceSecret = read.deviceSecret;
+        s.lastAccess = read.lastAccess;
+        int code = postLocal("/api/auth/handoff", jwtFor(s), null);
+        if (code != 200) {
+            log("Auth: the daemon did not accept its own secret file (" + code + ")");
+            return;
+        }
+        if (writeAppCopy(s)) log("Auth: took the daemon's secret into the app's own copy");
+        else log("Auth: couldn't save the daemon's secret to the app's copy");
+        publishApp(s, true);
+    }
+
+    // True when the last app-side regenerate was done by the daemon itself, which ends every session at once.
+    private static volatile boolean regeneratedInDaemon = false;
+
+    public static boolean lastRegenerateEndedSessions() {
+        return regeneratedInDaemon;
+    }
+
+    // The daemon makes a new secret (it keeps the secret); this call is a session signed with the current one.
+    private static String regenerateApp() {
+        regeneratedInDaemon = false;
+        AuthState cur = getStateApp();
+        if (cur == null) return null;
+        org.json.JSONObject[] body = new org.json.JSONObject[1];
+        int code = postLocal("/api/auth/regenerate", jwtFor(cur), body);
+        if (code == 404) return regenerateViaConfig();   // an older daemon: the shared config, as before
+        if (code != 200 || body[0] == null) return null;
+        String secret = body[0].optString("secret", "");
+        if (secret.isEmpty()) return null;
+        AuthState s = new AuthState();
+        s.deviceId = body[0].optString("deviceId", cur.deviceId);
+        s.deviceSecret = secret;
+        s.lastAccess = cur.lastAccess;
+        if (!writeAppCopy(s)) log("Auth: couldn't save the new secret to the app's copy");
+        publishApp(s, true);
+        // it holds it now: the daemon stops handing it off
+        postLocal("/api/auth/handoff", jwtFor(s), null);
+        regeneratedInDaemon = true;
+        return s.getDeviceToken();
+    }
+
+    private static boolean writeAppCopy(AuthState s) {
+        File file = appSecretFile;
+        if (file == null) return false;
+        File tmp = new File(file.getPath() + ".tmp");
+        try {
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(tmp)) {
+                out.write(s.toJson().toString().getBytes(StandardCharsets.UTF_8));
+                out.getFD().sync();
+            }
+            if (!tmp.renameTo(file)) {
+                tmp.delete();
+                return false;
+            }
+            cachedOwnMtime = file.lastModified();
+            return true;
+        } catch (Exception e) {
+            tmp.delete();
+            return false;
+        }
+    }
+
+    // POST to the daemon on this head unit with a session; the HTTP status (-1: unreachable), the JSON reply into [into].
+    private static int postLocal(String path, String jwt, org.json.JSONObject[] into) {
+        if (jwt == null) return -1;
+        java.net.HttpURLConnection c = null;
+        try {
+            c = (java.net.HttpURLConnection) new java.net.URL("http://127.0.0.1:8080" + path)
+                    .openConnection(java.net.Proxy.NO_PROXY);
+            c.setRequestMethod("POST");
+            c.setConnectTimeout(3000);
+            c.setReadTimeout(5000);
+            c.setDoOutput(true);
+            c.setRequestProperty("Authorization", "Bearer " + jwt);
+            c.setRequestProperty("Content-Type", "application/json");
+            try (java.io.OutputStream o = c.getOutputStream()) {
+                o.write("{}".getBytes(StandardCharsets.UTF_8));
+            }
+            int code = c.getResponseCode();
+            if (into != null && code == 200) {
+                StringBuilder sb = new StringBuilder();
+                try (BufferedReader r = new BufferedReader(new java.io.InputStreamReader(c.getInputStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = r.readLine()) != null) sb.append(line);
+                }
+                into[0] = new JSONObject(sb.toString());
+            }
+            return code;
+        } catch (Exception e) {
+            return -1;
+        } finally {
+            if (c != null) c.disconnect();
+        }
+    }
+
     // ==================== JWT MANAGEMENT ====================
 
     /**
      * Generate a JWT session token.
      */
     public static String generateJwt() {
+        return jwtFor(getState());
+    }
+
+    /**
+     * A browser sign-in token. In the daemon it carries a {@code jti} tracked by {@link AuthSessions}, so it can be
+     * listed and signed out; if that can't be saved it is a plain token, as before.
+     */
+    public static String generateSessionJwt(String userAgent) {
         AuthState state = getState();
+        if (state == null) return null;
+        long now = System.currentTimeMillis() / 1000;
+        long exp = now + (JWT_EXPIRY_MS / 1000);
+        String jti = null;
+        if (daemonSide()) {
+            try {
+                jti = AuthSessions.register(AuthSessions.labelFor(userAgent), now, exp, state.deviceSecret);
+            } catch (Throwable t) {
+                log("Session tracking unavailable: " + t.getMessage());
+            }
+        }
+        return jwtFor(state, jti, now, exp);
+    }
+
+    private static String jwtFor(AuthState state) {
+        long now = System.currentTimeMillis() / 1000;
+        return jwtFor(state, null, now, now + (JWT_EXPIRY_MS / 1000));
+    }
+
+    private static String jwtFor(AuthState state, String jti, long now, long exp) {
         if (state == null) {
             return null;
         }
 
         try {
-            long now = System.currentTimeMillis() / 1000;
-            long exp = now + (JWT_EXPIRY_MS / 1000);
-
             JSONObject header = new JSONObject();
             header.put("alg", JWT_ALGORITHM);
             header.put("typ", "JWT");
@@ -386,6 +931,7 @@ public class AuthManager {
             payload.put("sub", state.deviceId);
             payload.put("iat", now);
             payload.put("exp", exp);
+            if (jti != null) payload.put("jti", jti);
 
             String headerB64 = base64UrlEncode(header.toString().getBytes(StandardCharsets.UTF_8));
             String payloadB64 = base64UrlEncode(payload.toString().getBytes(StandardCharsets.UTF_8));
@@ -474,6 +1020,7 @@ public class AuthManager {
     public static synchronized void invalidateCache() {
         cachedState = null;
         cachedConfigMtime = 0;
+        cachedOwnMtime = 0;
         stateVersion++;
         log("Auth cache invalidated - will reload on next validation");
     }
@@ -532,11 +1079,39 @@ public class AuthManager {
                 return JwtValidation.failure("Device mismatch");
             }
 
+            // A tracked browser sign-in must still be listed (not signed out).
+            if (payload.has("jti") && daemonSide()
+                    && !AuthSessions.isActive(payload.optString("jti", ""))) {
+                return JwtValidation.failure("Signed out");
+            }
+
             return JwtValidation.success(tokenDeviceId);
 
         } catch (Exception e) {
             return JwtValidation.failure("Token validation error: " + e.getMessage());
         }
+    }
+
+    /** The sign-in id of a valid token, or null (untracked token, or not valid). */
+    public static String sessionIdOf(String jwt) {
+        if (jwt == null || !validateJwt(jwt).valid) return null;
+        try {
+            String token = jwt.startsWith("Bearer ") ? jwt.substring(7) : jwt;
+            String[] parts = token.split("\\.");
+            JSONObject payload = new JSONObject(
+                    new String(base64UrlDecode(parts[1]), StandardCharsets.UTF_8));
+            String jti = payload.optString("jti", "");
+            return AuthSessions.validId(jti) ? jti : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Browser sign-ins made with the current secret (daemon side). */
+    public static org.json.JSONArray listSessions(String currentId) {
+        AuthState state = getState();
+        if (state == null || !daemonSide()) return new org.json.JSONArray();
+        return AuthSessions.list(currentId, state.deviceSecret);
     }
 
     // ==================== UNIFIED CONFIG I/O ====================

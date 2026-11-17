@@ -36,7 +36,7 @@ public class BatteryPowerMonitor extends BaseDeviceMonitor<BatteryPowerData> {
         this.context = context;
         bindDeniedOnDi5Daemon = false;
         carSvcPollingMode = false;
-        
+
         try {
             if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
                     && android.os.Process.myUid() < android.os.Process.FIRST_APPLICATION_UID) {
@@ -84,7 +84,7 @@ public class BatteryPowerMonitor extends BaseDeviceMonitor<BatteryPowerData> {
             bindDeniedOnDi5Daemon = isSecurityDenial(e)
                     && com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
                     && android.os.Process.myUid() < android.os.Process.FIRST_APPLICATION_UID;
-            markUnavailable(!bindDeniedOnDi5Daemon);
+            markUnavailable();
         }
     }
 

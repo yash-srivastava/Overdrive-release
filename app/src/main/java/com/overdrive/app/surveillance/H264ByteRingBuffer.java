@@ -674,7 +674,12 @@ public class H264ByteRingBuffer {
      * @param endPtsUs requested inclusive end PTS
      */
     public Cursor beginFlushRange(long startPtsUs, long endPtsUs) {
-        return beginFlushRange(startPtsUs, endPtsUs, false);
+        return beginFlushRange(startPtsUs, endPtsUs, false, Long.MIN_VALUE);
+    }
+
+    /** Event cursor like {@link #beginFlushRange} whose first keyframe is newer than {@code floorPtsUs}. */
+    public Cursor beginFlushRangeAfter(long floorPtsUs, long startPtsUs, long endPtsUs) {
+        return beginFlushRange(startPtsUs, endPtsUs, false, floorPtsUs);
     }
 
     /**
@@ -683,10 +688,11 @@ public class H264ByteRingBuffer {
      * only from history until this cursor closes; live muxers are unaffected.
      */
     public Cursor beginStrongFlushRange(long startPtsUs, long endPtsUs) {
-        return beginFlushRange(startPtsUs, endPtsUs, true);
+        return beginFlushRange(startPtsUs, endPtsUs, true, Long.MIN_VALUE);
     }
 
-    private Cursor beginFlushRange(long startPtsUs, long endPtsUs, boolean strong) {
+    private Cursor beginFlushRange(long startPtsUs, long endPtsUs, boolean strong,
+                                   long keyFloorPtsUs) {
         if (startPtsUs > endPtsUs) {
             return null;
         }
@@ -725,6 +731,9 @@ public class H264ByteRingBuffer {
                     hasPacketInRange = true;
                 }
                 if ((hFlags[idx] & MediaCodec.BUFFER_FLAG_KEY_FRAME) == 0) {
+                    continue;
+                }
+                if (ptsUs <= keyFloorPtsUs) {
                     continue;
                 }
                 if (ptsUs <= startPtsUs) {
