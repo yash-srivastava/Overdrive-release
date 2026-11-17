@@ -13,7 +13,10 @@ import org.json.JSONObject;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.RandomAccessFile;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedList;
+import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -105,11 +108,19 @@ public class PerformanceMonitor {
     private java.io.File resolvedCpuTempFile = null;
     private java.io.File resolvedGpuTempFile = null;
     // CPU and GPU temperature discovery share the same thermal-zone topology.
-    // Read each zone type once instead of independently opening every /type
-    // file during both first-use scans. Null means the shared index is unresolved.
-    private String[] cachedThermalZoneTypes = null;
-    private boolean[] loadedThermalZoneTypes = null;
+    // Enumerate the actual thermal-zone directory once. BYD firmware exposes
+    // 48 zones (including GPU/CPU low-frequency and step zones), so fixed
+    // 30/40-entry scans silently omitted part of the device topology.
+    private int[] thermalZoneIndices = null;
+    private final Map<Integer, String> cachedThermalZoneTypes = new HashMap<>();
     
+    // All possible CPU directories, including currently offline cores. Discovering
+    // only cpufreq-enabled cores on the first sample would lose hotplugged clusters.
+    private java.io.File[] cpuFrequencyDirectories = null;
+    // Best hardware ceiling observed so far. Recheck while sampling: an offline
+    // big cluster may not expose its cpufreq nodes until it comes online.
+    private int cachedCpuMaxFreqMhz = 0;
+
     // Scheduler
     private ScheduledExecutorService scheduler;
     private volatile boolean isRunning = false;
@@ -819,63 +830,123 @@ public class PerformanceMonitor {
     // ==================== HELPER METHODS ====================
     
     private int readCpuFrequency() {
-        String[] paths = {
-            "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq",
-            "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_cur_freq"
-        };
-        
-        for (String path : paths) {
-            try {
-                BufferedReader reader = new BufferedReader(new FileReader(path));
-                String line = reader.readLine();
-                reader.close();
-                if (line != null) {
-                    return Integer.parseInt(line.trim()) / 1000;  // KHz to MHz
-                }
-            } catch (Exception ignored) {}
-        }
-        return 0;
+        // This head unit is a heterogeneous 4+4 Qualcomm SoC. Reading cpu0
+        // alone reports only the little-cluster clock and can misrepresent
+        // performance when the faster cluster is active. Report the highest
+        // current frequency among online cores, in line with the peak/max
+        // frequency shown by the performance dashboard.
+        int highest = readHighestCpuFrequencyMhz(
+                getCpuFrequencyDirectories(), "scaling_cur_freq", "cpuinfo_cur_freq");
+        if (highest > 0) return highest;
+
+        // Preserve the original cpu0 fallback for kernels with unusual sysfs
+        // layouts that do not expose per-core cpufreq directories.
+        return readCpuFrequencyFile(new java.io.File(
+                "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq"),
+                new java.io.File("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_cur_freq"));
     }
 
-    // Cached CPU max-freq (KHz→MHz). The ceiling is static per boot, so resolve
-    // it once. 0 = not yet resolved; -1 = resolved-absent (don't retry).
-    private int cachedCpuMaxFreqMhz = 0;
+    private java.io.File[] getCpuFrequencyDirectories() {
+        if (cpuFrequencyDirectories != null) return cpuFrequencyDirectories;
+        java.io.File[] entries = new java.io.File("/sys/devices/system/cpu").listFiles();
+        if (entries == null) return new java.io.File[0]; // Retry failed discovery.
+        java.util.ArrayList<java.io.File> discovered = new java.util.ArrayList<>();
+        for (java.io.File entry : entries) {
+            if (entry.isDirectory() && entry.getName().matches("cpu[0-9]+")) {
+                // Keep cores whose cpufreq directory is missing while offline.
+                discovered.add(entry);
+            }
+        }
+        if (!discovered.isEmpty()) {
+            cpuFrequencyDirectories = discovered.toArray(new java.io.File[0]);
+            return cpuFrequencyDirectories;
+        }
+        return new java.io.File[0];
+    }
 
-    /**
-     * Reads the CPU's maximum scaling frequency. Paired with {@link
-     * #readCpuFrequency()} this makes thermal throttling self-evident on the
-     * Performance page WITHOUT adb: when cpuFreqMhz sits well below
-     * cpuMaxFreqMhz under load (and CPU temp is high), the SoC is throttling —
-     * which on this shared SDM665 drags the whole head-unit UI, not just
-     * OverDrive. cpuinfo_max_freq is the hardware ceiling; scaling_max_freq is
-     * the governor's current cap (can itself be lowered by thermal HAL) — we
-     * prefer cpuinfo_max_freq so a thermally-capped governor still compares
-     * against the true hardware max.
-     */
+    static int readHighestCpuFrequencyMhz(java.io.File[] cpuDirectories,
+            String primaryName, String fallbackName) {
+        return readHighestCpuFrequencyMhz(cpuDirectories, primaryName, fallbackName, true);
+    }
+
+    private static int readHighestCpuFrequencyMhz(java.io.File[] cpuDirectories,
+            String primaryName, String fallbackName, boolean onlineOnly) {
+        int highest = 0;
+        if (cpuDirectories == null) return highest;
+        for (java.io.File cpuDirectory : cpuDirectories) {
+            if (onlineOnly && !isCpuOnline(cpuDirectory)) continue;
+            java.io.File cpufreq = new java.io.File(cpuDirectory, "cpufreq");
+            int mhz = readCpuFrequencyFile(
+                    new java.io.File(cpufreq, primaryName),
+                    new java.io.File(cpufreq, fallbackName));
+            if (mhz > highest) highest = mhz;
+        }
+        return highest;
+    }
+
+    // Policy directories can expose the big cluster's hardware ceiling even
+    // while its per-core cpufreq nodes are unavailable due to CPU hotplug.
+    static int readHighestPolicyMaxFrequencyMhz(java.io.File policyRoot) {
+        java.io.File[] entries = policyRoot.listFiles();
+        if (entries == null) return 0;
+        int highest = 0;
+        for (java.io.File entry : entries) {
+            if (!entry.isDirectory() || !entry.getName().matches("policy[0-9]+")) continue;
+            int mhz = readCpuFrequencyFile(new java.io.File(entry, "cpuinfo_max_freq"),
+                    new java.io.File(entry, "scaling_max_freq"));
+            if (mhz > highest) highest = mhz;
+        }
+        return highest;
+    }
+
+    static int observeCpuMaxFrequencyMhz(int previousMax, java.io.File[] cpuDirectories,
+            java.io.File policyRoot) {
+        int coreMax = readHighestCpuFrequencyMhz(
+                cpuDirectories, "cpuinfo_max_freq", "scaling_max_freq", false);
+        int policyMax = readHighestPolicyMaxFrequencyMhz(policyRoot);
+        // Never freeze a lower little-cluster ceiling after the first sample.
+        return Math.max(previousMax, Math.max(coreMax, policyMax));
+    }
+
+    private static boolean isCpuOnline(java.io.File cpuDirectory) {
+        java.io.File onlineFile = new java.io.File(cpuDirectory, "online");
+        if (!onlineFile.isFile()) return true; // cpu0 commonly has no online node.
+        try (BufferedReader reader = new BufferedReader(new FileReader(onlineFile))) {
+            String value = reader.readLine();
+            return value == null || !"0".equals(value.trim());
+        } catch (Exception ignored) {
+            return true; // An unreadable online flag must not hide a usable core.
+        }
+    }
+
+    private static int readCpuFrequencyFile(java.io.File primary, java.io.File fallback) {
+        int value = readCpuFrequencyFile(primary);
+        return value > 0 ? value : readCpuFrequencyFile(fallback);
+    }
+
+    private static int readCpuFrequencyFile(java.io.File file) {
+        try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+            String line = reader.readLine();
+            if (line == null) return 0;
+            long khz = Long.parseLong(line.trim());
+            return khz > 0 && khz <= Integer.MAX_VALUE * 1000L
+                    ? (int) (khz / 1000L) : 0;
+        } catch (Exception ignored) {
+            return 0;
+        }
+    }
+
     private int readCpuMaxFrequency() {
-        if (cachedCpuMaxFreqMhz != 0) {
-            return cachedCpuMaxFreqMhz > 0 ? cachedCpuMaxFreqMhz : 0;
-        }
-        String[] paths = {
-            "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq",
-            "/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq"
-        };
-        for (String path : paths) {
-            try {
-                BufferedReader reader = new BufferedReader(new FileReader(path));
-                String line = reader.readLine();
-                reader.close();
-                if (line != null) {
-                    int mhz = Integer.parseInt(line.trim()) / 1000;  // KHz to MHz
-                    if (mhz > 0) {
-                        cachedCpuMaxFreqMhz = mhz;
-                        return mhz;
-                    }
-                }
-            } catch (Exception ignored) {}
-        }
-        cachedCpuMaxFreqMhz = -1;  // resolved-absent; stop retrying
-        return 0;
+        cachedCpuMaxFreqMhz = observeCpuMaxFrequencyMhz(cachedCpuMaxFreqMhz,
+                getCpuFrequencyDirectories(),
+                new java.io.File("/sys/devices/system/cpu/cpufreq"));
+        if (cachedCpuMaxFreqMhz > 0) return cachedCpuMaxFreqMhz;
+
+        // Preserve cpu0 compatibility when directory enumeration is blocked.
+        cachedCpuMaxFreqMhz = readCpuFrequencyFile(
+                new java.io.File("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq"),
+                new java.io.File("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq"));
+        return cachedCpuMaxFreqMhz;
     }
 
     private double readCpuTemperature() {
@@ -894,7 +965,7 @@ public class PerformanceMonitor {
             "cpu-0-0", "cpu-0-1", "cpu-1-0", "cpu-1-1", "tsens_tz_sensor"
         };
 
-        for (int i = 0; i < 30; i++) {
+        for (int i : getThermalZoneIndices()) {
             String type = getThermalZoneType(i);
             if (type == null) continue;
             String typeLower = type.toLowerCase().trim();
@@ -935,25 +1006,69 @@ public class PerformanceMonitor {
     }
 
     /**
-     * Read each thermal-zone type at most once across CPU and GPU discovery.
-     * Resolve entries lazily so a match near the start of the zone list does
-     * not force reads of every later zone. Missing entries are cached too.
+     * Return the numeric thermal-zone IDs actually present on this kernel.
+     * Do not assume IDs are contiguous or impose a fixed upper bound: the BYD
+     * Dolphin firmware exports 48 zones, while other Qualcomm builds differ.
+     * The directory topology is stable for the daemon lifetime, so enumerate
+     * once and reuse the sorted result for CPU/GPU discovery and diagnostics.
      */
-    private String getThermalZoneType(int index) {
-        if (cachedThermalZoneTypes == null) {
-            cachedThermalZoneTypes = new String[30];
-            loadedThermalZoneTypes = new boolean[30];
-        }
-        if (loadedThermalZoneTypes[index]) return cachedThermalZoneTypes[index];
+    private synchronized int[] getThermalZoneIndices() {
+        if (thermalZoneIndices != null) return thermalZoneIndices;
+        thermalZoneIndices = discoverThermalZoneIndices(
+                new java.io.File("/sys/class/thermal"));
+        return thermalZoneIndices;
+    }
 
+    static int[] discoverThermalZoneIndices(java.io.File zonesDirectory) {
+        java.io.File[] entries = zonesDirectory.listFiles();
+        if (entries == null || entries.length == 0) return new int[0];
+
+        int[] indices = new int[entries.length];
+        int count = 0;
+        for (java.io.File entry : entries) {
+            String name = entry.getName();
+            if (!entry.isDirectory() || !name.startsWith("thermal_zone")) continue;
+            String suffix = name.substring("thermal_zone".length());
+            if (suffix.isEmpty()) continue;
+            boolean digitsOnly = true;
+            for (int i = 0; i < suffix.length(); i++) {
+                if (suffix.charAt(i) < '0' || suffix.charAt(i) > '9') {
+                    digitsOnly = false;
+                    break;
+                }
+            }
+            if (!digitsOnly) continue;
+            try {
+                int index = Integer.parseInt(suffix);
+                indices[count] = index;
+                count++; // Only count successfully parsed, valid zone IDs.
+            } catch (NumberFormatException ignored) {
+                // Skip numeric suffixes outside the signed-int range.
+            }
+        }
+        indices = Arrays.copyOf(indices, count);
+        Arrays.sort(indices);
+        return indices;
+    }
+
+    /**
+     * Read each zone type at most once across CPU and GPU discovery.
+     * Missing/unreadable entries are cached too, avoiding repeated sysfs I/O.
+     */
+    private synchronized String getThermalZoneType(int index) {
+        if (cachedThermalZoneTypes.containsKey(index)) {
+            return cachedThermalZoneTypes.get(index);
+        }
+
+        String type = null;
         try (BufferedReader reader = new BufferedReader(new FileReader(
                 "/sys/class/thermal/thermal_zone" + index + "/type"))) {
-            cachedThermalZoneTypes[index] = reader.readLine();
+            type = reader.readLine();
         } catch (Exception ignored) {
             // A missing/unreadable zone is cached as null.
         }
-        loadedThermalZoneTypes[index] = true;
-        return cachedThermalZoneTypes[index];
+        cachedThermalZoneTypes.put(index, type);
+        return type;
     }
 
     /**
@@ -986,7 +1101,7 @@ public class PerformanceMonitor {
         try {
             // Discover thermal zones
             JSONArray thermalZones = new JSONArray();
-            for (int i = 0; i < 40; i++) {
+            for (int i : getThermalZoneIndices()) {
                 try {
                     String typePath = "/sys/class/thermal/thermal_zone" + i + "/type";
                     BufferedReader typeReader = new BufferedReader(new FileReader(typePath));
@@ -1084,7 +1199,7 @@ public class PerformanceMonitor {
             "gpuss-1", "gpuss-max", "gpu-step"
         };
 
-        for (int i = 0; i < 30; i++) {
+        for (int i : getThermalZoneIndices()) {
             String type = getThermalZoneType(i);
             if (type == null) continue;
             String typeLower = type.toLowerCase().trim();
