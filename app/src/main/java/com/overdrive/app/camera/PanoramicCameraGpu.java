@@ -5713,36 +5713,63 @@ public class PanoramicCameraGpu {
     }
 
     /**
-     * BYD100F DiLink 100: opens the pano_h AVMCamera without the static factory's BmmCameraInfo id
-     * check (see {@link DiLink100Platform}), using {@code new AVMCamera(id, camDevType=0)} plus the
-     * instance {@code open()}, which is what the factory does after that check.
+     * BYD100F DiLink 100: opens the 360 (pano_h) AVMCamera without the static factory's
+     * BmmCameraInfo id check (see {@link DiLink100Platform}), using
+     * {@code new AVMCamera(id, camDevType=0)} plus the instance {@code open()}, which is what the
+     * factory does after that check.
      *
-     * @return the open AVMCamera, or null when bmmcameraserver refused it
+     * <p>The pano id differs per car (New E2: pano_h:0; Atto 3 EVO: oms:0, dms:1, pano_h:2), so the
+     * id that worked last is tried first, then ids 0..5, and the first one that opens with a 360
+     * super-frame strip is kept. Anything else, such as the 1920x1080 cabin camera, is closed right
+     * after open(), before any preview is started, so no frames are ever taken from it.
+     *
+     * @return the open 360 AVMCamera, or null when none was found
      */
     private Object openDiLink100Camera(Class<?> avmClass) {
-        final int id = DiLink100Platform.PANO_CAMERA_ID;
-        Object candidate = null;
-        try {
-            Constructor<?> constructor = avmClass.getDeclaredConstructor(int.class, int.class);
-            constructor.setAccessible(true);
-            candidate = constructor.newInstance(id, 0);
-            Method mOpen = avmClass.getDeclaredMethod("open");
-            mOpen.setAccessible(true);
-            if ((boolean) mOpen.invoke(candidate)) {
-                logger.info("DiLink 100 camera opened via AVMCamera(int,int) + open() (id=" + id + ")");
-                return candidate;
-            }
-            logger.warn("DiLink 100 AVMCamera(" + id + ", 0).open() returned false");
-        } catch (Throwable t) {
-            logger.warn("DiLink 100 AVMCamera(int,int) open failed: " + t);
-        }
-        if (candidate != null) {
+        java.util.LinkedHashSet<Integer> ids = new java.util.LinkedHashSet<>();
+        int known = DiLink100Platform.resolvedPanoCameraId();
+        if (known >= 0) ids.add(known);
+        for (int id = 0; id <= DiLink100Platform.MAX_PANO_SEARCH_ID; id++) ids.add(id);
+
+        for (int id : ids) {
+            Object candidate = null;
+            boolean keep = false;
             try {
-                avmClass.getMethod("close").invoke(candidate);
-            } catch (Throwable ignored) {
-                // Never opened; nothing more to release.
+                Constructor<?> constructor = avmClass.getDeclaredConstructor(int.class, int.class);
+                constructor.setAccessible(true);
+                candidate = constructor.newInstance(id, 0);
+                Method mOpen = avmClass.getDeclaredMethod("open");
+                mOpen.setAccessible(true);
+                if (!(boolean) mOpen.invoke(candidate)) {
+                    logger.info("DiLink 100 AVMCamera(" + id + ", 0).open() returned false");
+                    continue;
+                }
+                int width = (Integer) avmClass.getMethod("getPreviewWidth").invoke(candidate);
+                int height = (Integer) avmClass.getMethod("getPreviewHeight").invoke(candidate);
+                if (!DiLink100Platform.isPanoSuperFrame(width, height)) {
+                    logger.info("DiLink 100 AVMCamera id=" + id + " is " + width + "x" + height
+                            + ", not the 360 super-frame; closing it");
+                    continue;
+                }
+                keep = true;
+                DiLink100Platform.setResolvedPanoCameraId(id);
+                logger.info("DiLink 100 camera opened via AVMCamera(int,int) + open() (id="
+                        + id + ", " + width + "x" + height + ")");
+                return candidate;
+            } catch (Throwable t) {
+                logger.warn("DiLink 100 AVMCamera(" + id + ", 0) open failed: " + t);
+            } finally {
+                if (!keep && candidate != null) {
+                    try {
+                        avmClass.getMethod("close").invoke(candidate);
+                    } catch (Throwable ignored) {
+                        // Never opened or already closed; nothing more to release.
+                    }
+                }
             }
         }
+        logger.warn("DiLink 100: no AVMCamera id 0-" + DiLink100Platform.MAX_PANO_SEARCH_ID
+                + " delivered a 360 super-frame");
         return null;
     }
 
@@ -5947,10 +5974,11 @@ public class PanoramicCameraGpu {
                     if (cameraObj == null && cameraId == DiLink100Platform.PANO_CAMERA_ID
                             && isLegacyAvmPath() && DiLink100Platform.isAvmPathActive()) {
                         // === ATTEMPT 3 (BYD100F DiLink 100): AVMCamera(int,int) + open() ===
-                        // Only the requested pano_h id 0; unvalidated ids are never probed.
+                        // Searches ids 0..5 for the 360 super-frame (pano_h is 0 on the New E2,
+                        // 2 on the Atto 3 EVO); other cameras are closed before any preview.
                         cameraObj = openDiLink100Camera(avmClass);
                         if (cameraObj != null) {
-                            cameraIdOverride = DiLink100Platform.PANO_CAMERA_ID;
+                            cameraIdOverride = DiLink100Platform.resolvedPanoCameraId();
                         }
                     }
                     if (cameraObj == null) {
