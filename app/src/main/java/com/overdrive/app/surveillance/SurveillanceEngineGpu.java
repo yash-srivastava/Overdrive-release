@@ -4844,10 +4844,16 @@ public class SurveillanceEngineGpu {
                     }
                 }
 
-                // Staggered YOLO: queue active quadrants for AI detection
+                // Staggered YOLO: queue active quadrants for AI detection.
+                // Do NOT clear outstanding work here. This block runs on every
+                // motion tick, faster than the AI cooldown/inference cycle. A
+                // clear-and-refill always puts bestQ first, so sustained motion
+                // in one camera can starve a vehicle arriving in another camera
+                // indefinitely. The bounded, de-duplicating queue retains those
+                // pending quadrants until their turn, without adding AI passes
+                // or changing the detection/recording evidence gates.
                 if (useObjectDetection && !isAiRunning.get()) {
-                    aiQuadrantQueueClear();
-                    // Add quadrants sorted by threat level (highest first)
+                    // Prioritize bestQ only when first queued; preserve older work.
                     int bestQ = pipelineV2.getHighestThreatQuadrant();
                     if (bestQ >= 0) aiQuadrantQueueAdd(bestQ);
                     for (int q = 0; q < MotionPipelineV2.NUM_QUADRANTS; q++) {
