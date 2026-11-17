@@ -427,6 +427,18 @@ public final class AvasController {
         return gi(FID_SIM_HAS_SIM, -1) == 2;
     }
 
+    /**
+     * Read-only simulator state for automation telemetry. Null means that the
+     * capability or state cannot be read; it must not be interpreted as Off.
+     */
+    public static Boolean readEngineSoundState() {
+        if (!ensureManager() || gi(FID_SIM_HAS_SIM, -1) != 2) return null;
+        int state = gi(FID_SIM_STATE_GET, -1);
+        if (state == 0) return Boolean.FALSE;
+        if (state == 1) return Boolean.TRUE;
+        return null;
+    }
+
     /** True if the engine-sound simulator is currently on. */
     public static boolean isEngineSoundOn() {
         if (!ensureManager()) return false;

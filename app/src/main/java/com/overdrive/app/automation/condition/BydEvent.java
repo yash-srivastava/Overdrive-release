@@ -40,6 +40,7 @@ public class BydEvent {
     // never fires either edge (instead of a permanent, wrong "off").
     public static final EventData AMBIENT_STATE = new EventData("ambient", Map.of());
     public static final EventData SLW = new EventData("slw");
+    public static final EventData ENGINE_SOUND_STATE = new EventData("engineSoundState");
     public static final EventData CPD = new EventData("cpd");
     // Drive mode (normal/eco/sport/snow) normalized from the live Energy/Setting axes, and the
     // EV/HEV powertrain mode — both already on every telemetry snapshot (collectEnergy)
@@ -744,6 +745,14 @@ public class BydEvent {
         if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
                 || data.speedLimitWarningKnown) {
             Automations.update(SLW, data.speedLimitWarning ? "on" : "off");
+        }
+        // Read-only engine-sound simulator telemetry. Never publish a fabricated
+        // "off" when the MCU capability or state read is unavailable.
+        if (Automations.isEventReferenced(ENGINE_SOUND_STATE)) {
+            Boolean engineSound = com.overdrive.app.byd.AvasController.readEngineSoundState();
+            if (engineSound != null) {
+                publishFromSnapshot(ENGINE_SOUND_STATE, engineSound ? "on" : "off");
+            }
         }
         // Skip a non-reading: cpdToString returns null outside the three real states, and
         // update(key, String) would wrap it in a StringValue(null) — non-null to the guard in

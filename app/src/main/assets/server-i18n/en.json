@@ -774,6 +774,8 @@
     "lights_hazard": "Hazard Warning Lights",
     "lights_drl": "Daytime Running Lights",
     "slw": "Speed Limit Warning",
+    "engine_sound_state": "Engine Sound State (Exterior)",
+    "engine_sound_state_description": "Read-only state of the exterior engine-sound simulator. Unavailable readings are ignored.",
     "slw_description": "The current state of the Speed Limit Warning setting.",
     "cpd": "Child Presence Detection",
     "cpd_description": "The current state of the Child Presence Detection setting.",

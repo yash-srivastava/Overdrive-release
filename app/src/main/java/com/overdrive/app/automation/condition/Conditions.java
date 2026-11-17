@@ -95,6 +95,12 @@ public class Conditions {
                         new Label("on", "automation.on"),
                         new Label("off", "automation.off"))));
         addCondition(new EventCondition(
+                new Label("engineSoundState", "automation.engine_sound_state"),
+                "automation.engine_sound_state_description",
+                new EnumType(new Label("state", "automation.state"),
+                        new Label("on", "automation.on"),
+                        new Label("off", "automation.off"))));
+        addCondition(new EventCondition(
                 new Label("slw", "automation.slw"),
                 "automation.slw_description",
                 new EnumType(new Label("state", "automation.state"), new Label("on", "automation.on"), new Label("off", "automation.off"))));
