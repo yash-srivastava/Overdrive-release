@@ -314,6 +314,18 @@
                                     <span data-i18n="vehicle.power_off">Power off</span>
                                 </button>
                             </div>
+                            <!-- Reuse Vehicle Control's parked-only IVI reboot API and confirmation.
+                                 The shortcut is shown only when the vehicle reports support. -->
+                            <button class="dash-command" id="dashIviReboot" type="button"
+                                    style="display:none" title="Reboot IVI (parked only)"
+                                    data-i18n-attr="title:vehicle.ivi_reboot_title"
+                                    onclick="BYD.dashboard.rebootIvi(this)">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M20 11a8.1 8.1 0 1 1-2.3-5.7"/><path d="M20 4v7h-7"/>
+                                </svg>
+                                <span data-i18n="vehicle.ivi_reboot">Reboot IVI</span>
+                            </button>
                             <!-- User-defined buttons (GET /api/quick-controls). Rendered into its
                                  own grid so the built-in commands above are never reordered or
                                  replaced; stays display:none until at least one button exists. -->
@@ -2767,6 +2779,9 @@
         [dir="rtl"] .dash-pills .dash-command { margin: 0 0 8px 8px; }
         .dash-pills .dash-command svg,
         [dir="rtl"] .dash-pills .dash-command svg { margin: 0 10px 0 -10px; }
+        /* The destructive shortcut should be visually distinct from normal controls. */
+        #dashIviReboot { color: var(--danger); background: var(--danger-soft); }
+        #dashIviReboot svg { background: var(--danger-soft); }
         [dir="rtl"] .dash-pills .dash-command svg { margin: 0 -10px 0 10px; }
         .dash-fig-unit { white-space: nowrap; }
 
@@ -3155,6 +3170,71 @@
                     btn.classList.remove('pending');
                 });
             },
+            // Match Vehicle Control's confirmation and exact parked-only endpoint.
+            // Keep the shortcut disabled through the dialog and POST to prevent double taps.
+            rebootIvi: function(btn) {
+                if (!btn || btn.disabled || btn.classList.contains('pending')) return;
+                function translated(key, fallback) {
+                    var value = BYD.i18n.t(key);
+                    return value && value !== key ? value : fallback;
+                }
+                var title = translated('vehicle.ivi_reboot_confirm_title', 'Reboot IVI?');
+                var body = translated('vehicle.ivi_reboot_confirm_body',
+                    'The display and OverDrive will be unavailable while the IVI restarts.');
+                btn.disabled = true;
+                var confirmation;
+                try {
+                    confirmation = BYD.utils && BYD.utils.confirmDialog
+                        ? BYD.utils.confirmDialog({
+                            title: title,
+                            body: body,
+                            confirmLabel: translated('vehicle.ivi_reboot', 'Reboot IVI'),
+                            cancelLabel: translated('common.cancel', 'Cancel'),
+                            danger: true
+                        })
+                        : window.confirm(title + ' ' + body);
+                } catch (ignored) {
+                    btn.disabled = false;
+                    return;
+                }
+                Promise.resolve(confirmation).then(function(confirmed) {
+                    if (!confirmed) return;
+                    btn.classList.add('pending');
+                    return fetch('/api/system/ivi-reboot', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ confirm: 'REBOOT' })
+                    }).then(function(response) {
+                        return response.json().then(function(data) {
+                            var ok = response.ok && data && data.success === true;
+                            var message = (data && (data.message || data.error))
+                                || translated(ok ? 'vehicle.ivi_reboot_requested'
+                                    : 'vehicle.ivi_reboot_failed',
+                                    ok ? 'IVI reboot requested' : 'IVI reboot failed');
+                            if (BYD.utils && BYD.utils.toast) {
+                                BYD.utils.toast(message, ok ? 'success' : 'error');
+                            }
+                        });
+                    });
+                }).catch(function() {
+                    if (BYD.utils && BYD.utils.toast) {
+                        BYD.utils.toast(translated('vehicle.ivi_reboot_failed',
+                            'IVI reboot failed'), 'error');
+                    }
+                }).finally(function() {
+                    btn.classList.remove('pending');
+                    btn.disabled = false;
+                });
+            },
+            updateIviRebootAvailability: function(available) {
+                var btn = document.getElementById('dashIviReboot');
+                if (!btn) return;
+                var display = available ? '' : 'none';
+                if (btn.style.display !== display) {
+                    btn.style.display = display;
+                    this.layoutPills();
+                }
+            },
             // User-defined quick controls. The button carries only its id; the daemon looks the
             // action up in the persisted list and fires it through the SAME executor a physical
             // key uses, so the client can never name an action the user didn't save.
@@ -3301,6 +3381,8 @@
                             throw new Error('Invalid vehicle-state response');
                         }
                         self.vehicleStateFailureCount = 0;
+                        self.updateIviRebootAvailability(data.iviRebootAvailable === true
+                            || data.dilink5 === true);
                         self.updateVehicleState(data);
                         return data;
                     }).catch(function() {
@@ -3455,6 +3537,7 @@
                 this.startVehicleStatePolling();
             },
             markVehicleStateUnavailable: function() {
+                this.updateIviRebootAvailability(false);
                 // Reuse the normal reducer with explicit unknown values so every
                 // lock/window/climate/tyre class is cleared consistently.
                 this.updateVehicleState({
