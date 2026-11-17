@@ -599,26 +599,36 @@
         body.trips-page .main-content > .page-body {
             overflow: visible;
         }
-        #tripListView > #tripFilters.trips-period-sticky {
+        /* Sticky on the row only (not #tripFilters): full-width sticky shells on old
+           WebView composite var(--page) over scrolled tiles even when transparent. */
+        #tripListView > #tripFilters {
+            margin-bottom: 4px;
+            padding: 0;
+            border: 0;
+            background: none;
+            background-color: transparent;
+            background-image: none;
+            box-shadow: none;
+        }
+        #tripListView .trip-period-row.trips-period-sticky {
             position: -webkit-sticky;
             position: sticky;
             top: var(--trip-sticky-top);
             z-index: 5;
-            margin-bottom: 0;
+            margin: 0;
             padding: 0;
             border: 0;
-            background: transparent;
+            background: none;
+            background-color: transparent;
+            background-image: none;
             box-shadow: none;
             pointer-events: none;
         }
-        #tripListView > #tripFilters.trips-period-sticky > * { pointer-events: auto; }
-        :root[data-app-shell="1"] #tripListView > #tripFilters.trips-period-sticky {
+        #tripListView .trip-period-row.trips-period-sticky > * { pointer-events: auto; }
+        :root[data-app-shell="1"] #tripListView .trip-period-row.trips-period-sticky {
             top: var(--trip-sticky-top-shell);
         }
-        #tripListView > #tripFilters.trips-period-sticky .trip-period-row {
-            margin: 0;
-        }
-        #tripListView > #tripFilters.trips-period-sticky .trip-period-row > * {
+        #tripListView .trip-period-row.trips-period-sticky > * {
             margin: 0;
         }
         .trip-period-row {
@@ -631,10 +641,10 @@
             -webkit-justify-content: space-between;
             justify-content: space-between;
             width: 100%;
-            margin: 0 0 8px;
+            margin: 0;
             box-sizing: border-box;
         }
-        .trip-period-row > * { margin: 0 0 8px; }
+        .trip-period-row > * { margin: 0; }
         .calendar-toggle {
             display: flex;
             align-items: center;
@@ -2022,9 +2032,9 @@
                     </div>
 
                     <!-- Period filters (sticky); custom range sits below, outside the sticky shell. -->
-                    <div class="trips-top-bar trips-period-sticky" data-tab="trips" id="tripFilters">
+                    <div class="trips-top-bar" data-tab="trips" id="tripFilters">
                         <!-- trips.js finds the buttons with #tripFilters .filter-tab. -->
-                        <div class="trip-period-row">
+                        <div class="trip-period-row trips-period-sticky">
                             <div class="filter-tabs">
                                 <button class="filter-tab active" data-days="7" onclick="TRIPS.quickFilter(7, this)" data-i18n="trip.filter.days_7">7 Days</button>
                                 <button class="filter-tab" data-days="14" onclick="TRIPS.quickFilter(14, this)" data-i18n="trip.filter.days_14">14 Days</button>
