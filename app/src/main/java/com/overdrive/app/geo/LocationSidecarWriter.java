@@ -180,8 +180,11 @@ public final class LocationSidecarWriter {
             // don't emit a "Recording started" entry alone — sentry
             // does because it has actors; dashcam doesn't, and a
             // single-line SRT with just that key reads as noise).
+            PlaceResult cachedPlace = null;
             try {
-                writeSrtIfCached(mp4File, flow, effectiveStart);
+                cachedPlace = GeocodingResolver.getInstance().resolveCachedOnly(
+                        effectiveStart.lat, effectiveStart.lng, flow);
+                writeSrtIfCached(mp4File, cachedPlace);
             } catch (Throwable t) {
                 logger.warn("SRT prefix write failed for "
                         + mp4File.getName() + ": " + t.getMessage());
@@ -192,7 +195,7 @@ public final class LocationSidecarWriter {
             // and we re-merge inline; misses kick off the resolver
             // worker which calls SidecarGeoUpdater.mergePlaceForMp4
             // when Tier-B/C completes.
-            scheduleResolve(mp4File, flow, effectiveStart);
+            scheduleResolve(mp4File, flow, effectiveStart, cachedPlace);
         } catch (Throwable t) {
             logger.warn("writeSync failed for " + mp4File.getName()
                     + ": " + t.getMessage());
@@ -294,13 +297,9 @@ public final class LocationSidecarWriter {
         }
     }
 
-    private static void writeSrtIfCached(File mp4File, String flow,
-                                         GeoSnapshot startGeo) {
-        if (startGeo == null || !startGeo.hasFix()) return;
-        PlaceResult cached = GeocodingResolver.getInstance()
-                .resolveCachedOnly(startGeo.lat, startGeo.lng, flow);
-        if (cached == null) return;
-        String label = cached.shortLabel();
+    private static void writeSrtIfCached(File mp4File, PlaceResult cachedPlace) {
+        if (cachedPlace == null) return;
+        String label = cachedPlace.shortLabel();
         if (label == null || label.isEmpty()) return;
         SrtWriter srt = new SrtWriter();
         srt.addEvent(0L, SrtWriter.K_LOCATION_PREFIX, label);
@@ -317,15 +316,12 @@ public final class LocationSidecarWriter {
      * for Tier-C — we just hand it the flow.
      */
     private static void scheduleResolve(File mp4File, String flow,
-                                        GeoSnapshot startGeo) {
-        GeocodingResolver resolver = GeocodingResolver.getInstance();
-        PlaceResult fast = resolver.resolveCachedOnly(
-                startGeo.lat, startGeo.lng, flow);
-        if (fast != null) {
-            SidecarGeoUpdater.mergePlaceForMp4(mp4File, fast);
+                                        GeoSnapshot startGeo, PlaceResult cachedPlace) {
+        if (cachedPlace != null) {
+            SidecarGeoUpdater.mergePlaceForMp4(mp4File, cachedPlace);
             return;
         }
-        resolver.resolveAsync(startGeo.lat, startGeo.lng, flow, place -> {
+        GeocodingResolver.getInstance().resolveAsync(startGeo.lat, startGeo.lng, flow, place -> {
             if (place == null) return;
             SidecarGeoUpdater.mergePlaceForMp4(mp4File, place);
         });
