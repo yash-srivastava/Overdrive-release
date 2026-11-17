@@ -257,6 +257,7 @@ public class OemDashcamPipeline {
     private final AtomicBoolean recording = new AtomicBoolean(false);
     private volatile long cameraAttachedAtMs = 0L;   // elapsedRealtime; 0 = not attached
     private volatile boolean cameraFrameSeen = false;
+    private volatile long lastCameraFrameElapsedMs = 0L;
     // True when the in-flight clip was opened by the surveillance EVENT path
     // (tryStartIfIdle), as opposed to the continuous / resolver path
     // (startRecording). The trigger-lifecycle resolver must NOT finalize a
@@ -477,6 +478,8 @@ public class OemDashcamPipeline {
                     cameraStartEpoch, lifecycleOwnerCurrent);
                 requireStartCurrent(
                     cameraStartEpoch, lifecycleOwnerCurrent, "post-camera open");
+                cameraFrameSeen = false;
+                lastCameraFrameElapsedMs = 0L;
                 installFrameCallback();
                 cameraAttachedAtMs = SystemClock.elapsedRealtime();
                 requireStartCurrent(
@@ -1837,6 +1840,7 @@ public class OemDashcamPipeline {
         // dispatch is the only reason this thread exists.
         cameraSurfaceTexture.setOnFrameAvailableListener(st -> {
             cameraFrameSeen = true;
+            lastCameraFrameElapsedMs = SystemClock.elapsedRealtime();
             synchronized (frameSync) {
                 imagePending = true;
                 frameSync.notify();
@@ -1847,6 +1851,13 @@ public class OemDashcamPipeline {
     /** True once the camera has delivered at least one frame since start(). */
     public boolean hasDeliveredFrame() {
         return cameraFrameSeen;
+    }
+
+    /** True only while a frame has arrived recently enough to represent a live feed. */
+    public boolean hasRecentFrame(long maxAgeMs) {
+        long last = lastCameraFrameElapsedMs;
+        return running.get() && cameraFrameSeen && last > 0L
+            && SystemClock.elapsedRealtime() - last <= Math.max(1L, maxAgeMs);
     }
 
     /** Ms since the camera attached with no frame yet; -1 if streamed, stopped or not attached. */

@@ -86,6 +86,15 @@ Enable your preferred tunnel (Zrok, Cloudflared or Tailscale).
 
 Three options for viewing your car's cameras remotely:
 
+**Live View camera layouts:** In addition to the four-camera AVM mosaic and the
+factory DVR camera, the **All + DVR** hotspot (view 9) displays the AVM grid with
+a DVR band. This choice is shown only on vehicles configured for concurrent AVM
+and OEM camera capture (`camera.concurrentAvmSupported = 1`), with a configured
+DVR camera ID and a recently active DVR feed. If the DVR stops delivering
+frames, the availability indicator hides the hotspot; it does not switch any
+viewer's selected camera. The combined shader is intended for DiLink 3/4;
+on-device alignment and concurrent capture must be verified before relying on it.
+
 ### Local Network (LAN)
 Access at `http://<car-ip>:8080` when on the same WiFi. Zero setup, fastest streaming.
 

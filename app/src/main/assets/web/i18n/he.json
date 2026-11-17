@@ -3946,7 +3946,11 @@
     "view_name_3": "אחור",
     "view_name_4": "שמאל",
     "view_name_5": "גולמי",
-    "view_name_6": "מצלמת דרך מקורית"
+    "view_name_6": "מצלמת דרך מקורית",
+    "view_name_9": "כל המצלמות + DVR",
+    "combined_view_label": "הכל + DVR",
+    "combined_view_unsupported": "תצוגת AVM ו-DVR משולבת אינה זמינה",
+    "combined_view_dvr_not_live": "שידור מצלמת הדרך אינו פעיל"
   },
   "auth": {
     "code_placeholder": "xxxxxxxx"

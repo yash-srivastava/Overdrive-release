@@ -124,6 +124,7 @@ public class OemDashcamApiHandler {
                     lifecyclePending.set(false);
                     try {
                         applyTriggerLifecycleFromUcm();
+                        rebindCombinedViewAfterOemLifecycle();
                     } catch (Throwable t) {
                         com.overdrive.app.daemon.CameraDaemon.log(
                             "scheduleLifecycleRecalc body threw: " + t.getMessage());
@@ -138,6 +139,21 @@ public class OemDashcamApiHandler {
             }
         }
     };
+
+    /** After a DVR restart the old external OES texture is invalid even if
+     * view 9 remains selected. Rebind its replacement on the lifecycle worker,
+     * not from the 5-second read-only browser availability poll. If the first
+     * frame is not ready, the next lifecycle/self-heal pass can retry. */
+    private static void rebindCombinedViewAfterOemLifecycle() {
+        if (com.overdrive.app.server.StreamingApiHandler.getLastDesiredViewMode() != 9) return;
+        com.overdrive.app.surveillance.GpuSurveillancePipeline pano =
+            com.overdrive.app.daemon.CameraDaemon.getGpuPipeline();
+        com.overdrive.app.camera.OemDashcamPipeline oem =
+            com.overdrive.app.daemon.CameraDaemon.getOemDashcamPipeline();
+        if (pano == null || !pano.isRunning() || !pano.isStreamingEnabled()
+                || oem == null || !oem.isRouteReady() || !oem.hasRecentFrame(5000L)) return;
+        pano.activateCombinedViewIfDesired(oem);
+    }
 
     // ==================== PERIODIC SELF-HEAL TICKER ====================
     //
@@ -677,7 +693,7 @@ public class OemDashcamApiHandler {
      *  <p>Two signals are accepted, and BOTH are needed:
      *  <ul>
      *    <li>the live scaler view-mode (6) — the steady state once the route landed;</li>
-     *    <li>the persisted DESIRED view-mode (6) — the user's pick during the OEM
+     *    <li>the persisted DESIRED view-mode (6 or 9) — the user's pick during the OEM
      *        warmup window. The scaler is deliberately NOT switched to 6 until the
      *        OEM bind succeeds (a view-6 scaler with uOemActive=0 falls through the
      *        shader's OEM gate and paints the 4-cam AVM mosaic). Without this second
@@ -690,8 +706,11 @@ public class OemDashcamApiHandler {
             com.overdrive.app.surveillance.GpuSurveillancePipeline pano =
                 com.overdrive.app.daemon.CameraDaemon.getGpuPipeline();
             if (pano == null || !pano.isStreamingEnabled()) return false;
-            if (pano.getStreamViewMode() == 6) return true;
-            return com.overdrive.app.server.StreamingApiHandler.getLastDesiredViewMode() == 6;
+            int desired = com.overdrive.app.server.StreamingApiHandler.getLastDesiredViewMode();
+            // During 9 -> 6 the scaler may still be in combined mode while
+            // the OEM route is warming up. The desired selection is a viewer
+            // even before the scaler catches up.
+            return pano.getStreamViewMode() == 6 || desired == 6 || desired == 9;
         } catch (Throwable t) {
             return false;
         }
