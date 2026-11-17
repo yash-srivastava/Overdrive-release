@@ -1607,6 +1607,7 @@
     "mqtt_topic": "MQTT:",
     "signal_now": "Now",
     "signal_unknown": "not reported yet on this car",
+    "reading_unavailable": "No readable vehicle state is exposed for this action.",
     "signal_empty": "(empty)",
     "signal_allowed": "Allowed:",
     "signal_range": "Range: {0} – {1}",

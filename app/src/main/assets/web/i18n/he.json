@@ -1607,6 +1607,7 @@
     "mqtt_topic": "MQTT:",
     "signal_now": "עכשיו",
     "signal_unknown": "טרם דווח ברכב זה",
+    "reading_unavailable": "לא זמין מצב רכב קריא עבור פעולה זו.",
     "signal_empty": "(ריק)",
     "signal_allowed": "מותר:",
     "signal_range": "טווח: {0} – {1}",

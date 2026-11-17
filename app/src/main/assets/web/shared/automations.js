@@ -1324,6 +1324,8 @@ BYD.automations = {
                 inputs.classList.add('has-cond-value');
                 inputs.append(valInp);
             }
+            inputs.querySelectorAll('.step-reading').forEach(el => el.remove());
+            this.appendStepReading(inputs, () => group.conditions[ci], false, 'step-reading');
         };
 
         const typeSel = this.createEnumInput(this.getTypeEnum('cg', options), group.conditions[ci].type,
@@ -1515,6 +1517,8 @@ BYD.automations = {
                     inputs.append(elseBox);
                 }
             }
+            inputs.querySelectorAll('.step-reading').forEach(el => el.remove());
+            this.appendStepReading(inputs, () => arr[i], true, 'step-reading');
         };
 
         const typeSel = this.createEnumInput(this.getTypeEnum('na', options, d >= this.maxActionDepth()), arr[i].type,
@@ -1965,6 +1969,73 @@ BYD.automations = {
     stopStatePolling() {
         if (this._statePollTimer) { clearInterval(this._statePollTimer); this._statePollTimer = null; }
         this._stateHiddenTicks = 0;
+    },
+
+    // Address a configured IF leaf using the same event type and attributes as the
+    // daemon's state map. An incomplete attribute selection is NOT a different signal.
+    conditionReadingAddress(entry) {
+        if (!entry || !entry.type) return '';
+        const spec = this.conditionCatalog().find(o => o && o.id === entry.type);
+        if (!spec) return '';
+        const attrs = [];
+        const variables = entry.variables || {};
+        for (const field of (spec.variables || [])) {
+            const value = variables[field.id];
+            if (value === undefined || value === null || String(value) === '') return '';
+            attrs.push(field.id + '=' + String(value));
+        }
+        return entry.type + (attrs.length ? ':' + attrs.sort().join(',') : '');
+    },
+
+    // Only associate an action with a reading where the state meaning is known.
+    // Command success is not evidence of vehicle state. Unmapped/write-only actions
+    // deliberately show no reading rather than inventing an On/Off value.
+    actionReadingAddress(entry) {
+        if (!entry || !entry.type) return '';
+        const simple = {
+            lock: 'lock', unlock: 'lock', powerOn: 'power', powerOff: 'power',
+            adas_slw: 'slw', cpd: 'cpd', steeringHeat: 'steeringHeat',
+            driveMode: 'driveMode', powertrainMode: 'powertrainMode'
+        };
+        if (simple[entry.type]) return simple[entry.type];
+        if (entry.type === 'setAc') return 'ac';
+        if (entry.type === 'setAcTemp') return 'acSetpoint';
+        if (entry.type === 'setAcFan') return 'acFanLevel';
+        if (entry.type === 'windows' || entry.type === 'windowsPreset') {
+            const areas = { '1': 'lf', '2': 'rf', '3': 'lr', '4': 'rr',
+                '5': 'sunroof', '6': 'sunshade' };
+            const area = entry.variables && areas[String(entry.variables.area)];
+            return area ? 'windowOpenPercent:area=' + area : '';
+        }
+        const fixed = {
+            drl: 'lights:area=drl', hazard: 'lights:area=hazard',
+            sunshade: 'windowState:area=sunshade', sunroof: 'windowState:area=sunroof'
+        };
+        if (fixed[entry.type]) return fixed[entry.type];
+        // Exact catalog matches are safe only for zero-attribute signals: an
+        // unqualified area/seat signal would otherwise display the wrong reading.
+        const spec = this.conditionCatalog().find(o => o && o.id === entry.type);
+        return spec && (!spec.variables || !spec.variables.length) ? entry.type : '';
+    },
+
+    // The same read-only hint is attached to flat/group IF rows and to flat/nested
+    // action rows. Rebuilding a row removes its previous hint; the callback always
+    // reads the current entry so changing an attribute updates the address.
+    appendStepReading(inputs, getEntry, isAction, className) {
+        const hint = document.createElement('div');
+        hint.classList.add(className);
+        inputs.append(hint);
+        this.buildSignalHint(hint, () => {
+            const entry = getEntry();
+            return isAction ? this.actionReadingAddress(entry) : this.conditionReadingAddress(entry);
+        });
+        if (isAction && getEntry() && getEntry().type && !this.actionReadingAddress(getEntry())) {
+            const note = document.createElement('div');
+            note.classList.add('field-help', className);
+            note.textContent = BYD.i18n.t('automation.reading_unavailable');
+            inputs.append(note);
+        }
+        return hint;
     },
 
     // The live value for a ${signal:…} token (or a bare address), or undefined when the signal
@@ -2898,6 +2969,11 @@ BYD.automations = {
                     inputs.append(this.createNestedActions(options, entry.elseActions,
                         'automation.else_actions'));
                 }
+            }
+            inputs.querySelectorAll('.step-reading').forEach(el => el.remove());
+            if (id === 'conditions' || id === 'triggers' || id === 'actions' || id === 'elseActions') {
+                this.appendStepReading(inputs, () => this.formData[id][index],
+                    id === 'actions' || id === 'elseActions', 'step-reading');
             }
         };
 
