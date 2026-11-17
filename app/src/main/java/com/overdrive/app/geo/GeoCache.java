@@ -80,7 +80,7 @@ public final class GeoCache {
                 return t;
             });
 
-    /** Most-recently-scheduled flush; replaced by each {@link #scheduleFlush()}. */
+    /** Pending flush for the current dirty batch; subsequent puts reuse it. */
     private volatile ScheduledFuture<?> pendingFlush = null;
 
     private GeoCache() {}
@@ -139,7 +139,7 @@ public final class GeoCache {
      * H.265 muxer for I/O bandwidth).
      *
      * <p>Coalescing window: {@link #FLUSH_COALESCE_MS}. A burst of N puts
-     * within the window collapses to a single disk write at the end.
+     * shares one scheduled write, bounded by the first put in the batch.
      * {@link #flushNow()} is available for callers that need durability
      * (e.g. SafeLocation invalidation, daemon shutdown).
      */
@@ -180,16 +180,14 @@ public final class GeoCache {
     }
 
     /**
-     * Schedule (or re-schedule) a disk flush 30 s in the future. Called
-     * from {@link #put} on every dirty entry. The pending future is
-     * cancelled and replaced so a tight burst of puts collapses into a
-     * single trailing flush — sliding-window coalescing.
+     * Schedule one flush 30 s after the first dirty put. Keeping the existing
+     * future avoids cancel/requeue churn on every geocode result and prevents
+     * a continuous stream of puts from postponing persistence indefinitely.
+     * Called with the cache monitor held.
      */
     private void scheduleFlush() {
-        ScheduledFuture<?> prev = pendingFlush;
-        if (prev != null && !prev.isDone()) {
-            prev.cancel(false);
-        }
+        ScheduledFuture<?> pending = pendingFlush;
+        if (pending != null && !pending.isDone() && !pending.isCancelled()) return;
         try {
             pendingFlush = flushExecutor.schedule(() -> {
                 synchronized (GeoCache.this) {
