@@ -22,6 +22,23 @@ class DaemonStartupManager(
     private val log = LogManager.getInstance()
     private val handler = Handler(Looper.getMainLooper())
 
+    // Startup is a dependency graph, not a timeline. Every daemon shares the
+    // ADB-shell prerequisite; daemon-specific prerequisites (enabled state,
+    // stop sentinel, WireGuard config, Zrok token and Cloudflared backoff)
+    // are checked by the existing start paths below. No daemon is serialized
+    // behind an unrelated daemon's startup.
+    // A new app launch or boot/park-end initialization owns a fresh stabilization
+    // window. elapsedRealtime() is monotonic, but its origin is device boot — NOT
+    // the origin of a new manager's +45/+60/+90 second windows.
+    private val startupGeneration = java.util.concurrent.atomic.AtomicInteger(0)
+    @Volatile private var startupStartedAtMs = android.os.SystemClock.elapsedRealtime()
+    private val startupReleased = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val startupProbeInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val startupProbeAttempts = java.util.concurrent.atomic.AtomicInteger(0)
+    private val singboxDependencyAttempts = java.util.concurrent.atomic.AtomicInteger(0)
+    private val singboxStartInFlight = java.util.concurrent.atomic.AtomicLong(0L)
+    private val singboxStartSequence = java.util.concurrent.atomic.AtomicLong(0L)
+
     // Dedicated looper for the 30s daemon health check. That tick does blocking
     // process/sentinel shell probes and runs with NO Activity present
     // (armed from DaemonKeepaliveService / KeepAliveAccessibilityService) for the
@@ -80,6 +97,7 @@ class DaemonStartupManager(
         // A staged start whose probe could not reach ADB is re-probed until the health check owns revival.
         private const val STAGED_PROBE_RETRY_MS = 10_000L
         private const val STAGED_PROBE_RETRIES = 6
+        private const val MAX_SINGBOX_DEPENDENCY_RETRIES = 4
         @Volatile
         private var lastReconnectHealthCheckAtMs = 0L
 
@@ -471,8 +489,8 @@ class DaemonStartupManager(
             log.info(TAG, "initializeOnAppLaunch ignored — this manager's Activity is destroyed")
             return
         }
-        log.info(TAG, "=== Initializing daemon startup on app launch ===")
-        log.info(TAG, "Waiting 45 seconds before starting daemons (system stabilization)...")
+        log.info(TAG, "=== Initializing dependency-aware daemon startup on app launch ===")
+        val generation = beginStartupCycle()
 
         // Hand off from any pre-existing bootManager (which was launched
         // before MainActivity attached). If we don't shut its scheduler
@@ -526,7 +544,7 @@ class DaemonStartupManager(
         // "Vehicle ON only": an app launch is NOT evidence that the vehicle is on. The
         // head unit is lit in accessory mode too, and a resident process re-creates
         // MainActivity on any config change. The parked-shutdown marker is therefore
-        // left alone here; the delayed starts below all run through ifNotUserStopped,
+        // left alone here; automatic starts all run through ifNotUserStopped,
         // whose parked gate keeps them down until the ACC judge or a recovery trigger
         // erases the marker. An explicit Start in the Daemons UI remains the user's
         // override (DaemonsViewModel.clearStartBlockers).
@@ -535,12 +553,7 @@ class DaemonStartupManager(
         // only machine-written markers immediately before starting a daemon.
         clearStaleSentinels()
 
-        // Wait 45 seconds for system to fully stabilize before starting any daemons
-        handler.postDelayed({ startCoreDaemons() }, 45000)
-        handler.postDelayed({ startOptionalDaemonsFromPreferences() }, 60000)
-
-        // Start periodic health check after initial daemons have had time to start
-        handler.postDelayed({ startDaemonHealthCheck() }, 90000)
+        awaitAdbReadiness(generation)
     }
 
     /**
@@ -576,8 +589,10 @@ class DaemonStartupManager(
     }*/
 
     private fun initializeOnBoot() {
-        log.info(TAG, "=== Initializing daemon startup on boot ===")
-        log.info(TAG, "Waiting 45 seconds before starting daemons (system stabilization)...")
+        log.info(TAG, "=== Initializing dependency-aware daemon startup on boot ===")
+        val generation = beginStartupCycle()
+        // Reset only the process-local cache; durable manual stops survive boot.
+        userStoppedDaemons.clear()
 
         // Enable AccessibilityService keep-alive immediately on boot
         enableAccessibilityKeepAlive()
@@ -585,14 +600,96 @@ class DaemonStartupManager(
         // Keep manual-stop sentinels; see initializeOnAppLaunch.
         clearStaleSentinels()
 
-        // Wait 45 seconds for system to fully stabilize before starting any daemons
-        handler.postDelayed({ startCoreDaemonsViaAdb() }, 45000)
-        handler.postDelayed({ startOptionalDaemonsViaAdb() }, 60000)
-
-        // Start periodic health check after initial daemons have had time to start
-        handler.postDelayed({ startDaemonHealthCheck() }, 90000)
+        awaitAdbReadiness(generation)
     }
 
+
+    /** Start a new cycle; callbacks from prior cycles may not schedule or release work. */
+    private fun beginStartupCycle(): Int {
+        val generation = startupGeneration.incrementAndGet()
+        // A second initializeOnAppLaunch on this same live manager must not
+        // leave its old 30s health check bypassing the new settle windows.
+        // Cancel the old timer before rearming the check at this cycle's +90s.
+        if (healthCheckRunning.getAndSet(false)) {
+            AdbShellExecutor.removeConnectionReestablishedListener(adbReconnectListener)
+            healthCheckHandler.removeCallbacksAndMessages(null)
+        }
+        startupStartedAtMs = android.os.SystemClock.elapsedRealtime()
+        startupReleased.set(false)
+        startupProbeInFlight.set(false)
+        startupProbeAttempts.set(0)
+        singboxDependencyAttempts.set(0)
+        log.info(TAG, "Startup cycle $generation: +45s core, +60s optional, +90s health check")
+        return generation
+    }
+
+    /** ADB shell and sys.boot_completed are both required, not just a listening port. */
+    private fun awaitAdbReadiness(generation: Int) {
+        if (supervisionStopped || generation != startupGeneration.get() || startupReleased.get() ||
+            !startupProbeInFlight.compareAndSet(false, true)) return
+        var androidBootCompleted = false
+        adbLauncher.executeShellCommand(
+            "if [ \"\$(getprop sys.boot_completed)\" = \"1\" ]; then " +
+                "echo overdrive_boot_ready; else echo overdrive_boot_pending; fi",
+            object : AdbDaemonLauncher.LaunchCallback {
+                override fun onLog(message: String) {
+                    if (generation != startupGeneration.get()) return
+                    androidBootCompleted = message.contains("overdrive_boot_ready")
+                    log.debug(TAG, "Platform readiness: ${message.trim()}")
+                }
+                override fun onLaunched() {
+                    if (generation != startupGeneration.get() || supervisionStopped) return
+                    startupProbeInFlight.set(false)
+                    if (!androidBootCompleted) {
+                        scheduleAdbReadinessRetry(generation, "Android boot has not completed")
+                        return
+                    }
+                    handler.post {
+                        if (!supervisionStopped && generation == startupGeneration.get() &&
+                            startupReleased.compareAndSet(false, true)) {
+                            startupProbeAttempts.set(0)
+                            log.info(TAG, "ADB shell and Android boot are ready; releasing startup graph")
+                            releaseStartupGraph(generation)
+                        }
+                    }
+                }
+                override fun onError(error: String) {
+                    if (generation != startupGeneration.get() || supervisionStopped) return
+                    startupProbeInFlight.set(false)
+                    scheduleAdbReadinessRetry(generation, "ADB shell unavailable: $error")
+                }
+            }
+        )
+    }
+
+    private fun scheduleAdbReadinessRetry(generation: Int, reason: String) {
+        if (supervisionStopped || generation != startupGeneration.get()) return
+        val attempt = startupProbeAttempts.incrementAndGet()
+        val delayMs = minOf(30_000L, 1_000L shl minOf(attempt - 1, 5))
+        log.info(TAG, "Platform not ready (attempt $attempt); retrying in ${delayMs}ms: $reason")
+        handler.postDelayed({ awaitAdbReadiness(generation) }, delayMs)
+    }
+
+    private fun releaseStartupGraph(generation: Int) {
+        // Deadlines are relative to THIS manager's initialization, including
+        // fresh app-open/post-update/park-end cycles, never device boot uptime.
+        // A late ADB connection consumes only the elapsed portion of each window.
+        handler.postDelayed({
+            if (supervisionStopped || generation != startupGeneration.get()) return@postDelayed
+            if (daemonsViewModel == null) startCoreDaemonsViaAdb() else startCoreDaemons()
+        }, remainingStartupWindow(45_000L))
+        handler.postDelayed({
+            if (supervisionStopped || generation != startupGeneration.get()) return@postDelayed
+            if (daemonsViewModel == null) startOptionalDaemonsViaAdb()
+            else startOptionalDaemonsFromPreferences()
+        }, remainingStartupWindow(60_000L))
+        handler.postDelayed({
+            if (!supervisionStopped && generation == startupGeneration.get()) startDaemonHealthCheck()
+        }, remainingStartupWindow(90_000L))
+    }
+
+    private fun remainingStartupWindow(deadlineMs: Long): Long =
+        (deadlineMs - (android.os.SystemClock.elapsedRealtime() - startupStartedAtMs)).coerceAtLeast(0L)
 
     fun checkAllDaemonStatuses() {
         log.info(TAG, "=== Checking all daemon statuses ===")
@@ -611,86 +708,61 @@ class DaemonStartupManager(
             startCoreDaemonsViaAdb()
             return
         }
-        log.info(TAG, "Starting core daemons (Camera first, then Sentry daemons)...")
-        
-        // Start Camera Daemon FIRST
+        // Preserve the head-unit camera/AVM settle sequence: +0/+5/+10 s
+        // after the 45-second manager-relative core window, not simultaneous.
+        val generation = startupGeneration.get()
         ifNotUserStopped(DaemonType.CAMERA_DAEMON) {
-            log.info(TAG, "Starting Camera Daemon...")
-            vm.startDaemon(DaemonType.CAMERA_DAEMON, userInitiated = false)
+            if (generation == startupGeneration.get())
+                vm.startDaemon(DaemonType.CAMERA_DAEMON, userInitiated = false)
         }
-        
-        // Start Sentry Daemon after Camera Daemon has time to initialize
         handler.postDelayed({
+            if (supervisionStopped || generation != startupGeneration.get()) return@postDelayed
             ifNotUserStopped(DaemonType.SENTRY_DAEMON) {
-                log.info(TAG, "Starting Sentry Daemon...")
-                vm.startDaemon(DaemonType.SENTRY_DAEMON, userInitiated = false)
+                if (generation == startupGeneration.get())
+                    vm.startDaemon(DaemonType.SENTRY_DAEMON, userInitiated = false)
             }
-        }, 5000)
-        
-        // Start ACC Sentry Daemon last
+        }, 5_000L)
         handler.postDelayed({
+            if (supervisionStopped || generation != startupGeneration.get()) return@postDelayed
             ifNotUserStopped(DaemonType.ACC_SENTRY_DAEMON) {
-                log.info(TAG, "Starting ACC Sentry Daemon...")
-                vm.startDaemon(DaemonType.ACC_SENTRY_DAEMON, userInitiated = false)
+                if (generation == startupGeneration.get())
+                    vm.startDaemon(DaemonType.ACC_SENTRY_DAEMON, userInitiated = false)
             }
-        }, 10000)
+        }, 10_000L)
     }
 
     private fun startCoreDaemonsViaAdb() {
-        log.info(TAG, "Starting core daemons via ADB (Camera first, then Sentry daemons)...")
-
-        // Start Camera Daemon FIRST. Probe the actual --nice-name (`byd_cam_daemon`)
-        // not the legacy "camera_daemon" string — `ps -A` on stock Android shows
-        // the nice-name, and "camera_daemon" is not a substring of "byd_cam_daemon".
-        // The previous literal always reported false → one redundant launch+
-        // cleanup ADB round-trip on every boot (the inner `launchDaemon` does
-        // its own correct probe at DaemonLauncher.kt:328 and short-circuits, so
-        // this was cosmetic, but kept boot ~1-2 s slower than necessary).
+        log.info(TAG, "Starting core daemons via ADB with +0/+5/+10s stagger")
         ifNotUserStopped(DaemonType.CAMERA_DAEMON) {
             adbLauncher.isDaemonRunning(DaemonType.CAMERA_DAEMON.processName) { running ->
                 if (!running) {
-                    log.info(TAG, "Boot: Starting Camera Daemon...")
                     val nativeLibDir = context.applicationInfo.nativeLibraryDir
                     val outputDir = context.getExternalFilesDir(null)?.absolutePath ?: context.filesDir.absolutePath
                     adbLauncher.launchDaemon(outputDir, nativeLibDir, createLogCallback("CameraDaemon"))
-                } else {
-                    log.info(TAG, "Boot: Camera Daemon already running")
                 }
             }
         }
-        
-        // Start Sentry Daemon after Camera Daemon has time to initialize
+        val generation = startupGeneration.get()
         handler.postDelayed({
+            if (supervisionStopped || generation != startupGeneration.get()) return@postDelayed
             ifNotUserStopped(DaemonType.SENTRY_DAEMON) {
                 adbLauncher.isSentryDaemonRunning { running ->
-                    if (!running) {
-                        log.info(TAG, "Boot: Starting Sentry Daemon...")
-                        adbLauncher.launchSentryDaemon(createLogCallback("SentryDaemon"))
-                    } else {
-                        log.info(TAG, "Boot: Sentry Daemon already running")
-                    }
+                    if (!running) adbLauncher.launchSentryDaemon(createLogCallback("SentryDaemon"))
                 }
             }
-        }, 5000)
-        
-        // Start ACC Sentry Daemon last
+        }, 5_000L)
         handler.postDelayed({
+            if (supervisionStopped || generation != startupGeneration.get()) return@postDelayed
             ifNotUserStopped(DaemonType.ACC_SENTRY_DAEMON) {
                 adbLauncher.isDaemonRunning("acc_sentry_daemon") { running ->
-                    if (!running) {
-                        log.info(TAG, "Boot: Starting ACC Sentry Daemon...")
-                        adbLauncher.launchAccSentryDaemon(
-                            onSuccess = { log.info(TAG, "Boot: ACC Sentry Daemon started") },
-                            onError = { error -> log.error(TAG, "Boot: ACC Sentry error: $error") }
-                        )
-                    } else {
-                        log.info(TAG, "Boot: ACC Sentry Daemon already running")
-                    }
+                    if (!running) adbLauncher.launchAccSentryDaemon(
+                        onSuccess = { log.info(TAG, "Boot: ACC Sentry Daemon started") },
+                        onError = { error -> log.error(TAG, "Boot: ACC Sentry error: $error") }
+                    )
                 }
             }
-        }, 10000)
+        }, 10_000L)
     }
-
 
     /**
      * Run [onAllowed] only when [type] has no durable manual-stop sentinel.
@@ -796,41 +868,113 @@ class DaemonStartupManager(
 
     private fun startOptionalDaemonsFromPreferences() {
         val vm = daemonsViewModel ?: run {
-            log.warn(TAG, "ViewModel not available, using ADB launcher")
             startOptionalDaemonsViaAdb()
             return
         }
-        log.info(TAG, "Starting optional daemons from preferences...")
-
-        // Singbox starts iff the user enabled it AND hasn't stopped it via a
-        // sentinel. Tunnels are independent toggles.
+        log.info(TAG, "Starting enabled optional daemons by dependency")
+        // Each tunnel chooses port 8119 only ONCE at launch. When Singbox is
+        // enabled, even private Tailscale/WireGuard must wait for its real
+        // process AND listening socket, otherwise they remain stuck direct.
         if (PreferencesManager.isDaemonEnabled(DaemonType.SINGBOX_PROXY)) {
-            vm.singboxController.isRunning { isRunning ->
-                if (isRunning) {
-                    log.info(TAG, "Singbox already running, skipping start")
-                    handler.postDelayed({ startTunnelFromPreferences(vm) }, 1000)
-                } else {
-                    ifNotUserStopped(DaemonType.SINGBOX_PROXY) {
-                        log.info(TAG, "Starting Singbox (user enabled)...")
-                        vm.startDaemon(DaemonType.SINGBOX_PROXY, userInitiated = false)
-                    }
-                    handler.postDelayed({ startTunnelFromPreferences(vm) }, 5000)
-                }
-            }
+            awaitSingboxDependency(vm)
         } else {
-            startTunnelFromPreferences(vm)
+            startAllTunnelsFromPreferences(vm)
         }
-
-        // Start Telegram Bot daemon if user enabled it and hasn't stopped it.
+        // Telegram does not choose a network proxy at this point.
         if (PreferencesManager.isDaemonEnabled(DaemonType.TELEGRAM_DAEMON)) {
             syncTelegramEnabledToUnifiedConfig(true)
-            handler.postDelayed({
-                ifNotUserStopped(DaemonType.TELEGRAM_DAEMON) {
-                    log.info(TAG, "Starting Telegram Bot daemon (user enabled)...")
-                    vm.startDaemon(DaemonType.TELEGRAM_DAEMON, userInitiated = false)
-                }
-            }, 15000)
+            ifNotUserStopped(DaemonType.TELEGRAM_DAEMON) {
+                vm.startDaemon(DaemonType.TELEGRAM_DAEMON, userInitiated = false)
+            }
         }
+    }
+
+    private fun hasEnabledTunnel(): Boolean =
+        listOf(DaemonType.CLOUDFLARED_TUNNEL, DaemonType.ZROK_TUNNEL,
+            DaemonType.TAILSCALE_TUNNEL, DaemonType.WIREGUARD_TUNNEL)
+            .any { PreferencesManager.isDaemonEnabled(it) }
+
+    private fun startAllTunnelsFromPreferences(vm: DaemonsViewModel) {
+        startPublicTunnelsFromPreferences(vm)
+        startPrivateTunnelsFromPreferences(vm)
+    }
+
+    /** Single-flight lease shared by startup and the health check. A cancelled
+     * non-user ViewModel start may never invoke a callback (user Stop wins), so
+     * the lease also expires. Token-scoped release prevents a stale completion
+     * from unlocking a newer launch.
+     */
+    private fun beginSingboxLaunch(): Long {
+        val token = singboxStartSequence.incrementAndGet()
+        if (!singboxStartInFlight.compareAndSet(0L, token)) return 0L
+        handler.postDelayed({
+            if (singboxStartInFlight.compareAndSet(token, 0L)) {
+                log.warn(TAG, "Singbox start callback missing; released stale single-flight lease")
+            }
+        }, 60_000L)
+        return token
+    }
+
+    private fun finishSingboxLaunch(token: Long) {
+        if (token != 0L) singboxStartInFlight.compareAndSet(token, 0L)
+    }
+
+    /** A pidof match alone is not enough: the one-shot tunnel decision needs port 8119. */
+    private fun singboxPortReady(): Boolean =
+        com.overdrive.app.mqtt.ProxyHelper.probePort(8119)
+
+    /** Bounded retries never launch over an existing proxy or race a health check. */
+    private fun awaitSingboxDependency(vm: DaemonsViewModel, generation: Int = startupGeneration.get()) {
+        if (supervisionStopped || generation != startupGeneration.get() ||
+            !PreferencesManager.isDaemonEnabled(DaemonType.SINGBOX_PROXY)) return
+        if (singboxStartInFlight.get() != 0L) return
+        vm.singboxController.isRunning { running ->
+            if (supervisionStopped || generation != startupGeneration.get()) return@isRunning
+            if (running) {
+                if (singboxPortReady()) {
+                    singboxDependencyAttempts.set(0)
+                    log.info(TAG, "Singbox pidof and port 8119 confirmed; releasing all tunnel branches")
+                    if (hasEnabledTunnel()) startAllTunnelsFromPreferences(vm)
+                } else scheduleSingboxDependencyRetry(generation, "Singbox is alive but port 8119 is not ready") {
+                    awaitSingboxDependency(vm, generation)
+                }
+            } else if (singboxDependencyAttempts.get() < MAX_SINGBOX_DEPENDENCY_RETRIES) {
+                ifNotUserStopped(DaemonType.SINGBOX_PROXY) {
+                    // Acquire only after the durable stop probe allows a start:
+                    // denied probes must not leave the in-flight lock stuck.
+                    if (supervisionStopped || generation != startupGeneration.get()) return@ifNotUserStopped
+                    val token = beginSingboxLaunch()
+                    if (token == 0L) return@ifNotUserStopped
+                    vm.startDaemon(DaemonType.SINGBOX_PROXY, userInitiated = false) { status, message ->
+                        finishSingboxLaunch(token)
+                        if (generation != startupGeneration.get() || supervisionStopped) return@startDaemon
+                        // RUNNING is the parent launcher callback, not proof that
+                        // sing-box has bound the SOCKS listener. Probe after it.
+                        scheduleSingboxDependencyRetry(generation, message) {
+                            awaitSingboxDependency(vm, generation)
+                        }
+                    }
+                }
+                // Manual sentinel causes ifNotUserStopped to withhold the callback;
+                // the health check handles future recovery, never forcibly erase it.
+            }
+        }
+    }
+
+    private fun scheduleSingboxDependencyRetry(generation: Int, reason: String, retry: () -> Unit) {
+        if (supervisionStopped || generation != startupGeneration.get() ||
+            !PreferencesManager.isDaemonEnabled(DaemonType.SINGBOX_PROXY)) return
+        val attempt = singboxDependencyAttempts.incrementAndGet()
+        if (attempt > MAX_SINGBOX_DEPENDENCY_RETRIES) {
+            log.warn(TAG, "Singbox dependency not ready after bounded retries: $reason; health check owns recovery")
+            return
+        }
+        val delayMs = minOf(30_000L, 2_000L shl minOf(attempt - 1, 4))
+        log.warn(TAG, "Singbox not ready ($attempt/$MAX_SINGBOX_DEPENDENCY_RETRIES); " +
+            "retrying in ${delayMs}ms: $reason")
+        handler.postDelayed({
+            if (!supervisionStopped && generation == startupGeneration.get()) retry()
+        }, delayMs)
     }
 
     /**
@@ -872,41 +1016,9 @@ class DaemonStartupManager(
         return true
     }
 
-    private fun startTunnelFromPreferences(vm: DaemonsViewModel) {
-        val cloudflaredEnabled = PreferencesManager.isDaemonEnabled(DaemonType.CLOUDFLARED_TUNNEL)
-        val zrokEnabled = PreferencesManager.isDaemonEnabled(DaemonType.ZROK_TUNNEL)
+    private fun startPrivateTunnelsFromPreferences(vm: DaemonsViewModel) {
         val tailscaleEnabled = PreferencesManager.isDaemonEnabled(DaemonType.TAILSCALE_TUNNEL)
         val wireguardEnabled = PreferencesManager.isDaemonEnabled(DaemonType.WIREGUARD_TUNNEL)
-
-        // Each enabled tunnel starts on its own; Cloudflared and Zrok may run side by side.
-        if (cloudflaredEnabled) {
-            vm.cloudflaredController.isRunning { isRunning ->
-                if (isRunning) {
-                    log.info(TAG, "Cloudflared already running, skipping start")
-                } else if (!cloudflaredBackingOff("Auto-start")) {
-                    ifNotUserStopped(DaemonType.CLOUDFLARED_TUNNEL) {
-                        log.info(TAG, "Starting Cloudflared (user enabled)...")
-                        vm.startDaemon(DaemonType.CLOUDFLARED_TUNNEL, userInitiated = false)
-                    }
-                }
-            }
-        }
-        if (zrokEnabled) {
-            vm.zrokController.isRunning { isRunning ->
-                if (isRunning) {
-                    log.info(TAG, "Zrok already running, skipping start")
-                } else {
-                    ifNotUserStopped(DaemonType.ZROK_TUNNEL) {
-                        log.info(TAG, "Starting Zrok (user enabled)...")
-                        vm.startDaemon(DaemonType.ZROK_TUNNEL, userInitiated = false)
-                    }
-                }
-            }
-        }
-        if (!cloudflaredEnabled && !zrokEnabled && !tailscaleEnabled && !wireguardEnabled) {
-            log.info(TAG, "No tunnel enabled by user")
-        }
-
         // Tailscale runs independently — it's private access, not a public dashboard tunnel
         if (tailscaleEnabled) {
             vm.tailscaleController.isRunning { isRunning ->
@@ -938,74 +1050,139 @@ class DaemonStartupManager(
         }
     }
 
-    private fun startOptionalDaemonsViaAdb() {
-        log.info(TAG, "Starting optional daemons via ADB...")
-        try {
-            // Singbox is gated by its own user toggle AND the disable sentinel
-            // (a Telegram stop writes only the sentinel, never the pref).
-            if (PreferencesManager.isDaemonEnabled(DaemonType.SINGBOX_PROXY)) {
-                ifNotUserStopped(DaemonType.SINGBOX_PROXY) {
-                    log.info(TAG, "Boot: Starting Singbox (user enabled)...")
-                    adbLauncher.startSingbox(createLogCallback("Singbox"))
-                }
-            }
-
-            val tunnelDelay = if (PreferencesManager.isDaemonEnabled(DaemonType.SINGBOX_PROXY)) 5_000L else 0L
-
-            handler.postDelayed({
-                // Each enabled tunnel starts on its own; Cloudflared and Zrok may run side by side.
-                if (PreferencesManager.isDaemonEnabled(DaemonType.CLOUDFLARED_TUNNEL) &&
-                    !cloudflaredBackingOff("Boot")
-                ) {
+    private fun startPublicTunnelsFromPreferences(vm: DaemonsViewModel) {
+        val cloudflaredEnabled = PreferencesManager.isDaemonEnabled(DaemonType.CLOUDFLARED_TUNNEL)
+        val zrokEnabled = PreferencesManager.isDaemonEnabled(DaemonType.ZROK_TUNNEL)
+        // Each enabled public tunnel starts on its own; Cloudflared and Zrok may run side by side.
+        if (cloudflaredEnabled) {
+            vm.cloudflaredController.isRunning { isRunning ->
+                if (isRunning) {
+                    log.info(TAG, "Cloudflared already running, skipping start")
+                } else if (!cloudflaredBackingOff("Auto-start")) {
                     ifNotUserStopped(DaemonType.CLOUDFLARED_TUNNEL) {
-                        log.info(TAG, "Boot: Starting Cloudflared...")
-                        adbLauncher.launchTunnel(object : AdbDaemonLauncher.TunnelCallback {
-                            override fun onLog(message: String) { log.debug(TAG, "[Cloudflared] $message") }
-                            override fun onTunnelUrl(url: String) { log.info(TAG, "Boot: Cloudflared URL: $url") }
-                            override fun onError(error: String) { log.error(TAG, "Boot: Cloudflared error: $error") }
-                        })
+                        log.info(TAG, "Starting Cloudflared (user enabled)...")
+                        vm.startDaemon(DaemonType.CLOUDFLARED_TUNNEL, userInitiated = false)
                     }
                 }
-                if (PreferencesManager.isDaemonEnabled(DaemonType.ZROK_TUNNEL)) {
-                    ifNotUserStopped(DaemonType.ZROK_TUNNEL) {
-                        log.info(TAG, "Boot: Starting Zrok...")
-                        startZrokOnBoot()
-                    }
-                }
-
-                // Tailscale runs independently of cloudflared/zrok
-                if (PreferencesManager.isDaemonEnabled(DaemonType.TAILSCALE_TUNNEL)) {
-                    ifNotUserStopped(DaemonType.TAILSCALE_TUNNEL) {
-                        log.info(TAG, "Boot: Starting Tailscale...")
-                        startTailscaleOnBoot()
-                    }
-                }
-
-                if (PreferencesManager.isDaemonEnabled(DaemonType.WIREGUARD_TUNNEL)) {
-                    ifWireGuardConfiguredForStart {
-                        ifNotUserStopped(DaemonType.WIREGUARD_TUNNEL) {
-                            log.info(TAG, "Boot: Starting WireGuard...")
-                            startWireGuardOnBoot()
-                        }
-                    }
-                }
-            }, tunnelDelay)
-
-            // Start Telegram Bot daemon if user enabled it and hasn't stopped it.
-            if (PreferencesManager.isDaemonEnabled(DaemonType.TELEGRAM_DAEMON)) {
-                syncTelegramEnabledToUnifiedConfig(true)
-                handler.postDelayed({
-                    ifNotUserStopped(DaemonType.TELEGRAM_DAEMON) {
-                        log.info(TAG, "Boot: Starting Telegram Bot daemon...")
-                        adbLauncher.launchTelegramDaemon(createLogCallback("TelegramBot"))
-                    }
-                }, 15000) // Start after core daemons are up
             }
-        } catch (e: Exception) {
-            log.error(TAG, "Error starting optional daemons: ${e.message}")
+        }
+        if (zrokEnabled) {
+            vm.zrokController.isRunning { isRunning ->
+                if (isRunning) {
+                    log.info(TAG, "Zrok already running, skipping start")
+                } else {
+                    ifNotUserStopped(DaemonType.ZROK_TUNNEL) {
+                        log.info(TAG, "Starting Zrok (user enabled)...")
+                        vm.startDaemon(DaemonType.ZROK_TUNNEL, userInitiated = false)
+                    }
+                }
+            }
+        }
+        if (!cloudflaredEnabled && !zrokEnabled) {
+            log.info(TAG, "No tunnel enabled by user")
+        }
+
+    }
+
+
+    private fun startOptionalDaemonsViaAdb() {
+        log.info(TAG, "Starting enabled optional daemons by dependency via ADB")
+        if (PreferencesManager.isDaemonEnabled(DaemonType.SINGBOX_PROXY)) {
+            awaitSingboxDependencyViaAdb()
+        } else {
+            startAllTunnelsViaAdb()
+        }
+        if (PreferencesManager.isDaemonEnabled(DaemonType.TELEGRAM_DAEMON)) {
+            syncTelegramEnabledToUnifiedConfig(true)
+            ifNotUserStopped(DaemonType.TELEGRAM_DAEMON) {
+                adbLauncher.launchTelegramDaemon(createLogCallback("TelegramBot"))
+            }
         }
     }
-    
+
+    private fun startAllTunnelsViaAdb() {
+        startPublicTunnelsViaAdb()
+        startPrivateTunnelsViaAdb()
+    }
+
+    private fun awaitSingboxDependencyViaAdb(generation: Int = startupGeneration.get()) {
+        if (supervisionStopped || generation != startupGeneration.get() ||
+            !PreferencesManager.isDaemonEnabled(DaemonType.SINGBOX_PROXY) ||
+            singboxStartInFlight.get() != 0L) return
+        adbLauncher.isSingboxRunning { running ->
+            if (supervisionStopped || generation != startupGeneration.get()) return@isSingboxRunning
+            if (running) {
+                if (singboxPortReady()) {
+                    singboxDependencyAttempts.set(0)
+                    log.info(TAG, "Boot: Singbox pidof and port 8119 confirmed")
+                    if (hasEnabledTunnel()) startAllTunnelsViaAdb()
+                } else scheduleSingboxDependencyRetry(generation, "Singbox port 8119 not ready") {
+                    awaitSingboxDependencyViaAdb(generation)
+                }
+            } else if (singboxDependencyAttempts.get() < MAX_SINGBOX_DEPENDENCY_RETRIES) {
+                ifNotUserStopped(DaemonType.SINGBOX_PROXY) {
+                    if (supervisionStopped || generation != startupGeneration.get()) return@ifNotUserStopped
+                    val token = beginSingboxLaunch()
+                    if (token == 0L) return@ifNotUserStopped
+                    adbLauncher.startSingbox(object : AdbDaemonLauncher.LaunchCallback {
+                        override fun onLog(message: String) { log.debug(TAG, "[Singbox] $message") }
+                        override fun onLaunched() {
+                            finishSingboxLaunch(token)
+                            scheduleSingboxDependencyRetry(generation, "Checking proxy listener after launch") {
+                                awaitSingboxDependencyViaAdb(generation)
+                            }
+                        }
+                        override fun onError(error: String) {
+                            finishSingboxLaunch(token)
+                            scheduleSingboxDependencyRetry(generation, error) {
+                                awaitSingboxDependencyViaAdb(generation)
+                            }
+                        }
+                    })
+                }
+            }
+        }
+    }
+
+    /** Launch optional network daemons after their actual prerequisites are ready. */
+    private fun startPrivateTunnelsViaAdb() {
+        if (PreferencesManager.isDaemonEnabled(DaemonType.TAILSCALE_TUNNEL)) {
+            ifNotUserStopped(DaemonType.TAILSCALE_TUNNEL) {
+                log.info(TAG, "Boot: Starting Tailscale...")
+                startTailscaleOnBoot()
+            }
+        }
+        if (PreferencesManager.isDaemonEnabled(DaemonType.WIREGUARD_TUNNEL)) {
+            ifWireGuardConfiguredForStart {
+                ifNotUserStopped(DaemonType.WIREGUARD_TUNNEL) {
+                    log.info(TAG, "Boot: Starting WireGuard...")
+                    startWireGuardOnBoot()
+                }
+            }
+        }
+    }
+
+    private fun startPublicTunnelsViaAdb() {
+        if (PreferencesManager.isDaemonEnabled(DaemonType.CLOUDFLARED_TUNNEL) &&
+            !cloudflaredBackingOff("Boot")
+        ) {
+            ifNotUserStopped(DaemonType.CLOUDFLARED_TUNNEL) {
+                log.info(TAG, "Boot: Starting Cloudflared...")
+                adbLauncher.launchTunnel(object : AdbDaemonLauncher.TunnelCallback {
+                    override fun onLog(message: String) { log.debug(TAG, "[Cloudflared] $message") }
+                    override fun onTunnelUrl(url: String) { log.info(TAG, "Boot: Cloudflared URL: $url") }
+                    override fun onError(error: String) { log.error(TAG, "Boot: Cloudflared error: $error") }
+                })
+            }
+        }
+        if (PreferencesManager.isDaemonEnabled(DaemonType.ZROK_TUNNEL)) {
+            ifNotUserStopped(DaemonType.ZROK_TUNNEL) {
+                log.info(TAG, "Boot: Starting Zrok...")
+                startZrokOnBoot()
+            }
+        }
+    }
+
     /**
      * Start Zrok tunnel on boot using ZrokLauncher directly.
      */
@@ -1450,6 +1627,7 @@ class DaemonStartupManager(
         for (type in OPTIONAL_DAEMONS) {
             if (type in userStoppedDaemons) continue
             if (!PreferencesManager.isDaemonEnabled(type)) continue
+            if (type == DaemonType.SINGBOX_PROXY && singboxStartInFlight.get() != 0L) continue
             candidates.add(type)
         }
 
@@ -1478,6 +1656,16 @@ class DaemonStartupManager(
             lastHealthSnapshotAtMs = System.currentTimeMillis()
             for (type in candidates) {
                 if (!adbLauncher.processAliveIn(snapshot, type.processName)) {
+                    // A live sing-box may outlive sentry_proxy and not yet have
+                    // opened 8119. Never invoke launchProxyDaemon over a PID:
+                    // its cleanup kills *both* processes. Probe by pidof, not
+                    // sentry_proxy's snapshot name or the proxy socket alone.
+                    if (type == DaemonType.SINGBOX_PROXY) {
+                        adbLauncher.isSingboxRunning { pidAlive ->
+                            if (!pidAlive && singboxStartInFlight.get() == 0L) relaunchDaemon(type)
+                        }
+                        continue
+                    }
                     if (type == DaemonType.WIREGUARD_TUNNEL) {
                         ifWireGuardConfigured {
                             log.warn(TAG, "Health check: ${type.displayName} is DEAD — relaunching...")
@@ -1584,6 +1772,40 @@ class DaemonStartupManager(
 
     private fun doRelaunchDaemon(type: DaemonType) {
         if (supervisionStopped) return
+        if (type in listOf(DaemonType.CLOUDFLARED_TUNNEL, DaemonType.ZROK_TUNNEL,
+                DaemonType.TAILSCALE_TUNNEL, DaemonType.WIREGUARD_TUNNEL) &&
+            PreferencesManager.isDaemonEnabled(DaemonType.SINGBOX_PROXY)) {
+            adbLauncher.isSingboxRunning { running ->
+                if (running && singboxPortReady() && !supervisionStopped) {
+                    doRelaunchDaemonReady(type)
+                } else {
+                    log.info(TAG, "Health check: delaying ${type.displayName} until Singbox port 8119 is ready")
+                }
+            }
+            return
+        }
+        if (type == DaemonType.SINGBOX_PROXY) {
+            // Health-check and startup share one single-flight gate. The
+            // final pidof check closes the snapshot-to-launch race.
+            val token = beginSingboxLaunch()
+            if (token == 0L) return
+            adbLauncher.isSingboxRunning { running ->
+                if (running || supervisionStopped) {
+                    finishSingboxLaunch(token)
+                } else {
+                    doRelaunchDaemonReady(type, token)
+                }
+            }
+            return
+        }
+        doRelaunchDaemonReady(type)
+    }
+
+    private fun doRelaunchDaemonReady(type: DaemonType, singboxToken: Long = 0L) {
+        if (supervisionStopped) {
+            finishSingboxLaunch(singboxToken)
+            return
+        }
         val vm = daemonsViewModel
         if (vm != null) {
             // userInitiated=false: a health-check revival must NOT clear the
@@ -1595,7 +1817,17 @@ class DaemonStartupManager(
             // negative permanent for OPTIONAL daemons.
             // The non-user path relaunches the process only and re-gates on the
             // in-memory user-stopped set as a same-process race backstop.
-            handler.post { vm.startDaemon(type, userInitiated = false) }
+            handler.post {
+                if (supervisionStopped) {
+                    finishSingboxLaunch(singboxToken)
+                    return@post
+                }
+                if (type == DaemonType.SINGBOX_PROXY) {
+                    vm.startDaemon(type, userInitiated = false) { _, _ ->
+                        finishSingboxLaunch(singboxToken)
+                    }
+                } else vm.startDaemon(type, userInitiated = false)
+            }
         } else {
             // Fallback: ADB-only launch for when ViewModel is not available (boot path)
             when (type) {
@@ -1613,6 +1845,17 @@ class DaemonStartupManager(
                         onError = { e -> log.error(TAG, "HealthCheck: ACC Sentry restart failed: $e") }
                     )
                 }
+                DaemonType.SINGBOX_PROXY -> {
+                    adbLauncher.startSingbox(object : AdbDaemonLauncher.LaunchCallback {
+                        override fun onLog(message: String) { log.debug(TAG, "[Singbox HealthCheck] $message") }
+                        override fun onLaunched() { finishSingboxLaunch(singboxToken) }
+                        override fun onError(error: String) {
+                            finishSingboxLaunch(singboxToken)
+                            log.warn(TAG, "Health check: Singbox start failed: $error")
+                        }
+                    })
+                }
+                DaemonType.TAILSCALE_TUNNEL -> startTailscaleOnBoot()
                 DaemonType.ZROK_TUNNEL -> {
                     // Boot-path zrok recovery (no ViewModel). Without this
                     // branch, the health-check would log "no ADB fallback"
@@ -1704,6 +1947,7 @@ class DaemonStartupManager(
 
     fun cleanup() {
         healthCheckRunning.set(false)
+        startupProbeInFlight.set(false)
         handler.removeCallbacksAndMessages(null)
         // The health-check loop now lives on its own looper, so clearing the main
         // handler above no longer reaches it — drop its pending tick too (the

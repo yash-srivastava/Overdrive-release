@@ -52,7 +52,10 @@ public class ZrokLauncherReliabilityContractTest {
         assertTrue(telegram.contains("ProxyHelper.probePort(8119)"));
         assertTrue(telegram.contains("ZrokRuntimeProbe.waitForProxy(5_000L)"));
         assertFalse(telegram.contains("pgrep -f sing-box"));
-        assertTrue(startup.contains("val tunnelDelay = if (PreferencesManager.isDaemonEnabled"));
+        assertTrue(startup.contains("awaitSingboxDependency(vm)"));
+        assertTrue(startup.contains("adbLauncher.isSingboxRunning { running ->"));
+        assertTrue(startup.contains("singboxPortReady()"));
+        assertTrue(startup.contains("startAllTunnelsFromPreferences(vm)"));
     }
 
     @Test

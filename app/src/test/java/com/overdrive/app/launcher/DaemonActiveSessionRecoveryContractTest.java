@@ -35,7 +35,7 @@ public class DaemonActiveSessionRecoveryContractTest {
         assertTrue(start >= 0 && launcher > start);
         String startBody = viewModel.substring(start, launcher);
         assertTrue(startBody.contains("clearStartBlockers(type)"));
-        assertTrue(startBody.contains("launchController(type, controller)"));
+        assertTrue(startBody.contains("launchController(type, controller, onComplete)"));
         assertTrue(startBody.contains(
                 "type in DaemonStartupManager.userStoppedDaemons"));
         assertTrue(startBody.indexOf(

@@ -360,10 +360,43 @@ public class AppUpdaterRestartSafetyContractTest {
                 "UpdateLifecycle.hardResetDaemons(this)"));
         assertTrue(main.contains(
                 "daemonStartupManager.initializeOnAppLaunch()"));
-        assertTrue(startup.contains(
-                "handler.postDelayed({ startCoreDaemons() }, 45000)"));
-        assertTrue(startup.contains(
-                "handler.postDelayed({ startOptionalDaemonsFromPreferences() }, 60000)"));
+        // ADB and Android readiness release a per-manager stabilization cycle;
+        // opening the app after 90 seconds of device uptime is not a bypass.
+        assertTrue(startup.contains("awaitAdbReadiness(generation)"));
+        assertTrue(startup.contains("getprop sys.boot_completed"));
+        assertTrue(startup.contains("startupReleased.compareAndSet(false, true)"));
+        assertTrue(startup.contains("startupReleased.set(false)"));
+        assertTrue(startup.contains("startupGeneration.incrementAndGet()"));
+        assertTrue(startup.contains("remainingStartupWindow(45_000L)"));
+        assertTrue(startup.contains("remainingStartupWindow(60_000L)"));
+        assertTrue(startup.contains("remainingStartupWindow(90_000L)"));
+        assertTrue(startup.contains("elapsedRealtime() - startupStartedAtMs"));
+        assertFalse(startup.contains("remainingBootWindow("));
+
+        String coreStartup = methodBody(startup,
+                "private fun startCoreDaemons()",
+                "private fun startCoreDaemonsViaAdb()");
+        assertTrue(coreStartup.contains("vm.startDaemon(DaemonType.CAMERA_DAEMON, userInitiated = false)"));
+        assertTrue(coreStartup.contains("vm.startDaemon(DaemonType.SENTRY_DAEMON, userInitiated = false)"));
+        assertTrue(coreStartup.contains("vm.startDaemon(DaemonType.ACC_SENTRY_DAEMON, userInitiated = false)"));
+        assertTrue(coreStartup.contains("}, 5_000L)"));
+        assertTrue(coreStartup.contains("}, 10_000L)"));
+
+        String optionalStartup = methodBody(startup,
+                "private fun startOptionalDaemonsFromPreferences()",
+                "private fun hasEnabledTunnel()");
+        assertTrue(optionalStartup.contains("awaitSingboxDependency(vm)"));
+        assertTrue(optionalStartup.contains("startAllTunnelsFromPreferences(vm)"));
+        assertTrue(startup.contains("startAllTunnelsViaAdb()"));
+        assertTrue(startup.contains("com.overdrive.app.mqtt.ProxyHelper.probePort(8119)"));
+        assertTrue(startup.contains("MAX_SINGBOX_DEPENDENCY_RETRIES"));
+        assertTrue(startup.contains("singboxStartInFlight.compareAndSet(0L, token)"));
+        assertTrue(startup.contains("Health check: delaying ${type.displayName} until Singbox port 8119 is ready"));
+        String singboxLauncher = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/launcher/SingboxLauncher.kt");
+        assertTrue(singboxLauncher.contains("command = \"pidof sing-box\""));
+        assertTrue(singboxLauncher.contains("command = \"pidof sing-box >/dev/null 2>&1"));
+        assertFalse(singboxLauncher.contains("command = \"pgrep -f sing-box"));
     }
 
     private static boolean inRange(int value, int start, int end) {

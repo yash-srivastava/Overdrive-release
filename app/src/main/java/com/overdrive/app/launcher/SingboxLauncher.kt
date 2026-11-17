@@ -257,7 +257,7 @@ class SingboxLauncher(
         
         // Check if process is running
         adbShellExecutor.execute(
-            command = "pgrep -f sing-box && echo RUNNING || echo NOT_RUNNING",
+            command = "pidof sing-box >/dev/null 2>&1 && echo RUNNING || echo NOT_RUNNING",
             callback = object : AdbShellExecutor.ShellCallback {
                 override fun onSuccess(output: String) {
                     if (output.contains("RUNNING") && !output.contains("NOT_RUNNING")) {
@@ -311,8 +311,11 @@ class SingboxLauncher(
      * Check if sing-box is running.
      */
     fun isRunning(callback: (Boolean) -> Unit) {
+        // Match the kernel process name, not argv: pgrep -f also sees the
+        // `sh -c` wrapper whose command string contains "sing-box" and can
+        // therefore report a proxy that is not running.
         adbShellExecutor.execute(
-            command = "pgrep -f sing-box",
+            command = "pidof sing-box",
             callback = object : AdbShellExecutor.ShellCallback {
                 override fun onSuccess(output: String) {
                     callback(output.trim().isNotEmpty())
