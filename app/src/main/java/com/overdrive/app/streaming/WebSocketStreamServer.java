@@ -55,6 +55,8 @@ public class WebSocketStreamServer extends WebSocketServer
     private final Set<WebSocket> pendingKeyframeRetries =
             Collections.newSetFromMap(new ConcurrentHashMap<>());
     private Timer idleTimer;
+    // Late WebSocket close/error callbacks must not re-arm a timer after stop.
+    private volatile boolean stopped = false;
     private volatile long lastClientDisconnectElapsedMs = 0;
     private volatile boolean idleShutdownTriggered = false;
     private Runnable idleShutdownCallback;
@@ -138,6 +140,7 @@ public class WebSocketStreamServer extends WebSocketServer
      * This prevents idle timeout while external clients are connected.
      */
     public synchronized void registerExternalClient() {
+        if (stopped) return;
         externalClientCount++;
         // An idle callback may have been queued immediately before this
         // subscription. If its lifecycle re-check sees us and cancels the
@@ -151,6 +154,7 @@ public class WebSocketStreamServer extends WebSocketServer
      * Unregister an external client.
      */
     public synchronized void unregisterExternalClient() {
+        if (stopped) return;
         externalClientCount = Math.max(0, externalClientCount - 1);
         logger.info("External client unregistered (remaining: " + externalClientCount + ")");
         if (clients.isEmpty() && externalClientCount == 0) {
@@ -169,10 +173,16 @@ public class WebSocketStreamServer extends WebSocketServer
 
     @Override
     public void onOpen(WebSocket conn, ClientHandshake handshake) {
-        clients.add(conn);
+        synchronized (this) {
+            if (stopped) {
+                conn.close();
+                return;
+            }
+            clients.add(conn);
+            cancelIdleTimer();
+            idleShutdownTriggered = false;
+        }
         logger.info("WS Client connected: " + conn.getRemoteSocketAddress() + " (total: " + clients.size() + ")");
-        cancelIdleTimer();
-        idleShutdownTriggered = false;
         if (cachedSpsPps != null) {
             try {
                 conn.send(cachedSpsPps);
@@ -188,11 +198,7 @@ public class WebSocketStreamServer extends WebSocketServer
         clients.remove(conn);
         pendingKeyframeRetries.remove(conn);
         logger.info("WS Client disconnected (remaining: " + clients.size() + ")");
-        if (clients.isEmpty()) {
-            lastClientDisconnectElapsedMs =
-                    android.os.SystemClock.elapsedRealtime();
-            startIdleTimer();
-        }
+        armIdleTimerIfNoClients();
     }
 
     /** Optional hook to ask the owning encoder for a fresh IDR when a client
@@ -279,11 +285,7 @@ public class WebSocketStreamServer extends WebSocketServer
             clients.remove(conn);
             pendingKeyframeRetries.remove(conn);
             logger.error("WS Error: " + ex.getMessage());
-            if (clients.isEmpty()) {
-                lastClientDisconnectElapsedMs =
-                        android.os.SystemClock.elapsedRealtime();
-                startIdleTimer();
-            }
+            armIdleTimerIfNoClients();
         } else {
             logger.error("WS Server error: " + ex.getMessage());
         }
@@ -291,13 +293,20 @@ public class WebSocketStreamServer extends WebSocketServer
 
     @Override
     public void onStart() {
+        if (stopped) return;
         logger.info("WebSocket Stream Server started on port " + PORT);
-        lastClientDisconnectElapsedMs =
-                android.os.SystemClock.elapsedRealtime();
+        armIdleTimerIfNoClients();
+    }
+
+    /** Serialize idle transitions with external-client registration and shutdown. */
+    private synchronized void armIdleTimerIfNoClients() {
+        if (stopped || !clients.isEmpty() || externalClientCount > 0) return;
+        lastClientDisconnectElapsedMs = android.os.SystemClock.elapsedRealtime();
         startIdleTimer();
     }
 
     private synchronized void startIdleTimer() {
+        if (stopped) return;
         cancelIdleTimer();
         idleTimer = new Timer("WS-IdleTimer", true);
         idleTimer.schedule(new TimerTask() {
@@ -316,57 +325,45 @@ public class WebSocketStreamServer extends WebSocketServer
         }
     }
 
-    private synchronized void checkIdleTimeout() {
-        if (!clients.isEmpty() || externalClientCount > 0) {
-            cancelIdleTimer();
-            return;
-        }
-        long idleTime = android.os.SystemClock.elapsedRealtime()
-                - lastClientDisconnectElapsedMs;
-        if (idleTime >= IDLE_TIMEOUT_MS && !idleShutdownTriggered) {
+    private void checkIdleTimeout() {
+        Runnable callback;
+        synchronized (this) {
+            if (stopped || !clients.isEmpty() || externalClientCount > 0) {
+                cancelIdleTimer();
+                return;
+            }
+            long idleTime = android.os.SystemClock.elapsedRealtime()
+                    - lastClientDisconnectElapsedMs;
+            if (idleTime < IDLE_TIMEOUT_MS || idleShutdownTriggered) return;
             idleShutdownTriggered = true;
             logger.info("Idle timeout (" + (idleTime / 1000) + "s) - triggering shutdown");
             cancelIdleTimer();
-            if (idleShutdownCallback != null) {
-                try {
-                    idleShutdownCallback.run();
-                } catch (Exception e) {
-                    logger.error("Idle shutdown callback error", e);
-                }
-            } else {
-                // FIX BS-RC-001: no idle-shutdown callback was registered. Without a
-                // callback the bound port would stay held forever after the last
-                // client disconnects — so self-release here so the port frees within
-                // IDLE_TIMEOUT_MS of the last disconnect. The live-view wsStreamServer
-                // always has a callback and takes the branch above.
-                //
-                // FIX BS-DEFECT-D: this server is the LIVE-VIEW H.264 stream lane
-                // (port 8887, fed by streamEncoder). It is NOT the blind-spot lane.
-                // The blind-spot feature now uses the NATIVE SurfaceControl path
-                // (GpuSurveillancePipeline.enableBlindSpot → BsNativeLayer): the GPU
-                // composites the stitched 7/8 view straight onto an on-screen layer,
-                // with NO encoder, NO WebSocket server, and NO app-side decoder. There
-                // is therefore no BS WS server bound on 8889 and no WsH264Client to
-                // reconnect-storm it — the prior doc that attributed this idle branch
-                // to a BlindSpotOverlayService.tick()-driven BS lane is obsolete and
-                // has been corrected to prevent the false "8889 should be listening"
-                // expectation that masked the un-armed native lane.
-                //
-                // Use logger.warn so the self-release is visible on-device (I/D log
-                // levels are filtered out on the head unit); a port that could not
-                // free itself is a recoverability signal, not routine info.
-                logger.warn("Idle timeout with no shutdown callback - self-releasing port " + PORT);
-                try {
-                    shutdown();
-                } catch (Exception e) {
-                    logger.error("Idle self-shutdown error", e);
-                }
+            callback = idleShutdownCallback;
+        }
+        // Do not call application teardown or stop(1000) while holding the
+        // server monitor: worker callbacks may need that monitor to close.
+        if (callback != null) {
+            try {
+                callback.run();
+            } catch (Exception e) {
+                logger.error("Idle shutdown callback error", e);
+            }
+        } else {
+            // With no owner callback, release the port after the idle period.
+            // Shutdown runs outside the monitor, so WebSocket worker teardown
+            // cannot deadlock a late onClose/onError callback.
+            logger.warn("Idle timeout with no shutdown callback - self-releasing port " + PORT);
+            try {
+                shutdown();
+            } catch (Exception e) {
+                logger.error("Idle self-shutdown error", e);
             }
         }
     }
 
     @Override
     public void onSpsPps(ByteBuffer sps, ByteBuffer pps) {
+        if (stopped) return;
         // The callback may be shared with other consumers of the codec format.
         // Do not consume their ByteBuffer positions while caching headers.
         ByteBuffer spsView = sps.duplicate();
@@ -383,7 +380,7 @@ public class WebSocketStreamServer extends WebSocketServer
 
     @Override
     public void onH264Packet(ByteBuffer data, MediaCodec.BufferInfo info) {
-        if (clients.isEmpty()) return;
+        if (stopped || clients.isEmpty()) return;
 
         // Lazy-init the reusable buffer on the first packet that actually
         // reaches a connected client. With surveillance on but no streaming
@@ -470,7 +467,11 @@ public class WebSocketStreamServer extends WebSocketServer
     public boolean hasClients() { return !clients.isEmpty(); }
 
     public void shutdown() {
-        try {
+        // Retire the instance before closing sockets: their onClose callbacks
+        // can arrive after stop() and must not create a new Timer thread.
+        // Release the monitor before stop(), which waits for WS worker threads.
+        synchronized (this) {
+            stopped = true;
             cancelIdleTimer();
             for (WebSocket conn : clients) {
                 try { conn.close(); } catch (Exception ignored) {}
@@ -480,6 +481,8 @@ public class WebSocketStreamServer extends WebSocketServer
             cachedSpsPps = null;
             reusableFrameBuffer = null;
             frameCount = 0;
+        }
+        try {
             stop(1000);
             logger.info("WebSocket Stream Server stopped");
         } catch (Exception e) {

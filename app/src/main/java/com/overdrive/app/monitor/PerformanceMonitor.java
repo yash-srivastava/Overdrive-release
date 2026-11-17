@@ -325,9 +325,10 @@ public class PerformanceMonitor {
     private void collectCpuMetrics(PerformanceSnapshot snapshot) {
         try {
             // Read /proc/stat for system CPU
-            RandomAccessFile reader = new RandomAccessFile("/proc/stat", "r");
-            String line = reader.readLine();
-            reader.close();
+            String line;
+            try (RandomAccessFile reader = new RandomAccessFile("/proc/stat", "r")) {
+                line = reader.readLine();
+            }
             
             if (line != null && line.startsWith("cpu ")) {
                 String[] parts = line.split("\\s+");
@@ -356,9 +357,10 @@ public class PerformanceMonitor {
             }
             
             // Read /proc/[pid]/stat for app CPU
-            RandomAccessFile appReader = new RandomAccessFile("/proc/" + pid + "/stat", "r");
-            String appLine = appReader.readLine();
-            appReader.close();
+            String appLine;
+            try (RandomAccessFile appReader = new RandomAccessFile("/proc/" + pid + "/stat", "r")) {
+                appLine = appReader.readLine();
+            }
             
             if (appLine != null) {
                 // /proc/<pid>/stat field 2 (comm) is parenthesized and may
@@ -466,20 +468,30 @@ public class PerformanceMonitor {
             // /proc/meminfo values on every sample.
             long memTotal = 0;
             long memAvailable = 0;
+            boolean haveTotal = false;
+            boolean haveAvailable = false;
             try (BufferedReader reader = new BufferedReader(new FileReader("/proc/meminfo"))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
                     if (line.startsWith("MemTotal:")) {
                         memTotal = parseMemInfoValueKb(line);
+                        haveTotal = true;
                     } else if (line.startsWith("MemAvailable:")) {
                         memAvailable = parseMemInfoValueKb(line);
+                        haveAvailable = true;
                     }
                 }
             }
             
-            snapshot.memTotalMb = memTotal / 1024.0;
-            snapshot.memUsedMb = (memTotal - memAvailable) / 1024.0;
-            snapshot.memUsagePercent = 100.0 * (memTotal - memAvailable) / memTotal;
+            // /proc/meminfo can be inaccessible or partially read on OEM
+            // firmware. Never emit NaN/Infinity (or negative used memory)
+            // as valid telemetry on Android 10.
+            if (haveTotal && haveAvailable && memTotal > 0
+                    && memAvailable >= 0 && memAvailable <= memTotal) {
+                snapshot.memTotalMb = memTotal / 1024.0;
+                snapshot.memUsedMb = (memTotal - memAvailable) / 1024.0;
+                snapshot.memUsagePercent = 100.0 * (memTotal - memAvailable) / memTotal;
+            }
             
             // App memory via Debug API
             Debug.MemoryInfo memInfo = new Debug.MemoryInfo();
