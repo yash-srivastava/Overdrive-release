@@ -13,11 +13,6 @@
   <a href="#home-assistant-integration">Home Assistant</a> •
   <a href="#translations">Translate</a>
 </p>
-<p align="center">
-  <a href="https://crowdin.com/project/overdrive">
-    <img src="https://badges.crowdin.net/overdrive/localized.svg" alt="Crowdin localization status">
-  </a>
-</p>
 
 Free, open-source dashcam and sentry mode app built specifically for BYD vehicles with DiLink v3. All data stays on your device — no cloud, no accounts, no subscriptions.
 
@@ -388,27 +383,50 @@ If you want to use Zrok tunneling for remote access, you need your own Zrok invi
 
 ## Translations
 
-OverDrive's UI is translated through [Crowdin](https://crowdin.com/project/overdrive). The app currently ships in **16 languages** (English, German, Spanish, French, Hindi, Italian, Japanese, Korean, Dutch, Norwegian Bokmål, Brazilian Portuguese, Russian, Thai, Turkish, Vietnamese, Simplified Chinese, Traditional Chinese), with another ~14 languages open for community translation (Polish, Czech, Romanian, Catalan, Swedish, Finnish, Danish, Greek, Hungarian, Hebrew, Arabic, Serbian, Ukrainian, Afrikaans).
+OverDrive speaks 20 languages, all translated by drivers like you. Translating now works with one simple spreadsheet per language: no account, no coding.
 
 ### How to help
 
-1. Sign up at [crowdin.com](https://crowdin.com) (free).
-2. Visit the [OverDrive project](https://crowdin.com/project/overdrive) and click **Join**.
-3. Pick a language and translate strings directly in Crowdin's web editor — **no GitHub or coding required**.
+1. **Download your language** from the table below.
+2. **Open it** in Excel, Google Sheets, LibreOffice or Numbers.
+3. **Fill in the yellow cells** in the *translation* column. Untranslated lines are at the top. You can also correct any existing translation. Do as much or as little as you like.
+4. **Send it back:** open a [Translation update](https://github.com/yash-srivastava/Overdrive-release/issues/new?template=translation.yml) and drag your file in, or share it with us on [Discord](https://discord.gg/PZutk9fg4h).
 
-New strings get auto-pre-translated by AI; translators just need to review and correct rather than start from scratch. Brand names (BYD, OverDrive, Tailscale, etc.) are protected — Crowdin's glossary marks them "do not translate".
+Every line is checked before it ships (placeholders like `{name}` and `%s`, brand names, formatting), so a mistake can't break the app. Your translations go out with the next update.
 
-When you save translations they enter as suggestions. Once enough community translators agree, or a proofreader approves, they land in the next release via an automated pull request.
+**Spotted one wrong word?** Use the same [Translation update](https://github.com/yash-srivastava/Overdrive-release/issues/new?template=translation.yml) form: tell us where you saw it and what it should say. No sheet needed.
 
-### Want proofreader access?
+**Missing your language?** Open an issue and we'll set it up.
 
-If you've contributed substantial translations for a language, open an issue or DM the maintainer for **Proofreader** role — that lets you approve translations directly without waiting for review.
+| Language | Translated | Sheet |
+|---|---|---|
+| العربية (Arabic) | 50% | [OverDrive-ar.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-ar.xlsx) |
+| 简体中文 (Chinese, Simplified) | 51% | [OverDrive-zh-CN.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-zh-CN.xlsx) |
+| 繁體中文 (Chinese, Traditional) | 51% | [OverDrive-zh-TW.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-zh-TW.xlsx) |
+| Čeština (Czech) | 39% | [OverDrive-cs.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-cs.xlsx) |
+| Nederlands (Dutch) | 49% | [OverDrive-nl.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-nl.xlsx) |
+| Français (French) | 50% | [OverDrive-fr.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-fr.xlsx) |
+| Deutsch (German) | 49% | [OverDrive-de.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-de.xlsx) |
+| עברית (Hebrew) | 97% | [OverDrive-he.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-he.xlsx) |
+| हिन्दी (Hindi) | 50% | [OverDrive-hi.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-hi.xlsx) |
+| Italiano (Italian) | 50% | [OverDrive-it.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-it.xlsx) |
+| 日本語 (Japanese) | 50% | [OverDrive-ja.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-ja.xlsx) |
+| 한국어 (Korean) | 50% | [OverDrive-ko.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-ko.xlsx) |
+| Norsk bokmål (Norwegian) | 50% | [OverDrive-nb.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-nb.xlsx) |
+| Português (Portuguese, Brazil) | 51% | [OverDrive-pt-BR.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-pt-BR.xlsx) |
+| Русский (Russian) | 76% | [OverDrive-ru.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-ru.xlsx) |
+| Español (Spanish) | 81% | [OverDrive-es.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-es.xlsx) |
+| ไทย (Thai) | 56% | [OverDrive-th.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-th.xlsx) |
+| Türkçe (Turkish) | 66% | [OverDrive-tr.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-tr.xlsx) |
+| Tiếng Việt (Vietnamese) | 65% | [OverDrive-vi.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-vi.xlsx) |
+
+Developers can still send pull requests on the language files: `app/src/main/assets/web/i18n/<lang>.json`, `app/src/main/assets/server-i18n/<lang>.json` and `app/src/main/res/values-<lang>/`.
 
 ## Community
 
 - [Discord Server](https://discord.gg/PZutk9fg4h)
 - [Report Issues](https://github.com/yash-srivastava/Overdrive-release/issues)
-- [Translate on Crowdin](https://crowdin.com/project/overdrive)
+- [Help translate](#translations)
 
 ## Acknowledgments
 

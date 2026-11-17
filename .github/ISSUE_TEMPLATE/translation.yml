@@ -1,0 +1,52 @@
+name: 🌍 Translation update
+description: Send your filled-in translation sheet, or fix a few words in your language
+title: "[Translation] "
+labels: ["translation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping translate OverDrive! 🙌
+        **Sheet:** download your language from the [Translations release](https://github.com/yash-srivastava/Overdrive-release/releases/tag/translations), fill in the yellow cells, and attach the file below.
+        **Just a few words?** Skip the sheet and use the quick fix box.
+  - type: dropdown
+    id: language
+    attributes:
+      label: Language
+      options:
+        - العربية (Arabic)
+        - 简体中文 (Chinese, Simplified)
+        - 繁體中文 (Chinese, Traditional)
+        - Čeština (Czech)
+        - Nederlands (Dutch)
+        - Français (French)
+        - Deutsch (German)
+        - עברית (Hebrew)
+        - हिन्दी (Hindi)
+        - Italiano (Italian)
+        - 日本語 (Japanese)
+        - 한국어 (Korean)
+        - Norsk bokmål (Norwegian)
+        - Português (Portuguese, Brazil)
+        - Русский (Russian)
+        - Español (Spanish)
+        - ไทย (Thai)
+        - Türkçe (Turkish)
+        - Tiếng Việt (Vietnamese)
+        - Another language (tell us below)
+    validations:
+      required: true
+  - type: textarea
+    id: sheet
+    attributes:
+      label: Your sheet
+      description: Drag your .xlsx file here (a "CSV UTF-8" file works too).
+  - type: textarea
+    id: fix
+    attributes:
+      label: Quick fix (no sheet needed)
+      description: Where you saw it, what it says now, and what it should say. A screenshot helps.
+      placeholder: |
+        Where: Recordings → Timeline → speed menu
+        Now: ...
+        Should be: ...
