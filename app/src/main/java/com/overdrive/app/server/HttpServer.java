@@ -1940,6 +1940,12 @@ public class HttpServer {
             // is temporarily unreadable during a cross-process replacement.
             status.put("screenshotPrivacyMode", false);
         }
+        try {
+            status.put("personalizedRangeFirst",
+                    com.overdrive.app.config.UnifiedConfigManager.isPersonalizedRangeFirst());
+        } catch (Exception ignored) {
+            status.put("personalizedRangeFirst", true);
+        }
         status.put("genAiDashboardEnabled",
                 GenAiConfig.isDashboardPresentationEnabled());
 

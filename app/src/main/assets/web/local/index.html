@@ -151,6 +151,10 @@
                             </div>
                             <div class="dash-soc-bar" aria-hidden="true"><i id="dashSocBarFill"></i></div>
                             <div class="dash-range-intel" id="dashRangeIntel" hidden aria-live="polite">
+                                <label class="dash-range-preference" for="dashPreferPersonalized">
+                                    <span data-i18n="dashboard.prefer_personalized_range">Prioritize personalized range</span>
+                                    <input type="checkbox" id="dashPreferPersonalized" checked onchange="BYD.dashboard.setRangePreference(this.checked)">
+                                </label>
                                 <div class="dash-range-values">
                                     <div class="dash-range-value dash-range-value--personalized">
                                         <span data-i18n="trip.card.personalized_range">Personalized Range</span>
@@ -1274,6 +1278,20 @@
             margin-top: 16px;
         }
         .dash-range-intel[hidden] { display: none; }
+        .dash-range-preference {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            color: var(--on-surface-variant);
+            font-size: var(--fs-caption);
+            cursor: pointer;
+        }
+        .dash-range-preference[hidden] { display: none; }
+        .dash-range-preference input { width: 18px; height: 18px; accent-color: var(--primary); cursor: pointer; }
+        .dash-range-intel.vehicle-first .dash-range-value--vehicle { order: -1; }
+        .dash-range-intel.vehicle-first .dash-range-tracks > div:last-child { order: -1; }
         .dash-range-values {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2428,6 +2446,8 @@
             font-weight: 600;
         }
         .dash-range-meta { margin-top: 2px; }
+        .dash-range-intel.vehicle-first .dash-range-value--vehicle strong { color: var(--primary); }
+        .dash-range-intel.vehicle-first .dash-range-value--personalized strong { color: var(--on-surface); }
         .dash-glance-charge,
         .dash-glance-charge[hidden] { display: none; }
 
@@ -2966,6 +2986,39 @@
 
         BYD.dashboard = {
             lastStatus: null,
+            personalizedRangeFirst: true,
+            rangePreferenceSaving: false,
+            setRangePreference: function(enabled) {
+                var self = this;
+                var toggle = document.getElementById('dashPreferPersonalized');
+                if (this.rangePreferenceSaving) return;
+                this.rangePreferenceSaving = true;
+                if (toggle) toggle.disabled = true;
+                fetch('/api/settings/range-display', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ personalizedRangeFirst: enabled })
+                }).then(function(r) {
+                    if (!r.ok) throw new Error('Range preference request failed');
+                    return r.json();
+                }).then(function(data) {
+                    if (!data || data.success !== true || data.personalizedRangeFirst !== enabled) {
+                        throw new Error('Range preference was not saved');
+                    }
+                    self.personalizedRangeFirst = enabled;
+                    self.renderHalRange(self.lastStatus);
+                    self.updatePersonalizedRange(BYD.core.personalizedRangeSnapshot);
+                }).catch(function() {
+                    BYD.utils.toast(BYD.i18n.t('dashboard.range_preference_failed')
+                        || 'Could not save range display preference.', 'error');
+                }).then(function() {
+                    self.rangePreferenceSaving = false;
+                    if (toggle) {
+                        toggle.checked = self.personalizedRangeFirst;
+                        toggle.disabled = false;
+                    }
+                });
+            },
             vehicleStateRequest: null,
             vehicleStateRefreshQueued: false,
             vehicleStateFailureCount: 0,
@@ -3923,7 +3976,9 @@
 
                 var label = document.getElementById('dashRangeLabel');
                 if (label) {
-                    label.textContent = BYD.i18n.t('dashboard.metric_range') || 'Range';
+                    label.textContent = this.personalizedRangeFirst
+                        ? (BYD.i18n.t('dashboard.metric_range') || 'Range')
+                        : (BYD.i18n.t('dashboard.kicker_vehicle') || 'Vehicle');
                 }
                 var value = document.getElementById('dashRange');
                 if (value) value.textContent = rangeText;
@@ -3955,6 +4010,13 @@
                     return;
                 }
 
+                var vehicleFirst = !this.personalizedRangeFirst && snapshot.vehicleKm > 0;
+                panel.classList.toggle('vehicle-first', vehicleFirst);
+                var toggle = document.getElementById('dashPreferPersonalized');
+                if (toggle) {
+                    toggle.parentNode.hidden = !(snapshot.vehicleKm > 0);
+                    if (!this.rangePreferenceSaving) toggle.checked = this.personalizedRangeFirst;
+                }
                 var personalizedText = BYD.units.dist(snapshot.personalizedKm);
                 var vehicleText = snapshot.vehicleKm > 0
                     ? BYD.units.dist(snapshot.vehicleKm) : '--';
@@ -4023,19 +4085,22 @@
 
                 var rangeLabel = document.getElementById('dashRangeLabel');
                 if (rangeLabel) {
-                    rangeLabel.textContent =
-                        BYD.i18n.t('trip.card.personalized_range')
-                        || 'Personalized Range';
+                    rangeLabel.textContent = vehicleFirst
+                        ? (BYD.i18n.t('dashboard.kicker_vehicle') || 'Vehicle')
+                        : (BYD.i18n.t('trip.card.personalized_range') || 'Personalized Range');
                 }
                 var rangeValue = document.getElementById('dashRange');
-                if (rangeValue) rangeValue.textContent = personalizedText;
+                if (rangeValue) rangeValue.textContent = vehicleFirst ? vehicleText : personalizedText;
                 var rangeBreakdown = document.getElementById('dashRangeBreakdown');
                 if (rangeBreakdown) {
                     var vehicleLabel =
                         BYD.i18n.t('dashboard.kicker_vehicle') || 'Vehicle';
-                    rangeBreakdown.textContent = snapshot.vehicleKm > 0
-                        ? vehicleLabel + ' · ' + vehicleText : '';
-                    rangeBreakdown.style.display = snapshot.vehicleKm > 0
+                    var personalizedLabel = BYD.i18n.t('trip.card.personalized_range')
+                        || 'Personalized Range';
+                    rangeBreakdown.textContent = vehicleFirst
+                        ? personalizedLabel + ' · ' + personalizedText
+                        : (snapshot.vehicleKm > 0 ? vehicleLabel + ' · ' + vehicleText : '');
+                    rangeBreakdown.style.display = vehicleFirst || snapshot.vehicleKm > 0
                         ? '' : 'none';
                 }
 
@@ -4043,7 +4108,7 @@
                     && this.lastStatus.soc
                     && this.lastStatus.soc.percent !== undefined)
                     ? this.lastStatus.soc.percent : null;
-                this.glance.setSoc(socPercent, personalizedText);
+                this.glance.setSoc(socPercent, vehicleFirst ? vehicleText : personalizedText);
                 panel.hidden = false;
                 if (glance) glance.classList.add('has-range');
             },
@@ -4374,6 +4439,9 @@
             updateFromStatus: function(status) {
                 if (!status) return;
                 this.lastStatus = status;
+                if (!this.rangePreferenceSaving && typeof status.personalizedRangeFirst === 'boolean') {
+                    this.personalizedRangeFirst = status.personalizedRangeFirst;
+                }
                 this.setAiInsightEnabled(
                     status.genAiDashboardEnabled === true);
 

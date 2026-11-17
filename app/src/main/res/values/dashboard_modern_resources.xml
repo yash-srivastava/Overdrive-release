@@ -19,6 +19,8 @@
     <string name="dashboard_modern_range">Estimated range</string>
     <string name="dashboard_modern_personalized_range">Personalized range</string>
     <string name="dashboard_modern_vehicle_range">Vehicle estimate</string>
+    <string name="dashboard_range_prefer_personalized">Prioritize personalized range</string>
+    <string name="dashboard_range_preference_save_failed">Could not save range display preference</string>
     <string name="dashboard_modern_breakdown_ev">EV %1$d %2$s</string>
     <string name="dashboard_modern_breakdown_fuel">Fuel %1$d %2$s</string>
     <string name="dashboard_modern_breakdown_fuel_pct">Fuel %1$d %2$s (%3$.0f%%)</string>

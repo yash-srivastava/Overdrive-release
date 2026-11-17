@@ -175,6 +175,9 @@ class DashboardFragment : Fragment() {
     // figure occupies the main range column.
     private var vehicleHalRangeColumn: View? = null
     private var vehicleHalRangeValue: TextView? = null
+    private var rangePreferenceSwitch: com.google.android.material.switchmaterial.SwitchMaterial? = null
+    private var personalizedRangeFirst = true
+    private var rangePreferenceSaving = false
     private var vehicleArt: ImageView? = null
     private var quickTrips: View? = null
     private var quickVehicleControl: View? = null
@@ -310,6 +313,8 @@ class DashboardFragment : Fragment() {
         super.onDestroyView()
         metricsExecutor?.shutdownNow()
         metricsExecutor = null
+        rangePreferenceSaving = false
+        rangePreferenceSwitch = null
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -401,6 +406,7 @@ class DashboardFragment : Fragment() {
         heroRangeBreakdown = view.findViewById(R.id.heroRangeBreakdown)
         vehicleHalRangeColumn = view.findViewById(R.id.vehicleHalRangeColumn)
         vehicleHalRangeValue = view.findViewById(R.id.vehicleHalRangeValue)
+        rangePreferenceSwitch = view.findViewById(R.id.dashPreferPersonalized)
         vehicleArt = view.findViewById(R.id.vehicleArt)
 
         // Vehicle tile present in both portrait and landscape layouts.
@@ -458,6 +464,11 @@ class DashboardFragment : Fragment() {
             renderRemoteExpansion(animate = true)
         }
         metricVehicle?.setOnClickListener { showVehicleCapacityDialog() }
+        rangePreferenceSwitch?.setOnCheckedChangeListener { _, enabled ->
+            if (!rangePreferenceSaving && enabled != personalizedRangeFirst) {
+                saveRangePreference(enabled)
+            }
+        }
 
         btnToggleToken.setOnClickListener { toggleTokenVisibility() }
         btnCopyToken.setOnClickListener { copyTokenToClipboard() }
@@ -801,11 +812,16 @@ class DashboardFragment : Fragment() {
             mainHandler.post {
                 if (!isAdded || view == null || generation != viewGeneration) return@post
                 val previousVehicleState = dashboardState.vehicle
+                val previousRangePreference = personalizedRangeFirst
+                if (!rangePreferenceSaving && result is DashboardStatusResult.Available) {
+                    personalizedRangeFirst = result.snapshot.personalizedRangeFirst
+                }
                 dashboardState = DashboardStateReducer.status(dashboardState, result)
                 skeleton?.markLoaded(R.id.vehicleSocSkeleton)
                 skeleton?.markLoaded(R.id.vehicleRangeSkeleton)
                 // Most polls return the same values; skip the repaint and SOC gauge animation then.
-                if (dashboardState.vehicle != previousVehicleState) {
+                if (dashboardState.vehicle != previousVehicleState
+                    || personalizedRangeFirst != previousRangePreference) {
                     renderVehicleState()
                 }
                 if (dashboardResumed) {
@@ -895,6 +911,7 @@ class DashboardFragment : Fragment() {
                 vehicleSocValue.contentDescription = null
                 vehicleRangeValue.setText(R.string.dashboard_metric_value_pending)
                 vehicleRangeLabel?.setText(R.string.dash_range_caption)
+                rangePreferenceSwitch?.visibility = View.GONE
                 setHalRangeColumnVisible(false)
                 chargingCard.visibility = View.GONE
                 heroSubtitle.visibility = View.VISIBLE
@@ -908,6 +925,7 @@ class DashboardFragment : Fragment() {
                 vehicleSocValue.contentDescription = null
                 vehicleRangeValue.setText(R.string.dashboard_metric_value_pending)
                 vehicleRangeLabel?.setText(R.string.dash_range_caption)
+                rangePreferenceSwitch?.visibility = View.GONE
                 setHalRangeColumnVisible(false)
                 chargingCard.visibility = View.GONE
                 heroSubtitle.visibility = View.VISIBLE
@@ -951,14 +969,18 @@ class DashboardFragment : Fragment() {
                         scrollRemoteIntoView()
                     }
                 }
-                // Personalized range (learned from the driver's own trips via
-                // /api/trips/range) headlines the metric when available; the
-                // plain HAL estimate stays as the fallback so the card never
-                // regresses to a blank value.
-                // When BOTH figures exist, the vehicle's own estimate sits beside
-                // it so the two can be compared at a glance.
+                // Headline preference affects only presentation, never the
+                // learned estimate or the vehicle's original HAL reading.
                 val personalized = snapshot.rangeDetails?.personalized
-                vehicleRangeValue.text = (personalized ?: snapshot.range)?.let {
+                val halRange = snapshot.range
+                val vehicleFirst = !personalizedRangeFirst && halRange != null
+                val primaryRange = if (vehicleFirst) halRange else (personalized ?: halRange)
+                rangePreferenceSwitch?.apply {
+                    visibility = if (personalized != null && halRange != null) View.VISIBLE else View.GONE
+                    isEnabled = !rangePreferenceSaving
+                    if (isChecked != personalizedRangeFirst) isChecked = personalizedRangeFirst
+                }
+                vehicleRangeValue.text = primaryRange?.let {
                     leadNumber(
                         getString(R.string.dashboard_modern_distance, it.value, it.unit.label),
                         formatLocalized("%d", it.value),
@@ -967,15 +989,21 @@ class DashboardFragment : Fragment() {
                     )
                 } ?: getString(R.string.dashboard_metric_value_pending)
                 vehicleRangeLabel?.setText(
-                    if (personalized != null) R.string.dashboard_modern_personalized_range
+                    if (vehicleFirst) R.string.dashboard_modern_vehicle_range
+                    else if (personalized != null) R.string.dashboard_modern_personalized_range
                     else R.string.dash_range_caption
                 )
-                val halRange = snapshot.range
                 val showHalColumn = personalized != null && halRange != null
-                if (showHalColumn && halRange != null) {
-                    vehicleHalRangeValue?.text = vehicleEstimateText(
-                        getString(R.string.dashboard_modern_distance, halRange.value, halRange.unit.label)
-                    )
+                if (showHalColumn) {
+                    val secondary = if (vehicleFirst) personalized else halRange
+                    val label = if (vehicleFirst) R.string.dashboard_modern_personalized_range
+                        else R.string.dashboard_modern_vehicle_range
+                    if (secondary != null) {
+                        vehicleHalRangeValue?.text = rangeComparisonText(
+                            getString(label),
+                            getString(R.string.dashboard_modern_distance, secondary.value, secondary.unit.label)
+                        )
+                    }
                 }
                 setHalRangeColumnVisible(showHalColumn)
                 renderSocGauge(snapshot.socPercent)
@@ -988,9 +1016,8 @@ class DashboardFragment : Fragment() {
         }
     }
 
-    /** "Vehicle estimate 398 km", the figure in the primary text colour. */
-    private fun vehicleEstimateText(distance: String): CharSequence {
-        val label = getString(R.string.dashboard_modern_vehicle_range)
+    /** Secondary range label + figure, retaining the existing emphasized number. */
+    private fun rangeComparisonText(label: String, distance: String): CharSequence {
         val out = SpannableString("$label $distance")
         val start = label.length + 1
         out.setSpan(
@@ -999,6 +1026,47 @@ class DashboardFragment : Fragment() {
         )
         out.setSpan(TypefaceSpan("sans-serif-medium"), start, out.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         return out
+    }
+
+    /** Persist on the worker; failure keeps both displays on their last saved choice. */
+    private fun saveRangePreference(enabled: Boolean) {
+        rangePreferenceSaving = true
+        rangePreferenceSwitch?.isEnabled = false
+        val generation = viewGeneration
+        val executor = metricsExecutor ?: Executors.newSingleThreadExecutor()
+            .also { metricsExecutor = it }
+        executor.execute {
+            var saved = false
+            var conn: java.net.HttpURLConnection? = null
+            try {
+                conn = com.overdrive.app.util.DaemonHttpClient.open(
+                    "/api/settings/range-display", "POST", 2000, 4000)
+                conn.doOutput = true
+                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                conn.outputStream.use { it.write(
+                    org.json.JSONObject().put("personalizedRangeFirst", enabled)
+                        .toString().toByteArray(Charsets.UTF_8)
+                ) }
+                if (conn.responseCode == 200) {
+                    val response = org.json.JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+                    saved = response.optBoolean("success", false)
+                        && response.optBoolean("personalizedRangeFirst", !enabled) == enabled
+                }
+            } catch (_: Exception) {
+                saved = false
+            } finally {
+                conn?.disconnect()
+            }
+            mainHandler.post {
+                if (!isAdded || view == null || generation != viewGeneration) return@post
+                if (saved) personalizedRangeFirst = enabled
+                rangePreferenceSaving = false
+                renderVehicleState()
+                if (!saved) {
+                    appToast?.show(getString(R.string.dashboard_range_preference_save_failed), AppToast.Kind.ERROR)
+                }
+            }
+        }
     }
 
     private fun setHalRangeColumnVisible(visible: Boolean) {

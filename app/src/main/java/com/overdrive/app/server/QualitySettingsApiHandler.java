@@ -123,6 +123,15 @@ public class QualitySettingsApiHandler {
             handleSurveillanceLayoutPost(out, body);
             return true;
         }
+        // Shared native/WebUI dashboard range headline choice.
+        if (path.equals("/api/settings/range-display") && method.equals("GET")) {
+            sendRangeDisplay(out);
+            return true;
+        }
+        if (path.equals("/api/settings/range-display") && method.equals("POST")) {
+            handleRangeDisplayPost(out, body);
+            return true;
+        }
         // Web-shell appearance (theme picker shipped on every page).
         // Same UnifiedConfigManager-backed pattern as the rest of /api/settings.
         if (path.equals("/api/settings/appearance") && method.equals("GET")) {
@@ -174,6 +183,38 @@ public class QualitySettingsApiHandler {
         // present AND owner paired). Surface as a single field so the UI
         // doesn\'t have to re-compute the same logic.
         response.put("enabled", configured && paired);
+        HttpResponse.sendJson(out, response.toString());
+    }
+
+    /** Both dashboards use the same persisted preference, not browser-local storage. */
+    private static void sendRangeDisplay(OutputStream out) throws Exception {
+        JSONObject response = new JSONObject();
+        response.put("success", true);
+        response.put("personalizedRangeFirst",
+                com.overdrive.app.config.UnifiedConfigManager.isPersonalizedRangeFirst());
+        HttpResponse.sendJson(out, response.toString());
+    }
+
+    private static void handleRangeDisplayPost(OutputStream out, String body) throws Exception {
+        JSONObject response = new JSONObject();
+        try {
+            JSONObject req = new JSONObject(body == null ? "{}" : body);
+            Object wanted = req.opt("personalizedRangeFirst");
+            if (!(wanted instanceof Boolean)) {
+                response.put("success", false);
+                response.put("error", "personalizedRangeFirst must be a boolean");
+            } else {
+                boolean enabled = (Boolean) wanted;
+                boolean saved = com.overdrive.app.config.UnifiedConfigManager
+                        .setPersonalizedRangeFirst(enabled);
+                response.put("success", saved);
+                if (saved) response.put("personalizedRangeFirst", enabled);
+                else response.put("error", "Could not save range display preference");
+            }
+        } catch (Exception e) {
+            response.put("success", false);
+            response.put("error", "Invalid range display preference");
+        }
         HttpResponse.sendJson(out, response.toString());
     }
 

@@ -4291,6 +4291,8 @@
     "cmd_parking": "Parking",
     "metric_battery": "Battery",
     "metric_range": "Range",
+    "prefer_personalized_range": "Prioritize personalized range",
+    "range_preference_failed": "Could not save range display preference.",
     "state_on": "On",
     "state_off": "Off",
     "metric_power": "Power",

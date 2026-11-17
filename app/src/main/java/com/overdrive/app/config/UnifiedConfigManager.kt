@@ -3681,6 +3681,13 @@ object UnifiedConfigManager {
      * (the runtime falls back to navigator.language).
      */
     @JvmStatic
+    /** Shared dashboard headline preference; defaults to the historical personalized-first UI. */
+    fun isPersonalizedRangeFirst(): Boolean =
+        loadConfig().optJSONObject("dashboard")?.optBoolean("personalizedRangeFirst", true) ?: true
+
+    fun setPersonalizedRangeFirst(enabled: Boolean): Boolean =
+        updateSection("dashboard", JSONObject().put("personalizedRangeFirst", enabled))
+
     fun getAppearance(): JSONObject {
         return loadConfig().optJSONObject("appearance") ?: JSONObject().apply {
             put("theme", "dark")

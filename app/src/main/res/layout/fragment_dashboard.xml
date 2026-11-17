@@ -202,7 +202,17 @@
                                     android:textSize="16sp" />
                             </com.overdrive.app.ui.dashboard.DashboardBaselineFlow>
 
-                            <!-- Vehicle's own estimate, shown only beside a personalised range. -->
+                            <!-- Shared WebUI/native headline selection (On = personalized). -->
+                            <com.google.android.material.switchmaterial.SwitchMaterial
+                                android:id="@+id/dashPreferPersonalized"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="@dimen/od_space_4"
+                                android:checked="true"
+                                android:text="@string/dashboard_range_prefer_personalized"
+                                android:visibility="gone" />
+
+                            <!-- Secondary estimate, shown only when both ranges are available. -->
                             <LinearLayout
                                 android:id="@+id/vehicleHalRangeColumn"
                                 android:layout_width="match_parent"
