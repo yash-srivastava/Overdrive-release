@@ -69,9 +69,7 @@ public final class HighResPreviewSampler {
             "    vTexCoord = (uTexMatrix * vec4(src, 0.0, 1.0)).xy;\n" +
             "}\n";
 
-    private static String buildMosaicShader(
-            float[] offsets,
-            boolean isTexture2D) {
+    private static String buildMosaicShader(boolean isTexture2D) {
         // Layout 1 = full-frame passthrough. Layout 3 = four-corner DiLink 4
         // output with the configured inset. Layout 0 = legacy 4-strip.
         String extension = isTexture2D
@@ -80,13 +78,13 @@ public final class HighResPreviewSampler {
         String cameraSampler = isTexture2D
             ? "uniform sampler2D uCameraTex;\n"
             : "uniform samplerExternalOES uCameraTex;\n";
-        return String.format(Locale.US,
-                extension +
+        return extension +
                 "precision mediump float;\n" +
                 cameraSampler +
                 "uniform float uApaMode;\n" +
                 "uniform float uRedMaskStrength;\n" +
                 "uniform float uApaCenterInset;\n" +
+                "uniform vec4 uStripOffsets;\n" +
                 "varying vec2 vTexCoord;\n" +
                 "void main() {\n" +
                 "    vec2 samplePos;\n" +
@@ -97,10 +95,10 @@ public final class HighResPreviewSampler {
                 "        samplePos = vTexCoord;\n" +
                 "    } else {\n" +
                 "        vec2 gridPos = step(0.5, vTexCoord);\n" +
-                "        float frontOffset = %.5f;\n" +
-                "        float rightOffset = %.5f;\n" +
-                "        float rearOffset  = %.5f;\n" +
-                "        float leftOffset  = %.5f;\n" +
+                "        float frontOffset = uStripOffsets.x;\n" +
+                "        float rightOffset = uStripOffsets.y;\n" +
+                "        float rearOffset  = uStripOffsets.z;\n" +
+                "        float leftOffset  = uStripOffsets.w;\n" +
                 "        float stripOffsetX;\n" +
                 "        if (gridPos.x < 0.5) {\n" +
                 "            stripOffsetX = gridPos.y < 0.5 ? frontOffset : rearOffset;\n" +
@@ -114,8 +112,7 @@ public final class HighResPreviewSampler {
                 "    vec4 src = texture2D(uCameraTex, samplePos);\n" +
                 com.overdrive.app.camera.GlUtil.RED_MASK_GLSL +
                 "    gl_FragColor = src;\n" +
-                "}\n",
-                offsets[0], offsets[1], offsets[2], offsets[3]);
+                "}\n";
     }
 
     // Layout-aware single-quadrant sampler.
@@ -189,7 +186,7 @@ public final class HighResPreviewSampler {
     private int mosaicURedMaskStrength = -1;
     private int mosaicUApaCenterInset = -1;
     private int mosaicUApplyInverseYFlip = -1;
-    private float[] cachedOffsets = null;
+    private int mosaicUStripOffsets = -1;
 
     private int quadProgram = 0;
     private int quadAPos = -1, quadATex = -1, quadUTex = -1, quadUOffset = -1;
@@ -373,18 +370,12 @@ public final class HighResPreviewSampler {
         }
     }
 
-    private boolean ensureMosaicProgram(float[] offsets) {
-        if (mosaicProgram > 0 && cachedOffsets != null
-                && cachedOffsets[0] == offsets[0]
-                && cachedOffsets[1] == offsets[1]
-                && cachedOffsets[2] == offsets[2]
-                && cachedOffsets[3] == offsets[3]) return true;
-        if (mosaicProgram > 0) {
-            try { GLES20.glDeleteProgram(mosaicProgram); } catch (Throwable ignored) {}
-            mosaicProgram = 0;
-        }
+    private boolean ensureMosaicProgram() {
+        // Offsets are GL uniforms, not shader source constants. Calibration
+        // changes must not trigger driver shader compilation on the GL thread.
+        if (mosaicProgram > 0) return true;
         mosaicProgram = GlUtil.createProgram(
-            VERTEX_SHADER, buildMosaicShader(offsets, isTexture2D));
+            VERTEX_SHADER, buildMosaicShader(isTexture2D));
         if (mosaicProgram <= 0) return false;
         mosaicAPos = GLES20.glGetAttribLocation(mosaicProgram, "aPosition");
         mosaicATex = GLES20.glGetAttribLocation(mosaicProgram, "aTexCoord");
@@ -394,7 +385,7 @@ public final class HighResPreviewSampler {
         mosaicUApplyInverseYFlip = GLES20.glGetUniformLocation(mosaicProgram, "uApplyInverseYFlip");
         mosaicURedMaskStrength = GLES20.glGetUniformLocation(mosaicProgram, "uRedMaskStrength");
         mosaicUApaCenterInset = GLES20.glGetUniformLocation(mosaicProgram, "uApaCenterInset");
-        cachedOffsets = offsets.clone();
+        mosaicUStripOffsets = GLES20.glGetUniformLocation(mosaicProgram, "uStripOffsets");
         return true;
     }
 
@@ -437,7 +428,14 @@ public final class HighResPreviewSampler {
                 : Math.max(1, stripHeight * 2);
         return runOnSamplerThread(textureId, () -> {
             ensureFbo(outW, outH);
-            if (fbo < 0 || !ensureMosaicProgram(offsets)) return null;
+            if (fbo < 0 || !ensureMosaicProgram()) return null;
+            // Copy all four strip offsets into this draw's program before
+            // rendering. The sampler GL thread serializes preview jobs.
+            GLES20.glUseProgram(mosaicProgram);
+            if (mosaicUStripOffsets >= 0) {
+                GLES20.glUniform4f(mosaicUStripOffsets,
+                        offsets[0], offsets[1], offsets[2], offsets[3]);
+            }
             return renderAndEncode(textureId, mosaicProgram, mosaicAPos, mosaicATex, mosaicUTex,
                     -1, 0f, mosaicUTexMatrix, mosaicUApaMode, outW, outH);
         });
