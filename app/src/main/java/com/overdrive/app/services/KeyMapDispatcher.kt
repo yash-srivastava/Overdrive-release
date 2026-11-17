@@ -124,7 +124,12 @@ object KeyMapDispatcher {
      *  doubleWindowMs is the user-tunable single-vs-double disambiguation window
      *  (falls back to DOUBLE_WINDOW_MS when unset), captured per-snapshot so a live
      *  edit propagates on the next refresh without a restart. */
-    private class Snapshot(val enabled: Boolean, val bindings: List<JSONObject>, val doubleWindowMs: Long)
+    private class Snapshot(
+        val enabled: Boolean,
+        val bindings: List<JSONObject>,
+        val doubleWindowMs: Long,
+        val serviceModePaused: Boolean
+    )
 
     @Volatile private var cache: Snapshot? = null
     @Volatile private var foregroundPackage: String? = null
@@ -402,6 +407,15 @@ object KeyMapDispatcher {
      * @param repeatCount KeyEvent.getRepeatCount() (>0 ⇒ held → long-press)
      */
     fun onKey(keyCode: Int, isDown: Boolean, repeatCount: Int): Boolean {
+        // Service Mode pauses mapping without consuming hardware keys. Keep the
+        // throttled refresh alive while paused: otherwise a missed FileObserver
+        // event can leave the cached pause flag stuck after Service Mode ends.
+        val current = cache
+        if (current?.serviceModePaused == true) {
+            maybeRefresh()
+            return false
+        }
+
         // Capture mode: the Key Mapping "press a button to capture it" box (in the
         // WebView) can't see hardware keys — they arrive HERE, not as WebView DOM
         // keydown. While the page has armed capture, forward the keycode into the
@@ -840,14 +854,28 @@ object KeyMapDispatcher {
      *  the section under a different UID than this app process). */
     private fun refresh() {
         try {
-            UnifiedConfigManager.forceReload()
-            val enabled = UnifiedConfigManager.isKeymapEnabled()
-            val arr = UnifiedConfigManager.getKeymapBindings()
+            // Reuse the single freshly parsed root instead of reloading all
+            // settings (including another direct file read for Service Mode).
+            val root = UnifiedConfigManager.forceReload()
+            val keymap = root.optJSONObject("keymap") ?: JSONObject()
+            val enabled = keymap.optBoolean("enabled", false)
+            val arr = keymap.optJSONArray("bindings") ?: JSONArray()
             val list = ArrayList<JSONObject>(arr.length())
             for (i in 0 until arr.length()) {
                 arr.optJSONObject(i)?.let { list.add(it) }
             }
-            cache = Snapshot(enabled, list, UnifiedConfigManager.getKeymapDoubleTapWindowMs())
+            val serviceMode = root.optJSONObject("serviceMode")
+            val serviceModePaused = serviceMode?.optBoolean("enabled", false) == true &&
+                !serviceMode.optBoolean("ending", false) &&
+                (serviceMode.optJSONArray("disabledFeatures")?.let { features ->
+                    (0 until features.length()).any { features.optString(it) == "keymap" }
+                } == true)
+            cache = Snapshot(
+                enabled,
+                list,
+                keymap.optLong("doubleTapWindowMs", 450L).coerceIn(250L, 1500L),
+                serviceModePaused
+            )
             // Lazily toggle the instant-propagation watcher off this refresh so a
             // disabled feature holds no inotify watch (zero observer-thread wakes)
             // while an enabled one still gets the moment-the-daemon-writes push.
@@ -863,13 +891,13 @@ object KeyMapDispatcher {
             // next long-press; likewise a parked single/double whose binding is gone
             // should not still fire. Compute the set of keycodes that still have an
             // enabled long, then drop any tracked entry outside it (all of them when
-            // the feature is now disabled). Guarded by `this`, same monitor as onKey.
+            // the feature is disabled or Service Mode pauses it). Guarded by `this`, same monitor as onKey.
             synchronized(this) {
-                if (!enabled) {
+                if (!enabled || serviceModePaused) {
                     pending.clear(); pendingEpoch.clear(); suppressLongUntilUp.clear()
                     // Drop DOWN timestamps and the completed-cycle flags too: a
-                    // disabled feature must carry no stale burst-coalesce gap or
-                    // half-seen cycle into a later re-enable.
+                    // disabled/paused feature must carry no stale burst-coalesce gap
+                    // or half-seen cycle into a later re-enable.
                     lastDownAtMs.clear(); upSeenSinceDown.clear(); downPassedThrough.clear()
                     nativeCameraPassThroughUntilMs.clear()
                     nativeCameraDefaultGesture.clear()

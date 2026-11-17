@@ -685,6 +685,12 @@ public class SurveillanceIpcServer implements Runnable {
                     String s = request.optString("section", "");
                     JSONObject data = request.optJSONObject("data");
                     boolean ok = false;
+                    // Service Mode state is owned by the daemon's dedicated manager.
+                    if ("serviceMode".equals(s)) {
+                        response.put("success", false);
+                        response.put("error", "Service Mode state uses its dedicated API");
+                        break;
+                    }
                     // (the device secret is the daemon's to keep: no forwarded write sets it)
                     if ("auth".equals(s) && data != null) {
                         data.remove("deviceSecret");
@@ -714,6 +720,11 @@ public class SurveillanceIpcServer implements Runnable {
                     String s = request.optString("section", "");
                     JSONObject values = request.optJSONObject("values");
                     boolean ok = false;
+                    if ("serviceMode".equals(s)) {
+                        response.put("success", false);
+                        response.put("error", "Service Mode state uses its dedicated API");
+                        break;
+                    }
                     if (!s.isEmpty() && values != null) {
                         java.util.Map<String, Object> map = new java.util.HashMap<>();
                         java.util.Iterator<String> it = values.keys();

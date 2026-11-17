@@ -372,6 +372,8 @@ class BootReceiver : BroadcastReceiver() {
      * arriving after the judge erased the marker also brings the stack back.
      */
     private fun launchStack(appCtx: Context, trigger: String) {
+        com.overdrive.app.server.ServiceModeAppRecovery.tryRestore(appCtx)
+
         // Only reached on an actual launch path — bump the debounce timer here (not at the
         // top) so suppressed passive returns never shadow a subsequent recovery.
         lastStartTime = System.currentTimeMillis()

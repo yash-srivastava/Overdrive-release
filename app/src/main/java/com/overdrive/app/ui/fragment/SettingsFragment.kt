@@ -86,6 +86,7 @@ class SettingsFragment : Fragment() {
         ADB(R.string.settings_section_adb, R.drawable.ic_diagnostics),
         SECURITY(R.string.settings_section_security, R.drawable.ic_security_lock),
         DAEMONS(R.string.daemons_hero_title, R.drawable.ic_services),
+        SERVICE_MODE(R.string.settings_section_service_mode, R.drawable.ic_services, navigates = true),
         PRIVACY(R.string.settings_section_privacy, R.drawable.ic_delete),
     }
 
@@ -264,6 +265,7 @@ class SettingsFragment : Fragment() {
         Section.ADB -> SettingsAdbFragment()
         Section.SECURITY -> SettingsSecurityFragment()
         Section.DAEMONS -> SettingsDaemonsFragment()
+        Section.SERVICE_MODE -> ServiceModeFragment()
         Section.PRIVACY -> SettingsPrivacyFragment()
     }
 
@@ -360,6 +362,9 @@ class SettingsFragment : Fragment() {
         }
         view.findViewById<View>(R.id.cardSectionDaemons)?.setOnClickListener {
             findNavController().navigateDrillDown(R.id.daemonsFragment)
+        }
+        view.findViewById<View>(R.id.cardSectionServiceMode)?.setOnClickListener {
+            findNavController().navigateDrillDown(R.id.serviceModeFragment)
         }
     }
 
