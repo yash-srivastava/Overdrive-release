@@ -508,14 +508,16 @@ public final class HighResPreviewSampler {
         return runOnSamplerThread(textureId, () -> {
             ensureFbo(finalW, finalH);
             if (fbo < 0 || !ensureQuadrantProgram()) return null;
-            // Upload corner + flip uniforms if the program has them (silent
-            // no-op otherwise). uApaMode picks which branch the shader takes.
-            if (quadUCorner >= 0) {
+            // Bind once for both corner and flip uniforms. Each location may
+            // be optimized out by the driver; renderAndEncode still binds the
+            // program for the draw, including when both are absent.
+            if (quadUCorner >= 0 || quadUFlip >= 0) {
                 GLES20.glUseProgram(quadProgram);
+            }
+            if (quadUCorner >= 0) {
                 GLES20.glUniform2f(quadUCorner, cx, cy);
             }
             if (quadUFlip >= 0) {
-                GLES20.glUseProgram(quadProgram);
                 GLES20.glUniform2f(quadUFlip, fx, fy);
             }
             // renderAndEncode handles uApaMode upload via the location arg.
