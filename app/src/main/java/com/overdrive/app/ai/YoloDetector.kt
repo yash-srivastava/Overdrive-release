@@ -446,7 +446,14 @@ class YoloDetector(private val context: Context) {
             return emptyList()
         }
 
-        if (width <= 0 || height <= 0) return emptyList()
+        // The GPU readback may be interrupted by a camera restart. Never feed
+        // a partially copied or stale RGB888 buffer to TensorBuffer: it throws
+        // during reshape, aborting the surveillance inference worker's task.
+        // Compare in Long to avoid overflow for malformed dimensions.
+        if (width <= 0 || height <= 0 ||
+            rgbData.size.toLong() != width.toLong() * height.toLong() * 3L) {
+            return emptyList()
+        }
 
         // CRITICAL: Color channel handling
         // GpuDownscaler outputs RGB from OpenGL (RGBA_8888 with A dropped)

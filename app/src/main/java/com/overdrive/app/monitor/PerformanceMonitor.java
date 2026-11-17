@@ -68,6 +68,7 @@ public class PerformanceMonitor {
     private long lastAppCpuTime = 0;
     private long lastCpuTimeForApp = 0;  // Tracks CPU time baseline for app CPU calculation
     private long lastIdleTime = 0;
+    private final CpuFrequencySampler cpuFrequencySampler = new CpuFrequencySampler();
 
     // GPU busy tracking — kgsl exposes "busy total" cumulative ticks on most
     // MSM kernels (filename varies: gpu_busy / gpubusy / gpu_busy_time). Usage
@@ -111,6 +112,12 @@ public class PerformanceMonitor {
     // Scheduler
     private ScheduledExecutorService scheduler;
     private volatile boolean isRunning = false;
+    // shutdownNow() interrupts the old scheduler but does not wait for an
+    // in-flight procfs/sysfs sample to finish. Epoch checks stop that old
+    // task from publishing after disconnect (or racing a new session).
+    private volatile long monitoringEpoch = 0;
+    private long sampledEpoch = -1;
+    private final Object samplingLock = new Object();
     
     // SOTA: Client connection tracking for on-demand polling
     private final java.util.concurrent.ConcurrentHashMap<String, Long> activeClients = new java.util.concurrent.ConcurrentHashMap<>();
@@ -144,7 +151,8 @@ public class PerformanceMonitor {
     public synchronized void start() {
         if (isRunning) return;
         isRunning = true;
-        
+        final long epoch = ++monitoringEpoch;
+
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "PerfMonitor");
             t.setPriority(Thread.MIN_PRIORITY);
@@ -152,12 +160,14 @@ public class PerformanceMonitor {
         });
         
         // Fixed delay: a sweep slower than the interval must not run the next one back-to-back.
-        scheduler.scheduleWithFixedDelay(this::collectMetrics, 0, SAMPLE_INTERVAL_MS, TimeUnit.MILLISECONDS);
+        scheduler.scheduleWithFixedDelay(() -> collectMetrics(epoch),
+                0, SAMPLE_INTERVAL_MS, TimeUnit.MILLISECONDS);
         logger.info("Performance monitoring started");
     }
     
     public synchronized void stop() {
         isRunning = false;
+        ++monitoringEpoch;
         if (scheduler != null) {
             scheduler.shutdownNow();
             scheduler = null;
@@ -291,43 +301,64 @@ public class PerformanceMonitor {
     
     // ==================== METRICS COLLECTION ====================
     
-    private void collectMetrics() {
-        try {
-            PerformanceSnapshot snapshot = new PerformanceSnapshot();
-            snapshot.timestamp = System.currentTimeMillis();
-            
-            // CPU metrics
-            collectCpuMetrics(snapshot);
-            
-            // Memory metrics
-            collectMemoryMetrics(snapshot);
-            
-            // GPU metrics (estimated from thermal/frequency)
-            collectGpuMetrics(snapshot);
-            
-            // App-specific metrics
-            collectAppMetrics(snapshot);
-            
-            // Store in history
-            synchronized (history) {
-                history.addLast(snapshot);
-                while (history.size() > HISTORY_SIZE) {
-                    history.removeFirst();
-                }
+    private void collectMetrics(long epoch) {
+        // An interrupted sampler can finish sysfs reads after shutdownNow().
+        // Serialize old/new instances and discard their work after disconnect.
+        synchronized (samplingLock) {
+            if (!isRunning || monitoringEpoch != epoch) return;
+            if (sampledEpoch != epoch) {
+                // Jiffy deltas are only meaningful within a continuous sampling
+                // session. Reconnects must not average across parked idle time.
+                lastCpuTime = 0;
+                lastIdleTime = 0;
+                lastAppCpuTime = 0;
+                lastCpuTimeForApp = 0;
+                lastGpuBusy = -1;
+                lastGpuTotal = -1;
+                sampledEpoch = epoch;
             }
-            latestSnapshot.set(snapshot);
+            try {
+                PerformanceSnapshot snapshot = new PerformanceSnapshot();
+                snapshot.timestamp = System.currentTimeMillis();
             
-        } catch (Exception e) {
-            logger.error("Failed to collect metrics", e);
+                // CPU metrics
+                collectCpuMetrics(snapshot);
+            
+                // Memory metrics
+                collectMemoryMetrics(snapshot);
+            
+                // GPU metrics (estimated from thermal/frequency)
+                collectGpuMetrics(snapshot);
+            
+                // App-specific metrics
+                collectAppMetrics(snapshot);
+            
+                // stop()/start() hold this monitor, so guard the final epoch
+                // check AND publication with the same lock. Otherwise stop()
+                // could race between the check and latestSnapshot.set().
+                synchronized (this) {
+                    if (!isRunning || monitoringEpoch != epoch) return;
+                    synchronized (history) {
+                        history.addLast(snapshot);
+                        while (history.size() > HISTORY_SIZE) {
+                            history.removeFirst();
+                        }
+                    }
+                    latestSnapshot.set(snapshot);
+                }
+            } catch (Exception e) {
+                logger.error("Failed to collect metrics", e);
+            }
         }
     }
     
     private void collectCpuMetrics(PerformanceSnapshot snapshot) {
         try {
             // Read /proc/stat for system CPU
-            RandomAccessFile reader = new RandomAccessFile("/proc/stat", "r");
-            String line = reader.readLine();
-            reader.close();
+            String line;
+            try (RandomAccessFile reader = new RandomAccessFile("/proc/stat", "r")) {
+                line = reader.readLine();
+            }
             
             if (line != null && line.startsWith("cpu ")) {
                 String[] parts = line.split("\\s+");
@@ -356,9 +387,10 @@ public class PerformanceMonitor {
             }
             
             // Read /proc/[pid]/stat for app CPU
-            RandomAccessFile appReader = new RandomAccessFile("/proc/" + pid + "/stat", "r");
-            String appLine = appReader.readLine();
-            appReader.close();
+            String appLine;
+            try (RandomAccessFile appReader = new RandomAccessFile("/proc/" + pid + "/stat", "r")) {
+                appLine = appReader.readLine();
+            }
             
             if (appLine != null) {
                 // /proc/<pid>/stat field 2 (comm) is parenthesized and may
@@ -464,8 +496,8 @@ public class PerformanceMonitor {
             // Only MemTotal and MemAvailable contribute to the dashboard's
             // memory metrics. Avoid regex splitting and parsing unrelated
             // /proc/meminfo values on every sample.
-            long memTotal = 0;
-            long memAvailable = 0;
+            long memTotal = -1;
+            long memAvailable = -1;
             try (BufferedReader reader = new BufferedReader(new FileReader("/proc/meminfo"))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
@@ -474,12 +506,21 @@ public class PerformanceMonitor {
                     } else if (line.startsWith("MemAvailable:")) {
                         memAvailable = parseMemInfoValueKb(line);
                     }
+                    if (memTotal > 0 && memAvailable >= 0) break;
                 }
             }
-            
-            snapshot.memTotalMb = memTotal / 1024.0;
-            snapshot.memUsedMb = (memTotal - memAvailable) / 1024.0;
-            snapshot.memUsagePercent = 100.0 * (memTotal - memAvailable) / memTotal;
+
+            // Some vendor /proc mounts deny or truncate meminfo. A missing
+            // MemTotal previously divided by zero (NaN/Infinity in chart JSON),
+            // while a missing MemAvailable looked like 100% RAM pressure.
+            if (memTotal > 0) {
+                snapshot.memTotalMb = memTotal / 1024.0;
+                if (memAvailable >= 0) {
+                    long usedKb = memTotal - Math.min(memAvailable, memTotal);
+                    snapshot.memUsedMb = usedKb / 1024.0;
+                    snapshot.memUsagePercent = 100.0 * usedKb / memTotal;
+                }
+            }
             
             // App memory via Debug API
             Debug.MemoryInfo memInfo = new Debug.MemoryInfo();
@@ -800,64 +841,15 @@ public class PerformanceMonitor {
     
     // ==================== HELPER METHODS ====================
     
+    // Report the fastest live clock and the highest static ceiling across
+    // cpufreq policies. cpu0-only sampling is wrong on the Dolphin's 4+4 SoC:
+    // the silver cluster tops out at 1804 MHz, the gold cluster at 2016 MHz.
     private int readCpuFrequency() {
-        String[] paths = {
-            "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq",
-            "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_cur_freq"
-        };
-        
-        for (String path : paths) {
-            try {
-                BufferedReader reader = new BufferedReader(new FileReader(path));
-                String line = reader.readLine();
-                reader.close();
-                if (line != null) {
-                    return Integer.parseInt(line.trim()) / 1000;  // KHz to MHz
-                }
-            } catch (Exception ignored) {}
-        }
-        return 0;
+        return cpuFrequencySampler.currentPeakMhz();
     }
 
-    // Cached CPU max-freq (KHz→MHz). The ceiling is static per boot, so resolve
-    // it once. 0 = not yet resolved; -1 = resolved-absent (don't retry).
-    private int cachedCpuMaxFreqMhz = 0;
-
-    /**
-     * Reads the CPU's maximum scaling frequency. Paired with {@link
-     * #readCpuFrequency()} this makes thermal throttling self-evident on the
-     * Performance page WITHOUT adb: when cpuFreqMhz sits well below
-     * cpuMaxFreqMhz under load (and CPU temp is high), the SoC is throttling —
-     * which on this shared SDM665 drags the whole head-unit UI, not just
-     * OverDrive. cpuinfo_max_freq is the hardware ceiling; scaling_max_freq is
-     * the governor's current cap (can itself be lowered by thermal HAL) — we
-     * prefer cpuinfo_max_freq so a thermally-capped governor still compares
-     * against the true hardware max.
-     */
     private int readCpuMaxFrequency() {
-        if (cachedCpuMaxFreqMhz != 0) {
-            return cachedCpuMaxFreqMhz > 0 ? cachedCpuMaxFreqMhz : 0;
-        }
-        String[] paths = {
-            "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq",
-            "/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq"
-        };
-        for (String path : paths) {
-            try {
-                BufferedReader reader = new BufferedReader(new FileReader(path));
-                String line = reader.readLine();
-                reader.close();
-                if (line != null) {
-                    int mhz = Integer.parseInt(line.trim()) / 1000;  // KHz to MHz
-                    if (mhz > 0) {
-                        cachedCpuMaxFreqMhz = mhz;
-                        return mhz;
-                    }
-                }
-            } catch (Exception ignored) {}
-        }
-        cachedCpuMaxFreqMhz = -1;  // resolved-absent; stop retrying
-        return 0;
+        return cpuFrequencySampler.hardwarePeakMhz();
     }
 
     private double readCpuTemperature() {
