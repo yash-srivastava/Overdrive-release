@@ -1314,6 +1314,56 @@ BYD.storagePage = {
         }
     },
 
+    // ==================== SD card formatting ====================
+
+    async formatSdCard() {
+        const button = this._el('sdFormatButton');
+        const status = this._el('sdFormatStatus');
+        if (!button || button.disabled) return;
+        button.disabled = true; // Includes preview and confirmation; no parallel submissions.
+        try {
+            // Never ask the user to erase an unnamed or stale card. The daemon
+            // resolves the exact same UUID again while holding its mount lock.
+            const preview = await fetch('/api/storage/external/format/target', { cache: 'no-store' });
+            const target = await preview.json();
+            if (!preview.ok || !target.success || !target.uuid || !target.label) {
+                throw new Error(target.error || this._tr('storage.sd_format_failed'));
+            }
+            const warning = this._tr('storage.sd_format_confirm_body', { card: target.label });
+            const confirmed = BYD.utils && BYD.utils.confirmDialog
+                ? await Promise.resolve(BYD.utils.confirmDialog({
+                    title: this._tr('storage.sd_format_confirm_title'), body: warning,
+                    confirmLabel: this._tr('storage.sd_format_confirm'),
+                    cancelLabel: this._tr('common.cancel'), danger: true
+                })).catch(() => false)
+                : window.confirm(warning);
+            if (!confirmed) return;
+
+            if (status) status.textContent = this._tr('storage.sd_format_progress');
+            const response = await fetch('/api/storage/external/format', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ confirmed: true, expectedUuid: target.uuid })
+            });
+            const data = await response.json();
+            const success = response.ok && data.success === true;
+            const message = data.message || data.error || this._tr('storage.sd_format_failed');
+            if (status) status.textContent = message;
+            this._toast(message, success ? 'success' : 'error');
+            if (success) {
+                this.loadCdrConfig();
+                this.loadStorageStats();
+            }
+        } catch (e) {
+            const message = this._tr('storage.sd_format_request_failed', {
+                error: e && e.message ? e.message : 'request failed'
+            });
+            if (status) status.textContent = message;
+            this._toast(message, 'error');
+        } finally {
+            button.disabled = false;
+        }
+    },
+
     // ==================== Recover missing trips ====================
 
     /**

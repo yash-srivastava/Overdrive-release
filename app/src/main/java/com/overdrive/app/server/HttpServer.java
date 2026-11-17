@@ -826,6 +826,19 @@ public class HttpServer {
                 return;
             }
             
+            boolean destructiveStorageFormatRequest = pathOnly.equals("/api/storage/external/format");
+            boolean storageFormatPreviewRequest = pathOnly.equals("/api/storage/external/format/target");
+            // A destructive browser request must have an explicit same-origin Origin.
+            // A valid JWT alone is insufficient against cookie-based CSRF.
+            // Unlike GenAI, absent Origin is NOT permitted (including native callers).
+            if (destructiveStorageFormatRequest
+                    && (originHeader == null || originHeader.trim().isEmpty()
+                        || !GenAiRequestSecurity.isAllowedOrigin(
+                                originHeader, hostHeader, forwardedHostHeader))) {
+                HttpResponse.sendError(out, 403, "Forbidden origin");
+                client.close();
+                return;
+            }
             boolean genAiRequest = GenAiRequestSecurity.isGenAiPath(pathOnly);
             if (genAiRequest && !GenAiRequestSecurity.isAllowedOrigin(
                     originHeader, hostHeader, forwardedHostHeader)) {
@@ -839,6 +852,11 @@ public class HttpServer {
             // The in-app WebView is same-origin so it skips this, but the external webapp needs it.
             // Must be handled BEFORE auth check — preflight requests don't carry cookies/tokens.
             if (method.equals("OPTIONS")) {
+                if (destructiveStorageFormatRequest || storageFormatPreviewRequest) {
+                    HttpResponse.sendError(out, 403, "No cross-origin formatting");
+                    client.close();
+                    return;
+                }
                 if (genAiRequest) {
                     HttpResponse.sendCorsPreflightResponse(out, originHeader);
                 } else {
@@ -870,8 +888,10 @@ public class HttpServer {
             // the glassWidgets settings, like the built-ins: the car's own arrange mode writes those over loopback.
             boolean widgetWriteRequest = !method.equals("GET")
                     && (isCustomWidgetsPath(pathOnly) || isCommunityWidgetsPath(pathOnly));
+            // Formatting erases an entire removable volume. Unlike ordinary local
+            // storage settings, it must never accept the loopback/same-device fallback.
             boolean authenticated = remoteDevRequest || genAiRequest || wireGuardRequest || remoteAccessRequest
-                    || widgetWriteRequest
+                    || widgetWriteRequest || destructiveStorageFormatRequest || storageFormatPreviewRequest
                 ? AuthMiddleware.checkJwtOnly(path, cookieHeader, authHeader, out)
                 : AuthMiddleware.checkAuth(path, cookieHeader, authHeader, out,
                     client.getRemoteSocketAddress(), hasTunnelHeaders,

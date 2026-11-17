@@ -23,6 +23,8 @@ import java.util.Map;
  * - POST /api/storage/external/cleanup  - Trigger manual cleanup
  * - GET  /api/storage/external/preview  - Preview what would be deleted
  * - POST /api/storage/external/refresh  - Refresh SD card detection
+ * - GET  /api/storage/external/format/target - Read-only card identity (JWT only)
+ * - POST /api/storage/external/format   - Destructively format the SD public volume (JWT + Origin)
  */
 public class ExternalStorageApiHandler {
 
@@ -86,10 +88,56 @@ public class ExternalStorageApiHandler {
             refreshPaths(out);
             return true;
         }
+
+        if (path.equals("/api/storage/external/format/target") && method.equals("GET")) {
+            com.overdrive.app.storage.SdCardFormatter.Target target =
+                    com.overdrive.app.storage.SdCardFormatter.getInstance().target();
+            JSONObject response = new JSONObject();
+            response.put("success", target != null);
+            if (target != null) {
+                response.put("uuid", target.uuid);
+                response.put("label", "/storage/" + target.uuid);
+            } else {
+                response.put("error", "No uniquely identifiable, mounted SD card is available.");
+            }
+            sendJson(out, target != null ? 200 : 409, response);
+            return true;
+        }
+
+        if (path.equals("/api/storage/external/format") && method.equals("POST")) {
+            formatSdCard(body, out);
+            return true;
+        }
         
         return false;
     }
     
+    /** POST /api/storage/external/format — destructive, user-confirmed SD formatting. */
+    private static void formatSdCard(String body, OutputStream out) throws Exception {
+        JSONObject response = new JSONObject();
+        try {
+            JSONObject request = new JSONObject(body == null ? "{}" : body);
+            if (!request.optBoolean("confirmed", false)
+                    || !request.has("expectedUuid")
+                    || !request.optString("expectedUuid", "").matches("[A-Za-z0-9][A-Za-z0-9_-]{0,63}")) {
+                response.put("success", false);
+                response.put("error", "Explicit confirmation is required.");
+                sendJson(out, 400, response);
+                return;
+            }
+            com.overdrive.app.storage.SdCardFormatter.Result result =
+                    com.overdrive.app.storage.SdCardFormatter.getInstance().format(
+                            request.getString("expectedUuid"));
+            response.put("success", result.success);
+            response.put(result.success ? "message" : "error", result.message);
+            sendJson(out, result.success ? 200 : 409, response);
+        } catch (Exception e) {
+            response.put("success", false);
+            response.put("error", e.getMessage() == null ? "Unable to format SD card." : e.getMessage());
+            sendJson(out, 400, response);
+        }
+    }
+
     /**
      * GET /api/storage/external
      * Returns SD card status, CDR info, and cleanup configuration.
