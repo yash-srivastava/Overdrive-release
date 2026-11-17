@@ -1345,14 +1345,13 @@ public class TripApiHandler {
         List<TelemetrySample> samples = TelemetryStore.readFromFile(telemetryFile);
         JSONArray gps = new JSONArray();
         for (TelemetrySample s : samples) {
-            if (s.lat != 0 && s.lon != 0) {
-                try {
-                    JSONArray point = new JSONArray();
-                    point.put(s.lat);
-                    point.put(s.lon);
-                    gps.put(point);
-                } catch (Exception ignored) {}
-            }
+            if (!TelemetrySample.hasGpsFix(s.lat, s.lon)) continue;
+            try {
+                JSONArray point = new JSONArray();
+                point.put(s.lat);
+                point.put(s.lon);
+                gps.put(point);
+            } catch (Exception ignored) {}
         }
 
         JSONObject response = new JSONObject();

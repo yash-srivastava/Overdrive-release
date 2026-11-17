@@ -339,7 +339,7 @@ public class TripTelemetryRecorder {
         double dist = 0;
         for (TelemetrySample s : history) {
             sampleCountTotal++;
-            boolean haveGps = s.lat != 0 || s.lon != 0;
+            boolean haveGps = TelemetrySample.hasGpsFix(s.lat, s.lon);
             if (haveGps) {
                 sampleCountWithGps++;
                 if (havePrev) {
@@ -1000,7 +1000,7 @@ public class TripTelemetryRecorder {
             if (dtCapped) dtMs = MAX_INTEGRATION_DT_MS;
 
             sampleCountTotal++;
-            boolean haveGps = lat != 0 && lon != 0;
+            boolean haveGps = TelemetrySample.hasGpsFix(lat, lon);
             if (haveGps) sampleCountWithGps++;
 
             // Does the CAN/wheel speed channel look USABLE, not merely fresh?
