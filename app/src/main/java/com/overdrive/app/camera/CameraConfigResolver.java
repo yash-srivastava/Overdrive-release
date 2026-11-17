@@ -73,6 +73,29 @@ public final class CameraConfigResolver {
         boolean validated = fixedGeometry || camera.optBoolean("probedAndValidated", false);
         boolean fallback = !fixedGeometry && camera.optBoolean("fallbackFromProbe", false);
 
+        // For legacy DiLink 3 automatic selection, prefer the current HAL's
+        // native panoramic tag to a model guess or a persisted probe ID.
+        // Do not override an explicit user selection, and do not treat a
+        // discovered ID as proof that the stream geometry was validated.
+        // DiLink 4/5/100 and Camera2 have their own source contracts.
+        if (!dilink5 && !dilink4 && !dilink100 && !manual) {
+            int halPanoId = AvmCameraHelper.discoverDi3NativePanoCameraId();
+            if (halPanoId >= 0) {
+                if (panoCameraId != halPanoId) {
+                    logger.info("DiLink 3 HAL pano id overrides stored/profile id: "
+                            + panoCameraId + " -> " + halPanoId);
+                    // Probe dimensions belong to the previous camera ID.
+                    // Keep the profile geometry until the new stream is probed.
+                    panoWidth = profile.getPanoWidth();
+                    panoHeight = profile.getPanoHeight();
+                    panoSurfaceMode = profile.getPanoSurfaceMode();
+                    validated = false;
+                    fallback = false;
+                }
+                panoCameraId = halPanoId;
+            }
+        }
+
         if (dilink4) {
             // DIPlus panoramic recording does not use a vehicle-profile pin
             // or a stale saved probe. It resolves the physical source from

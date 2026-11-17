@@ -172,6 +172,38 @@ public final class AvmCameraHelper {
         return -1;
     }
 
+    /**
+     * Resolve only the native panoramic tags for legacy DiLink 3.
+     *
+     * <p>Unlike the DIPlus APA fallback, the legacy recorder has no verified
+     * preview-index contract for APA. Never substitute an APA camera ID here:
+     * opening the wrong vendor camera can destabilize the native camera service.
+     * This lookup does not open a camera or claim that a stream is validated.
+     */
+    public static int discoverDi3NativePanoCameraId() {
+        try {
+            Class<?> bmmClass = Class.forName(BMM_CAMERA_INFO_CLASS);
+            java.lang.reflect.Method getCameraId =
+                    bmmClass.getDeclaredMethod("getCameraId", String.class);
+            getCameraId.setAccessible(true);
+            for (String tag : DI4_PANO_TAGS) {
+                try {
+                    Object result = getCameraId.invoke(null, tag);
+                    if (result instanceof Integer && (Integer) result >= 0) {
+                        int id = (Integer) result;
+                        logger.info("DiLink 3 HAL panoramic tag " + tag + " id=" + id);
+                        return id;
+                    }
+                } catch (ReflectiveOperationException | RuntimeException e) {
+                    logger.warn("DiLink 3 HAL tag " + tag + " unavailable: " + e.getMessage());
+                }
+            }
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            logger.warn("DiLink 3 HAL discovery unavailable: " + e.getMessage());
+        }
+        return -1;
+    }
+
     // ── Frame Rate Control (REQ-2) ──────────────────────────────────────
 
     /**
