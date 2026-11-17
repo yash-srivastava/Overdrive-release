@@ -211,7 +211,10 @@ public class OemDashcamPipeline {
     // lazily on the GL thread once the context is current — Bitmap creation
     // is thread-agnostic, but holding it on the GL thread keeps lifetimes
     // simple (created in init, released in stop).
-    private OverlayBitmapRenderer overlayRenderer;
+    private volatile OverlayBitmapRenderer overlayRenderer;
+    // GL-thread-only: a failed overlay shader is not recompiled every frame.
+    // Reset at teardown so a later camera session can try again.
+    private boolean overlayGlInitAttempted = false;
     private int overlayFrameCounter = 0;
     private boolean overlayTextureInitialized = false;
     private boolean overlayTextureReady = false;
@@ -1589,68 +1592,82 @@ public class OemDashcamPipeline {
                     .asFloatBuffer();
                 texCoordBuffer.put(FULL_SCREEN_TEX).position(0);
 
-                // Telemetry overlay program + texture. Mirrors the pano
-                // GpuMosaicRecorder overlay pass: a 2D sampler quad pinned
-                // to the top 1/12 of the frame (matches pano's 160/1920
-                // ratio so the overlay reads at the same relative size on
-                // both pipelines). Allocate unconditionally — the runtime
-                // gate is the (overlayEnabled && recording) check inside
-                // drawPassthrough(), which avoids a recompile if the user
-                // toggles the burn-in mid-clip.
-                overlayProgramId = com.overdrive.app.camera.GlUtil
-                    .createProgram(VS_OVERLAY, FS_OVERLAY);
-                if (overlayProgramId == 0) {
-                    logger.warn("Failed to create overlay shader; OEM telemetry burn-in disabled");
-                } else {
-                    overlayAPositionLoc = GLES20.glGetAttribLocation(overlayProgramId, "aPosition");
-                    overlayATexCoordLoc = GLES20.glGetAttribLocation(overlayProgramId, "aTexCoord");
-                    overlayUTextureLoc = GLES20.glGetUniformLocation(overlayProgramId, "uTexture");
-
-                    int[] otex = new int[1];
-                    GLES20.glGenTextures(1, otex, 0);
-                    overlayTextureId = otex[0];
-
-                    // Pin the overlay to the top 1/12 of the frame in NDC.
-                    // Y=+1 is the top edge; bottom of overlay is +1 - 2*(1/12)
-                    // = 0.8333. Same Y range as pano's overlay quad.
-                    final float bottomY = 1.0f - 2.0f * (1.0f / 12.0f);
-                    float[] overlayVerts = {
-                        -1.0f, bottomY,
-                         1.0f, bottomY,
-                        -1.0f,  1.0f,
-                         1.0f,  1.0f
-                    };
-                    // Tex coords are flipped on Y so the bitmap's row 0
-                    // (top of the overlay PNG composite) ends up at the
-                    // top of the on-screen quad. Same convention pano uses.
-                    float[] overlayUv = {
-                        0.0f, 1.0f,
-                        1.0f, 1.0f,
-                        0.0f, 0.0f,
-                        1.0f, 0.0f
-                    };
-                    overlayVertexBuffer = com.overdrive.app.camera.GlUtil.createFloatBuffer(overlayVerts);
-                    overlayTexCoordBuffer = com.overdrive.app.camera.GlUtil.createFloatBuffer(overlayUv);
-                    overlayTextureInitialized = false;
-                    overlayTextureReady = false;
-                    overlayFrameCounter = 0;
-
-                    try {
-                        overlayRenderer = new OverlayBitmapRenderer();
-                        // Renderer is created lazily here on the GL thread, possibly
-                        // AFTER reconcileTelemetryHold already wanted the worker up —
-                        // reconcile now that the renderer exists so the off-thread
-                        // raster starts if overlay is active.
-                        reconcileTelemetryHold();
-                    } catch (Throwable t) {
-                        logger.warn("OverlayBitmapRenderer init failed: " + t.getMessage());
-                        overlayRenderer = null;
-                    }
+                // The overlay is optional. Skip shader compilation, GL texture
+                // allocation and bitmap-raster setup on the common disabled
+                // path. Live enable is handled on the render thread below.
+                if (overlayEnabled) {
+                    initOverlayResourcesOnGlThread();
                 }
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         });
+    }
+
+    /**
+     * Allocate OEM telemetry overlay resources only when requested. Startup
+     * prepares an already-enabled overlay as before; enabling it later while
+     * recording creates the resources on the same GL thread as rendering.
+     */
+    private void initOverlayResourcesOnGlThread() {
+        if (overlayGlInitAttempted) return;
+        overlayGlInitAttempted = true;
+        // Telemetry overlay program + texture. Mirrors the pano
+        // GpuMosaicRecorder overlay pass: a 2D sampler quad pinned
+        // to the top 1/12 of the frame (matches pano's 160/1920
+        // ratio so the overlay reads at the same relative size on
+        // both pipelines). All calls are on the OEM GL thread, with
+        // a one-shot guard so a shader failure cannot retry at 30 fps.
+        overlayProgramId = com.overdrive.app.camera.GlUtil
+            .createProgram(VS_OVERLAY, FS_OVERLAY);
+        if (overlayProgramId == 0) {
+            logger.warn("Failed to create overlay shader; OEM telemetry burn-in disabled");
+        } else {
+            overlayAPositionLoc = GLES20.glGetAttribLocation(overlayProgramId, "aPosition");
+            overlayATexCoordLoc = GLES20.glGetAttribLocation(overlayProgramId, "aTexCoord");
+            overlayUTextureLoc = GLES20.glGetUniformLocation(overlayProgramId, "uTexture");
+
+            int[] otex = new int[1];
+            GLES20.glGenTextures(1, otex, 0);
+            overlayTextureId = otex[0];
+
+            // Pin the overlay to the top 1/12 of the frame in NDC.
+            // Y=+1 is the top edge; bottom of overlay is +1 - 2*(1/12)
+            // = 0.8333. Same Y range as pano's overlay quad.
+            final float bottomY = 1.0f - 2.0f * (1.0f / 12.0f);
+            float[] overlayVerts = {
+                -1.0f, bottomY,
+                 1.0f, bottomY,
+                -1.0f,  1.0f,
+                 1.0f,  1.0f
+            };
+            // Tex coords are flipped on Y so the bitmap's row 0
+            // (top of the overlay PNG composite) ends up at the
+            // top of the on-screen quad. Same convention pano uses.
+            float[] overlayUv = {
+                0.0f, 1.0f,
+                1.0f, 1.0f,
+                0.0f, 0.0f,
+                1.0f, 0.0f
+            };
+            overlayVertexBuffer = com.overdrive.app.camera.GlUtil.createFloatBuffer(overlayVerts);
+            overlayTexCoordBuffer = com.overdrive.app.camera.GlUtil.createFloatBuffer(overlayUv);
+            overlayTextureInitialized = false;
+            overlayTextureReady = false;
+            overlayFrameCounter = 0;
+
+            try {
+                overlayRenderer = new OverlayBitmapRenderer();
+                // Renderer is created lazily here on the GL thread, possibly
+                // AFTER reconcileTelemetryHold already wanted the worker up —
+                // reconcile now that the renderer exists so the off-thread
+                // raster starts if overlay is active.
+                reconcileTelemetryHold();
+            } catch (Throwable t) {
+                logger.warn("OverlayBitmapRenderer init failed: " + t.getMessage());
+                overlayRenderer = null;
+            }
+        }
     }
 
     /** GLES external-OES texture target. We don't link android-opengl-extensions. */
@@ -2100,7 +2117,14 @@ public class OemDashcamPipeline {
      */
     private void drawPassthrough() {
         GLES20.glViewport(0, 0, width, height);
-        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+        // The opaque OES passthrough quad covers every pixel of the encoder
+        // surface. Clearing the same full surface each frame adds GPU work
+        // without changing the output. Keep the black clear only if the
+        // passthrough shader is unexpectedly unavailable.
+        if (passthroughProgram == 0) {
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+            return;
+        }
 
         // R9 #2: drop the cameraSurfaceTexture re-read. The renderLoop's
         // stLocal capture already null-guarded for this iteration (an in-
@@ -2109,8 +2133,6 @@ public class OemDashcamPipeline {
         // cameraTextureId and the precomputed texMatrix; it doesn't touch
         // the SurfaceTexture at all. Re-reading the volatile field defeats
         // the snapshot pattern.
-        if (passthroughProgram == 0) return;
-
         GLES20.glUseProgram(passthroughProgram);
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
         GLES20.glBindTexture(GLES11_OES_TEXTURE_EXTERNAL, cameraTextureId);
@@ -2132,6 +2154,13 @@ public class OemDashcamPipeline {
         // while a clip is actively being written, the user opted in,
         // and we have a renderer + collector to source the bitmap from.
         // Cheap when off: a single boolean check on the volatile flag.
+        if (overlayEnabled && recording.get() && telemetryCollector != null
+                && !overlayGlInitAttempted) {
+            // A user can enable burn-in after the pipeline has started.
+            // The render loop owns this EGL context and can initialize once
+            // here; no UI or lifecycle thread may issue these GL calls.
+            initOverlayResourcesOnGlThread();
+        }
         if (overlayEnabled
                 && recording.get()
                 && overlayProgramId != 0
@@ -2558,6 +2587,7 @@ public class OemDashcamPipeline {
         passthroughProgram = 0;
         overlayTextureId = 0;
         overlayProgramId = 0;
+        overlayGlInitAttempted = false;
         overlayTextureInitialized = false;
         overlayTextureReady = false;
         overlayFrameCounter = 0;
