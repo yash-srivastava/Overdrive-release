@@ -229,6 +229,9 @@ public final class HighResPreviewSampler {
     private int[] argbPixels;
     // Sampler-thread-owned; reused until the FBO dimensions change.
     private Bitmap jpegBitmap;
+    // Only touched by the sampler GL thread. Reuse the encoder's expandable
+    // buffer across requests instead of allocating and growing it each frame.
+    private ByteArrayOutputStream jpegOutput;
     private final boolean isTexture2D;
     private volatile Object sourceLock;
     private volatile SourceGuard sourceGuard;
@@ -697,11 +700,26 @@ public final class HighResPreviewSampler {
             // Reuse the mutable bitmap instead of allocating one per preview.
             // All renderAndEncode calls run serially on the sampler thread.
             jpegBitmap.setPixels(argbPixels, 0, width, 0, 0, width, height);
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            if (!jpegBitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)) {
+            if (jpegOutput == null) {
+                // Bound the initial reservation; the JPEG encoder can grow it
+                // for high-detail frames without assuming a fixed compression ratio.
+                long pixels = (long) width * height;
+                int capacity = (int) Math.min(256L * 1024L,
+                        Math.max(4L * 1024L, pixels / 8L));
+                jpegOutput = new ByteArrayOutputStream(capacity);
+            } else {
+                jpegOutput.reset();
+            }
+            if (!jpegBitmap.compress(Bitmap.CompressFormat.JPEG, 85, jpegOutput)) {
                 return null;
             }
-            return out.toByteArray();
+            byte[] jpeg = jpegOutput.toByteArray();
+            // Don't retain a very large expanded backing array after an
+            // unusually incompressible frame. The returned copy is independent.
+            if (jpegOutput.size() > 1024 * 1024) {
+                jpegOutput = null;
+            }
+            return jpeg;
         } catch (Throwable t) {
             logger.warn("renderAndEncode failed " + width + "x" + height
                     + ": " + t.getMessage());
@@ -726,6 +744,7 @@ public final class HighResPreviewSampler {
         readBuffer = null;
         scratchRgba = null;
         argbPixels = null;
+        jpegOutput = null;
         if (jpegBitmap != null) {
             jpegBitmap.recycle();
             jpegBitmap = null;
