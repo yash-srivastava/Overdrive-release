@@ -64,6 +64,15 @@ public class Conditions {
                         new Label("rr", "automation.area_rr"),
                         new Label("sunroof", "automation.area_sunroof"),
                         new Label("sunshade", "automation.area_sunshade"))));
+        // Dedicated sunshade condition for rules such as "open only if closed".
+        // The generic Window State condition also supports area=sunshade; this shortcut
+        // makes the state discoverable without choosing a window area.
+        addCondition(new EventCondition(
+                new Label("sunshadeState", "automation.sunshade_state"),
+                "automation.sunshade_state_description",
+                new EnumType(new Label("state", "automation.state"),
+                        new Label("open", "automation.open"),
+                        new Label("closed", "automation.closed"))));
         addCondition(new EventCondition(
                 new Label("batteryLevel", "automation.battery_level"),
                 "automation.battery_level_description",

@@ -69,7 +69,7 @@ public final class AutomationCategories {
                 "frontDefrost", "rearDefrost", "maxCool", "airPurify", "acFanLevel");
         // ── Windows / body / openings ──
         put(WINDOWS_BODY, "windows", "windowsAll", "windowsPreset", "windowState",
-                "windowOpenPercent", "sunroof", "sunshade", "tailgate", "mirror_fold",
+                "windowOpenPercent", "sunroof", "sunshade", "sunshadeState", "tailgate", "mirror_fold",
                 "mirror_auto_follow_up", "child_lock", "doorState", "wireless_charging", "rainCloseWindows",
                 "wireless_charging_state", "wireless_charging_left", "wireless_charging_right",
                 // Seat/mirror GEOMETRY — physically moving the body, unlike the seat

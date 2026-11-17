@@ -757,6 +757,8 @@
     "area_sunshade": "Sunshade",
     "area_all": "All",
     "percent": "Percent",
+    "sunshade_state": "Sunshade State",
+    "sunshade_state_description": "The current sunshade state, based on the vehicle's reported position. Closed means 0% open; any positive opening is Open. Unavailable readings are ignored.",
     "window_state": "Window State",
     "window_state_description": "The current window state. It will be closed if they are closed and open if not. The All state will be open if any of the windows are open.",
     "battery_level": "Battery Level",
