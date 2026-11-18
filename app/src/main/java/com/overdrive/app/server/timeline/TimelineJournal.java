@@ -345,25 +345,39 @@ public final class TimelineJournal {
 
     /** Takes every spooled entry and empties the spool. */
     static List<Entry> drainSpool() {
+        byte[] bytes = readAndClearSpool();
+        if (bytes == null) return Collections.emptyList();
+        // UTF-8 decoding and entry parsing can be expensive for a full spool.
+        // Do that work after both the cross-process file lock and SPOOL_LOCK are released,
+        // so other processes and the async writer can append new events immediately.
+        try {
+            return decode(bytes);
+        } catch (Throwable t) {
+            return Collections.emptyList();
+        }
+    }
+
+    /** Snapshot and truncate atomically under the same locks used by appendToSpool. */
+    private static byte[] readAndClearSpool() {
         synchronized (SPOOL_LOCK) {
             File file = spoolFile();
-            if (!file.isFile() || file.length() == 0) return Collections.emptyList();
+            if (!file.isFile() || file.length() == 0) return null;
             try (RandomAccessFile raf = new RandomAccessFile(file, "rw")) {
                 FileChannel channel = raf.getChannel();
                 FileLock lock = lock(channel);
-                if (lock == null) return Collections.emptyList();
+                if (lock == null) return null;
                 try {
                     long size = Math.min(channel.size(), SPOOL_MAX_BYTES * 2);
                     byte[] buf = new byte[(int) size];
                     raf.seek(0);
                     raf.readFully(buf);
                     channel.truncate(0);
-                    return decode(buf);
+                    return buf;
                 } finally {
                     release(lock);
                 }
             } catch (Throwable t) {
-                return Collections.emptyList();
+                return null;
             }
         }
     }
