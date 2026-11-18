@@ -404,7 +404,7 @@ Every line is checked before it ships (placeholders like `{name}` and `%s`, bran
 | 简体中文 (Chinese, Simplified) | 51% | [OverDrive-zh-CN.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-zh-CN.xlsx) |
 | 繁體中文 (Chinese, Traditional) | 51% | [OverDrive-zh-TW.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-zh-TW.xlsx) |
 | Čeština (Czech) | 39% | [OverDrive-cs.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-cs.xlsx) |
-| Nederlands (Dutch) | 49% | [OverDrive-nl.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-nl.xlsx) |
+| Nederlands (Dutch) | 95% | [OverDrive-nl.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-nl.xlsx) |
 | Français (French) | 50% | [OverDrive-fr.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-fr.xlsx) |
 | Deutsch (German) | 49% | [OverDrive-de.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-de.xlsx) |
 | עברית (Hebrew) | 97% | [OverDrive-he.xlsx](https://github.com/yash-srivastava/Overdrive-release/releases/download/translations/OverDrive-he.xlsx) |
