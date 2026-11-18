@@ -1267,10 +1267,32 @@ public final class RemoteAccessApiHandler {
                             + " appOutcome=" + lockOutcome);
                 }
                 if (!confirmWithVehicle) {
-                    // S3: the car is not asked to confirm — no readback window, no re-send, no cloud leg
-                    // (it needs a readback to know it is due). lastCommandConfirmed stays false, so the
-                    // cooldown treats the command as unconfirmed exactly as before.
-                    notifyOutcome(decision, settings, "unconfirmed", DiLink5GateActuationPolicy.CONFIRM_OFF_SENT_TEXT);
+                    // S3: no confirm job, cloud leg or legacy re-send — but a fresh LOCAL read so an
+                    // offline car is not stuck in cooldown on a stale lock poll while the door already
+                    // moved (field logs: unlock landed, readback lagged 10–16 s without this).
+                    try {
+                        collector.pollLockStateNow();
+                    } catch (Throwable ignored) {
+                        // The poll is best-effort; the sent outcome below is unchanged on failure.
+                    }
+                    int afterSend = finalEvidence != null
+                            ? collector.readDiLink5GateDoorLockEvidence().state
+                            : collector.readDoorLockState();
+                    if (afterSend == target) {
+                        lastCommandConfirmed = true;
+                        decision.satisfied();
+                        String detail = finalEvidence != null
+                                ? DiLink5GateActuationPolicy.detailSuffix(
+                                        collector.readDiLink5GateDoorLockEvidence())
+                                : railDetail;
+                        String text = "Driver door is already "
+                                + ("unlock".equals(action) ? "unlocked" : "locked") + detail;
+                        recordAction(action, "confirmed", text);
+                        notifyOutcome(decision, settings, "confirmed", text);
+                        return;
+                    }
+                    notifyOutcome(decision, settings, "unconfirmed",
+                            DiLink5GateActuationPolicy.CONFIRM_OFF_SENT_TEXT);
                     return;
                 }
             }
@@ -1376,6 +1398,16 @@ public final class RemoteAccessApiHandler {
                     if (cloudLeg.worthASecondWindow())
                         confirmation = confirmLocallyAfterCloud(collector, finalEvidence != null, actuationRail,
                                 target, dispatchedAtElapsed);
+                } else if (confirmation == DiLink5GateActuationPolicy.Confirmation.UNCONFIRMED
+                        && cloudLeg.worthASecondWindow()) {
+                    // Di5 immediate rule: the cloud leg ran before the first window; when it fails or
+                    // times out offline the budget was consumed without a follow-up local window (J3).
+                    DiLink5GateActuationPolicy.Confirmation afterImmediate =
+                            confirmLocallyAfterCloud(collector, finalEvidence != null, actuationRail, target,
+                                    dispatchedAtElapsed);
+                    if (afterImmediate == DiLink5GateActuationPolicy.Confirmation.CONFIRMED) {
+                        confirmation = afterImmediate;
+                    }
                 }
                 recordCloudFallbackOutcome(decision, settings, confirmation, cloudLeg, actuationRail, true, null, false);
                 return;
@@ -1532,6 +1564,13 @@ public final class RemoteAccessApiHandler {
             com.overdrive.app.daemon.CameraDaemon.log("Proximity: cloudFallback action=" + action
                     + " trigger=" + trigger + " skipped=" + skipped);
             return new CloudLeg(null, skipped, DiLink5GateActuationPolicy.PATH_SDK);
+        }
+        String transportSkip = VehicleCommandRouter.getInstance()
+                .proximityCloudFallbackTransportSkipReason(command);
+        if (transportSkip != null) {
+            com.overdrive.app.daemon.CameraDaemon.log("Proximity: cloudFallback action=" + action
+                    + " trigger=" + trigger + " skipped=" + transportSkip);
+            return new CloudLeg(null, transportSkip, DiLink5GateActuationPolicy.PATH_SDK);
         }
         String path = sdkAccepted ? DiLink5GateActuationPolicy.PATH_SDK_THEN_CLOUD : DiLink5GateActuationPolicy.PATH_CLOUD;
         VehicleCommandRouter.CommandResult result = runCloudLegBounded(command, cloudTimeoutMs);

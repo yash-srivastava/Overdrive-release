@@ -2892,6 +2892,40 @@ public final class VehicleCommandRouter {
         return finishCommand(cmd, runCloudOnly(cmd));
     }
 
+    /**
+     * Proximity cloud-fallback admission before {@link #runCloudOnly}: same handshake and policy
+     * gates as {@link #executeCloudOnly}, plus a validated default-network check so an offline
+     * head unit does not burn the decision budget on an HTTP timeout.
+     *
+     * @return skip reason when the leg must not run; {@code null} when it may.
+     */
+    public String proximityCloudFallbackTransportSkipReason(VehicleCommand cmd) {
+        if (!cmd.hasCloudPath()) return "cloud leg not available for this command";
+        if (resolveEffectivePreference(cmd) == RoutePreference.SDK_ONLY) {
+            return "cloud leg not available for this command";
+        }
+        if (!cloudHandshakeSatisfied(cmd)) return "cloud not configured";
+        if (!hasValidatedDefaultNetwork()) return "no validated network";
+        return null;
+    }
+
+    private static boolean hasValidatedDefaultNetwork() {
+        try {
+            android.content.Context ctx = com.overdrive.app.daemon.CameraDaemon.getAppContext();
+            if (ctx == null) return true;
+            android.net.ConnectivityManager cm = (android.net.ConnectivityManager)
+                    ctx.getSystemService(android.content.Context.CONNECTIVITY_SERVICE);
+            if (cm == null) return true;
+            android.net.Network network = cm.getActiveNetwork();
+            if (network == null) return false;
+            android.net.NetworkCapabilities caps = cm.getNetworkCapabilities(network);
+            return caps != null
+                    && caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+        } catch (Throwable ignored) {
+            return true;
+        }
+    }
+
     private CommandResult runCloudFirst(VehicleCommand cmd) {
         long start = System.currentTimeMillis();
 

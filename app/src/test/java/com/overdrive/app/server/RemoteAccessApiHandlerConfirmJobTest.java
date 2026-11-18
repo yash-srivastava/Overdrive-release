@@ -285,17 +285,20 @@ public class RemoteAccessApiHandlerConfirmJobTest {
                 + "                if (\"unlock\".equals(action)) noteProximityUnlockDispatched(collector);"));
         assertTrue(decision.contains(
                 "                if (!confirmWithVehicle) {\n"));
+        assertTrue(decision.contains("collector.pollLockStateNow();"));
         assertTrue(decision.contains(
-                "                    notifyOutcome(decision, settings, \"unconfirmed\", DiLink5GateActuationPolicy.CONFIRM_OFF_SENT_TEXT);\n"
+                "                    notifyOutcome(decision, settings, \"unconfirmed\",\n"
+                + "                            DiLink5GateActuationPolicy.CONFIRM_OFF_SENT_TEXT);\n"
                 + "                    return;\n"
                 + "                }\n"
                 + "            }\n"));
-        int sentReturn = decision.indexOf("notifyOutcome(decision, settings, \"unconfirmed\", DiLink5GateActuationPolicy.CONFIRM_OFF_SENT_TEXT);");
+        int sentReturn = decision.indexOf("notifyOutcome(decision, settings, \"unconfirmed\",\n"
+                + "                            DiLink5GateActuationPolicy.CONFIRM_OFF_SENT_TEXT);");
         int job = decision.indexOf("ConfirmJob job = new ConfirmJob(");
         assertTrue(sentReturn > 0 && job > sentReturn);
         assertEquals("Command sent; vehicle confirmation off", DiLink5GateActuationPolicy.CONFIRM_OFF_SENT_TEXT);
-        // lastCommandConfirmed stays false on that path: the only writers of true are the three confirmed branches.
-        assertEquals(0, count(decision, "lastCommandConfirmed = true;"));
+        // Confirmation-off may still mark the command confirmed when a fresh LOCAL read already shows the target.
+        assertEquals(1, count(decision.substring(0, job), "lastCommandConfirmed = true;"));
         // The job never sees the switch: with confirmation on the sequence is exactly today's.
         assertEquals(0, count(method(handler, CONFIRM), "confirmWithVehicle"));
     }
