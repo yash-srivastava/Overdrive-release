@@ -73,13 +73,19 @@ public final class HlsPlaylists {
             long clipUs = e.clipStartWall * 1000L;
             long fromUs = e.playFromWall * 1000L;
             long toUs = e.playToWall * 1000L;
-            int[] gops = new int[gt.count()];
+            // GOP boundaries are monotonic (validated by Mp4Index). Skip the
+            // leading GOPs outside this window or already covered by earlier
+            // clips, and size the scratch array for the window rather than the
+            // entire recording — long clips often contribute just a few GOPs.
+            int first = firstGopEndingAfter(gt.us, clipUs, Math.max(fromUs, coveredUs));
+            int end = firstGopStartingAtOrAfter(gt.us, clipUs, toUs);
+            if (first >= end) continue;
+            int[] gops = new int[end - first];
             int count = 0;
-            for (int n = 0; n < gt.count(); n++) {
-                long startUs = clipUs + gt.us[n];
+            for (int n = first; n < end; n++) {
                 long endUs = clipUs + gt.us[n + 1];
-                if (startUs >= toUs) break;
-                if (endUs <= fromUs || endUs <= coveredUs) continue;
+                // Equal-duration boundaries may still be covered by a prior GOP.
+                if (endUs <= coveredUs) continue;
                 gops[count++] = n;
                 coveredUs = Math.max(coveredUs, endUs);
             }
@@ -111,6 +117,30 @@ public final class HlsPlaylists {
             }
         }
         return finish(maxMs, body);
+    }
+
+    /** First GOP whose end is strictly after cutoffUs (or count if none). */
+    static int firstGopEndingAfter(long[] us, long clipUs, long cutoffUs) {
+        int lo = 0;
+        int hi = us.length - 1;
+        while (lo < hi) {
+            int mid = lo + (hi - lo) / 2;
+            if (clipUs + us[mid + 1] <= cutoffUs) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
+    }
+
+    /** First GOP whose start is at or after toUs (or count if none). */
+    static int firstGopStartingAtOrAfter(long[] us, long clipUs, long toUs) {
+        int lo = 0;
+        int hi = us.length - 1;
+        while (lo < hi) {
+            int mid = lo + (hi - lo) / 2;
+            if (clipUs + us[mid] < toUs) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
     }
 
     private static final class Pick {
