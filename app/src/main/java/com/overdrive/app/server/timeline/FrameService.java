@@ -302,7 +302,9 @@ public final class FrameService {
         try {
             byte[] data = java.nio.file.Files.readAllBytes(file.toPath());
             if (data.length == 0) return null;
-            file.setLastModified(System.currentTimeMillis());
+            // Reading cached scrub frames is common during seeking. Throttle the
+            // on-disk LRU timestamp update rather than writing metadata on every hit.
+            CacheFileTouch.onHit(file, System.currentTimeMillis());
             return data;
         } catch (Throwable t) {
             return null;
