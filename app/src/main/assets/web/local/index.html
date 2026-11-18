@@ -2445,6 +2445,11 @@
             font-size: var(--fs-label);
         }
         [dir="rtl"] .dash-metric small { margin: 0 6px 0 0; }
+        /* The vehicle range is a second reading, not an inline qualifier. */
+        .dash-metric #dashRangeBreakdown {
+            display: block;
+            margin: 4px 0 0;
+        }
         .dash-metric > span { margin-bottom: 6px; }
 
         /* Network tile: Wi-Fi switch pinned to the top corner, so the tile keeps its height. */
