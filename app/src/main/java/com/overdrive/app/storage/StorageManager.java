@@ -547,6 +547,44 @@ public class StorageManager {
     
     // Background cleanup scheduler
     private ScheduledExecutorService cleanupScheduler;
+
+    // ACC-OFF can race BYD's SD unmount/remount. Never do rehome I/O on the
+    // capture path, and never hold surveillanceCleanupLock while copying/syncing.
+    private static final long SURV_REHOME_MAX_WAIT_MS = 2L * 60 * 60_000L;
+    private static final long SURV_REHOME_RETAIN_MS = 30L * 60_000L;
+    private static final int SURV_REHOME_MAX_QUEUE = 128;
+    private final java.util.concurrent.ConcurrentHashMap<String, Long> pendingSurveillanceFallbacks =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    // The video has been published, but index insertion still needs retrying.
+    // Never attempt another copy (nor overwrite the published file) in that state.
+    private final java.util.concurrent.ConcurrentHashMap<String, String> publishedSurveillanceFallbacks =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final class RetainedSurveillanceSource {
+        final File destination;
+        final List<File> sidecars;
+        final long size;
+        final long modified;
+        final long eligibleAtMs;
+        RetainedSurveillanceSource(File destination, File source, List<File> sidecars,
+                                   long eligibleAtMs) {
+            this.destination = destination;
+            this.sidecars = new ArrayList<>(sidecars);
+            this.size = source.length();
+            this.modified = source.lastModified();
+            this.eligibleAtMs = eligibleAtMs;
+        }
+    }
+    private final java.util.concurrent.ConcurrentHashMap<String, RetainedSurveillanceSource>
+            retainedSurveillanceSources = new java.util.concurrent.ConcurrentHashMap<>();
+    // Touched only on the single-threaded scheduled worker; rotate after failures.
+    private String lastSurveillanceFallbackAttempt = "";
+    private final AtomicBoolean surveillanceFallbackWorkerStarted = new AtomicBoolean(false);
+    private final ScheduledExecutorService surveillanceFallbackWorker =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "SurveillanceSdRehome");
+                t.setDaemon(true);
+                return t;
+            });
     // Coalesces the card-space reap requested when a clip falls back off a full card.
     private final java.util.concurrent.atomic.AtomicBoolean earlyEmergencyReapQueued =
             new java.util.concurrent.atomic.AtomicBoolean();
@@ -5977,6 +6015,289 @@ public class StorageManager {
         return internalSurveillanceDir;
     }
 
+    /** Cheap predicate, also used BEFORE queuing the metadata/timeline barrier. */
+    public boolean isSurveillanceSdFallbackSegment(File mp4) {
+        File internal = internalSurveillanceDir;
+        return surveillanceStorageType == StorageType.SD_CARD && mp4 != null
+                && mp4.getName().startsWith("event_") && mp4.getName().endsWith(".mp4")
+                && internal != null && samePath(internal, mp4.getParentFile())
+                && mp4.isFile() && mp4.length() > 0L;
+    }
+
+    /** Only called after encoder close and both metadata queues have drained. */
+    public void queueFinalizedSurveillanceFallback(File mp4) {
+        if (!isSurveillanceSdFallbackSegment(mp4)) return;
+        String path = mp4.getAbsolutePath();
+        if (retainedSurveillanceSources.containsKey(path)) return;
+        if (!pendingSurveillanceFallbacks.containsKey(path)
+                && pendingSurveillanceFallbacks.size() >= SURV_REHOME_MAX_QUEUE) {
+            logWarn("Surveillance SD rehome queue full; keeping " + mp4.getName() + " on internal");
+            return;
+        }
+        if (pendingSurveillanceFallbacks.putIfAbsent(path,
+                android.os.SystemClock.elapsedRealtime()) == null) {
+            logInfo("Surveillance fallback queued for SD: " + path);
+        }
+        if (surveillanceFallbackWorkerStarted.compareAndSet(false, true)) {
+            try {
+                surveillanceFallbackWorker.scheduleWithFixedDelay(
+                        this::retrySurveillanceFallbacks, 5L, 20L, TimeUnit.SECONDS);
+            } catch (java.util.concurrent.RejectedExecutionException e) {
+                surveillanceFallbackWorkerStarted.set(false);
+            }
+        }
+    }
+
+    private enum RehomeOutcome { COMPLETE, RETRY, DROP }
+
+    /** Release previously indexed internal originals only after a 30-minute
+     * upload/spool grace period AND while their SD destination remains readable.
+     * No network, probe, or file copy is performed under the cleanup lock. */
+    private void reapRetainedSurveillanceSources(long now) {
+        for (java.util.Map.Entry<String, RetainedSurveillanceSource> item
+                : retainedSurveillanceSources.entrySet()) {
+            RetainedSurveillanceSource retained = item.getValue();
+            if (now < retained.eligibleAtMs) continue;
+            File source = new File(item.getKey());
+            synchronized (surveillanceCleanupLock) {
+                if (surveillanceStorageType != StorageType.SD_CARD || !sdCardAvailable
+                        || !samePath(retained.destination.getParentFile(), sdCardSurveillanceDir)
+                        || !retained.destination.isFile()
+                        || retained.destination.length() != retained.size) continue;
+                // Never delete a subsequently recreated or changed internal file.
+                if (source.exists() && (source.length() != retained.size
+                        || source.lastModified() != retained.modified)) {
+                    retainedSurveillanceSources.remove(item.getKey(), retained);
+                    continue;
+                }
+                if (source.exists() && !source.delete()) continue;
+                boolean allRemoved = true;
+                for (File sidecar : retained.sidecars) {
+                    if (!sidecar.delete()) allRemoved = false;
+                }
+                if (allRemoved) {
+                    retainedSurveillanceSources.remove(item.getKey(), retained);
+                    markStorageDirty(source);
+                    markStorageDirty(retained.destination);
+                }
+            }
+        }
+    }
+
+    /** Ordinary/physical-free retention must not reap a source during the
+     * Telegram/photo grace period; intentional user deletion is separate. */
+    private boolean isSurveillanceRehomeGraceProtected(File file) {
+        if (file == null) return false;
+        RetainedSurveillanceSource source = retainedSurveillanceSources.get(file.getAbsolutePath());
+        return source != null && android.os.SystemClock.elapsedRealtime() < source.eligibleAtMs;
+    }
+
+    /** One success or at most four failures per tick, round-robin. An invalid
+     * or colliding clip is dropped; a missing SD never costs the only copy. */
+    private void retrySurveillanceFallbacks() {
+        try {
+            long now = android.os.SystemClock.elapsedRealtime();
+            reapRetainedSurveillanceSources(now);
+            for (java.util.Map.Entry<String, Long> item : pendingSurveillanceFallbacks.entrySet()) {
+                String path = item.getKey();
+                if (now - item.getValue() >= SURV_REHOME_MAX_WAIT_MS
+                        || !new File(path).isFile()
+                        || surveillanceStorageType != StorageType.SD_CARD) {
+                    pendingSurveillanceFallbacks.remove(path, item.getValue());
+                    publishedSurveillanceFallbacks.remove(path);
+                }
+            }
+            if (pendingSurveillanceFallbacks.isEmpty()) return;
+            File target = sdCardSurveillanceDir;
+            if (!sdCardAvailable || target == null || sdCardPath == null
+                    || isWriteFaulted(StorageType.SD_CARD)
+                    || !Boolean.TRUE.equals(isMountWritableBounded(StorageType.SD_CARD))) return;
+            List<String> paths = new ArrayList<>(pendingSurveillanceFallbacks.keySet());
+            Collections.sort(paths);
+            int cursor = Collections.binarySearch(paths, lastSurveillanceFallbackAttempt);
+            int start = cursor >= 0 ? cursor + 1 : -cursor - 1;
+            for (int i = 0; i < Math.min(4, paths.size()); i++) {
+                String path = paths.get((start + i) % paths.size());
+                lastSurveillanceFallbackAttempt = path;
+                RehomeOutcome outcome = rehomeFinalizedSurveillanceSegment(new File(path), target);
+                if (outcome != RehomeOutcome.RETRY) {
+                    pendingSurveillanceFallbacks.remove(path);
+                    publishedSurveillanceFallbacks.remove(path);
+                }
+                if (outcome == RehomeOutcome.COMPLETE) break;
+            }
+        } catch (Throwable t) {
+            logWarn("Surveillance SD rehome worker failed; originals kept: " + t.getMessage());
+        }
+    }
+
+    private static final class RehomeStaging {
+        final File source;
+        final File destination;
+        final File temporary;
+        final long length;
+        final long modified;
+        RehomeStaging(File source, File destination, File temporary) {
+            this.source = source;
+            this.destination = destination;
+            this.temporary = temporary;
+            this.length = source.length();
+            this.modified = source.lastModified();
+        }
+    }
+
+    /** Copy and fsync everything WITHOUT surveillanceCleanupLock. The lock
+     * covers only the final same-folder publishes and index transition; the
+     * MP4 is published last, so readers never see an incomplete clip. */
+    private RehomeOutcome rehomeFinalizedSurveillanceSegment(File source, File destinationDir) {
+        if (!isSurveillanceSdFallbackSegment(source)) return RehomeOutcome.DROP;
+        String sourcePath = source.getAbsolutePath();
+        File destination = new File(destinationDir, source.getName());
+        String previouslyPublished = publishedSurveillanceFallbacks.get(sourcePath);
+        if (previouslyPublished != null && (!destination.getAbsolutePath().equals(previouslyPublished)
+                || !destination.isFile() || destination.length() != source.length())) {
+            logWarn("Surveillance SD rehome published path changed; keeping original: " + source);
+            return RehomeOutcome.DROP;
+        }
+        List<File> companions = surveillanceEventSidecars(source);
+        List<RehomeStaging> staged = new ArrayList<>();
+        List<File> installed = new ArrayList<>();
+        try {
+            if (previouslyPublished == null) {
+                List<File> media = new ArrayList<>(companions);
+                media.add(source); // video goes LAST
+                long totalBytes = 0L;
+                for (File f : media) {
+                    File dst = new File(destinationDir, f.getName());
+                    if (dst.exists()) {
+                        logWarn("Surveillance SD rehome name collision: " + dst);
+                        return RehomeOutcome.DROP;
+                    }
+                    totalBytes += f.length();
+                }
+                if (getSdCardFreeSpace() < totalBytes + 100L * 1024 * 1024)
+                    return RehomeOutcome.RETRY;
+                if (!destinationDir.isDirectory() && !destinationDir.mkdirs())
+                    return RehomeOutcome.RETRY;
+                for (File f : media) {
+                    File dst = new File(destinationDir, f.getName());
+                    File temporary = stageSurveillanceMigrationFile(f, destinationDir);
+                    staged.add(new RehomeStaging(f, dst, temporary));
+                }
+            }
+            synchronized (surveillanceCleanupLock) {
+                if (surveillanceStorageType != StorageType.SD_CARD || !sdCardAvailable
+                        || isWriteFaulted(StorageType.SD_CARD)
+                        || !samePath(destinationDir, sdCardSurveillanceDir)
+                        || !source.isFile()) return RehomeOutcome.RETRY;
+                if (previouslyPublished == null) {
+                    for (RehomeStaging item : staged) {
+                        if (item.destination.exists()) {
+                            logWarn("Surveillance SD rehome publish collision: " + item.destination);
+                            return RehomeOutcome.DROP;
+                        }
+                        if (item.source.length() != item.length
+                                || item.source.lastModified() != item.modified)
+                            return RehomeOutcome.RETRY;
+                    }
+                    for (RehomeStaging item : staged) {
+                        java.nio.file.Files.move(item.temporary.toPath(), item.destination.toPath());
+                        installed.add(item.destination);
+                    }
+                    publishedSurveillanceFallbacks.put(sourcePath, destination.getAbsolutePath());
+                }
+                com.overdrive.app.server.RecordingsIndex idx =
+                        com.overdrive.app.server.RecordingsIndex.getInstance();
+                if (!idx.upsert(destination)) return RehomeOutcome.RETRY;
+                // The destination has a durable, indexed copy; remove only the
+                // old INDEX row, not the files that Telegram/photos still use.
+                idx.removeByPath(sourcePath);
+                retainedSurveillanceSources.put(sourcePath, new RetainedSurveillanceSource(
+                        destination, source, companions,
+                        android.os.SystemClock.elapsedRealtime() + SURV_REHOME_RETAIN_MS));
+                markStorageDirty(source);
+                markStorageDirty(destination);
+                logInfo("Surveillance rehome indexed; retaining internal for 30 min: " + sourcePath);
+                return RehomeOutcome.COMPLETE;
+            }
+        } catch (Throwable t) {
+            logWarn("Surveillance SD rehome failed for " + source.getName()
+                    + " (internal retained): " + t.getMessage());
+            return RehomeOutcome.RETRY;
+        } finally {
+            for (RehomeStaging item : staged) {
+                if (item.temporary.exists()) item.temporary.delete();
+            }
+            if (!publishedSurveillanceFallbacks.containsKey(sourcePath)) {
+                for (File file : installed) file.delete();
+            }
+        }
+    }
+
+    /** Files attached to one finalized event segment. The "_a" boundary is
+     * important: event_..._2 is a distinct segment from event_... . */
+    static List<File> surveillanceEventSidecars(File mp4) {
+        List<File> siblings = new ArrayList<>();
+        if (mp4 == null || mp4.getParentFile() == null
+                || !mp4.getName().endsWith(".mp4")) return siblings;
+        String stem = mp4.getName().substring(0, mp4.getName().length() - 4);
+        for (String ext : sidecarExtensionsForCategory("surveillance")) {
+            File sidecar = new File(mp4.getParentFile(), stem + ext);
+            if (sidecar.isFile()) siblings.add(sidecar);
+        }
+        File[] thumbs = mp4.getParentFile().listFiles((dir, name) ->
+                name.startsWith("thumb_" + stem + "_a") && name.endsWith(".jpg"));
+        if (thumbs != null) Collections.addAll(siblings, thumbs);
+        return siblings;
+    }
+
+    /** Stage a fully synced byte-for-byte copy without publishing it. Each
+     * MiB costs at least ~150 ms; preserve source mtime for oldest-first reaps.
+     * The .surv-rehome-* temporary name is explicitly swept on orphan cleanup. */
+    static File stageSurveillanceMigrationFile(File src, File destinationDir) throws java.io.IOException {
+        long size = src.length(), modified = src.lastModified();
+        java.nio.file.Path temp = java.nio.file.Files.createTempFile(
+                destinationDir.toPath(), ".surv-rehome-", ".tmp");
+        try {
+            try (java.io.InputStream in = new java.io.BufferedInputStream(new java.io.FileInputStream(src));
+                 java.io.FileOutputStream out = new java.io.FileOutputStream(temp.toFile())) {
+                byte[] chunk = new byte[1024 * 1024];
+                int n;
+                while ((n = in.read(chunk)) != -1) {
+                    out.write(chunk, 0, n);
+                    try {
+                        Thread.sleep(Math.max(1L, (n * 150L + 1024 * 1024 - 1) / (1024 * 1024)));
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new java.io.InterruptedIOException("surveillance rehome copy interrupted");
+                    }
+                }
+                out.getChannel().force(true);
+            }
+            if (temp.toFile().length() != size || src.length() != size
+                    || src.lastModified() != modified)
+                throw new java.io.IOException("source changed during SD copy: " + src);
+            java.nio.file.Files.setLastModifiedTime(temp,
+                    java.nio.file.attribute.FileTime.fromMillis(modified));
+            return temp.toFile();
+        } catch (java.io.IOException | RuntimeException | Error t) {
+            java.nio.file.Files.deleteIfExists(temp);
+            throw t;
+        }
+    }
+
+    /** Isolated helper for exercising staging and collision without a daemon. */
+    static void copySurveillanceMigrationFile(File src, File dst) throws java.io.IOException {
+        if (dst.exists()) throw new java.nio.file.FileAlreadyExistsException(dst.toString());
+        File temp = stageSurveillanceMigrationFile(src, dst.getParentFile());
+        try {
+            if (dst.exists()) throw new java.nio.file.FileAlreadyExistsException(dst.toString());
+            java.nio.file.Files.move(temp.toPath(), dst.toPath());
+        } finally {
+            if (temp.exists()) temp.delete();
+        }
+    }
+
     /**
      * {@link #getLiveSurveillanceDir()}, but internal when its SD/USB fails the cheap liveness
      * probe right now: the availability flag lags a card that just dropped by up to two watchdog ticks.
@@ -9668,7 +9989,8 @@ public class StorageManager {
         for (String ext : partials) {
             if (name.endsWith(ext)) return true;
         }
-        return "surveillance".equals(category) && isShortHopName(name);
+        return "surveillance".equals(category)
+                && (name.startsWith(".surv-rehome-") || isShortHopName(name));
     }
 
     /**
@@ -10062,6 +10384,9 @@ public class StorageManager {
                 continue;
             }
 
+            if ("surveillance".equals(category) && isSurveillanceRehomeGraceProtected(file)) {
+                continue;  // the internal original is still feeding Telegram/photo uploads
+            }
             if (!safeKeepRetained.isEmpty() && safeKeepRetained.contains(file.getAbsolutePath())) {
                 continue;
             }
@@ -11581,6 +11906,8 @@ public class StorageManager {
      */
     private long deleteAnchorAndSidecars(File file, String category, long deadlineMs,
                                          AuxPass auxPass) {
+        if ("surveillance".equals(category) && isSurveillanceRehomeGraceProtected(file))
+            return 0L;
         final String primaryExt = primaryExtensionForCategory(category);
         final String[] sidecarExts = sidecarExtensionsForCategory(category);
         final String[] auxPrefixes = auxiliaryPrefixesForCategory(category);
@@ -12989,6 +13316,10 @@ public class StorageManager {
      * Call this when the app is terminating.
      */
     public void shutdown() {
+        surveillanceFallbackWorker.shutdownNow();
+        pendingSurveillanceFallbacks.clear();
+        publishedSurveillanceFallbacks.clear();
+        retainedSurveillanceSources.clear();
         stopPeriodicCleanup();
         stopSdCardWatchdog();
         
