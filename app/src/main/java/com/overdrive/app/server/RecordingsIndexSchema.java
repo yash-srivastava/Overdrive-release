@@ -21,11 +21,13 @@ final class RecordingsIndexSchema {
     // v6: SORT_INDEX, created by createIndexes() IF NOT EXISTS (no data migration).
     // v7: nullable deterrent_flags (1 cloud, 2 screen) from the sidecar deterrents[] marks.
     // v8: independent watched-recordings table; survives recording row upserts.
-    static final int VERSION = 8;
+    // v9: full deterministic list sort index and forward-only newer seek index.
+    static final int VERSION = 9;
 
     // H2 only index-sorts when the index STARTS with the ORDER BY column, so this
     // cannot be folded into idx_rec_available_ts.
-    static final String SORT_INDEX = "idx_rec_ts_rank";
+    static final String SORT_INDEX = "idx_rec_ts_rank_id";
+    static final String NEWER_INDEX = "idx_rec_ts_rank_id_asc";
 
     private static final String[] LEGACY_COLUMNS = {
         "filename", "abs_path", "type", "camera_id", "ts_ms", "size_bytes",
@@ -227,8 +229,15 @@ final class RecordingsIndexSchema {
         statement.execute("CREATE INDEX IF NOT EXISTS idx_rec_storage ON recordings(storage)");
         statement.execute("CREATE INDEX IF NOT EXISTS idx_rec_parking"
                 + " ON recordings(parking_session_id)");
+        // The old two-column index cannot satisfy the stable id tie-break.
+        // Replace it only after the new index exists, so an interrupted
+        // upgrade never leaves the list without a usable sort index.
         statement.execute("CREATE INDEX IF NOT EXISTS " + SORT_INDEX
-                + " ON recordings(ts_ms DESC, root_rank)");
+                + " ON recordings(ts_ms DESC, root_rank ASC, recording_id ASC)");
+        // H2 cannot traverse a descending index backwards for the newer seek.
+        statement.execute("CREATE INDEX IF NOT EXISTS " + NEWER_INDEX
+                + " ON recordings(ts_ms ASC, root_rank DESC, recording_id DESC)");
+        statement.execute("DROP INDEX IF EXISTS idx_rec_ts_rank");
     }
 
     /** True when {@link #SORT_INDEX} exists; gate for the USE INDEX hint. */

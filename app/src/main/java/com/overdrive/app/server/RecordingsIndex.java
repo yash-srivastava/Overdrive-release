@@ -1907,7 +1907,7 @@ public final class RecordingsIndex {
     }
 
     /**
-     * Page through the index with the given filter, sorted by ts_ms DESC.
+     * Page through the index with the given filter, newest first.
      * Returns JSON rows in the same shape as the legacy
      * RecordingsApiHandler.parseRecordingUncached output so existing
      * clients don't break.
@@ -1925,7 +1925,7 @@ public final class RecordingsIndex {
                 + " AND w.mp4_mtime = recordings.mp4_mtime) AS watched"
                 + fromRecordings(f)
                 + (where.length() > 0 ? " WHERE " + where : "")
-                + " ORDER BY ts_ms DESC, root_rank ASC"
+                + " ORDER BY ts_ms DESC, root_rank ASC, recording_id ASC"
                 + " LIMIT ? OFFSET ?";
 
         // The result list is built INSIDE the body so a reconnect-retry
@@ -1944,6 +1944,139 @@ public final class RecordingsIndex {
             }
             return out;
         });
+    }
+
+    /** Stable status from the adjacent query; never confuse database errors with an end. */
+    public static final class AdjacentResult {
+        public enum Status { FOUND, END, MISSING_ANCHOR, ERROR }
+        public final Status status;
+        public final JSONObject recording;
+        private AdjacentResult(Status status, JSONObject recording) {
+            this.status = status;
+            this.recording = recording;
+        }
+        private static AdjacentResult of(Status status) {
+            return new AdjacentResult(status, null);
+        }
+    }
+
+    /**
+     * Find the next clip under the exact filtered list ordering. step -1 seeks
+     * newer, +1 older. The anchor is deliberately looked up unfiltered, so a
+     * metadata edit does not break navigation. The timestamp bound is explicit
+     * for H2's index range scan: OR branches alone force a table-wide scan.
+     */
+    public synchronized AdjacentResult queryAdjacentRecording(Filter f, String recordingId,
+                                                               int step) {
+        if (recordingId == null || !recordingId.matches("[0-9a-f]{32}")
+                || (step != -1 && step != 1)) {
+            return AdjacentResult.of(AdjacentResult.Status.MISSING_ANCHOR);
+        }
+        StringBuilder where = new StringBuilder();
+        List<Object> args = new ArrayList<>();
+        buildWhere(f, where, args);
+        final boolean newer = step < 0;
+        appendAnd(where, newer
+                ? "ts_ms >= ? AND (ts_ms > ? OR (ts_ms = ? AND root_rank < ?)"
+                        + " OR (ts_ms = ? AND root_rank = ? AND recording_id < ?))"
+                : "ts_ms <= ? AND (ts_ms < ? OR (ts_ms = ? AND root_rank > ?)"
+                        + " OR (ts_ms = ? AND root_rank = ? AND recording_id > ?))");
+        String from = sortIndexAvailable
+                ? " FROM recordings USE INDEX ("
+                        + (newer ? RecordingsIndexSchema.NEWER_INDEX
+                                 : RecordingsIndexSchema.SORT_INDEX) + ")"
+                : " FROM recordings";
+        String sql = "SELECT recordings.*, EXISTS (SELECT 1 FROM recordings_watched w"
+                + " WHERE w.recording_id = recordings.recording_id"
+                + " AND w.size_bytes = recordings.size_bytes"
+                + " AND w.mp4_mtime = recordings.mp4_mtime) AS watched"
+                + from + " WHERE " + where
+                + (newer ? " ORDER BY ts_ms ASC, root_rank DESC, recording_id DESC"
+                         : " ORDER BY ts_ms DESC, root_rank ASC, recording_id ASC")
+                + " LIMIT 1";
+
+        return withRetry("queryAdjacentRecording",
+                AdjacentResult.of(AdjacentResult.Status.ERROR), () -> {
+            long timestamp;
+            int rank;
+            try (PreparedStatement anchor = connection.prepareStatement(
+                    "SELECT ts_ms, root_rank FROM recordings"
+                            + " WHERE recording_id = ? AND is_available = TRUE")) {
+                anchor.setString(1, recordingId);
+                try (ResultSet rs = anchor.executeQuery()) {
+                    if (!rs.next()) {
+                        return AdjacentResult.of(AdjacentResult.Status.MISSING_ANCHOR);
+                    }
+                    timestamp = rs.getLong(1);
+                    rank = rs.getInt(2);
+                }
+            }
+            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                int p = 1;
+                for (Object arg : args) bind(ps, p++, arg);
+                // A single indexed timestamp range plus lexicographic ties.
+                ps.setLong(p++, timestamp);
+                ps.setLong(p++, timestamp);
+                ps.setLong(p++, timestamp);
+                ps.setInt(p++, rank);
+                ps.setLong(p++, timestamp);
+                ps.setInt(p++, rank);
+                ps.setString(p, recordingId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    return rs.next()
+                            ? new AdjacentResult(AdjacentResult.Status.FOUND, rowToJson(rs))
+                            : AdjacentResult.of(AdjacentResult.Status.END);
+                }
+            }
+        });
+    }
+
+    /**
+     * Zero-based rank of the destination under the same filtered list order.
+     * Only needed on page crossings; ordinary in-page steps remain local.
+     * -1 means the destination fell out of the filtered list before this read.
+     */
+    public synchronized int positionOfRecording(Filter f, JSONObject recording) {
+        if (recording == null) return -1;
+        String id = recording.optString("id", "");
+        if (!id.matches("[0-9a-f]{32}")) return -1;
+        StringBuilder where = new StringBuilder();
+        List<Object> args = new ArrayList<>();
+        buildWhere(f, where, args);
+        // The destination is already known to match. Count all entries before
+        // it; the bound prevents a table-wide search on historical footage.
+        appendAnd(where, "ts_ms >= ? AND (ts_ms > ? OR (ts_ms = ? AND root_rank < ?)"
+                + " OR (ts_ms = ? AND root_rank = ? AND recording_id < ?))");
+        String sql = "SELECT COUNT(*)" + fromRecordings(f) + " WHERE " + where;
+        Integer count = withRetry("positionOfRecording", null, () -> {
+            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                int p = 1;
+                for (Object arg : args) bind(ps, p++, arg);
+                long timestamp;
+                int rank;
+                try (PreparedStatement anchor = connection.prepareStatement(
+                        "SELECT ts_ms, root_rank FROM recordings"
+                                + " WHERE recording_id = ? AND is_available = TRUE")) {
+                    anchor.setString(1, id);
+                    try (ResultSet row = anchor.executeQuery()) {
+                        if (!row.next()) return null;
+                        timestamp = row.getLong(1);
+                        rank = row.getInt(2);
+                    }
+                }
+                ps.setLong(p++, timestamp);
+                ps.setLong(p++, timestamp);
+                ps.setLong(p++, timestamp);
+                ps.setInt(p++, rank);
+                ps.setLong(p++, timestamp);
+                ps.setInt(p++, rank);
+                ps.setString(p, id);
+                try (ResultSet rs = ps.executeQuery()) {
+                    return rs.next() ? rs.getInt(1) : null;
+                }
+            }
+        });
+        return count == null ? -1 : count;
     }
 
     /**
