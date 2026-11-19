@@ -11890,6 +11890,34 @@ public class SurveillanceEngineGpu {
             } else {
                 logger.debug("Final notification already sent for " + videoName + "; skipping duplicate");
             }
+
+            // ACC-OFF may begin while BYD has temporarily unmounted the SD card.
+            // Preserve the event on internal storage immediately; only after ALL
+            // segment thumbnails and timeline writes have completed may the
+            // storage worker copy finalized fallback clips back to the user's
+            // configured SD card. Never move an open file or block detection on
+            // a mount/copy. Earlier rotated segments belong to this same event.
+            final java.util.List<File> finalizedSegments = new java.util.ArrayList<>(eventSegmentFiles);
+            if (!finalizedSegments.contains(stoppingFile)) finalizedSegments.add(stoppingFile);
+            try {
+                segmentMetadataExecutor.execute(() -> {
+                    if (!timelineCollector.awaitWrites(30_000L)) {
+                        logger.warn("Surveillance fallback migration skipped: timeline writes did not drain");
+                        return; // preserve originals; never race an async .json/.srt writer
+                    }
+                    try {
+                        com.overdrive.app.storage.StorageManager storage =
+                                com.overdrive.app.storage.StorageManager.getInstance();
+                        for (File segment : finalizedSegments) {
+                            storage.queueFinalizedSurveillanceFallback(segment);
+                        }
+                    } catch (Throwable t) {
+                        logger.warn("Surveillance fallback migration queue failed: " + t.getMessage());
+                    }
+                });
+            } catch (java.util.concurrent.RejectedExecutionException ignored) {
+                // Closing the engine: the original, finalized files remain on internal.
+            }
         }
 
         // (audit R8-2 / ExtC-3) The segment-listener detach, currentEventFile
