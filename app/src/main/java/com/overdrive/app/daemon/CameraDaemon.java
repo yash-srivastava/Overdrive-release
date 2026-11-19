@@ -1581,6 +1581,7 @@ public class CameraDaemon {
         // one ActivityManager.getMemoryInfo() + one Runtime.totalMemory()
         // every 5 minutes.
         startPeriodicMemoryLogging();
+        com.overdrive.app.updater.AutoUpdateScheduler.start(getAppContext());
 
         // RESILIENT LOOPER: BYD framework listeners (gearbox, bodywork, etc.) can throw
         // uncaught exceptions from their internal processing (e.g., learningEPB → CarSettings
@@ -2682,6 +2683,7 @@ public class CameraDaemon {
     private static final String DISABLE_SENTINEL = com.overdrive.app.util.ScratchRoot.path("camera_daemon.disabled");
 
     public static void shutdown() {
+        com.overdrive.app.updater.AutoUpdateScheduler.stop();
         shutdownInternal(true);
     }
 
@@ -3114,6 +3116,7 @@ public class CameraDaemon {
     }
 
     private static void shutdownInternal(boolean writeDisableSentinel) {
+        com.overdrive.app.updater.AutoUpdateScheduler.stop();
         synchronized (TRIP_ANALYTICS_LIFECYCLE_LOCK) {
             if (!shutdownStarted.compareAndSet(false, true)) {
                 return;
@@ -9528,6 +9531,39 @@ public class CameraDaemon {
      */
     public static boolean isSurveillanceEnabled() {
         return surveillanceEnabled;
+    }
+
+    /**
+     * Fail-closed admission for unattended APK replacement. An ACC-off default
+     * during cold boot is NOT proof of parking. The scheduler needs an admitted
+     * OFF edge and no camera activity; a new ON edge invalidates this gate.
+     * Do not use for manual user-confirmed installs.
+     */
+    public static boolean isSafeForAutomaticUpdate() {
+        if (!running.get() || isProcessRestartPending()
+                || !isAccOffAdmitted() || isParkShutdownCommitted() || surveillanceEnabled
+                || com.overdrive.app.config.UnifiedConfigManager.isSurveillanceEnabled()
+                || doorLockListenerArmed || pendingAccOn || pendingAccOff) {
+            return false;
+        }
+        final long generation = captureAccObservationGeneration();
+        final long offSince = captureCurrentAccOffEnteredAtElapsedMs(generation);
+        final long now = android.os.SystemClock.elapsedRealtime();
+        if (offSince <= 0L || now - offSince < 30L * 60L * 1000L) return false;
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            // Never trust a cached ACC OFF while the driver sits in P.
+            Boolean live = com.overdrive.app.monitor.AccMonitor
+                    .probeDiLink5AccOnForTransition(sharedAppContext, false, false);
+            if (!Boolean.FALSE.equals(live) || !isAccObservationCurrent(generation)) return false;
+        }
+        com.overdrive.app.surveillance.GpuSurveillancePipeline pano = gpuPipeline;
+        // Do not infer idle from a missing recorder during daemon startup.
+        if (pano == null || pano.isRecording()
+                || pano.getPendingRecordingPrefix() != null) {
+            return false;
+        }
+        com.overdrive.app.camera.OemDashcamPipeline oem = oemDashcamPipeline;
+        return oem == null || !oem.isRecording();
     }
 
     /** True if surveillance was requested but suppressed because car is in a safe zone. */
