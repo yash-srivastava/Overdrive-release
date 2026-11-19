@@ -103,6 +103,22 @@ public class Conditions {
                 new EnumType(new Label("state", "automation.state"),
                         new Label("on", "automation.on"),
                         new Label("off", "automation.off"))));
+        // DiLink 5 ESP reports a fixed 0 and its iTAC getter is a stub.
+        // Only offer real IF/WHEN ADAS readings on DiLink 3/4.
+        if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            addCondition(new EventCondition(
+                    new Label("esp_control", "automation.esp_state"),
+                    "automation.esp_state_description",
+                    new EnumType(new Label("state", "automation.state"),
+                            new Label("on", "automation.on"),
+                            new Label("off", "automation.off"))));
+            addCondition(new EventCondition(
+                    new Label("itac", "automation.itac_state"),
+                    "automation.itac_state_description",
+                    new EnumType(new Label("state", "automation.state"),
+                            new Label("on", "automation.on"),
+                            new Label("off", "automation.off"))));
+        }
         addCondition(new EventCondition(
                 new Label("slw", "automation.slw"),
                 "automation.slw_description",

@@ -326,10 +326,10 @@ public final class AutomationApiHandler {
      * emits. Backs the "reads X right now" hint next to a signal picker, so a user does not have
      * to guess whether {@code gear} says {@code p} or {@code park}.
      *
-     * <p>Read-only and side-effect-free: it does not seed, publish, or expire anything, so polling
-     * it while the editor is open cannot perturb rule evaluation. Signals that have never been
-     * observed (or whose value has expired) are simply absent, which the UI renders as "unknown"
-     * rather than inventing a default.
+     * <p>Read-only with respect to vehicle controls: it seeds live telemetry and conditional
+     * signals for the editor, but uses the store-only/silent-seed path so these reads never
+     * execute an automation action. When ACC is off or a getter is unsupported, expired
+     * signals are absent and the UI renders "unknown" instead of inventing a default.
      */
     private static boolean getState(OutputStream out) throws Exception {
         // Open the seed window FIRST: with no automation enabled, Automations.update() stores
@@ -360,6 +360,8 @@ public final class AutomationApiHandler {
                         com.overdrive.app.automation.condition.BlindSpotEvent
                                 .seedForEditor();
                         com.overdrive.app.automation.condition.EnergyRegenEvent
+                                .seedForEditor();
+                        com.overdrive.app.automation.condition.AdasStateEvent
                                 .seedForEditor();
                         com.overdrive.app.automation.condition.DoorEvent
                                 .seedForEditor();

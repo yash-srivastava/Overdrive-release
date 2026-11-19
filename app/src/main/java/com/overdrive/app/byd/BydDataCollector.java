@@ -22907,9 +22907,10 @@ public class BydDataCollector {
 
     /**
      * Read the raw iTAC state via the setting HAL ({@code SETTING_ITAC_STATE}).
-     * Returns the raw SDK int (typically 1=on / 0=off), or -1 when the read fails /
-     * device is unavailable. Exposed for on-device verification of the iTAC feature
-     * ids before the toggle is trusted (mirrors {@link #getEspState()}).
+     * Returns the raw SDK int or -1 when the read fails / device is unavailable.
+     * Polarity is unconfirmed on a real DiLink 3/4 car: some tools interpret
+     * 0=on and 1/2=off. Capture values with /api/vehicle/adas before relying
+     * on automation conditions (mirrors {@link #getEspState()}).
      */
     public int getItacState() {
         try {

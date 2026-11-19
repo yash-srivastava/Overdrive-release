@@ -2913,16 +2913,19 @@ public class VehicleControlApiHandler {
     }
 
     /**
-     * Read-only ADAS state — currently the raw ESP/ESC readback, so the (guessed)
-     * ESP feature id can be verified on-car before the toggle is trusted. Returns
-     * the raw SDK int plus a best-effort parsed on/off (1=on, 0=off; -1=unavailable).
+     * Read-only diagnostic ADAS values for on-car polarity verification.
+     * DiLink 5 provides stubs, so neither getter is queried on that platform.
+     * ESP: 0=on / 1=off; iTAC interpretation is provisional and needs testing
+     * before it is relied upon for automations.
      */
     private static void handleAdasState(OutputStream out) throws Exception {
         JSONObject response = new JSONObject();
         try {
             BydDataCollector collector = BydDataCollector.getInstance();
-            int espRaw = collector.getEspState();
-            int itacRaw = collector.getItacState();
+            boolean readable = !com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                    && collector.isAccOn();
+            int espRaw = readable ? collector.getEspState() : -1;
+            int itacRaw = readable ? collector.getItacState() : -1;
             // success if either readback yielded a usable value
             response.put("success", espRaw >= 0 || itacRaw >= 0);
             JSONObject esp = new JSONObject();
@@ -2936,8 +2939,9 @@ public class VehicleControlApiHandler {
             response.put("esp", esp);
             JSONObject itac = new JSONObject();
             itac.put("raw", itacRaw);
-            if (itacRaw == 1) itac.put("on", true);
-            else if (itacRaw == 0) itac.put("on", false);
+            // Provisional setting-HAL polarity; report raw for field verification.
+            if (itacRaw == 0) itac.put("on", true);
+            else if (itacRaw == 1 || itacRaw == 2) itac.put("on", false);
             response.put("itac", itac);
             HttpResponse.sendJson(out, response.toString());
         } catch (Exception e) {
