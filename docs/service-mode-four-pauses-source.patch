@@ -1,0 +1,657 @@
+diff --git a/app/src/main/assets/web/i18n/en.json b/app/src/main/assets/web/i18n/en.json
+index d5d782a8..d86e023d 100644
+--- a/app/src/main/assets/web/i18n/en.json
++++ b/app/src/main/assets/web/i18n/en.json
+@@ -7436,6 +7436,18 @@
+     "features_desc": "These runtime gates do not delete or modify your saved rules, bindings or configuration.",
+     "feature_automations": "Automations",
+     "feature_keymap": "Key Mapping",
++    "feature_proximity": "Proximity",
++    "feature_roadsense": "RoadSense",
++    "feature_widgets": "Widgets",
++    "feature_seat_positions": "Seat Positions",
++    "proximity": "Proximity",
++    "proximity_desc": "Pause automatic proximity lock and unlock without changing trusted devices.",
++    "roadsense": "RoadSense",
++    "roadsense_desc": "Pause road hazard detection and warnings without changing its settings.",
++    "widgets": "Widgets",
++    "widgets_desc": "Hide the OverDrive widgets overlay until Service Mode ends.",
++    "seat_positions": "Seat Positions",
++    "seat_positions_desc": "Pause saved position capture, editing and seat or mirror movement from OverDrive.",
+     "warning": "Only select apps you are comfortable disabling temporarily. Do not select apps required for vehicle controls or diagnostics. Apps that were already disabled before Service Mode are not enabled when Service Mode ends. If a package is reclassified as a system app while the mode is active, it will not be disabled again during reconciliation.",
+     "choose_end_date": "Choose a valid end date.",
+     "start_failed": "Could not start Service Mode.",
+diff --git a/app/src/main/assets/web/i18n/he.json b/app/src/main/assets/web/i18n/he.json
+index 3050e0e8..3d63855b 100644
+--- a/app/src/main/assets/web/i18n/he.json
++++ b/app/src/main/assets/web/i18n/he.json
+@@ -7436,6 +7436,18 @@
+     "features_desc": "שערי זמן הריצה אינם מוחקים או משנים כללים, מיפויים או הגדרות שמורות.",
+     "feature_automations": "אוטומציות",
+     "feature_keymap": "מיפוי מקשים",
++    "feature_proximity": "קרבה",
++    "feature_roadsense": "RoadSense",
++    "feature_widgets": "וידג׳טים",
++    "feature_seat_positions": "תנוחות מושב",
++    "proximity": "קרבה",
++    "proximity_desc": "השהיית נעילה ופתיחה אוטומטיות לפי קרבה, ללא שינוי מכשירים מהימנים.",
++    "roadsense": "RoadSense",
++    "roadsense_desc": "השהיית זיהוי מפגעי דרך והתרעות ללא שינוי ההגדרות.",
++    "widgets": "וידג׳טים",
++    "widgets_desc": "הסתרת שכבת הווידג׳טים של OverDrive עד לסיום מצב השירות.",
++    "seat_positions": "תנוחות מושב",
++    "seat_positions_desc": "השהיית שמירה, עריכה והפעלת תנוחות מושב ומראות דרך OverDrive.",
+     "warning": "בחר רק אפליקציות שניתן להשבית זמנית. אל תבחר אפליקציות הנדרשות לבקרות הרכב או לאבחון. אפליקציות שהיו מושבתות לפני מצב השירות לא יופעלו מחדש בסיומו. אם חבילה תסווג מחדש כאפליקציית מערכת בזמן שמצב השירות פעיל, היא לא תושבת שוב במהלך ההתאמה.",
+     "choose_end_date": "יש לבחור תאריך סיום תקין.",
+     "start_failed": "הפעלת מצב השירות נכשלה.",
+diff --git a/app/src/main/assets/web/local/service-mode.html b/app/src/main/assets/web/local/service-mode.html
+index 0301f4a6..3cada047 100644
+--- a/app/src/main/assets/web/local/service-mode.html
++++ b/app/src/main/assets/web/local/service-mode.html
+@@ -134,6 +134,34 @@
+                                 <span class="sm-option-desc" data-i18n="service_mode.keymap_desc">Stop physical-key bindings from dispatching configured actions.</span>
+                             </span>
+                         </label>
++                        <label class="sm-option">
++                            <input id="smPauseProximity" type="checkbox">
++                            <span class="sm-option-copy">
++                                <span class="sm-option-title" data-i18n="service_mode.proximity">Proximity</span>
++                                <span class="sm-option-desc" data-i18n="service_mode.proximity_desc">Pause automatic proximity lock and unlock without changing trusted devices.</span>
++                            </span>
++                        </label>
++                        <label class="sm-option">
++                            <input id="smPauseRoadSense" type="checkbox">
++                            <span class="sm-option-copy">
++                                <span class="sm-option-title" data-i18n="service_mode.roadsense">RoadSense</span>
++                                <span class="sm-option-desc" data-i18n="service_mode.roadsense_desc">Pause road hazard detection and warnings without changing its settings.</span>
++                            </span>
++                        </label>
++                        <label class="sm-option">
++                            <input id="smPauseWidgets" type="checkbox">
++                            <span class="sm-option-copy">
++                                <span class="sm-option-title" data-i18n="service_mode.widgets">Widgets</span>
++                                <span class="sm-option-desc" data-i18n="service_mode.widgets_desc">Hide the OverDrive widgets overlay until Service Mode ends.</span>
++                            </span>
++                        </label>
++                        <label class="sm-option">
++                            <input id="smPauseSeatPositions" type="checkbox">
++                            <span class="sm-option-copy">
++                                <span class="sm-option-title" data-i18n="service_mode.seat_positions">Seat Positions</span>
++                                <span class="sm-option-desc" data-i18n="service_mode.seat_positions_desc">Pause saved position capture, editing and seat or mirror movement from OverDrive.</span>
++                            </span>
++                        </label>
+                     </section>
+ 
+                     <div class="sm-warning" data-i18n="service_mode.warning">
+diff --git a/app/src/main/assets/web/shared/service-mode.js b/app/src/main/assets/web/shared/service-mode.js
+index 279dd281..8f166f00 100644
+--- a/app/src/main/assets/web/shared/service-mode.js
++++ b/app/src/main/assets/web/shared/service-mode.js
+@@ -165,7 +165,14 @@
+                     this.formatDateTime(status.endsAtEpochMs, status.timeZoneId));
+                 const rows = [];
+                 (status.hiddenPackages || []).forEach(pkg => rows.push(this.t('hidden_app', 'Hidden app: {package}').replace('{package}', pkg)));
+-                const labels = { automations: this.t('feature_automations', 'Automations'), keymap: this.t('feature_keymap', 'Key Mapping') };
++                const labels = {
++                    automations: this.t('feature_automations', 'Automations'),
++                    keymap: this.t('feature_keymap', 'Key Mapping'),
++                    proximity: this.t('feature_proximity', 'Proximity'),
++                    roadsense: this.t('feature_roadsense', 'RoadSense'),
++                    widgets: this.t('feature_widgets', 'Widgets'),
++                    seat_positions: this.t('feature_seat_positions', 'Seat Positions')
++                };
+                 (status.disabledFeatures || []).forEach(feature => {
+                     rows.push(this.t('paused_feature', 'Paused feature: {feature}').replace('{feature}', labels[feature] || feature));
+                 });
+@@ -241,6 +248,10 @@
+             const disabledFeatures = [];
+             if (this.byId('smPauseAutomations').checked) disabledFeatures.push('automations');
+             if (this.byId('smPauseKeymap').checked) disabledFeatures.push('keymap');
++            if (this.byId('smPauseProximity').checked) disabledFeatures.push('proximity');
++            if (this.byId('smPauseRoadSense').checked) disabledFeatures.push('roadsense');
++            if (this.byId('smPauseWidgets').checked) disabledFeatures.push('widgets');
++            if (this.byId('smPauseSeatPositions').checked) disabledFeatures.push('seat_positions');
+ 
+             const payload = {
+                 endDate: endDate,
+diff --git a/app/src/main/java/com/overdrive/app/config/ServiceModeFeatureGate.java b/app/src/main/java/com/overdrive/app/config/ServiceModeFeatureGate.java
+new file mode 100644
+index 00000000..735f7845
+--- /dev/null
++++ b/app/src/main/java/com/overdrive/app/config/ServiceModeFeatureGate.java
+@@ -0,0 +1,58 @@
++package com.overdrive.app.config;
++
++import org.json.JSONArray;
++import org.json.JSONObject;
++
++import java.util.Collections;
++import java.util.HashSet;
++import java.util.Set;
++
++/** Runtime Service Mode flags, without mutating each feature's saved configuration. */
++public final class ServiceModeFeatureGate {
++    private static volatile Set<String> paused = Collections.emptySet();
++    private static volatile Set<String> appProcessPaused = Collections.emptySet();
++
++    private ServiceModeFeatureGate() {}
++
++    /** Called by the daemon before it starts accepting requests, and on every transition. */
++    public static void apply(JSONObject state) {
++        if (state.optBoolean("__readError", false)) return; // Preserve the last known gates.
++        Set<String> next = new HashSet<>();
++        if (state.optBoolean("enabled", false) && !state.optBoolean("ending", false)) {
++            JSONArray features = state.optJSONArray("disabledFeatures");
++            if (features != null) for (int i = 0; i < features.length(); i++) {
++                String feature = features.optString(i, "");
++                if (!feature.isEmpty()) next.add(feature);
++            }
++        }
++        paused = Collections.unmodifiableSet(next);
++    }
++
++    public static boolean isPaused(String feature) {
++        return paused.contains(feature);
++    }
++
++    /**
++     * The widgets and accessibility hooks run in the app process, not the daemon.
++     * Read the shared durable section there; no daemon-only static flag crosses UIDs.
++     * When the config is temporarily unreadable, retain this process's last gate.
++     */
++    public static boolean isPausedInConfig(String feature) {
++        try {
++            JSONObject state = UnifiedConfigManager.loadConfig().optJSONObject("serviceMode");
++            Set<String> next = new HashSet<>();
++            if (state != null && state.optBoolean("enabled", false)
++                    && !state.optBoolean("ending", false)) {
++                JSONArray features = state.optJSONArray("disabledFeatures");
++                if (features != null) for (int i = 0; i < features.length(); i++) {
++                    String selected = features.optString(i, "");
++                    if (!selected.isEmpty()) next.add(selected);
++                }
++            }
++            appProcessPaused = Collections.unmodifiableSet(next);
++            return next.contains(feature);
++        } catch (Throwable ignored) {
++            return appProcessPaused.contains(feature);
++        }
++    }
++}
+diff --git a/app/src/main/java/com/overdrive/app/overlay/GlassWidgetsOverlayService.kt b/app/src/main/java/com/overdrive/app/overlay/GlassWidgetsOverlayService.kt
+index 831a79f7..bb9212ac 100644
+--- a/app/src/main/java/com/overdrive/app/overlay/GlassWidgetsOverlayService.kt
++++ b/app/src/main/java/com/overdrive/app/overlay/GlassWidgetsOverlayService.kt
+@@ -134,13 +134,13 @@ class GlassWidgetsOverlayService : Service() {
+             private const val MAX_CUSTOM = 40
+ 
+             /** [units] is the app-wide tyre pressure display unit, not a widget setting. */
+-            fun from(o: JSONObject?, units: String, miles: Boolean = false): Settings {
++            fun from(o: JSONObject?, units: String, miles: Boolean = false, paused: Boolean = false): Settings {
+                 val list = o?.optJSONArray("widgets")
+                 val widgets = if (list == null) listOf("battery", "charging", "trip", "power")
+                 else (0 until list.length()).map { list.optString(it) }.filter { it in ALL }.distinct()
+                 val custom = custom(o?.optJSONArray("custom"))
+                 return Settings(
+-                    enabled = o?.optBoolean("enabled", false) ?: false,
++                    enabled = (o?.optBoolean("enabled", false) ?: false) && !paused,
+                     mode = if (o?.optString("mode") == "global") "global" else "home",
+                     widgets = widgets,
+                     position = o?.optString("position")?.takeIf { it in POSITIONS } ?: "bottom-left",
+@@ -461,11 +461,12 @@ class GlassWidgetsOverlayService : Service() {
+         val units = UnifiedConfigManager.getTyrePressureUnit()
+         // distances and speeds in the unit picked for trips
+         val miles = cfg.optJSONObject("tripAnalytics")?.optString("distanceUnit") == "mi"
+-        val raw = "$units|$miles|$section"
++        val paused = com.overdrive.app.config.ServiceModeFeatureGate.isPausedInConfig("widgets")
++        val raw = "$units|$miles|$section|serviceModePaused=$paused"
+         // read on the io thread and, at start, on main: the text and what it parsed to stay one pair
+         synchronized(settingsLock) {
+             if (!force && raw == lastSettings) readSettings
+-            else Settings.from(section, units, miles).also { lastSettings = raw; readSettings = it }
++            else Settings.from(section, units, miles, paused).also { lastSettings = raw; readSettings = it }
+         }
+     } catch (t: Throwable) {
+         Log.w(TAG, "config unavailable: ${t.message}")
+@@ -2415,7 +2416,9 @@ class GlassWidgetsOverlayService : Service() {
+         /** App-side reconcile with the saved master toggle (boot / keepalive path). */
+         fun syncWithConfig(context: Context): Boolean {
+             val enabled = try {
+-                UnifiedConfigManager.loadConfig().optJSONObject(SECTION)?.optBoolean("enabled", false) ?: false
++                val config = UnifiedConfigManager.loadConfig()
++                (config.optJSONObject(SECTION)?.optBoolean("enabled", false) ?: false) &&
++                    !com.overdrive.app.config.ServiceModeFeatureGate.isPausedInConfig("widgets")
+             } catch (t: Throwable) {
+                 false
+             }
+diff --git a/app/src/main/java/com/overdrive/app/remote/RemoteDevViewBridgeService.kt b/app/src/main/java/com/overdrive/app/remote/RemoteDevViewBridgeService.kt
+index 82b1af0e..5a2a0a83 100644
+--- a/app/src/main/java/com/overdrive/app/remote/RemoteDevViewBridgeService.kt
++++ b/app/src/main/java/com/overdrive/app/remote/RemoteDevViewBridgeService.kt
+@@ -62,8 +62,13 @@ class RemoteDevViewBridgeService : Service() {
+         ensureListening()
+         // A service can be recreated while the Application stays alive.
+         // Restore saved monitoring here as well as at process startup.
+-        com.overdrive.app.remoteaccess.KeyFobAccessMonitor.resumeIfEnabled(application)
+-        com.overdrive.app.remoteaccess.BluetoothAccessMonitor.resumeIfEnabled(application)
++        if (com.overdrive.app.config.ServiceModeFeatureGate.isPausedInConfig("proximity")) {
++            com.overdrive.app.remoteaccess.KeyFobAccessMonitor.stop()
++            com.overdrive.app.remoteaccess.BluetoothAccessMonitor.stop()
++        } else {
++            com.overdrive.app.remoteaccess.KeyFobAccessMonitor.resumeIfEnabled(application)
++            com.overdrive.app.remoteaccess.BluetoothAccessMonitor.resumeIfEnabled(application)
++        }
+         return START_NOT_STICKY
+     }
+ 
+diff --git a/app/src/main/java/com/overdrive/app/remoteaccess/BluetoothAccessMonitor.java b/app/src/main/java/com/overdrive/app/remoteaccess/BluetoothAccessMonitor.java
+index e0e11dab..adda03a5 100644
+--- a/app/src/main/java/com/overdrive/app/remoteaccess/BluetoothAccessMonitor.java
++++ b/app/src/main/java/com/overdrive/app/remoteaccess/BluetoothAccessMonitor.java
+@@ -63,7 +63,8 @@ public final class BluetoothAccessMonitor {
+ 
+     /** One startup read; a disabled feature never schedules a config poll. */
+     public static void resumeIfEnabled(Context context) {
+-        if (RemoteAccessSettings.read().optBoolean("enabled")) {
++        if (RemoteAccessSettings.read().optBoolean("enabled")
++                && !com.overdrive.app.config.ServiceModeFeatureGate.isPausedInConfig("proximity")) {
+             try {
+                 JSONObject result = command(context, new JSONObject().put("operation", "apply"));
+                 if (!result.optBoolean("success"))
+@@ -79,6 +80,15 @@ public final class BluetoothAccessMonitor {
+         if ("devices".equals(operation))
+             return new JSONObject().put("success", true).put("devices", devices());
+         if ("apply".equals(operation)) {
++            // Service Mode stops both app-process collectors without touching the
++            // user's saved trusted phones, keyfobs or master toggle.
++            if (com.overdrive.app.config.ServiceModeFeatureGate.isPausedInConfig("proximity")) {
++                stop();
++                KeyFobAccessMonitor.stop();
++                return new JSONObject().put("success", true).put("paused", true)
++                        .put("runtime", runtime(context))
++                        .put("keyFobRuntime", KeyFobAccessMonitor.runtime());
++            }
+             JSONObject settings = RemoteAccessSettings.read();
+             KeyFobAccessMonitor.apply(context, settings);
+             JSONArray phones = settings.getJSONArray("phones");
+@@ -213,7 +223,8 @@ public final class BluetoothAccessMonitor {
+         try {
+             UnifiedConfigManager.forceReload();
+             JSONObject persisted = RemoteAccessSettings.read();
+-            if (!running || !persisted.optBoolean("enabled")) return "master_off";
++            if (!running || !persisted.optBoolean("enabled")
++                    || com.overdrive.app.config.ServiceModeFeatureGate.isPausedInConfig("proximity")) return "master_off";
+             if (!sameMonitorConfig(persisted, config)) return "settings_changed";
+             if (!persisted.optBoolean("keepBluetoothOn")) return "shared_bluetooth_off";
+             if (UnifiedConfigManager.isVehicleOnOnlyMode()) return "vehicle_on_only";
+@@ -239,7 +250,8 @@ public final class BluetoothAccessMonitor {
+         try {
+             UnifiedConfigManager.forceReload();
+             JSONObject persisted = RemoteAccessSettings.read();
+-            return running && persisted.optBoolean("enabled")
++            return running && !com.overdrive.app.config.ServiceModeFeatureGate.isPausedInConfig("proximity")
++                    && persisted.optBoolean("enabled")
+                     && persisted.optBoolean("keepBluetoothOn")
+                     && sameMonitorConfig(persisted, config);
+         } catch (Exception | LinkageError unavailable) { return false; }
+@@ -266,7 +278,8 @@ public final class BluetoothAccessMonitor {
+                 long cycleStartedMs = SystemClock.elapsedRealtime();
+                 // Restores/imports also revoke monitoring without relying on a web client.
+                 JSONObject persisted = RemoteAccessSettings.read();
+-                if (!persisted.optBoolean("enabled") || !persisted.optBoolean("keepBluetoothOn")
++                if (com.overdrive.app.config.ServiceModeFeatureGate.isPausedInConfig("proximity")
++                        || !persisted.optBoolean("enabled") || !persisted.optBoolean("keepBluetoothOn")
+                         || !sameMonitorConfig(persisted, config)) {
+                     Log.i(TAG, "Phone worker stopping: " + (persisted.optBoolean("enabled")
+                             ? "settings changed" : "master off"));
+diff --git a/app/src/main/java/com/overdrive/app/remoteaccess/KeyFobAccessMonitor.java b/app/src/main/java/com/overdrive/app/remoteaccess/KeyFobAccessMonitor.java
+index 760bdb8e..babab5f4 100644
+--- a/app/src/main/java/com/overdrive/app/remoteaccess/KeyFobAccessMonitor.java
++++ b/app/src/main/java/com/overdrive/app/remoteaccess/KeyFobAccessMonitor.java
+@@ -87,7 +87,8 @@ public final class KeyFobAccessMonitor {
+     }
+ 
+     public static synchronized void apply(Context context, JSONObject settings) {
+-        boolean enabled = consent(settings);
++        boolean enabled = consent(settings)
++                && !com.overdrive.app.config.ServiceModeFeatureGate.isPausedInConfig("proximity");
+         if (instance != null && (!enabled || !sameFobRules(settings, instance.config)
+                 || !instance.running)) stop();
+         if (!enabled) {
+@@ -172,7 +173,7 @@ public final class KeyFobAccessMonitor {
+ 
+     private boolean stillConsented() {
+         try {
+-            if (!running) return false;
++            if (!running || com.overdrive.app.config.ServiceModeFeatureGate.isPausedInConfig("proximity")) return false;
+             JSONObject live = RemoteAccessSettings.read();
+             if (!sameFobRules(live, config)) return false;
+             // A1: a revision-only change is adopted in place so the next heartbeat carries it.
+diff --git a/app/src/main/java/com/overdrive/app/roadsense/RoadSenseController.kt b/app/src/main/java/com/overdrive/app/roadsense/RoadSenseController.kt
+index ac610ced..93a458eb 100644
+--- a/app/src/main/java/com/overdrive/app/roadsense/RoadSenseController.kt
++++ b/app/src/main/java/com/overdrive/app/roadsense/RoadSenseController.kt
+@@ -444,17 +444,21 @@ class RoadSenseController @JvmOverloads constructor(
+         }
+     }
+ 
++    /** Apply a Service Mode transition without overwriting roadSense.enabled. */
++    fun onServiceModeChanged() {
++        Thread({
++            try { reconcile() } catch (t: Throwable) { Log.w(TAG, "service-mode reconcile failed: ${t.message}") }
++        }, "roadsense-service-mode").apply { isDaemon = true }.start()
++    }
++
+     /**
+-     * Start or stop the heavy machinery to match the persisted roadSense.enabled flag.
+-     * forceReload so a cross-UID web write is seen immediately (the listener fires in this
+-     * daemon process, but the flag may have been written via the app→daemon IPC path and
+-     * only just landed on disk). Serialized on [lifecycleLock] so overlapping toggle
+-     * notifications can't race start() against stop(). start()/stop() are themselves
+-     * idempotent (guarded by [started]), so a redundant reconcile is a cheap no-op.
++     * Match the running machinery to the saved master toggle and Service Mode gate.
++     * The lifecycle lock serializes overlapping toggles and pause transitions.
+      */
+     private fun reconcile() {
+         val enabled = try {
+-            RoadSenseConfig.snapshot(forceReload = true).enabled
++            RoadSenseConfig.snapshot(forceReload = true).enabled &&
++                !com.overdrive.app.config.ServiceModeFeatureGate.isPaused("roadsense")
+         } catch (t: Throwable) {
+             Log.w(TAG, "reconcile snapshot failed: ${t.message}"); return
+         }
+@@ -657,7 +661,8 @@ class RoadSenseController @JvmOverloads constructor(
+         // Snapshot once: we also consult overlayVisible below for the app-side overlay
+         // launch, and a single read keeps the two decisions consistent within this tick.
+         val cfgSnap = RoadSenseConfig.snapshot()
+-        featureEnabled = cfgSnap.enabled
++        featureEnabled = cfgSnap.enabled &&
++            !com.overdrive.app.config.ServiceModeFeatureGate.isPaused("roadsense")
+         // Pick up any change to the speed-adaptive cornering-yaw knobs (rare; off the
+         // 100 Hz IMU path — this is the ~2 Hz vehicle poll).
+         maybeRebuildRejection(cfgSnap)
+@@ -1433,7 +1438,8 @@ class RoadSenseController @JvmOverloads constructor(
+             cachedDynamics = vehicleSource.latest(nowWall)
+             // Refresh the master-enabled flag on the same throttle (config is
+             // file-backed; reading it per-100Hz-sample would be wasteful I/O).
+-            featureEnabled = RoadSenseConfig.snapshot().enabled
++            featureEnabled = RoadSenseConfig.snapshot().enabled &&
++                !com.overdrive.app.config.ServiceModeFeatureGate.isPaused("roadsense")
+         }
+         if (nowWall - lastGpsPollMs > GPS_POLL_MS) {
+             lastGpsPollMs = nowWall
+diff --git a/app/src/main/java/com/overdrive/app/server/GlassWidgetsApiHandler.java b/app/src/main/java/com/overdrive/app/server/GlassWidgetsApiHandler.java
+index c1b88cb4..0f78787b 100644
+--- a/app/src/main/java/com/overdrive/app/server/GlassWidgetsApiHandler.java
++++ b/app/src/main/java/com/overdrive/app/server/GlassWidgetsApiHandler.java
+@@ -7,6 +7,7 @@ import android.content.pm.PackageManager;
+ import android.content.pm.ResolveInfo;
+ 
+ import com.overdrive.app.logging.DaemonLogger;
++import com.overdrive.app.config.ServiceModeFeatureGate;
+ 
+ import org.json.JSONObject;
+ 
+@@ -126,7 +127,8 @@ public final class GlassWidgetsApiHandler {
+         Boolean enabled = null;
+         try {
+             JSONObject cfg = com.overdrive.app.config.UnifiedConfigManager.loadConfig().optJSONObject(SECTION);
+-            enabled = cfg != null && cfg.optBoolean("enabled", false);
++            enabled = cfg != null && cfg.optBoolean("enabled", false)
++                    && !ServiceModeFeatureGate.isPaused("widgets");
+         } catch (Throwable t) {
+             logger.warn("config unavailable: " + t.getMessage());
+         }
+@@ -139,7 +141,8 @@ public final class GlassWidgetsApiHandler {
+         boolean enabled = false;
+         try {
+             JSONObject cfg = com.overdrive.app.config.UnifiedConfigManager.loadConfig().optJSONObject(SECTION);
+-            enabled = cfg != null && cfg.optBoolean("enabled", false);
++            enabled = cfg != null && cfg.optBoolean("enabled", false)
++                    && !ServiceModeFeatureGate.isPaused("widgets");
+         } catch (Throwable t) {
+             logger.warn("config unavailable: " + t.getMessage());
+         }
+diff --git a/app/src/main/java/com/overdrive/app/server/PositionsApiHandler.java b/app/src/main/java/com/overdrive/app/server/PositionsApiHandler.java
+index 9455a57e..eb31521d 100644
+--- a/app/src/main/java/com/overdrive/app/server/PositionsApiHandler.java
++++ b/app/src/main/java/com/overdrive/app/server/PositionsApiHandler.java
+@@ -191,6 +191,13 @@ public final class PositionsApiHandler {
+             HttpResponse.sendJson(out, cur.toString());
+             return true;
+         }
++        if ("POST".equals(method)
++                && com.overdrive.app.config.ServiceModeFeatureGate.isPaused("seat_positions")) {
++            HttpResponse.sendJson(out, 423, new JSONObject()
++                    .put("success", false)
++                    .put("error", "Seat Positions are paused by Service Mode.").toString());
++            return true;
++        }
+         if (pathOnly.equals("/api/positions/capture")) return handleCapture(out, q);
+         if (pathOnly.equals("/api/positions/apply"))   return handleApply(out, q, body);
+         if (pathOnly.equals("/api/positions/delete"))  return handleDelete(out, q, body);
+diff --git a/app/src/main/java/com/overdrive/app/server/RemoteAccessApiHandler.java b/app/src/main/java/com/overdrive/app/server/RemoteAccessApiHandler.java
+index 3e4f5211..96e10457 100644
+--- a/app/src/main/java/com/overdrive/app/server/RemoteAccessApiHandler.java
++++ b/app/src/main/java/com/overdrive/app/server/RemoteAccessApiHandler.java
+@@ -6,6 +6,7 @@ import com.overdrive.app.byd.DiLink5LockRail;
+ import com.overdrive.app.byd.routing.VehicleCommandRouter;
+ import com.overdrive.app.remote.RemoteDevViewBridgeAuth;
+ import com.overdrive.app.remoteaccess.ProximityEvaluator;
++import com.overdrive.app.config.ServiceModeFeatureGate;
+ import com.overdrive.app.remoteaccess.BluetoothConnectionEvidence;
+ import com.overdrive.app.remoteaccess.BluetoothProximityDecisionGuard;
+ import com.overdrive.app.remoteaccess.ProximityCooldownPolicy;
+@@ -402,11 +403,23 @@ public final class RemoteAccessApiHandler {
+             return;
+         }
+         if ("remoteAccessKeyFobObservation".equals(sample.optString("command"))) {
++            if (ServiceModeFeatureGate.isPaused("proximity")) {
++                synchronized (STATE) { rememberNonce(authenticated.nonce, authenticated.timestampMs); }
++                HttpResponse.sendJson(out, new JSONObject().put("success", false).put("revoked", true)
++                        .put("reason", "service_mode").toString());
++                return;
++            }
+             relayKeyFob(authenticated, out);
+             return;
+         }
+         if (!"remoteAccessObservation".equals(sample.optString("command")))
+             throw new SecurityException("Invalid signal envelope");
++        if (ServiceModeFeatureGate.isPaused("proximity")) {
++            synchronized (STATE) { rememberNonce(authenticated.nonce, authenticated.timestampMs); }
++            HttpResponse.sendJson(out, new JSONObject().put("success", false).put("revoked", true)
++                    .put("reason", "service_mode").toString());
++            return;
++        }
+         Integer observedPower = null;
+         boolean nonceRemembered = false;
+         boolean readSwitchOffClosures = !DiLink5Platform.isSelected()
+@@ -682,7 +695,8 @@ public final class RemoteAccessApiHandler {
+             rememberNonce(authenticated.nonce, authenticated.timestampMs);
+             refreshSettings();
+             PendingActuation pending = pendingActuation;
+-            allowed = pending != null && pending.scope.token.equals(scope.token)
++            allowed = !ServiceModeFeatureGate.isPaused("proximity")
++                    && pending != null && pending.scope.token.equals(scope.token)
+                     && pending.scope.action.equals(scope.action)
+                     && pending.scope.revision == scope.revision
+                     && pending.scope.expiresAt == scope.expiresAt
+@@ -1041,6 +1055,7 @@ public final class RemoteAccessApiHandler {
+     private static void performDecision(ActionDecision decision, JSONObject settings) throws Exception {
+         String action = decision.action;
+         synchronized (ACTION) {
++            if (ServiceModeFeatureGate.isPaused("proximity")) return;
+             JSONObject live = RemoteAccessSettings.read();
+             if (DiLink5Platform.isSelected()) {
+                 // Gate rails follow the live settings just read; never under diLink5IngressLock.
+@@ -1053,7 +1068,8 @@ public final class RemoteAccessApiHandler {
+                     // The gate keeps its previous rail set; the decision proceeds on it.
+                 }
+             }
+-            if (!live.optBoolean("enabled") || live.optLong("revision") != settings.optLong("revision")) return;
++            if (ServiceModeFeatureGate.isPaused("proximity")
++                    || !live.optBoolean("enabled") || live.optLong("revision") != settings.optLong("revision")) return;
+             // Cloud fallback actuator (17 Oct): read once from the live settings that just passed the
+             // revision check. The gate below runs exactly as today whatever its value.
+             boolean cloudFallback = RemoteAccessSettings.cloudFallback(live);
+@@ -1299,6 +1315,7 @@ public final class RemoteAccessApiHandler {
+             VehicleCommandRouter.CommandResult result, BydDataCollector.DiLink5LockEvidence finalEvidence,
+             DiLink5LockRail actuationRail, BydDataCollector.DiLink5LockEvidence typedEvidence, int target,
+             boolean cloudFallback, boolean legacyDispatch, long dispatchedAtElapsed) throws Exception {
++        if (ServiceModeFeatureGate.isPaused("proximity")) return;
+         String action = decision.action;
+         CloudLeg cloudLeg = null;                                  // at most ONE cloud attempt per decision
+         try {
+@@ -1451,6 +1468,24 @@ public final class RemoteAccessApiHandler {
+                 decision.freshnessMs) && decision.valid();
+     }
+ 
++    /** Reconcile the app-process monitors when Service Mode starts or ends. */
++    public static void onServiceModeChanged() {
++        Thread sync = new Thread(() -> {
++            try {
++                if (ServiceModeFeatureGate.isPaused("proximity")) {
++                    ConfirmJob pending = pendingConfirmJob;
++                    if (pending != null) pending.interrupt();
++                }
++                bridge(ServiceModeFeatureGate.isPaused("proximity") ? "stop" : "apply");
++            } catch (Throwable error) {
++                com.overdrive.app.daemon.CameraDaemon.log(
++                        "Proximity Service Mode reconcile unavailable: " + error.getMessage());
++            }
++        }, "service-mode-proximity");
++        sync.setDaemon(true);
++        sync.start();
++    }
++
+     private static JSONObject bridge(String operation) throws Exception {
+         RemoteDevViewBridgeClient.Response response = new RemoteDevViewBridgeClient().send(
+                 new JSONObject().put("command", "remoteAccess").put("operation", operation));
+@@ -2191,7 +2226,8 @@ public final class RemoteAccessApiHandler {
+             boolean arriving = reading.arrivalCandidate || reading.event == ProximityEvaluator.Event.ARRIVAL;
+             if (!reading.arrivalCandidate && !reading.lockCandidate
+                     && reading.event == ProximityEvaluator.Event.NONE) return false;
+-            return config.optBoolean("enabled") && config.optLong("revision") == settings.optLong("revision")
++            return !ServiceModeFeatureGate.isPaused("proximity")
++                    && config.optBoolean("enabled") && config.optLong("revision") == settings.optLong("revision")
+                     && BluetoothProximityDecisionGuard.allows(arriving ? "unlock" : "lock",
+                         originalObserved, reading.episodeId, instance, serial, originalModeGeneration,
+                         signal, phone.sourceInstance, phone.sourceSequence, activeModeGeneration(),
+@@ -2221,7 +2257,8 @@ public final class RemoteAccessApiHandler {
+             boolean arriving = reading.arrivalCandidate || reading.event == ProximityEvaluator.Event.ARRIVAL;
+             if (!reading.arrivalCandidate && !reading.lockCandidate
+                     && reading.event == ProximityEvaluator.Event.NONE) return false;
+-            return config.optBoolean("enabled") && config.optLong("revision") == settings.optLong("revision")
++            return !ServiceModeFeatureGate.isPaused("proximity")
++                    && config.optBoolean("enabled") && config.optLong("revision") == settings.optLong("revision")
+                     && BluetoothProximityDecisionGuard.allowsIgnoringObservationAge(arriving ? "unlock" : "lock",
+                         reading.episodeId, instance, serial, originalModeGeneration,
+                         signal, phone.sourceInstance, phone.sourceSequence, activeModeGeneration(),
+diff --git a/app/src/main/java/com/overdrive/app/server/ServiceModeManager.java b/app/src/main/java/com/overdrive/app/server/ServiceModeManager.java
+index 9eb84d4d..14556f7e 100644
+--- a/app/src/main/java/com/overdrive/app/server/ServiceModeManager.java
++++ b/app/src/main/java/com/overdrive/app/server/ServiceModeManager.java
+@@ -7,6 +7,7 @@ import android.os.SystemClock;
+ import com.overdrive.app.automation.Automations;
+ import com.overdrive.app.automation.ServiceModeAutomationGate;
+ import com.overdrive.app.config.UnifiedConfigManager;
++import com.overdrive.app.config.ServiceModeFeatureGate;
+ import com.overdrive.app.daemon.CameraDaemon;
+ import com.overdrive.app.launcher.AppLauncher;
+ import com.overdrive.app.logging.DaemonLogger;
+@@ -426,6 +427,26 @@ public final class ServiceModeManager {
+ 
+         boolean active = state.optBoolean("enabled", false)
+                 && !state.optBoolean("ending", false);
++        boolean wasProximityPaused = ServiceModeFeatureGate.isPaused("proximity");
++        boolean wasRoadSensePaused = ServiceModeFeatureGate.isPaused("roadsense");
++        boolean wasWidgetsPaused = ServiceModeFeatureGate.isPaused("widgets");
++        ServiceModeFeatureGate.apply(state);
++        // Reconcile live services after a gate transition. Never block the state lock
++        // on an overlay service command or RoadSense's store shutdown.
++        if (wasProximityPaused != ServiceModeFeatureGate.isPaused("proximity")
++                && CameraDaemon.getAppContext() != null) {
++            RemoteAccessApiHandler.onServiceModeChanged();
++        }
++        if (wasRoadSensePaused != ServiceModeFeatureGate.isPaused("roadsense")) {
++            com.overdrive.app.roadsense.RoadSenseController controller = CameraDaemon.getRoadSense();
++            if (controller != null) controller.onServiceModeChanged();
++        }
++        if (wasWidgetsPaused != ServiceModeFeatureGate.isPaused("widgets")
++                && CameraDaemon.getAppContext() != null) {
++            Thread sync = new Thread(GlassWidgetsApiHandler::sync, "service-mode-widgets");
++            sync.setDaemon(true);
++            sync.start();
++        }
+         boolean pauseAutomations = active
+                 && contains(state.optJSONArray("disabledFeatures"), "automations");
+         // Do not touch Automations on an ordinary daemon start. Its <clinit>
+@@ -532,7 +553,9 @@ public final class ServiceModeManager {
+ 
+         for (int i = 0; i < requested.length(); i++) {
+             String feature = requested.optString(i, "").trim().toLowerCase(Locale.ROOT);
+-            if (!"automations".equals(feature) && !"keymap".equals(feature)) {
++            if (!"automations".equals(feature) && !"keymap".equals(feature)
++                    && !"proximity".equals(feature) && !"roadsense".equals(feature)
++                    && !"widgets".equals(feature) && !"seat_positions".equals(feature)) {
+                 throw new IllegalArgumentException("Unsupported Service Mode feature: " + feature);
+             }
+             if (seen.add(feature)) normalized.put(feature);
+diff --git a/app/src/main/java/com/overdrive/app/services/KeepAliveAccessibilityService.java b/app/src/main/java/com/overdrive/app/services/KeepAliveAccessibilityService.java
+index fdf2beda..e5bb6c04 100644
+--- a/app/src/main/java/com/overdrive/app/services/KeepAliveAccessibilityService.java
++++ b/app/src/main/java/com/overdrive/app/services/KeepAliveAccessibilityService.java
+@@ -361,6 +361,7 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
+      * as KeyMapDispatcher.fire(). Runs off the a11y callback thread.
+      */
+     private void captureSeatPosition(int slot) {
++        if (com.overdrive.app.config.ServiceModeFeatureGate.isPausedInConfig("seat_positions")) return;
+         captureExecutor.execute(() -> {
+             HttpURLConnection conn = null;
+             try {
+diff --git a/docs/SERVICE_MODE.md b/docs/SERVICE_MODE.md
+index 8df9d1cc..b7a67a07 100644
+--- a/docs/SERVICE_MODE.md
++++ b/docs/SERVICE_MODE.md
+@@ -6,7 +6,7 @@ Service Mode is a temporary, device-local mode intended for workshop or dealer v
+ 
+ - Start Service Mode immediately and choose a restoration date in the head unit's local time zone.
+ - Optionally hide selected third-party launchable apps. OverDrive remains visible and available.
+-- Optionally pause Automations and Key Mapping without deleting saved rules or bindings.
++- Optionally pause Automations, Key Mapping, Proximity, RoadSense, Widgets, and Seat Positions without deleting saved settings, trusted devices, rules or bindings.
+ - End the mode early from the Service Mode page, or let the daemon restore the saved state at 23:59:59.999 on the selected date in the head unit's local time zone. During the same boot, expiry uses Android's monotonic elapsed-realtime clock and the persisted boot counter, so moving the wall clock backwards cannot extend the schedule. After a reboot, the wall deadline is used because elapsed realtime resets. A 15-second reconciliation worker runs only while Service Mode is active or restoring, and restores it on the first check after the deadline.
+ - If restoration cannot complete, the mode remains marked as restoring and the daemon retries. An independent app-process recovery attempt also runs on boot or activity launch if the daemon is unavailable, using authenticated ADB when available.
+ 
+@@ -52,7 +52,17 @@ The `serviceMode` section is private runtime state. It is excluded from config b
+ 
+ ## Feature gates
+ 
+-The Automations gate is **fire-only**: telemetry continues updating its snapshots and a paused signal is treated as consumed, so an unchanged snapshot does not run after End. It blocks automatic and explicit runs, including action groups called from keys and quick controls, while leaving saved definitions intact. The Key Mapping gate rejects physical-key action dispatch while leaving stored bindings intact. Ending Service Mode reopens the gates.
++The Automations gate is **fire-only**: telemetry continues updating its snapshots and a paused signal is treated as consumed, so an unchanged snapshot does not run after End. It blocks automatic and explicit runs, including action groups called from keys and quick controls, while leaving saved definitions intact. The Key Mapping gate rejects physical-key action dispatch while leaving stored bindings intact.
++
++The **Proximity** gate rejects phone and keyfob observation-driven lock/unlock actions, including the final actuation/confirmation checks, while retaining trusted devices and user configuration. It does not disable the separate radar-based Proximity Guard recording mode.
++
++The **RoadSense** gate reconciles its running controller to the disabled state (releasing its detector, sensor sidecar and warning worker) while leaving `roadSense.enabled` unchanged. When the visit ends it reconciles back to the saved configuration.
++
++The **Widgets** gate stops the on-screen Glass Widgets overlay in the app process and prevents boot/keepalive and manual Arrange from restarting it. It does not delete layouts or widgets. The app-side service checks the persisted state independently of the daemon.
++
++The **Seat Positions** gate rejects POST changes and applies at `/api/positions` and suppresses accessibility-initiated captures, but keeps read-only listing and live status available. It does not touch the head unit's native BYD seat-memory controls.
++
++Ending Service Mode reopens all gates. The paused choices also take effect after a reboot because their state is persisted.
+ 
+ ## Device compatibility
+ 
+@@ -62,10 +72,10 @@ Package state changes depend on the head unit's Android PackageManager and shell
+ 
+ Use an expendable, third-party app (never a vehicle-control or diagnostic app) on a parked, controlled test vehicle.
+ 
+-1. Record its original PackageManager enabled state. Start Service Mode with the app plus both optional feature pauses. Verify the app is hidden and action-group/key/automation requests are rejected rather than reported successful. Verify an otherwise eligible app is still excluded if it is acting as the home launcher or an enabled keyboard.
+-2. End manually. Verify the original app state is restored exactly, the original launcher remains available, and rules/bindings still exist. Verify both the guardian marker and the recovery copies are cleaned up.
++1. Record its original PackageManager enabled state. Start Service Mode with the app plus the optional feature pauses. Verify the app is hidden and action-group/key/automation requests are rejected rather than reported successful. Verify an otherwise eligible app is still excluded if it is acting as the home launcher or an enabled keyboard.
++2. End manually. Verify the original app state is restored exactly, the original launcher remains available, and rules/bindings still exist. Verify the additional Proximity, RoadSense, Widgets and Seat Positions gates restore the previously saved feature states, and verify both the guardian marker and the recovery copies are cleaned up.
+ 3. Start again, reboot in the middle of the visit, and verify paused features and hidden apps remain paused/hidden until End or the selected deadline. Verify a paused boot event is not fired or replayed on End.
+ 4. Start with an expendable app and verify exactly one guardian is running across daemon restarts. Uninstall OverDrive while Service Mode is active and the guardian is running; verify the previously enabled app is restored. Confirm the trusted `/data/local/tmp` recovery command works if automatic recovery is interrupted; never execute the Downloads copy.
+ 5. Switch between English and Hebrew after the page has loaded. Verify checkbox/label spacing, status translations, and cache behavior in the head unit's WebView.
+ 
+-**Status:** Host-only checks passed; the car acceptance test remains required and unverified.
++**Status:** The extended feature gates were reviewed statically only; no Android build, project tests or car acceptance tests have been performed for this change.
