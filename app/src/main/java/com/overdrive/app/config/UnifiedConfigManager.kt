@@ -3294,6 +3294,16 @@ object UnifiedConfigManager {
         return updateSection("updates", JSONObject().put("channel", channel))
     }
 
+    /** Explicit opt-in. Old configs and locally patched APKs remain untouched. */
+    @JvmStatic
+    fun isAutoUpdateEnabled(): Boolean =
+        loadConfig().optJSONObject("updates")?.optBoolean("autoInstall", false) ?: false
+
+    /** Merged write so switching channels never clears auto-install consent. */
+    @JvmStatic
+    fun setAutoUpdateEnabled(enabled: Boolean): Boolean =
+        updateValues("updates", mapOf("autoInstall" to enabled))
+
     /**
      * Get status-overlay (floating pill) visibility section.
      * Each segment defaults to visible=true so installs that pre-date this

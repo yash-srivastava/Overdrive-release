@@ -481,6 +481,9 @@
     <string name="update_error_start_failed">לא ניתן להתחיל בעדכון: %1$s</string>
     <string name="update_error_lost_headunit">אבד הקשר עם מסך הרכב לפני סיום ההתקנה. מחובר דרך מנהרה? בדוק ב-Telegram אם התקבלה כתובת חדשה, או השתמש ב-IP המקומי.</string>
     <string name="update_hide">הסתר</string>
+    <string name="settings_auto_update_title">התקנת עדכונים אוטומטית</string>
+    <string name="settings_auto_update_desc">כבוי כברירת מחדל; לערוץ Braveheart בלבד. בדיקה לאחר ההפעלה ובהמשך בערך כל 6 שעות כשהתהליך פועל. נדרשים חיבור ללא חיוב לפי נפח, רכב כבוי במשך 30 דקות, מצב שומר כבוי וללא הקלטה. מותקנות רק גרסאות חדשות יותר, לא אותה גרסה ולא החלפה של גרסה ששונתה מקומית. OverDrive יופעל מחדש לאחר ההתקנה.</string>
+    <string name="settings_auto_update_save_failed">לא ניתן לשמור את העדפת העדכון האוטומטי</string>
     <string name="settings_update_channel_title">ערוץ עדכון</string>
     <string name="settings_update_channel_alpha">Alpha</string>
     <string name="settings_update_channel_braveheart">Braveheart</string>
