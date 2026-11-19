@@ -432,6 +432,8 @@ BYD.pip = {
                 useWorker: true,
                 workerFile: workerUrl,
                 webgl: true,
+                // Opt in per page with ?reusePlaneTextures=1 for on-device A/B measurements.
+                reusePlaneTextures: new URLSearchParams(window.location.search).get('reusePlaneTextures') === '1',
                 size: { width: 1280, height: 960 }
             });
             
