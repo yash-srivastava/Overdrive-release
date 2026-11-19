@@ -2693,14 +2693,17 @@ public class StorageManager {
     private static final java.util.regex.Pattern BARE_PUBLIC_VOLUME_ID =
             java.util.regex.Pattern.compile("\\d+:\\d+");
 
-    private static boolean isPublicVolumeId(String volumeId) {
-        return volumeId.startsWith("public:") || BARE_PUBLIC_VOLUME_ID.matcher(volumeId).matches();
+    static boolean isPublicVolumeId(String volumeId) {
+        if (volumeId == null) return false;
+        return BARE_PUBLIC_VOLUME_ID.matcher(volumeId).matches()
+                || volumeId.matches("public:[0-9]+[,:][0-9]+");
     }
 
     /** {major, minor} of an {@link #isPublicVolumeId} id, or null when unparsable. */
-    private static int[] parsePublicVolumeDevice(String volumeId) {
+    static int[] parsePublicVolumeDevice(String volumeId) {
+        if (!isPublicVolumeId(volumeId)) return null;
         String[] dev = volumeId.startsWith("public:")
-                ? volumeId.substring("public:".length()).split(",")
+                ? volumeId.substring("public:".length()).split("[,:]")
                 : volumeId.split(":");
         try {
             return new int[]{Integer.parseInt(dev[0]), Integer.parseInt(dev[1])};
@@ -6697,6 +6700,27 @@ public class StorageManager {
 
     public String getSdCardPath() {
         return sdCardPath;
+    }
+
+    /** Record only a new UUID verified mounted on the same SD public volume. */
+    public void rememberFormattedSdUuid(String uuid) {
+        if (uuid != null && uuid.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+                && !"null".equalsIgnoreCase(uuid)) learnSdUuid(uuid);
+    }
+
+    /** Serialize destructive SD operations against mount/unmount discovery. */
+    public boolean acquireSdCardFormatLock() {
+        try {
+            return mountLock.tryLock(5, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    /** Release the lock acquired by {@link #acquireSdCardFormatLock()}. */
+    public void releaseSdCardFormatLock() {
+        if (mountLock.isHeldByCurrentThread()) mountLock.unlock();
     }
 
     public boolean isUsbAvailable() {
