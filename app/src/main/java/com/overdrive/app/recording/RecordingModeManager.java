@@ -67,6 +67,11 @@ public class RecordingModeManager {
     // probe, but there was no prior IPC, so reporting "wasOn=true" is misleading.
     private volatile boolean accIpcSeen = false;
 
+    // Incremented under the manager monitor when an ACC IPC updates accIsOn.
+    // A post-latch hardware read must not overwrite an IPC delivered while
+    // that read was in flight; the first such race merits a fresh HW read.
+    private long accIpcRevision = 0L;
+
     // True if the current mode's pipeline/recording state is actually live.
     // Used to distinguish "ACC is on AND mode is running" from "ACC was set to
     // on but activation failed silently (pipeline init threw, etc.)".
@@ -189,10 +194,10 @@ public class RecordingModeManager {
         // Synchronous auto-activate races the drain — produces a 2-3s
         // phantom cam_*.mp4 then a tear-down.
         //
-        // We now await {@link #bootStableSignal}, which is released by the
-        // first ACC IPC (handler at the top of onAccStateChanged) OR by the
-        // first GearMonitor delivery (top of onGearChanged), whichever
-        // comes first. That way we don't activate against stale state, and
+        // We now await {@link #bootStableSignal}, which is released after
+        // the first ACC IPC updates accIsOn OR the first GearMonitor delivery
+        // updates currentGear, whichever comes first. That way we don't
+        // activate against stale state, and
         // we don't sleep longer than necessary on a clean boot. Hard cap is
         // {@link #BOOT_AUTO_ACTIVATE_HARD_CAP_MS} so a daemon that never
         // receives any IPC (e.g. AccSentry crashed) still falls through to
@@ -225,57 +230,71 @@ public class RecordingModeManager {
             // is a soft-pre-check that just decides whether to spawn the
             // warmup in the first place.
             //
-            // One last hardware probe: the latch may have been released by
-            // a stale GearMonitor delivery before the AccSentry IPC landed,
-            // in which case accIsOn still reflects the constructor's
-            // possibly-stale read. Pulling fresh from the bodywork HAL here
-            // prevents auto-activate from racing against an ACC OFF that
-            // hasn't propagated to the field yet.
+            // Always take a post-latch hardware sample, even after an ACC
+            // IPC. The first IPC can itself be stale; skipping this newer
+            // reading leaves a wrong ON/OFF uncorrected until the 8s resync.
+            // Keep the 1.5s binder deadline and the fallback to accIsOn.
+            // A one-shot FutureTask avoids creating an ExecutorService for
+            // just this single read. Neither path blocks the manager monitor.
             //
-            // FIX (rmm: BootAutoActivate post-latch HW probe pinned by slow
-            // binder): wrap the HW probe in a Future with 1.5s timeout. If
-            // the BYDAuto binder is wedged the probe could otherwise hang
-            // past BOOT_AUTO_ACTIVATE_HARD_CAP_MS. On timeout, fall through
-            // to the existing accIsOn (which carries the AccMonitor IPC
-            // value or constructor probe).
-            boolean hwAccPostLatch;
-            java.util.concurrent.ExecutorService probeExec =
-                java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
-                    Thread th = new Thread(r, "BootAutoActivate-HwProbe");
-                    th.setDaemon(true);
-                    return th;
-                });
-            try {
-                java.util.concurrent.Future<Boolean> probeFut =
-                    probeExec.submit(() -> queryAccStateFromHardware());
+            // If an ACC IPC changes state while the sample is in flight,
+            // retry once AFTER that IPC. Otherwise a probe that started
+            // before the first IPC could overwrite it with an older read.
+            // When a second race or a hung/failed probe occurs, preserve the
+            // newest IPC state and leave later reconciliation to resync.
+            // Defaults are only used for Java's definite-assignment check;
+            // each exit from the probe loop re-snapshots all three under lock.
+            Mode targetMode = currentMode;
+            int gearNow = currentGear;
+            boolean accNow = accIsOn;
+            long probeStartRevision;
+            synchronized (RecordingModeManager.this) {
+                probeStartRevision = accIpcRevision;
+            }
+            for (int attempt = 0; attempt < 2; attempt++) {
+                java.util.concurrent.FutureTask<Boolean> probeTask =
+                    new java.util.concurrent.FutureTask<>(this::queryAccStateFromHardware);
+                Thread probeThread = new Thread(probeTask, "BootAutoActivate-HwProbe");
+                probeThread.setDaemon(true);
+                probeThread.start();
+                boolean probeCompleted = false;
+                boolean hwAccPostLatch = false;
                 try {
-                    hwAccPostLatch = probeFut.get(1500L,
+                    hwAccPostLatch = probeTask.get(1500L,
                         java.util.concurrent.TimeUnit.MILLISECONDS);
+                    probeCompleted = true;
                 } catch (java.util.concurrent.TimeoutException te) {
-                    probeFut.cancel(true);
+                    probeTask.cancel(true);
                     logger.warn("Boot auto-activate HW probe timed out (>1.5s) — "
-                        + "falling back to accIsOn=" + accIsOn);
-                    hwAccPostLatch = accIsOn;
+                        + "falling back to latest accIsOn");
+                } catch (InterruptedException ie) {
+                    probeTask.cancel(true);
+                    Thread.currentThread().interrupt();
+                    return;
                 } catch (Exception e) {
                     logger.warn("Boot auto-activate HW probe failed: " + e.getMessage()
-                        + " — falling back to accIsOn=" + accIsOn);
-                    hwAccPostLatch = accIsOn;
+                        + " — falling back to latest accIsOn");
                 }
-            } finally {
-                probeExec.shutdownNow();
-            }
-            Mode targetMode;
-            int gearNow;
-            boolean accNow;
-            synchronized (RecordingModeManager.this) {
-                if (hwAccPostLatch != accIsOn) {
-                    logger.info("Boot auto-activate: HW probe corrects accIsOn "
-                        + accIsOn + " -> " + hwAccPostLatch);
-                    accIsOn = hwAccPostLatch;
+                synchronized (RecordingModeManager.this) {
+                    if (accIpcRevision != probeStartRevision) {
+                        if (probeCompleted && attempt == 0 && !shuttingDown) {
+                            logger.info("Boot auto-activate: newer ACC IPC arrived during HW "
+                                + "probe — repeating post-IPC read");
+                            probeStartRevision = accIpcRevision;
+                            continue;
+                        }
+                        logger.info("Boot auto-activate: newer ACC IPC supersedes HW probe "
+                            + "— keeping accIsOn=" + accIsOn);
+                    } else if (probeCompleted && hwAccPostLatch != accIsOn) {
+                        logger.info("Boot auto-activate: HW probe corrects accIsOn "
+                            + accIsOn + " -> " + hwAccPostLatch);
+                        accIsOn = hwAccPostLatch;
+                    }
+                    targetMode = currentMode;
+                    gearNow = currentGear;
+                    accNow = accIsOn;
                 }
-                targetMode = currentMode;
-                gearNow = currentGear;
-                accNow = accIsOn;
+                break;
             }
             if (!accNow) {
                 logger.info("Boot auto-activate skipped — ACC OFF (signalled="
@@ -1236,8 +1255,9 @@ public class RecordingModeManager {
     private static final int PENDING_PREFIX_STUCK_TICKS = 2;
 
     /**
-     * Released by the first ACC IPC ({@link #onAccStateChanged}) AND by the
-     * first GearMonitor delivery ({@link #onGearChanged}). The boot
+     * Released after the first ACC IPC updates accIsOn
+     * ({@link #onAccStateChanged}) or the first GearMonitor delivery updates
+     * currentGear ({@link #onGearChanged}). The boot
      * auto-activate worker awaits this with a hard cap so it doesn't fire
      * until either:
      * <ul>
@@ -1907,12 +1927,10 @@ public class RecordingModeManager {
      * actually-activated pipeline.
      */
     public void onAccStateChanged(boolean isOn) {
-        // Release the boot-stable latch BEFORE taking lifecycleSerializer.
-        // We want the boot worker to wake up the moment any ACC IPC arrives,
-        // even if a peer setMode is currently inside lifecycleSerializer
-        // doing slow I/O. countDown is a no-op after the first call so
-        // subsequent IPCs are free.
-        bootStableSignal.countDown();
+        // The boot latch is released inside onAccStateChangedLocked, just
+        // after the IPC updates accIsOn. Releasing it before serialization
+        // could wake the boot probe while the IPC was still queued behind
+        // another lifecycle operation and make its ordering ambiguous.
         synchronized (lifecycleSerializer) {
             onAccStateChangedLocked(isOn);
         }
@@ -1938,6 +1956,10 @@ public class RecordingModeManager {
                 + ", modeActive=" + modeActive + ")");
 
             accIsOn = isOn;
+            accIpcRevision++;
+            // Publish the first IPC state before waking BootAutoActivate.
+            // A gear delivery or the timeout may already have released it.
+            bootStableSignal.countDown();
             // DiLink 5: a source released while parked reopens before any ACC-on consumer.
             if (isOn && diLink5CameraEnabled()) {
                 pipeline.resumeIdleCameraSource("ACC on");
@@ -2138,12 +2160,8 @@ public class RecordingModeManager {
      * @param gear The new gear position (GEAR_P, GEAR_R, GEAR_N, GEAR_D, etc.)
      */
     public void onGearChanged(int gear) {
-        // Release the boot-stable latch — see onAccStateChanged for rationale.
-        // GearMonitor's start() fires this with the initial gear immediately
-        // after a successful HAL bind, so this is one of the fastest signals
-        // that "real state has arrived; boot auto-activate is safe to run."
-        bootStableSignal.countDown();
-
+        // onGearChangedLocked releases the boot latch after committing the
+        // first gear value, for the same ordering reason as the ACC IPC.
         // Wrapped in lifecycleSerializer for parity with setMode/onAccStateChanged.
         // Without this, a concurrent setMode(NONE) and onGearChanged(D) can
         // interleave: setMode mutates currentMode=NONE while gear handler still
@@ -2164,6 +2182,9 @@ public class RecordingModeManager {
             // for RecordingModeManager that often matches the constructor default
             // and there's nothing to do. Logging it as a "P -> P" change is just noise.
             if (gear == currentGear) {
+                // The first GearMonitor delivery is still a stable signal,
+                // even if it agrees with the constructor's default.
+                bootStableSignal.countDown();
                 return;
             }
 
@@ -2172,6 +2193,7 @@ public class RecordingModeManager {
 
             int previousGear = currentGear;
             currentGear = gear;
+            bootStableSignal.countDown();
 
             // Only DRIVE_MODE responds to gear changes. PROXIMITY_GUARD is now
             // ACC-gated in ALL gears (the low-power ring stays warm parked in P
