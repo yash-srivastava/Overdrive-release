@@ -222,7 +222,11 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
      *   on the in-memory set as a same-process race backstop.
      */
     @JvmOverloads
-    fun startDaemon(type: DaemonType, userInitiated: Boolean = true) {
+    fun startDaemon(
+        type: DaemonType,
+        userInitiated: Boolean = true,
+        onTerminal: ((Boolean) -> Unit)? = null
+    ) {
         val controller = controllers[type] ?: return
 
         if (userInitiated) {
@@ -293,22 +297,38 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
 
-        launchController(type, controller)
+        if (onTerminal != null) launchController(type, controller, onTerminal)
+        else launchController(type, controller)
     }
 
+    // Keep the ordinary (and explicit user-start) launch path unchanged.
     private fun launchController(type: DaemonType, controller: DaemonController) {
-        updateState(type, DaemonStatus.STARTING, appStr(R.string.daemon_status_starting))
+        launchController(type, controller, null)
+    }
 
+    /** Only the startup retry coordinator needs a terminal result. */
+    private fun launchController(
+        type: DaemonType, controller: DaemonController,
+        onTerminal: ((Boolean) -> Unit)?
+    ) {
+        updateState(type, DaemonStatus.STARTING, appStr(R.string.daemon_status_starting))
+        val delivered = java.util.concurrent.atomic.AtomicBoolean(false)
+        fun finish(success: Boolean) {
+            if (delivered.compareAndSet(false, true)) onTerminal?.invoke(success)
+        }
         controller.start(object : DaemonCallback {
             override fun onStatusChanged(status: DaemonStatus, message: String) {
-                if (lateAfterUserStop(type)) return
+                if (lateAfterUserStop(type)) { finish(false); return }
                 updateState(type, status, message)
+                if (status == DaemonStatus.RUNNING) finish(true)
+                if (status == DaemonStatus.ERROR) finish(false)
             }
 
             override fun onError(error: String) {
-                if (lateAfterUserStop(type)) return
+                if (lateAfterUserStop(type)) { finish(false); return }
                 lastLaunchError[type] = error
                 updateState(type, DaemonStatus.ERROR, error)
+                finish(false)
             }
         })
     }

@@ -360,10 +360,11 @@ public class AppUpdaterRestartSafetyContractTest {
                 "UpdateLifecycle.hardResetDaemons(this)"));
         assertTrue(main.contains(
                 "daemonStartupManager.initializeOnAppLaunch()"));
-        assertTrue(startup.contains(
-                "handler.postDelayed({ startCoreDaemons() }, 45000)"));
-        assertTrue(startup.contains(
-                "handler.postDelayed({ startOptionalDaemonsFromPreferences() }, 60000)"));
+        // Stages are now anchored to the first startup cycle, rather than
+        // being rescheduled after each ADB authorization (including update).
+        assertTrue(startup.contains("stage(DaemonBootSchedule.CORE_DELAY_MS"));
+        assertTrue(startup.contains("stage(DaemonBootSchedule.OPTIONAL_DELAY_MS"));
+        assertTrue(startup.contains("if (startupCycleStartedAtMs != null)"));
     }
 
     private static boolean inRange(int value, int start, int end) {

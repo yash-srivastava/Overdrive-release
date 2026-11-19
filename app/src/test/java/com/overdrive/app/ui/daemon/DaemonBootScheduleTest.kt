@@ -31,6 +31,14 @@ class DaemonBootScheduleTest {
     }
 
     @Test
+    fun coreStagesHaveTheirOwnZeroFiveTenOffsets() {
+        assertTrue(DaemonBootSchedule.SENTRY_STAGGER_MS == 5_000L)
+        assertTrue(DaemonBootSchedule.ACC_SENTRY_STAGGER_MS == 10_000L)
+        assertTrue(DaemonBootSchedule.CORE_DELAY_MS + DaemonBootSchedule.ACC_SENTRY_STAGGER_MS
+            < DaemonBootSchedule.HEALTH_CHECK_DELAY_MS)
+    }
+
+    @Test
     fun bootStillStabilizesBeforeTheFirstLaunch() {
         // The lead must not drag the first daemon launch back to the very start of boot, where the
         // system is still settling — that is what the original 45s stabilisation delay was for.
