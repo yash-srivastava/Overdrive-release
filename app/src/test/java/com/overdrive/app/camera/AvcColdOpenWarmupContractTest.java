@@ -112,7 +112,7 @@ public class AvcColdOpenWarmupContractTest {
                 "isWarmupStillRequired(stillRequired)",
                 "AvcProbeResult beforeLaunch = probeAvcProcess()",
                 "suppressing launcher Activity",
-                "beforeLaunch.state != AvcProbeState.RUNNING",
+                "AvcHandoffSettlePolicy.requiresLaunch(",
                 "launchAvc()",
                 "Thread.sleep(HAL_WARMUP_DELAY_MS)",
                 "suppressing recovery relaunch",
@@ -126,6 +126,35 @@ public class AvcColdOpenWarmupContractTest {
                 "skipping foreground Activity launch"));
         assertTrue(source.contains(
                 "COLD_OPEN_WARMUP_TIMEOUT_MS = 35_000L"));
+
+        // A receipt is issued only from the handoff worker after the original
+        // 4 s settle and RUNNING post-probe. The ordinary pre-open pidof is the
+        // only receipt validation probe, and UNKNOWN still launches on cold open.
+        assertOrdered(warmup,
+                "AvcProbeResult beforeLaunch = probeAvcProcess()",
+                "receipt.proof.consumeIfEligible(",
+                "AvcHandoffSettlePolicy.requiresLaunch(",
+                "launchAvc()",
+                "Thread.sleep(HAL_WARMUP_DELAY_MS)",
+                "AvcProbeResult postWarmup = probeAvcProcess()",
+                "lastWarmupCompletedNanos = System.nanoTime()",
+                "receipt.proof.issueFromCompletedPrewarm(");
+        assertTrue(warmup.contains("if (prewarmWorker && receipt != null && avcReady"));
+        assertTrue(source.contains("prewarmForAccHandoff("));
+        assertTrue(source.contains("requireFreshWarmupForAccRetry("));
+        assertTrue(source.contains(
+                "recoveryLaunch, beforeLaunch.state == AvcProbeState.RUNNING"));
+
+        String reopen = method(readRepositoryFile(
+                        "app/src/main/java/com/overdrive/app/camera/PanoramicCameraGpu.java"),
+                "public void reopenCamera() {",
+                "\n    /**\n     * Legacy-only bounded AVMCamera open");
+        assertOrdered(reopen,
+                "AvcHalWarmup.newHandoffSettleReceipt()",
+                "AvcHalWarmup.prewarmForAccHandoff(",
+                "Started AVC HAL warmup alongside camera handoff",
+                "openLegacyCameraWithHardTimeout(",
+                "AvcHalWarmup.requireFreshWarmupForAccRetry(handoffSettle)");
 
         String watchdog = method(source,
                 "private void startKeepAliveWorkerLocked",

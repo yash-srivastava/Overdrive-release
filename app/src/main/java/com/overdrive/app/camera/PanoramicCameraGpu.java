@@ -10627,6 +10627,12 @@ public class PanoramicCameraGpu {
         logger.info("Reopening AVMCamera...");
         final boolean legacyOpenAttempt =
                 !USE_DILINK4_AVM_PATH && !USE_DILINK5_QCARCAM_PATH;
+        // BYD100F stays on the original ACC open and ownership-poll path.
+        // Only classic DiLink 3 receives the one-use prewarm receipt.
+        final boolean optimizedDi3Handoff = legacyOpenAttempt
+                && !DiLink100Platform.isAvmPathActive();
+        final AvcHalWarmup.HandoffSettleReceipt handoffSettle =
+                optimizedDi3Handoff ? AvcHalWarmup.newHandoffSettleReceipt() : null;
         boolean releaseRestartGate = true;
 
         // CRITICAL: Mark restart-in-progress BEFORE touching the camera so the
@@ -10663,10 +10669,13 @@ public class PanoramicCameraGpu {
             if (legacyOpenAttempt) {
                 Thread warmupThread = new Thread(() -> {
                     try {
-                        boolean warmed = AvcHalWarmup.warmupBeforeColdOpen(
-                                () -> running
-                                        && restartInProgress.get()
-                                        && !CameraDaemon.isProcessRestartPending());
+                        java.util.function.BooleanSupplier stillRequired =
+                                () -> running && restartInProgress.get()
+                                        && !CameraDaemon.isProcessRestartPending();
+                        boolean warmed = optimizedDi3Handoff
+                                ? AvcHalWarmup.prewarmForAccHandoff(
+                                        stillRequired, handoffSettle)
+                                : AvcHalWarmup.warmupBeforeColdOpen(stillRequired);
                         if (!warmed) {
                             logger.info("Concurrent AVC HAL warmup cancelled; "
                                     + "cold-open boundary will re-check");
@@ -10705,16 +10714,46 @@ public class PanoramicCameraGpu {
             // make timeSinceHeartbeat exceed the threshold.
             logger.info("Polling fallback (maxWait=" + maxWaitMs + "ms)");
             final long minWaitMs = 3000;
-            sleepWithHeartbeat(minWaitMs);
+            // On DiLink 3, overlap the *first* native-owner probe with the
+            // mandatory minimum handoff wait. Previously the first Binder
+            // probe only started after sleeping three seconds, adding its
+            // latency to a handoff where the OEM owner was already present.
+            // Still never open before the full 3 s ownership grace period.
+            long minWaitStartedMs = 0L;
+            boolean ownerSeenDuringMinWait = false;
+            if (optimizedDi3Handoff) {
+                minWaitStartedMs = android.os.SystemClock.elapsedRealtime();
+                if (cameraCoordinator != null && cameraCoordinator.isRegistered()) {
+                    try {
+                        ownerSeenDuringMinWait = cameraCoordinator.checkNativeAppActive();
+                    } catch (Exception earlyProbeFailure) {
+                        // A speculative early query must not abort the handoff;
+                        // the normal poll after the minimum grace may still work.
+                        logger.warn("Early OEM ownership probe failed; retaining "
+                                + "normal post-grace poll: " + earlyProbeFailure.getMessage());
+                    }
+                }
+                long minWaitRemainingMs = minWaitMs -
+                        (android.os.SystemClock.elapsedRealtime() - minWaitStartedMs);
+                if (minWaitRemainingMs > 0L) sleepWithHeartbeat(minWaitRemainingMs);
+            } else {
+                // DiLink 4/5 and BYD100F retain the original full wait and
+                // original post-wait probe ordering, without early IPC.
+                sleepWithHeartbeat(minWaitMs);
+            }
 
             if (cameraCoordinator != null && cameraCoordinator.isRegistered()) {
-                long deadline = (legacyOpenAttempt
-                        ? android.os.SystemClock.elapsedRealtime()
-                        : System.currentTimeMillis())
-                        + (maxWaitMs - minWaitMs);
-                boolean nativeAppDetected = false;
+                // Count an early probe (even a slow Binder call) against the
+                // same maxWait budget instead of accidentally extending it.
+                long deadline = optimizedDi3Handoff
+                        ? minWaitStartedMs + maxWaitMs
+                        : (legacyOpenAttempt
+                                ? android.os.SystemClock.elapsedRealtime()
+                                : System.currentTimeMillis())
+                                + (maxWaitMs - minWaitMs);
+                boolean nativeAppDetected = ownerSeenDuringMinWait;
 
-                while ((legacyOpenAttempt
+                while (!nativeAppDetected && (legacyOpenAttempt
                         ? android.os.SystemClock.elapsedRealtime()
                         : System.currentTimeMillis()) < deadline) {
                     if (cameraCoordinator.checkNativeAppActive()) {
@@ -10726,18 +10765,27 @@ public class PanoramicCameraGpu {
                     sleepWithHeartbeat(500);
                 }
 
-                if (!nativeAppDetected) {
+                if (ownerSeenDuringMinWait) {
+                    // Retain the existing 500 ms OEM release grace even when
+                    // the owner was observed in the overlapped early probe.
+                    logger.info("Native app claimed camera during minimum wait");
+                    sleepWithHeartbeat(500);
+                } else if (!nativeAppDetected) {
                     logger.info("Native app not detected after polling — reopening");
                 }
             } else {
-                long remainingWait = maxWaitMs - minWaitMs;
+                long remainingWait = optimizedDi3Handoff
+                        ? Math.max(0L, maxWaitMs -
+                                (android.os.SystemClock.elapsedRealtime() - minWaitStartedMs))
+                        : maxWaitMs - minWaitMs;
                 logger.info("No service available — fixed delay (" + remainingWait + "ms)");
                 sleepWithHeartbeat(remainingWait);
             }
 
             resetDeadSlotWalkForReopen();
             if (legacyOpenAttempt) {
-                if (!openLegacyCameraWithHardTimeout("ACC ON camera reopen")) {
+                if (!openLegacyCameraWithHardTimeout(
+                        "ACC ON camera reopen", handoffSettle)) {
                     // The worker may still be inside the vendor Binder call.
                     // Process death is the only safe cancellation; keep the
                     // single-flight gate latched until the urgent restart lands.
@@ -10777,8 +10825,11 @@ public class PanoramicCameraGpu {
                 if (cameraObj == null) {
                     logger.warn("Retry camera open...");
                     if (legacyOpenAttempt) {
+                        if (optimizedDi3Handoff) {
+                            AvcHalWarmup.requireFreshWarmupForAccRetry(handoffSettle);
+                        }
                         if (!openLegacyCameraWithHardTimeout(
-                                "ACC ON camera reopen retry")) {
+                                "ACC ON camera reopen retry", handoffSettle)) {
                             releaseRestartGate = false;
                             return;
                         }
@@ -10810,14 +10861,16 @@ public class PanoramicCameraGpu {
      * {@link #restartInProgress} latched so no second open can overlap the late
      * worker. DiLink 4/5 never call this helper.
      */
-    private boolean openLegacyCameraWithHardTimeout(String phase)
+    private boolean openLegacyCameraWithHardTimeout(String phase,
+            AvcHalWarmup.HandoffSettleReceipt handoffSettle)
             throws Exception {
         // Keep the timeout scoped to AVMCamera/HAL acquisition. startCamera()
         // sees this just-completed warmup and coalesces its own cold-open gate.
         if (!AvcHalWarmup.warmupBeforeColdOpen(
                 () -> running
                     && restartInProgress.get()
-                    && !CameraDaemon.isProcessRestartPending())) {
+                    && !CameraDaemon.isProcessRestartPending(),
+                handoffSettle)) {
             throw new InterruptedException(
                     "AVC HAL warmup interrupted before " + phase);
         }
