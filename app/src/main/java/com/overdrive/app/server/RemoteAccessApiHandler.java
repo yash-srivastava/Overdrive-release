@@ -46,6 +46,52 @@ public final class RemoteAccessApiHandler {
     private static JSONObject config = RemoteAccessSettings.read();
     private static JSONObject effectiveConfig = RemoteAccessSettings.effective(config);
     private static final LinkedHashMap<String, PhoneState> PHONES = new LinkedHashMap<>();
+    // Protected by STATE. Queue publications to keep concurrent HTTP workers in evidence order;
+    // drain outside STATE to avoid nesting the automation queue lock under the proximity lock.
+    private static final com.overdrive.app.remoteaccess.ProximityAutomationState PROXIMITY_AUTOMATION =
+            new com.overdrive.app.remoteaccess.ProximityAutomationState();
+    private static final ArrayDeque<String> PROXIMITY_AUTOMATION_EVENTS = new ArrayDeque<>();
+    private static final Object AUTOMATION_PUBLICATION = new Object();
+    // Per-phone automation evidence is deliberately separate from the pinned PhoneState and
+    // its vehicle-off actuator evaluator. All these fields are protected by STATE.
+    private static final Map<PhoneState, AutomationPhoneEvidence> AUTOMATION_PHONES =
+            new java.util.WeakHashMap<>();
+    private static final LinkedHashMap<String, PhoneState> AUTOMATION_ROSTER = new LinkedHashMap<>();
+    private static volatile AutomationMotion AUTOMATION_MOTION = AutomationMotion.unavailable();
+
+    private static final class AutomationPhoneEvidence {
+        final ProximityEvaluator evaluator;
+        JSONObject signal;
+        long lastNearEvidenceElapsedMs = -1;
+        long lastAcceptedElapsedMs = -1;
+        AutomationPhoneEvidence(PhoneState phone) throws Exception {
+            evaluator = new ProximityEvaluator(RemoteAccessSettings.evaluatorConfig(effectiveConfig, phone.profile));
+            signal = emptySignal("waiting_for_phone");
+        }
+        void discard(String reason) throws Exception {
+            evaluator.reset();
+            signal = emptySignal(reason);
+            lastAcceptedElapsedMs = -1;
+            lastNearEvidenceElapsedMs = -1;
+        }
+    }
+
+    /** Timestamp and live driving readings are collected outside STATE, never by automation actions. */
+    private static final class AutomationMotion {
+        final long observed;
+        final int power, gear;
+        final double speedKmh;
+        AutomationMotion(long observed, int power, int gear, double speedKmh) {
+            this.observed = observed;
+            this.power = power;
+            this.gear = gear;
+            this.speedKmh = speedKmh;
+        }
+        static AutomationMotion unavailable() {
+            return new AutomationMotion(-1, BydVehicleData.UNAVAILABLE,
+                    BydVehicleData.UNAVAILABLE, Double.NaN);
+        }
+    }
     private static JSONObject runtime = new JSONObject();
     private static JSONObject lastAction = new JSONObject();
     private static JSONArray pairedDevices = new JSONArray();
@@ -243,6 +289,7 @@ public final class RemoteAccessApiHandler {
                 if (config.optBoolean("enabled") && after >= sequence) STATE.wait(12000);
                 HttpResponse.sendJson(out, status().toString());
             }
+            publishProximityAutomation();
             return true;
         }
         if ("GET".equals(method) && route.equals("/api/remote-access/devices")) {
@@ -322,6 +369,7 @@ public final class RemoteAccessApiHandler {
                             .put("collectorApply", collectorOutcome);
                     HttpResponse.sendJson(out, response.toString());
                 }
+                publishProximityAutomation();
                 return;
             }
             next.put("revision", current.optLong("revision") + 1);
@@ -357,6 +405,7 @@ public final class RemoteAccessApiHandler {
                 event("settings", next.optBoolean("enabled") ? "Proximity monitoring enabled" : "Master switch off");
             }
             synchronized (STATE) { HttpResponse.sendJson(out, status().toString()); }
+            publishProximityAutomation();
         }
     }
 
@@ -436,6 +485,7 @@ public final class RemoteAccessApiHandler {
             if (readSwitchOffClosures && observedPower == 0)
                 switchOffDoorsClosed = readSwitchOffClosures(sample, closureStaleMs);
         }
+        AutomationMotion motion = readAutomationMotion();
         ProximityEvaluator.Snapshot evaluated;
         JSONObject settings;
         long actionObserved;
@@ -492,6 +542,10 @@ public final class RemoteAccessApiHandler {
             if (!instance.equals(phone.sourceInstance)) {
                 if (!adoptSourceInstance(phone, now)) {
                     phone.evaluator.reset();
+                    // A new unadopted source must re-establish an automation Near visit.
+                    AutomationPhoneEvidence automation = AUTOMATION_PHONES.get(phone);
+                    if (automation != null) automation.discard("source_changed");
+                    if (PROXIMITY_AUTOMATION.reset()) PROXIMITY_AUTOMATION_EVENTS.addLast("unknown");
                     phone.calibration.clear();
                     phone.satisfiedEpisodeId = 0;
                 }
@@ -522,6 +576,8 @@ public final class RemoteAccessApiHandler {
                         switchOffDoorsClosed);
                 if (switchOff.takeHistoryRevocation()) {
                     phone.evaluator.reset();
+                    // Switch-off carry revocation only affects the actuator; the Bluetooth
+                    // automation evaluator has an independent accepted-observation lease.
                     phone.calibration.clear();
                     phone.satisfiedEpisodeId = 0;
                 }
@@ -538,6 +594,12 @@ public final class RemoteAccessApiHandler {
                     ? phone.evaluator.observe(phone.profile.getString("address"), raw, observed,
                             connected, eligible, healthyNativeProof ? proof : null)
                     : phone.evaluator.observe(phone.profile.getString("address"), raw, observed, connected, eligible);
+            AutomationPhoneEvidence automation = automationPhoneLocked(phone);
+            ProximityEvaluator.Snapshot automationReading = nativeProof
+                    ? automation.evaluator.observe(phone.profile.getString("address"), raw, observed,
+                            connected, true, healthyNativeProof ? proof : null)
+                    : automation.evaluator.observe(phone.profile.getString("address"), raw, observed,
+                            connected, true);
             if (switchOff != null) {
                 switchOff.evaluated(evaluated.event == ProximityEvaluator.Event.DEPARTURE, evaluated.reason);
                 logSwitchOff(phone, switchOff, sample, observed);
@@ -563,7 +625,21 @@ public final class RemoteAccessApiHandler {
                     .put("ageMs", signalObserved < 0 ? JSONObject.NULL : now - signalObserved)
                     .put("actionSatisfied", actionSatisfied)
                     .put("deviceName", phone.profile.getString("name"));
+            // The actuator snapshot is ineligible with power on and cannot supply an
+            // absence timestamp for this independent read-only evaluation.
+            long automationObserved = nativeProof && automationReading.rawRssi == null
+                    ? automationReading.freshnessMs < 0 ? -1 : observed - automationReading.freshnessMs
+                    : automationReading.rawRssi == null ? -1 : observed;
+            automation.signal = snapshotJson(automationReading)
+                    .put("connected", connected).put("observedAtElapsedMs", automationObserved);
+            automation.lastAcceptedElapsedMs = observed;
             if (nativeProof) {
+                automation.signal.put("connectionReadKnown", proof.connectionReadKnown)
+                        .put("connectionState", proof.state.name().toLowerCase(java.util.Locale.US))
+                        .put("radioReadKnown", proof.radioReadKnown)
+                        .put("connectionObservedAtElapsedMs", proof.observedAtElapsedMs)
+                        .put("connectionModeGeneration", proof.modeGeneration)
+                        .put("modeGeneration", modeGeneration == null ? JSONObject.NULL : modeGeneration);
                 phone.signal.put("connectionReadKnown", proof.connectionReadKnown)
                         .put("connectionState", proof.state.name().toLowerCase(java.util.Locale.US))
                         .put("radioReadKnown", proof.radioReadKnown)
@@ -595,9 +671,15 @@ public final class RemoteAccessApiHandler {
             lastObservationElapsed = observed;
             lastObservedPower = power;
             notePhoneObservation(phone, sample, observed, proof, healthyNativeProof, evaluated);
+            if (connected && !(automationReading.state == ProximityEvaluator.State.AWAY
+                    && automationReading.departureEligible))
+                automation.lastNearEvidenceElapsedMs = observed;
+            AUTOMATION_MOTION = motion;
+            updateProximityAutomationLocked(now);
             logPhoneDiagnostic(phone, sample, evaluated, eligible, power, now);
             changed();
         }
+        publishProximityAutomation();
         // Release the collector before readback. Confirmation must not delay
         // sampling beyond its freshness window. Reuse this existing HTTP worker.
         HttpResponse.sendJson(out, new JSONObject().put("success", true).toString());
@@ -1928,6 +2010,7 @@ public final class RemoteAccessApiHandler {
         if (!disk.toString().equals(config.toString())
                 || !java.util.Objects.equals(presenceModeGeneration, DiLink5Platform.currentActiveModeGeneration()))
             reset(disk);
+        syncAutomationRosterLocked();
         // DI5 gate rails: the settings file was read above; the collector call takes
         // diLink5IngressLock after STATE (never the reverse) and must not fail a refresh.
         if (DiLink5Platform.isSelected()) {
@@ -2095,6 +2178,36 @@ public final class RemoteAccessApiHandler {
         }
     }
 
+    /** Existing daemon maintenance tick: stale/disabled phone evidence publishes Unknown without a relay. */
+    public static void refreshAutomationPresence() {
+        try {
+            // Live speed/gear queries do not share the proximity monitor or actuator lock.
+            AutomationMotion motion = readAutomationMotion();
+            synchronized (STATE) {
+                refreshSettings();
+                AUTOMATION_MOTION = motion;
+                updateProximityAutomationLocked(SystemClock.elapsedRealtime());
+            }
+            publishProximityAutomation();
+        } catch (Throwable unavailable) {
+            com.overdrive.app.daemon.CameraDaemon.log("Proximity: automation maintenance unavailable: "
+                    + unavailable.getClass().getSimpleName());
+        }
+    }
+
+    private static AutomationMotion readAutomationMotion() {
+        long now = SystemClock.elapsedRealtime();
+        try {
+            BydDataCollector collector = BydDataCollector.getInstance();
+            int power = readVehiclePowerNow();
+            // With ACC on, require both a fresh zero-speed reading and Park.
+            // Even with ACC off, a positively observed non-P gear/motion vetoes presence.
+            return new AutomationMotion(now, power, collector.readGearNow(), collector.readCurrentSpeedKmh());
+        } catch (Throwable unavailable) {
+            return AutomationMotion.unavailable();
+        }
+    }
+
     private static JSONObject status() throws Exception {
         refreshSettings();
         JSONArray signals = new JSONArray();
@@ -2110,6 +2223,7 @@ public final class RemoteAccessApiHandler {
             signals.put(snapshot);
             if (phone.profile.getString("address").equals(config.optString("deviceAddress"))) value = snapshot;
         }
+        updateProximityAutomationLocked(now);
         // A paused or revoked signal carries no timestamp; the collector is alive while its deliveries are.
         if (lastObservationElapsed <= now) latestObservation = Math.max(latestObservation, lastObservationElapsed);
         JSONArray events = new JSONArray();
@@ -2286,8 +2400,9 @@ public final class RemoteAccessApiHandler {
                         && UnifiedConfigManager.isBluetoothKeepAliveEnabled(),
                 phone.lastProof, phone.lastProofHealthy, activeModeGeneration(), now,
                 effectiveConfig.optLong("staleMs"));
-        if (revocation.required())
+        if (revocation.required()) {
             revokePhoneSignal(phone, revocation.reason, nativeProof, revocation.invalidateRecovery);
+        }
     }
 
     private static void revokePhoneSignal(PhoneState phone, String reason, boolean nativeProof) throws Exception {
@@ -2374,6 +2489,127 @@ public final class RemoteAccessApiHandler {
                     phone.lastNearEvidenceElapsedMs));
         }
         return states;
+    }
+
+    /** Reconcile against the entire identity roster, preserving Near across unrelated saves. */
+    private static void syncAutomationRosterLocked() throws Exception {
+        if (AUTOMATION_ROSTER.equals(PHONES)) return;
+        if (PROXIMITY_AUTOMATION.reset()) PROXIMITY_AUTOMATION_EVENTS.addLast("unknown");
+        AUTOMATION_ROSTER.clear();
+        AUTOMATION_ROSTER.putAll(PHONES);
+        // Weak keys allow replaced/removed PhoneState objects and their evidence to be collected.
+        for (PhoneState phone : PHONES.values()) automationPhoneLocked(phone);
+    }
+
+    private static AutomationPhoneEvidence automationPhoneLocked(PhoneState phone) throws Exception {
+        AutomationPhoneEvidence evidence = AUTOMATION_PHONES.get(phone);
+        if (evidence == null) {
+            evidence = new AutomationPhoneEvidence(phone);
+            AUTOMATION_PHONES.put(phone, evidence);
+        }
+        return evidence;
+    }
+
+    /** Build a SEPARATE roster without touching byte-pinned phoneDepartureStates(). */
+    private static java.util.List<MultiPhoneProximityPolicy.Observation> automationPhoneDepartureStates(long now)
+            throws Exception {
+        java.util.List<MultiPhoneProximityPolicy.Observation> states = new java.util.ArrayList<>();
+        long staleMs = effectiveConfig.optLong("staleMs");
+        String generation = activeModeGeneration();
+        for (PhoneState phone : PHONES.values()) {
+            AutomationPhoneEvidence evidence = automationPhoneLocked(phone);
+            // An action/status vehicle_ineligible revocation does NOT revoke automation evidence.
+            // Only the automation channel's own accepted timestamps and native proofs expire it.
+            if (evidence.lastAcceptedElapsedMs >= 0 && !BluetoothProximityDecisionGuard.fresh(
+                    evidence.lastAcceptedElapsedMs, now, staleMs)) evidence.discard("stale");
+            JSONObject signal = evidence.signal;
+            ProximityEvaluator.State state;
+            try { state = ProximityEvaluator.State.valueOf(signal.optString("state", "UNKNOWN")); }
+            catch (IllegalArgumentException unknown) { state = ProximityEvaluator.State.UNKNOWN; }
+            boolean confirmedDisconnection = BluetoothProximityDecisionGuard.confirmedDisconnection(
+                    signal, now, staleMs, generation);
+            boolean nativeProof = BluetoothConnectionEvidence.hasAny(signal);
+            if (state == ProximityEvaluator.State.AWAY && !confirmedDisconnection
+                    && (!signal.optBoolean("departureEligible")
+                    || !"UNKNOWN".equals(signal.optString("candidate", "UNKNOWN"))
+                    || !signal.optBoolean("connected") || signal.isNull("rawRssi")
+                    || signal.optDouble("rawRssi", Double.POSITIVE_INFINITY)
+                        > phone.profile.optInt("awayThreshold", -24)
+                    || signal.isNull("departureFilteredRssi")
+                    || signal.optDouble("departureFilteredRssi", Double.POSITIVE_INFINITY)
+                        > phone.profile.optInt("awayThreshold", -24)
+                    || nativeProof && !BluetoothProximityDecisionGuard.nativeProofHealthy(
+                        signal, now, staleMs, generation)))
+                state = ProximityEvaluator.State.TRANSITION;
+            BluetoothConnectionEvidence proof = phone.lastProof;
+            boolean proofFresh = proof != null && generation != null && generation.equals(proof.modeGeneration)
+                    && BluetoothProximityDecisionGuard.fresh(phone.lastProofElapsedMs, now, staleMs);
+            boolean connectionKnown = proofFresh && phone.lastProofHealthy && proof.healthyAt(now, staleMs)
+                    && (proof.state == BluetoothConnectionEvidence.State.CONNECTED) == signal.optBoolean("connected");
+            boolean radioOn = proofFresh && proof.radioReadKnown && proof.radioOn;
+            states.add(new MultiPhoneProximityPolicy.Observation(
+                    phone.profile.optBoolean("enabled") && config.optBoolean("keepBluetoothOn"),
+                    signal.optBoolean("connected"), !signal.isNull("rawRssi"), state,
+                    signal.optLong("observedAtElapsedMs", -1), confirmedDisconnection,
+                    connectionKnown, radioOn, phone.firstConnectedElapsedMs < 0,
+                    phone.generationStartedElapsedMs, proofFresh ? phone.lastProofElapsedMs : -1,
+                    evidence.lastNearEvidenceElapsedMs));
+        }
+        return states;
+    }
+
+    /** Caller holds STATE; signal only, never an actuator or a vehicle power command. */
+    private static void updateProximityAutomationLocked(long now) throws Exception {
+        syncAutomationRosterLocked();
+        // Missing or expired motion evidence fails closed, including on a radio-off tick.
+        AutomationMotion motion = AUTOMATION_MOTION;
+        boolean safe = com.overdrive.app.remoteaccess.ProximityAutomationState.safeForPresence(
+                motion.power, motion.gear, motion.speedKmh)
+                && BluetoothProximityDecisionGuard.fresh(motion.observed, now, 10_000);
+        boolean enabled = effectiveConfig.optBoolean("enabled") && effectiveConfig.optBoolean("keepBluetoothOn");
+        boolean near = false, away = false;
+        if (enabled && safe) {
+            java.util.List<MultiPhoneProximityPolicy.Observation> phones = automationPhoneDepartureStates(now);
+            long staleMs = effectiveConfig.optLong("staleMs");
+            near = MultiPhoneProximityPolicy.anyConfirmedNear(phones, now, staleMs);
+            away = MultiPhoneProximityPolicy.allAway(phones, now, staleMs);
+            if (away) {
+                boolean fobDetection = config.optBoolean("keyFobEnabled") && KeyFobAccessMonitor.platformSupported();
+                boolean fobConfigured = fobDetection && config.optBoolean("keyFobLockEnabled");
+                boolean fobDetected = fobDetection && (hasFreshKeyFobApproach(now) || hasFreshKeyFobPresence(now));
+                // allowsLock requires power=0. While on, omit ONLY the optional absence
+                // wait for the read-only signal; a detected physical key still vetoes.
+                boolean waitForKey = motion.power == 0 && effectiveConfig.optBoolean(
+                        RemoteAccessSettings.LOCK_WAITS_FOR_KEY_ABSENCE_KEY,
+                        RemoteAccessSettings.LOCK_WAITS_FOR_KEY_ABSENCE_DEFAULT);
+                away = MultiPhoneProximityPolicy.consensus(true, fobDetected,
+                        RemoteAccessSettings.lockWithKeyInside(effectiveConfig),
+                        RemoteAccessSettings.phonePriority(effectiveConfig), fobConfigured,
+                        waitForKey, fobConfigured && keyFobPresence.allowsLock(now), phones, now, staleMs);
+            }
+        }
+        // Even without relays, a stale/disabled signal must transition to Unknown once.
+        String next = PROXIMITY_AUTOMATION.observe(near, away);
+        if (next != null) PROXIMITY_AUTOMATION_EVENTS.addLast(next);
+    }
+
+    /** Drain in evidence order; never hold STATE while entering the automation engine. */
+    private static void publishProximityAutomation() {
+        synchronized (AUTOMATION_PUBLICATION) {
+            while (true) {
+                String next;
+                synchronized (STATE) { next = PROXIMITY_AUTOMATION_EVENTS.pollFirst(); }
+                if (next == null) return;
+                try {
+                    com.overdrive.app.automation.Automations.update(
+                            com.overdrive.app.automation.condition.BydEvent.PROXIMITY_PRESENCE, next, true);
+                } catch (Throwable unavailable) {
+                    com.overdrive.app.daemon.CameraDaemon.log(
+                            "Proximity: automation publication unavailable: "
+                                    + unavailable.getClass().getSimpleName());
+                }
+            }
+        }
     }
 
     private static boolean lockConsensus(boolean phoneDeparture, long now) {

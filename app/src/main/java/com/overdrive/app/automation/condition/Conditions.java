@@ -160,6 +160,15 @@ public class Conditions {
                         new Label("state", "automation.state"),
                         new Label("locked", "automation.locked"),
                         new Label("unlocked", "automation.unlocked"))));
+        // The Bluetooth proximity monitor reports confirmed near/all-away transitions even
+        // while the ignition is on. This signal never sends a vehicle command.
+        addCondition(new EventCondition(
+                new Label("proximityPresence", "automation.proximity_presence"),
+                "automation.proximity_presence_description",
+                new EnumType(new Label("state", "automation.state"),
+                        new Label("near", "automation.proximity_near"),
+                        new Label("away", "automation.proximity_away"),
+                        new Label("unknown", "automation.proximity_unknown"))));
         addCondition(new EventCondition(
                 new Label("unlockSource", "automation.unlock_source"),
                 "automation.unlock_source_description",
