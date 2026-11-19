@@ -61,13 +61,9 @@
                     <div class="dash-hero-main">
                         <div class="dash-drive-state is-pending" id="dashDriveState"
                              role="status" aria-live="polite" aria-atomic="true">
-                            <div class="dash-drive-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                     stroke-width="2" stroke-linecap="round">
-                                    <path d="M12 2v10"/>
-                                    <path d="M6.3 5.8a8 8 0 1 0 11.4 0"/>
-                                </svg>
-                            </div>
+                            <!-- The gear readout overlays this slot. Do not render the
+                                 obsolete power SVG: it flashes before the page CSS loads. -->
+                            <div class="dash-drive-icon" aria-hidden="true"></div>
                             <div class="dash-drive-copy">
                                 <span id="dashDrivePower"
                                       data-i18n="dashboard.drive_power_pending">Vehicle --</span>
@@ -790,10 +786,6 @@
             background: var(--well);
         }
         [dir="rtl"] .dash-drive-icon { margin-left: 0; margin-right: 12px; }
-        .dash-drive-icon svg {
-            width: 20px;
-            height: 20px;
-        }
         .dash-drive-copy {
             min-width: 0;
         }
@@ -2022,7 +2014,6 @@
             margin: 0;
             border-radius: 14px;
         }
-        .dash-drive-icon svg { display: none; }
         .dash-drive-readouts {
             grid-column: auto;
             grid-template-columns: auto;
