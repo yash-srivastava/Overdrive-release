@@ -215,6 +215,23 @@ public class AvcHalWarmup {
     public AvcHalWarmup() {
     }
 
+    /**
+     * A one-use receipt tied to a single ACC camera handoff. Only a completed
+     * full HAL settle may populate this receipt; process presence alone cannot.
+     * No receipt is used for DiLink 100 cold opens.
+     */
+    public static final class HandoffSettleReceipt {
+        // All accesses are serialized by WARMUP_LANE. Only the ACC handoff's
+        // *prewarm worker* can issue; an open or retry can only consume.
+        private final AvcHandoffSettlePolicy.Receipt proof =
+                new AvcHandoffSettlePolicy.Receipt();
+    }
+
+    /** Allocate a receipt before starting the overlapping ACC handoff warmup. */
+    public static HandoffSettleReceipt newHandoffSettleReceipt() {
+        return new HandoffSettleReceipt();
+    }
+
     // ==================== One-Shot Warmup ====================
 
     /**
@@ -235,6 +252,35 @@ public class AvcHalWarmup {
     public static boolean warmupBeforeColdOpen(
             java.util.function.BooleanSupplier stillRequired) {
         return COLD_OPEN_WARMUP.warmupAndWait(stillRequired);
+    }
+
+    /**
+     * Complete the normal four-second settle in the background while the OEM
+     * camera ownership handoff runs. Only this entry point may issue a receipt.
+     */
+    public static boolean prewarmForAccHandoff(
+            java.util.function.BooleanSupplier stillRequired,
+            HandoffSettleReceipt receipt) {
+        return COLD_OPEN_WARMUP.warmupAndWait(stillRequired, receipt, true);
+    }
+
+    /** Consume a completed prewarm, if still valid, at this ACC open only. */
+    public static boolean warmupBeforeColdOpen(
+            java.util.function.BooleanSupplier stillRequired,
+            HandoffSettleReceipt receipt) {
+        return COLD_OPEN_WARMUP.warmupAndWait(stillRequired, receipt, false);
+    }
+
+    /**
+     * Retire handoff-specific proof on a failed vendor open. The already
+     * completed normal 15 s settle cache remains valid: a vendor exception
+     * does not itself restart AVC or invalidate its completed settle.
+     */
+    public static void requireFreshWarmupForAccRetry(HandoffSettleReceipt receipt) {
+        synchronized (WARMUP_LANE) {
+            AvcHandoffSettlePolicy.onVendorOpenFailure(
+                    receipt == null ? null : receipt.proof);
+        }
     }
 
     /** True only while a legacy AVC cold-open warmup is actively blocking. */
@@ -261,6 +307,15 @@ public class AvcHalWarmup {
 
     public boolean warmupAndWait(
             java.util.function.BooleanSupplier stillRequired) {
+        return warmupAndWait(stillRequired, null, false);
+    }
+
+    private boolean warmupAndWait(
+            java.util.function.BooleanSupplier stillRequired,
+            HandoffSettleReceipt receipt, boolean prewarmWorker) {
+        // BYD100F cold open is intentionally unchanged, even if a caller
+        // supplies a receipt while swapping modes.
+        if (isDiLink100AvmPath()) receipt = null;
         if (isDiLink5Selected()) {
             logger.info("DiLink 5: skipping legacy AVC warmup");
             return true;
@@ -287,12 +342,16 @@ public class AvcHalWarmup {
                 return false;
             }
             long nowNanos = System.nanoTime();
+            // The normal zero-probe 15 s cache wins first. No new IPC, and
+            // there is no additional settle to avoid in this common case.
             long completedNanos = lastWarmupCompletedNanos;
             if (completedNanos != Long.MIN_VALUE) {
                 long ageNanos = nowNanos - completedNanos;
                 long reuseNanos = java.util.concurrent.TimeUnit.MILLISECONDS
                         .toNanos(WARMUP_REUSE_WINDOW_MS);
-                if (ageNanos >= 0 && ageNanos <= reuseNanos) {
+                if (AvcHandoffSettlePolicy.cachedSettleIsFresh(
+                        nowNanos, completedNanos, reuseNanos)) {
+                    if (receipt != null && !prewarmWorker) receipt.proof.retire();
                     logger.info("Reusing completed AVC warmup (age="
                         + java.util.concurrent.TimeUnit.NANOSECONDS
                             .toMillis(ageNanos)
@@ -301,22 +360,42 @@ public class AvcHalWarmup {
                 }
             }
 
+            // A fresh, single pre-open pidof is required even with a receipt;
+            // use the *same* probe for both receipt validation and the normal
+            // launch decision. Rejected/expired receipts cannot cause a third
+            // pidof or change the cold-open UNKNOWN -> launch policy.
             final boolean recoveryRequested =
                     isRecoveryLaunchDue(android.os.SystemClock.elapsedRealtime());
             coldOpenWarmupInProgress = true;
             try {
-                logger.info("Warming up camera HAL via com.byd.avc (waiting " +
-                    HAL_WARMUP_DELAY_MS + "ms)...");
+                logger.info("Checking AVC before camera HAL settle");
                 AvcProbeResult beforeLaunch = probeAvcProcess();
                 if (!isWarmupStillRequired(stillRequired)) {
                     logger.info("AVC warmup cancelled after process probe; "
                         + "suppressing launcher Activity");
                     return false;
                 }
-                // Re-checked after the probe: the car may have left P meanwhile.
+                // Only the prewarm worker may mint the receipt. On a delayed
+                // handoff, the open can spend this proof once without a second
+                // four-second wait. A rejected proof falls through unchanged.
+                if (receipt != null && !prewarmWorker
+                        && receipt.proof.consumeIfEligible(
+                                System.nanoTime(), lastWarmupCompletedNanos,
+                                beforeLaunch.pid,
+                                beforeLaunch.state == AvcProbeState.RUNNING,
+                                recoveryLaunchRequestedMs.get() != 0L)) {
+                    // startCamera() immediately performs its own boundary check.
+                    // Admit that nested check through the ordinary 15 s cache;
+                    // retry invalidates it before another vendor open.
+                    lastWarmupCompletedNanos = System.nanoTime();
+                    logger.info("Reusing completed 4 s AVC settle for the "
+                            + "same delayed ACC camera handoff");
+                    return true;
+                }
+                // Re-checked after probe: the car may have left P meanwhile.
                 final boolean recoveryLaunch = recoveryRequested && isParkedForRecoveryLaunch();
-                boolean launchAttempted = recoveryLaunch
-                        || beforeLaunch.state != AvcProbeState.RUNNING;
+                boolean launchAttempted = AvcHandoffSettlePolicy.requiresLaunch(
+                        recoveryLaunch, beforeLaunch.state == AvcProbeState.RUNNING);
                 boolean launched = false;
                 if (launchAttempted) {
                     if (beforeLaunch.state == AvcProbeState.UNKNOWN) {
@@ -405,6 +484,12 @@ public class AvcHalWarmup {
                         return false;
                     }
                     lastWarmupCompletedNanos = System.nanoTime();
+                    if (prewarmWorker && receipt != null && avcReady
+                            && !recoveryRequested
+                            && recoveryLaunchRequestedMs.get() == 0L) {
+                        receipt.proof.issueFromCompletedPrewarm(
+                                lastWarmupCompletedNanos, postWarmup.pid);
+                    }
                     if (avcReady) {
                         logger.info("HAL warmup complete — safe to open camera");
                     } else {

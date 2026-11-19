@@ -403,7 +403,8 @@ public class Di3BootAnimationSafetyContractTest {
                 "final boolean legacyOpenAttempt =",
                 "!USE_DILINK4_AVM_PATH && !USE_DILINK5_QCARCAM_PATH",
                 "boolean releaseRestartGate = true",
-                "openLegacyCameraWithHardTimeout(\"ACC ON camera reopen\")",
+                "openLegacyCameraWithHardTimeout(\n"
+                        + "                        \"ACC ON camera reopen\", handoffSettle)",
                 "releaseRestartGate = false",
                 "openLegacyCameraWithHardTimeout(",
                 "\"ACC ON camera reopen retry\"",
@@ -412,7 +413,7 @@ public class Di3BootAnimationSafetyContractTest {
 
         String boundedLegacyOpen = method(
                 source,
-                "private boolean openLegacyCameraWithHardTimeout(String phase)",
+                "private boolean openLegacyCameraWithHardTimeout(String phase,",
                 "\n    /**\n     * Sleeps for");
         assertOrdered(
                 boundedLegacyOpen,

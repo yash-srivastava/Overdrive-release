@@ -1,6 +1,7 @@
 package com.overdrive.app.camera;
 
 import android.hardware.IBYDCameraService;
+import android.hardware.IBYDCameraUser;
 import com.overdrive.app.logging.DaemonLogger;
 
 import java.lang.reflect.Method;
@@ -176,15 +177,27 @@ public class BydCameraCoordinator {
      * Used at camera open time to decide PRIMARY vs SECONDARY mode.
      */
     public String queryCurrentCameraUser() {
-        if (getCurrentCameraUserMethod != null && reflectionServiceProxy != null) {
+        if (typedServiceProxy != null || getCurrentCameraUserMethod != null) {
             try {
-                Object currentUser = getCurrentCameraUserMethod.invoke(reflectionServiceProxy);
-                if (currentUser != null) {
-                    Method getPkg = currentUser.getClass().getMethod("getPackageName");
-                    String pkg = (String) getPkg.invoke(currentUser);
-                    if (pkg != null && !"com.overdrive.app".equals(pkg)) return pkg;
-                }
+                String pkg = queryCameraOwnerPackage();
+                if (pkg != null && !"com.overdrive.app".equals(pkg)) return pkg;
             } catch (Exception e) { /* ignore */ }
+        }
+        return null;
+    }
+
+    /** Prefer the typed BYD Binder interface. Reflect only on vendor mismatches.
+     * A release build may rename our own Stub, so reflective lookup must not
+     * be the only way to observe the OEM owner. */
+    private String queryCameraOwnerPackage() throws Exception {
+        if (typedServiceProxy != null) {
+            IBYDCameraUser user = typedServiceProxy.getCurrentCameraUser();
+            return user == null ? null : user.getPackageName();
+        }
+        if (getCurrentCameraUserMethod != null && reflectionServiceProxy != null) {
+            Object user = getCurrentCameraUserMethod.invoke(reflectionServiceProxy);
+            return user == null ? null : (String) user.getClass()
+                    .getMethod("getPackageName").invoke(user);
         }
         return null;
     }
@@ -196,18 +209,14 @@ public class BydCameraCoordinator {
      * @return true if another camera user is active (native AVM app)
      */
     public boolean checkNativeAppActive() {
-        if (!serviceAvailable || getCurrentCameraUserMethod == null) {
+        if (!serviceAvailable || (typedServiceProxy == null
+                && getCurrentCameraUserMethod == null)) {
             return false;
         }
 
         try {
-            Object currentUser = getCurrentCameraUserMethod.invoke(reflectionServiceProxy);
-            if (currentUser != null) {
-                String pkg = null;
-                try {
-                    Method getPkg = currentUser.getClass().getMethod("getPackageName");
-                    pkg = (String) getPkg.invoke(currentUser);
-                } catch (Exception ignored) {}
+            String pkg = queryCameraOwnerPackage();
+            if (pkg != null) {
 
                 boolean isUs = "com.overdrive.app".equals(pkg);
                 boolean wasActive = nativeAppActive;

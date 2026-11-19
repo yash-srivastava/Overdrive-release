@@ -435,3 +435,11 @@
 
 # sherpa-onnx native code reads its Kotlin config classes' fields by name.
 -keep class com.k2fsa.sherpa.onnx.** { *; }
+
+# BYD camera arbitration Binder signatures must survive release R8. Vendor
+# firmware supplies these android.hardware classes at runtime, and reflective
+# fallback discovers the same exact names when typed binding is unavailable.
+-keep class android.hardware.IBYDCameraService { *; }
+-keep class android.hardware.IBYDCameraService$* { *; }
+-keep class android.hardware.IBYDCameraUser { *; }
+-keep class android.hardware.IBYDCameraUser$* { *; }

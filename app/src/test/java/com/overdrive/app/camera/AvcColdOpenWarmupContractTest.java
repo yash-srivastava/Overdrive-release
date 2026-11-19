@@ -13,6 +13,28 @@ import org.junit.Test;
 public class AvcColdOpenWarmupContractTest {
 
     @Test
+    public void releaseCoordinatorUsesTypedBinderAndRetryKeepsValidCache()
+            throws IOException {
+        String coordinator = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/camera/BydCameraCoordinator.java");
+        assertTrue(coordinator.contains("typedServiceProxy.getCurrentCameraUser()"));
+        assertTrue(coordinator.contains("user.getPackageName()"));
+        String rules = readRepositoryFile("app/proguard-rules.pro");
+        assertTrue(rules.contains("-keep class android.hardware.IBYDCameraService$*"));
+        assertTrue(rules.contains("-keep class android.hardware.IBYDCameraUser$*"));
+        String warmup = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/camera/AvcHalWarmup.java");
+        String retry = method(warmup, "public static void requireFreshWarmupForAccRetry(",
+                "    /** True only while");
+        assertFalse(retry.contains("lastWarmupCompletedNanos = Long.MIN_VALUE"));
+        assertTrue(retry.contains("onVendorOpenFailure("));
+        String reopen = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/camera/PanoramicCameraGpu.java");
+        assertTrue(reopen.contains("!DiLink100Platform.isAvmPathActive()"));
+        assertTrue(reopen.contains("earlyProbeFinished.get()"));
+    }
+
+    @Test
     public void primaryCameraColdOpensShareOneWarmupBoundary() throws IOException {
         String source = readRepositoryFile(
                 "app/src/main/java/com/overdrive/app/camera/PanoramicCameraGpu.java");
@@ -112,7 +134,7 @@ public class AvcColdOpenWarmupContractTest {
                 "isWarmupStillRequired(stillRequired)",
                 "AvcProbeResult beforeLaunch = probeAvcProcess()",
                 "suppressing launcher Activity",
-                "beforeLaunch.state != AvcProbeState.RUNNING",
+                "AvcHandoffSettlePolicy.requiresLaunch(",
                 "launchAvc()",
                 "Thread.sleep(HAL_WARMUP_DELAY_MS)",
                 "suppressing recovery relaunch",
@@ -126,6 +148,35 @@ public class AvcColdOpenWarmupContractTest {
                 "skipping foreground Activity launch"));
         assertTrue(source.contains(
                 "COLD_OPEN_WARMUP_TIMEOUT_MS = 35_000L"));
+
+        // A receipt is issued only from the handoff worker after the original
+        // 4 s settle and RUNNING post-probe. The ordinary pre-open pidof is the
+        // only receipt validation probe, and UNKNOWN still launches on cold open.
+        assertOrdered(warmup,
+                "AvcProbeResult beforeLaunch = probeAvcProcess()",
+                "receipt.proof.consumeIfEligible(",
+                "AvcHandoffSettlePolicy.requiresLaunch(",
+                "launchAvc()",
+                "Thread.sleep(HAL_WARMUP_DELAY_MS)",
+                "AvcProbeResult postWarmup = probeAvcProcess()",
+                "lastWarmupCompletedNanos = System.nanoTime()",
+                "receipt.proof.issueFromCompletedPrewarm(");
+        assertTrue(warmup.contains("if (prewarmWorker && receipt != null && avcReady"));
+        assertTrue(source.contains("prewarmForAccHandoff("));
+        assertTrue(source.contains("requireFreshWarmupForAccRetry("));
+        assertTrue(source.contains(
+                "recoveryLaunch, beforeLaunch.state == AvcProbeState.RUNNING"));
+
+        String reopen = method(readRepositoryFile(
+                        "app/src/main/java/com/overdrive/app/camera/PanoramicCameraGpu.java"),
+                "public void reopenCamera() {",
+                "\n    /**\n     * Legacy-only bounded AVMCamera open");
+        assertOrdered(reopen,
+                "AvcHalWarmup.newHandoffSettleReceipt()",
+                "AvcHalWarmup.prewarmForAccHandoff(",
+                "Started AVC HAL warmup alongside camera handoff",
+                "openLegacyCameraWithHardTimeout(",
+                "AvcHalWarmup.requireFreshWarmupForAccRetry(handoffSettle)");
 
         String watchdog = method(source,
                 "private void startKeepAliveWorkerLocked",
