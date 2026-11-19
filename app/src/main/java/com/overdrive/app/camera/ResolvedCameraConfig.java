@@ -29,6 +29,9 @@ public final class ResolvedCameraConfig {
     private final boolean manualPanoOverride;
     private final boolean validated;
     private final boolean fallbackFromProbe;
+    private final String panoCameraIdSource;
+    private final String panoSurfaceModeSource;
+    private final String panoGeometrySource;
     private final EnumMap<CameraRole, CameraSourceRef> roleMappings;
 
     public ResolvedCameraConfig(
@@ -43,6 +46,31 @@ public final class ResolvedCameraConfig {
             boolean validated,
             boolean fallbackFromProbe,
             Map<CameraRole, CameraSourceRef> roleMappings) {
+        this(profile, selectedProfileId, autoProfile, panoCameraId, panoWidth,
+                panoHeight, panoSurfaceMode, manualPanoOverride, validated,
+                fallbackFromProbe, "unspecified", "unspecified", "unspecified",
+                roleMappings);
+    }
+
+    /**
+     * Constructs a resolved config with diagnostic-only provenance labels.
+     * Labels do not participate in camera selection or stream validation.
+     */
+    public ResolvedCameraConfig(
+            CameraProfile profile,
+            String selectedProfileId,
+            boolean autoProfile,
+            int panoCameraId,
+            int panoWidth,
+            int panoHeight,
+            int panoSurfaceMode,
+            boolean manualPanoOverride,
+            boolean validated,
+            boolean fallbackFromProbe,
+            String panoCameraIdSource,
+            String panoSurfaceModeSource,
+            String panoGeometrySource,
+            Map<CameraRole, CameraSourceRef> roleMappings) {
         this.profile = profile;
         this.selectedProfileId = selectedProfileId;
         this.autoProfile = autoProfile;
@@ -53,6 +81,9 @@ public final class ResolvedCameraConfig {
         this.manualPanoOverride = manualPanoOverride;
         this.validated = validated;
         this.fallbackFromProbe = fallbackFromProbe;
+        this.panoCameraIdSource = panoCameraIdSource;
+        this.panoSurfaceModeSource = panoSurfaceModeSource;
+        this.panoGeometrySource = panoGeometrySource;
         this.roleMappings = new EnumMap<>(CameraRole.class);
         if (roleMappings != null) {
             this.roleMappings.putAll(roleMappings);
@@ -97,6 +128,21 @@ public final class ResolvedCameraConfig {
 
     public boolean isFallbackFromProbe() {
         return fallbackFromProbe;
+    }
+
+    /** Source of the resolved camera ID; not a guarantee that a stream opened. */
+    public String getPanoCameraIdSource() {
+        return panoCameraIdSource;
+    }
+
+    /** Source of the resolved preview index; not an observed frame mode. */
+    public String getPanoSurfaceModeSource() {
+        return panoSurfaceModeSource;
+    }
+
+    /** Source of the resolved dimensions; saved values may be profile-seeded. */
+    public String getPanoGeometrySource() {
+        return panoGeometrySource;
     }
 
     public EnumMap<CameraRole, CameraSourceRef> getRoleMappings() {
