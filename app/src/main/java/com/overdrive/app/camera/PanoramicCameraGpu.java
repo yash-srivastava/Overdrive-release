@@ -10627,6 +10627,10 @@ public class PanoramicCameraGpu {
         logger.info("Reopening AVMCamera...");
         final boolean legacyOpenAttempt =
                 !USE_DILINK4_AVM_PATH && !USE_DILINK5_QCARCAM_PATH;
+        // The worker and this reopen share exactly one completed-settle receipt.
+        // It never applies to a later restart or to a different camera mode.
+        final AvcHalWarmup.HandoffSettleReceipt handoffSettle =
+                legacyOpenAttempt ? AvcHalWarmup.newHandoffSettleReceipt() : null;
         boolean releaseRestartGate = true;
 
         // CRITICAL: Mark restart-in-progress BEFORE touching the camera so the
@@ -10666,7 +10670,8 @@ public class PanoramicCameraGpu {
                         boolean warmed = AvcHalWarmup.warmupBeforeColdOpen(
                                 () -> running
                                         && restartInProgress.get()
-                                        && !CameraDaemon.isProcessRestartPending());
+                                        && !CameraDaemon.isProcessRestartPending(),
+                                handoffSettle);
                         if (!warmed) {
                             logger.info("Concurrent AVC HAL warmup cancelled; "
                                     + "cold-open boundary will re-check");
@@ -10737,7 +10742,8 @@ public class PanoramicCameraGpu {
 
             resetDeadSlotWalkForReopen();
             if (legacyOpenAttempt) {
-                if (!openLegacyCameraWithHardTimeout("ACC ON camera reopen")) {
+                if (!openLegacyCameraWithHardTimeout(
+                        "ACC ON camera reopen", handoffSettle)) {
                     // The worker may still be inside the vendor Binder call.
                     // Process death is the only safe cancellation; keep the
                     // single-flight gate latched until the urgent restart lands.
@@ -10778,7 +10784,7 @@ public class PanoramicCameraGpu {
                     logger.warn("Retry camera open...");
                     if (legacyOpenAttempt) {
                         if (!openLegacyCameraWithHardTimeout(
-                                "ACC ON camera reopen retry")) {
+                                "ACC ON camera reopen retry", handoffSettle)) {
                             releaseRestartGate = false;
                             return;
                         }
@@ -10810,14 +10816,16 @@ public class PanoramicCameraGpu {
      * {@link #restartInProgress} latched so no second open can overlap the late
      * worker. DiLink 4/5 never call this helper.
      */
-    private boolean openLegacyCameraWithHardTimeout(String phase)
+    private boolean openLegacyCameraWithHardTimeout(String phase,
+            AvcHalWarmup.HandoffSettleReceipt handoffSettle)
             throws Exception {
         // Keep the timeout scoped to AVMCamera/HAL acquisition. startCamera()
         // sees this just-completed warmup and coalesces its own cold-open gate.
         if (!AvcHalWarmup.warmupBeforeColdOpen(
                 () -> running
                     && restartInProgress.get()
-                    && !CameraDaemon.isProcessRestartPending())) {
+                    && !CameraDaemon.isProcessRestartPending(),
+                handoffSettle)) {
             throw new InterruptedException(
                     "AVC HAL warmup interrupted before " + phase);
         }

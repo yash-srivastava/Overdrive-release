@@ -127,6 +127,39 @@ public class AvcColdOpenWarmupContractTest {
         assertTrue(source.contains(
                 "COLD_OPEN_WARMUP_TIMEOUT_MS = 35_000L"));
 
+        // #805 follow-up: a matching PID never substitutes for the real 4 s
+        // settle. A receipt is earned only after that settle and its probe.
+        assertTrue(source.contains("HAL_WARMUP_DELAY_MS = 4000"));
+        assertOrdered(warmup,
+                "AvcProbeResult beforeLaunch = probeAvcProcess()",
+                "launchAvc()",
+                "Thread.sleep(HAL_WARMUP_DELAY_MS)",
+                "AvcProbeResult postWarmup = probeAvcProcess()");
+        String postSettle = warmup.substring(
+                warmup.indexOf("Thread.sleep(HAL_WARMUP_DELAY_MS)"));
+        assertOrdered(postSettle,
+                "AvcProbeResult postWarmup = probeAvcProcess()",
+                "lastWarmupCompletedNanos = System.nanoTime()",
+                "receipt.completedNanos = lastWarmupCompletedNanos");
+        assertTrue(warmup.contains("current.pid == receipt.settledPid"));
+        assertTrue(warmup.contains("receiptCheckRejected"));
+        assertTrue(warmup.contains("beforeLaunch.state == AvcProbeState.UNKNOWN"));
+        assertTrue(warmup.contains("isDiLink100AvmPath()) receipt = null"));
+        assertTrue(source.contains("HANDOFF_SETTLE_RECEIPT_MAX_AGE_MS = 30_000L"));
+
+        String reopen = method(readRepositoryFile(
+                        "app/src/main/java/com/overdrive/app/camera/PanoramicCameraGpu.java"),
+                "public void reopenCamera() {",
+                "\n    /**\n     * Legacy-only bounded AVMCamera open");
+        assertOrdered(reopen,
+                "AvcHalWarmup.newHandoffSettleReceipt()",
+                "Started AVC HAL warmup alongside camera handoff",
+                "openLegacyCameraWithHardTimeout(");
+        assertTrue(reopen.contains(
+                "\"ACC ON camera reopen\", handoffSettle"));
+        assertTrue(reopen.contains(
+                "\"ACC ON camera reopen retry\", handoffSettle"));
+
         String watchdog = method(source,
                 "private void startKeepAliveWorkerLocked",
                 "\n    private void scheduleKeepAliveHandoffLocked");
