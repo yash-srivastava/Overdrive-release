@@ -1528,6 +1528,11 @@ public final class KeymapApiHandler {
             response.put("error", "Missing automation id");
             return response;
         }
+        if (com.overdrive.app.automation.Automations.isServiceModeDisabled()) {
+            response.put("success", false);
+            response.put("error", "Automation execution is paused by Service Mode.");
+            return response;
+        }
         if (!com.overdrive.app.automation.Automations.automationExists(id)) {
             response.put("success", false);
             response.put("error", "Unknown automation: " + id);
@@ -1565,6 +1570,11 @@ public final class KeymapApiHandler {
         if (id == null || id.isBlank()) {
             response.put("success", false);
             response.put("error", "Missing action group id");
+            return response;
+        }
+        if (com.overdrive.app.automation.Automations.isServiceModeDisabled()) {
+            response.put("success", false);
+            response.put("error", "Action-group execution is paused by Service Mode.");
             return response;
         }
         if (!com.overdrive.app.automation.ActionGroups.exists(id)) {

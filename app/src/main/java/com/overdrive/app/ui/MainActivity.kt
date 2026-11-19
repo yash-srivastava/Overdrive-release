@@ -396,6 +396,9 @@ open class MainActivity : AppCompatActivity() {
         // Initialize daemon startup manager
         daemonStartupManager = DaemonStartupManager(this, daemonsViewModel)
         daemonsViewModel.setStartupManager(daemonStartupManager)
+        // A second restore path independent of CameraDaemon.start(): if the
+        // daemon is unavailable past the deadline, try authenticated app-side ADB.
+        com.overdrive.app.server.ServiceModeAppRecovery.tryRestore(applicationContext)
         
         // Setup ADB auth callback to re-initialize when auth is granted
         if (!remoteDevSession) setupAdbAuthCallback()
@@ -868,8 +871,6 @@ open class MainActivity : AppCompatActivity() {
         var pendingWatchdog: Runnable? = null
         var watchdogHandler: android.os.Handler? = null
     }
-
-    
     override fun onResume() {
         super.onResume()
         // PIN gate: if Settings → Security has the app lock enabled and the
@@ -1964,6 +1965,7 @@ open class MainActivity : AppCompatActivity() {
                     R.id.daemonsFragment,
                     R.id.settingsAdbFragment,
                     R.id.settingsSecurityFragment,
+                    R.id.serviceModeFragment,
                 )),
             RailItem(RAIL_KEY_ABOUT, R.id.railDestAbout, R.id.settingsAboutFragment,
                 R.drawable.ic_update, R.string.settings_section_about)

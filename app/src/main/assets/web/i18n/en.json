@@ -147,6 +147,7 @@
     "assistant_title": "Assistant - OverDrive",
     "parking_title": "Parking - OverDrive",
     "safekeep_title": "SafeKeep - OverDrive",
+    "service_mode_title": "Service Mode - OverDrive",
     "factory_dvr_title": "Factory DVR - OverDrive"
   },
   "factory_dvr": {
@@ -227,6 +228,7 @@
   },
   "nav": {
     "sessions": "Signed-in Browsers",
+    "service_mode": "Service Mode",
     "daemons": "Daemons",
     "dashboard": "Dashboard",
     "assistant": "Assistant",
@@ -7414,5 +7416,47 @@
       "one": "{count} module warning",
       "other": "{count} module warnings"
     }
+  },
+  "service_mode": {
+    "page_title": "Service Mode",
+    "status_inactive": "Service Mode is off",
+    "status_inactive_desc": "Your apps and OverDrive are available as usual.",
+    "status_active": "Service Mode is active",
+    "status_until": "Automatic restoration: {date}",
+    "status_restoring": "Restoring apps and features…",
+    "status_restoring_desc": "The daemon is retrying any item that has not yet been restored.",
+    "schedule_title": "Schedule automatic restoration",
+    "schedule_desc": "Service Mode starts immediately. The selected apps and features are restored at 23:59:59 on the chosen date in the head unit's local time zone, or sooner when you end it manually.",
+    "end_date": "End date",
+    "refresh_apps": "Refresh",
+    "loading_apps": "Loading installed apps…",
+    "apps_failed": "Could not load installed apps.",
+    "no_apps": "No eligible user-installed launchable apps were found.",
+    "features_title": "Pause OverDrive features",
+    "features_desc": "These runtime gates do not delete or modify your saved rules, bindings or configuration.",
+    "feature_automations": "Automations",
+    "feature_keymap": "Key Mapping",
+    "warning": "Only select apps you are comfortable disabling temporarily. Do not select apps required for vehicle controls or diagnostics. Apps that were already disabled before Service Mode are not enabled when Service Mode ends. If a package is reclassified as a system app while the mode is active, it will not be disabled again during reconciliation.",
+    "choose_end_date": "Choose a valid end date.",
+    "start_failed": "Could not start Service Mode.",
+    "end_failed": "Could not restore everything yet.",
+    "started": "Service Mode started.",
+    "ended": "Service Mode ended. Apps and features have been restored.",
+    "hero_desc": "Temporarily hide selected third-party apps during a dealer visit. OverDrive remains available.",
+    "checking": "Checking Service Mode…",
+    "reading": "Reading the current device state.",
+    "end_restore": "End now and restore",
+    "apps_title": "Third-party apps",
+    "apps_desc": "Choose installed user apps to hide temporarily. Android and BYD system apps, home launchers, enabled keyboards and OverDrive are excluded.",
+    "apps_only": "Only eligible launchable apps are listed.",
+    "automations": "Automations",
+    "automations_desc": "Pause automatic and manual automation runs, including direct action-group runs.",
+    "keymap": "Key Mapping",
+    "keymap_desc": "Stop physical-key bindings from dispatching configured actions.",
+    "start": "Start Service Mode",
+    "hidden_app": "Hidden app: {package}",
+    "paused_feature": "Paused feature: {feature}",
+    "starting": "Starting Service Mode…",
+    "manual_recovery": "If OverDrive is uninstalled before restoration, use a trusted ADB shell to run sh /data/local/tmp/overdrive-service-mode-rescue.sh. Do not execute the editable Downloads copy."
   }
 }

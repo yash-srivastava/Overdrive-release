@@ -319,6 +319,12 @@ public class HttpServer {
         // Initialize auth system
         AuthManager.initialize();
         CameraDaemon.log("Auth system initialized");
+        // Apply persisted pause gates before the first HTTP request can dispatch actions.
+        try {
+            ServiceModeManager.start();
+        } catch (Throwable error) {
+            CameraDaemon.log("Service Mode startup failed: " + error.getMessage());
+        }
         HeadUnitClock.setting(); // start the 12/24-hour read before the first page asks
 
         while (running && CameraDaemon.isRunning()) {
@@ -912,6 +918,10 @@ public class HttpServer {
                     || pathOnly.equals("/wireguard.html")
                     || pathOnly.equals("/api/wireguard")
                     || pathOnly.startsWith("/api/wireguard/");
+            // This UI and its mutating API require a JWT even on loopback.
+            boolean serviceModeRequest = pathOnly.equals("/service-mode")
+                    || pathOnly.equals("/service-mode.html")
+                    || pathOnly.startsWith("/api/service-mode/");
             boolean remoteAccessRequest = pathOnly.equals("/remote-access")
                     || pathOnly.equals("/remote-access.html")
                     || pathOnly.startsWith("/api/remote-access/");
@@ -954,7 +964,7 @@ public class HttpServer {
                     || pathOnly.startsWith("/api/factory-dvr/");
             boolean authenticated = remoteDevRequest || genAiRequest || wireGuardRequest || remoteAccessRequest
                     || widgetWriteRequest || briefingRequest || secretRequest || sessionsRequest
-                    || factoryDvrRequest || rangeCalibrationWrite
+                    || factoryDvrRequest || rangeCalibrationWrite || serviceModeRequest
                 ? AuthMiddleware.checkJwtOnly(path, cookieHeader, authHeader, out)
                 : AuthMiddleware.checkAuth(path, cookieHeader, authHeader, out,
                     client.getRemoteSocketAddress(), hasTunnelHeaders,
@@ -1031,6 +1041,10 @@ public class HttpServer {
             } else if (path.equals("/module-faults.html") || path.equals("/module-faults")) {
                 if (!serveStaticFile(out, "local/module-faults.html")) {
                     HttpResponse.sendError(out, 404, "module-faults.html not found");
+                }
+            } else if (path.equals("/service-mode.html") || path.equals("/service-mode")) {
+                if (!serveStaticFile(out, "local/service-mode.html")) {
+                    HttpResponse.sendError(out, 404, "service-mode.html not found");
                 }
             } else if (path.equals("/remote-dev-view.html") || path.equals("/remote-dev-view")) {
                 if (!serveStaticFile(out, "local/remote-dev-view.html")) {
@@ -1369,6 +1383,9 @@ public class HttpServer {
      */
     private boolean routeToHandlers(String method, String path, String body, String rangeHeader,
                                      String ifNoneMatchHeader, OutputStream out) throws Exception {
+        if (path.startsWith("/api/service-mode/")) {
+            return ServiceModeApiHandler.handle(method, path, body, out);
+        }
         if (path.equals("/api/auth/handoff") || path.equals("/api/auth/regenerate")) {
             AuthApiHandler.handleSecret(method, path, isLocalSessionCaller(), out);
             return true;
