@@ -420,6 +420,26 @@ public class EventTimelineCollector {
                 (actors == null || actors.isEmpty())
                         ? java.util.Collections.<Actor>emptyList()
                         : new java.util.ArrayList<>(actors);
+        // A single false PERSON frame currently wins the entire coalesced span,
+        // even if repeated detections resolved the same lone subject as ANIMAL.
+        // Reconcile only when an independently confirmed, moving animal in the
+        // same camera/time window has at least as strong a score, and no confirmed
+        // person shares that window. Never change the trigger / tracker / hero.
+        // This also handles pre-record spans: the actor's wall timestamps and
+        // the snapshotted clip origin are in the same time base.
+        int animalCorrections = 0;
+        for (int i = 0; i < count; i++) {
+            if (types[i] == TYPE_PERSON && shouldLabelAsAnimal(
+                    starts[i], ends[i], cams[i] & 0x0F, counts[i] & 0xFF,
+                    confs[i], recordingStartTimeMs, actorsCopy)) {
+                types[i] = TYPE_ANIMAL;
+                animalCorrections++;
+            }
+        }
+        if (animalCorrections > 0) {
+            logger.info("Timeline: reconciled " + animalCorrections
+                    + " person span(s) using confirmed animal evidence");
+        }
         final String heroThumb = heroThumbnail;
         // End snapshot wasn't passed by older callers; capture it now if the
         // overload was invoked with a null endGeo. Done on this thread (the
@@ -801,6 +821,47 @@ public class EventTimelineCollector {
             // Pre-trigger: always ingest into the ring buffer
             ingestPreTrigger(now, TYPE_MOTION, 0f, (byte) 0, (byte)(cameraMask & 0x0F));
         }
+    }
+
+    /**
+     * Reconcile an ambiguous timeline label with the more reliable actor history.
+     * Raw YOLO output can oscillate PERSON → ANIMAL → PERSON for one dog; the
+     * coalescer otherwise makes even a single PERSON frame color the whole clip
+     * red. Actor confirmation requires multiple observations, so a confirmed
+     * animal is stronger evidence than an unconfirmed person flicker.
+     *
+     * Fail open for real people: a confirmed person, multiple simultaneous
+     * objects, a different camera, a static animal, an unmatched time range,
+     * or a higher-confidence person preserves the original PERSON marker.
+     * A model that *always* predicts PERSON for an animal cannot be corrected
+     * without independent animal evidence. Animal detection must be enabled.
+     */
+    static boolean shouldLabelAsAnimal(long startMs, long endMs, int cameraMask,
+                                       int maxCount, float personConfidence,
+                                       long clipStartWallMs, List<Actor> actors) {
+        // A multi-camera span has no per-class camera ownership: do not let
+        // an animal in one quadrant erase a briefly seen person in another.
+        if (maxCount != 1 || Integer.bitCount(cameraMask) != 1
+                || actors == null || actors.isEmpty()
+                || startMs > endMs) return false;
+
+        long fromWallMs = clipStartWallMs + Math.max(0L, startMs);
+        long toWallMs = clipStartWallMs + Math.max(0L, endMs);
+        boolean confirmedAnimal = false;
+        for (Actor a : actors) {
+            if ((a.cameraMask & cameraMask) == 0
+                    || a.lastSeenWallMs < fromWallMs || a.firstSeenWallMs > toWallMs) {
+                continue;
+            }
+            if (a.classGroup == Actor.ClassGroup.PERSON && a.confirmed) {
+                return false; // A real person can coexist with an animal.
+            }
+            if (a.classGroup == Actor.ClassGroup.ANIMAL && a.confirmed
+                    && !a.isStaticForTimeline && a.peakConfidence >= personConfidence) {
+                confirmedAnimal = true;
+            }
+        }
+        return confirmedAnimal;
     }
 
     // ========================================================================

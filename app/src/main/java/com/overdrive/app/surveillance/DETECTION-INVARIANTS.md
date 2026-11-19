@@ -184,6 +184,13 @@ than per-quadrant-instance; affects only a log line.
 
 - The S4 motion-overlap filter is dilated by one block; `ThumbnailBuffer`'s copy is
   NOT. Opposite penalties: drop-the-detection vs cosmetic scenery flag. Do not unify.
+- Timeline sidecars may relabel a single-object PERSON span as ANIMAL **only**
+  when the same camera/time window has a confirmed moving animal with at least
+  the span's person confidence, and no confirmed person. This is cosmetic:
+  YOLO trigger evidence, ActorTracker class/severity, and hero selection are
+  unchanged. Without animal-class evidence (for example, Animal detection off
+  or a model that labels every dog frame PERSON), the marker stays PERSON.
+  Multi-camera/multi-object spans fail open to PERSON.
 - `beatsAsThreat` demotes an all-scenery headline, but the count loops are untouched
   and `pushWorthy` latches before the demotion. Cosmetic surfaces may narrow;
   gates may not.
