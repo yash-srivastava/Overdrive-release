@@ -36,6 +36,10 @@ object DaemonBootSchedule {
     /** Core daemons (camera — which owns MQTT — then the sentries). */
     const val CORE_DELAY_MS = 45_000L
 
+    /** Stage the sentries 5 and 10 seconds after the camera instead of a launch burst. */
+    const val SENTRY_STAGGER_MS = 5_000L
+    const val ACC_SENTRY_STAGGER_MS = 10_000L
+
     /** Remaining optional daemons/tunnels. */
     const val OPTIONAL_DELAY_MS = 60_000L
 
