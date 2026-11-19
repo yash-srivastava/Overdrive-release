@@ -21,7 +21,8 @@ final class RecordingsIndexSchema {
     // v6: SORT_INDEX, created by createIndexes() IF NOT EXISTS (no data migration).
     // v7: nullable deterrent_flags (1 cloud, 2 screen) from the sidecar deterrents[] marks.
     // v8: independent watched-recordings table; survives recording row upserts.
-    static final int VERSION = 8;
+    // v9: per-action cloud deterrent counts, derived from sidecar firing marks.
+    static final int VERSION = 9;
 
     // H2 only index-sorts when the index STARTS with the ORDER BY column, so this
     // cannot be folded into idx_rec_available_ts.
@@ -88,6 +89,15 @@ final class RecordingsIndexSchema {
             if (!columnExists(connection, "RECORDINGS", "DETERRENT_FLAGS")) {
                 statement.execute("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS"
                         + " deterrent_flags INT");
+            }
+            if (!columnExists(connection, "RECORDINGS", "CLOUD_DETERRENT_ACTIONS")) {
+                statement.execute("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS"
+                        + " cloud_deterrent_actions VARCHAR(256)");
+                // Reconcile normally skips unchanged sidecars. Make existing cloud
+                // clips eligible for a one-time refresh so old indexes can show
+                // their recorded action and frequency without a full rescan.
+                statement.execute("UPDATE recordings SET sidecar_mtime = 0"
+                        + " WHERE deterrent_flags IN (1, 3)");
             }
         }
     }
@@ -206,6 +216,7 @@ final class RecordingsIndexSchema {
             "  event_cameras   VARCHAR(32)," +
             "  peak_confidence DOUBLE," +
             "  deterrent_flags INT," +
+            "  cloud_deterrent_actions VARCHAR(256)," +
             "  UNIQUE(volume_id, relative_path)" +
             ")"
         );

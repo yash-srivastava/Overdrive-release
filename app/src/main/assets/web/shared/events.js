@@ -1976,9 +1976,26 @@ BYD.events = {
             if (animalCount > 0)  actorPills += '<span class="pill" title="' + BYD.i18n.t('events.actor_animal') + '">' + icons.animal + animalCount + '</span>';
             actorPills += sevBadge;
             if (proxLabel)        actorPills += '<span class="pill prox-' + (rec.peakProximity || 'UNKNOWN') + '">' + proxLabel + '</span>';
-            // deterrentFlags: 1 = Cloud deterrent sent, 2 = Screen deterrent shown during this clip.
+            // Cloud marks are indexed by action, not by the currently selected
+            // setting (which may have changed since this clip was recorded).
             const deterrentFlags = rec.deterrentFlags || 0;
-            if (deterrentFlags & 1) actorPills += '<span class="pill">' + BYD.i18n.t('events.legend_deterrent_cloud') + '</span>';
+            const cloudActions = rec.cloudDeterrentActions;
+            if (cloudActions && typeof cloudActions === 'object') {
+                const labels = {
+                    flash_lights: 'events.deterrent_action_flash_lights',
+                    find_car: 'events.deterrent_action_horn_lights',
+                    other: 'events.legend_deterrent_cloud'
+                };
+                for (const action of Object.keys(labels)) {
+                    const count = Number(cloudActions[action]);
+                    if (Number.isSafeInteger(count) && count > 0) {
+                        actorPills += '<span class="pill">' + BYD.i18n.t(labels[action]) + ' ×' + count + '</span>';
+                    }
+                }
+            } else if (deterrentFlags & 1) {
+                // Older index/API without per-action data: do not invent a count.
+                actorPills += '<span class="pill">' + BYD.i18n.t('events.legend_deterrent_cloud') + '</span>';
+            }
             if (deterrentFlags & 2) actorPills += '<span class="pill">' + BYD.i18n.t('events.legend_deterrent_screen') + '</span>';
             const actorRow = actorPills ? '<div class="actor-summary">' + actorPills + '</div>' : '';
 

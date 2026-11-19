@@ -976,10 +976,10 @@ public final class RecordingsIndex {
                 + " person_count, vehicle_count, bike_count, animal_count, hero_thumb,"
                 + " actor_classes, place_short, place_medium, place_display, place_country,"
                 + " place_source, start_lat, start_lng, ymd, storage,"
-                + " parking_session_id, event_cameras, peak_confidence, deterrent_flags)"
-                + " KEY(recording_id) VALUES ("
+                + " parking_session_id, event_cameras, peak_confidence, deterrent_flags,"
+                + " cloud_deterrent_actions) KEY(recording_id) VALUES ("
                 + "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-                + " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                + " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
             try (PreparedStatement ps = connection.prepareStatement(sql)) {
                 ps.setString(1, r.recordingId);
                 ps.setString(2, r.filename);
@@ -1017,6 +1017,7 @@ public final class RecordingsIndex {
                 setNullableString(ps, 34, r.eventCameras);
                 setNullableDouble(ps, 35, r.peakConfidence);
                 setNullableInt(ps, 36, r.deterrentFlags);
+                setNullableString(ps, 37, r.cloudDeterrentActions);
                 ps.executeUpdate();
                 invalidateQueryMemos();   // row counts/bytes changed
                 try { com.overdrive.app.server.timeline.TimelineEnricher.kick(r.recordingId); } catch (Throwable ignored) { }
@@ -2562,16 +2563,26 @@ public final class RecordingsIndex {
                 JSONArray deterrentMarks = side.optJSONArray("deterrents");
                 if (deterrentMarks != null) {
                     int flags = 0;
+                    JSONObject cloudActions = new JSONObject();
                     for (int k = 0; k < deterrentMarks.length(); k++) {
                         JSONObject mark = deterrentMarks.optJSONObject(k);
                         String kind = mark != null ? mark.optString("type", "") : "";
                         if (com.overdrive.app.surveillance.EventTimelineCollector.DETERRENT_CLOUD.equals(kind)) {
                             flags |= DETERRENT_FLAG_CLOUD;
+                            // Store only known action identifiers; legacy marks
+                            // without an action (and future unknown actions) still
+                            // contribute to the generic cloud count.
+                            String action = mark.optString("action", "");
+                            if (!"flash_lights".equals(action) && !"find_car".equals(action)) {
+                                action = "other";
+                            }
+                            cloudActions.put(action, cloudActions.optInt(action, 0) + 1);
                         } else if (com.overdrive.app.surveillance.EventTimelineCollector.DETERRENT_SCREEN.equals(kind)) {
                             flags |= DETERRENT_FLAG_SCREEN;
                         }
                     }
                     if (flags != 0) r.deterrentFlags = flags;
+                    if (cloudActions.length() > 0) r.cloudDeterrentActions = cloudActions.toString();
                 }
 
                 JSONObject geo = side.optJSONObject("geo");
@@ -2748,6 +2759,8 @@ public final class RecordingsIndex {
         if (!rs.wasNull()) rec.put("peakConfidence", Math.round(pconf * 100) / 100.0);
         int deterrentFlags = rs.getInt("deterrent_flags");
         if (!rs.wasNull() && deterrentFlags != 0) rec.put("deterrentFlags", deterrentFlags);
+        String cloudActions = rs.getString("cloud_deterrent_actions");
+        if (cloudActions != null) rec.put("cloudDeterrentActions", new JSONObject(cloudActions));
 
         // bucketLabel — used by the native fragment for sticky time-of-day
         // headers without needing the full list. Format: "Today", "Yesterday",
@@ -2860,6 +2873,7 @@ public final class RecordingsIndex {
         String eventCameras;      // CSV of quadrant names for non-static actors
         Double peakConfidence;    // max peakConfidence over non-static actors
         Integer deterrentFlags;   // DETERRENT_FLAG_* bits; null when none fired
+        String cloudDeterrentActions; // JSON counts for flash_lights, find_car, other
     }
 
     private static final class DirEntry {

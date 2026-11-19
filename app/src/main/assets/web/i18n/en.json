@@ -2460,6 +2460,8 @@
     "quadrant_left": "Show left camera",
     "legend_motion": "Motion",
     "legend_deterrent_cloud": "Cloud deterrent",
+    "deterrent_action_flash_lights": "Flash Lights",
+    "deterrent_action_horn_lights": "Horn + Lights",
     "legend_deterrent_screen": "Screen deterrent",
     "shortcuts_title": "Keyboard shortcuts",
     "shortcut_play_pause": "Play or pause",
