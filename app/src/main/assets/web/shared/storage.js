@@ -81,6 +81,8 @@ BYD.storagePage = {
     _pollTimer: null,
     _lastResume: 0,
     _recoverRunning: false,
+    _sdFormatPollTimer: null,
+    _sdFormatPolling: false,
 
     // ==================== Helpers ====================
 
@@ -264,6 +266,7 @@ BYD.storagePage = {
         // their own _cdrReady gate, so it loads after hydration.
         if (this._cdrVisible()) this.loadCdrConfig();
         this._startPolling();
+        this._resumeSdFormat();
         // hydrate() rewrites [data-i18n] text on a language switch; repaint live values.
         if (BYD.i18n && typeof BYD.i18n.onChange === 'function') {
             BYD.i18n.onChange(() => {
@@ -464,6 +467,8 @@ BYD.storagePage = {
         const known = this._loaded.settings || this._loaded.trips;
         // Internal figures only come with /api/settings/storage.
         this._paintVolume('Int', this._loaded.settings, true, v.internalFreeSpace, v.internalTotalSpace, null);
+        const formatCard = this._el('sdFormatCard');
+        if (formatCard) formatCard.style.display = known && v.sdCardAvailable ? '' : 'none';
         this._paintVolume('Sd', known, v.sdCardAvailable, v.sdCardFreeSpace, v.sdCardTotalSpace,
             !known ? 'recording.sd_checking'
                 : (v.sdCardAvailable ? 'recording.sd_card_available' : 'recording.sd_card_not_detected'));
@@ -1316,6 +1321,143 @@ BYD.storagePage = {
         } finally {
             this._cdrCleanupPending = false;
             this.updateCdrUI();
+        }
+    },
+
+    // ==================== SD card formatting ====================
+
+    /** Daemon messages are diagnostic; display a translated reason, not English raw text. */
+    _sdFormatReason(data) {
+        const code = data && data.reasonCode ? data.reasonCode : 'generic';
+        return this._tr('storage.sd_format_reason_' + code, null,
+            this._tr('storage.sd_format_failed'));
+    },
+
+    async _sdFormatReadJson(url, options) {
+        const resp = await fetch(url, options || { cache: 'no-store' });
+        // A native bridge/proxy can return non-JSON on transient unavailability.
+        let data = null;
+        try { data = await resp.json(); } catch (ignored) { /* retry by caller */ }
+        return { ok: resp.ok, status: resp.status, data: data };
+    },
+
+    async _pollSdFormat(jobId) {
+        if (this._sdFormatPolling) return;
+        this._sdFormatPolling = true;
+        const button = this._el('sdFormatButton');
+        const status = this._el('sdFormatStatus');
+        const t = k => this._tr('storage.' + k);
+        if (button) button.disabled = true;
+        let failures = 0;
+        try {
+            // Do not impose a browser-side deadline on a still-running vold job.
+            // A 900s sm command + 300s mount poll can exceed the old 140s window.
+            while (true) {
+                await new Promise(resolve => { this._sdFormatPollTimer = setTimeout(resolve, 2000); });
+                this._sdFormatPollTimer = null;
+                let result;
+                try {
+                    result = await this._sdFormatReadJson('/api/storage/external/format/status', { cache: 'no-store' });
+                } catch (ignored) { result = null; }
+                const job = result && result.data;
+                if (!result || !result.ok || !job || !job.success || job.jobId !== jobId) {
+                    failures++;
+                    // A daemon restart loses its in-memory job ID. Do not claim
+                    // success/failure of the old job based on a different job.
+                    if (result && result.ok && job && job.success === true
+                            && job.jobId !== jobId) {
+                        if (status) status.textContent = t('sd_format_reason_unverified');
+                        return;
+                    }
+                    if (status && failures >= 3) status.textContent = t('sd_format_poll_retry');
+                    continue;
+                }
+                failures = 0;
+                if (job.state === 'running' || job.state === 'recovering') {
+                    if (status) status.textContent = t('sd_format_progress');
+                    continue;
+                }
+                const ok = job.state === 'succeeded';
+                const message = ok ? t('sd_format_success') : this._sdFormatReason(job);
+                if (status) status.textContent = message;
+                this._toast(message, ok ? 'success' : 'error');
+                if (ok) {
+                    this.loadCdrConfig();
+                    this.loadStorageStats();
+                    this.loadStorageSettings();
+                }
+                return;
+            }
+        } finally {
+            this._sdFormatPolling = false;
+            if (button) button.disabled = false;
+        }
+    },
+
+    async _resumeSdFormat() {
+        if (this._sdFormatPolling) return;
+        try {
+            const response = await this._sdFormatReadJson('/api/storage/external/format/status', { cache: 'no-store' });
+            const job = response.data;
+            if (response.ok && job && job.success && job.state === 'running' && job.jobId) {
+                this._pollSdFormat(job.jobId);
+            } else if (response.ok && job && job.state === 'recovering') {
+                this._setText('sdFormatStatus', this._tr('storage.sd_format_reason_recovery'));
+            }
+        } catch (ignored) { /* No action on an unavailable daemon; do not infer failure. */ }
+    },
+
+    async formatSdCard() {
+        const button = this._el('sdFormatButton');
+        const status = this._el('sdFormatStatus');
+        if (!button || button.disabled || this._sdFormatPolling || !this.volumes.sdCardAvailable) return;
+        button.disabled = true;
+        const t = (key, vars) => this._tr('storage.' + key, vars);
+        const report = (message) => {
+            if (status) status.textContent = message;
+            this._toast(message, 'error');
+        };
+        try {
+            const preview = await this._sdFormatReadJson('/api/storage/external/format/target', { cache: 'no-store' });
+            const target = preview.data;
+            if (!preview.ok || !target || !target.success || !target.uuid || !target.label
+                    || !(target.capacityBytes > 0) || !(target.usedBytes >= 0)) {
+                report(target ? this._sdFormatReason(target) : t('sd_format_preview_failed'));
+                return;
+            }
+            if (!target.identityVerifiable) {
+                report(t('sd_format_reason_media_identity'));
+                return;
+            }
+            const card = target.label + ' (' + this.formatSize(target.capacityBytes) + ' '
+                + t('sd_format_capacity') + ', ' + this.formatSize(target.usedBytes) + ' '
+                + t('sd_format_used') + ')';
+            const warning = t('sd_format_confirm_body', { card: card });
+            const stopFactoryDvr = !!(this._el('sdFormatStopDvr') && this._el('sdFormatStopDvr').checked);
+            const fullWarning = warning + (stopFactoryDvr ? '\n' + t('sd_format_dvr_restore_warning') : '');
+            const confirmed = BYD.utils && BYD.utils.confirmDialog
+                ? await Promise.resolve(BYD.utils.confirmDialog({
+                    title: t('sd_format_confirm_title'), body: fullWarning,
+                    confirmLabel: t('sd_format_confirm'),
+                    cancelLabel: this._tr('common.cancel'), danger: true
+                })).catch(() => false)
+                : window.confirm(fullWarning);
+            if (!confirmed) return;
+            if (status) status.textContent = t('sd_format_progress');
+            const response = await this._sdFormatReadJson('/api/storage/external/format', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ confirmed: true, expectedUuid: target.uuid, stopFactoryDvr: stopFactoryDvr })
+            });
+            const submitted = response.data;
+            if (response.status !== 202 || !submitted || !submitted.success || !submitted.jobId) {
+                report(submitted ? this._sdFormatReason(submitted) : t('sd_format_request_unavailable'));
+                return;
+            }
+            await this._pollSdFormat(submitted.jobId);
+        } catch (e) {
+            report(t('sd_format_request_unavailable'));
+        } finally {
+            if (!this._sdFormatPolling) button.disabled = false;
         }
     },
 
