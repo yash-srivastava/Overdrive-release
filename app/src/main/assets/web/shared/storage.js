@@ -81,6 +81,7 @@ BYD.storagePage = {
     _pollTimer: null,
     _lastResume: 0,
     _recoverRunning: false,
+    _sdFormatPollTimer: null,
 
     // ==================== Helpers ====================
 
@@ -464,6 +465,8 @@ BYD.storagePage = {
         const known = this._loaded.settings || this._loaded.trips;
         // Internal figures only come with /api/settings/storage.
         this._paintVolume('Int', this._loaded.settings, true, v.internalFreeSpace, v.internalTotalSpace, null);
+        const formatCard = this._el('sdFormatCard');
+        if (formatCard) formatCard.style.display = known && v.sdCardAvailable ? '' : 'none';
         this._paintVolume('Sd', known, v.sdCardAvailable, v.sdCardFreeSpace, v.sdCardTotalSpace,
             !known ? 'recording.sd_checking'
                 : (v.sdCardAvailable ? 'recording.sd_card_available' : 'recording.sd_card_not_detected'));
@@ -1316,6 +1319,77 @@ BYD.storagePage = {
         } finally {
             this._cdrCleanupPending = false;
             this.updateCdrUI();
+        }
+    },
+
+    // ==================== SD card formatting ====================
+
+    async formatSdCard() {
+        const button = this._el('sdFormatButton');
+        const status = this._el('sdFormatStatus');
+        if (!button || button.disabled || !this.volumes.sdCardAvailable) return;
+        button.disabled = true;
+        const t = (key, vars) => this._tr('storage.' + key, vars);
+        const report = (message, success) => {
+            if (status) status.textContent = message;
+            this._toast(message, success ? 'success' : 'error');
+        };
+        try {
+            const preview = await fetch('/api/storage/external/format/target', { cache: 'no-store' });
+            const target = await preview.json();
+            if (!preview.ok || !target.success || !target.uuid || !target.label
+                    || !(target.capacityBytes > 0) || !(target.usedBytes >= 0)) {
+                throw new Error(target.error || t('sd_format_failed'));
+            }
+            const card = target.label + ' (' + this.formatSize(target.capacityBytes) + ' '
+                + t('sd_format_capacity') + ', ' + this.formatSize(target.usedBytes) + ' '
+                + t('sd_format_used') + ')';
+            const warning = t('sd_format_confirm_body', { card: card });
+            const confirmed = BYD.utils && BYD.utils.confirmDialog
+                ? await Promise.resolve(BYD.utils.confirmDialog({
+                    title: t('sd_format_confirm_title'), body: warning,
+                    confirmLabel: t('sd_format_confirm'),
+                    cancelLabel: this._tr('common.cancel'), danger: true
+                })).catch(() => false)
+                : window.confirm(warning);
+            if (!confirmed) return;
+            if (status) status.textContent = t('sd_format_progress');
+            const response = await fetch('/api/storage/external/format', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ confirmed: true, expectedUuid: target.uuid })
+            });
+            const submitted = await response.json();
+            if (response.status !== 202 || !submitted.success || !submitted.jobId) {
+                throw new Error(submitted.error || submitted.message || t('sd_format_failed'));
+            }
+            // The native bridge has a 10 s timeout. Each poll is short; never
+            // wait for sm format on the HTTP request thread.
+            const started = Date.now();
+            while (Date.now() - started < 210000) {
+                await new Promise(resolve => { this._sdFormatPollTimer = setTimeout(resolve, 1500); });
+                this._sdFormatPollTimer = null;
+                const result = await fetch('/api/storage/external/format/status', { cache: 'no-store' });
+                const job = await result.json();
+                if (!result.ok || !job.success || job.jobId !== submitted.jobId) {
+                    throw new Error(t('sd_format_status_failed'));
+                }
+                if (job.state === 'running') continue;
+                const ok = job.state === 'succeeded';
+                report(t(ok ? 'sd_format_success' : 'sd_format_failed'), ok);
+                if (ok) {
+                    this.loadCdrConfig();
+                    this.loadStorageStats();
+                    this.loadStorageSettings();
+                }
+                return;
+            }
+            throw new Error(t('sd_format_status_failed'));
+        } catch (e) {
+            report(t('sd_format_request_failed', {
+                error: e && e.message ? e.message : t('sd_format_failed')
+            }), false);
+        } finally {
+            button.disabled = false;
         }
     },
 

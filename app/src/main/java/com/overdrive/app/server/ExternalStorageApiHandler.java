@@ -23,6 +23,9 @@ import java.util.Map;
  * - POST /api/storage/external/cleanup  - Trigger manual cleanup
  * - GET  /api/storage/external/preview  - Preview what would be deleted
  * - POST /api/storage/external/refresh  - Refresh SD card detection
+ * - GET  /api/storage/external/format/target - Read-only card identity (JWT only)
+ * - POST /api/storage/external/format   - Queue destructive format (JWT, same-origin if present)
+ * - GET  /api/storage/external/format/status - Poll background job status (JWT)
  */
 public class ExternalStorageApiHandler {
 
@@ -86,10 +89,72 @@ public class ExternalStorageApiHandler {
             refreshPaths(out);
             return true;
         }
+
+        if (path.equals("/api/storage/external/format/target") && method.equals("GET")) {
+            com.overdrive.app.storage.SdCardFormatter.Target target =
+                    com.overdrive.app.storage.SdCardFormatter.getInstance().target();
+            JSONObject response = new JSONObject();
+            response.put("success", target != null);
+            if (target != null) {
+                response.put("uuid", target.uuid);
+                response.put("label", "/storage/" + target.uuid);
+                response.put("capacityBytes", target.capacityBytes);
+                response.put("usedBytes", target.usedBytes);
+            } else {
+                response.put("error", "No uniquely identifiable, mounted SD card is available.");
+            }
+            sendFormatJson(out, target != null ? 200 : 409, response);
+            return true;
+        }
+
+        if (path.equals("/api/storage/external/format/status") && method.equals("GET")) {
+            com.overdrive.app.storage.SdCardFormatter.Job job =
+                    com.overdrive.app.storage.SdCardFormatter.getInstance().status();
+            JSONObject response = new JSONObject();
+            response.put("success", true);
+            response.put("jobId", job.id);
+            response.put("state", job.state);
+            response.put("message", job.message);
+            sendFormatJson(out, 200, response);
+            return true;
+        }
+
+        if (path.equals("/api/storage/external/format") && method.equals("POST")) {
+            formatSdCard(body, out);
+            return true;
+        }
         
         return false;
     }
     
+    /** Queue once and answer immediately; the native bridge times out at 10 seconds. */
+    private static void formatSdCard(String body, OutputStream out) throws Exception {
+        JSONObject response = new JSONObject();
+        try {
+            JSONObject request = new JSONObject(body == null ? "{}" : body);
+            if (!request.optBoolean("confirmed", false)
+                    || !request.optString("expectedUuid", "").matches("[A-Za-z0-9][A-Za-z0-9_-]{0,63}")) {
+                response.put("success", false);
+                response.put("error", "Explicit confirmation and a valid SD UUID are required.");
+                sendFormatJson(out, 400, response);
+                return;
+            }
+            String uuid = request.getString("expectedUuid");
+            com.overdrive.app.daemon.CameraDaemon.log("SD format: request for " + uuid);
+            com.overdrive.app.storage.SdCardFormatter.Job job =
+                    com.overdrive.app.storage.SdCardFormatter.getInstance().submit(uuid);
+            response.put("success", "running".equals(job.state));
+            response.put("jobId", job.id);
+            response.put("state", job.state);
+            response.put("message", job.message);
+            sendFormatJson(out, "running".equals(job.state) ? 202 : 409, response);
+        } catch (Exception e) {
+            response.put("success", false);
+            response.put("error", e.getMessage() == null ? "Unable to queue SD format." : e.getMessage());
+            sendFormatJson(out, 400, response);
+        }
+    }
+
     /**
      * GET /api/storage/external
      * Returns SD card status, CDR info, and cleanup configuration.
@@ -360,11 +425,15 @@ public class ExternalStorageApiHandler {
     /**
      * Send JSON response.
      */
+    private static void sendFormatJson(OutputStream out, int status, JSONObject json) throws Exception {
+        HttpResponse.sendJsonNoCors(out, status, json.toString());
+    }
+
     private static void sendJson(OutputStream out, int status, JSONObject json) throws Exception {
         String body = json.toString();
         byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
         
-        String statusText = status == 200 ? "OK" : (status == 400 ? "Bad Request" : "Error");
+        String statusText = status == 200 ? "OK" : status == 400 ? "Bad Request" : "Error";
         String response = "HTTP/1.1 " + status + " " + statusText + "\r\n" +
             "Content-Type: application/json\r\n" +
             "Content-Length: " + bodyBytes.length + "\r\n" +

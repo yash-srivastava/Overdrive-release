@@ -6699,6 +6699,27 @@ public class StorageManager {
         return sdCardPath;
     }
 
+    /** Record only a new UUID verified mounted on the same SD public volume. */
+    public void rememberFormattedSdUuid(String uuid) {
+        if (uuid != null && uuid.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+                && !"null".equalsIgnoreCase(uuid)) learnSdUuid(uuid);
+    }
+
+    /** Serialize destructive SD operations against mount/unmount discovery. */
+    public boolean acquireSdCardFormatLock() {
+        try {
+            return mountLock.tryLock(5, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    /** Release the lock acquired by {@link #acquireSdCardFormatLock()}. */
+    public void releaseSdCardFormatLock() {
+        if (mountLock.isHeldByCurrentThread()) mountLock.unlock();
+    }
+
     public boolean isUsbAvailable() {
         return usbAvailable;
     }

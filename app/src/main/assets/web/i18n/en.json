@@ -5315,7 +5315,22 @@
     "budget_over_capacity": "Your storage limits add up to {total} on {volume}, which only holds {capacity}. Lower a limit, or the oldest clips across {others} may be deleted sooner than your limits promise.",
     "budget_over_capacity_solo": "Your storage limit of {total} is larger than {volume}, which only holds {capacity}. The oldest clips will be deleted sooner than your limit promises.",
     "budget_over_free": "Your storage limits add up to {total} on {volume}, but only {capacity} is available there. Lower a limit or free up space, or the oldest clips across {others} may be deleted sooner than your limits promise.",
-    "budget_over_free_solo": "Your storage limit of {total} exceeds the {capacity} available on {volume}. Lower the limit or free up space, or the oldest clips will be deleted sooner than your limit promises."
+    "budget_over_free_solo": "Your storage limit of {total} exceeds the {capacity} available on {volume}. Lower the limit or free up space, or the oldest clips will be deleted sooner than your limit promises.",
+    "sd_format_title": "SD Card Format",
+    "sd_format_name": "Format SD card",
+    "sd_format_desc": "Use Android's system storage service to format the removable SD card. Android selects the filesystem supported by the vehicle.",
+    "sd_format_warning": "Formatting permanently erases the SD card. Back up your files, move all Overdrive storage off SD, and stop BYD CDR/dashcam recording first. Formatting a busy card can terminate the recorder.",
+    "sd_format_button": "Format SD card",
+    "sd_format_confirm_title": "Erase and format SD card?",
+    "sd_format_confirm_body": "Erase ALL data on {card}? Confirm that this is the intended SD card, backups are complete, Overdrive uses other storage, and BYD CDR/dashcam recording is stopped.",
+    "sd_format_confirm": "Erase and format",
+    "sd_format_progress": "Formatting…",
+    "sd_format_failed": "Formatting failed.",
+    "sd_format_request_failed": "Could not format the SD card: {error}",
+    "sd_format_capacity": "capacity",
+    "sd_format_used": "used",
+    "sd_format_success": "SD card formatted and remounted successfully.",
+    "sd_format_status_failed": "Could not verify the SD format job status."
   },
   "wireguard": {
     "page_title": "WireGuard Tunnel",
