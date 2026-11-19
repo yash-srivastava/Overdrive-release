@@ -1907,7 +1907,7 @@ public final class RecordingsIndex {
     }
 
     /**
-     * Page through the index with the given filter, sorted by ts_ms DESC.
+     * Page through the index with the given filter, newest first.
      * Returns JSON rows in the same shape as the legacy
      * RecordingsApiHandler.parseRecordingUncached output so existing
      * clients don't break.
@@ -1925,7 +1925,7 @@ public final class RecordingsIndex {
                 + " AND w.mp4_mtime = recordings.mp4_mtime) AS watched"
                 + fromRecordings(f)
                 + (where.length() > 0 ? " WHERE " + where : "")
-                + " ORDER BY ts_ms DESC, root_rank ASC"
+                + " ORDER BY ts_ms DESC, root_rank ASC, recording_id ASC"
                 + " LIMIT ? OFFSET ?";
 
         // The result list is built INSIDE the body so a reconnect-retry
@@ -1943,6 +1943,69 @@ public final class RecordingsIndex {
                 }
             }
             return out;
+        });
+    }
+
+    /**
+     * Return the immediate neighbour of a recording in the filtered, newest-first
+     * library. Unlike an OFFSET page boundary, this remains stable when the
+     * recorder inserts newer rows while a video is playing. step -1 means
+     * previous (newer), +1 means next (older). The recording id breaks ties
+     * between clips with equal timestamps and root ranks.
+     *
+     * The anchor is located without the user's filters: the open clip can
+     * cease matching a filter after a metadata update, but its position still
+     * determines which matching clip is adjacent. Missing anchors return null.
+     */
+    public synchronized JSONObject queryAdjacentRecording(Filter f, String recordingId, int step) {
+        if (recordingId == null || !recordingId.matches("[0-9a-f]{32}")
+                || (step != -1 && step != 1)) return null;
+
+        StringBuilder where = new StringBuilder();
+        List<Object> args = new ArrayList<>();
+        buildWhere(f, where, args);
+        final boolean newer = step < 0;
+        appendAnd(where, newer
+                ? "(ts_ms > ? OR (ts_ms = ? AND root_rank < ?)"
+                        + " OR (ts_ms = ? AND root_rank = ? AND recording_id < ?))"
+                : "(ts_ms < ? OR (ts_ms = ? AND root_rank > ?)"
+                        + " OR (ts_ms = ? AND root_rank = ? AND recording_id > ?))");
+        String sql = "SELECT recordings.*, EXISTS (SELECT 1 FROM recordings_watched w"
+                + " WHERE w.recording_id = recordings.recording_id"
+                + " AND w.size_bytes = recordings.size_bytes"
+                + " AND w.mp4_mtime = recordings.mp4_mtime) AS watched"
+                + fromRecordings(f)
+                + " WHERE " + where
+                + (newer ? " ORDER BY ts_ms ASC, root_rank DESC, recording_id DESC"
+                         : " ORDER BY ts_ms DESC, root_rank ASC, recording_id ASC")
+                + " LIMIT 1";
+
+        return withRetry("queryAdjacentRecording", null, () -> {
+            long timestamp;
+            int rank;
+            try (PreparedStatement anchor = connection.prepareStatement(
+                    "SELECT ts_ms, root_rank FROM recordings"
+                            + " WHERE recording_id = ? AND is_available = TRUE")) {
+                anchor.setString(1, recordingId);
+                try (ResultSet rs = anchor.executeQuery()) {
+                    if (!rs.next()) return null;
+                    timestamp = rs.getLong(1);
+                    rank = rs.getInt(2);
+                }
+            }
+            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                int p = 1;
+                for (Object a : args) bind(ps, p++, a);
+                ps.setLong(p++, timestamp);
+                ps.setLong(p++, timestamp);
+                ps.setInt(p++, rank);
+                ps.setLong(p++, timestamp);
+                ps.setInt(p++, rank);
+                ps.setString(p, recordingId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    return rs.next() ? rowToJson(rs) : null;
+                }
+            }
         });
     }
 

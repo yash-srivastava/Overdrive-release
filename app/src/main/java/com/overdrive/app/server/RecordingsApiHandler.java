@@ -168,6 +168,44 @@ public class RecordingsApiHandler {
             return true;
         }
 
+        // Playback navigation is anchored to a stable row id, never a moving
+        // LIMIT/OFFSET page boundary. Insertions at the front cannot cause
+        // Previous/Next to skip or replay a clip across a page transition.
+        if ((path.equals("/api/recordings/adjacent")
+                || path.startsWith("/api/recordings/adjacent?")) && method.equals("GET")) {
+            String query = path.contains("?") ? path.substring(path.indexOf('?') + 1) : "";
+            Map<String, String> params = parseQuery(query);
+            String fromId = params.get("fromId");
+            String step = params.get("step");
+            if (!validRecordingId(fromId) || !("-1".equals(step) || "1".equals(step))) {
+                HttpResponse.sendError(out, 400, "Invalid recording navigation anchor or step");
+                return true;
+            }
+            if (sendIndexUnavailable(out, "recordings")) return true;
+            RecordingsIndex idx = RecordingsIndex.getInstance();
+            RecordingsIndex.WarmupSnapshot snap = idx.warmupState();
+            if (!snap.complete && snap.total > 0) {
+                JSONObject warming = new JSONObject();
+                warming.put("success", false);
+                warming.put("warming", true);
+                HttpResponse.sendJson(out, warming.toString());
+                return true;
+            }
+            RecordingsIndex.Filter filter = buildFilter(params.get("type"), params.get("date"),
+                    params.get("class"), params.get("severity"), params.get("proximity"),
+                    params.get("place"), params.get("placeContains"), params.get("country"),
+                    params.get("storage"));
+            applyParkingExtras(filter, params.get("parkingSessionId"),
+                    params.get("camera"), params.get("minConfidence"));
+            JSONObject neighbour = idx.queryAdjacentRecording(filter, fromId,
+                    Integer.parseInt(step));
+            JSONObject response = new JSONObject();
+            response.put("success", true);
+            response.put("recording", neighbour == null ? JSONObject.NULL : neighbour);
+            HttpResponse.sendJson(out, response.toString());
+            return true;
+        }
+
         // Distinct places list (top-N by count) — drives the dynamic
         // Place chip row in events.html. Scoped by the SAME filter
         // context as /api/recordings (minus the place filter itself),
