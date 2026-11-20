@@ -4495,7 +4495,9 @@ open class MainActivity : AppCompatActivity() {
                             // early triggers event 1002 on the new daemon's open.
                             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                                 if (!activityAlive()) return@postDelayed
-                                daemonStartupManager.initializeOnAppLaunch()
+                                // Reinitialization is intentionally idempotent after first
+                                // ADB auth. Restart this camera explicitly after HAL release.
+                                daemonStartupManager.restartCameraAfterSettingsChange()
                                 android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                                     if (!activityAlive()) return@postDelayed
                                     daemonStartupManager.checkAllDaemonStatuses()
