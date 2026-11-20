@@ -1,6 +1,7 @@
 package com.overdrive.app.camera;
 
 import android.hardware.IBYDCameraService;
+import android.hardware.IBYDCameraUser;
 import com.overdrive.app.logging.DaemonLogger;
 
 import java.lang.reflect.Method;
@@ -26,6 +27,12 @@ public class BydCameraCoordinator {
     private Object reflectionServiceProxy;  // Fallback if typed stub doesn't match runtime
     private Method getCurrentCameraUserMethod;  // For polling fallback
     private boolean serviceAvailable = false;
+
+    // Only ACC-on asks the typed Binder for ownership. The frame-stall/yield
+    // valve, native-app lifecycle and ordinary open paths keep their original
+    // reflection-only behaviour. A stalled call is never repeated concurrently.
+    private final BoundedAccOwnerProbe accOwnerProbe = new BoundedAccOwnerProbe(
+            this::queryAccHandoffOwner, "AccCameraOwnerProbe");
 
     // Event callback state (AVMCamera.IEventCallback — separate from IBYDCameraUser)
     private boolean eventCallbackSet = false;
@@ -149,6 +156,45 @@ public class BydCameraCoordinator {
         } catch (Exception e) {
             logger.warn("IBYDCameraService setup failed: " + e.getMessage());
         }
+    }
+
+    /** A fresh bounded poll ticket for the ACC-on handoff only. */
+    BoundedAccOwnerProbe.Ticket startAccHandoffOwnerProbe() {
+        return accOwnerProbe.startIfIdle();
+    }
+
+    /**
+     * The typed BYD method is deliberately confined to the ACC-on handoff.
+     * If firmware supplies an incompatible interface (including linkage
+     * failures), fall back to the existing reflective implementation. This
+     * method does not write nativeAppActive or trigger yield/reacquire.
+     */
+    private boolean queryAccHandoffOwner() {
+        if (!serviceAvailable) return false;
+        String pkg = null;
+        if (typedServiceProxy != null) {
+            try {
+                IBYDCameraUser user = typedServiceProxy.getCurrentCameraUser();
+                pkg = user == null ? null : user.getPackageName();
+            } catch (Exception | LinkageError incompatible) {
+                logger.warn("ACC owner typed probe unavailable; using reflection: "
+                        + incompatible.getClass().getSimpleName());
+            }
+        }
+        if (pkg == null && getCurrentCameraUserMethod != null
+                && reflectionServiceProxy != null) {
+            try {
+                Object user = getCurrentCameraUserMethod.invoke(reflectionServiceProxy);
+                if (user != null) {
+                    pkg = (String) user.getClass().getMethod("getPackageName")
+                            .invoke(user);
+                }
+            } catch (Exception | LinkageError incompatible) {
+                logger.warn("ACC owner reflection probe unavailable: "
+                        + incompatible.getClass().getSimpleName());
+            }
+        }
+        return pkg != null && !"com.overdrive.app".equals(pkg);
     }
 
     // ==================== Yield State Query ====================

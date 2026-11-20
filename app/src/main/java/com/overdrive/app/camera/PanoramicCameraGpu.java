@@ -10627,6 +10627,11 @@ public class PanoramicCameraGpu {
         logger.info("Reopening AVMCamera...");
         final boolean legacyOpenAttempt =
                 !USE_DILINK4_AVM_PATH && !USE_DILINK5_QCARCAM_PATH;
+        // Limit the prewarm and typed ownership poll to the classic DiLink 3
+        // ACC-on handoff. BYD100F is excluded regardless of its selected
+        // surface (AVMCamera or AvmSurfaceTexture).
+        final boolean di3AccHandoff = legacyOpenAttempt
+                && !DiLink100Platform.isByd100f();
         boolean releaseRestartGate = true;
 
         // CRITICAL: Mark restart-in-progress BEFORE touching the camera so the
@@ -10660,12 +10665,11 @@ public class PanoramicCameraGpu {
             // calls the same shared warmup gate; it coalesces with this worker
             // and reuses its completed result. This overlaps the required HAL
             // settle time without removing or shortening that safety delay.
-            if (legacyOpenAttempt) {
+            if (di3AccHandoff) {
                 Thread warmupThread = new Thread(() -> {
                     try {
                         boolean warmed = AvcHalWarmup.warmupBeforeColdOpen(
-                                () -> running
-                                        && restartInProgress.get()
+                                () -> running && restartInProgress.get()
                                         && !CameraDaemon.isProcessRestartPending());
                         if (!warmed) {
                             logger.info("Concurrent AVC HAL warmup cancelled; "
@@ -10679,7 +10683,7 @@ public class PanoramicCameraGpu {
                 }, "AvcHalWarmup-Handoff");
                 warmupThread.setDaemon(true);
                 warmupThread.start();
-                logger.info("Started AVC HAL warmup alongside camera handoff");
+                logger.info("Started AVC HAL warmup alongside ACC camera handoff");
             }
 
             // registerCameraUser is DISABLED — the event-driven branch below is
@@ -10708,26 +10712,32 @@ public class PanoramicCameraGpu {
             sleepWithHeartbeat(minWaitMs);
 
             if (cameraCoordinator != null && cameraCoordinator.isRegistered()) {
-                long deadline = (legacyOpenAttempt
-                        ? android.os.SystemClock.elapsedRealtime()
-                        : System.currentTimeMillis())
-                        + (maxWaitMs - minWaitMs);
-                boolean nativeAppDetected = false;
-
-                while ((legacyOpenAttempt
-                        ? android.os.SystemClock.elapsedRealtime()
-                        : System.currentTimeMillis()) < deadline) {
-                    if (cameraCoordinator.checkNativeAppActive()) {
-                        nativeAppDetected = true;
-                        logger.info("Native app claimed camera (polling) — waiting for release");
+                if (di3AccHandoff) {
+                    // Never call a vendor Binder on the reopen thread. A
+                    // blocked probe cannot extend the existing 15 s handoff
+                    // budget or start more concurrent probes on a rerun.
+                    pollAccHandoffOwnerBounded(Math.max(0L, maxWaitMs - minWaitMs));
+                } else {
+                    // Unchanged DiLink 4/5 and BYD100F polling semantics.
+                    long deadline = (legacyOpenAttempt
+                            ? android.os.SystemClock.elapsedRealtime()
+                            : System.currentTimeMillis())
+                            + (maxWaitMs - minWaitMs);
+                    boolean nativeAppDetected = false;
+                    while ((legacyOpenAttempt
+                            ? android.os.SystemClock.elapsedRealtime()
+                            : System.currentTimeMillis()) < deadline) {
+                        if (cameraCoordinator.checkNativeAppActive()) {
+                            nativeAppDetected = true;
+                            logger.info("Native app claimed camera (polling) — waiting for release");
+                            sleepWithHeartbeat(500);
+                            break;
+                        }
                         sleepWithHeartbeat(500);
-                        break;
                     }
-                    sleepWithHeartbeat(500);
-                }
-
-                if (!nativeAppDetected) {
-                    logger.info("Native app not detected after polling — reopening");
+                    if (!nativeAppDetected) {
+                        logger.info("Native app not detected after polling — reopening");
+                    }
                 }
             } else {
                 long remainingWait = maxWaitMs - minWaitMs;
@@ -10737,10 +10747,21 @@ public class PanoramicCameraGpu {
 
             resetDeadSlotWalkForReopen();
             if (legacyOpenAttempt) {
-                if (!openLegacyCameraWithHardTimeout("ACC ON camera reopen")) {
-                    // The worker may still be inside the vendor Binder call.
-                    // Process death is the only safe cancellation; keep the
-                    // single-flight gate latched until the urgent restart lands.
+                if (di3AccHandoff) {
+                    LegacyAccOpenRetry.Result result = LegacyAccOpenRetry.run(
+                            this::openLegacyCameraWithHardTimeout,
+                            () -> cameraObj == null && running && restartInProgress.get(),
+                            (phase, error) -> logger.error(
+                                    phase + ": " + error.getMessage(), error));
+                    if (result == LegacyAccOpenRetry.Result.TERMINAL_TIMEOUT) {
+                        // The vendor worker may still own the Binder; fence
+                        // all overlapping opens until the terminal restart.
+                        releaseRestartGate = false;
+                        return;
+                    }
+                    if (result == LegacyAccOpenRetry.Result.FAILED) return;
+                } else if (!openLegacyCameraWithHardTimeout("ACC ON camera reopen")) {
+                    // BYD100F retains the original bounded open path.
                     releaseRestartGate = false;
                     return;
                 }
@@ -10777,6 +10798,11 @@ public class PanoramicCameraGpu {
                 if (cameraObj == null) {
                     logger.warn("Retry camera open...");
                     if (legacyOpenAttempt) {
+                        if (di3AccHandoff) {
+                            // The Di3 helper already made its single retry;
+                            // never issue a third vendor open.
+                            return;
+                        }
                         if (!openLegacyCameraWithHardTimeout(
                                 "ACC ON camera reopen retry")) {
                             releaseRestartGate = false;
@@ -10797,6 +10823,53 @@ public class PanoramicCameraGpu {
             if (releaseRestartGate) {
                 restartInProgress.set(false);
             }
+        }
+    }
+
+    /**
+     * Only classic DiLink 3 ACC-on uses this bounded asynchronous owner poll.
+     * Each poll runs on the coordinator's single daemon probe worker; if a
+     * Binder call wedges, no further worker starts until it actually returns.
+     * No early probe, no changed stall/yield state, and no wait past deadline.
+     */
+    private void pollAccHandoffOwnerBounded(long budgetMs)
+            throws InterruptedException {
+        long started = android.os.SystemClock.elapsedRealtime();
+        boolean ownerDetected = false;
+        while (running && restartInProgress.get()
+                && android.os.SystemClock.elapsedRealtime() - started < budgetMs) {
+            BoundedAccOwnerProbe.Ticket ticket =
+                    cameraCoordinator.startAccHandoffOwnerProbe();
+            if (ticket == null) {
+                // Previous handoff left a Binder call in flight. Never start
+                // another call while the stale one is stuck.
+                logger.warn("ACC owner probe still in flight — waiting within handoff budget");
+                sleepWithHeartbeat(Math.min(500L, Math.max(0L,
+                        budgetMs - (android.os.SystemClock.elapsedRealtime() - started))));
+                continue;
+            }
+            while (running && restartInProgress.get()
+                    && ticket.result() == BoundedAccOwnerProbe.Result.PENDING
+                    && android.os.SystemClock.elapsedRealtime() - started < budgetMs) {
+                sleepWithHeartbeat(Math.min(250L, Math.max(0L,
+                        budgetMs - (android.os.SystemClock.elapsedRealtime() - started))));
+            }
+            if (ticket.result() == BoundedAccOwnerProbe.Result.PENDING) {
+                logger.warn("ACC owner Binder probe timed out — continuing fail-open");
+                break;
+            }
+            if (ticket.result() == BoundedAccOwnerProbe.Result.OWNER) {
+                ownerDetected = true;
+                logger.info("Native app claimed camera (ACC-only bounded poll) — waiting for release");
+                sleepWithHeartbeat(Math.min(500L, Math.max(0L,
+                        budgetMs - (android.os.SystemClock.elapsedRealtime() - started))));
+                break;
+            }
+            sleepWithHeartbeat(Math.min(500L, Math.max(0L,
+                    budgetMs - (android.os.SystemClock.elapsedRealtime() - started))));
+        }
+        if (!ownerDetected) {
+            logger.info("Native app not detected by bounded ACC poll — reopening");
         }
     }
 

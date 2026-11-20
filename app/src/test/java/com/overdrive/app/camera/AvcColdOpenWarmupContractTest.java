@@ -13,6 +13,27 @@ import org.junit.Test;
 public class AvcColdOpenWarmupContractTest {
 
     @Test
+    public void accHandoffIsScopedAndDoesNotRestampWarmupCache()
+            throws IOException {
+        String gpu = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/camera/PanoramicCameraGpu.java");
+        String coordinator = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/camera/BydCameraCoordinator.java");
+        String warmup = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/camera/AvcHalWarmup.java");
+        assertTrue(gpu.contains("&& !DiLink100Platform.isByd100f()"));
+        assertTrue(gpu.contains("pollAccHandoffOwnerBounded("));
+        assertTrue(gpu.contains("LegacyAccOpenRetry.run("));
+        assertTrue(coordinator.contains("typedServiceProxy.getCurrentCameraUser()"));
+        assertTrue(coordinator.contains("catch (Exception | LinkageError incompatible)"));
+        assertFalse(gpu.contains("earlyOwnerSeen"));
+        assertFalse(gpu.contains("HandoffSettleReceipt"));
+        assertFalse(warmup.contains("HandoffSettleReceipt"));
+        assertTrue(warmup.contains("beforeLaunch.state != AvcProbeState.RUNNING"));
+        assertTrue(warmup.contains("lastWarmupCompletedNanos = System.nanoTime()"));
+    }
+
+    @Test
     public void primaryCameraColdOpensShareOneWarmupBoundary() throws IOException {
         String source = readRepositoryFile(
                 "app/src/main/java/com/overdrive/app/camera/PanoramicCameraGpu.java");
