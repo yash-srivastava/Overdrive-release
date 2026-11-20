@@ -320,6 +320,28 @@
                     </div>
                 </div>
 
+                <!-- SD-card formatting is intentionally separate from cleanup: it erases the entire card. -->
+                <div class="card" id="sdFormatCard" style="display:none;">
+                    <div class="card-header"><div class="card-title"><span data-i18n="storage.sd_format_title">SD Card Format</span></div></div>
+                    <div class="card-body">
+                        <div class="setting-row">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="storage.sd_format_name">Format SD card</div>
+                                <div class="setting-desc" data-i18n="storage.sd_format_desc">Use Android's system storage service to format the removable SD card. Android selects the filesystem supported by the vehicle.</div>
+                                <div class="setting-desc" data-i18n="storage.sd_format_mmc_only">Only built-in MMC SD slots with a verifiable SD CID are supported. USB-bridged slots, USB sticks, and external readers cannot be formatted.</div>
+                            </div>
+                        </div>
+                        <div class="info-box-warning" role="alert" data-i18n="storage.sd_format_warning">Formatting permanently erases the SD card. Back up your files, move all Overdrive storage off SD, and stop BYD CDR/dashcam recording first. Formatting a busy card can terminate the recorder.</div>
+                        <label class="setting-desc" for="sdFormatStopDvr" style="display:flex;align-items:center;margin-top:12px;">
+                            <input type="checkbox" id="sdFormatStopDvr" style="margin: 0 8px;" />
+                            <span data-i18n="storage.sd_format_stop_dvr">Temporarily disable factory DVR during format (restore afterwards)</span>
+                        </label>
+                        <button class="btn btn-danger" id="sdFormatButton" style="width:100%;margin-top:12px;" onclick="StoragePage.formatSdCard()" data-i18n="storage.sd_format_button" disabled>Format SD card</button>
+                        <div class="setting-desc" id="sdFormatEligibility" role="status" aria-live="polite"></div>
+                        <div class="setting-desc" id="sdFormatStatus" role="status" aria-live="polite"></div>
+                    </div>
+                </div>
+
                 <!-- BYD factory dashcam clean-up: SD only, shown while a category uses the SD card.
                      Saves immediately (toggle, debounced sliders, clean-up). -->
                 <div class="card" id="cdrCleanupCard" style="display:none;">
@@ -452,7 +474,7 @@
     <script src="../shared/update-flow.js?v=3"></script>
     <script src="../shared/storage-budget.js?v=9"></script>
     <script src="../shared/settings-hydration.js?v=1"></script>
-    <script src="../shared/storage.js?v=3"></script>
+    <script src="../shared/storage.js?v=5"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
