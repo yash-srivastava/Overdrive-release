@@ -1,33 +1,6 @@
 package com.overdrive.app.ui.daemon
 
-/**
- * Pure boot-timing policy for the daemon startup sequence.
- *
- * Extracted from [DaemonStartupManager.initializeOnBoot] so the ordering rule is
- * unit-testable without a Looper, a Context, or an ADB connection.
- *
- * The rule that matters is the Tailscale lead. The MQTT publisher lives inside the
- * camera daemon, and when the tunnel is enabled a LAN broker is normally reachable
- * ONLY through the SOCKS proxy that tailscaled exposes. Starting the camera daemon
- * first means the publisher wakes, finds no proxy and — per issue #182 — defers.
- *
- * What that deferral costs is small, and NOT the 300s backoff an earlier version of
- * this comment claimed. The #182 fix is already in this branch's history, and its
- * whole point is that it does *not* bump `consecutiveFailures` while waiting on the
- * proxy: `MqttConnectionManager` therefore re-probes at the min-interval floor
- * (`DEFAULT_MIN_INTERVAL` = 5s) and connects the moment the listener binds. A few
- * seconds of ordering slip costs a few seconds of telemetry.
- *
- * The lead earns its keep at the TAIL, not the average. The deferral is bounded by
- * `PROXY_WARMUP_GRACE_MS` (60s), after which the publisher gives up waiting and falls
- * through to a direct dial — which off Wi-Fi can never reach a LAN address, so the
- * connection then churns until something restarts the daemon. With the core daemons
- * first, tailscaled is only *launched* at 60s and needs a further 10–40s, while the
- * grace window opens when MQTT first defers (~45–50s): that lands near the edge of
- * the window, and past it the failure is the bad one. Leading with tailscaled moves
- * the proxy up to ~40–70s, comfortably inside. Buying that margin is the point — not
- * the handful of seconds saved on a good boot.
- */
+/** Fixed boot deadlines shared by the boot and Activity managers. */
 object DaemonBootSchedule {
 
     /** Tailscale goes first so its SOCKS listener is bound before MQTT starts. */
@@ -36,16 +9,45 @@ object DaemonBootSchedule {
     /** Core daemons (camera — which owns MQTT — then the sentries). */
     const val CORE_DELAY_MS = 45_000L
 
+    /** Stage the sentries 5 and 10 seconds after the camera instead of a launch burst. */
+    const val SENTRY_STAGGER_MS = 5_000L
+    const val ACC_SENTRY_STAGGER_MS = 10_000L
+
     /** Remaining optional daemons/tunnels. */
     const val OPTIONAL_DELAY_MS = 60_000L
 
     /** Periodic liveness check that relaunches anything that died. */
     const val HEALTH_CHECK_DELAY_MS = 90_000L
 
-    /**
-     * How much head start tailscaled gets over the core daemons. Positive by
-     * construction; asserted by [DaemonBootScheduleTest] so a future edit to the
-     * constants can't silently invert the order.
-     */
+    /** Telegram follows the optional stage by 15 seconds. */
+    const val TELEGRAM_DELAY_MS = OPTIONAL_DELAY_MS + 15_000L
+
+    /** A fired timer is complete only if its guarded start was dispatched. */
+    fun completedPhasesForHandoff(
+        fired: Set<Long>,
+        delivered: Set<Long>,
+        optionalPending: Boolean,
+    ): Set<Long> {
+        val completed = fired intersect delivered
+        return if (optionalPending) completed - OPTIONAL_DELAY_MS else completed
+    }
+
+    /** Avoid adding 5 seconds per overdue sentry or optional tunnel at ADB reconnect. */
+    const val DEFERRED_REPLAY_STAGGER_MS = 1_000L
+
+    /** Keep critical core starts first; Tailscale precedes Cloudflared/Zrok. */
+    fun replayPriority(type: com.overdrive.app.ui.model.DaemonType): Int = when (type) {
+        com.overdrive.app.ui.model.DaemonType.CAMERA_DAEMON -> 0
+        com.overdrive.app.ui.model.DaemonType.SENTRY_DAEMON -> 1
+        com.overdrive.app.ui.model.DaemonType.ACC_SENTRY_DAEMON -> 2
+        com.overdrive.app.ui.model.DaemonType.TAILSCALE_TUNNEL -> 3
+        else -> 4
+    }
+
+    /** A finished health-check cycle resumes supervision, never startup stages. */
+    fun shouldResumeStagedBoot(bootStartPending: Boolean, parkEnded: Boolean): Boolean =
+        bootStartPending || parkEnded
+
+    /** Positive lead gives the Tailscale SOCKS proxy time to precede camera MQTT. */
     fun proxyLeadMs(): Long = CORE_DELAY_MS - TAILSCALE_LEAD_DELAY_MS
 }

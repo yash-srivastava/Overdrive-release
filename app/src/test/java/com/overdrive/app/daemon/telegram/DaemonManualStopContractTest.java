@@ -72,7 +72,7 @@ public class DaemonManualStopContractTest {
                 "ifNotUserStopped(DaemonType.SENTRY_DAEMON)") >= 2);
         assertTrue(count(startup,
                 "ifNotUserStopped(DaemonType.ACC_SENTRY_DAEMON)") >= 2);
-        assertTrue(startup.contains("leaving it stopped this tick"));
+        assertTrue(startup.contains("retrying only if ADB recovers"));
 
         int clear = startup.indexOf("fun clearStaleSentinels()");
         int next = startup.indexOf("fun stopHealthCheckThread()", clear);
