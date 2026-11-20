@@ -31,6 +31,42 @@ class DaemonBootScheduleTest {
     }
 
     @Test
+    fun handoffWithoutAdbRearmsAlreadyFiredStartsBeforeHealthSupervision() {
+        val fired = setOf(
+            DaemonBootSchedule.TAILSCALE_LEAD_DELAY_MS,
+            DaemonBootSchedule.CORE_DELAY_MS,
+            DaemonBootSchedule.CORE_DELAY_MS + DaemonBootSchedule.SENTRY_STAGGER_MS,
+            DaemonBootSchedule.CORE_DELAY_MS + DaemonBootSchedule.ACC_SENTRY_STAGGER_MS,
+            DaemonBootSchedule.OPTIONAL_DELAY_MS,
+            DaemonBootSchedule.OPTIONAL_DELAY_MS + 15_000L,
+        )
+        val completed = DaemonBootSchedule.completedPhasesForHandoff(
+            fired, adbAvailable = false, healthCheckRunning = false, optionalPending = true)
+        assertTrue("ADB-blocked starts must replay on the next manager", completed.isEmpty())
+    }
+
+    @Test
+    fun handoffWithAdbPreservesFiredStagesUnlessOptionalIsStillWaiting() {
+        val camera = DaemonBootSchedule.CORE_DELAY_MS
+        val optional = DaemonBootSchedule.OPTIONAL_DELAY_MS
+        val fired = setOf(camera, optional)
+        assertTrue(DaemonBootSchedule.completedPhasesForHandoff(
+            fired, adbAvailable = true, healthCheckRunning = false, optionalPending = false) == fired)
+        assertTrue(DaemonBootSchedule.completedPhasesForHandoff(
+            fired, adbAvailable = true, healthCheckRunning = false, optionalPending = true)
+            == setOf(camera))
+    }
+
+    @Test
+    fun handoffAfterHealthCheckDoesNotRestartEarlierStages() {
+        val camera = DaemonBootSchedule.CORE_DELAY_MS
+        val health = DaemonBootSchedule.HEALTH_CHECK_DELAY_MS
+        val fired = setOf(camera, health)
+        assertTrue(DaemonBootSchedule.completedPhasesForHandoff(
+            fired, adbAvailable = false, healthCheckRunning = true, optionalPending = false) == fired)
+    }
+
+    @Test
     fun bootStillStabilizesBeforeTheFirstLaunch() {
         // The lead must not drag the first daemon launch back to the very start of boot, where the
         // system is still settling — that is what the original 45s stabilisation delay was for.

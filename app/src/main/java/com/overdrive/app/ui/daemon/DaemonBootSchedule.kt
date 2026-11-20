@@ -36,11 +36,40 @@ object DaemonBootSchedule {
     /** Core daemons (camera — which owns MQTT — then the sentries). */
     const val CORE_DELAY_MS = 45_000L
 
+    /** Stage the sentries 5 and 10 seconds after the camera instead of a launch burst. */
+    const val SENTRY_STAGGER_MS = 5_000L
+    const val ACC_SENTRY_STAGGER_MS = 10_000L
+
     /** Remaining optional daemons/tunnels. */
     const val OPTIONAL_DELAY_MS = 60_000L
 
     /** Periodic liveness check that relaunches anything that died. */
     const val HEALTH_CHECK_DELAY_MS = 90_000L
+
+    // A timer firing does not mean its ADB-gated start succeeded. When the
+    // connection was unavailable during a boot/Activity handoff, a new manager
+    // must retry these already-fired stages at their original (now elapsed)
+    // deadlines instead of waiting for the first periodic health tick.
+    private val ADB_GATED_STAGES = setOf(
+        TAILSCALE_LEAD_DELAY_MS,
+        CORE_DELAY_MS,
+        CORE_DELAY_MS + SENTRY_STAGGER_MS,
+        CORE_DELAY_MS + ACC_SENTRY_STAGGER_MS,
+        OPTIONAL_DELAY_MS + 15_000L, // Telegram has its own stage.
+    )
+
+    /** Return only phases the next manager can safely treat as completed. */
+    fun completedPhasesForHandoff(
+        fired: Set<Long>,
+        adbAvailable: Boolean,
+        healthCheckRunning: Boolean,
+        optionalPending: Boolean,
+    ): Set<Long> {
+        var completed = fired
+        if (!adbAvailable && !healthCheckRunning) completed = completed - ADB_GATED_STAGES
+        if (optionalPending) completed = completed - OPTIONAL_DELAY_MS
+        return completed
+    }
 
     /**
      * How much head start tailscaled gets over the core daemons. Positive by

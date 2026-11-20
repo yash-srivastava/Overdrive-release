@@ -257,7 +257,7 @@ class SingboxLauncher(
         
         // Check if process is running
         adbShellExecutor.execute(
-            command = "pgrep -f sing-box && echo RUNNING || echo NOT_RUNNING",
+            command = "pidof sing-box >/dev/null 2>&1 && echo RUNNING || echo NOT_RUNNING",
             callback = object : AdbShellExecutor.ShellCallback {
                 override fun onSuccess(output: String) {
                     if (output.contains("RUNNING") && !output.contains("NOT_RUNNING")) {
