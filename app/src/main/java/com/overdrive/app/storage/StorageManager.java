@@ -1,5 +1,7 @@
 package com.overdrive.app.storage;
 
+import android.media.MediaScannerConnection;
+import android.os.Build;
 import android.os.StatFs;
 import android.util.Log;
 import org.json.JSONObject;
@@ -16,7 +18,10 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -70,7 +75,7 @@ public class StorageManager {
         if (useDaemonLogger && daemonLogger != null) {
             daemonLogger.info(msg);
         } else {
-            Log.i(TAG, msg);
+            try { Log.i(TAG, msg); } catch (RuntimeException ignored) {}
         }
     }
     
@@ -78,7 +83,7 @@ public class StorageManager {
         if (useDaemonLogger && daemonLogger != null) {
             daemonLogger.warn(msg);
         } else {
-            Log.w(TAG, msg);
+            try { Log.w(TAG, msg); } catch (RuntimeException ignored) {}
         }
     }
     
@@ -86,7 +91,7 @@ public class StorageManager {
         if (useDaemonLogger && daemonLogger != null) {
             daemonLogger.error(msg);
         } else {
-            Log.e(TAG, msg);
+            try { Log.e(TAG, msg); } catch (RuntimeException ignored) {}
         }
     }
 
@@ -121,7 +126,7 @@ public class StorageManager {
         if (useDaemonLogger && daemonLogger != null) {
             daemonLogger.debug(msg);
         } else {
-            Log.d(TAG, msg);
+            try { Log.d(TAG, msg); } catch (RuntimeException ignored) {}
         }
     }
 
@@ -610,6 +615,54 @@ public class StorageManager {
             t.setPriority(Thread.MIN_PRIORITY);
             return t;
         });
+
+    // Dedicated single-thread executor serializing all MediaScanner indexing
+    // (startup catch-up + per-file onFileSaved). Keeps in-flight Binder/shell
+    // work at concurrency <= 1 so bursts cannot exhaust system_server's
+    // 32-thread Binder pool.
+    private final ExecutorService mediaScanExecutor =
+        Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(() -> {
+                try {
+                    android.os.Process.setThreadPriority(
+                            android.os.Process.THREAD_PRIORITY_BACKGROUND);
+                } catch (Throwable ignored) {}
+                r.run();
+            }, "StorageMediaScan");
+            t.setDaemon(true);
+            t.setPriority(Thread.MIN_PRIORITY);
+            return t;
+        });
+    private final Object broadcastMarkerLock = new Object();
+    private volatile long lastBroadcastTimestampCache = 0L;
+    private final AtomicBoolean mediaScannerConnectionVerified = new AtomicBoolean(false);
+    private final AtomicBoolean mediaScannerConnectionBroken = new AtomicBoolean(false);
+
+    interface ScanProcessStarter {
+        Process start(String[] command) throws java.io.IOException;
+    }
+
+    private static final ScanProcessStarter DEFAULT_SCAN_PROCESS_STARTER =
+        command -> new ProcessBuilder(command).redirectErrorStream(true).start();
+
+    interface MediaScanAction {
+        boolean scan(File file);
+    }
+
+    interface WatermarkCheckpoint {
+        void accept(long timestampMs);
+    }
+
+    private void enqueueMediaScan(Runnable task) {
+        if (task == null || mediaScanExecutor == null || mediaScanExecutor.isShutdown()) {
+            return;
+        }
+        try {
+            mediaScanExecutor.execute(task);
+        } catch (RejectedExecutionException ignored) {
+            // Shutdown race; safe to drop best-effort media indexing.
+        }
+    }
 
     // Deferred-cleanup queue: when a save event fires while encoder is mid-
     // write, instead of running the delete burst we mark the directory as
@@ -6064,94 +6117,207 @@ public class StorageManager {
         makeFilesReadable(proximityDir);
         makeFilesReadable(tripsDir);
         
-        // SOTA: Incremental MediaScanner broadcast — only broadcast files created
-        // since the last successful broadcast. Uses a marker file to track the
-        // timestamp of the last full scan. On first run (no marker), broadcasts
-        // everything once, then subsequent startups only broadcast new files.
-        //
-        // Additionally, broadcasts are throttled (50ms between each shell exec)
-        // to avoid saturating the I/O bus during camera pipeline startup.
-        // The old approach spawned 2 shell processes per file × hundreds of files
-        // = hundreds of concurrent process forks competing with the GPU pipeline.
-        new Thread(() -> {
+        // Incremental MediaScanner catch-up on the single-thread mediaScanExecutor
+        // (max concurrency = 1 across startup catch-up and onFileSaved).
+        // Avoids spawning concurrent `am broadcast` / `content insert` bursts
+        // that saturate system_server's 32-thread Binder pool.
+        enqueueMediaScan(() -> {
             long lastScanTimestamp = loadLastBroadcastTimestamp();
             long scanStartTime = System.currentTimeMillis();
-            
-            int count = 0;
-            count += broadcastFilesSince(recordingsDir, lastScanTimestamp);
-            count += broadcastFilesSince(surveillanceDir, lastScanTimestamp);
-            count += broadcastFilesSince(proximityDir, lastScanTimestamp);
-            
-            saveLastBroadcastTimestamp(scanStartTime);
-            
-            if (count > 0) {
-                logInfo("MediaScanner broadcast complete: " + count + " new files indexed");
-            } else {
-                logDebug("MediaScanner: no new files to broadcast since last scan");
+
+            List<File> pending = selectStartupMediaScanBatch(
+                    java.util.Arrays.asList(recordingsDir, surveillanceDir, proximityDir),
+                    lastScanTimestamp,
+                    scanStartTime,
+                    MAX_STARTUP_MEDIA_SCAN_FILES,
+                    STARTUP_MISSING_MARKER_WINDOW_MS);
+
+            int count = broadcastStartupBatch(
+                    pending,
+                    this::broadcastFile,
+                    this::saveLastBroadcastTimestampIfNewer,
+                    BROADCAST_THROTTLE_MS,
+                    MAX_CONSECUTIVE_SCAN_TIMEOUTS);
+
+            if (count >= 0) {
+                saveLastBroadcastTimestampIfNewer(scanStartTime);
+                if (count > 0) {
+                    logInfo("MediaScanner broadcast complete: " + count + " new files indexed");
+                } else {
+                    logDebug("MediaScanner: no new files to broadcast since last scan");
+                }
             }
-        }, "MediaScannerBroadcast").start();
+        });
     }
-    
+
     /** Marker file that stores the epoch millis of the last successful broadcast scan. */
     private static final String BROADCAST_MARKER_FILE = com.overdrive.app.util.ScratchRoot.path("overdrive_last_mediascan");
-    
-    /** Throttle delay between individual file broadcasts (ms). */
+
+    /** Throttle delay between serialized file scans (ms). */
     private static final long BROADCAST_THROTTLE_MS = 50;
-    
+    private static final long MEDIA_SCAN_EXEC_TIMEOUT_MS = 5_000L;
+    private static final long MEDIA_SCAN_CONNECTION_TIMEOUT_MS = 3_000L;
+    private static final int MAX_STARTUP_MEDIA_SCAN_FILES = 50;
+    private static final long STARTUP_MISSING_MARKER_WINDOW_MS = 24L * 60L * 60L * 1000L;
+    private static final int MAX_CONSECUTIVE_SCAN_TIMEOUTS = 2;
+
     /**
      * Load the timestamp of the last successful MediaScanner broadcast.
-     * Returns 0 if no marker exists (first run — will broadcast everything).
+     * Returns 0 if no marker exists (first run — bounded by missing-marker window).
      */
     private long loadLastBroadcastTimestamp() {
-        try {
-            File marker = new File(BROADCAST_MARKER_FILE);
-            if (marker.exists()) {
-                String content = new java.util.Scanner(marker).useDelimiter("\\A").next().trim();
-                return Long.parseLong(content);
-            }
-        } catch (Exception e) {
-            logDebug("No broadcast marker found, will do full scan");
+        synchronized (broadcastMarkerLock) {
+            return loadLastBroadcastTimestampLocked();
         }
-        return 0;
     }
-    
-    /**
-     * Save the timestamp of the current broadcast scan.
-     */
-    private void saveLastBroadcastTimestamp(long timestamp) {
+
+    private long loadLastBroadcastTimestampLocked() {
+        long parsed = readTimestampMarker(new File(BROADCAST_MARKER_FILE));
+        if (parsed == 0L) {
+            logDebug("No broadcast marker found, will run bounded catch-up scan");
+        }
+        return parsed;
+    }
+
+    static long readTimestampMarker(File marker) {
+        if (marker == null || !marker.isFile()) return 0L;
+        try (java.util.Scanner scanner = new java.util.Scanner(marker)) {
+            if (!scanner.useDelimiter("\\A").hasNext()) return 0L;
+            String content = scanner.next().trim();
+            return content.isEmpty() ? 0L : Math.max(0L, Long.parseLong(content));
+        } catch (Exception e) {
+            return 0L;
+        }
+    }
+
+    static boolean writeTimestampMarkerIfNewer(File marker, long candidateTimestamp) {
+        if (marker == null || candidateTimestamp <= 0L) return false;
+        long existing = readTimestampMarker(marker);
+        if (candidateTimestamp <= existing) return false;
         try {
-            java.io.FileWriter fw = new java.io.FileWriter(BROADCAST_MARKER_FILE);
-            fw.write(String.valueOf(timestamp));
-            fw.close();
+            File parent = marker.getParentFile();
+            if (parent != null && !parent.exists()) {
+                parent.mkdirs();
+            }
+            try (FileWriter fw = new FileWriter(marker)) {
+                fw.write(String.valueOf(candidateTimestamp));
+            }
+            return true;
         } catch (Exception e) {
             logWarn("Failed to save broadcast marker: " + e.getMessage());
+            return false;
         }
     }
-    
+
     /**
-     * Broadcast only files modified after the given timestamp.
-     * Throttled to avoid I/O contention with the GPU pipeline.
-     * @return number of files broadcast
+     * Monotonically advance the MediaScanner watermark so clips already indexed
+     * on save or mid-batch are never re-broadcast on the next daemon restart.
      */
-    private int broadcastFilesSince(File dir, long sinceTimestamp) {
-        if (dir == null || !dir.exists()) return 0;
-        
-        File[] files = dir.listFiles((d, name) -> name.endsWith(".mp4"));
-        if (files == null || files.length == 0) return 0;
-        
-        int count = 0;
-        for (File f : files) {
-            if (f.lastModified() > sinceTimestamp) {
-                broadcastFile(f);
-                count++;
-                
-                // Throttle: yield between broadcasts to avoid saturating I/O
-                if (count % 5 == 0) {
-                    try { Thread.sleep(BROADCAST_THROTTLE_MS); } catch (InterruptedException e) { break; }
+    private void saveLastBroadcastTimestampIfNewer(long timestamp) {
+        if (timestamp <= 0L) return;
+        synchronized (broadcastMarkerLock) {
+            if (lastBroadcastTimestampCache == 0L) {
+                lastBroadcastTimestampCache = loadLastBroadcastTimestampLocked();
+            }
+            if (timestamp <= lastBroadcastTimestampCache) return;
+            if (writeTimestampMarkerIfNewer(new File(BROADCAST_MARKER_FILE), timestamp)) {
+                lastBroadcastTimestampCache = timestamp;
+            }
+        }
+    }
+
+    /**
+     * Select up to {@code maxFiles} eligible {@code .mp4} files across {@code dirs}
+     * modified after the effective watermark, picking the newest matches and sorting
+     * them oldest-to-newest so incremental checkpointing advances monotonically.
+     */
+    static List<File> selectStartupMediaScanBatch(
+            List<File> dirs,
+            long lastScanTimestamp,
+            long scanStartTimeMs,
+            int maxFiles,
+            long missingMarkerWindowMs) {
+        List<File> eligible = new ArrayList<>();
+        if (dirs == null || maxFiles <= 0) return eligible;
+
+        long cutoff = (lastScanTimestamp > 0L)
+                ? lastScanTimestamp
+                : Math.max(0L, scanStartTimeMs - Math.max(0L, missingMarkerWindowMs));
+
+        for (File dir : dirs) {
+            if (dir == null || !dir.exists()) continue;
+            File[] files = dir.listFiles((d, name) -> name.endsWith(".mp4"));
+            if (files == null || files.length == 0) continue;
+            for (File f : files) {
+                if (f != null && f.isFile() && f.lastModified() > cutoff) {
+                    eligible.add(f);
                 }
             }
         }
-        return count;
+
+        if (eligible.isEmpty()) return eligible;
+
+        // Keep only the most recent maxFiles if a long offline archive accumulated,
+        // then order oldest-to-newest for monotonic checkpointing during scan.
+        eligible.sort(Comparator.comparingLong(File::lastModified).reversed());
+        List<File> batch = eligible.size() > maxFiles
+                ? new ArrayList<>(eligible.subList(0, maxFiles))
+                : eligible;
+        Collections.reverse(batch);
+        return batch;
+    }
+
+    /**
+     * Broadcast a pre-selected batch sequentially with inter-file pacing,
+     * periodic watermark checkpoints, and a consecutive-timeout circuit breaker.
+     *
+     * @return count of indexed files, or {@code -1} if aborted by timeouts
+     */
+    static int broadcastStartupBatch(
+            List<File> batch,
+            MediaScanAction scanAction,
+            WatermarkCheckpoint checkpoint,
+            long throttleMs,
+            int maxConsecutiveTimeouts) {
+        if (batch == null || batch.isEmpty() || scanAction == null) return 0;
+
+        int indexed = 0;
+        int consecutiveTimeouts = 0;
+        for (int i = 0; i < batch.size(); i++) {
+            File f = batch.get(i);
+            if (i > 0 && throttleMs > 0L) {
+                try {
+                    Thread.sleep(throttleMs);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return -1;
+                }
+            }
+
+            boolean ok = false;
+            try {
+                ok = scanAction.scan(f);
+            } catch (Exception e) {
+                logWarn("Startup scan failed for " + f.getName() + ": " + e.getMessage());
+            }
+
+            if (ok) {
+                consecutiveTimeouts = 0;
+                indexed++;
+                if (checkpoint != null && indexed % 5 == 0 && f.lastModified() > 0L) {
+                    checkpoint.accept(f.lastModified());
+                }
+            } else {
+                consecutiveTimeouts++;
+                if (maxConsecutiveTimeouts > 0 && consecutiveTimeouts >= maxConsecutiveTimeouts) {
+                    logWarn("MediaScanner startup catch-up aborted after "
+                            + consecutiveTimeouts + " consecutive timeouts ("
+                            + indexed + "/" + batch.size() + " indexed)");
+                    return -1;
+                }
+            }
+        }
+        return indexed;
     }
     
     // ==================== Limit Getters/Setters ====================
@@ -10742,39 +10908,192 @@ public class StorageManager {
     
     /**
      * Force Android MediaScanner to index a file so it appears in MediaStore
-     * and becomes visible to standard apps with READ_EXTERNAL_STORAGE.
-     * 
+     * and becomes visible to standard apps with READ_EXTERNAL_STORAGE, without
+     * risking {@code system_server} Binder thread starvation.
+     *
      * CRITICAL: Both methods are required on BYD's Android 10:
-     * - `am broadcast MEDIA_SCANNER_SCAN_FILE` refreshes the FUSE permission cache
+     * - {@code am broadcast MEDIA_SCANNER_SCAN_FILE} refreshes the FUSE permission cache
      *   so that File.listFiles() on SD card paths can see the file. Without this,
      *   the RecordingsApiHandler's scanDirectory() gets incomplete file listings.
-     * - `content insert` directly inserts into MediaStore for cross-UID visibility
+     * - {@code content insert} directly inserts into MediaStore for cross-UID visibility
      *   (needed for the UI app running as a different UID).
+     *
+     * @return {@code true} if the scan completed without timing out
      */
-    private void broadcastFile(File file) {
-        if (file == null || !file.exists()) return;
-        
-        String path = file.getAbsolutePath();
-        
+    private boolean broadcastFile(File file) {
+        android.content.Context ctx = null;
         try {
-            // Method 1: FUSE cache refresh via MediaScanner intent
-            // Required for File.listFiles() to work on SD card FUSE paths
-            Runtime.getRuntime().exec(new String[]{
-                "am", "broadcast",
-                "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
-                "-d", "file://" + path
-            });
-            
-            // Method 2: Direct MediaStore insert for cross-UID visibility
-            Runtime.getRuntime().exec(new String[]{
-                "content", "insert",
-                "--uri", "content://media/external/video/media",
-                "--bind", "_data:s:" + path
-            });
-            
-            logDebug("Broadcast file to MediaScanner: " + file.getName());
+            ctx = com.overdrive.app.daemon.CameraDaemon.getAppContext();
+        } catch (Throwable ignored) {
+        }
+        return broadcastFile(
+                file,
+                Build.VERSION.SDK_INT,
+                ctx,
+                DEFAULT_SCAN_PROCESS_STARTER,
+                mediaScannerConnectionVerified,
+                mediaScannerConnectionBroken);
+    }
+
+    static boolean broadcastFile(
+            File file,
+            int sdkInt,
+            android.content.Context appContext,
+            ScanProcessStarter starter,
+            AtomicBoolean connectionVerified,
+            AtomicBoolean connectionBroken) {
+        if (file == null || !file.exists()) return true;
+
+        String path = file.getAbsolutePath();
+        String mimeType = path.endsWith(".mp4") ? "video/mp4" : null;
+
+        // Android 11+ (API 30+): prefer direct MediaScannerConnection IPC when a
+        // ContentResolver-backed Context is available, avoiding `am broadcast` Binder
+        // waitForFinish() holds and `content insert` app_process forks altogether.
+        if (sdkInt >= 30 && appContext != null
+                && (connectionBroken == null || !connectionBroken.get())) {
+            if (scanFileViaConnection(appContext, path, mimeType)) {
+                if (connectionVerified != null) connectionVerified.set(true);
+                logDebug("Indexed file via MediaScannerConnection: " + file.getName());
+                return true;
+            }
+            if (connectionVerified == null || !connectionVerified.get()) {
+                if (connectionBroken != null) connectionBroken.set(true);
+            }
+        }
+
+        boolean broadcastCompleted = runBoundedScanCommand(
+                starter,
+                new String[]{
+                    "am", "broadcast",
+                    "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
+                    "-d", "file://" + path
+                },
+                MEDIA_SCAN_EXEC_TIMEOUT_MS,
+                "am-broadcast(" + file.getName() + ")");
+        if (!broadcastCompleted) {
+            return false;
+        }
+
+        // BYD Android 10 (API < 30) also requires direct MediaStore insert for
+        // cross-UID visibility; serialized and bounded on the single media-scan worker.
+        if (sdkInt < 30) {
+            boolean insertCompleted = runBoundedScanCommand(
+                    starter,
+                    new String[]{
+                        "content", "insert",
+                        "--uri", "content://media/external/video/media",
+                        "--bind", "_data:s:" + path
+                    },
+                    MEDIA_SCAN_EXEC_TIMEOUT_MS,
+                    "content-insert(" + file.getName() + ")");
+            if (!insertCompleted) {
+                return false;
+            }
+        }
+
+        logDebug("Broadcast file to MediaScanner: " + file.getName());
+        return true;
+    }
+
+    private static boolean scanFileViaConnection(
+            android.content.Context appContext, String path, String mimeType) {
+        try {
+            if (appContext.getContentResolver() == null) return false;
+            final CountDownLatch latch = new CountDownLatch(1);
+            final android.net.Uri[] scannedUri = new android.net.Uri[1];
+            MediaScannerConnection.scanFile(
+                    appContext,
+                    new String[]{path},
+                    new String[]{mimeType},
+                    (scannedPath, uri) -> {
+                        scannedUri[0] = uri;
+                        latch.countDown();
+                    });
+            if (latch.await(MEDIA_SCAN_CONNECTION_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                return scannedUri[0] != null;
+            }
+            logWarn("MediaScannerConnection.scanFile timed out — falling back to serialized am broadcast");
+            return false;
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (Throwable t) {
+            logDebug("MediaScannerConnection.scanFile unavailable ("
+                    + t.getClass().getSimpleName() + "), falling back to serialized am broadcast");
+            return false;
+        }
+    }
+
+    /**
+     * Execute one media-scan helper subprocess while draining stdout/stderr
+     * concurrently on a daemon thread and bounding wait time via {@link Process#waitFor(long, TimeUnit)}.
+     *
+     * @return {@code true} if the process exited within {@code timeoutMs},
+     *         {@code false} if it timed out, failed to launch, or was interrupted
+     */
+    static boolean runBoundedScanCommand(
+            ScanProcessStarter starter,
+            String[] command,
+            long timeoutMs,
+            String label) {
+        if (starter == null || command == null || command.length == 0) return false;
+        Process p = null;
+        Thread drain = null;
+        try {
+            p = starter.start(command);
+            if (p == null) return false;
+            try {
+                java.io.OutputStream stdin = p.getOutputStream();
+                if (stdin != null) stdin.close();
+            } catch (Exception ignored) {}
+            final Process proc = p;
+            drain = new Thread(() -> {
+                drainAndCloseStream(proc.getInputStream());
+                drainAndCloseStream(proc.getErrorStream());
+            }, label + "-drain");
+            drain.setDaemon(true);
+            drain.start();
+
+            if (!proc.waitFor(timeoutMs, TimeUnit.MILLISECONDS)) {
+                logWarn(label + ": timed out after " + timeoutMs + "ms — killing child");
+                proc.destroyForcibly();
+                try { proc.waitFor(500, TimeUnit.MILLISECONDS); } catch (InterruptedException ignored) {}
+                try { drain.join(250); } catch (InterruptedException ignored) {}
+                return false;
+            }
+            try {
+                drain.join(250);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+            return true;
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            if (p != null) {
+                try { p.destroyForcibly(); } catch (Exception ignored) {}
+            }
+            return false;
         } catch (Exception e) {
-            logWarn("Failed to broadcast file: " + e.getMessage());
+            logWarn("Failed scan helper " + label + ": " + e.getMessage());
+            if (p != null) {
+                try { p.destroyForcibly(); } catch (Exception ignored) {}
+            }
+            return false;
+        }
+    }
+
+    private static void drainAndCloseStream(java.io.InputStream in) {
+        if (in == null) return;
+        try {
+            byte[] buf = new byte[512];
+            while (in.read(buf) != -1) {
+                // discard so pipe buffer cannot block child
+            }
+        } catch (Exception ignored) {
+        } finally {
+            try { in.close(); } catch (Exception ignored) {}
         }
     }
     
@@ -10798,20 +11117,21 @@ public class StorageManager {
         // 1. Make file readable by all (chmod 666)
         makeFileReadable(file);
 
-        // 2. Broadcast to MediaScanner. This spawns shell processes
-        // (am broadcast + content insert) which compete for I/O bandwidth.
-        // While the encoder is mid-write, defer to the background cleanup
-        // executor so the disk writer keeps priority. (Audit P2.)
-        if (isEncoderWriting()) {
-            final File f = file;
-            asyncCleanupExecutor.execute(() -> {
-                try { broadcastFile(f); } catch (Exception e) {
-                    logWarn("Deferred broadcastFile error: " + e.getMessage());
+        // 2. Index in MediaStore on the single-thread mediaScanExecutor so bursts
+        // never spawn concurrent am broadcast storms or block muxer finalization,
+        // and advance overdrive_last_mediascan monotonically so indexed clips
+        // are not re-broadcast on the next daemon restart.
+        final File f = file;
+        final long fileTimestamp = file.lastModified();
+        enqueueMediaScan(() -> {
+            try {
+                if (broadcastFile(f) && fileTimestamp > 0L) {
+                    saveLastBroadcastTimestampIfNewer(fileTimestamp);
                 }
-            });
-        } else {
-            broadcastFile(file);
-        }
+            } catch (Exception e) {
+                logWarn("Async broadcastFile error: " + e.getMessage());
+            }
+        });
 
         // 3. Trigger appropriate cleanup based on directory
         String path = file.getAbsolutePath();
@@ -10829,25 +11149,6 @@ public class StorageManager {
         try {
             com.overdrive.app.safekeep.SafeKeep.onFileSaved(file);
         } catch (Throwable ignored) {
-        }
-    }
-    
-    /**
-     * Broadcast all recent files in a directory to MediaScanner.
-     * @param dir Directory to scan
-     * @param maxAgeMs Only broadcast files modified within this time (ms)
-     */
-    private void broadcastRecentFiles(File dir, long maxAgeMs) {
-        if (dir == null || !dir.exists()) return;
-        
-        File[] files = dir.listFiles((d, name) -> name.endsWith(".mp4"));
-        if (files != null) {
-            long now = System.currentTimeMillis();
-            for (File f : files) {
-                if (now - f.lastModified() < maxAgeMs) {
-                    broadcastFile(f);
-                }
-            }
         }
     }
     
@@ -12999,8 +13300,19 @@ public class StorageManager {
             }
         } catch (InterruptedException e) {
             asyncCleanupExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
         }
-        
+
+        mediaScanExecutor.shutdown();
+        try {
+            if (!mediaScanExecutor.awaitTermination(2, TimeUnit.SECONDS)) {
+                mediaScanExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            mediaScanExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+
         logInfo("StorageManager shutdown complete");
     }
 }

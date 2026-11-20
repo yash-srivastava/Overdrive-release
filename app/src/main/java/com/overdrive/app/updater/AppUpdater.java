@@ -2151,8 +2151,9 @@ public class AppUpdater {
                     + APK_PATH + " /data/local/tmp/overdrive_install.sh "
                     + com.overdrive.app.util.ScratchRoot.path("overdrive_install.sh.tmp"));
             runShell(
-                    "for S in /data/local/tmp/camera_daemon.disabled "
-                            + com.overdrive.app.util.ScratchRoot.path("acc_sentry_daemon.disabled;") + " do "
+                    "for S in "
+                            + com.overdrive.app.util.ScratchRoot.path("camera_daemon.disabled") + " "
+                            + com.overdrive.app.util.ScratchRoot.path("acc_sentry_daemon.disabled") + "; do "
                             + "R=$(head -1 \"$S\" 2>/dev/null); "
                             + "case \"$R\" in 'disabled for update'*|"
                             + "'disabled by stopAllDaemons sweep'*|"

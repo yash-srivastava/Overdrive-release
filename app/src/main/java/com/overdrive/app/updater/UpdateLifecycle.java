@@ -207,9 +207,10 @@ public final class UpdateLifecycle {
                 // and must survive the update.
                 // The post-update markers (UPDATE_IN_PROGRESS_FILE /
                 // POST_UPDATE_FILE) survive — new process owns them.
-                "for S in /data/local/tmp/camera_daemon.disabled " +
+                "for S in " +
+                com.overdrive.app.util.ScratchRoot.path("camera_daemon.disabled") + " " +
                 com.overdrive.app.util.ScratchRoot.path("sentry_daemon.disabled") + " " +
-                com.overdrive.app.util.ScratchRoot.path("acc_sentry_daemon.disabled;") + " do\n" +
+                com.overdrive.app.util.ScratchRoot.path("acc_sentry_daemon.disabled") + "; do\n" +
                 "  R=$(head -1 \"$S\" 2>/dev/null)\n" +
                 "  case \"$R\" in " +
                 "'disabled by post-update reset'*|'disabled for update'*|" +
