@@ -55,6 +55,8 @@ public class BydEvent {
     // source converges through) so a trigger can fire "when the car locks" and a
     // condition can gate "only while locked". NOT read from the dead BYDAutoDoorLockDevice.
     public static final EventData LOCK = new EventData("lock");
+    /** Trusted-phone proximity presence, independent of the vehicle lock actuator. */
+    public static final EventData PROXIMITY_PRESENCE = new EventData("proximityPresence");
     // "fob" for 2 minutes after a key-fob unlock press, and for the rest of a drive started in that
     // time; otherwise "none". DiLink 3 only (BydDataCollector key fob channel).
     public static final EventData UNLOCK_SOURCE = new EventData("unlockSource");

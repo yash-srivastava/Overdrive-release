@@ -2533,6 +2533,15 @@ public class CameraDaemon {
         memoryLogScheduler.scheduleAtFixedRate(
             CameraDaemon::logMemoryStatus,
             1, 5, java.util.concurrent.TimeUnit.MINUTES);
+        // Age the read-only phone automation signal even if the Bluetooth collector stops.
+        // Reuse this daemon's existing scheduler: no new worker or proximity actuator.
+        memoryLogScheduler.scheduleAtFixedRate(() -> {
+            try {
+                com.overdrive.app.server.RemoteAccessApiHandler.refreshAutomationPresence();
+            } catch (Throwable t) {
+                log("Proximity automation maintenance failed: " + t.getClass().getSimpleName());
+            }
+        }, 5, 5, java.util.concurrent.TimeUnit.SECONDS);
         // Piggy-back recording-cache prune onto the same scheduler. The
         // RecordingsApiHandler.RECORDING_CACHE is invalidated synchronously
         // when the daemon itself rotates an mp4 (HardwareEventRecorderGpu)
