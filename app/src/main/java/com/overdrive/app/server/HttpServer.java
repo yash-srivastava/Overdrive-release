@@ -881,6 +881,20 @@ public class HttpServer {
                 return;
             }
             
+            boolean destructiveStorageFormatRequest = pathOnly.equals("/api/storage/external/format");
+            boolean storageFormatApi = destructiveStorageFormatRequest
+                    || pathOnly.equals("/api/storage/external/format/target")
+                    || pathOnly.equals("/api/storage/external/format/status");
+            // Native bridge POSTs have no Origin. Foreign Origins are refused.
+            if (destructiveStorageFormatRequest && !method.equals("OPTIONS")
+                    && !GenAiRequestSecurity.isAllowedOrigin(
+                            originHeader, hostHeader, forwardedHostHeader)) {
+                CameraDaemon.log("SD format: rejected foreign Origin");
+                HttpResponse.sendJsonNoCors(out, 403,
+                        "{\"success\":false,\"error\":\"Forbidden origin\"}");
+                client.close();
+                return;
+            }
             boolean genAiRequest = GenAiRequestSecurity.isGenAiPath(pathOnly);
             if (genAiRequest && !GenAiRequestSecurity.isAllowedOrigin(
                     originHeader, hostHeader, forwardedHostHeader)) {
@@ -894,6 +908,12 @@ public class HttpServer {
             // The in-app WebView is same-origin so it skips this, but the external webapp needs it.
             // Must be handled BEFORE auth check — preflight requests don't carry cookies/tokens.
             if (method.equals("OPTIONS")) {
+                if (storageFormatApi) {
+                    HttpResponse.sendJsonNoCors(out, 403,
+                            "{\"success\":false,\"error\":\"Cross-origin formatting is not allowed\"}");
+                    client.close();
+                    return;
+                }
                 if (genAiRequest) {
                     HttpResponse.sendCorsPreflightResponse(out, originHeader);
                 } else {
@@ -954,7 +974,7 @@ public class HttpServer {
                     || pathOnly.startsWith("/api/factory-dvr/");
             boolean authenticated = remoteDevRequest || genAiRequest || wireGuardRequest || remoteAccessRequest
                     || widgetWriteRequest || briefingRequest || secretRequest || sessionsRequest
-                    || factoryDvrRequest || rangeCalibrationWrite
+                    || factoryDvrRequest || rangeCalibrationWrite || storageFormatApi
                 ? AuthMiddleware.checkJwtOnly(path, cookieHeader, authHeader, out)
                 : AuthMiddleware.checkAuth(path, cookieHeader, authHeader, out,
                     client.getRemoteSocketAddress(), hasTunnelHeaders,
