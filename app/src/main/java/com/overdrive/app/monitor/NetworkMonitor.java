@@ -6,6 +6,7 @@ import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.LinkProperties;
 import android.net.LinkAddress;
+import android.net.wifi.WifiConfiguration;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.Build;
@@ -467,6 +468,116 @@ public class NetworkMonitor {
      * (refreshes at most once per 10 s); call that, then read the accessors.
      */
     public static String getNetworkType() { return networkType; }
+
+    /**
+     * Auto-update admission for the shell daemon: require the cached Wi-Fi
+     * observation AND an outbound IPv4 route through wlan0. Android 10 may
+     * hide the per-UID default network from UID 2000. A stale WLAN address
+     * alone is not evidence of Wi-Fi after a cellular failover.
+     *
+     * The route check is bounded and cached for ten seconds so per-chunk
+     * download guards do not fork a shell for each packet.
+     */
+    private static volatile long lastAutoUpdateRouteCheckElapsed = -1L;
+    private static volatile boolean lastAutoUpdateWifiRoute;
+
+    public static synchronized boolean isAutoUpdateWifiRoute() {
+        getNetworkInfo(); // shared 10-second refresh bound, including shell fallback
+        if (!"wifi".equals(networkType)) return false;
+        long now = SystemClock.elapsedRealtime();
+        if (lastAutoUpdateRouteCheckElapsed >= 0
+                && now - lastAutoUpdateRouteCheckElapsed < 10_000L) {
+            return lastAutoUpdateWifiRoute;
+        }
+        // Do not infer the outbound network from wlan0 having an address.
+        // On some head units that address persists during cellular fallback.
+        BoundedShell.Result route = BoundedShell.run(
+                "ip -4 route get 1.1.1.1 2>/dev/null", SHELL_DEADLINE_MS);
+        boolean wifiRoute = route.ok() && java.util.regex.Pattern.compile(
+                "(?:^|\\s)dev\\s+wlan0(?:\\s|$)").matcher(route.output).find();
+        lastAutoUpdateWifiRoute = wifiRoute;
+        lastAutoUpdateRouteCheckElapsed = now;
+        return wifiRoute;
+    }
+
+    /**
+     * Effective per-network metering for unattended APK transfers. An AP's
+     * {@code getMeteredHint()} is not the owner's Android Settings override.
+     * Prefer Android's computed network metering result if it exposes the
+     * connected Wi-Fi network to this UID; otherwise inspect the currently
+     * connected saved Wi-Fi configuration (no shell fork, no Wi-Fi dump).
+     *
+     * A shell daemon on Android 10 may have neither permission. In that case
+     * false is intentional: a hint-less phone hotspot, or Wi-Fi explicitly
+     * marked Metered by its owner, must never be treated as free data.
+     * This is cached for at most ten seconds, like the route and SSID probes.
+     */
+    private static volatile long lastOwnerMeteringCheckElapsed = -1L;
+    private static volatile String lastOwnerMeteringKey = "";
+    private static volatile boolean lastOwnerWifiUnmetered;
+
+    public static synchronized boolean isAutoUpdateWifiOwnerUnmetered(Context context) {
+        if (context == null || !"wifi".equals(networkType)) return false;
+        String key = wifiSsid + "|" + ipAddress;
+        long now = SystemClock.elapsedRealtime();
+        if (key.equals(lastOwnerMeteringKey) && lastOwnerMeteringCheckElapsed >= 0
+                && now - lastOwnerMeteringCheckElapsed < 10_000L) {
+            return lastOwnerWifiUnmetered;
+        }
+        boolean result = readEffectiveWifiUnmetered(context);
+        lastOwnerMeteringKey = key;
+        lastOwnerMeteringCheckElapsed = now;
+        lastOwnerWifiUnmetered = result;
+        return result;
+    }
+
+    private static boolean readEffectiveWifiUnmetered(Context context) {
+        try {
+            ConnectivityManager cm = (ConnectivityManager)
+                    context.getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm != null) {
+                Network active = cm.getActiveNetwork();
+                if (active != null) {
+                    NetworkCapabilities caps = cm.getNetworkCapabilities(active);
+                    // When the default network is visible, its transport and
+                    // effective NOT_METERED capability include user overrides.
+                    // Do not fall back to an AP-only hint for a known metered
+                    // Android network.
+                    if (caps == null || !caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                        return false;
+                    }
+                    return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+                            && !cm.isActiveNetworkMetered();
+                }
+            }
+        } catch (RuntimeException ignored) {
+            // Shell UID may not be allowed to query the per-UID active network.
+        }
+        try {
+            WifiManager wifi = (WifiManager) context.getSystemService(Context.WIFI_SERVICE);
+            if (wifi == null) return false;
+            WifiInfo connected = wifi.getConnectionInfo();
+            if (connected == null || connected.getNetworkId() < 0) return false;
+            java.util.List<WifiConfiguration> saved = wifi.getConfiguredNetworks();
+            if (saved == null) return false;
+            // meteredOverride is a hidden @SystemApi field on Android 10. Read
+            // it defensively: hidden-API access may be blocked on OEM firmware.
+            java.lang.reflect.Field override = WifiConfiguration.class.getField("meteredOverride");
+            for (WifiConfiguration config : saved) {
+                if (config == null || config.networkId != connected.getNetworkId()) continue;
+                switch (override.getInt(config)) {
+                    case 1: return false; // owner explicitly marked Metered
+                    case 2: return true;  // owner explicitly marked Unmetered
+                    case 0: // Automatic: require the AP hint to be readable.
+                        return wifiMeteredHintKnown && !wifiMeteredHint;
+                    default: return false;
+                }
+            }
+        } catch (RuntimeException | ReflectiveOperationException ignored) {
+            // An unknown owner setting must refuse the unattended download.
+        }
+        return false;
+    }
 
     /** True when the last known network type is WiFi. */
     public static boolean isWifiConnected() { return "wifi".equals(networkType); }

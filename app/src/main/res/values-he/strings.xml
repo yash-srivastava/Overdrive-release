@@ -481,6 +481,9 @@
     <string name="update_error_start_failed">לא ניתן להתחיל בעדכון: %1$s</string>
     <string name="update_error_lost_headunit">אבד הקשר עם מסך הרכב לפני סיום ההתקנה. מחובר דרך מנהרה? בדוק ב-Telegram אם התקבלה כתובת חדשה, או השתמש ב-IP המקומי.</string>
     <string name="update_hide">הסתר</string>
+    <string name="settings_auto_update_title">התקנת עדכונים אוטומטית</string>
+    <string name="settings_auto_update_desc">כבוי כברירת מחדל; לערוץ Braveheart בלבד. בדיקה בעת ההפעלה ובהמשך בערך כל 6 שעות (כל 30 דקות כשיש עדכון ממתין) כשהתהליך פועל. נדרש Wi-Fi שמערכת Android מאשרת כחיבור ללא חיוב לפי נפח, כולל הגדרת ״חיבור לפי שימוש״ שנבחרה לרשת (אם לא ניתן לקרוא את ההגדרה, ההתקנה תידחה), רכב כבוי במשך 30 דקות, מצב שומר כבוי וללא הקלטה. במצב רכב-דולק-בלבד לא ניתן להתקין אוטומטית, כי התהליך נעצר כשהרכב נכבה. נדרשים מספר גרסה וקוד גרסה חדשים יותר ואותה חתימת APK; גרסאות מותאמות אישית עם תווית גרסה ישנה עלולות להתחלף. OverDrive יופעל מחדש לאחר ההתקנה.</string>
+    <string name="settings_auto_update_save_failed">לא ניתן לשמור את העדפת העדכון האוטומטי</string>
     <string name="settings_update_channel_title">ערוץ עדכון</string>
     <string name="settings_update_channel_alpha">Alpha</string>
     <string name="settings_update_channel_braveheart">Braveheart</string>
