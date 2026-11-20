@@ -6392,10 +6392,6 @@ public class SurveillanceEngineGpu {
                         }
                         
                         boolean hasActiveMotion = timeSinceMotion < 2000;
-                        // Always send to timeline — pre-trigger ring buffer captures
-                        // events before recording starts for the JSON sidecar.
-                        timelineCollector.onAiDetection(motionFiltered, hasActiveMotion, 1 << qIdx);
-                        
                         // Cross-quadrant tracking REQUIRES bboxes in 320×240 quadrant
                         // pixel space — its centroid threshold (dist < 120) and edge
                         // margin (48 px) are hardcoded against Q_WIDTH=320 / Q_HEIGHT=240
@@ -6455,6 +6451,12 @@ public class SurveillanceEngineGpu {
                         } else {
                             cqtDetections = motionFiltered;
                         }
+
+                        // The timeline uses the same quadrant-space boxes as the
+                        // tracker: mosaic and foveated detections must share one
+                        // coordinate system for conservative class-flicker matching.
+                        // This call also fills the pre-trigger semantic ring.
+                        timelineCollector.onAiDetection(cqtDetections, hasActiveMotion, 1 << qIdx);
 
                         // CAPTURE-ANCHORED OBSERVATION TIME (audit R13-7 /
                         // ExtE-8). Foveated pixels are older than "now" by the

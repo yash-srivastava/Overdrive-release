@@ -74,6 +74,7 @@ public class EventTimelineCollector {
     private final float[] preRingConfs  = new float[PRE_RING_CAPACITY];
     private final byte[]  preRingCounts = new byte[PRE_RING_CAPACITY];
     private final byte[]  preRingCams   = new byte[PRE_RING_CAPACITY];
+    private final AnimalFrameEvidence[] preRingEvidence = new AnimalFrameEvidence[PRE_RING_CAPACITY];
     private int preRingHead = 0;   // Next write position
     private int preRingCount = 0;  // Number of valid entries (max PRE_RING_CAPACITY)
 
@@ -84,6 +85,7 @@ public class EventTimelineCollector {
     private float  preInflightConf  = 0;
     private byte   preInflightCount = 0;
     private byte   preInflightCams  = 0;
+    private AnimalFrameEvidence preInflightEvidence;
 
     // Wall-clock reference for pre-trigger timestamps (absolute ms)
     // Pre-trigger events use absolute timestamps; they get shifted when flushed.
@@ -99,6 +101,7 @@ public class EventTimelineCollector {
     private final float[] spanConfidences = new float[SPAN_CAPACITY];
     private final byte[]  spanCounts      = new byte[SPAN_CAPACITY];
     private final byte[]  spanCameras     = new byte[SPAN_CAPACITY];
+    private final AnimalFrameEvidence[] spanEvidence = new AnimalFrameEvidence[SPAN_CAPACITY];
     private int spanCount = 0;
 
     // In-flight span for the active path
@@ -108,6 +111,7 @@ public class EventTimelineCollector {
     private float  inflightConf  = 0;
     private byte   inflightCount = 0;
     private byte   inflightCameras = 0;
+    private AnimalFrameEvidence inflightEvidence;
 
     // State
     private long recordingStartTimeMs = 0;
@@ -260,6 +264,7 @@ public class EventTimelineCollector {
         collectionGen++; // audit R11-4 / ExtD-5 — invalidates stale stops
         spanCount = 0;
         inflightStart = -1;
+        inflightEvidence = null;
         actualPreRecordMs = 0;
         requestedPreRecordMs = 0;
 
@@ -294,6 +299,7 @@ public class EventTimelineCollector {
                     spanConfidences[spanCount] = preRingConfs[idx];
                     spanCounts[spanCount]      = preRingCounts[idx];
                     spanCameras[spanCount]     = preRingCams[idx];
+                    spanEvidence[spanCount]    = preRingEvidence[idx];
                     spanCount++;
                     flushed++;
                 }
@@ -302,6 +308,7 @@ public class EventTimelineCollector {
             // Rotation path: drop any in-flight pre-ring span so it won't
             // spuriously appear in a future event's pre-roll.
             preInflightStart = -1;
+            preInflightEvidence = null;
         }
 
         collecting = true;
@@ -420,6 +427,24 @@ public class EventTimelineCollector {
                 (actors == null || actors.isEmpty())
                         ? java.util.Collections.<Actor>emptyList()
                         : new java.util.ArrayList<>(actors);
+        // Classify from observations collected WITH the span, not from the actor
+        // snapshots (which freeze at an early peak and may expire before post-roll).
+        // Only the cosmetic sidecar label/confidence changes. Never touch trigger,
+        // tracker, retained actors, severity, or hero selection.
+        int animalCorrections = 0;
+        for (int i = 0; i < count; i++) {
+            AnimalFrameEvidence evidence = spanEvidence[i];
+            if (types[i] == TYPE_PERSON && evidence != null
+                    && evidence.shouldRelabel(cams[i] & 0x0F, counts[i] & 0xFF, confs[i])) {
+                types[i] = TYPE_ANIMAL;
+                confs[i] = evidence.peakAnimalConfidence; // maxConf must match the new class
+                animalCorrections++;
+            }
+        }
+        if (animalCorrections > 0) {
+            logger.info("Timeline: corrected " + animalCorrections
+                    + " person marker(s) from in-span animal frames");
+        }
         final String heroThumb = heroThumbnail;
         // End snapshot wasn't passed by older callers; capture it now if the
         // overload was invoked with a null endGeo. Done on this thread (the
@@ -803,6 +828,109 @@ public class EventTimelineCollector {
         }
     }
 
+    /**
+     * Per-span frame evidence, independent of ActorTracker retention/peak copies.
+     * A brief PERSON label is safe to treat as an ANIMAL flicker only when it
+     * sits BETWEEN repeated animal observations of the same bounding box.
+     * Person observations beside an animal, at the edge of the window, or in
+     * another location keep the PERSON marker. This deliberately prefers an
+     * extra person label to erasing an actual passing person. A model that
+     * mistakes a real person's every frame for an animal cannot be resolved
+     * by class evidence alone.
+     *
+     * One instance per inflight span; carried through pre-roll and committed
+     * arrays. No actor history or live mutable tracker references are needed.
+     */
+    static final class AnimalFrameEvidence {
+        int personFrames;
+        int animalFrames;
+        int otherFrames;
+        int pendingPersons;
+        int animalFramesAfterPerson;
+        long lastAnimalWallMs;
+        long pendingPersonWallMs;
+        float peakAnimalConfidence;
+        boolean ambiguous;
+        Detection lastAnimal;
+        Detection pendingPerson;
+
+        void observe(List<Detection> detections, long observationWallMs) {
+            Detection person = null, animal = null;
+            int persons = 0, animals = 0;
+            for (Detection d : detections) {
+                int id = d.getClassId();
+                if (id == 0) {
+                    persons++;
+                    person = d;
+                } else if (id >= 14 && id <= 23) {
+                    animals++;
+                    animal = d;
+                    peakAnimalConfidence = Math.max(peakAnimalConfidence, d.getConfidence());
+                } else if (id == 1 || id == 2 || id == 3 || id == 5 || id == 7) {
+                    otherFrames++;
+                }
+            }
+            if (persons > 0) personFrames++;
+            if (animals > 0) animalFrames++;
+            if (persons > 1 || animals > 1 || (persons > 0 && animals > 0)) {
+                ambiguous = true; // two simultaneous objects, even if tracker missed one
+            }
+            if (person != null) {
+                // The first observation of a real passer-by, with no prior dog
+                // at the SAME position, must never disappear into a dog span.
+                if (lastAnimal == null || animalFrames < 2
+                        || observationWallMs - lastAnimalWallMs > 1000L
+                        || !sameSubject(lastAnimal, person)
+                        || (pendingPerson != null && !sameSubject(pendingPerson, person))) {
+                    ambiguous = true;
+                }
+                pendingPerson = person;
+                pendingPersonWallMs = observationWallMs;
+                animalFramesAfterPerson = 0;
+                pendingPersons++;
+                if (pendingPersons > 2) ambiguous = true;
+            } else if (animal != null) {
+                if (pendingPerson != null) {
+                    // A nearby subsequent animal at the same location completes the
+                    // ANIMAL -> PERSON -> ANIMAL flicker. A PERSON at the end
+                    // of a dog span remains pending and cannot be relabelled.
+                    if (observationWallMs - pendingPersonWallMs > 1000L
+                            || !sameSubject(pendingPerson, animal)) ambiguous = true;
+                    pendingPerson = null;
+                    pendingPersons = 0;
+                }
+            }
+            if (animal != null) {
+                if (personFrames > 0) animalFramesAfterPerson++;
+                lastAnimal = animal;
+                lastAnimalWallMs = observationWallMs;
+            }
+        }
+
+        boolean shouldRelabel(int cameraMask, int maxCount, float personConfidence) {
+            return !ambiguous && pendingPersons == 0 && personFrames > 0
+                    && personFrames <= 2 && animalFrames >= 3 * personFrames
+                    && animalFramesAfterPerson >= 2
+                    && otherFrames == 0 && maxCount == 1
+                    && Integer.bitCount(cameraMask) == 1
+                    && peakAnimalConfidence >= personConfidence;
+        }
+
+        private static boolean sameSubject(Detection a, Detection b) {
+            if (a.getW() <= 0 || a.getH() <= 0 || b.getW() <= 0 || b.getH() <= 0) {
+                return false;
+            }
+            long left = Math.max(a.getX(), b.getX());
+            long top = Math.max(a.getY(), b.getY());
+            long right = Math.min((long) a.getX() + a.getW(), (long) b.getX() + b.getW());
+            long bottom = Math.min((long) a.getY() + a.getH(), (long) b.getY() + b.getH());
+            long intersection = Math.max(0L, right - left) * Math.max(0L, bottom - top);
+            long areaA = (long) a.getW() * a.getH();
+            long areaB = (long) b.getW() * b.getH();
+            return intersection * 5 >= (areaA + areaB - intersection) * 2; // IoU >= 0.4
+        }
+    }
+
     // ========================================================================
     // HOT PATH — AI detection events
     // ========================================================================
@@ -811,7 +939,7 @@ public class EventTimelineCollector {
         onAiDetection(detections, hasActiveMotion, 0);
     }
 
-    public void onAiDetection(List<Detection> detections, boolean hasActiveMotion, int cameraMask) {
+    public synchronized void onAiDetection(List<Detection> detections, boolean hasActiveMotion, int cameraMask) {
         if (!hasActiveMotion || detections == null || detections.isEmpty()) return;
 
         byte bestType = TYPE_MOTION;
@@ -843,9 +971,13 @@ public class EventTimelineCollector {
 
             if (collecting) {
                 ingestEvent(now - recordingStartTimeMs, bestType, bestConf, countByte, camByte);
+                if (inflightEvidence == null) inflightEvidence = new AnimalFrameEvidence();
+                inflightEvidence.observe(detections, now);
             } else {
                 // Pre-trigger: always ingest into the ring buffer
                 ingestPreTrigger(now, bestType, bestConf, countByte, camByte);
+                if (preInflightEvidence == null) preInflightEvidence = new AnimalFrameEvidence();
+                preInflightEvidence.observe(detections, now);
             }
         }
     }
@@ -863,6 +995,7 @@ public class EventTimelineCollector {
             preInflightConf  = conf;
             preInflightCount = count;
             preInflightCams  = cameras;
+            preInflightEvidence = null;
             return;
         }
 
@@ -886,6 +1019,7 @@ public class EventTimelineCollector {
             preInflightConf  = conf;
             preInflightCount = count;
             preInflightCams  = cameras;
+            preInflightEvidence = null;
         }
     }
 
@@ -899,11 +1033,13 @@ public class EventTimelineCollector {
         preRingConfs[idx]  = preInflightConf;
         preRingCounts[idx] = preInflightCount;
         preRingCams[idx]   = preInflightCams;
+        preRingEvidence[idx] = preInflightEvidence;
 
         preRingHead = (preRingHead + 1) % PRE_RING_CAPACITY;
         if (preRingCount < PRE_RING_CAPACITY) preRingCount++;
 
         preInflightStart = -1;
+        preInflightEvidence = null;
     }
 
     // ========================================================================
@@ -919,6 +1055,7 @@ public class EventTimelineCollector {
             inflightConf  = conf;
             inflightCount = count;
             inflightCameras = cameras;
+            inflightEvidence = null;
             return;
         }
 
@@ -942,6 +1079,7 @@ public class EventTimelineCollector {
             inflightConf  = conf;
             inflightCount = count;
             inflightCameras = cameras;
+            inflightEvidence = null;
         }
     }
 
@@ -952,6 +1090,7 @@ public class EventTimelineCollector {
                 logger.warn("Timeline buffer full (" + SPAN_CAPACITY + " spans). Dropping.");
             }
             inflightStart = -1;
+            inflightEvidence = null;
             return;
         }
 
@@ -962,8 +1101,10 @@ public class EventTimelineCollector {
         spanConfidences[idx] = inflightConf;
         spanCounts[idx]      = inflightCount;
         spanCameras[idx]     = inflightCameras;
+        spanEvidence[idx]    = inflightEvidence;
         spanCount = idx + 1;
         inflightStart = -1;
+        inflightEvidence = null;
     }
 
     // ========================================================================

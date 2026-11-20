@@ -3,6 +3,7 @@ package com.overdrive.app.ui.view
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Path
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
@@ -14,7 +15,7 @@ import com.overdrive.app.R
  * Each event span is drawn as a colored rectangle proportional to the video duration.
  * A playhead indicator shows current position.
  *
- * Colors: motion=gray, person=red, car=blue, bike=green
+ * Colors: motion=gray, person=red, car=blue, bike=green, animal=purple
  */
 class EventTimelineView @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
@@ -38,6 +39,8 @@ class EventTimelineView @JvmOverloads constructor(
     private val paintPerson = Paint().apply { color = 0xCCFF4444.toInt(); isAntiAlias = true }
     private val paintCar = Paint().apply { color = 0xCC4488FF.toInt(); isAntiAlias = true }
     private val paintBike = Paint().apply { color = 0xCC44CC44.toInt(); isAntiAlias = true }
+    private val paintAnimal = Paint().apply { color = 0xCCA855F7.toInt(); isAntiAlias = true }
+    private val animalDiamond = Path()
     private val paintPlayhead = Paint().apply { color = 0xFFFFFFFF.toInt(); isAntiAlias = true }
 
     fun setEvents(events: List<TimelineEvent>, durationMs: Long) {
@@ -170,6 +173,7 @@ class EventTimelineView @JvmOverloads constructor(
                 "person" -> paintPerson
                 "car" -> paintCar
                 "bike" -> paintBike
+                "animal" -> paintAnimal
                 else -> paintMotion
             }
             canvas.drawRect(left, barTop, right, barBottom, paint)
@@ -181,6 +185,15 @@ class EventTimelineView @JvmOverloads constructor(
                 "bike" -> {
                     canvas.drawCircle(left + 2f, centerY, 2f, paintPlayhead)
                     canvas.drawCircle(left + 7f, centerY, 2f, paintPlayhead)
+                }
+                "animal" -> {
+                    animalDiamond.rewind()
+                    animalDiamond.moveTo(left + 4f, centerY - 4f)
+                    animalDiamond.lineTo(left + 8f, centerY)
+                    animalDiamond.lineTo(left + 4f, centerY + 4f)
+                    animalDiamond.lineTo(left, centerY)
+                    animalDiamond.close()
+                    canvas.drawPath(animalDiamond, paintPlayhead)
                 }
                 else -> canvas.drawRect(left, barTop, left + 2f, barBottom, paintPlayhead)
             }

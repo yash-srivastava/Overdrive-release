@@ -184,6 +184,17 @@ than per-quadrant-instance; affects only a log line.
 
 - The S4 motion-overlap filter is dilated by one block; `ThumbnailBuffer`'s copy is
   NOT. Opposite penalties: drop-the-detection vs cosmetic scenery flag. Do not unify.
+- Timeline sidecars may cosmetically relabel a PERSON span as ANIMAL only when
+  repeated nearby animal-class frames bracket 1–2 same-position PERSON frames, the
+  animal confidence meets the person peak, and the span has one camera/object.
+  Per-span evidence is carried through pre-roll and post-roll; actor lists are
+  deliberately not used (frozen peak copies and 8 s TTL miss later frames).
+  A PERSON at a span edge, a simultaneous PERSON+ANIMAL, a different-position
+  PERSON, or insufficient animal evidence keeps PERSON. "Moving" here means
+  not timeline-static; it is not proof of species or independent physical motion.
+  A human consistently mislabeled as an animal remains inherently ambiguous.
+  Only the sidecar's event type/maxConf and derived event stats/legend change;
+  trigger decisions, severity, actor records, actor-driven SRT, and hero remain unchanged.
 - `beatsAsThreat` demotes an all-scenery headline, but the count loops are untouched
   and `pushWorthy` latches before the demotion. Cosmetic surfaces may narrow;
   gates may not.
