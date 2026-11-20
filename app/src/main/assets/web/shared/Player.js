@@ -7,6 +7,7 @@ p = new Player({
   useWorker: <bool>,
   workerFile: <defaults to "Decoder.js"> // give path to Decoder.js
   webgl: true | false | "auto" // defaults to "auto"
+  reusePlaneTextures: true | false // experimental; defaults to false
 });
 
 // canvas property represents the canvas node
@@ -280,6 +281,7 @@ p.decode(<binary>);
         canvasObj.webGLCanvas = new WebGLCanvas({
           canvas: canvasObj.canvas,
           contextOptions: canvasObj.contextOptions,
+          reusePlaneTextures: this._config.reusePlaneTextures === true,
           width: width,
           height: height
         });
