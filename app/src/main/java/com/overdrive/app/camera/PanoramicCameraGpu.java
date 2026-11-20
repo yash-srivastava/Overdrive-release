@@ -10627,6 +10627,14 @@ public class PanoramicCameraGpu {
         logger.info("Reopening AVMCamera...");
         final boolean legacyOpenAttempt =
                 !USE_DILINK4_AVM_PATH && !USE_DILINK5_QCARCAM_PATH;
+        final boolean di3AccHandoff = Di3AccHandoffPolicy.eligible(
+                legacyOpenAttempt,
+                DiLink100Platform.isByd100f(),
+                com.overdrive.app.camera.dilink5.DiLink5Platform.isDiLink4Selected(),
+                android.os.Build.PRODUCT, android.os.Build.DEVICE,
+                android.os.Build.FINGERPRINT);
+        final LegacyAccOpenRetry accOpenRetry = di3AccHandoff
+                ? new LegacyAccOpenRetry() : null;
         boolean releaseRestartGate = true;
 
         // CRITICAL: Mark restart-in-progress BEFORE touching the camera so the
@@ -10736,11 +10744,21 @@ public class PanoramicCameraGpu {
             }
 
             resetDeadSlotWalkForReopen();
-            if (legacyOpenAttempt) {
+            if (di3AccHandoff) {
+                LegacyAccOpenRetry.Result result = accOpenRetry.run(
+                        this::openLegacyCameraWithHardTimeout,
+                        () -> cameraObj == null && running && restartInProgress.get(),
+                        (phase, error) -> logger.error(
+                                phase + ": " + error.getMessage(), error));
+                if (result == LegacyAccOpenRetry.Result.TERMINAL_TIMEOUT) {
+                    releaseRestartGate = false;
+                    return;
+                }
+                if (result == LegacyAccOpenRetry.Result.FAILED) return;
+            } else if (legacyOpenAttempt) {
                 if (!openLegacyCameraWithHardTimeout("ACC ON camera reopen")) {
                     // The worker may still be inside the vendor Binder call.
-                    // Process death is the only safe cancellation; keep the
-                    // single-flight gate latched until the urgent restart lands.
+                    // Keep the gate latched until the terminal restart lands.
                     releaseRestartGate = false;
                     return;
                 }
@@ -10777,6 +10795,9 @@ public class PanoramicCameraGpu {
                 if (cameraObj == null) {
                     logger.warn("Retry camera open...");
                     if (legacyOpenAttempt) {
+                        // The optimized helper already owns its retry budget.
+                        // Before it runs, retain the original catch-block retry.
+                        if (accOpenRetry != null && !accOpenRetry.canRetryInCatch()) return;
                         if (!openLegacyCameraWithHardTimeout(
                                 "ACC ON camera reopen retry")) {
                             releaseRestartGate = false;
