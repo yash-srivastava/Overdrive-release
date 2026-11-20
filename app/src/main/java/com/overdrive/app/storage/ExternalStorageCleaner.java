@@ -148,8 +148,9 @@ public class ExternalStorageCleaner {
     private boolean sdCardAvailable = false;
     
     // Background monitor
-    private ScheduledExecutorService monitorScheduler;
+    private volatile ScheduledExecutorService monitorScheduler;
     private final AtomicBoolean monitoringActive = new AtomicBoolean(false);
+    private final AtomicBoolean sdFormatPaused = new AtomicBoolean(false);
     private final Object cleanupLock = new Object();
     
     // Statistics
@@ -958,6 +959,7 @@ public class ExternalStorageCleaner {
      */
     public CleanupResult ensureReservedSpace() {
         synchronized (cleanupLock) {
+            if (sdFormatPaused.get()) return new CleanupResult("Cleanup paused for SD format");
             if (!enabled) {
                 return new CleanupResult("Cleanup not enabled");
             }
@@ -1003,6 +1005,7 @@ public class ExternalStorageCleaner {
      */
     public CleanupResult forceCleanup(long bytesToFree) {
         synchronized (cleanupLock) {
+            if (sdFormatPaused.get()) return new CleanupResult("Cleanup paused for SD format");
             if (!enabled) {
                 return new CleanupResult("External storage cleanup is disabled");
             }
@@ -1131,7 +1134,8 @@ public class ExternalStorageCleaner {
      * Start periodic monitoring of SD card space.
      * Automatically triggers cleanup when space runs low.
      */
-    public void startMonitoring() {
+    public synchronized void startMonitoring() {
+        if (sdFormatPaused.get()) return;
         // Gate only on `enabled` — the tick self-discovers the SD card, so the
         // monitor may be armed before vold mounts it (boot-race) and will
         // converge once the card appears. Requiring sdCardAvailable here would
@@ -1183,7 +1187,7 @@ public class ExternalStorageCleaner {
     /**
      * Stop periodic monitoring.
      */
-    public void stopMonitoring() {
+    public synchronized void stopMonitoring() {
         monitoringActive.set(false);
         
         if (monitorScheduler != null) {
@@ -1200,6 +1204,25 @@ public class ExternalStorageCleaner {
         }
     }
     
+    /**
+     * Exclude periodic AND manual CDR cleanup while vold modifies the SD.
+     * Wait for an in-flight cleanup to leave its lock before permitting format.
+     * A failed pause must be followed by resumeAfterSdFormat().
+     */
+    public boolean pauseForSdFormat() {
+        if (!sdFormatPaused.compareAndSet(false, true)) return false;
+        ScheduledExecutorService previous = monitorScheduler;
+        stopMonitoring();
+        synchronized (cleanupLock) { /* wait for any active CDR cleanup */ }
+        return previous == null || previous.isTerminated();
+    }
+
+    public void resumeAfterSdFormat() {
+        sdFormatPaused.set(false);
+        refresh();
+        startMonitoring();
+    }
+
     /**
      * Check if monitoring is active.
      */
@@ -1285,6 +1308,7 @@ public class ExternalStorageCleaner {
      * Refresh paths (call when SD card is mounted/unmounted).
      */
     public void refresh() {
+        if (sdFormatPaused.get()) return;
         discoverPaths();
         if (enabled && sdCardAvailable && !monitoringActive.get()) {
             startMonitoring();

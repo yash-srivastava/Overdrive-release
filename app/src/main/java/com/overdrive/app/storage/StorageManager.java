@@ -1201,6 +1201,9 @@ public class StorageManager {
             return false;
         }
         try {
+            // A destructive SD operation owns the card, not this shared lock.
+            // USB mounts must still work while `sm format` is running.
+            if ("SD".equals(targetClass) && sdCardFormatActive) return false;
             // LIVE pre-call accessibility, NOT the cached flag (audit:
             // stale-true remounts missed notification). In the canonical
             // failure state the system unmounted the card while
@@ -2693,12 +2696,13 @@ public class StorageManager {
     private static final java.util.regex.Pattern BARE_PUBLIC_VOLUME_ID =
             java.util.regex.Pattern.compile("\\d+:\\d+");
 
-    private static boolean isPublicVolumeId(String volumeId) {
-        return volumeId.startsWith("public:") || BARE_PUBLIC_VOLUME_ID.matcher(volumeId).matches();
+    static boolean isPublicVolumeId(String volumeId) {
+        return volumeId != null && (volumeId.startsWith("public:")
+                || BARE_PUBLIC_VOLUME_ID.matcher(volumeId).matches());
     }
 
     /** {major, minor} of an {@link #isPublicVolumeId} id, or null when unparsable. */
-    private static int[] parsePublicVolumeDevice(String volumeId) {
+    static int[] parsePublicVolumeDevice(String volumeId) {
         String[] dev = volumeId.startsWith("public:")
                 ? volumeId.substring("public:".length()).split(",")
                 : volumeId.split(":");
@@ -6640,6 +6644,10 @@ public class StorageManager {
      * to internal under a label that says "SD card".
      */
     private boolean ensureExternalAvailable(StorageType type, String label) {
+        if (type == StorageType.SD_CARD && sdCardFormatActive) {
+            logWarn("Cannot switch " + label + " to SD during format/recovery");
+            return false;
+        }
         if (type == StorageType.SD_CARD) {
             if (sdCardAvailable) return true;
             logInfo("SD card not available, attempting to mount for " + label + "...");
@@ -6697,6 +6705,36 @@ public class StorageManager {
 
     public String getSdCardPath() {
         return sdCardPath;
+    }
+
+    /** Record only a new UUID verified mounted on the same SD public volume. */
+    public void rememberFormattedSdUuid(String uuid) {
+        if (uuid != null && uuid.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+                && !"null".equalsIgnoreCase(uuid)) learnSdUuid(uuid);
+    }
+
+    // Guard only SD remounts and selection while an SD format/recovery runs.
+    // Does not hold mountLock across vold, allowing USB and config operations.
+    private volatile boolean sdCardFormatActive;
+
+    /** Caller holds the short mount lock when starting a format or recovery. */
+    public void setSdCardFormatActive(boolean active) {
+        sdCardFormatActive = active;
+    }
+
+    /** Serialize short SD preflight checks against mount/discovery. */
+    public boolean acquireSdCardFormatLock() {
+        try {
+            return mountLock.tryLock(5, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    /** Release the lock acquired by {@link #acquireSdCardFormatLock()}. */
+    public void releaseSdCardFormatLock() {
+        if (mountLock.isHeldByCurrentThread()) mountLock.unlock();
     }
 
     public boolean isUsbAvailable() {
