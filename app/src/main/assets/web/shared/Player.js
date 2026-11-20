@@ -7,6 +7,8 @@ p = new Player({
   useWorker: <bool>,
   workerFile: <defaults to "Decoder.js"> // give path to Decoder.js
   webgl: true | false | "auto" // defaults to "auto"
+  reusePlaneTextures: true | false // experimental; defaults to false
+  benchmarkPlaneTextures: true | false // diagnostic CPU timing; defaults to false
 });
 
 // canvas property represents the canvas node
@@ -274,12 +276,15 @@ p.decode(<binary>);
       var width = options.width || canvasObj.canvas.width;
       var height = options.height || canvasObj.canvas.height;
 
-      if (canvasObj.canvas.width !== width || canvasObj.canvas.height !== height || !canvasObj.webGLCanvas){
+      var newCanvas = canvasObj.canvas.width !== width ||
+          canvasObj.canvas.height !== height || !canvasObj.webGLCanvas;
+      if (newCanvas){
         canvasObj.canvas.width = width;
         canvasObj.canvas.height = height;
         canvasObj.webGLCanvas = new WebGLCanvas({
           canvas: canvasObj.canvas,
           contextOptions: canvasObj.contextOptions,
+          reusePlaneTextures: this._config.reusePlaneTextures === true,
           width: width,
           height: height
         });
@@ -288,15 +293,68 @@ p.decode(<binary>);
       var ylen = width * height;
       var uvlen = (width / 2) * (height / 2);
 
+      var benchmark = this._config.benchmarkPlaneTextures === true &&
+          typeof performance !== 'undefined' && typeof performance.now === 'function';
+      var startedAt = benchmark ? performance.now() : 0;
       canvasObj.webGLCanvas.drawNextOutputPicture({
         yData: options.data.subarray(0, ylen),
         uData: options.data.subarray(ylen, ylen + uvlen),
         vData: options.data.subarray(ylen + uvlen, ylen + uvlen + uvlen)
       });
+      if (benchmark) {
+        this.recordPlaneUploadMs(performance.now() - startedAt, newCanvas);
+      }
 
       var self = this;
       self.recycleMemory(options.data);
 
+    },
+    // CPU time around the WebGL upload/draw call only (not GPU completion).
+    // Log a bounded 300-frame window for on-car Chrome WebView A/B capture.
+    recordPlaneUploadMs: function(ms, firstAfterResize) {
+      var stats = this._planeUploadStats;
+      if (!stats) {
+        stats = { frames: 0, regular: [], refresh: [], first: [] };
+        this._planeUploadStats = stats;
+      }
+      if (firstAfterResize) {
+        // A resized canvas changes upload cost; do not mix dimensions.
+        stats.frames = 0;
+        stats.regular = [];
+        stats.refresh = [];
+        stats.first = [];
+      }
+      stats.frames++;
+      // First frame after a new canvas is reported separately. In reuse
+      // mode, subsequent allocation refreshes land on frames 31, 61, ...
+      // within a stable canvas (30 uploads per allocation).
+      var bucket = firstAfterResize ? stats.first :
+          ((stats.frames - 1) % 30 === 0 ? stats.refresh : stats.regular);
+      bucket.push(ms);
+      if (stats.regular.length + stats.refresh.length < 300) return;
+
+      function summary(values) {
+        if (!values.length) return { count: 0 };
+        var ordered = values.slice().sort(function(a, b) { return a - b; });
+        var total = 0;
+        for (var i = 0; i < values.length; i++) total += values[i];
+        return {
+          count: values.length,
+          meanMs: +(total / values.length).toFixed(3),
+          p50Ms: +ordered[Math.floor((ordered.length - 1) * 0.50)].toFixed(3),
+          p95Ms: +ordered[Math.floor((ordered.length - 1) * 0.95)].toFixed(3)
+        };
+      }
+      console.log('[Broadway A/B] ' + JSON.stringify({
+        decoder: 'broadway',
+        reusePlaneTextures: this._config.reusePlaneTextures === true,
+        normal: summary(stats.regular),
+        every30th: summary(stats.refresh),
+        firstAfterResize: summary(stats.first)
+      }));
+      stats.regular = [];
+      stats.refresh = [];
+      stats.first = [];
     },
     renderFrameRGB: function(options){
       var canvasObj = options.canvasObj;

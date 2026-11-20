@@ -50,6 +50,10 @@ BYD.stream = {
     _broadwayWorkerUrl: null,
     activeFps: 10,  // Updated from /api/stream/quality response; default matches MEDIUM preset
     isDiLink5: false,
+    // Only an explicit URL parameter or the Live View A/B button opts in.
+    // For benchmark comparisons, force Broadway even if JMuxer is available.
+    forceBroadway: new URLSearchParams(window.location.search).get('decoder') === 'broadway',
+    reusePlaneTextures: new URLSearchParams(window.location.search).get('reusePlaneTextures') === '1',
     // Last view mode the backend accepted; currentViewMode is set optimistically.
     confirmedViewMode: -1,
     // Bumped by stopStream. An async start/view-switch compares its captured
@@ -79,7 +83,7 @@ BYD.stream = {
     hasWebCodecs: typeof VideoDecoder !== 'undefined',
 
     _willUseBroadway() {
-        return this.decoderMode === 'broadway' ||
+        return this.forceBroadway || this.decoderMode === 'broadway' ||
             (!(this.hasWebCodecs && typeof SotaPlayer !== 'undefined') &&
              (this.isIOS || !window.MediaSource || typeof JMuxer === 'undefined'));
     },
@@ -381,6 +385,10 @@ BYD.stream = {
      * Priority: WebCodecs > JMuxer > Broadway
      */
     async initDecoder() {
+        // Diagnostic override: choose Broadway before WebCodecs/JMuxer, and
+        // send decoder=broadway to the backend from the first request.
+        if (this.forceBroadway) return await this.initBroadway();
+
         // Try WebCodecs first (SOTA - best performance)
         if (this.hasWebCodecs && typeof SotaPlayer !== 'undefined') {
             const success = await this.initWebCodecs();
@@ -584,6 +592,10 @@ BYD.stream = {
                 useWorker: true,
                 workerFile: workerUrl,
                 webgl: true,
+                // Off unless explicitly selected in Live View or via ?reusePlaneTextures=1.
+                reusePlaneTextures: this.reusePlaneTextures === true,
+                // Diagnostic sampling is limited to forced Broadway A/B sessions.
+                benchmarkPlaneTextures: this.forceBroadway === true,
                 reuseMemory: this.isDiLink5 === true,
                 size: { width: 1280, height: 960 }
             });

@@ -28,8 +28,8 @@
     <script src="https://cdn.jsdelivr.net/npm/jmuxer@2.0.4/dist/jmuxer.min.js"></script>
     <script src="../shared/SotaPlayer.js?v=14"></script>
     <script src="../shared/Decoder.js"></script>
-    <script src="../shared/YUVCanvas.js"></script>
-    <script src="../shared/Player.js"></script>
+    <script src="../shared/YUVCanvas.js?v=2"></script>
+    <script src="../shared/Player.js?v=2"></script>
 </head>
 <body class="live-view-page">
     <div class="app-layout">
@@ -233,6 +233,12 @@
                             <!-- Camera selector — first card in the landscape utility rail. -->
                             <div class="selector-card-header">
                                 <h2 data-i18n="liveview.cameras">Cameras</h2>
+                                <!-- Diagnostic entry point for the car app, which opens /live-view
+                                     without query parameters. Never enabled by default. -->
+                                <button type="button" id="broadwayAbButton" class="broadway-ab-button"
+                                        onclick="BYD.stream.cycleBroadwayAb()"
+                                        title="Experimental Broadway A/B (reloads Live View)"
+                                        aria-label="Experimental Broadway A/B mode">A/B: Auto</button>
                             </div>
                             <div class="car-selector-bottom">
                                 <div class="car-image-container">
@@ -1062,9 +1068,29 @@
         }
 
         .selector-card-header {
+            display: flex;
             flex: 0 0 auto;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
             padding: 14px 16px 0;
         }
+        .broadway-ab-button {
+            margin-left: 8px;
+            min-height: 32px;
+            border: 1px solid var(--lv-pill-border-soft);
+            border-radius: 8px;
+            background: var(--lv-pill-bg);
+            color: inherit;
+            font-size: 11px;
+            cursor: pointer;
+            padding: 5px 8px;
+        }
+        :root[data-android-embed="1"] .broadway-ab-button {
+            min-height: 44px;
+            font-size: var(--fs-label);
+        }
+        [dir="rtl"] .broadway-ab-button { margin-left: 0; margin-right: 8px; }
 
         .camera-selector-card .car-selector-bottom {
             flex: 1 1 auto;
@@ -1747,10 +1773,38 @@
     <script src="../shared/core.js?v=27"></script>
     <script src="../shared/update-flow.js?v=3"></script>
     <script src="../shared/cabin-audio.js?v=2"></script>
-    <script src="../shared/stream.js?v=index7"></script>
+    <script src="../shared/stream.js?v=index9"></script>
     <script src="../shared/map.js?v=9"></script>
     <script src="../shared/surveillance.js?v=survtoggle20"></script>
     <script>
+        // This page also runs in the car app without a query string. Cycle the
+        // diagnostic variants here so both Broadway paths are reachable on-car.
+        // URLSearchParams is supported by the DiLink 3 Chrome 58 WebView.
+        BYD.stream.updateBroadwayAbButton = function() {
+            var button = document.getElementById('broadwayAbButton');
+            if (!button) return;
+            var mode = !this.forceBroadway ? 'Auto'
+                : (this.reusePlaneTextures ? 'Reuse on' : 'Reuse off');
+            button.textContent = 'A/B: ' + mode;
+            button.setAttribute('aria-label', 'Experimental Broadway A/B: ' + mode
+                + '. Tap to switch mode and reload Live View.');
+        };
+        BYD.stream.cycleBroadwayAb = function() {
+            var url = new URL(window.location.href);
+            if (!this.forceBroadway) {
+                url.searchParams.set('decoder', 'broadway');
+                url.searchParams.delete('reusePlaneTextures');
+            } else if (!this.reusePlaneTextures) {
+                url.searchParams.set('decoder', 'broadway');
+                url.searchParams.set('reusePlaneTextures', '1');
+            } else {
+                url.searchParams.delete('decoder');
+                url.searchParams.delete('reusePlaneTextures');
+            }
+            window.location.assign(url.href);
+        };
+        BYD.stream.updateBroadwayAbButton();
+
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
             document.getElementById('sidebarOverlay').classList.toggle('show');
@@ -2296,8 +2350,9 @@
                 return false;
             }
 
-            // 4. Initialize SOTA Player (WebCodecs)
-            if ('VideoDecoder' in window && typeof SotaPlayer !== 'undefined') {
+            // 4. Initialize SOTA Player (WebCodecs), except when the A/B
+            // control explicitly forces Broadway for a genuine comparison.
+            if (!this.forceBroadway && 'VideoDecoder' in window && typeof SotaPlayer !== 'undefined') {
                 console.log("[Stream] Initializing SOTA Player (WebCodecs)...");
                 this.decoderMode = 'webcodecs';
                 

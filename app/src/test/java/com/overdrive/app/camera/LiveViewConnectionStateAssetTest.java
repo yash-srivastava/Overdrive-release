@@ -39,7 +39,30 @@ public class LiveViewConnectionStateAssetTest {
         assertTrue(stream.contains("?decoder=broadway"));
         assertTrue(stream.contains("reuseMemory: this.isDiLink5 === true"));
         assertTrue(stream.contains("this.isDiLink5 = data.dilink5 === true"));
-        assertTrue(liveView.contains("stream.js?v=index7"));
+        assertTrue(liveView.contains("stream.js?v=index9"));
+        // All three Broadway assets must bypass the one-hour shared-JS cache.
+        assertTrue(liveView.contains("YUVCanvas.js?v=2"));
+        assertTrue(liveView.contains("Player.js?v=2"));
+        assertTrue(stream.contains("forceBroadway: new URLSearchParams"));
+        assertTrue(stream.contains("if (this.forceBroadway) return await this.initBroadway()"));
+        assertTrue(liveView.contains("if (!this.forceBroadway && 'VideoDecoder' in window"));
+        assertTrue(stream.contains("reusePlaneTextures: this.reusePlaneTextures === true"));
+        assertTrue(liveView.contains("BYD.stream.cycleBroadwayAb = function()"));
+        assertTrue(liveView.contains("id=\"broadwayAbButton\""));
+    }
+
+    @Test
+    public void optionalTextureReuseLeavesLegacyGlCallsInPlace() throws Exception {
+        String canvas = readAsset("shared/YUVCanvas.js");
+        String player = readAsset("shared/Player.js");
+
+        assertTrue(canvas.contains("this.reusePlaneTextures = parOptions.reusePlaneTextures === true"));
+        assertTrue(canvas.contains("if (!this.reusePlaneTextures)"));
+        assertTrue(canvas.contains("size.reuseFrames < 29"));
+        assertTrue(canvas.contains("gl.texSubImage2D("));
+        assertTrue(canvas.contains("gl.texImage2D("));
+        assertTrue(player.contains("reusePlaneTextures: this._config.reusePlaneTextures === true"));
+        assertTrue(player.contains("benchmarkPlaneTextures"));
     }
 
     @Test
