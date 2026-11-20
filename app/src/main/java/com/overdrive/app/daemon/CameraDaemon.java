@@ -992,6 +992,8 @@ public class CameraDaemon {
         // a hole where the HTTP server returned empty recordings until the
         // user cycled ACC OFF→ON.
         storageManager.startSdCardWatchdog();
+        // Journal recovery runs even when all configured storage is INTERNAL.
+        com.overdrive.app.storage.SdCardFormatter.getInstance().recoverAtDaemonStart();
 
         // Start the accessibility bind watchdog. Key mapping rides on the
         // app-process KeepAliveAccessibilityService, whose OS bind can wedge in
