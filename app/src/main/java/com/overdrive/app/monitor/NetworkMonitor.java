@@ -468,6 +468,37 @@ public class NetworkMonitor {
      */
     public static String getNetworkType() { return networkType; }
 
+    /**
+     * Auto-update admission for the shell daemon: require the cached Wi-Fi
+     * observation AND an outbound IPv4 route through wlan0. Android 10 may
+     * hide the per-UID default network from UID 2000. A stale WLAN address
+     * alone is not evidence of Wi-Fi after a cellular failover.
+     *
+     * The route check is bounded and cached for ten seconds so per-chunk
+     * download guards do not fork a shell for each packet.
+     */
+    private static volatile long lastAutoUpdateRouteCheckElapsed = -1L;
+    private static volatile boolean lastAutoUpdateWifiRoute;
+
+    public static synchronized boolean isAutoUpdateWifiRoute() {
+        getNetworkInfo(); // shared 10-second refresh bound, including shell fallback
+        if (!"wifi".equals(networkType)) return false;
+        long now = SystemClock.elapsedRealtime();
+        if (lastAutoUpdateRouteCheckElapsed >= 0
+                && now - lastAutoUpdateRouteCheckElapsed < 10_000L) {
+            return lastAutoUpdateWifiRoute;
+        }
+        // Do not infer the outbound network from wlan0 having an address.
+        // On some head units that address persists during cellular fallback.
+        BoundedShell.Result route = BoundedShell.run(
+                "ip -4 route get 1.1.1.1 2>/dev/null", SHELL_DEADLINE_MS);
+        boolean wifiRoute = route.ok() && java.util.regex.Pattern.compile(
+                "(?:^|\\s)dev\\s+wlan0(?:\\s|$)").matcher(route.output).find();
+        lastAutoUpdateWifiRoute = wifiRoute;
+        lastAutoUpdateRouteCheckElapsed = now;
+        return wifiRoute;
+    }
+
     /** True when the last known network type is WiFi. */
     public static boolean isWifiConnected() { return "wifi".equals(networkType); }
 
