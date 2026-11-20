@@ -928,6 +928,7 @@ public final class RecordingsIndex {
     public boolean upsert(File mp4) {
         if (mp4 == null || !mp4.isFile() || !mp4.canRead()) return false;
         if (!mp4.getName().endsWith(".mp4")) return false;
+        if (StorageManager.getInstance().isPublishedSurveillanceInternalCopy(mp4)) return false;
 
         // Sample BEFORE parsing so any remove() landing during the parse is
         // detected by upsertRow and the stale MERGE is refused.
@@ -1582,6 +1583,7 @@ public final class RecordingsIndex {
             File[] files = sm.listMp4Files(dir);
             for (File f : files) {
                 if (!f.isFile() || f.length() <= 0 || !f.canRead()) continue;
+                if (sm.isPublishedSurveillanceInternalCopy(f)) continue;
                 out.add(new DirEntry(f, forceType));
             }
         }
@@ -1768,6 +1770,9 @@ public final class RecordingsIndex {
             RootScan scan = new RootScan(
                     RecordingIdentity.rootIdFor(root), rank, listing.available, listing.complete);
             for (File file : listing.files) {
+                // Omitting its ID also drops pre-existing internal rows in
+                // reconcile phase 2, not just new additions in phase 3.
+                if (sm.isPublishedSurveillanceInternalCopy(file)) continue;
                 RecordingIdentity identity = RecordingIdentity.fromFile(file);
                 scan.observedIds.add(identity.recordingId);
                 if (!file.isFile()) continue;
@@ -1824,7 +1829,8 @@ public final class RecordingsIndex {
             // shell ls when listFiles() returns null on SD-card mounts.
             File[] files = sm.listMp4Files(dir);
             for (File f : files) {
-                if (f.isFile() && f.length() > 0) {
+                if (f.isFile() && f.length() > 0
+                        && !sm.isPublishedSurveillanceInternalCopy(f)) {
                     out.add(RecordingIdentity.fromFile(f).recordingId);
                 }
             }
@@ -2373,6 +2379,7 @@ public final class RecordingsIndex {
      * we don't own).
      */
     private static Row parse(File mp4) {
+        if (StorageManager.getInstance().isPublishedSurveillanceInternalCopy(mp4)) return null;
         String name = mp4.getName();
         Row r = new Row();
         RecordingIdentity identity = RecordingIdentity.fromFile(mp4);
