@@ -928,6 +928,7 @@ public final class RecordingsIndex {
     public boolean upsert(File mp4) {
         if (mp4 == null || !mp4.isFile() || !mp4.canRead()) return false;
         if (!mp4.getName().endsWith(".mp4")) return false;
+        if (StorageManager.hasPublishedSurveillanceMarker(mp4)) return false;
 
         // Sample BEFORE parsing so any remove() landing during the parse is
         // detected by upsertRow and the stale MERGE is refused.
@@ -1582,6 +1583,7 @@ public final class RecordingsIndex {
             File[] files = sm.listMp4Files(dir);
             for (File f : files) {
                 if (!f.isFile() || f.length() <= 0 || !f.canRead()) continue;
+                if (StorageManager.hasPublishedSurveillanceMarker(f)) continue;
                 out.add(new DirEntry(f, forceType));
             }
         }
@@ -1768,6 +1770,9 @@ public final class RecordingsIndex {
             RootScan scan = new RootScan(
                     RecordingIdentity.rootIdFor(root), rank, listing.available, listing.complete);
             for (File file : listing.files) {
+                // Omitting its ID also drops pre-existing internal rows in
+                // reconcile phase 2, not just new additions in phase 3.
+                if (StorageManager.hasPublishedSurveillanceMarker(file)) continue;
                 RecordingIdentity identity = RecordingIdentity.fromFile(file);
                 scan.observedIds.add(identity.recordingId);
                 if (!file.isFile()) continue;
@@ -1824,7 +1829,8 @@ public final class RecordingsIndex {
             // shell ls when listFiles() returns null on SD-card mounts.
             File[] files = sm.listMp4Files(dir);
             for (File f : files) {
-                if (f.isFile() && f.length() > 0) {
+                if (f.isFile() && f.length() > 0
+                        && !StorageManager.hasPublishedSurveillanceMarker(f)) {
                     out.add(RecordingIdentity.fromFile(f).recordingId);
                 }
             }
@@ -2373,6 +2379,7 @@ public final class RecordingsIndex {
      * we don't own).
      */
     private static Row parse(File mp4) {
+        if (StorageManager.hasPublishedSurveillanceMarker(mp4)) return null;
         String name = mp4.getName();
         Row r = new Row();
         RecordingIdentity identity = RecordingIdentity.fromFile(mp4);
@@ -2385,19 +2392,17 @@ public final class RecordingsIndex {
         r.absPath = mp4.getAbsolutePath();
         r.sizeBytes = mp4.length();
         r.mp4Mtime = mp4.lastModified();
-        // Physical volume the clip lives on, classified from its path. Stored
-        // as an indexed column so the recordings library can filter by volume
-        // (INTERNAL / SD_CARD / USB). Best-effort — a classifier/singleton
-        // failure leaves storage NULL and rowToJson falls back to deriving the
-        // tag from the path at read time, so the row is never dropped.
-        try {
-            com.overdrive.app.storage.StorageManager storageManager =
-                    com.overdrive.app.storage.StorageManager.getInstance();
-            r.storage = storageManager.classifyStorageForPath(r.absPath);
-            r.rootRank = storageManager.getRecordingRootRank(mp4);
-        } catch (Throwable ignored) {
-            r.storage = null;
-        }
+        // An existing storage manager knows whether a portable root is SD or
+        // USB. Never CONSTRUCT one inside index parsing (the standalone index
+        // tests deliberately create RecordingsIndex without storage setup).
+        StorageManager existingStorage = StorageManager.peekInstance();
+        if (existingStorage != null) try {
+            r.storage = existingStorage.classifyStorageForPath(r.absPath);
+            r.rootRank = existingStorage.getRecordingRootRank(mp4);
+        } catch (Throwable ignored) { /* preserve the index row */ }
+        if (r.storage == null && ("internal".equals(r.volumeId)
+                || "data".equals(r.volumeId))) r.storage = "INTERNAL";
+        // An unidentified portable volume may be USB; do not label it SD.
 
         // Type + timestamp from filename pattern.
         Matcher cam = CAM_PATTERN.matcher(name);
@@ -2647,8 +2652,15 @@ public final class RecordingsIndex {
         try {
             String storage = rs.getString("storage");
             if (storage == null || storage.isEmpty()) {
-                storage = com.overdrive.app.storage.StorageManager
-                        .getInstance().classifyStorageForPath(absPath);
+                // Legacy rows: use live mount knowledge only if storage has
+                // already initialized; never start it in a query renderer.
+                StorageManager existing = StorageManager.peekInstance();
+                if (existing != null) storage = existing.classifyStorageForPath(absPath);
+                if (storage == null) {
+                    String volume = RecordingIdentity.fromPath(absPath).volumeId;
+                    if ("internal".equals(volume) || "data".equals(volume))
+                        storage = "INTERNAL";
+                }
             }
             if (storage != null) rec.put("storage", storage);
         } catch (Throwable ignored) {
