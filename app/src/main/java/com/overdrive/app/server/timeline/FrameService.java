@@ -1,5 +1,7 @@
 package com.overdrive.app.server.timeline;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import android.graphics.Bitmap;
 import android.media.MediaMetadataRetriever;
 
@@ -233,10 +235,13 @@ public final class FrameService {
         Bitmap frame = null;
         Bitmap scaled = null;
         Bitmap corrected = null;
-        try (FileInputStream in = new FileInputStream(job.mp4)) {
+        try (FileInputStream in = RemovableStorageFs.openInput(job.mp4)) {
             try {
                 // The String overload needs an Application, which the daemon does not have.
-                retriever.setDataSource(in.getFD());
+                // Card files on DiLink 100 are reached through MediaStore; their descriptors need the
+                // MediaDataSource route (the FileDescriptor overload wants an app Context).
+                if (RemovableStorageFs.isRouted(job.mp4)) RemovableStorageFs.setDataSource(retriever, job.mp4);
+                else retriever.setDataSource(in.getFD());
             } catch (RuntimeException e) {
                 fail(job.clipKey);
                 return FAILED_FRAME;
@@ -297,10 +302,10 @@ public final class FrameService {
 
     private static byte[] readCached(File file) {
         if (file == null) return null;
-        long length = file.length();
+        long length = RemovableStorageFs.length(file);
         if (length <= 0 || length > CACHE_FILE_MAX_BYTES) return null;
         try {
-            byte[] data = java.nio.file.Files.readAllBytes(file.toPath());
+            byte[] data = RemovableStorageFs.readAllBytes(file);
             if (data.length == 0) return null;
             // Reading cached scrub frames is common during seeking. Throttle the
             // on-disk LRU timestamp update rather than writing metadata on every hit.
@@ -316,16 +321,16 @@ public final class FrameService {
         if (cacheOff && System.nanoTime() - cacheOffSinceNs < SWEEP_EVERY_NS) return;
         cacheOff = false;
         File dir = target.getParentFile();
-        if (dir == null || (!dir.isDirectory() && !dir.mkdirs())) return;
+        if (dir == null || (!RemovableStorageFs.isDirectory(dir) && !RemovableStorageFs.mkdirs(dir))) return;
         File part = new File(dir, target.getName() + ".part");
-        try (FileOutputStream out = new FileOutputStream(part)) {
+        try (FileOutputStream out = RemovableStorageFs.openOutput(part)) {
             out.write(data);
         } catch (IOException e) {
-            part.delete();
+            RemovableStorageFs.delete(part);
             return;
         }
-        if (!part.renameTo(target)) {
-            part.delete();
+        if (!RemovableStorageFs.renameTo(part, target)) {
+            RemovableStorageFs.delete(part);
             return;
         }
         if (cacheBytes >= 0) cacheBytes += data.length;
@@ -334,7 +339,7 @@ public final class FrameService {
 
     /** Oldest-first eviction down to 48 MB once over 64 MB; no listing means no further writes for 10 min. */
     private static void trim(File dir) {
-        File[] files = dir.listFiles();
+        File[] files = RemovableStorageFs.listFiles(dir);
         if (files == null) {
             cacheOff = true;
             cacheOffSinceNs = System.nanoTime();
@@ -345,8 +350,8 @@ public final class FrameService {
         long[] stamps = new long[files.length];
         Integer[] order = new Integer[files.length];
         for (int i = 0; i < files.length; i++) {
-            sizes[i] = files[i].length();
-            stamps[i] = files[i].lastModified();
+            sizes[i] = RemovableStorageFs.length(files[i]);
+            stamps[i] = RemovableStorageFs.lastModified(files[i]);
             order[i] = i;
             total += sizes[i];
         }
@@ -354,7 +359,7 @@ public final class FrameService {
             Arrays.sort(order, (a, b) -> Long.compare(stamps[a], stamps[b]));
             for (Integer i : order) {
                 if (total <= CACHE_TRIM_TO_BYTES) break;
-                if (files[i].delete()) total -= sizes[i];
+                if (RemovableStorageFs.delete(files[i])) total -= sizes[i];
             }
         }
         cacheBytes = total;
@@ -412,11 +417,11 @@ public final class FrameService {
             }
             try {
                 File dir = cacheDir();
-                File[] files = dir == null ? null : dir.listFiles();
+                File[] files = dir == null ? null : RemovableStorageFs.listFiles(dir);
                 if (files == null) continue;
                 for (File f : files) {
                     String n = f.getName();
-                    if (n.length() > 33 && n.charAt(32) == '_' && ids.contains(n.substring(0, 32))) f.delete();
+                    if (n.length() > 33 && n.charAt(32) == '_' && ids.contains(n.substring(0, 32))) RemovableStorageFs.delete(f);
                 }
             } catch (Throwable ignored) {
                 // The periodic sweep catches anything left.
@@ -427,8 +432,8 @@ public final class FrameService {
     /** Drops stills of clips that left the index or changed, plus stray partial files. */
     private static void sweep() {
         File dir = cacheDir();
-        if (dir == null || !dir.isDirectory()) return;
-        File[] files = dir.listFiles();
+        if (dir == null || !RemovableStorageFs.isDirectory(dir)) return;
+        File[] files = RemovableStorageFs.listFiles(dir);
         if (files == null) return;
         long now = System.currentTimeMillis();
         Map<String, Boolean> live = new HashMap<>();
@@ -437,7 +442,7 @@ public final class FrameService {
             int idEnd = name.indexOf('_');
             int fpEnd = idEnd < 0 ? -1 : name.indexOf('_', idEnd + 1);
             if (idEnd != 32 || fpEnd < 0 || !name.endsWith(".jpg")) {
-                if (now - file.lastModified() > STRAY_FILE_AGE_MS) file.delete();
+                if (now - RemovableStorageFs.lastModified(file) > STRAY_FILE_AGE_MS) RemovableStorageFs.delete(file);
                 continue;
             }
             String id = name.substring(0, idEnd);
@@ -454,7 +459,7 @@ public final class FrameService {
                 keep = ref != null && fp.equals(ref.fp());
                 live.put(clip, keep);
             }
-            if (!keep) file.delete();
+            if (!keep) RemovableStorageFs.delete(file);
         }
         trim(dir);
     }

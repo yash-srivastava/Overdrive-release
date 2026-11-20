@@ -1,4 +1,6 @@
 package com.overdrive.app.surveillance;
+
+import com.overdrive.app.storage.removable.RemovableStorageFs;
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.storage.StorageManager;
 import com.overdrive.app.telemetry.TelemetryDataCollector;
@@ -2303,8 +2305,8 @@ public class GpuSurveillancePipeline {
         logger.info("Initializing GPU surveillance pipeline...");
         
         // Ensure output directory exists
-        if (!eventOutputDir.exists()) {
-            eventOutputDir.mkdirs();
+        if (!RemovableStorageFs.exists(eventOutputDir)) {
+            RemovableStorageFs.mkdirs(eventOutputDir);
         }
         
         // SOTA: Release any stuck encoder resources before creating new one
@@ -4623,20 +4625,22 @@ public class GpuSurveillancePipeline {
             // No probe outstanding — this call owns the slot.
             Thread t = new Thread(() -> {
                 try {
-                    if (!target.exists()) {
-                        target.mkdirs();
+                    if (!RemovableStorageFs.exists(target)) {
+                        RemovableStorageFs.mkdirs(target);
                     }
-                    if (!target.isDirectory()) return;
+                    if (!RemovableStorageFs.isDirectory(target)) return;
+                    // MediaStore-routed volumes (DiLink 100) do not allow names starting with a dot.
                     java.io.File probeFile = new java.io.File(target,
-                        ".wrprobe_" + android.os.Process.myPid());
-                    java.io.FileOutputStream fos = new java.io.FileOutputStream(probeFile);
+                        (RemovableStorageFs.isRouted(target) ? "wrprobe_" : ".wrprobe_")
+                            + android.os.Process.myPid());
+                    java.io.FileOutputStream fos = RemovableStorageFs.openOutput(probeFile);
                     try {
                         fos.write(0);
                         fos.flush();
                     } finally {
                         try { fos.close(); } catch (Exception ignored) {}
                     }
-                    probeFile.delete();
+                    RemovableStorageFs.delete(probeFile);
                     ok[0] = true;
                 } catch (Throwable ignored) {
                     // ok stays false — volume not write-ready

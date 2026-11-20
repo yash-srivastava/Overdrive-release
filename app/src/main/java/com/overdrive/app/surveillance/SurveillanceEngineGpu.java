@@ -1,4 +1,6 @@
 package com.overdrive.app.surveillance;
+
+import com.overdrive.app.storage.removable.RemovableStorageFs;
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.ai.YoloDetector;
 import com.overdrive.app.telegram.TelegramNotifier;
@@ -1927,8 +1929,8 @@ public class SurveillanceEngineGpu {
             this.thumbnailBuffer = new ThumbnailBuffer();
         }
         
-        if (!eventDir.exists()) {
-            eventDir.mkdirs();
+        if (!RemovableStorageFs.exists(eventDir)) {
+            RemovableStorageFs.mkdirs(eventDir);
         }
         
         // Allocate direct buffer for V2 pipeline JNI
@@ -2000,7 +2002,7 @@ public class SurveillanceEngineGpu {
         // Async — must not block init().
         new Thread(() -> {
             try {
-                if (eventDir != null && eventDir.isDirectory()) {
+                if (eventDir != null && RemovableStorageFs.isDirectory(eventDir)) {
                     sweepOrphanHeroThumbnails(eventDir);
                 }
             } catch (Throwable t) {
@@ -2293,12 +2295,12 @@ public class SurveillanceEngineGpu {
      */
     public void setEventOutputDir(File eventDir) {
         this.eventOutputDir = eventDir;
-        if (eventDir != null && !eventDir.exists()) {
-            boolean created = eventDir.mkdirs();
+        if (eventDir != null && !RemovableStorageFs.exists(eventDir)) {
+            boolean created = RemovableStorageFs.mkdirs(eventDir);
             logger.info("Updated event output directory: " + eventDir.getAbsolutePath() + " (created=" + created + ")");
             if (created) {
-                eventDir.setReadable(true, false);
-                eventDir.setExecutable(true, false);
+                RemovableStorageFs.setReadable(eventDir, true, false);
+                RemovableStorageFs.setExecutable(eventDir, true, false);
             }
         } else {
             logger.info("Updated event output directory: " + (eventDir != null ? eventDir.getAbsolutePath() : "null"));
@@ -8642,7 +8644,7 @@ public class SurveillanceEngineGpu {
                 // field is nulled before the publish tail runs).
                 videoPath = eventFile.getAbsolutePath();
             }
-            if (videoPath != null && new java.io.File(videoPath).exists()) {
+            if (videoPath != null && RemovableStorageFs.exists(new java.io.File(videoPath))) {
                 int durationSec = 0;
                 try {
                     HardwareEventRecorderGpu enc = (recorder != null) ? recorder.getEncoder() : null;
@@ -8662,7 +8664,7 @@ public class SurveillanceEngineGpu {
         try {
             if (oemFinalizedClip != null
                     && oemFinalizedClip.getPath() != null
-                    && new java.io.File(oemFinalizedClip.getPath()).exists()) {
+                    && RemovableStorageFs.exists(new java.io.File(oemFinalizedClip.getPath()))) {
                 String label = threat != null ? Actor.groupLabel(threat.classGroup) : null;
                 TelegramNotifier.notifyVideoRecorded(
                         oemFinalizedClip.getPath(), label,
@@ -8898,7 +8900,7 @@ public class SurveillanceEngineGpu {
      * file (MediaMetadataRetriever can hang on a malformed mp4).
      */
     private void sweepOrphanHeroThumbnails(File dir) {
-        File[] mp4s = dir.listFiles((d, name) -> name.endsWith(".mp4"));
+        File[] mp4s = RemovableStorageFs.listFiles(dir, (d, name) -> name.endsWith(".mp4"));
         if (mp4s == null || mp4s.length == 0) return;
         long cutoff = System.currentTimeMillis() - 30_000L;
         int generated = 0;
@@ -8912,11 +8914,11 @@ public class SurveillanceEngineGpu {
         // progress on the remaining files. 5s budget per file is generous
         // (a healthy keyframe extract is <500 ms even on a slow SD card).
         for (File mp4 : mp4s) {
-            if (mp4.lastModified() > cutoff) continue;
+            if (RemovableStorageFs.lastModified(mp4) > cutoff) continue;
             String name = mp4.getName();
             String heroName = name.substring(0, name.length() - 4) + ".jpg";
             File heroFile = new File(dir, heroName);
-            if (heroFile.exists()) continue;
+            if (RemovableStorageFs.exists(heroFile)) continue;
 
             final File mp4Final = mp4;
             final File heroFinal = heroFile;
@@ -8956,7 +8958,7 @@ public class SurveillanceEngineGpu {
                 logger.warn("Orphan hero extract timed out for " + name
                         + " — leaking worker thread, continuing sweep");
             }
-            if (heroFile.exists()) generated++;
+            if (RemovableStorageFs.exists(heroFile)) generated++;
         }
         if (generated > 0) {
             logger.info("Orphan hero sweep: generated " + generated
@@ -9015,13 +9017,13 @@ public class SurveillanceEngineGpu {
 
     private void writeFallbackHeroFromMp4(File mp4File, File outFile) {
         if (mp4File == null || outFile == null) return;
-        if (outFile.exists()) return;          // ThumbnailBuffer already wrote one
-        if (!mp4File.exists() || mp4File.length() == 0) return;
+        if (RemovableStorageFs.exists(outFile)) return;          // ThumbnailBuffer already wrote one
+        if (!RemovableStorageFs.exists(mp4File) || RemovableStorageFs.length(mp4File) == 0) return;
 
         android.media.MediaMetadataRetriever mmr = null;
         try {
             mmr = new android.media.MediaMetadataRetriever();
-            mmr.setDataSource(mp4File.getAbsolutePath());
+            RemovableStorageFs.setDataSource(mmr, mp4File);
             // Seek to the MOTION moment, not the pre-roll. The clip is
             // [pre-record | motion | post-record]; the old hardcoded ~1s landed
             // inside the pre-record quiet window (preRecordMs default 5s, often
@@ -9075,17 +9077,17 @@ public class SurveillanceEngineGpu {
             // Raw (player-dewarped) clips get the same lens correction as playback.
             frame = LensTag.dewarpFrameForClip(frame, mp4File);
             File tmpFile = new File(outFile.getAbsolutePath() + ".tmp");
-            try (java.io.FileOutputStream fos = new java.io.FileOutputStream(tmpFile)) {
+            try (java.io.FileOutputStream fos = RemovableStorageFs.openOutput(tmpFile)) {
                 frame.compress(android.graphics.Bitmap.CompressFormat.JPEG, 92, fos);
                 try { fos.getFD().sync(); } catch (Throwable ignored) {}
             } finally {
                 frame.recycle();
             }
-            try { tmpFile.setReadable(true, /*ownerOnly=*/false); } catch (Throwable ignored) {}
-            if (!tmpFile.renameTo(outFile)) {
-                outFile.delete();
-                if (!tmpFile.renameTo(outFile)) {
-                    tmpFile.delete();
+            try { RemovableStorageFs.setReadable(tmpFile, true, false); } catch (Throwable ignored) {}
+            if (!RemovableStorageFs.renameTo(tmpFile, outFile)) {
+                RemovableStorageFs.delete(outFile);
+                if (!RemovableStorageFs.renameTo(tmpFile, outFile)) {
+                    RemovableStorageFs.delete(tmpFile);
                     logger.warn("Fallback hero rename failed for " + outFile.getName());
                     return;
                 }
@@ -10830,11 +10832,11 @@ public class SurveillanceEngineGpu {
         // would be treated as a duplicate of the first and the user would NEVER be
         // told about it. Uniquify instead — bounded probe, then fall back to
         // millisecond precision so we can never loop or reuse a name.
-        if (currentEventFile.exists()) {
+        if (RemovableStorageFs.exists(currentEventFile)) {
             File unique = null;
             for (int n = 2; n <= 9; n++) {
                 File cand = new File(trigDir, "event_" + timestamp + "_" + n + ".mp4");
-                if (!cand.exists()) { unique = cand; break; }
+                if (!RemovableStorageFs.exists(cand)) { unique = cand; break; }
             }
             if (unique == null) {
                 unique = new File(trigDir, "event_" + timestamp + "_"
@@ -10901,7 +10903,7 @@ public class SurveillanceEngineGpu {
                 if (internal != null && !internal.equals(trigDir)) {
                     eventOutputDir = internal;
                     currentEventFile = new File(internal, currentEventFile.getName());
-                    if (currentEventFile.exists()) {
+                    if (RemovableStorageFs.exists(currentEventFile)) {
                         currentEventFile = new File(internal, "event_" + timestamp + "_"
                                 + (System.currentTimeMillis() % 1000L) + ".mp4");
                     }
@@ -11543,7 +11545,7 @@ public class SurveillanceEngineGpu {
         for (File seg : eventSegmentFiles) {
             if (seg == null || seg.equals(f)) continue;       // skip the final segment (handled below)
             try {
-                if (seg.exists()) seg.delete();
+                if (RemovableStorageFs.exists(seg)) RemovableStorageFs.delete(seg);
             } catch (Throwable ignored) {}
             try {
                 com.overdrive.app.server.RecordingsApiHandler.deleteEventSidecars(seg, seg.getName());
@@ -11553,7 +11555,7 @@ public class SurveillanceEngineGpu {
         }
         eventSegmentFiles.clear();
         try {
-            if (f.exists()) f.delete();                       // the mp4 (final segment)
+            if (RemovableStorageFs.exists(f)) RemovableStorageFs.delete(f);                       // the mp4 (final segment)
         } catch (Throwable ignored) {}
         try {
             // Sidecars (.json/.jpg/per-actor thumbs) + H2 row + cache invalidate,
@@ -11780,7 +11782,7 @@ public class SurveillanceEngineGpu {
         actorTracker.reset();
         lastActors = java.util.Collections.emptyList();
 
-        if (stoppingFile != null && stoppingFile.exists() && shouldDiscardEvent()) {
+        if (stoppingFile != null && RemovableStorageFs.exists(stoppingFile) && shouldDiscardEvent()) {
             // Empty-bright-motion false positive (shadow over a parked car, etc.):
             // delete the clip + sidecars + H2 row and emit NO notification. Runs
             // BEFORE flushSegmentMetadata so the hero/JSON/SRT are usually never
@@ -11800,9 +11802,9 @@ public class SurveillanceEngineGpu {
                 logger.debug("Discard compensation already emitted for " + discardName
                         + "; skipping duplicate");
             }
-        } else if (stoppingFile != null && stoppingFile.exists()) {
+        } else if (stoppingFile != null && RemovableStorageFs.exists(stoppingFile)) {
             logger.info( String.format("Saved: %s (%d KB)",
-                    stoppingFile.getName(), stoppingFile.length() / 1024));
+                    stoppingFile.getName(), RemovableStorageFs.length(stoppingFile) / 1024));
 
             // Flush metadata for the FINAL segment. Earlier segments were
             // scheduled via the rotation listener and run on
@@ -11863,12 +11865,12 @@ public class SurveillanceEngineGpu {
             // moment ago from an orphan .jpg an earlier run left at the same path.
             // Matched by name so a stale latch from a previous event reads false.
             final boolean heroIsCloseUp = videoName.equals(lastSyncHeroMp4Name.get());
-            if (!heroSiblingFile.exists()) {
+            if (!RemovableStorageFs.exists(heroSiblingFile)) {
                 writeFallbackHeroWithTimeout(stoppingFile, heroSiblingFile, 5_000L);  // snapshot (audit R8-2 / ExtC-3)
             }
 
-            String heroName = heroSiblingFile.exists() ? heroSibling : null;
-            String heroPath = heroSiblingFile.exists() ? heroSiblingFile.getAbsolutePath() : null;
+            String heroName = RemovableStorageFs.exists(heroSiblingFile) ? heroSibling : null;
+            String heroPath = RemovableStorageFs.exists(heroSiblingFile) ? heroSiblingFile.getAbsolutePath() : null;
             // Per-event dedup remains as defense in depth for retries or future
             // alternate finalization paths. The lifecycle lock now serializes
             // concurrent stop callers, but the final notification transports
@@ -12263,7 +12265,7 @@ public class SurveillanceEngineGpu {
                             // pick failed) — extract a real keyframe from this
                             // segment's MP4 so expectedHeroName resolves to a file.
                             File fallback = new File(segmentMp4.getParentFile(), heroBase + ".jpg");
-                            if (!fallback.exists()) {
+                            if (!RemovableStorageFs.exists(fallback)) {
                                 // Timeout-isolated: writeFallbackHeroFromMp4 drives
                                 // MediaMetadataRetriever, which can hang forever on a
                                 // truncated-moov / corrupt-sample MP4 (SD unmount or
@@ -12277,7 +12279,7 @@ public class SurveillanceEngineGpu {
                                 // exactly as the final-segment path does (:6368).
                                 writeFallbackHeroWithTimeout(segmentMp4, fallback, 5_000L);
                             }
-                            if (fallback.exists()) {
+                            if (RemovableStorageFs.exists(fallback)) {
                                 logger.info("Hero thumbnail (fallback keyframe) ("
                                         + segmentMp4.getName() + "): " + fallback.getName());
                             }

@@ -1,5 +1,7 @@
 package com.overdrive.app.daemon.telegram;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.server.LocaleManager;
 import com.overdrive.app.storage.StorageManager;
 
@@ -93,12 +95,12 @@ public class EventCommandHandler implements TelegramCommandHandler {
     private void handleEvents(long chatId, int hours, int page, CommandContext ctx) {
         File eventDir = new File(getEventDir());
         
-        if (!eventDir.exists() || !eventDir.isDirectory()) {
+        if (!RemovableStorageFs.exists(eventDir) || !RemovableStorageFs.isDirectory(eventDir)) {
             ctx.sendMessage(chatId, ctx.tr("events.directory_missing"));
             return;
         }
         
-        File[] files = eventDir.listFiles((dir, name) -> 
+        File[] files = RemovableStorageFs.listFiles(eventDir, (dir, name) -> 
             name.startsWith("event_") && name.endsWith(".mp4"));
         
         if (files == null || files.length == 0) {
@@ -111,7 +113,7 @@ public class EventCommandHandler implements TelegramCommandHandler {
         List<File> recentFiles = new ArrayList<>();
         
         for (File f : files) {
-            if (f.lastModified() >= cutoffTime) {
+            if (RemovableStorageFs.lastModified(f) >= cutoffTime) {
                 recentFiles.add(f);
             }
         }
@@ -122,7 +124,7 @@ public class EventCommandHandler implements TelegramCommandHandler {
         }
         
         // Sort by modification time (newest first)
-        recentFiles.sort((a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+        recentFiles.sort((a, b) -> Long.compare(RemovableStorageFs.lastModified(b), RemovableStorageFs.lastModified(a)));
         
         // Pagination
         int totalEvents = recentFiles.size();
@@ -146,14 +148,14 @@ public class EventCommandHandler implements TelegramCommandHandler {
         
         for (int i = startIdx; i < endIdx; i++) {
             File f = recentFiles.get(i);
-            String dateStr = sdf.format(new Date(f.lastModified()));
-            String sizeStr = formatFileSize(f.length(), ctx);
+            String dateStr = sdf.format(new Date(RemovableStorageFs.lastModified(f)));
+            String sizeStr = formatFileSize(RemovableStorageFs.length(f), ctx);
             
             // Status indicator
             String status;
             if (isFileStillWriting(f)) {
                 status = "⏺️";
-            } else if (f.length() > MAX_VIDEO_SIZE_BYTES) {
+            } else if (RemovableStorageFs.length(f) > MAX_VIDEO_SIZE_BYTES) {
                 status = "⚠️";
             } else {
                 status = "📥";
@@ -200,7 +202,7 @@ public class EventCommandHandler implements TelegramCommandHandler {
         
         File videoFile = new File(getEventDir(), filename);
         
-        if (!videoFile.exists()) {
+        if (!RemovableStorageFs.exists(videoFile)) {
             ctx.sendMessage(chatId, ctx.tr("events.file_not_found", filename));
             return;
         }
@@ -210,11 +212,11 @@ public class EventCommandHandler implements TelegramCommandHandler {
             ctx.sendMessage(chatId, ctx.tr(
                     "events.recording_in_progress",
                     filename,
-                    formatFileSize(videoFile.length(), ctx)));
+                    formatFileSize(RemovableStorageFs.length(videoFile), ctx)));
             return;
         }
         
-        long fileSize = videoFile.length();
+        long fileSize = RemovableStorageFs.length(videoFile);
         
         // Check file size
         if (fileSize > MAX_VIDEO_SIZE_BYTES) {
@@ -244,18 +246,18 @@ public class EventCommandHandler implements TelegramCommandHandler {
      */
     private boolean isFileStillWriting(File file) {
         // Method 1: Check if file was modified very recently (within 3 seconds)
-        long lastModified = file.lastModified();
+        long lastModified = RemovableStorageFs.lastModified(file);
         long now = System.currentTimeMillis();
         if (now - lastModified < 3000) {
             return true;
         }
         
         // Method 2: Check if file size is changing
-        long size1 = file.length();
+        long size1 = RemovableStorageFs.length(file);
         try {
             Thread.sleep(500);
         } catch (InterruptedException ignored) {}
-        long size2 = file.length();
+        long size2 = RemovableStorageFs.length(file);
         
         return size2 != size1;
     }

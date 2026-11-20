@@ -1,5 +1,7 @@
 package com.overdrive.app.server;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import android.graphics.Bitmap;
 import android.media.MediaMetadataRetriever;
 import com.overdrive.app.daemon.CameraDaemon;
@@ -401,7 +403,7 @@ public class RecordingsApiHandler {
             File jpegFile = requestedPath == null
                     ? findSiblingJpeg(filename)
                     : findRequestedMediaFile(filename, requestedPath, false);
-            if (jpegFile != null && jpegFile.exists() && jpegFile.length() > 0) {
+            if (jpegFile != null && RemovableStorageFs.exists(jpegFile) && RemovableStorageFs.length(jpegFile) > 0) {
                 HttpResponse.sendImage(out, jpegFile, "image/jpeg");
                 return;
             }
@@ -411,8 +413,8 @@ public class RecordingsApiHandler {
 
         // Check cache first
         File cacheDir = new File(getThumbnailCacheDir());
-        if (!cacheDir.exists()) {
-            cacheDir.mkdirs();
+        if (!RemovableStorageFs.exists(cacheDir)) {
+            RemovableStorageFs.mkdirs(cacheDir);
         }
 
         String thumbName = filename.replace(".mp4", ".jpg");
@@ -445,16 +447,16 @@ public class RecordingsApiHandler {
         // than a generic frame at +1s. Backwards-compat: legacy clips without
         // a hero file fall through to the cache + MediaMetadataRetriever path.
         File exactHero = new File(videoFile.getParentFile(), thumbName);
-        File heroSibling = exactHero.exists() && exactHero.canRead() && exactHero.length() > 0
+        File heroSibling = RemovableStorageFs.exists(exactHero) && RemovableStorageFs.canRead(exactHero) && RemovableStorageFs.length(exactHero) > 0
                 ? exactHero
                 : (requestedPath == null ? findSiblingJpeg(thumbName) : null);
-        if (heroSibling != null && heroSibling.exists() && heroSibling.length() > 0) {
+        if (heroSibling != null && RemovableStorageFs.exists(heroSibling) && RemovableStorageFs.length(heroSibling) > 0) {
             HttpResponse.sendImage(out, heroSibling, "image/jpeg", thumbCacheControl);
             return;
         }
 
         // If cached thumbnail exists and is valid, serve it immediately
-        if (thumbFile.exists() && thumbFile.length() > 0) {
+        if (RemovableStorageFs.exists(thumbFile) && RemovableStorageFs.length(thumbFile) > 0) {
             HttpResponse.sendImage(out, thumbFile, "image/jpeg", thumbCacheControl);
             return;
         }
@@ -472,7 +474,7 @@ public class RecordingsApiHandler {
                 try {
                     byte[] data = generateThumbnail(vf);
                     if (data != null) {
-                        try (FileOutputStream fos = new FileOutputStream(tf)) {
+                        try (FileOutputStream fos = RemovableStorageFs.openOutput(tf)) {
                             fos.write(data);
                         }
                     }
@@ -506,7 +508,7 @@ public class RecordingsApiHandler {
                 Messages.get("errors.recordings_thumbnail_not_found_with_filename", recordingId));
             return;
         }
-        if (!videoFile.isFile() || !videoFile.canRead()) {
+        if (!RemovableStorageFs.isFile(videoFile) || !RemovableStorageFs.canRead(videoFile)) {
             HttpResponse.sendError(out, 410, Messages.get("errors.recordings_file_no_longer_accessible"));
             return;
         }
@@ -521,9 +523,9 @@ public class RecordingsApiHandler {
             }
         }
         File cacheDir = new File(getThumbnailCacheDir());
-        if (!cacheDir.exists()) cacheDir.mkdirs();
+        if (!RemovableStorageFs.exists(cacheDir)) RemovableStorageFs.mkdirs(cacheDir);
         File thumbFile = new File(cacheDir, recordingId + ".jpg");
-        if (thumbFile.isFile() && thumbFile.length() > 0) {
+        if (RemovableStorageFs.isFile(thumbFile) && RemovableStorageFs.length(thumbFile) > 0) {
             HttpResponse.sendImage(out, thumbFile, "image/jpeg");
             return;
         }
@@ -532,7 +534,7 @@ public class RecordingsApiHandler {
                 try {
                     byte[] data = generateThumbnail(videoFile);
                     if (data != null) {
-                        try (FileOutputStream output = new FileOutputStream(thumbFile)) {
+                        try (FileOutputStream output = RemovableStorageFs.openOutput(thumbFile)) {
                             output.write(data);
                         }
                     }
@@ -578,8 +580,11 @@ public class RecordingsApiHandler {
         // setDataSource(String) calls ActivityThread.currentApplication().getPackageManager()
         // for MIME lookup. The daemon has no registered Application, so that NPEs on DiLink5.
         // The FileDescriptor overload skips the package-manager probe entirely.
-        try (FileInputStream fis = new FileInputStream(videoFile)) {
-            retriever.setDataSource(fis.getFD());
+        try (FileInputStream fis = RemovableStorageFs.openInput(videoFile)) {
+            // Card files on DiLink 100 are reached through MediaStore; their descriptors need the
+            // MediaDataSource route (the FileDescriptor overload wants an app Context).
+            if (RemovableStorageFs.isRouted(videoFile)) RemovableStorageFs.setDataSource(retriever, videoFile);
+            else retriever.setDataSource(fis.getFD());
 
             // Get frame at 1 second (1000000 microseconds)
             frame = retriever.getFrameAtTime(1000000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
@@ -654,7 +659,7 @@ public class RecordingsApiHandler {
             json.put("filename", filename);
             json.put("inflight", tmp != null);
             if (tmp != null) {
-                json.put("sizeBytes", tmp.length());
+                json.put("sizeBytes", RemovableStorageFs.length(tmp));
             }
         } catch (Exception ignored) {}
         HttpResponse.sendJson(out, json.toString());
@@ -669,15 +674,15 @@ public class RecordingsApiHandler {
         String tmpName = filename + ".tmp";
         for (File dir : sm.getAllRecordingsDirs()) {
             File f = new File(dir, tmpName);
-            if (f.exists() && f.canRead() && f.length() > 0) return f;
+            if (RemovableStorageFs.exists(f) && RemovableStorageFs.canRead(f) && RemovableStorageFs.length(f) > 0) return f;
         }
         for (File dir : sm.getAllSurveillanceDirs()) {
             File f = new File(dir, tmpName);
-            if (f.exists() && f.canRead() && f.length() > 0) return f;
+            if (RemovableStorageFs.exists(f) && RemovableStorageFs.canRead(f) && RemovableStorageFs.length(f) > 0) return f;
         }
         for (File dir : sm.getAllProximityDirs()) {
             File f = new File(dir, tmpName);
-            if (f.exists() && f.canRead() && f.length() > 0) return f;
+            if (RemovableStorageFs.exists(f) && RemovableStorageFs.canRead(f) && RemovableStorageFs.length(f) > 0) return f;
         }
         return null;
     }
@@ -714,19 +719,19 @@ public class RecordingsApiHandler {
         // Search all recordings directories (active + alternate)
         for (File dir : sm.getAllRecordingsDirs()) {
             File f = new File(dir, filename);
-            if (f.exists() && f.canRead() && f.length() > 0) return f;
+            if (RemovableStorageFs.exists(f) && RemovableStorageFs.canRead(f) && RemovableStorageFs.length(f) > 0) return f;
         }
 
         // Search all surveillance directories (active + alternate)
         for (File dir : sm.getAllSurveillanceDirs()) {
             File f = new File(dir, filename);
-            if (f.exists() && f.canRead() && f.length() > 0) return f;
+            if (RemovableStorageFs.exists(f) && RemovableStorageFs.canRead(f) && RemovableStorageFs.length(f) > 0) return f;
         }
 
         // Search all proximity directories (active + alternate)
         for (File dir : sm.getAllProximityDirs()) {
             File f = new File(dir, filename);
-            if (f.exists() && f.canRead() && f.length() > 0) return f;
+            if (RemovableStorageFs.exists(f) && RemovableStorageFs.canRead(f) && RemovableStorageFs.length(f) > 0) return f;
         }
 
         // In-flight fallback (thumbnails only): a notification fires the moment
@@ -740,15 +745,15 @@ public class RecordingsApiHandler {
             String tmpName = filename + ".tmp";
             for (File dir : sm.getAllRecordingsDirs()) {
                 File f = new File(dir, tmpName);
-                if (f.exists() && f.canRead() && f.length() > 0) return f;
+                if (RemovableStorageFs.exists(f) && RemovableStorageFs.canRead(f) && RemovableStorageFs.length(f) > 0) return f;
             }
             for (File dir : sm.getAllSurveillanceDirs()) {
                 File f = new File(dir, tmpName);
-                if (f.exists() && f.canRead() && f.length() > 0) return f;
+                if (RemovableStorageFs.exists(f) && RemovableStorageFs.canRead(f) && RemovableStorageFs.length(f) > 0) return f;
             }
             for (File dir : sm.getAllProximityDirs()) {
                 File f = new File(dir, tmpName);
-                if (f.exists() && f.canRead() && f.length() > 0) return f;
+                if (RemovableStorageFs.exists(f) && RemovableStorageFs.canRead(f) && RemovableStorageFs.length(f) > 0) return f;
             }
         }
 
@@ -768,13 +773,13 @@ public class RecordingsApiHandler {
             if (!requested.getName().equals(filename) || !isAllowedRecordingPath(requested)) {
                 return null;
             }
-            if (requested.exists() && requested.canRead() && requested.length() > 0) {
+            if (RemovableStorageFs.exists(requested) && RemovableStorageFs.canRead(requested) && RemovableStorageFs.length(requested) > 0) {
                 return requested;
             }
             if (allowInFlightTmp) {
                 File inFlight = new File(requestedPath + ".tmp").getCanonicalFile();
                 if (isAllowedRecordingPath(inFlight)
-                        && inFlight.exists() && inFlight.canRead() && inFlight.length() > 0) {
+                        && RemovableStorageFs.exists(inFlight) && RemovableStorageFs.canRead(inFlight) && RemovableStorageFs.length(inFlight) > 0) {
                     return inFlight;
                 }
             }
@@ -842,15 +847,15 @@ public class RecordingsApiHandler {
         StorageManager sm = StorageManager.getInstance();
         for (File dir : sm.getAllRecordingsDirs()) {
             File f = new File(dir, jpegName);
-            if (f.exists() && f.canRead() && f.length() > 0) return f;
+            if (RemovableStorageFs.exists(f) && RemovableStorageFs.canRead(f) && RemovableStorageFs.length(f) > 0) return f;
         }
         for (File dir : sm.getAllSurveillanceDirs()) {
             File f = new File(dir, jpegName);
-            if (f.exists() && f.canRead() && f.length() > 0) return f;
+            if (RemovableStorageFs.exists(f) && RemovableStorageFs.canRead(f) && RemovableStorageFs.length(f) > 0) return f;
         }
         for (File dir : sm.getAllProximityDirs()) {
             File f = new File(dir, jpegName);
-            if (f.exists() && f.canRead() && f.length() > 0) return f;
+            if (RemovableStorageFs.exists(f) && RemovableStorageFs.canRead(f) && RemovableStorageFs.length(f) > 0) return f;
         }
         return null;
     }
@@ -1249,7 +1254,7 @@ public class RecordingsApiHandler {
             for (java.io.File dir : dirs) {
                 // Missing dir → offline volume (or never-created category
                 // dir): excluded from both sides of the comparison.
-                if (dir == null || !dir.exists() || !dir.isDirectory()) continue;
+                if (dir == null || !RemovableStorageFs.exists(dir) || !RemovableStorageFs.isDirectory(dir)) continue;
                 StorageManager.DirListing listing = sm.listMp4FilesChecked(dir);
                 if (!listing.complete) {
                     // Present but unlistable/partial — comparison would be
@@ -1262,7 +1267,7 @@ public class RecordingsApiHandler {
                 for (java.io.File f : listing.files) {
                     // Mirror reconcile's eligibility (isFile + size>0) so the
                     // two sides count the same volume-aware population.
-                    if (f.isFile() && f.length() > 0) {
+                    if (RemovableStorageFs.isFile(f) && RemovableStorageFs.length(f) > 0) {
                         diskIds.add(RecordingIdentity.fromFile(f).recordingId);
                     }
                 }
@@ -1437,10 +1442,10 @@ public class RecordingsApiHandler {
 
         // Available space from the active recordings volume.
         File activeRecDir = storage.getRecordingsDir();
-        long availableSpace = activeRecDir != null && activeRecDir.exists()
-                ? activeRecDir.getFreeSpace() : 0;
-        long totalSpace = activeRecDir != null && activeRecDir.exists()
-                ? activeRecDir.getTotalSpace() : 0;
+        long availableSpace = activeRecDir != null && RemovableStorageFs.exists(activeRecDir)
+                ? RemovableStorageFs.getFreeSpace(activeRecDir) : 0;
+        long totalSpace = activeRecDir != null && RemovableStorageFs.exists(activeRecDir)
+                ? RemovableStorageFs.getTotalSpace(activeRecDir) : 0;
 
         JSONObject response = new JSONObject();
         response.put("success", true);
@@ -1579,7 +1584,7 @@ public class RecordingsApiHandler {
             HttpResponse.sendError(out, 404, Messages.get("errors.recordings_not_found"));
             return;
         }
-        if (!file.isFile() || !file.canRead()) {
+        if (!RemovableStorageFs.isFile(file) || !RemovableStorageFs.canRead(file)) {
             HttpResponse.sendError(out, 410, Messages.get("errors.recordings_file_no_longer_accessible"));
             return;
         }
@@ -1598,7 +1603,7 @@ public class RecordingsApiHandler {
         }
 
         try {
-            long[] range = HttpResponse.parseSingleByteRange(rangeHeader, file.length());
+            long[] range = HttpResponse.parseSingleByteRange(rangeHeader, RemovableStorageFs.length(file));
             if (range != null) {
                 HttpResponse.sendVideoRange(out, file, range[0], range[1], etag);
             } else {
@@ -1607,7 +1612,7 @@ public class RecordingsApiHandler {
         } catch (IndexOutOfBoundsException e) {
             HttpResponse.sendRangeNotSatisfiable(
                     out,
-                    file.length(),
+                    RemovableStorageFs.length(file),
                     Messages.get("errors.recordings_range_not_satisfiable"));
         } catch (IllegalArgumentException e) {
             HttpResponse.sendError(out, 400, Messages.get("errors.recordings_invalid_range_header"));
@@ -1623,7 +1628,7 @@ public class RecordingsApiHandler {
      * changes at least one of these, invalidating the client's cache.
      */
     private static String buildVideoEtag(File file) {
-        return "\"" + file.length() + "-" + file.lastModified() + "\"";
+        return "\"" + RemovableStorageFs.length(file) + "-" + RemovableStorageFs.lastModified(file) + "\"";
     }
 
     /**
@@ -1664,7 +1669,7 @@ public class RecordingsApiHandler {
         }
         
         try { com.overdrive.app.server.timeline.TimelineLedger.noteDeleting(file, "user"); } catch (Throwable ignored) { }
-        boolean deleted = file.delete();
+        boolean deleted = RemovableStorageFs.delete(file);
         if (deleted) {
             deleteSidecars(file, filename);
         }
@@ -1696,12 +1701,12 @@ public class RecordingsApiHandler {
         }
         // Regular-file check before the unlink (audit): a corrupt row whose
         // contained path is a DIRECTORY named *.mp4 must not be deletable.
-        if (file.exists() && !file.isFile()) {
+        if (RemovableStorageFs.exists(file) && !RemovableStorageFs.isFile(file)) {
             HttpResponse.sendJsonError(out, Messages.get("errors.recordings_not_found"));
             return;
         }
         try { com.overdrive.app.server.timeline.TimelineLedger.noteDeleting(file, "user"); } catch (Throwable ignored) { }
-        boolean deleted = file.delete();
+        boolean deleted = RemovableStorageFs.delete(file);
         if (deleted) {
             deleteSidecars(file, ref.filename);
         }
@@ -1769,18 +1774,18 @@ public class RecordingsApiHandler {
 
         // JSON event timeline
         File jsonFile = new File(sidecarDir, stem + ".json");
-        if (jsonFile.exists()) jsonFile.delete();
+        if (RemovableStorageFs.exists(jsonFile)) RemovableStorageFs.delete(jsonFile);
 
         // SRT subtitle sidecar (parity — future callers shouldn't re-hit the gap).
         File srtFile = new File(sidecarDir, stem + ".srt");
-        if (srtFile.exists()) srtFile.delete();
+        if (RemovableStorageFs.exists(srtFile)) RemovableStorageFs.delete(srtFile);
 
         // Cached thumbnail
         File thumbFile = new File(getThumbnailCacheDir(), stem + ".jpg");
-        if (thumbFile.exists()) thumbFile.delete();
+        if (RemovableStorageFs.exists(thumbFile)) RemovableStorageFs.delete(thumbFile);
         File idThumbFile = new File(getThumbnailCacheDir(),
             RecordingIdentity.fromPath(mp4File.getAbsolutePath()).recordingId + ".jpg");
-        if (idThumbFile.exists()) idThumbFile.delete();
+        if (RemovableStorageFs.exists(idThumbFile)) RemovableStorageFs.delete(idThumbFile);
 
         // v3 hero JPEG sibling: <base>.jpg next to the mp4.
         //
@@ -1791,12 +1796,12 @@ public class RecordingsApiHandler {
         // SD/USB case under daemon UID 2000 that the per-actor lister below exists
         // to work around. Scoped as an if-block so the tail always runs.
         File parent = mp4File.getParentFile();
-        if (parent != null && parent.canRead()) {
+        if (parent != null && RemovableStorageFs.canRead(parent)) {
             String base = name.endsWith(".mp4")
                     ? name.substring(0, name.length() - 4)
                     : name;
             File heroSibling = new File(parent, base + ".jpg");
-            if (heroSibling.exists()) heroSibling.delete();
+            if (RemovableStorageFs.exists(heroSibling)) RemovableStorageFs.delete(heroSibling);
 
             // Per-actor thumbs: thumb_<base>_a<id>(_<rel>).jpg
             // Anchor with "_a" so a sibling segment named "<base>_2.mp4" with
@@ -1810,7 +1815,7 @@ public class RecordingsApiHandler {
             // listFiles() returns null on those FUSE mounts.
             File[] perActor = StorageManager.getInstance()
                     .listFilesWithFallback(parent, perActorPrefix, ".jpg");
-            for (File f : perActor) f.delete();
+            for (File f : perActor) RemovableStorageFs.delete(f);
         }
 
         // The mp4 + every sidecar counted toward the category's reported size is
@@ -1908,7 +1913,7 @@ public class RecordingsApiHandler {
                 // safe by construction: findVideoFile builds File(dir, name)
                 // from managed dirs with a traversal-checked name.
                 if (file != null && ref != null
-                        && (!indexPathAllowed(file) || (file.exists() && !file.isFile()))) {
+                        && (!indexPathAllowed(file) || (RemovableStorageFs.exists(file) && !RemovableStorageFs.isFile(file)))) {
                     file = null;  // treated as not-found below
                 }
                 String resolvedFilename = ref != null ? ref.filename : filename;
@@ -1919,7 +1924,7 @@ public class RecordingsApiHandler {
                 }
                 
                 try { com.overdrive.app.server.timeline.TimelineLedger.noteDeleting(file, "user"); } catch (Throwable ignored) { }
-                boolean success = file.delete();
+                boolean success = RemovableStorageFs.delete(file);
                 if (success) {
                     deleted++;
                     deleteSidecars(file, resolvedFilename);
@@ -1971,7 +1976,7 @@ public class RecordingsApiHandler {
         File exactJson = videoFile == null
                 ? null
                 : new File(videoFile.getParentFile(), jsonFilename);
-        File jsonFile = exactJson != null && exactJson.exists()
+        File jsonFile = exactJson != null && RemovableStorageFs.exists(exactJson)
                 ? exactJson
                 : (requestedPath == null ? findJsonSidecar(jsonFilename) : null);
         
@@ -2009,9 +2014,9 @@ public class RecordingsApiHandler {
     }
 
     private static void serveTimelineFile(OutputStream out, File jsonFile) throws Exception {
-        if (jsonFile != null && jsonFile.exists()) {
+        if (jsonFile != null && RemovableStorageFs.exists(jsonFile)) {
             try (java.io.BufferedReader reader =
-                         new java.io.BufferedReader(new java.io.FileReader(jsonFile))) {
+                         new java.io.BufferedReader(new java.io.InputStreamReader(RemovableStorageFs.openInput(jsonFile), java.nio.charset.StandardCharsets.UTF_8))) {
                 StringBuilder json = new StringBuilder();
                 String line;
                 while ((line = reader.readLine()) != null) json.append(line);
@@ -2045,19 +2050,19 @@ public class RecordingsApiHandler {
         // Check all surveillance directories
         for (File dir : sm.getAllSurveillanceDirs()) {
             File f = new File(dir, jsonFilename);
-            if (f.exists()) return f;
+            if (RemovableStorageFs.exists(f)) return f;
         }
 
         // Check all recordings directories
         for (File dir : sm.getAllRecordingsDirs()) {
             File f = new File(dir, jsonFilename);
-            if (f.exists()) return f;
+            if (RemovableStorageFs.exists(f)) return f;
         }
 
         // Check all proximity directories
         for (File dir : sm.getAllProximityDirs()) {
             File f = new File(dir, jsonFilename);
-            if (f.exists()) return f;
+            if (RemovableStorageFs.exists(f)) return f;
         }
 
         return null;

@@ -1,5 +1,7 @@
 package com.overdrive.app.geo;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.storage.StorageManager;
 
@@ -109,7 +111,7 @@ public final class GeoBackfillSweep {
                 if (sidecars == null) continue;
                 for (File sidecar : sidecars) {
                     try {
-                        long mtime = sidecar.lastModified();
+                        long mtime = RemovableStorageFs.lastModified(sidecar);
                         if (mtime <= 0L || now - mtime < 0L) continue;
                         // STAT-ONLY fast skip (the "cheap pass" this class promises):
                         // a clip whose mtime is already older than MAX_AGE_MS can
@@ -250,7 +252,7 @@ public final class GeoBackfillSweep {
         String n = sidecar.getName();
         if (!n.endsWith(".json")) return null;
         File mp4 = new File(sidecar.getParentFile(), n.substring(0, n.length() - 5) + ".mp4");
-        return mp4.exists() ? mp4 : null;
+        return RemovableStorageFs.exists(mp4) ? mp4 : null;
     }
 
     private static String inferFlow(String sidecarName) {
@@ -258,9 +260,9 @@ public final class GeoBackfillSweep {
     }
 
     private static JSONObject readSidecar(File f) {
-        if (f == null || !f.exists()) return null;
-        try (FileReader r = new FileReader(f)) {
-            long len = Math.min(f.length(), MAX_BYTES);
+        if (f == null || !RemovableStorageFs.exists(f)) return null;
+        try (java.io.Reader r = new java.io.InputStreamReader(RemovableStorageFs.openInput(f), java.nio.charset.StandardCharsets.UTF_8)) {
+            long len = Math.min(RemovableStorageFs.length(f), MAX_BYTES);
             char[] buf = new char[8192];
             StringBuilder sb = new StringBuilder((int) len);
             int total = 0, n;

@@ -1,5 +1,7 @@
 package com.overdrive.app.surveillance;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import android.opengl.EGLSurface;
 import android.opengl.GLUtils;
 import com.overdrive.app.logging.DaemonLogger;
@@ -1467,8 +1469,8 @@ public class GpuMosaicRecorder {
             }
 
             // Ensure directory exists
-            if (!targetDir.exists()) {
-                targetDir.mkdirs();
+            if (!RemovableStorageFs.exists(targetDir)) {
+                RemovableStorageFs.mkdirs(targetDir);
             }
 
             // Reserve ~100MB for new recording. Time it explicitly — a slow
@@ -1517,9 +1519,9 @@ public class GpuMosaicRecorder {
             try {
                 long freeBytes = -1L;
                 try {
-                    java.io.File probe = targetDir.exists() ? targetDir : targetDir.getParentFile();
-                    if (probe != null && probe.exists()) {
-                        freeBytes = new android.os.StatFs(probe.getAbsolutePath()).getAvailableBytes();
+                    java.io.File probe = RemovableStorageFs.exists(targetDir) ? targetDir : targetDir.getParentFile();
+                    if (probe != null && RemovableStorageFs.exists(probe)) {
+                        freeBytes = RemovableStorageFs.statFsAvailableBytes(probe.getAbsolutePath());
                     }
                 } catch (Throwable ignore) { /* unmounted — leave -1 */ }
                 logger.info("Recording start: target=" + targetDir.getAbsolutePath()
@@ -1533,7 +1535,7 @@ public class GpuMosaicRecorder {
                 java.io.File internal = storageManager.resolveTargetWithEnospcFallback(
                     targetDir, 100 * 1024 * 1024, true);
                 if (internal != null && !internal.equals(targetDir)) {
-                    if (!internal.exists()) internal.mkdirs();
+                    if (!RemovableStorageFs.exists(internal)) RemovableStorageFs.mkdirs(internal);
                     storageManager.ensureRecordingsSpaceForRecorder(100 * 1024 * 1024, internal);
                     logger.warn("Recording start failed on a card that refuses writes ("
                         + targetDir.getAbsolutePath() + ") — retrying on " + internal.getAbsolutePath());

@@ -1,5 +1,7 @@
 package com.overdrive.app.parking;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.parking.signage.SignageReader;
 import com.overdrive.app.parking.signage.TextOcrBackend;
 import com.overdrive.app.surveillance.Actor;
@@ -1161,14 +1163,14 @@ public final class ParkingController implements ParkingHooks.Listener, Detection
 
     /** Remove one prefix's stills ({@code <prefix>_front.jpg …, <prefix>_mosaic.jpg}) from a session dir. */
     private static void deleteStills(File dir, String prefix) {
-        if (dir == null || !dir.isDirectory()) return;
-        File[] files = dir.listFiles();
+        if (dir == null || !RemovableStorageFs.isDirectory(dir)) return;
+        File[] files = RemovableStorageFs.listFiles(dir);
         if (files == null) return;
         for (File f : files) {
             String n = f.getName();
             if (n.startsWith(prefix + "_") && n.endsWith(".jpg")) {
                 //noinspection ResultOfMethodCallIgnored
-                f.delete();
+                RemovableStorageFs.delete(f);
             }
         }
     }
@@ -1386,7 +1388,7 @@ public final class ParkingController implements ParkingHooks.Listener, Detection
             st.deleteSession(id);
         }
         File base = env.parkingBaseDir();
-        File[] dirs = base.listFiles(File::isDirectory);
+        File[] dirs = RemovableStorageFs.listFiles(base, File::isDirectory);
         if (dirs == null) return;
         // Orphan directories (row deleted by the API or retention while a late
         // signage / geocode write recreated the folder; crash between the two
@@ -1485,17 +1487,17 @@ public final class ParkingController implements ParkingHooks.Listener, Detection
 
     static long dirSize(File d) {
         long total = 0;
-        File[] files = d.listFiles();
+        File[] files = RemovableStorageFs.listFiles(d);
         if (files == null) return 0;
-        for (File f : files) total += f.isDirectory() ? dirSize(f) : f.length();
+        for (File f : files) total += RemovableStorageFs.isDirectory(f) ? dirSize(f) : RemovableStorageFs.length(f);
         return total;
     }
 
     static void deleteRecursively(File f) {
-        if (f == null || !f.exists()) return;
-        File[] kids = f.listFiles();
+        if (f == null || !RemovableStorageFs.exists(f)) return;
+        File[] kids = RemovableStorageFs.listFiles(f);
         if (kids != null) for (File k : kids) deleteRecursively(k);
         //noinspection ResultOfMethodCallIgnored
-        f.delete();
+        RemovableStorageFs.delete(f);
     }
 }

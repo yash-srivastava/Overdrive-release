@@ -1,5 +1,7 @@
 package com.overdrive.app.camera;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import android.graphics.SurfaceTexture;
 import android.media.MediaFormat;
 import android.opengl.EGLSurface;
@@ -791,7 +793,7 @@ public class OemDashcamPipeline {
         if (enc != null) enc.stopEventRecording(true, Math.max(0L, postRecordMs));
         reapplyIdleStrideAfterStop();
         reconcileTelemetryHold();
-        if (path == null || !new File(path).isFile()) return null;
+        if (path == null || !RemovableStorageFs.isFile(new File(path))) return null;
         return new FinalizedClip(path, enc != null ? enc.getLastFinalizedDurationSec() : 0);
     }
 

@@ -1,5 +1,7 @@
 package com.overdrive.app.surveillance;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.ai.Detection;
 import com.overdrive.app.logging.DaemonLogger;
 
@@ -1314,18 +1316,18 @@ public class EventTimelineCollector {
             File jsonFile = new File(mp4File.getParentFile(), jsonName);
             File tmpFile = new File(jsonFile.getAbsolutePath() + ".tmp");
 
-            try (FileWriter fw = new FileWriter(tmpFile)) {
+            try (java.io.Writer fw = new java.io.OutputStreamWriter(RemovableStorageFs.openOutput(tmpFile), java.nio.charset.StandardCharsets.UTF_8)) {
                 fw.write(root.toString());
             }
 
-            if (!tmpFile.renameTo(jsonFile)) {
-                try (FileWriter fw = new FileWriter(jsonFile)) {
+            if (!RemovableStorageFs.renameTo(tmpFile, jsonFile)) {
+                try (java.io.Writer fw = new java.io.OutputStreamWriter(RemovableStorageFs.openOutput(jsonFile), java.nio.charset.StandardCharsets.UTF_8)) {
                     fw.write(root.toString());
                 }
-                tmpFile.delete();
+                RemovableStorageFs.delete(tmpFile);
             }
 
-            jsonFile.setReadable(true, false);
+            RemovableStorageFs.setReadable(jsonFile, true, false);
 
             logger.info(String.format("Timeline saved (v3): %s (%d spans, %d actors, dur=%ds)",
                     jsonFile.getName(), count, actorsArr.length(), durationMs / 1000));

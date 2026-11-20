@@ -1,5 +1,7 @@
 package com.overdrive.app.trips;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import android.content.Context;
 
 import com.overdrive.app.abrp.SohEstimator;
@@ -74,8 +76,8 @@ public class TripAnalyticsManager {
 
         // 4. Ensure trips directory exists
         File tripsDir = StorageManager.getInstance().getTripsDir();
-        if (tripsDir != null && !tripsDir.exists()) {
-            boolean created = tripsDir.mkdirs();
+        if (tripsDir != null && !RemovableStorageFs.exists(tripsDir)) {
+            boolean created = RemovableStorageFs.mkdirs(tripsDir);
             logger.info("Trips directory created: " + tripsDir.getAbsolutePath()
                     + " (success=" + created + ")");
         }
@@ -515,7 +517,7 @@ public class TripAnalyticsManager {
             if (journalDir != null && !tripsDirs.contains(journalDir)) tripsDirs.add(journalDir);
             boolean anyDir = false;
             for (File d : tripsDirs) {
-                if (d != null && d.isDirectory()) { anyDir = true; break; }
+                if (d != null && RemovableStorageFs.isDirectory(d)) { anyDir = true; break; }
             }
             final boolean haveAnyDir = anyDir;
             final TripDatabase db = database;
@@ -708,7 +710,7 @@ public class TripAnalyticsManager {
             if (dir == null) continue;
             File f = new File(dir, name);
             try {
-                if (f.isFile() && f.length() > 0) return f;
+                if (RemovableStorageFs.isFile(f) && RemovableStorageFs.length(f) > 0) return f;
             } catch (Throwable ignored) {}
         }
         return null;
@@ -716,16 +718,16 @@ public class TripAnalyticsManager {
 
     /** Delete journal-dir files older than {@code olderThanMs}, sparing the in-flight one. */
     private static void reapStaleJournals(File journalDir, long olderThanMs) {
-        if (journalDir == null || !journalDir.isDirectory()) return;
-        File[] files = journalDir.listFiles();
+        if (journalDir == null || !RemovableStorageFs.isDirectory(journalDir)) return;
+        File[] files = RemovableStorageFs.listFiles(journalDir);
         if (files == null) return;
         String active = null;
         try { active = StorageManager.getInstance().getActiveTripFilePath(); } catch (Throwable ignored) {}
         int reaped = 0;
         for (File f : files) {
-            if (!f.isFile() || !f.getName().endsWith(".jsonl.gz")) continue;
+            if (!RemovableStorageFs.isFile(f) || !f.getName().endsWith(".jsonl.gz")) continue;
             if (active != null && active.equals(f.getAbsolutePath())) continue;
-            if (f.lastModified() < olderThanMs && f.delete()) reaped++;
+            if (RemovableStorageFs.lastModified(f) < olderThanMs && RemovableStorageFs.delete(f)) reaped++;
         }
         if (reaped > 0) logger.info("Reaped " + reaped + " stale trip journal(s)");
     }
@@ -1155,8 +1157,8 @@ public class TripAnalyticsManager {
         if (telemetryPath != null) {
             try {
                 File f = new File(telemetryPath);
-                if (f.exists() && f.isFile()) {
-                    trip.sizeBytes = f.length();
+                if (RemovableStorageFs.exists(f) && RemovableStorageFs.isFile(f)) {
+                    trip.sizeBytes = RemovableStorageFs.length(f);
                 }
             } catch (Throwable e) {
                 logger.warn("Failed to stat telemetry file for size accounting: " + e.getMessage());
@@ -1217,7 +1219,7 @@ public class TripAnalyticsManager {
                 if (newPath != null && telemetryPath != null) {
                     File oldFile = new File(telemetryPath);
                     File newFile = new File(newPath);
-                    if (oldFile.exists() && !oldFile.getAbsolutePath().equals(newFile.getAbsolutePath())) {
+                    if (RemovableStorageFs.exists(oldFile) && !oldFile.getAbsolutePath().equals(newFile.getAbsolutePath())) {
                         // Marker flip + rename run ATOMICALLY under the trips
                         // cleanup lock (renameActiveTripFile): every reaper
                         // pass holds that lock and protects the marker's exact
@@ -1430,8 +1432,8 @@ public class TripAnalyticsManager {
             // Clean up telemetry file
             if (telemetryPath != null) {
                 File telemetryFile = new File(telemetryPath);
-                if (telemetryFile.exists()) {
-                    if (telemetryFile.delete()) {
+                if (RemovableStorageFs.exists(telemetryFile)) {
+                    if (RemovableStorageFs.delete(telemetryFile)) {
                         logger.info("Discarded telemetry file: " + telemetryFile.getName());
                     } else {
                         logger.warn("Failed to delete discarded telemetry file: "

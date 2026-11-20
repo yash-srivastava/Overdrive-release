@@ -1,5 +1,7 @@
 package com.overdrive.app.telegram;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import android.util.Log;
 
 import org.json.JSONObject;
@@ -120,17 +122,17 @@ public final class TelegramSpool {
             // matched by drain's *.json filter) then atomically rename, so the
             // drainer only ever sees a complete file.
             File tmp = new File(dir, name + WRITING_SUFFIX);
-            try (FileWriter w = new FileWriter(tmp)) {
+            try (java.io.Writer w = new java.io.OutputStreamWriter(RemovableStorageFs.openOutput(tmp), java.nio.charset.StandardCharsets.UTF_8)) {
                 w.write(copy.toString());
             }
             // Owner-only — the drainer is the same UID 2000. No world bits.
-            try { tmp.setReadable(true, true); } catch (Exception ignored) {}
-            try { tmp.setWritable(true, true); } catch (Exception ignored) {}
-            if (!tmp.renameTo(f)) {
+            try { RemovableStorageFs.setReadable(tmp, true, true); } catch (Exception ignored) {}
+            try { RemovableStorageFs.setWritable(tmp, true, true); } catch (Exception ignored) {}
+            if (!RemovableStorageFs.renameTo(tmp, f)) {
                 // Rename failed — don't leave a stray temp; drop (the event is
                 // still on disk, only the Telegram push is lost, same as before).
                 try { //noinspection ResultOfMethodCallIgnored
-                    tmp.delete(); } catch (Exception ignored) {}
+                    RemovableStorageFs.delete(tmp); } catch (Exception ignored) {}
                 Log.w(TAG, "Spool publish rename failed; dropping "
                         + command.optString("cmd", "?"));
                 return false;
@@ -159,7 +161,7 @@ public final class TelegramSpool {
     public static synchronized int drain(SpooledSender sender) {
         if (sender == null) return 0;
         File dir = new File(DIR);
-        if (!dir.isDirectory()) return 0;
+        if (!RemovableStorageFs.isDirectory(dir)) return 0;
 
         // First, reap any orphaned .inflight markers from a PRIOR drain that was
         // SIGKILL'd mid-send (AccSentryDaemon kill -9's the daemon the instant
@@ -167,7 +169,7 @@ public final class TelegramSpool {
         // file was already handed to send() once, so we MUST NOT replay it —
         // that would double-deliver. At-most-once: drop it unsent.
         long reapNow = System.currentTimeMillis();
-        File[] orphans = dir.listFiles((d, n) ->
+        File[] orphans = RemovableStorageFs.listFiles(dir, (d, n) ->
                 n.endsWith(INFLIGHT_SUFFIX) || n.endsWith(WRITING_SUFFIX));
         if (orphans != null) {
             for (File o : orphans) {
@@ -182,7 +184,7 @@ public final class TelegramSpool {
                 // .writing temp that's clearly an orphan (older than the guard);
                 // never delete one a living emitter is actively writing.
                 if (o.getName().endsWith(WRITING_SUFFIX)) {
-                    long age = reapNow - o.lastModified();
+                    long age = reapNow - RemovableStorageFs.lastModified(o);
                     // age < guard → too fresh to reap. A FUTURE-dated temp
                     // (age < 0, cross-process clock skew / NTP-GPS correction)
                     // is also "too fresh" — a living emitter may still be
@@ -192,11 +194,11 @@ public final class TelegramSpool {
                 }
                 Log.w(TAG, "Reaping orphaned spool temp (not replaying): " + o.getName());
                 try { //noinspection ResultOfMethodCallIgnored
-                    o.delete(); } catch (Exception ignored) {}
+                    RemovableStorageFs.delete(o); } catch (Exception ignored) {}
             }
         }
 
-        File[] files = dir.listFiles((d, n) -> n.endsWith(".json"));
+        File[] files = RemovableStorageFs.listFiles(dir, (d, n) -> n.endsWith(".json"));
         if (files == null || files.length == 0) return 0;
 
         Arrays.sort(files, Comparator.comparing(File::getName));  // oldest-first
@@ -245,7 +247,7 @@ public final class TelegramSpool {
             // attempt, at-most-once, matches the class contract; the underlying
             // event is always still recorded to disk.
             File inflight = new File(dir, f.getName() + INFLIGHT_SUFFIX);
-            if (!f.renameTo(inflight)) {
+            if (!RemovableStorageFs.renameTo(f, inflight)) {
                 // Couldn't claim it — skip rather than risk a double-send race.
                 Log.w(TAG, "Could not claim spool entry " + f.getName() + "; skipping");
                 continue;
@@ -265,7 +267,7 @@ public final class TelegramSpool {
 
     private static void safeDelete(File f) {
         try { //noinspection ResultOfMethodCallIgnored
-            f.delete(); } catch (Exception ignored) {}
+            RemovableStorageFs.delete(f); } catch (Exception ignored) {}
     }
 
     /**
@@ -280,28 +282,28 @@ public final class TelegramSpool {
 
     private static File ensureDir() {
         File dir = new File(DIR);
-        if (dir.isDirectory()) return dir;
+        if (RemovableStorageFs.isDirectory(dir)) return dir;
         try {
-            if (dir.mkdirs() || dir.isDirectory()) {
+            if (RemovableStorageFs.mkdirs(dir) || RemovableStorageFs.isDirectory(dir)) {
                 // OWNER-ONLY perms (ownerOnly=true). Every spool emitter (the
                 // surveillance engine + proximity handler inside CameraDaemon)
                 // and the drainer (TelegramBotDaemon) run as UID 2000, so the
                 // dir does NOT need to be world-writable. A world-writable
                 // spool would let any local UID drop a crafted command that the
                 // daemon replays verbatim — chat-spoof / file-exfil surface.
-                try { dir.setReadable(true, true); } catch (Exception ignored) {}
-                try { dir.setWritable(true, true); } catch (Exception ignored) {}
-                try { dir.setExecutable(true, true); } catch (Exception ignored) {}
+                try { RemovableStorageFs.setReadable(dir, true, true); } catch (Exception ignored) {}
+                try { RemovableStorageFs.setWritable(dir, true, true); } catch (Exception ignored) {}
+                try { RemovableStorageFs.setExecutable(dir, true, true); } catch (Exception ignored) {}
                 return dir;
             }
         } catch (Exception e) {
             Log.w(TAG, "Spool dir create failed: " + e.getMessage());
         }
-        return dir.isDirectory() ? dir : null;
+        return RemovableStorageFs.isDirectory(dir) ? dir : null;
     }
 
     private static void evictOldestIfFull(File dir) {
-        File[] files = dir.listFiles((d, n) -> n.endsWith(".json"));
+        File[] files = RemovableStorageFs.listFiles(dir, (d, n) -> n.endsWith(".json"));
         if (files == null || files.length < MAX_ENTRIES) return;
         // Sort the listFiles() array in place; copying it into an ArrayList
         // allocates an extra collection on the full-spool eviction path.
@@ -316,7 +318,7 @@ public final class TelegramSpool {
             Log.w(TAG, "Spool full (" + files.length + "/" + MAX_ENTRIES
                     + "); evicting oldest unsent entry " + victim.getName());
             try { //noinspection ResultOfMethodCallIgnored
-                victim.delete(); } catch (Exception ignored) {}
+                RemovableStorageFs.delete(victim); } catch (Exception ignored) {}
         }
     }
 

@@ -1,5 +1,7 @@
 package com.overdrive.app.storage;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import android.os.StatFs;
 import android.util.Log;
 import org.json.JSONObject;
@@ -224,7 +226,7 @@ public class ExternalStorageCleaner {
         // Discovery needs clips directly in a folder; a dashcam that nests them is found by name.
         for (int i = 0; cdr == null && i < FACTORY_DVR_FOLDERS.length; i++) {
             File named = new File(reader.sdCardPath, FACTORY_DVR_FOLDERS[i]);
-            if (named.isDirectory()) cdr = named.getPath();
+            if (RemovableStorageFs.isDirectory(named)) cdr = named.getPath();
         }
         if (cdr == null) {
             return FactoryVideoSnapshot.failed(FactoryVideoSnapshot.Status.NOT_FOUND, null);
@@ -274,7 +276,7 @@ public class ExternalStorageCleaner {
     }
 
     static FactoryVideoSnapshot walkFactoryVideos(File root, int maxShown) {
-        if (!root.isDirectory()) {
+        if (!RemovableStorageFs.isDirectory(root)) {
             return FactoryVideoSnapshot.failed(FactoryVideoSnapshot.Status.UNREADABLE, root.getPath());
         }
         String rootPrefix = root.getPath() + File.separator;
@@ -291,7 +293,7 @@ public class ExternalStorageCleaner {
         while (!dirs.isEmpty() && examined <= FACTORY_SCAN_MAX_ENTRIES) {
             File dir = dirs.removeFirst();
             int depth = depths.removeFirst();
-            File[] entries = dir.listFiles();
+            File[] entries = RemovableStorageFs.listFiles(dir);
             if (entries == null) {
                 if (depth == 0) {
                     return FactoryVideoSnapshot.failed(
@@ -305,16 +307,30 @@ public class ExternalStorageCleaner {
                     partial = true;
                     break;
                 }
-                java.nio.file.attribute.BasicFileAttributes attrs;
-                try {
-                    // NOFOLLOW_LINKS: a link can never take the walk or a listed clip outside root.
-                    attrs = java.nio.file.Files.readAttributes(entry.toPath(),
-                        java.nio.file.attribute.BasicFileAttributes.class,
-                        java.nio.file.LinkOption.NOFOLLOW_LINKS);
-                } catch (java.io.IOException | RuntimeException e) {
-                    continue;
+                boolean isDir, isRegular;
+                long size, modifiedMs;
+                if (RemovableStorageFs.isRouted(entry)) {
+                    // Reached through the app (exFAT has no symlinks); the listing carries the metadata.
+                    isDir = RemovableStorageFs.isDirectory(entry);
+                    isRegular = !isDir && RemovableStorageFs.exists(entry);
+                    size = RemovableStorageFs.length(entry);
+                    modifiedMs = RemovableStorageFs.lastModified(entry);
+                } else {
+                    java.nio.file.attribute.BasicFileAttributes attrs;
+                    try {
+                        // NOFOLLOW_LINKS: a link can never take the walk or a listed clip outside root.
+                        attrs = java.nio.file.Files.readAttributes(entry.toPath(),
+                            java.nio.file.attribute.BasicFileAttributes.class,
+                            java.nio.file.LinkOption.NOFOLLOW_LINKS);
+                    } catch (java.io.IOException | RuntimeException e) {
+                        continue;
+                    }
+                    isDir = attrs.isDirectory();
+                    isRegular = attrs.isRegularFile();
+                    size = attrs.size();
+                    modifiedMs = attrs.lastModifiedTime().toMillis();
                 }
-                if (attrs.isDirectory()) {
+                if (isDir) {
                     if (depth >= FACTORY_SCAN_MAX_DEPTH || queuedDirs >= FACTORY_SCAN_MAX_DIRS) {
                         partial = true;
                     } else {
@@ -322,11 +338,11 @@ public class ExternalStorageCleaner {
                         depths.add(depth + 1);
                         queuedDirs++;
                     }
-                } else if (attrs.isRegularFile() && isVideoFile(entry)) {
+                } else if (isRegular && isVideoFile(entry)) {
                     found++;
                     newest.add(new FactoryVideo(entry,
                         entry.getPath().substring(rootPrefix.length()),
-                        attrs.size(), attrs.lastModifiedTime().toMillis()));
+                        size, modifiedMs));
                     if (newest.size() > maxShown) newest.poll();
                 }
             }
@@ -416,7 +432,7 @@ public class ExternalStorageCleaner {
             if ("true".equalsIgnoreCase(sdExists) && !sdUuid.isEmpty()) {
                 String uuidPath = "/storage/" + sdUuid;
                 File uuidDir = new File(uuidPath);
-                if (uuidDir.exists() && uuidDir.isDirectory()) {
+                if (RemovableStorageFs.exists(uuidDir) && RemovableStorageFs.isDirectory(uuidDir)) {
                     sdCardPath = uuidPath;
                     logInfo("Found SD card via UUID: " + sdCardPath);
                 }
@@ -434,7 +450,7 @@ public class ExternalStorageCleaner {
         for (String subdir : CDR_SUBDIRS) {
             String fullPath = sdCardPath + "/" + subdir;
             File cdrDir = new File(fullPath);
-            if (cdrDir.exists() && cdrDir.isDirectory() && containsVideoFiles(cdrDir)) {
+            if (RemovableStorageFs.exists(cdrDir) && RemovableStorageFs.isDirectory(cdrDir) && containsVideoFiles(cdrDir)) {
                 cdrPath = fullPath;
                 logInfo("Found CDR directory: " + cdrPath);
                 break;
@@ -493,9 +509,9 @@ public class ExternalStorageCleaner {
      * Check if directory contains video files.
      */
     private boolean containsVideoFiles(File dir) {
-        if (dir == null || !dir.exists()) return false;
+        if (dir == null || !RemovableStorageFs.exists(dir)) return false;
         
-        File[] files = dir.listFiles(file -> file.isFile() && isVideoFile(file));
+        File[] files = RemovableStorageFs.listFiles(dir, file -> RemovableStorageFs.isFile(file) && isVideoFile(file));
         
         return files != null && files.length > 0;
     }
@@ -508,7 +524,7 @@ public class ExternalStorageCleaner {
     public void loadConfig() {
         try {
             File configFile = new File(CONFIG_FILE);
-            if (!configFile.exists()) return;
+            if (!RemovableStorageFs.exists(configFile)) return;
             
             BufferedReader reader = new BufferedReader(new FileReader(configFile));
             StringBuilder sb = new StringBuilder();
@@ -609,7 +625,7 @@ public class ExternalStorageCleaner {
         try {
             File dir = new File(path).getCanonicalFile();
             for (String subdir : CDR_SUBDIRS) {
-                if (dir.equals(new File(sd, subdir).getCanonicalFile())) return dir.isDirectory();
+                if (dir.equals(new File(sd, subdir).getCanonicalFile())) return RemovableStorageFs.isDirectory(dir);
             }
         } catch (java.io.IOException | RuntimeException e) {
             return false;
@@ -686,11 +702,10 @@ public class ExternalStorageCleaner {
         try {
             // Verify path exists before using StatFs
             File sdDir = new File(sdCardPath);
-            if (!sdDir.exists() || !sdDir.isDirectory()) {
+            if (!RemovableStorageFs.exists(sdDir) || !RemovableStorageFs.isDirectory(sdDir)) {
                 return 0;
             }
-            StatFs stat = new StatFs(sdCardPath);
-            return stat.getAvailableBytes();
+            return RemovableStorageFs.statFsAvailableBytes(sdCardPath);
         } catch (Exception e) {
             logWarn("Could not get SD card free space: " + e.getMessage());
             return 0;
@@ -705,11 +720,10 @@ public class ExternalStorageCleaner {
         try {
             // Verify path exists before using StatFs
             File sdDir = new File(sdCardPath);
-            if (!sdDir.exists() || !sdDir.isDirectory()) {
+            if (!RemovableStorageFs.exists(sdDir) || !RemovableStorageFs.isDirectory(sdDir)) {
                 return 0;
             }
-            StatFs stat = new StatFs(sdCardPath);
-            return stat.getTotalBytes();
+            return RemovableStorageFs.statFsTotalBytes(sdCardPath);
         } catch (Exception e) {
             return 0;
         }
@@ -754,11 +768,11 @@ public class ExternalStorageCleaner {
         long usage = 0, prot = 0, del = 0;
         int n = files.size();
         // Sort newest-first for the deletable computation.
-        files.sort((a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+        files.sort((a, b) -> Long.compare(RemovableStorageFs.lastModified(b), RemovableStorageFs.lastModified(a)));
         for (int i = 0; i < n; i++) {
             File f = files.get(i);
-            long sz = f.length();
-            long m = f.lastModified();
+            long sz = RemovableStorageFs.length(f);
+            long m = RemovableStorageFs.lastModified(f);
             usage += sz;
             if (m > protCutoff) {
                 prot += sz;
@@ -808,15 +822,15 @@ public class ExternalStorageCleaner {
     }
     
     private long getDirectorySize(File dir) {
-        if (dir == null || !dir.exists()) return 0;
+        if (dir == null || !RemovableStorageFs.exists(dir)) return 0;
         
         long size = 0;
-        File[] files = dir.listFiles();
+        File[] files = RemovableStorageFs.listFiles(dir);
         if (files != null) {
             for (File file : files) {
-                if (file.isFile()) {
-                    size += file.length();
-                } else if (file.isDirectory()) {
+                if (RemovableStorageFs.isFile(file)) {
+                    size += RemovableStorageFs.length(file);
+                } else if (RemovableStorageFs.isDirectory(file)) {
                     size += getDirectorySize(file);
                 }
             }
@@ -836,9 +850,9 @@ public class ExternalStorageCleaner {
     }
     
     private void collectVideoFiles(File dir, List<File> result) {
-        if (dir == null || !dir.exists()) return;
+        if (dir == null || !RemovableStorageFs.exists(dir)) return;
         
-        File[] files = dir.listFiles();
+        File[] files = RemovableStorageFs.listFiles(dir);
         if (files == null) {
             // Try shell fallback for permission issues
             files = listFilesViaShell(dir);
@@ -846,7 +860,7 @@ public class ExternalStorageCleaner {
         
         if (files != null) {
             for (File file : files) {
-                if (file.isDirectory()) {
+                if (RemovableStorageFs.isDirectory(file)) {
                     collectVideoFiles(file, result);
                 } else if (isVideoFile(file)) {
                     result.add(file);
@@ -881,6 +895,11 @@ public class ExternalStorageCleaner {
      * short list can't cause a wrong deletion.
      */
     private File[] listFilesViaShell(File dir) {
+        // Routed volumes are only reachable through the app.
+        if (RemovableStorageFs.isRouted(dir)) {
+            File[] listed = RemovableStorageFs.listFiles(dir);
+            return listed != null ? listed : new File[0];
+        }
         Process p = null;
         try {
             p = Runtime.getRuntime().exec(new String[]{"ls", "-1", dir.getAbsolutePath()});
@@ -1029,7 +1048,7 @@ public class ExternalStorageCleaner {
         }
         
         // Sort oldest first
-        files.sort(Comparator.comparingLong(File::lastModified));
+        files.sort(Comparator.comparingLong(RemovableStorageFs::lastModified));
         
         // Calculate protection cutoff
         long protectionCutoff = System.currentTimeMillis() - (protectedHours * 3600L * 1000L);
@@ -1045,13 +1064,13 @@ public class ExternalStorageCleaner {
             File file = files.get(i);
             
             // Skip protected files
-            if (file.lastModified() > protectionCutoff) {
+            if (RemovableStorageFs.lastModified(file) > protectionCutoff) {
                 logDebug("Skipping protected file: " + file.getName() + 
                     " (age: " + getFileAge(file) + ")");
                 continue;
             }
             
-            long fileSize = file.length();
+            long fileSize = RemovableStorageFs.length(file);
             String fileName = file.getName();
             
             if (deleteFile(file)) {
@@ -1085,10 +1104,13 @@ public class ExternalStorageCleaner {
      */
     private boolean deleteFile(File file) {
         // Try Java delete
-        if (file.delete()) {
+        if (RemovableStorageFs.delete(file)) {
             return true;
         }
         
+        // Routed volumes are only reachable through the app: a shell rm cannot help.
+        if (RemovableStorageFs.isRouted(file)) return false;
+
         // Try shell rm
         Process p = null;
         try {
@@ -1100,9 +1122,9 @@ public class ExternalStorageCleaner {
                 // the filesystem instead of reporting a false failure — the caller
                 // sums freed bytes from this return, so a wrong `false` makes it
                 // keep deleting while reporting "0 files deleted".
-                return !file.exists();
+                return !RemovableStorageFs.exists(file);
             }
-            return exitCode == 0 && !file.exists();
+            return exitCode == 0 && !RemovableStorageFs.exists(file);
         } catch (Exception e) {
             logWarn("Shell delete failed: " + e.getMessage());
             return false;
@@ -1117,7 +1139,7 @@ public class ExternalStorageCleaner {
     }
     
     private String getFileAge(File file) {
-        long ageMs = System.currentTimeMillis() - file.lastModified();
+        long ageMs = System.currentTimeMillis() - RemovableStorageFs.lastModified(file);
         long hours = ageMs / (3600 * 1000);
         if (hours < 24) {
             return hours + "h";
@@ -1225,7 +1247,7 @@ public class ExternalStorageCleaner {
         }
         
         List<File> files = getCdrVideoFiles();
-        files.sort(Comparator.comparingLong(File::lastModified));
+        files.sort(Comparator.comparingLong(RemovableStorageFs::lastModified));
         
         long protectionCutoff = System.currentTimeMillis() - (protectedHours * 3600L * 1000L);
         int deletableCount = Math.max(0, files.size() - minFilesKeep);
@@ -1235,17 +1257,17 @@ public class ExternalStorageCleaner {
         for (int i = 0; i < deletableCount && wouldFree < bytesToFree; i++) {
             File file = files.get(i);
             
-            if (file.lastModified() > protectionCutoff) {
+            if (RemovableStorageFs.lastModified(file) > protectionCutoff) {
                 continue; // Would be skipped
             }
             
             preview.add(new FileInfo(
                 file.getName(),
-                file.length(),
-                file.lastModified(),
+                RemovableStorageFs.length(file),
+                RemovableStorageFs.lastModified(file),
                 file.getAbsolutePath()
             ));
-            wouldFree += file.length();
+            wouldFree += RemovableStorageFs.length(file);
         }
         
         return preview;

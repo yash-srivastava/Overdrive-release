@@ -1,5 +1,7 @@
 package com.overdrive.app.server.timeline;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import java.io.File;
 import java.util.concurrent.TimeUnit;
 
@@ -15,8 +17,8 @@ final class CacheFileTouch {
 
     /** Keep approximate LRU order without rewriting file metadata on every cache hit. */
     static void onHit(File file, long nowMs) {
-        if (shouldTouch(nowMs, file.lastModified())) {
-            file.setLastModified(nowMs);
+        if (shouldTouch(nowMs, RemovableStorageFs.lastModified(file))) {
+            RemovableStorageFs.setLastModified(file, nowMs);
         }
     }
 }

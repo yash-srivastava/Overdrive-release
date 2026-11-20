@@ -1,5 +1,7 @@
 package com.overdrive.app.server;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.storage.StorageManager;
 
@@ -521,7 +523,7 @@ public class QualitySettingsApiHandler {
         
         try {
             File unifiedFile = new File(UNIFIED_CONFIG_FILE);
-            if (unifiedFile.exists()) {
+            if (RemovableStorageFs.exists(unifiedFile)) {
                 BufferedReader reader = new BufferedReader(new FileReader(unifiedFile));
                 StringBuilder sb = new StringBuilder();
                 String line;
@@ -535,7 +537,7 @@ public class QualitySettingsApiHandler {
                 JSONObject auth = config.optJSONObject("auth");
                 if (auth != null) auth.remove("deviceSecret");
                 response.put("config", config);
-                response.put("lastModified", unifiedFile.lastModified());
+                response.put("lastModified", RemovableStorageFs.lastModified(unifiedFile));
             } else {
                 // Return default config structure
                 JSONObject config = new JSONObject();
@@ -1079,8 +1081,8 @@ public class QualitySettingsApiHandler {
         
         try {
             File unifiedFile = new File(UNIFIED_CONFIG_FILE);
-            if (unifiedFile.exists()) {
-                lastModified = unifiedFile.lastModified();
+            if (RemovableStorageFs.exists(unifiedFile)) {
+                lastModified = RemovableStorageFs.lastModified(unifiedFile);
                 
                 BufferedReader reader = new BufferedReader(new FileReader(unifiedFile));
                 StringBuilder sb = new StringBuilder();
@@ -1707,7 +1709,7 @@ public class QualitySettingsApiHandler {
         // Try unified config first
         try {
             File unifiedFile = new File(UNIFIED_CONFIG_FILE);
-            if (unifiedFile.exists()) {
+            if (RemovableStorageFs.exists(unifiedFile)) {
                 BufferedReader reader = new BufferedReader(new FileReader(unifiedFile));
                 StringBuilder sb = new StringBuilder();
                 String line;
@@ -1773,8 +1775,8 @@ public class QualitySettingsApiHandler {
     private static void loadLegacySettings() {
         try {
             File file = new File(LEGACY_SETTINGS_FILE);
-            CameraDaemon.log("Loading settings from legacy: " + LEGACY_SETTINGS_FILE + " (exists=" + file.exists() + ")");
-            if (file.exists()) {
+            CameraDaemon.log("Loading settings from legacy: " + LEGACY_SETTINGS_FILE + " (exists=" + RemovableStorageFs.exists(file) + ")");
+            if (RemovableStorageFs.exists(file)) {
                 BufferedReader reader = new BufferedReader(new FileReader(file));
                 StringBuilder sb = new StringBuilder();
                 String line;

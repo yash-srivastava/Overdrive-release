@@ -1,5 +1,7 @@
 package com.overdrive.app.server;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.remote.RemoteDevViewBridgeAuth;
@@ -2599,8 +2601,7 @@ public class SurveillanceIpcServer implements Runnable {
                         com.overdrive.app.updater.AppUpdater.channelOfLabel(versionRef[0]) != null
                                 ? versionRef[0]
                                 : com.overdrive.app.updater.AppUpdater.getInstalledVersion();
-                try (java.io.FileWriter fw = new java.io.FileWriter(
-                        com.overdrive.app.updater.UpdateLifecycle.TELEGRAM_POST_UPDATE_HINT_FILE)) {
+                try (java.io.Writer fw = new java.io.OutputStreamWriter(RemovableStorageFs.openOutput(new java.io.File(com.overdrive.app.updater.UpdateLifecycle.TELEGRAM_POST_UPDATE_HINT_FILE)), java.nio.charset.StandardCharsets.UTF_8)) {
                     fw.write(hintVersion);
                     fw.write('\n');
                 }
@@ -2704,8 +2705,7 @@ public class SurveillanceIpcServer implements Runnable {
             if (error != null) r.put("error", error);
             r.put("ts", System.currentTimeMillis());
         } catch (Exception ignored) {}
-        try (java.io.FileWriter fw = new java.io.FileWriter(
-                com.overdrive.app.util.ScratchRoot.path("overdrive_update_progress.json"))) {
+        try (java.io.Writer fw = new java.io.OutputStreamWriter(RemovableStorageFs.openOutput(new java.io.File(com.overdrive.app.util.ScratchRoot.path("overdrive_update_progress.json"))), java.nio.charset.StandardCharsets.UTF_8)) {
             fw.write(r.toString());
         } catch (Exception ignored) {}
     }
@@ -2732,9 +2732,9 @@ public class SurveillanceIpcServer implements Runnable {
     private static void surfaceIpcInstallFailure(String error) {
         java.io.File hint = new java.io.File(
                 com.overdrive.app.updater.UpdateLifecycle.TELEGRAM_POST_UPDATE_HINT_FILE);
-        boolean wasIpcTriggered = hint.exists();
+        boolean wasIpcTriggered = RemovableStorageFs.exists(hint);
         if (wasIpcTriggered) {
-            try { hint.delete(); } catch (Exception ignored) {}
+            try { RemovableStorageFs.delete(hint); } catch (Exception ignored) {}
         }
         if (!wasIpcTriggered) return;
         String raw = (error != null && !error.trim().isEmpty())
@@ -2766,7 +2766,7 @@ public class SurveillanceIpcServer implements Runnable {
     private void handleGetUpdateProgress(JSONObject response) throws Exception {
         response.put("success", true);
         java.io.File f = new java.io.File(com.overdrive.app.util.ScratchRoot.path("overdrive_update_progress.json"));
-        if (!f.exists()) {
+        if (!RemovableStorageFs.exists(f)) {
             response.put("phase", "idle");
             response.put("percent", -1);
             response.put("message", "");
@@ -2774,7 +2774,7 @@ public class SurveillanceIpcServer implements Runnable {
         }
         String json = null;
         try (java.io.BufferedReader r = new java.io.BufferedReader(
-                new java.io.InputStreamReader(new java.io.FileInputStream(f)))) {
+                new java.io.InputStreamReader(RemovableStorageFs.openInput(f)))) {
             StringBuilder sb = new StringBuilder();
             String line;
             while ((line = r.readLine()) != null) sb.append(line);

@@ -1,5 +1,7 @@
 package com.overdrive.app.telegram.config;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.byd.cloud.crypto.CredentialCipher;
 import com.overdrive.app.config.UnifiedConfigManager;
 
@@ -505,7 +507,7 @@ public final class UnifiedTelegramConfig {
         }
 
         File legacy = new File(LEGACY_PROPS_PATH);
-        if (!legacy.exists()) {
+        if (!RemovableStorageFs.exists(legacy)) {
             // Nothing to import. Don't fire a stampMigrated() write just to
             // record that fact — when the app UID can't write to
             // /data/local/tmp, that write fails anyway, and the in-process
@@ -517,7 +519,7 @@ public final class UnifiedTelegramConfig {
         }
 
         Properties props = new Properties();
-        try (FileInputStream fis = new FileInputStream(legacy)) {
+        try (FileInputStream fis = RemovableStorageFs.openInput(legacy)) {
             props.load(fis);
         } catch (Exception e) {
             // Can't read this session — set the per-process latch so we
@@ -562,7 +564,7 @@ public final class UnifiedTelegramConfig {
             // file mtime as a best-effort backstop so the UI doesn't show
             // "paired Jan 1 1970".
             if (delta.has(K_OWNER_CHAT_ID) && !section.has(K_OWNER_PAIRED_AT)) {
-                delta.put(K_OWNER_PAIRED_AT, legacy.lastModified());
+                delta.put(K_OWNER_PAIRED_AT, RemovableStorageFs.lastModified(legacy));
             }
 
             // PIN — only import if not yet expired, otherwise it's noise.
@@ -592,7 +594,7 @@ public final class UnifiedTelegramConfig {
         // Best-effort delete; if we can't (permission), the marker still
         // suppresses re-import. The next privileged-UID startup will clean
         // up via the cleanup branch below.
-        try { legacy.delete(); } catch (Exception ignored) {}
+        try { RemovableStorageFs.delete(legacy); } catch (Exception ignored) {}
     }
 
     /**

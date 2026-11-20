@@ -1,12 +1,14 @@
 package com.overdrive.app.server.hls;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import static com.overdrive.app.server.hls.Boxes.*;
 
 import java.io.EOFException;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.RandomAccessFile;
+import com.overdrive.app.storage.removable.SeekableFileReader;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
@@ -59,8 +61,8 @@ public final class Mp4Index {
 
     public static Mp4Index parse(File f) throws Mp4Exception {
         if (f == null) throw new Mp4Exception("no file");
-        long mtime = f.lastModified();
-        try (RandomAccessFile raf = new RandomAccessFile(f, "r")) {
+        long mtime = RemovableStorageFs.lastModified(f);
+        try (SeekableFileReader raf = new SeekableFileReader(f)) {
             FileChannel ch = raf.getChannel();
             long len = ch.size();
             return build(f, len, mtime, readMoov(ch, len));

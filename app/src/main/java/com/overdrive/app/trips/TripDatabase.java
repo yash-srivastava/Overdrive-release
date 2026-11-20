@@ -1,5 +1,7 @@
 package com.overdrive.app.trips;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.logging.DaemonLogger;
 
 import java.sql.Connection;
@@ -241,17 +243,17 @@ public class TripDatabase {
     private void cleanupStaleLocks() {
         try {
             java.io.File lockFile = new java.io.File(DB_PATH + ".lock.db");
-            if (lockFile.exists()) {
-                long ageMs = System.currentTimeMillis() - lockFile.lastModified();
+            if (RemovableStorageFs.exists(lockFile)) {
+                long ageMs = System.currentTimeMillis() - RemovableStorageFs.lastModified(lockFile);
                 if (ageMs > 5 * 60 * 1000) {
-                    if (lockFile.delete()) {
+                    if (RemovableStorageFs.delete(lockFile)) {
                         logger.info("Deleted stale lock file (age: " + (ageMs / 1000) + "s)");
                     }
                 }
             }
             java.io.File traceFile = new java.io.File(DB_PATH + ".trace.db");
-            if (traceFile.exists()) {
-                traceFile.delete();
+            if (RemovableStorageFs.exists(traceFile)) {
+                RemovableStorageFs.delete(traceFile);
             }
         } catch (Exception e) {
             logger.debug("Lock cleanup failed: " + e.getMessage());
@@ -977,7 +979,7 @@ public class TripDatabase {
                     // it'll reappear when the card remounts. volumeUp==null →
                     // unknown → preserve (fail safe).
                     boolean volAvailable = (volumeUp == null) ? false : volumeUp.test(path);
-                    if (volAvailable && !new java.io.File(path).exists()) {
+                    if (volAvailable && !RemovableStorageFs.exists(new java.io.File(path))) {
                         missingFileOrphans.add(rs.getLong("id"));
                     }
                 }
@@ -1707,7 +1709,7 @@ public class TripDatabase {
         java.util.LinkedHashSet<String> seenDirs = new java.util.LinkedHashSet<>();
         java.util.List<java.io.File> files = new java.util.ArrayList<>();
         for (java.io.File dir : tripsDirs) {
-            if (dir == null || !dir.isDirectory()) continue;
+            if (dir == null || !RemovableStorageFs.isDirectory(dir)) continue;
             if (!seenDirs.add(dir.getAbsolutePath())) continue;
             // BOUNDED listing: SD/USB trips dirs are FUSE-bridged and a bare
             // listFiles() can hang indefinitely on a flaky mount mid-write —
@@ -1873,7 +1875,7 @@ public class TripDatabase {
                     }
                     if (rowDeleted) {
                         try {
-                            if (!f.delete()) {
+                            if (!RemovableStorageFs.delete(f)) {
                                 logger.warn("recover: could not delete below-threshold file " + baseName);
                             }
                         } catch (Throwable ignored) { }
@@ -1886,7 +1888,7 @@ public class TripDatabase {
                     continue;
                 }
                 long sz;
-                try { sz = f.length(); } catch (Throwable e) { sz = 0; }
+                try { sz = RemovableStorageFs.length(f); } catch (Throwable e) { sz = 0; }
                 // Score from the surviving telemetry OUTSIDE the monitor (pure
                 // CPU over ≤ a few thousand samples). The five DNA axes minus
                 // efficiency are fully derivable from the journal; the row
@@ -1984,7 +1986,7 @@ public class TripDatabase {
             // far preferable to pinning isBackfillComplete=false (which would
             // revert the whole storage card to the multi-minute FUSE walk).
             long sz = 0;
-            try { sz = f.length(); } catch (Throwable ignored) { sz = 0; }
+            try { sz = RemovableStorageFs.length(f); } catch (Throwable ignored) { sz = 0; }
             t.sizeBytes = sz > 0 ? sz : 1;
             t.sidecarSizeBytes = 0;
 
@@ -2473,7 +2475,7 @@ public class TripDatabase {
         String path = row.telemetryFilePath;
         if (path == null || path.isEmpty() || isImportedPath(path)) return null;
         java.io.File f = new java.io.File(path);
-        if (!f.isFile()) return null;
+        if (!RemovableStorageFs.isFile(f)) return null;
         if (isActiveTripFileNow(f.getAbsolutePath())) return null;
 
         java.util.List<TelemetrySample> samples;
@@ -3539,8 +3541,8 @@ public class TripDatabase {
                         if (p != null && !p.isEmpty()) {
                             try {
                                 java.io.File f = new java.io.File(p);
-                                if (f.exists() && f.isFile()) {
-                                    sz = f.length();
+                                if (RemovableStorageFs.exists(f) && RemovableStorageFs.isFile(f)) {
+                                    sz = RemovableStorageFs.length(f);
                                 }
                             } catch (Throwable ignored) {
                                 // Permissions / FUSE blip — leave at 0 so

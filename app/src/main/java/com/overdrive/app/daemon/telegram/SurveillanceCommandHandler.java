@@ -1,5 +1,7 @@
 package com.overdrive.app.daemon.telegram;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import org.json.JSONObject;
 
 import java.util.Locale;
@@ -133,7 +135,7 @@ public class SurveillanceCommandHandler implements TelegramCommandHandler {
         for (int i = 0; i < 30; i++) {
             try {
                 java.io.File typeFile = new java.io.File("/sys/class/thermal/thermal_zone" + i + "/type");
-                if (!typeFile.exists()) continue;
+                if (!RemovableStorageFs.exists(typeFile)) continue;
                 String type;
                 try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(typeFile))) {
                     type = br.readLine();
@@ -147,7 +149,7 @@ public class SurveillanceCommandHandler implements TelegramCommandHandler {
                 if (!match) continue;
 
                 java.io.File tempFile = new java.io.File("/sys/class/thermal/thermal_zone" + i + "/temp");
-                if (!tempFile.exists()) continue;
+                if (!RemovableStorageFs.exists(tempFile)) continue;
                 String tempLine;
                 try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(tempFile))) {
                     tempLine = br.readLine();

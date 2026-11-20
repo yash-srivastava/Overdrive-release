@@ -1,5 +1,7 @@
 package com.overdrive.app.parking;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.notifications.NotificationEvent;
 import com.overdrive.app.server.Messages;
 
@@ -53,7 +55,7 @@ public final class ParkingNotifier {
         String body = startedBody(s, levelLabel);
         JSONObject data = baseData(s, "started");
         try {
-            if (composite != null && composite.isFile()) {
+            if (composite != null && RemovableStorageFs.isFile(composite)) {
                 attachImage(data, s, composite);
             }
             JSONArray buttons = new JSONArray();

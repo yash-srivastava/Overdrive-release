@@ -1,5 +1,7 @@
 package com.overdrive.app.surveillance;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import org.json.JSONObject;
 
 import java.io.File;
@@ -59,18 +61,18 @@ public final class LensTag {
         boolean created = false;
         try {
             // O_EXCL create: another writer's sidecar is never replaced, theirs may replace this one.
-            if (!json.createNewFile()) return false;
+            if (!RemovableStorageFs.createNewFile(json)) return false;
             created = true;
             JSONObject root = new JSONObject();
             root.put("version", 3);
             root.put("lens", tag);
-            try (java.io.FileWriter w = new java.io.FileWriter(json)) {
+            try (java.io.Writer w = new java.io.OutputStreamWriter(RemovableStorageFs.openOutput(json), java.nio.charset.StandardCharsets.UTF_8)) {
                 w.write(root.toString());
             }
-            json.setReadable(true, false);
+            RemovableStorageFs.setReadable(json, true, false);
             return true;
         } catch (Throwable t) {
-            if (created) json.delete();
+            if (created) RemovableStorageFs.delete(json);
             return false;
         }
     }
@@ -80,9 +82,9 @@ public final class LensTag {
         JSONObject tag = forFile(mp4);
         if (tag != null || mp4 == null || mp4.getParentFile() == null) return tag;
         File json = new File(mp4.getParentFile(), mp4.getName().replace(".mp4", ".json"));
-        if (!json.isFile() || json.length() <= 0 || json.length() > 1_048_576) return null;
+        if (!RemovableStorageFs.isFile(json) || RemovableStorageFs.length(json) <= 0 || RemovableStorageFs.length(json) > 1_048_576) return null;
         try {
-            byte[] bytes = java.nio.file.Files.readAllBytes(json.toPath());
+            byte[] bytes = RemovableStorageFs.readAllBytes(json);
             JSONObject lens = new JSONObject(new String(bytes, java.nio.charset.StandardCharsets.UTF_8))
                 .optJSONObject("lens");
             return lens != null && lens.optBoolean("raw", false) && "divide".equals(lens.optString("model"))

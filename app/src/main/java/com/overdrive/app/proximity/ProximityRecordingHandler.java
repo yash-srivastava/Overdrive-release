@@ -1,5 +1,7 @@
 package com.overdrive.app.proximity;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.storage.StorageManager;
 import com.overdrive.app.surveillance.GpuSurveillancePipeline;
@@ -249,7 +251,7 @@ public class ProximityRecordingHandler {
                     ? videoFile.substring(0, videoFile.length() - 4) + ".jpg"
                     : videoFile + ".jpg";
             File heroFile = new File(outputDir, heroName);
-            String snapshotName = heroFile.exists() ? heroName : videoFile;
+            String snapshotName = RemovableStorageFs.exists(heroFile) ? heroName : videoFile;
             String encSnap = java.net.URLEncoder.encode(snapshotName, "UTF-8");
             String thumbTok = com.overdrive.app.auth.AuthManager
                     .signThumbToken(snapshotName, 600L);

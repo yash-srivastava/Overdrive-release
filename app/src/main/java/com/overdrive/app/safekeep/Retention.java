@@ -1,5 +1,7 @@
 package com.overdrive.app.safekeep;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -91,7 +93,7 @@ public final class Retention {
             String path = f.getAbsolutePath();
             Entry l = locks.get(path);
             if (l != null) {
-                long size = Math.max(0, f.length());
+                long size = Math.max(0, RemovableStorageFs.length(f));
                 if (lockedKept + size <= lockBudget) {
                     lockedKept += size;
                     keep.add(path);
@@ -100,7 +102,7 @@ public final class Retention {
             }
             Entry e = p.get(path);
             if (e == null || now - e.since > PIN_MAX_AGE_MS) continue;
-            long size = Math.max(0, f.length());
+            long size = Math.max(0, RemovableStorageFs.length(f));
             if (pinnedKept + size <= pinBudget) {
                 pinnedKept += size;
                 keep.add(path);
@@ -191,11 +193,11 @@ public final class Retention {
         Map<File, Boolean> readable = new HashMap<>();
         for (String p : new java.util.ArrayList<>(locks.keySet())) {
             File f = new File(p);
-            if (f.exists()) continue;
+            if (RemovableStorageFs.exists(f)) continue;
             File dir = f.getParentFile();
             Boolean ok = readable.get(dir);
             if (ok == null) {
-                String[] listing = dir == null ? null : dir.list();
+                String[] listing = dir == null ? null : RemovableStorageFs.list(dir);
                 ok = listing != null && listing.length > 0;
                 readable.put(dir, ok);
             }
@@ -211,8 +213,8 @@ public final class Retention {
     synchronized void loadLocks() {
         Map<String, Entry> loaded = new HashMap<>();
         try {
-            if (LOCKS_FILE.isFile() && LOCKS_FILE.length() < 1024 * 1024) {
-                JSONArray a = new JSONObject(new String(java.nio.file.Files.readAllBytes(LOCKS_FILE.toPath()),
+            if (RemovableStorageFs.isFile(LOCKS_FILE) && RemovableStorageFs.length(LOCKS_FILE) < 1024 * 1024) {
+                JSONArray a = new JSONObject(new String(RemovableStorageFs.readAllBytes(LOCKS_FILE),
                         StandardCharsets.UTF_8)).optJSONArray("locks");
                 if (a != null) for (int i = 0; i < a.length(); i++) {
                     JSONObject o = a.optJSONObject(i);

@@ -89,6 +89,10 @@ public final class RecordingsIndexFileWatcher {
 
     /** Live set of registered observers. Replaced atomically on refresh. */
     private final List<FileObserver> observers = new ArrayList<>();
+    /** Pollers for MediaStore-routed dirs (DiLink 100 removable storage), which inotify can't watch. */
+    private final List<java.util.concurrent.ScheduledFuture<?>> routedPollers = new ArrayList<>();
+    private java.util.concurrent.ScheduledExecutorService routedPollExecutor;
+    private static final long ROUTED_POLL_SECONDS = 15;
 
     /** Whether start() has ever been called — gates refresh()'s no-op. */
     private volatile boolean started = false;
@@ -144,7 +148,8 @@ public final class RecordingsIndexFileWatcher {
                         try {
                             if (change == RecordingIndexEventQueue.Change.REMOVE) {
                                 RecordingsIndex.getInstance().removeByPath(mp4Path);
-                            } else if (file.isFile() && file.length() > 0) {
+                            } else if (com.overdrive.app.storage.removable.RemovableStorageFs.isFile(file)
+                                    && com.overdrive.app.storage.removable.RemovableStorageFs.length(file) > 0) {
                                 // A failed stat (e.g. mid-remount) leaves the row for reconcile.
                                 RecordingsIndex.getInstance().upsert(file);
                             }
@@ -179,6 +184,8 @@ public final class RecordingsIndexFileWatcher {
         if (eventQueue != null) eventQueue.close();
         stopWatchingOnly();
         if (indexWorker != null) indexWorker.shutdown(); // do not interrupt JDBC
+        if (routedPollExecutor != null) routedPollExecutor.shutdown();
+        routedPollExecutor = null;
         eventQueue = null;
         indexWorker = null;
         started = false;
@@ -192,6 +199,8 @@ public final class RecordingsIndexFileWatcher {
             }
         }
         observers.clear();
+        for (java.util.concurrent.ScheduledFuture<?> f : routedPollers) f.cancel(false);
+        routedPollers.clear();
     }
 
     private void registerAll(List<File> dirs, Set<String> seen) {
@@ -209,6 +218,10 @@ public final class RecordingsIndexFileWatcher {
     private void registerOne(final File dir) {
         final RecordingIndexEventQueue queue = eventQueue;
         if (queue == null) return;
+        if (com.overdrive.app.storage.removable.RemovableStorageFs.isRouted(dir)) {
+            registerRoutedPoller(dir, queue);
+            return;
+        }
         if (!dir.exists() || !dir.isDirectory() || !dir.canRead()) {
             logger.debug("Skipping observer for non-readable dir: " + dir);
             return;
@@ -249,6 +262,62 @@ public final class RecordingsIndexFileWatcher {
             CameraDaemon.log("FileObserver register failed for " + dir + ": "
                     + t.getClass().getSimpleName() + ": " + t.getMessage());
         }
+    }
+
+    /**
+     * DiLink 100 removable storage is reached through MediaStore, where inotify can't
+     * follow. Poll the directory listing (one MediaStore query) and feed the same queue
+     * with the same three kinds of change the FileObserver path produces. The first
+     * listing is only a baseline: clips already there are covered by the reconcile.
+     */
+    private void registerRoutedPoller(final File dir, final RecordingIndexEventQueue queue) {
+        if (routedPollExecutor == null) {
+            routedPollExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "RecordingsIndexRoutedPoll");
+                t.setDaemon(true);
+                return t;
+            });
+        }
+        final java.util.Map<String, String> previous = new java.util.HashMap<>();
+        final boolean[] baseline = {false};
+        Runnable poll = () -> {
+            try {
+                File[] kids = com.overdrive.app.storage.removable.RemovableStorageFs.listFiles(dir);
+                if (kids == null) return;  // volume gone or unreadable: keep the last state
+                java.util.Map<String, String> now = new java.util.HashMap<>();
+                for (File k : kids) {
+                    String name = k.getName();
+                    if (!name.endsWith(".mp4") && !name.endsWith(".json")) continue;
+                    // The listing's own metadata: no per-file lookups on every tick.
+                    now.put(name, com.overdrive.app.storage.removable.RemovableStorageFs.listingSignature(k));
+                }
+                if (baseline[0]) {
+                    for (java.util.Map.Entry<String, String> e : now.entrySet()) {
+                        if (e.getValue().equals(previous.get(e.getKey()))) continue;
+                        String name = e.getKey();
+                        String mp4 = name.endsWith(".json")
+                                ? name.substring(0, name.length() - ".json".length()) + ".mp4" : name;
+                        queue.submit(new File(dir, mp4).getAbsolutePath(),
+                                RecordingIndexEventQueue.Change.REFRESH);
+                    }
+                    for (String gone : previous.keySet()) {
+                        if (gone.endsWith(".mp4") && !now.containsKey(gone)) {
+                            queue.submit(new File(dir, gone).getAbsolutePath(),
+                                    RecordingIndexEventQueue.Change.REMOVE);
+                        }
+                    }
+                }
+                previous.clear();
+                previous.putAll(now);
+                baseline[0] = true;
+            } catch (Throwable t) {
+                logger.warn("Routed poll failed for " + dir + ": " + t.getMessage());
+            }
+        };
+        routedPollers.add(routedPollExecutor.scheduleWithFixedDelay(
+                poll, 0, ROUTED_POLL_SECONDS, java.util.concurrent.TimeUnit.SECONDS));
+        logger.info("Polling " + dir.getAbsolutePath() + " every " + ROUTED_POLL_SECONDS
+                + "s (removable storage via MediaStore; inotify unavailable)");
     }
 
     /** FileObserver callback: no file stats, JSON parse, JDBC or blocking queue put. */

@@ -1,5 +1,7 @@
 package com.overdrive.app.storage;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import android.os.StatFs;
 import android.util.Log;
 import org.json.JSONObject;
@@ -1038,8 +1040,8 @@ public class StorageManager {
                     if (dir == null) continue;
                     String path = dir.getAbsolutePath();
                     if (!seenPaths.add(path)) continue;
-                    if (!dir.isDirectory()) continue;
-                    File[] files = dir.listFiles((d, name) -> isSweptPartial(category, name, partials));
+                    if (!RemovableStorageFs.isDirectory(dir)) continue;
+                    File[] files = RemovableStorageFs.listFiles(dir, (d, name) -> isSweptPartial(category, name, partials));
                     if (files == null) {
                         // FUSE-bridged SD/USB returns null under daemon UID 2000.
                         // Without this fallback the entire external dir is skipped,
@@ -1067,23 +1069,23 @@ public class StorageManager {
                             continue;
                         }
                         if (com.overdrive.app.surveillance.SegmentRecovery.isPending(f)) continue;
-                        if (f.getName().endsWith(".mp4.tmp.jnl") && new File(f.getPath().substring(
-                                0, f.getPath().length() - ".jnl".length())).exists()) {
+                        if (f.getName().endsWith(".mp4.tmp.jnl") && RemovableStorageFs.exists(new File(f.getPath().substring(
+                                0, f.getPath().length() - ".jnl".length())))) {
                             continue;  // goes with its .mp4.tmp
                         }
-                        if (f.lastModified() > cutoff) continue;  // grace window
+                        if (RemovableStorageFs.lastModified(f) > cutoff) continue;  // grace window
                         if ("surveillance".equals(category) && isShortHopName(f.getName())) {
                             hopLeftovers.add(f);
                             continue;
                         }
-                        long size = f.length();
-                        boolean ok = f.delete();
+                        long size = RemovableStorageFs.length(f);
+                        boolean ok = RemovableStorageFs.delete(f);
                         if (!ok) ok = deleteFileViaShell(f);
                         if (ok) {
                             deleted++;
                             bytesFreed += size;
                             if (f.getName().endsWith(".mp4.tmp")) {
-                                new File(f.getPath() + ".jnl").delete();
+                                RemovableStorageFs.delete(new File(f.getPath() + ".jnl"));
                             }
                         } else {
                             logWarn("Orphan tmp delete failed: " + f.getAbsolutePath());
@@ -1094,7 +1096,7 @@ public class StorageManager {
         }
         // Re-checked under the hop lock (a clip may park there meanwhile), never under a cleanup lock.
         for (File f : hopLeftovers) {
-            long size = f.length();
+            long size = RemovableStorageFs.length(f);
             boolean ok = deleteHopLeftover(f, cutoff);
             if (ok) {
                 deleted++;
@@ -2211,11 +2213,11 @@ public class StorageManager {
         // sys.byd.isSDExist covers the BYD fleet anyway) than to misclassify.
         try {
             File mmcHostDir = new File("/sys/class/mmc_host");
-            if (mmcHostDir.exists() && mmcHostDir.isDirectory()) {
-                File[] hosts = mmcHostDir.listFiles();
+            if (RemovableStorageFs.exists(mmcHostDir) && RemovableStorageFs.isDirectory(mmcHostDir)) {
+                File[] hosts = RemovableStorageFs.listFiles(mmcHostDir);
                 if (hosts != null) {
                     for (File host : hosts) {
-                        File[] children = host.listFiles();
+                        File[] children = RemovableStorageFs.listFiles(host);
                         if (children == null) continue;
                         for (File child : children) {
                             if (!MMC_CARD_ENTRY.matcher(child.getName()).matches()) continue;
@@ -2223,7 +2225,7 @@ public class StorageManager {
                             // card `type` sysfs node: "SD"/"SDIO" = removable card,
                             // "MMC" = soldered eMMC.
                             File typeFile = new File(child, "type");
-                            if (!typeFile.isFile() || !typeFile.canRead()) continue;
+                            if (!RemovableStorageFs.isFile(typeFile) || !RemovableStorageFs.canRead(typeFile)) continue;
                             try (BufferedReader tr = new BufferedReader(new FileReader(typeFile))) {
                                 String type = tr.readLine();
                                 if (type != null) {
@@ -2263,8 +2265,8 @@ public class StorageManager {
     private boolean isUsbDeviceAttached() {
         try {
             File usbDir = new File("/sys/bus/usb/devices");
-            if (!usbDir.exists() || !usbDir.isDirectory()) return false;
-            File[] devices = usbDir.listFiles();
+            if (!RemovableStorageFs.exists(usbDir) || !RemovableStorageFs.isDirectory(usbDir)) return false;
+            File[] devices = RemovableStorageFs.listFiles(usbDir);
             if (devices == null) return false;
             for (File dev : devices) {
                 // Skip root hubs (usb1, usb2, …) — those are always present
@@ -2272,11 +2274,11 @@ public class StorageManager {
                 // up as e.g. 1-1, 1-1.2 (port path notation).
                 String name = dev.getName();
                 if (name.startsWith("usb") || !name.contains("-")) continue;
-                File[] children = dev.listFiles();
+                File[] children = RemovableStorageFs.listFiles(dev);
                 if (children == null) continue;
                 for (File child : children) {
                     File classFile = new File(child, "bInterfaceClass");
-                    if (!classFile.isFile() || !classFile.canRead()) continue;
+                    if (!RemovableStorageFs.isFile(classFile) || !RemovableStorageFs.canRead(classFile)) continue;
                     try (BufferedReader r = new BufferedReader(new FileReader(classFile))) {
                         String cls = r.readLine();
                         // 08 = USB Mass Storage. 06 = Image (cameras), other
@@ -2326,14 +2328,13 @@ public class StorageManager {
     public boolean isSdCardLikelyMounted() {
         if (sdCardPath == null) return false;
         File d = new File(sdCardPath);
-        if (!d.exists() || !d.isDirectory()) return false;
+        if (!RemovableStorageFs.exists(d) || !RemovableStorageFs.isDirectory(d)) return false;
         try {
-            android.os.StatFs s = new android.os.StatFs(sdCardPath);
-            if (s.getTotalBytes() <= 0) return false;
+            if (RemovableStorageFs.statFsTotalBytes(sdCardPath) <= 0) return false;
         } catch (Throwable t) {
             return false;
         }
-        return d.canWrite();
+        return RemovableStorageFs.canWrite(d);
     }
 
     /**
@@ -2435,14 +2436,13 @@ public class StorageManager {
     public boolean isUsbLikelyMounted() {
         if (usbPath == null) return false;
         File d = new File(usbPath);
-        if (!d.exists() || !d.isDirectory()) return false;
+        if (!RemovableStorageFs.exists(d) || !RemovableStorageFs.isDirectory(d)) return false;
         try {
-            android.os.StatFs s = new android.os.StatFs(usbPath);
-            if (s.getTotalBytes() <= 0) return false;
+            if (RemovableStorageFs.statFsTotalBytes(usbPath) <= 0) return false;
         } catch (Throwable t) {
             return false;
         }
-        return d.canWrite();
+        return RemovableStorageFs.canWrite(d);
     }
 
     /**
@@ -2760,7 +2760,7 @@ public class StorageManager {
         // Signal 2: DEVNAME from the kernel uevent.
         try {
             File ueventFile = new File("/sys/dev/block/" + major + ":" + minor + "/uevent");
-            if (ueventFile.exists() && ueventFile.canRead()) {
+            if (RemovableStorageFs.exists(ueventFile) && RemovableStorageFs.canRead(ueventFile)) {
                 BufferedReader r = new BufferedReader(new FileReader(ueventFile));
                 String l;
                 String devname = null;
@@ -2793,8 +2793,10 @@ public class StorageManager {
      */
     private boolean isMountWritable(String mountPath) {
         File dir = new File(mountPath);
-        if (!dir.exists() || !dir.isDirectory()) return false;
-        if (dir.canWrite()) return true;
+        if (!RemovableStorageFs.exists(dir) || !RemovableStorageFs.isDirectory(dir)) return false;
+        if (RemovableStorageFs.canWrite(dir)) return true;
+        // Routed volumes are only reachable through the app: a shell touch would always fail.
+        if (RemovableStorageFs.isRouted(dir)) return false;
         try {
             Process p = Runtime.getRuntime().exec(new String[]{
                 "sh", "-c", com.overdrive.app.util.ScratchRoot.remap("touch " + mountPath + "/.overdrive_probe && rm " + mountPath + "/.overdrive_probe")
@@ -3361,16 +3363,16 @@ public class StorageManager {
     /** The {@link #isPathLikelyMounted} checks, itemised for the shadow log. */
     private static String describeMountProbe(String path) {
         File d = new File(path);
-        boolean exists = d.exists();
-        boolean dir = exists && d.isDirectory();
+        boolean exists = RemovableStorageFs.exists(d);
+        boolean dir = exists && RemovableStorageFs.isDirectory(d);
         String totalBytes;
         try {
-            totalBytes = dir ? String.valueOf(new android.os.StatFs(path).getTotalBytes()) : "-";
+            totalBytes = dir ? String.valueOf(RemovableStorageFs.statFsTotalBytes(path)) : "-";
         } catch (Throwable t) {
             totalBytes = "threw " + t.getMessage();
         }
         return "exists=" + exists + " dir=" + dir + " totalBytes=" + totalBytes
-                + " canWrite=" + (dir && d.canWrite());
+                + " canWrite=" + (dir && RemovableStorageFs.canWrite(d));
     }
 
     // Budget for a single isPathLikelyMounted probe. A healthy mount answers
@@ -3431,10 +3433,9 @@ public class StorageManager {
         Thread probe = new Thread(() -> {
             try {
                 File d = new File(path);
-                if (!d.exists() || !d.isDirectory()) return;
-                android.os.StatFs s = new android.os.StatFs(path);
-                if (s.getTotalBytes() <= 0) return;
-                ok[0] = d.canWrite();
+                if (!RemovableStorageFs.exists(d) || !RemovableStorageFs.isDirectory(d)) return;
+                if (RemovableStorageFs.statFsTotalBytes(path) <= 0) return;
+                ok[0] = RemovableStorageFs.canWrite(d);
             } catch (Throwable ignored) {
                 // ok stays false
             } finally {
@@ -3491,7 +3492,7 @@ public class StorageManager {
      */
     private String readLearnedSdUuid() {
         File f = new File(LEARNED_SD_UUID_FILE);
-        if (!f.exists() || !f.canRead()) return "";
+        if (!RemovableStorageFs.exists(f) || !RemovableStorageFs.canRead(f)) return "";
         try (BufferedReader r = new BufferedReader(new FileReader(f))) {
             String line = r.readLine();
             return line != null ? line.trim() : "";
@@ -3508,11 +3509,11 @@ public class StorageManager {
     private void learnSdUuid(String uuid) {
         if (uuid == null || uuid.isEmpty()) return;
         if (uuid.equalsIgnoreCase(readLearnedSdUuid())) return;  // unchanged, skip write
-        try (FileWriter w = new FileWriter(LEARNED_SD_UUID_FILE, false)) {
+        try (java.io.Writer w = new java.io.OutputStreamWriter(RemovableStorageFs.openOutput(new java.io.File(LEARNED_SD_UUID_FILE), false), java.nio.charset.StandardCharsets.UTF_8)) {
             w.write(uuid);
             // 0644 — daemon (UID 2000) writes, app process needs to read on
             // the rare path where it walks classifyPublicVolume itself.
-            try { new File(LEARNED_SD_UUID_FILE).setReadable(true, false); } catch (Exception ignored) {}
+            try { RemovableStorageFs.setReadable(new File(LEARNED_SD_UUID_FILE), true, false); } catch (Exception ignored) {}
             logInfo("Learned SD UUID for future classification: " + uuid);
         } catch (Exception e) {
             logDebug("learnSdUuid write failed: " + e.getMessage());
@@ -3527,44 +3528,44 @@ public class StorageManager {
     private void initDirectories() {
         // Initialize internal storage directories (always available)
         File internalBaseDir = new File(INTERNAL_BASE_DIR);
-        if (!internalBaseDir.exists()) {
-            boolean created = internalBaseDir.mkdirs();
+        if (!RemovableStorageFs.exists(internalBaseDir)) {
+            boolean created = RemovableStorageFs.mkdirs(internalBaseDir);
             logInfo("Created internal base directory: " + INTERNAL_BASE_DIR + " (success=" + created + ")");
         }
-        internalBaseDir.setReadable(true, false);
-        internalBaseDir.setExecutable(true, false);
+        RemovableStorageFs.setReadable(internalBaseDir, true, false);
+        RemovableStorageFs.setExecutable(internalBaseDir, true, false);
         
         internalRecordingsDir = new File(internalBaseDir, RECORDINGS_SUBDIR);
-        if (!internalRecordingsDir.exists()) {
-            boolean created = internalRecordingsDir.mkdirs();
+        if (!RemovableStorageFs.exists(internalRecordingsDir)) {
+            boolean created = RemovableStorageFs.mkdirs(internalRecordingsDir);
             logInfo("Created internal recordings directory: " + internalRecordingsDir.getAbsolutePath() + " (success=" + created + ")");
         }
-        internalRecordingsDir.setReadable(true, false);
-        internalRecordingsDir.setExecutable(true, false);
+        RemovableStorageFs.setReadable(internalRecordingsDir, true, false);
+        RemovableStorageFs.setExecutable(internalRecordingsDir, true, false);
         
         internalSurveillanceDir = new File(internalBaseDir, SURVEILLANCE_SUBDIR);
-        if (!internalSurveillanceDir.exists()) {
-            boolean created = internalSurveillanceDir.mkdirs();
+        if (!RemovableStorageFs.exists(internalSurveillanceDir)) {
+            boolean created = RemovableStorageFs.mkdirs(internalSurveillanceDir);
             logInfo("Created internal surveillance directory: " + internalSurveillanceDir.getAbsolutePath() + " (success=" + created + ")");
         }
-        internalSurveillanceDir.setReadable(true, false);
-        internalSurveillanceDir.setExecutable(true, false);
+        RemovableStorageFs.setReadable(internalSurveillanceDir, true, false);
+        RemovableStorageFs.setExecutable(internalSurveillanceDir, true, false);
         
         internalProximityDir = new File(internalBaseDir, PROXIMITY_SUBDIR);
-        if (!internalProximityDir.exists()) {
-            boolean created = internalProximityDir.mkdirs();
+        if (!RemovableStorageFs.exists(internalProximityDir)) {
+            boolean created = RemovableStorageFs.mkdirs(internalProximityDir);
             logInfo("Created internal proximity directory: " + internalProximityDir.getAbsolutePath() + " (success=" + created + ")");
         }
-        internalProximityDir.setReadable(true, false);
-        internalProximityDir.setExecutable(true, false);
+        RemovableStorageFs.setReadable(internalProximityDir, true, false);
+        RemovableStorageFs.setExecutable(internalProximityDir, true, false);
         
         internalTripsDir = new File(internalBaseDir, TRIPS_SUBDIR);
-        if (!internalTripsDir.exists()) {
-            boolean created = internalTripsDir.mkdirs();
+        if (!RemovableStorageFs.exists(internalTripsDir)) {
+            boolean created = RemovableStorageFs.mkdirs(internalTripsDir);
             logInfo("Created internal trips directory: " + internalTripsDir.getAbsolutePath() + " (success=" + created + ")");
         }
-        internalTripsDir.setReadable(true, false);
-        internalTripsDir.setExecutable(true, false);
+        RemovableStorageFs.setReadable(internalTripsDir, true, false);
+        RemovableStorageFs.setExecutable(internalTripsDir, true, false);
         
         // Initialize SD card and USB directories if available
         initSdCardDirectories();
@@ -3676,24 +3677,24 @@ public class StorageManager {
 
     private File[] initVolumeDirectoriesUnbounded(String volumePath, String label) {
         File base = new File(volumePath, "Overdrive");
-        boolean baseCreated = base.mkdirs();
-        if (!base.exists()) {
+        boolean baseCreated = RemovableStorageFs.mkdirs(base);
+        if (!RemovableStorageFs.exists(base)) {
             logError("Failed to create " + label + " base directory: " + base.getAbsolutePath());
             return null;
         }
         if (baseCreated) {
             logInfo("Created " + label + " base directory: " + base.getAbsolutePath());
         }
-        base.setReadable(true, false);
-        base.setWritable(true, false);
-        base.setExecutable(true, false);
+        RemovableStorageFs.setReadable(base, true, false);
+        RemovableStorageFs.setWritable(base, true, false);
+        RemovableStorageFs.setExecutable(base, true, false);
 
         File rec = makeChildDir(base, RECORDINGS_SUBDIR, label + " recordings");
         File surv = makeChildDir(base, SURVEILLANCE_SUBDIR, label + " surveillance");
         File prox = makeChildDir(base, PROXIMITY_SUBDIR, label + " proximity");
         File trips = makeChildDir(base, TRIPS_SUBDIR, label + " trips");
 
-        if (surv != null && surv.exists() && !surv.canWrite()) {
+        if (surv != null && RemovableStorageFs.exists(surv) && !RemovableStorageFs.canWrite(surv)) {
             logError(label + " surveillance directory exists but is not writable: " + surv.getAbsolutePath());
         }
         return new File[]{rec, surv, prox, trips};
@@ -3701,17 +3702,17 @@ public class StorageManager {
 
     private File makeChildDir(File parent, String name, String label) {
         File dir = new File(parent, name);
-        boolean created = dir.mkdirs();
-        if (!dir.exists()) {
+        boolean created = RemovableStorageFs.mkdirs(dir);
+        if (!RemovableStorageFs.exists(dir)) {
             logError("Failed to create " + label + " directory: " + dir.getAbsolutePath());
             return dir;
         }
         if (created) {
             logInfo("Created " + label + " directory: " + dir.getAbsolutePath());
         }
-        dir.setReadable(true, false);
-        dir.setWritable(true, false);
-        dir.setExecutable(true, false);
+        RemovableStorageFs.setReadable(dir, true, false);
+        RemovableStorageFs.setWritable(dir, true, false);
+        RemovableStorageFs.setExecutable(dir, true, false);
         return dir;
     }
     
@@ -3931,9 +3932,9 @@ public class StorageManager {
             // leave it to the unmount fallback path.
             long targetFree;
             try {
-                File probe = targetDir.exists() ? targetDir : targetDir.getParentFile();
-                if (probe == null || !probe.exists()) return targetDir;
-                targetFree = new StatFs(probe.getAbsolutePath()).getAvailableBytes();
+                File probe = RemovableStorageFs.exists(targetDir) ? targetDir : targetDir.getParentFile();
+                if (probe == null || !RemovableStorageFs.exists(probe)) return targetDir;
+                targetFree = RemovableStorageFs.statFsAvailableBytes(probe.getAbsolutePath());
             } catch (Throwable statThrow) {
                 logWarn("ENOSPC-fallback: StatFs on external target " + targetPath
                     + " threw (" + statThrow.getMessage() + ") — treating as unmounted, "
@@ -3981,7 +3982,7 @@ public class StorageManager {
 
             File internalDir = internalRecordingsDir;
             if (internalDir == null) return targetDir;
-            if (!internalDir.exists()) internalDir.mkdirs();
+            if (!RemovableStorageFs.exists(internalDir)) RemovableStorageFs.mkdirs(internalDir);
             logWarn("ENOSPC-fallback: external target " + targetPath + " is full ("
                 + formatSize(targetFree) + " free < " + formatSize(reserveBytes)
                 + " reserve) — redirecting THIS segment to internal "
@@ -4058,9 +4059,9 @@ public class StorageManager {
 
             long targetFree;
             try {
-                File probe = targetDir.exists() ? targetDir : targetDir.getParentFile();
-                if (probe == null || !probe.exists()) return targetDir;
-                targetFree = new StatFs(probe.getAbsolutePath()).getAvailableBytes();
+                File probe = RemovableStorageFs.exists(targetDir) ? targetDir : targetDir.getParentFile();
+                if (probe == null || !RemovableStorageFs.exists(probe)) return targetDir;
+                targetFree = RemovableStorageFs.statFsAvailableBytes(probe.getAbsolutePath());
             } catch (Throwable statThrow) {
                 logWarn("ENOSPC-fallback(surveillance): StatFs on external target " + targetPath
                     + " threw (" + statThrow.getMessage() + ") — treating as unmounted, "
@@ -4085,7 +4086,7 @@ public class StorageManager {
                 return targetDir;
             }
 
-            if (!internalDir.exists()) internalDir.mkdirs();
+            if (!RemovableStorageFs.exists(internalDir)) RemovableStorageFs.mkdirs(internalDir);
             logWarn("ENOSPC-fallback(surveillance): external target " + targetPath + " is full ("
                 + formatSize(targetFree) + " free < " + formatSize(reserveBytes)
                 + " reserve) — redirecting THIS event to internal surveillance "
@@ -4207,7 +4208,7 @@ public class StorageManager {
         if (type == null || !isWriteFaulted(type)) return dir;
         File internal = internalDirForCategory(categoryOfDir(dir, category));
         if (internal == null) return dir;
-        if (!internal.exists()) internal.mkdirs();
+        if (!RemovableStorageFs.exists(internal)) RemovableStorageFs.mkdirs(internal);
         long now = android.os.SystemClock.elapsedRealtime();
         if (now - writeFaultRedirectLoggedAtMs >= 60_000L) {  // starts log their own targets
             writeFaultRedirectLoggedAtMs = now;
@@ -4487,14 +4488,14 @@ public class StorageManager {
     private boolean deleteHopLeftover(File f, long newestAllowedMs) {
         final String key = parkedKey(f);
         synchronized (SHORT_NAME_RENAME_LOCK) {
-            if (isParkedClip(f) || !f.isFile() || f.lastModified() > newestAllowedMs) return false;
-            if (f.delete()) return true;
-            if (!f.exists()) return false;
+            if (isParkedClip(f) || !RemovableStorageFs.isFile(f) || RemovableStorageFs.lastModified(f) > newestAllowedMs) return false;
+            if (RemovableStorageFs.delete(f)) return true;
+            if (!RemovableStorageFs.exists(f)) return false;
             hopRmPending.merge(key, 1, Integer::sum);
         }
         try {
             rmForRelief(java.util.Collections.singletonList(f.getAbsolutePath()));
-            return !f.exists();
+            return !RemovableStorageFs.exists(f);
         } finally {
             synchronized (SHORT_NAME_RENAME_LOCK) {
                 hopRmPending.computeIfPresent(key, (k, n) -> n > 1 ? n - 1 : null);
@@ -4622,6 +4623,13 @@ public class StorageManager {
     }
 
     private static int renameErrno(File from, File to) {
+        boolean routedFrom = RemovableStorageFs.isRouted(from);
+        if (routedFrom || RemovableStorageFs.isRouted(to)) {
+            if (routedFrom != RemovableStorageFs.isRouted(to)) return android.system.OsConstants.EXDEV;
+            if (RemovableStorageFs.renameTo(from, to)) return 0;
+            return RemovableStorageFs.exists(from)
+                    ? android.system.OsConstants.EIO : android.system.OsConstants.ENOENT;
+        }
         try {
             android.system.Os.rename(from.getAbsolutePath(), to.getAbsolutePath());
             return 0;
@@ -4801,7 +4809,7 @@ public class StorageManager {
         synchronized (FOLDER_RELIEF_STATE_LOCK) {
             if (folderReliefStateLoaded) return;
             File f = new File(FOLDER_RELIEF_STATE_FILE);
-            if (f.isFile()) {
+            if (RemovableStorageFs.isFile(f)) {
                 try (BufferedReader r = new BufferedReader(new FileReader(f))) {
                     String line;
                     while ((line = r.readLine()) != null) {
@@ -4814,7 +4822,7 @@ public class StorageManager {
                         }
                     }
                 } catch (java.io.FileNotFoundException e) {
-                    if (f.exists()) folderReliefStateUnreadable = true;  // else removed meanwhile
+                    if (RemovableStorageFs.exists(f)) folderReliefStateUnreadable = true;  // else removed meanwhile
                 } catch (Exception e) {
                     folderReliefStateUnreadable = true;
                     logDebug("Folder-entry relief state unreadable: " + e.getMessage());
@@ -4833,20 +4841,20 @@ public class StorageManager {
             }
             File f = new File(FOLDER_RELIEF_STATE_FILE);
             if (sb.length() == 0) {
-                if (f.exists() && !f.delete()) logDebug("Folder-entry relief state not removed");
+                if (RemovableStorageFs.exists(f) && !RemovableStorageFs.delete(f)) logDebug("Folder-entry relief state not removed");
                 return;
             }
             File tmp = new File(FOLDER_RELIEF_STATE_FILE + ".tmp");
-            try (java.io.FileOutputStream out = new java.io.FileOutputStream(tmp, false)) {
+            try (java.io.FileOutputStream out = RemovableStorageFs.openOutput(tmp, false)) {
                 out.write(sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 out.getFD().sync();  // a power cut right after the rename must not leave it empty
             } catch (Exception e) {
                 logDebug("Folder-entry relief state not saved: " + e.getMessage());
                 return;
             }
-            if (!tmp.renameTo(f)) {
+            if (!RemovableStorageFs.renameTo(tmp, f)) {
                 logDebug("Folder-entry relief state not saved: rename failed");
-                tmp.delete();
+                RemovableStorageFs.delete(tmp);
             }
         }
     }
@@ -4942,7 +4950,7 @@ public class StorageManager {
                     : "probe failed (" + android.system.OsConstants.errnoName(state) + "), not a full folder");
                 return;
             }
-            long free = new StatFs(path).getAvailableBytes();
+            long free = RemovableStorageFs.statFsAvailableBytes(path);
             // Bytes short: the card is full, which the ENOSPC fallback and the reaper own.
             if (free < WRITE_FAULT_MIN_FREE_BYTES) {
                 folderReliefGapUntilMs.put(path, gapUntil);
@@ -5081,7 +5089,7 @@ public class StorageManager {
                 File f = orphanFiles.get(nextOrphan);
                 String stem = orphanStems.get(nextOrphan);
                 nextOrphan++;
-                if (f.lastModified() > newestAllowedMs || !f.isFile()) continue;
+                if (RemovableStorageFs.lastModified(f) > newestAllowedMs || !RemovableStorageFs.isFile(f)) continue;
                 // The listing can predate the clip's save, or miss names: confirm the clip is gone.
                 if (stem != null ? clipOnDisk(dir, stem + ext) : isParkedClip(f)) continue;
                 doomed.add(f);
@@ -5139,7 +5147,7 @@ public class StorageManager {
             boolean evictedOne = false;
             boolean otherCleanup = false;
             boolean skipped = false;
-            final long size = event.length();
+            final long size = RemovableStorageFs.length(event);
             List<String> stuck = null;
             synchronized (surveillanceCleanupLock) {
                 // Another cleanup deleted since the probe: measure again before deleting more.
@@ -5154,7 +5162,7 @@ public class StorageManager {
             }
             if (stuck != null) {
                 rmForRelief(stuck);  // outside the lock, as for orphans
-                evictedOne = !event.exists();
+                evictedOne = !RemovableStorageFs.exists(event);
             }
             if (evictedOne) {
                 finishEviction(dir, event, size, ext, sidecarExts, auxIndex);
@@ -5219,14 +5227,14 @@ public class StorageManager {
 
     /** Not evictable: gone, written in the last 10 minutes, SafeKeep-locked, or kept by SafeKeep. */
     private static boolean isReliefProtected(File event, long newestAllowedMs, java.util.Set<String> safeKept) {
-        return !event.exists() || event.lastModified() > newestAllowedMs
+        return !RemovableStorageFs.exists(event) || RemovableStorageFs.lastModified(event) > newestAllowedMs
             || com.overdrive.app.safekeep.SafeKeep.isLockedForEmergency(event)
             || safeKept.contains(event.getAbsolutePath());
     }
 
     private static long freeBytesOrZero(String path) {
         try {
-            return new StatFs(path).getAvailableBytes();
+            return RemovableStorageFs.statFsAvailableBytes(path);
         } catch (Throwable t) {
             return 0L;  // volume gone
         }
@@ -5271,7 +5279,7 @@ public class StorageManager {
         synchronized (SHORT_NAME_RENAME_LOCK) {  // a hop in progress briefly hides both names
             // In the order a clip moves (parked, .tmp, final), so a rename landing between checks is seen.
             return parkedClips.contains(clip.getAbsolutePath())
-                || new File(dir, clipName + ".tmp").exists() || clip.exists();
+                || RemovableStorageFs.exists(new File(dir, clipName + ".tmp")) || RemovableStorageFs.exists(clip);
         }
     }
 
@@ -5286,9 +5294,9 @@ public class StorageManager {
     private static int unlinkForRelief(List<File> files, List<String> stuck) {
         int deleted = 0;
         for (File f : files) {
-            if (f.delete()) {
+            if (RemovableStorageFs.delete(f)) {
                 deleted++;
-            } else if (f.exists()) {
+            } else if (RemovableStorageFs.exists(f)) {
                 stuck.add(f.getAbsolutePath());
             }
         }
@@ -5299,6 +5307,14 @@ public class StorageManager {
     private int rmForRelief(List<String> stuck) {
         if (stuck.isEmpty()) return 0;
         int deleted = 0;
+        // Routed volumes are only reachable through the app: delete there, not via shell rm.
+        List<String> viaShell = new ArrayList<>(stuck.size());
+        for (String path : stuck) {
+            if (!RemovableStorageFs.isRouted(path)) viaShell.add(path);
+            else if (RemovableStorageFs.delete(new File(path)) || !RemovableStorageFs.exists(new File(path))) deleted++;
+        }
+        if (viaShell.isEmpty()) return deleted;
+        stuck = viaShell;
         List<String> cmd = new ArrayList<>(stuck.size() + 2);
         cmd.add("rm");
         cmd.add("-f");
@@ -5310,7 +5326,7 @@ public class StorageManager {
             logWarn("Folder-entry relief rm failed: " + e.getMessage());
         }
         for (String p : stuck) {
-            if (!new File(p).exists()) deleted++;
+            if (!RemovableStorageFs.exists(new File(p))) deleted++;
         }
         return deleted;
     }
@@ -5363,7 +5379,7 @@ public class StorageManager {
             }
             // A probe that stays would hold the very room it found.
             deleteAllForRelief(probe);
-            return probe.get(0).exists() ? android.system.OsConstants.EEXIST : errno;
+            return RemovableStorageFs.exists(probe.get(0)) ? android.system.OsConstants.EEXIST : errno;
         }
     }
 
@@ -5379,7 +5395,7 @@ public class StorageManager {
             leftovers.add(new File(dir, FOLDER_PROBE_FIT));
             deleteAllForRelief(leftovers);
             for (File leftover : leftovers) {
-                if (leftover.exists()) return android.system.OsConstants.EEXIST;
+                if (RemovableStorageFs.exists(leftover)) return android.system.OsConstants.EEXIST;
             }
             int made = 0;
             int errno = 0;
@@ -5397,7 +5413,7 @@ public class StorageManager {
             List<File> madeProbes = probes.subList(0, made);
             deleteAllForRelief(madeProbes);
             for (File probe : madeProbes) {
-                if (probe.exists()) return android.system.OsConstants.EEXIST;
+                if (RemovableStorageFs.exists(probe)) return android.system.OsConstants.EEXIST;
             }
             return errno;
         }
@@ -5478,10 +5494,11 @@ public class StorageManager {
 
     private static void runWriteTest(WriteTest test, File dir, String volumeRoot) {
         test.ran = true;
-        File probe = new File(dir, ".od_write_test");
+        // MediaStore-routed volumes (DiLink 100) rewrite names starting with a dot.
+        File probe = new File(dir, RemovableStorageFs.isRouted(dir) ? "od_write_test" : ".od_write_test");
         try {
-            if (!dir.isDirectory()) dir.mkdirs();
-            try (java.io.FileOutputStream out = new java.io.FileOutputStream(probe)) {
+            if (!RemovableStorageFs.isDirectory(dir)) RemovableStorageFs.mkdirs(dir);
+            try (java.io.FileOutputStream out = RemovableStorageFs.openOutput(probe)) {
                 out.write(new byte[64 * 1024]);
                 out.getFD().sync();
             }
@@ -5492,13 +5509,12 @@ public class StorageManager {
             test.failure = msg.startsWith(prefix) ? msg.substring(prefix.length()) : msg;
             try {
                 // The volume root: dir itself may not exist on a card too full to mkdir.
-                test.freeBytesOnFail = new StatFs(
-                        volumeRoot != null ? volumeRoot : dir.getAbsolutePath()).getAvailableBytes();
+                test.freeBytesOnFail = RemovableStorageFs.statFsAvailableBytes(volumeRoot != null ? volumeRoot : dir.getAbsolutePath());
             } catch (Throwable alsoIgnored) {
                 // unknown: not treated as full
             }
         } finally {
-            try { probe.delete(); } catch (Throwable ignored) {}
+            try { RemovableStorageFs.delete(probe); } catch (Throwable ignored) {}
             test.done.countDown();
         }
     }
@@ -5777,7 +5793,7 @@ public class StorageManager {
     private void loadConfig() {
         try {
             File configFile = new File(CONFIG_FILE);
-            if (configFile.exists()) {
+            if (RemovableStorageFs.exists(configFile)) {
                 BufferedReader reader = new BufferedReader(new FileReader(configFile));
                 StringBuilder sb = new StringBuilder();
                 String line;
@@ -6046,9 +6062,9 @@ public class StorageManager {
     public void fixAllPermissions() {
         // Fix directory permissions synchronously (fast, no I/O contention)
         File baseDir = new File(INTERNAL_BASE_DIR);
-        if (baseDir.exists()) {
-            baseDir.setReadable(true, false);
-            baseDir.setExecutable(true, false);
+        if (RemovableStorageFs.exists(baseDir)) {
+            RemovableStorageFs.setReadable(baseDir, true, false);
+            RemovableStorageFs.setExecutable(baseDir, true, false);
         }
         fixDirectoryPermissions(recordingsDir);
         fixDirectoryPermissions(surveillanceDir);
@@ -6105,7 +6121,7 @@ public class StorageManager {
     private long loadLastBroadcastTimestamp() {
         try {
             File marker = new File(BROADCAST_MARKER_FILE);
-            if (marker.exists()) {
+            if (RemovableStorageFs.exists(marker)) {
                 String content = new java.util.Scanner(marker).useDelimiter("\\A").next().trim();
                 return Long.parseLong(content);
             }
@@ -6120,7 +6136,7 @@ public class StorageManager {
      */
     private void saveLastBroadcastTimestamp(long timestamp) {
         try {
-            java.io.FileWriter fw = new java.io.FileWriter(BROADCAST_MARKER_FILE);
+            java.io.Writer fw = new java.io.OutputStreamWriter(RemovableStorageFs.openOutput(new java.io.File(BROADCAST_MARKER_FILE)), java.nio.charset.StandardCharsets.UTF_8);
             fw.write(String.valueOf(timestamp));
             fw.close();
         } catch (Exception e) {
@@ -6134,14 +6150,14 @@ public class StorageManager {
      * @return number of files broadcast
      */
     private int broadcastFilesSince(File dir, long sinceTimestamp) {
-        if (dir == null || !dir.exists()) return 0;
+        if (dir == null || !RemovableStorageFs.exists(dir)) return 0;
         
-        File[] files = dir.listFiles((d, name) -> name.endsWith(".mp4"));
+        File[] files = RemovableStorageFs.listFiles(dir, (d, name) -> name.endsWith(".mp4"));
         if (files == null || files.length == 0) return 0;
         
         int count = 0;
         for (File f : files) {
-            if (f.lastModified() > sinceTimestamp) {
+            if (RemovableStorageFs.lastModified(f) > sinceTimestamp) {
                 broadcastFile(f);
                 count++;
                 
@@ -6878,7 +6894,7 @@ public class StorageManager {
         final java.util.concurrent.atomic.AtomicReference<File[]> result =
                 new java.util.concurrent.atomic.AtomicReference<>(null);
         Thread worker = new Thread(() -> {
-            try { result.set(d.listFiles()); } catch (Throwable ignored) {}
+            try { result.set(RemovableStorageFs.listFiles(d)); } catch (Throwable ignored) {}
         }, "listTripFiles-" + dir.getName());
         worker.setDaemon(true);   // never block daemon shutdown if it's wedged
         worker.start();
@@ -7021,8 +7037,8 @@ public class StorageManager {
         long size = 0;
         Set<String> seen = new HashSet<>();
         for (File dir : dirs) {
-            if (dir == null || !dir.exists() || !dir.isDirectory()) continue;
-            File[] files = dir.listFiles();
+            if (dir == null || !RemovableStorageFs.exists(dir) || !RemovableStorageFs.isDirectory(dir)) continue;
+            File[] files = RemovableStorageFs.listFiles(dir);
             if (files == null) {
                 files = listFilesViaShell(dir);
             }
@@ -7060,6 +7076,9 @@ public class StorageManager {
      * stat with the same follow-symlink semantics as {@code isFile()} + {@code length()}.
      */
     static long regularFileLength(File f) {
+        if (RemovableStorageFs.isRouted(f)) {
+            return RemovableStorageFs.isFile(f) ? RemovableStorageFs.length(f) : -1L;
+        }
         try {
             java.nio.file.attribute.BasicFileAttributes attrs = java.nio.file.Files.readAttributes(
                     f.toPath(), java.nio.file.attribute.BasicFileAttributes.class);
@@ -7067,7 +7086,7 @@ public class StorageManager {
         } catch (java.io.IOException notAFile) {
             return -1L;
         } catch (RuntimeException unparseablePath) {
-            return f.isFile() ? f.length() : -1L;
+            return RemovableStorageFs.isFile(f) ? RemovableStorageFs.length(f) : -1L;
         }
     }
     
@@ -7106,12 +7125,11 @@ public class StorageManager {
         try {
             // Verify path exists before using StatFs
             File sdDir = new File(sdCardPath);
-            if (!sdDir.exists() || !sdDir.isDirectory()) {
+            if (!RemovableStorageFs.exists(sdDir) || !RemovableStorageFs.isDirectory(sdDir)) {
                 logDebug("SD card path not accessible: " + sdCardPath);
                 return 0;
             }
-            StatFs stat = new StatFs(sdCardPath);
-            return stat.getAvailableBytes();
+            return RemovableStorageFs.statFsAvailableBytes(sdCardPath);
         } catch (Exception e) {
             logWarn("Could not get SD card free space: " + e.getMessage());
             return 0;
@@ -7126,11 +7144,10 @@ public class StorageManager {
         try {
             // Verify path exists before using StatFs
             File sdDir = new File(sdCardPath);
-            if (!sdDir.exists() || !sdDir.isDirectory()) {
+            if (!RemovableStorageFs.exists(sdDir) || !RemovableStorageFs.isDirectory(sdDir)) {
                 return 0;
             }
-            StatFs stat = new StatFs(sdCardPath);
-            return stat.getTotalBytes();
+            return RemovableStorageFs.statFsTotalBytes(sdCardPath);
         } catch (Exception e) {
             return 0;
         }
@@ -7253,9 +7270,8 @@ public class StorageManager {
         if (usbPath == null) return 0;
         try {
             File d = new File(usbPath);
-            if (!d.exists() || !d.isDirectory()) return 0;
-            StatFs stat = new StatFs(usbPath);
-            return stat.getAvailableBytes();
+            if (!RemovableStorageFs.exists(d) || !RemovableStorageFs.isDirectory(d)) return 0;
+            return RemovableStorageFs.statFsAvailableBytes(usbPath);
         } catch (Exception e) {
             logWarn("Could not get USB free space: " + e.getMessage());
             return 0;
@@ -7269,9 +7285,8 @@ public class StorageManager {
         if (usbPath == null) return 0;
         try {
             File d = new File(usbPath);
-            if (!d.exists() || !d.isDirectory()) return 0;
-            StatFs stat = new StatFs(usbPath);
-            return stat.getTotalBytes();
+            if (!RemovableStorageFs.exists(d) || !RemovableStorageFs.isDirectory(d)) return 0;
+            return RemovableStorageFs.statFsTotalBytes(usbPath);
         } catch (Exception e) {
             return 0;
         }
@@ -7605,7 +7620,7 @@ public class StorageManager {
         StringBuilder sb = new StringBuilder(isFallbackActiveForCategory(category) ? "fallback" : "normal");
         for (File dir : getReapableDirs(category)) {
             if (dir == null) continue;
-            sb.append('|').append(dir.getAbsolutePath()).append(dir.isDirectory() ? "+" : "-");
+            sb.append('|').append(dir.getAbsolutePath()).append(RemovableStorageFs.isDirectory(dir) ? "+" : "-");
         }
         return sb.toString();
     }
@@ -8477,8 +8492,8 @@ public class StorageManager {
         int count = 0;
         Set<String> seen = new HashSet<>();
         for (File dir : getReapableDirs(category)) {
-            if (dir == null || !dir.exists() || !dir.isDirectory()) continue;
-            File[] files = dir.listFiles();
+            if (dir == null || !RemovableStorageFs.exists(dir) || !RemovableStorageFs.isDirectory(dir)) continue;
+            File[] files = RemovableStorageFs.listFiles(dir);
             if (files == null) {
                 files = listFilesViaShell(dir);
             }
@@ -8683,14 +8698,14 @@ public class StorageManager {
         int total = 0;
         Set<String> seen = new HashSet<>();
         for (File dir : dirs) {
-            if (dir == null || !dir.exists() || !dir.isDirectory()) continue;
-            File[] files = dir.listFiles((d, name) -> name.endsWith(primaryExt));
+            if (dir == null || !RemovableStorageFs.exists(dir) || !RemovableStorageFs.isDirectory(dir)) continue;
+            File[] files = RemovableStorageFs.listFiles(dir, (d, name) -> name.endsWith(primaryExt));
             if (files == null) {
                 files = listFilesByExt(dir, primaryExt);
             }
             if (files == null) continue;
             for (File f : files) {
-                if (!f.isFile()) continue;
+                if (!RemovableStorageFs.isFile(f)) continue;
                 String name = f.getName();
                 if (namePrefix != null && !name.startsWith(namePrefix)) continue;
                 if (seen.add(name)) {
@@ -8864,6 +8879,11 @@ public class StorageManager {
     }
 
     private DirListing listFilesViaShellChecked(File dir, long drainTimeoutMs) {
+        if (RemovableStorageFs.isRouted(dir)) {
+            // Routed volumes are only reachable through the app; its listing is complete or null.
+            File[] listed = RemovableStorageFs.listFiles(dir);
+            return new DirListing(listed, listed != null);
+        }
         Process p = null;
         try {
             p = Runtime.getRuntime().exec(new String[]{"ls", dir.getAbsolutePath()});
@@ -8988,7 +9008,7 @@ public class StorageManager {
      * only when {@link Mp4Listing#complete} is true.
      */
     public Mp4Listing listMp4FilesWithStatus(File dir) {
-        if (dir == null || !dir.exists() || !dir.isDirectory()) {
+        if (dir == null || !RemovableStorageFs.exists(dir) || !RemovableStorageFs.isDirectory(dir)) {
             return new Mp4Listing(new File[0], false, false);
         }
         java.io.FileFilter mp4Filter = file -> file.getName().endsWith(".mp4");
@@ -9012,7 +9032,7 @@ public class StorageManager {
                 new java.util.concurrent.atomic.AtomicBoolean(false);
         Thread worker = new Thread(() -> {
             try {
-                files.set(dir.listFiles(filter));
+                files.set(RemovableStorageFs.listFiles(dir, filter));
             } catch (Throwable ignored) {
                 files.set(null);
             } finally {
@@ -9050,11 +9070,11 @@ public class StorageManager {
      * </ul>
      */
     public DirListing listMp4FilesChecked(File dir) {
-        if (dir == null || !dir.exists() || !dir.isDirectory()) {
+        if (dir == null || !RemovableStorageFs.exists(dir) || !RemovableStorageFs.isDirectory(dir)) {
             return new DirListing(new File[0], false);
         }
         java.io.FileFilter filter = f -> f.getName().endsWith(".mp4");
-        File[] files = dir.listFiles(filter);
+        File[] files = RemovableStorageFs.listFiles(dir, filter);
         if (files != null) {
             return new DirListing(files, true);
         }
@@ -9091,7 +9111,7 @@ public class StorageManager {
         // sweep guard only on exists()+isDirectory(). A canRead() short-circuit
         // here would skip the listFilesViaShell path and silently no-op the
         // FUSE consumers (e.g. cleanupOrphanedTmpFiles).
-        if (dir == null || !dir.exists() || !dir.isDirectory()) {
+        if (dir == null || !RemovableStorageFs.exists(dir) || !RemovableStorageFs.isDirectory(dir)) {
             return new File[0];
         }
         java.io.FileFilter filter = f -> {
@@ -9100,7 +9120,7 @@ public class StorageManager {
             if (prefix != null && !n.startsWith(prefix)) return false;
             return true;
         };
-        File[] files = dir.listFiles(filter);
+        File[] files = RemovableStorageFs.listFiles(dir, filter);
         if (files == null) {
             // FUSE returned null — shell ls then filter in-process. The
             // listFilesViaShell path doesn't take a filter so we apply it
@@ -9430,11 +9450,10 @@ public class StorageManager {
             // volume the path lives on either way.
             File probeDir = null;
             if (dir != null) {
-                probeDir = dir.exists() ? dir : dir.getParentFile();
+                probeDir = RemovableStorageFs.exists(dir) ? dir : dir.getParentFile();
             }
-            if (probeDir != null && probeDir.exists()) {
-                android.os.StatFs stat = new android.os.StatFs(probeDir.getAbsolutePath());
-                availableBytes = stat.getAvailableBytes();
+            if (probeDir != null && RemovableStorageFs.exists(probeDir)) {
+                availableBytes = RemovableStorageFs.statFsAvailableBytes(probeDir.getAbsolutePath());
             }
         } catch (Throwable t) {
             // StatFs throws IllegalArgumentException on an unmounted / half-
@@ -9876,8 +9895,8 @@ public class StorageManager {
         // a target of zero bytes (which would delete the entire category).
         if (limitBytes == 0) return true;
 
-        if (activeDir != null && (!activeDir.exists() || !activeDir.isDirectory())) {
-            activeDir.mkdirs();
+        if (activeDir != null && (!RemovableStorageFs.exists(activeDir) || !RemovableStorageFs.isDirectory(activeDir))) {
+            RemovableStorageFs.mkdirs(activeDir);
         }
 
         long targetSize = limitBytes - reserveBytes;
@@ -9903,8 +9922,8 @@ public class StorageManager {
         // Aux indexes built below are reused by the delete loop.
         final AuxPass auxPass = new AuxPass();
         for (File dir : dirs) {
-            if (dir == null || !dir.exists() || !dir.isDirectory()) continue;
-            File[] files = dir.listFiles((d, name) -> name.endsWith(primaryExt));
+            if (dir == null || !RemovableStorageFs.exists(dir) || !RemovableStorageFs.isDirectory(dir)) continue;
+            File[] files = RemovableStorageFs.listFiles(dir, (d, name) -> name.endsWith(primaryExt));
             if (files == null) {
                 files = listFilesByExt(dir, primaryExt);
             }
@@ -9977,7 +9996,7 @@ public class StorageManager {
                                 : findAuxiliarySiblings(f.getParentFile(), auxPrefixes, stem);
                         if (auxHits != null) {
                             for (File aux : auxHits) {
-                                currentSize += aux.length();
+                                currentSize += RemovableStorageFs.length(aux);
                             }
                         }
                     }
@@ -10013,7 +10032,7 @@ public class StorageManager {
         // footage is exhausted. Oldest-first within each tier.
         // Sort keys are read once per file, never inside the comparator.
         final java.util.Map<File, Long> mtimeOf = new java.util.HashMap<>(allFiles.size() * 2);
-        for (File f : allFiles) mtimeOf.put(f, f.lastModified());
+        for (File f : allFiles) mtimeOf.put(f, RemovableStorageFs.lastModified(f));
         Comparator<File> reapOrder = Comparator.comparingLong(f -> mtimeOf.get(f));
         if ("recordings".equals(category)) {
             reapOrder = Comparator.<File>comparingInt(
@@ -10066,9 +10085,9 @@ public class StorageManager {
                 continue;
             }
 
-            long fileSize = file.length();
+            long fileSize = RemovableStorageFs.length(file);
             try { com.overdrive.app.server.timeline.TimelineLedger.noteDeleting(file, "retention"); } catch (Throwable ignored) { }
-            boolean deleted = file.delete();
+            boolean deleted = RemovableStorageFs.delete(file);
             if (!deleted) {
                 deleted = deleteFileViaShell(file);
             }
@@ -10121,9 +10140,9 @@ public class StorageManager {
                     String stem = stemForName(file.getName(), primaryExt);
                     for (String ext : sidecarExts) {
                         File sidecar = new File(file.getParentFile(), stem + ext);
-                        if (sidecar.exists()) {
-                            long sidecarSize = sidecar.length();
-                            boolean sidecarDeleted = sidecar.delete();
+                        if (RemovableStorageFs.exists(sidecar)) {
+                            long sidecarSize = RemovableStorageFs.length(sidecar);
+                            boolean sidecarDeleted = RemovableStorageFs.delete(sidecar);
                             if (!sidecarDeleted) sidecarDeleted = deleteFileViaShell(sidecar);
                             if (sidecarDeleted) {
                                 currentSize -= sidecarSize;
@@ -10138,8 +10157,8 @@ public class StorageManager {
                     String stem = stemForName(file.getName(), primaryExt);
                     for (File aux : auxSiblingsForPass(auxPass, category, file.getParentFile(),
                             auxPrefixes, stem)) {
-                        long auxSize = aux.length();
-                        boolean auxDeleted = aux.delete();
+                        long auxSize = RemovableStorageFs.length(aux);
+                        boolean auxDeleted = RemovableStorageFs.delete(aux);
                         if (!auxDeleted) auxDeleted = deleteFileViaShell(aux);
                         if (auxDeleted) {
                             currentSize -= auxSize;
@@ -10207,8 +10226,8 @@ public class StorageManager {
             long orphansFreed = 0;
             Set<String> seenSidecarPaths = new HashSet<>();
             for (File dir : dirs) {
-                if (dir == null || !dir.exists() || !dir.isDirectory()) continue;
-                File[] files = dir.listFiles();
+                if (dir == null || !RemovableStorageFs.exists(dir) || !RemovableStorageFs.isDirectory(dir)) continue;
+                File[] files = RemovableStorageFs.listFiles(dir);
                 if (files == null) files = listFilesViaShell(dir);
                 if (files == null) continue;
                 for (File f : files) {
@@ -10267,7 +10286,7 @@ public class StorageManager {
                     if (liveStems.contains(stem)) continue;  // anchor still around
                     long sz = regularFileLength(f);
                     if (sz < 0) continue;
-                    boolean ok = f.delete();
+                    boolean ok = RemovableStorageFs.delete(f);
                     if (!ok) ok = deleteFileViaShell(f);
                     if (ok) {
                         orphansDeleted++;
@@ -10352,10 +10371,10 @@ public class StorageManager {
     /** Owner stem -> per-actor files for one directory, from a single listing. Never null. */
     private java.util.Map<String, List<File>> buildAuxiliaryIndex(File dir, String[] auxPrefixes) {
         if (dir == null || auxPrefixes == null || auxPrefixes.length == 0
-                || !dir.isDirectory()) {
+                || !RemovableStorageFs.isDirectory(dir)) {
             return java.util.Collections.emptyMap();
         }
-        File[] files = dir.listFiles();
+        File[] files = RemovableStorageFs.listFiles(dir);
         if (files == null) files = listFilesViaShell(dir);
         if (files == null) return java.util.Collections.emptyMap();   // defensive; not reachable today
 
@@ -10365,7 +10384,7 @@ public class StorageManager {
             for (String aux : auxPrefixes) {
                 if (!name.startsWith(aux)) continue;
                 String owner = auxOwnerStem(name, aux);
-                if (owner != null && f.isFile()) {
+                if (owner != null && RemovableStorageFs.isFile(f)) {
                     index.computeIfAbsent(owner, k -> new ArrayList<>()).add(f);
                 }
                 break;   // first matching aux prefix wins
@@ -10400,18 +10419,18 @@ public class StorageManager {
     /** Per-actor files owned by exactly {@code stem}, never a {@code <stem>_N} segment's. */
     private List<File> findAuxiliarySiblings(File dir, String[] auxPrefixes, String stem) {
         if (dir == null || auxPrefixes == null || auxPrefixes.length == 0
-                || !dir.isDirectory()) {
+                || !RemovableStorageFs.isDirectory(dir)) {
             return java.util.Collections.emptyList();
         }
         List<File> hits = new ArrayList<>();
-        File[] files = dir.listFiles();
+        File[] files = RemovableStorageFs.listFiles(dir);
         if (files == null) files = listFilesViaShell(dir);
         if (files == null) return hits;
         for (File f : files) {
             String name = f.getName();
             for (String aux : auxPrefixes) {
                 if (!name.startsWith(aux)) continue;
-                if (stem.equals(auxOwnerStem(name, aux)) && f.isFile()) hits.add(f);
+                if (stem.equals(auxOwnerStem(name, aux)) && RemovableStorageFs.isFile(f)) hits.add(f);
                 break;   // first matching aux prefix wins
             }
         }
@@ -10422,6 +10441,7 @@ public class StorageManager {
      * SOTA: Delete file via shell command when Java delete fails.
      */
     private boolean deleteFileViaShell(File file) {
+        if (RemovableStorageFs.isRouted(file)) return RemovableStorageFs.delete(file);
         try {
             Process p = Runtime.getRuntime().exec(new String[]{"rm", file.getAbsolutePath()});
             // Bounded wait — a stuck `rm` on a bad FUSE-bridged external volume
@@ -10706,9 +10726,9 @@ public class StorageManager {
      * Note: chmod doesn't work on Android FUSE filesystem, but we keep Java API calls.
      */
     private void fixDirectoryPermissions(File dir) {
-        if (dir != null && dir.exists()) {
-            dir.setReadable(true, false);
-            dir.setExecutable(true, false);
+        if (dir != null && RemovableStorageFs.exists(dir)) {
+            RemovableStorageFs.setReadable(dir, true, false);
+            RemovableStorageFs.setExecutable(dir, true, false);
         }
     }
     
@@ -10717,16 +10737,16 @@ public class StorageManager {
      * Note: chmod doesn't work on Android FUSE filesystem - rely on MediaStore instead.
      */
     private void makeFilesReadable(File dir) {
-        if (dir == null || !dir.exists()) return;
+        if (dir == null || !RemovableStorageFs.exists(dir)) return;
         
-        File[] files = dir.listFiles((d, name) -> name.endsWith(".mp4"));
+        File[] files = RemovableStorageFs.listFiles(dir, (d, name) -> name.endsWith(".mp4"));
         if (files == null) {
             files = listFilesViaShell(dir);
         }
         
         if (files != null) {
             for (File f : files) {
-                f.setReadable(true, false);
+                RemovableStorageFs.setReadable(f, true, false);
             }
         }
     }
@@ -10736,8 +10756,8 @@ public class StorageManager {
      * Note: chmod doesn't work on Android FUSE - rely on MediaStore for cross-UID access.
      */
     public void makeFileReadable(File file) {
-        if (file == null || !file.exists()) return;
-        file.setReadable(true, false);
+        if (file == null || !RemovableStorageFs.exists(file)) return;
+        RemovableStorageFs.setReadable(file, true, false);
     }
     
     /**
@@ -10752,9 +10772,15 @@ public class StorageManager {
      *   (needed for the UI app running as a different UID).
      */
     private void broadcastFile(File file) {
-        if (file == null || !file.exists()) return;
+        if (file == null || !RemovableStorageFs.exists(file)) return;
         
         String path = file.getAbsolutePath();
+        if (RemovableStorageFs.isRouted(file)) {
+            // The card is mounted only for the driver's user; its MediaStore is reached
+            // through the app (the shell's am/content calls target user 0).
+            RemovableStorageFs.scanMedia(file);
+            return;
+        }
         
         try {
             // Method 1: FUSE cache refresh via MediaScanner intent
@@ -10784,13 +10810,13 @@ public class StorageManager {
      * @param file The video file that was just saved
      */
     public void onFileSaved(File file) {
-        if (file == null || !file.exists()) {
+        if (file == null || !RemovableStorageFs.exists(file)) {
             logWarn("onFileSaved: file is null or doesn't exist");
             return;
         }
         maybeTopUpFolder(file);
 
-        logInfo("Processing saved file: " + file.getName() + " (" + formatSize(file.length()) + ")");
+        logInfo("Processing saved file: " + file.getName() + " (" + formatSize(RemovableStorageFs.length(file)) + ")");
 
         // A clip just landed: only the pools that count it need re-measuring.
         invalidateSizeCacheFor(file);
@@ -10838,13 +10864,13 @@ public class StorageManager {
      * @param maxAgeMs Only broadcast files modified within this time (ms)
      */
     private void broadcastRecentFiles(File dir, long maxAgeMs) {
-        if (dir == null || !dir.exists()) return;
+        if (dir == null || !RemovableStorageFs.exists(dir)) return;
         
-        File[] files = dir.listFiles((d, name) -> name.endsWith(".mp4"));
+        File[] files = RemovableStorageFs.listFiles(dir, (d, name) -> name.endsWith(".mp4"));
         if (files != null) {
             long now = System.currentTimeMillis();
             for (File f : files) {
-                if (now - f.lastModified() < maxAgeMs) {
+                if (now - RemovableStorageFs.lastModified(f) < maxAgeMs) {
                     broadcastFile(f);
                 }
             }
@@ -11398,14 +11424,14 @@ public class StorageManager {
             String namePrefix = namePrefixForCategory(category);
             String[] auxPrefixes = auxiliaryPrefixesForCategory(category);
             for (File dir : getReapableDirs(category)) {
-                if (dir == null || !dir.exists() || !dir.isDirectory()) continue;
+                if (dir == null || !RemovableStorageFs.exists(dir) || !RemovableStorageFs.isDirectory(dir)) continue;
                 // Only dirs physically on the target volume.
                 if (!dir.getAbsolutePath().startsWith(volumeRoot)) continue;
-                File[] files = dir.listFiles((d, name) -> name.endsWith(primaryExt));
+                File[] files = RemovableStorageFs.listFiles(dir, (d, name) -> name.endsWith(primaryExt));
                 if (files == null) files = listFilesByExt(dir, primaryExt);
                 if (files == null) continue;
                 for (File f : files) {
-                    if (f == null || !f.isFile()) continue;
+                    if (f == null || !RemovableStorageFs.isFile(f)) continue;
                     String name = f.getName();
                     if (namePrefix != null
                             && !nameMatchesCategoryPrefix(name, namePrefix, auxPrefixes)) continue;
@@ -11432,7 +11458,7 @@ public class StorageManager {
             if (com.overdrive.app.safekeep.SafeKeep.isLockedForEmergency(c.file)) safeKeepLocked.add(c);
         }
         final java.util.Map<ReapCandidate, Long> mtimeOf = new java.util.HashMap<>(pool.size() * 2);
-        for (ReapCandidate c : pool) mtimeOf.put(c, c.file.lastModified());
+        for (ReapCandidate c : pool) mtimeOf.put(c, RemovableStorageFs.lastModified(c.file));
         Collections.sort(pool, (a, b) -> {
             boolean la = !safeKeepLocked.isEmpty() && safeKeepLocked.contains(a);
             boolean lb = !safeKeepLocked.isEmpty() && safeKeepLocked.contains(b);
@@ -11504,7 +11530,7 @@ public class StorageManager {
                 continue;
             }
             // Never a fresh .tmp partial a writer may still hold open.
-            if (c.file.getName().endsWith(".tmp") && c.file.lastModified() > tmpGraceCutoff) {
+            if (c.file.getName().endsWith(".tmp") && RemovableStorageFs.lastModified(c.file) > tmpGraceCutoff) {
                 continue;
             }
             attempted++;
@@ -11585,9 +11611,9 @@ public class StorageManager {
         final String[] sidecarExts = sidecarExtensionsForCategory(category);
         final String[] auxPrefixes = auxiliaryPrefixesForCategory(category);
 
-        long fileSize = file.length();
+        long fileSize = RemovableStorageFs.length(file);
         try { com.overdrive.app.server.timeline.TimelineLedger.noteDeleting(file, "free_space"); } catch (Throwable ignored) { }
-        boolean deleted = file.delete();
+        boolean deleted = RemovableStorageFs.delete(file);
         // Whether the anchor's fast in-process unlink failed and we had to fall through
         // to (or are about to skip) the bounded shell `rm`. A failed fast unlink is the
         // hung/degenerate-volume signal: don't fork serial 4 s rm's for the companions.
@@ -11611,9 +11637,9 @@ public class StorageManager {
             String stem = stemForName(file.getName(), primaryExt);
             for (String ext : sidecarExts) {
                 File sidecar = new File(file.getParentFile(), stem + ext);
-                if (sidecar.exists()) {
-                    long sz = sidecar.length();
-                    boolean sd = sidecar.delete();
+                if (RemovableStorageFs.exists(sidecar)) {
+                    long sz = RemovableStorageFs.length(sidecar);
+                    boolean sd = RemovableStorageFs.delete(sidecar);
                     // Skip the bounded shell fallback once the lock-hold budget is spent
                     // or the anchor signalled a hung volume — either way forking another
                     // 4 s `rm` only pads the hold without freeing space on a wedged FUSE.
@@ -11628,8 +11654,8 @@ public class StorageManager {
             String stem = stemForName(file.getName(), primaryExt);
             for (File aux : auxSiblingsForPass(auxPass, category, file.getParentFile(),
                     auxPrefixes, stem)) {
-                long sz = aux.length();
-                boolean ad = aux.delete();
+                long sz = RemovableStorageFs.length(aux);
+                boolean ad = RemovableStorageFs.delete(aux);
                 if (!ad && !fastUnlinkFailed && System.currentTimeMillis() < deadlineMs) {
                     ad = deleteFileViaShell(aux);
                 }
@@ -11671,9 +11697,9 @@ public class StorageManager {
             final String namePrefix = namePrefixForCategory(category);
             final String[] auxPrefixes = auxiliaryPrefixesForCategory(category);
             for (File dir : getReapableDirs(category)) {
-                if (dir == null || !dir.exists() || !dir.isDirectory()) continue;
+                if (dir == null || !RemovableStorageFs.exists(dir) || !RemovableStorageFs.isDirectory(dir)) continue;
                 if (!dir.getAbsolutePath().startsWith(volumeRoot)) continue;
-                File[] files = dir.listFiles((d, name) -> name.endsWith(primaryExt));
+                File[] files = RemovableStorageFs.listFiles(dir, (d, name) -> name.endsWith(primaryExt));
                 if (files == null) files = listFilesByExt(dir, primaryExt);
                 if (files == null) continue;
                 for (File f : files) {
@@ -11866,7 +11892,7 @@ public class StorageManager {
     }
 
     private static long readSdMountedLeaseDeadline(java.io.File lease) {
-        if (lease == null || !lease.isFile()) return Long.MIN_VALUE;
+        if (lease == null || !RemovableStorageFs.isFile(lease)) return Long.MIN_VALUE;
         try {
             byte[] raw = java.nio.file.Files.readAllBytes(lease.toPath());
             return Long.parseLong(new String(
@@ -11883,20 +11909,20 @@ public class StorageManager {
             java.io.File tmp =
                     new java.io.File(SD_MOUNTED_LEASE_FILE + ".tmp");
             try (java.io.FileOutputStream output =
-                         new java.io.FileOutputStream(tmp)) {
+                         RemovableStorageFs.openOutput(tmp)) {
                 output.write(payload);
             }
             java.io.File destination =
                     new java.io.File(SD_MOUNTED_LEASE_FILE);
-            if (!tmp.renameTo(destination)) {
+            if (!RemovableStorageFs.renameTo(tmp, destination)) {
                 try (java.io.FileOutputStream output =
-                             new java.io.FileOutputStream(destination)) {
+                             RemovableStorageFs.openOutput(destination)) {
                     output.write(payload);
                 }
-                tmp.delete();
+                RemovableStorageFs.delete(tmp);
             }
-            destination.setReadable(true, false);
-            destination.setWritable(true, false);
+            RemovableStorageFs.setReadable(destination, true, false);
+            RemovableStorageFs.setWritable(destination, true, false);
         } catch (Throwable failure) {
             // Missing/unwritable lease makes AccSentryDaemon retain its legacy
             // recovery behavior, so this side channel cannot disable recovery.
@@ -12636,7 +12662,7 @@ public class StorageManager {
             setActiveTripFile(to);
             boolean renamed = false;
             try {
-                renamed = from.renameTo(to);
+                renamed = RemovableStorageFs.renameTo(from, to);
             } finally {
                 if (!renamed) {
                     setActiveTripFile(from);
@@ -12681,19 +12707,23 @@ public class StorageManager {
         if (from.getAbsolutePath().equals(to.getAbsolutePath())) return true;
         try {
             File parent = to.getParentFile();
-            if (parent != null && !parent.isDirectory()) parent.mkdirs();
+            if (parent != null && !RemovableStorageFs.isDirectory(parent)) RemovableStorageFs.mkdirs(parent);
         } catch (Throwable ignored) {}
         try {
-            if (from.renameTo(to)) return true;
+            if (RemovableStorageFs.renameTo(from, to)) return true;
         } catch (Throwable ignored) {}
         try {
-            java.nio.file.Files.copy(from.toPath(), to.toPath(),
-                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-            if (to.length() != from.length()) {
-                try { to.delete(); } catch (Throwable ignored) {}
+            if (RemovableStorageFs.isRouted(from) || RemovableStorageFs.isRouted(to)) {
+                RemovableStorageFs.copy(from, to);
+            } else {
+                java.nio.file.Files.copy(from.toPath(), to.toPath(),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+            if (RemovableStorageFs.length(to) != RemovableStorageFs.length(from)) {
+                try { RemovableStorageFs.delete(to); } catch (Throwable ignored) {}
                 return false;
             }
-            if (!from.delete()) {
+            if (!RemovableStorageFs.delete(from)) {
                 // Destination is complete; a lingering source is only an
                 // orphan for the journal janitor to reap.
                 logWarn("moveFileCrossVolume: copied but could not delete source "
@@ -12703,7 +12733,7 @@ public class StorageManager {
         } catch (Throwable e) {
             logWarn("moveFileCrossVolume failed " + from.getAbsolutePath() + " -> "
                     + to.getAbsolutePath() + ": " + e.getMessage());
-            try { if (to.exists() && from.exists()) to.delete(); } catch (Throwable ignored) {}
+            try { if (RemovableStorageFs.exists(to) && RemovableStorageFs.exists(from)) RemovableStorageFs.delete(to); } catch (Throwable ignored) {}
             return false;
         }
     }
@@ -12722,7 +12752,7 @@ public class StorageManager {
     public File getTripJournalDir() {
         File dir = new File(TRIP_JOURNAL_DIR);
         try {
-            if (dir.isDirectory() || dir.mkdirs()) return dir;
+            if (RemovableStorageFs.isDirectory(dir) || RemovableStorageFs.mkdirs(dir)) return dir;
         } catch (Throwable ignored) {}
         return null;
     }
@@ -12871,8 +12901,8 @@ public class StorageManager {
         long skippedActive = 0;
         synchronized (lockForCategory(category)) {
             for (File dir : dirs) {
-                if (dir == null || !dir.exists() || !dir.isDirectory()) continue;
-                File[] files = dir.listFiles();
+                if (dir == null || !RemovableStorageFs.exists(dir) || !RemovableStorageFs.isDirectory(dir)) continue;
+                File[] files = RemovableStorageFs.listFiles(dir);
                 if (files == null) {
                     // FUSE-bridged SD/USB returns null under daemon UID 2000. Without
                     // this fallback a user "delete all" on an SD-configured category
@@ -12882,7 +12912,7 @@ public class StorageManager {
                 }
                 if (files == null) continue;
                 for (File f : files) {
-                    if (f.isFile()) {
+                    if (RemovableStorageFs.isFile(f)) {
                         String name = f.getName();
                         String absPath = f.getAbsolutePath();
                         // Category gate. The dir list can contain roots shared with
@@ -12913,11 +12943,11 @@ public class StorageManager {
                         // Honour the same 10-min grace window for any *.tmp
                         // partial — newer than that and a writer may still
                         // hold it open.
-                        if (name.endsWith(".tmp") && f.lastModified() > tmpGraceCutoff) {
+                        if (name.endsWith(".tmp") && RemovableStorageFs.lastModified(f) > tmpGraceCutoff) {
                             skippedActive++;
                             continue;
                         }
-                        boolean wiped = f.delete();
+                        boolean wiped = RemovableStorageFs.delete(f);
                         if (!wiped) wiped = deleteFileViaShell(f);
                         if (wiped) {
                             deleted++;
@@ -12949,8 +12979,8 @@ public class StorageManager {
                     ? null : dirs.get(0).getParentFile();
                 if (baseDir != null) {
                     File thumbs = new File(baseDir, "thumbs");
-                    if (thumbs.exists() && thumbs.isDirectory()) {
-                        File[] thumbFiles = thumbs.listFiles();
+                    if (RemovableStorageFs.exists(thumbs) && RemovableStorageFs.isDirectory(thumbs)) {
+                        File[] thumbFiles = RemovableStorageFs.listFiles(thumbs);
                         if (thumbFiles == null) {
                             // FUSE-bridged SD/USB returns null here too. The thumbs
                             // cache is reaped by nothing else (it isn't scoped by any
@@ -12961,7 +12991,7 @@ public class StorageManager {
                         }
                         if (thumbFiles != null) {
                             for (File t : thumbFiles) {
-                                if (t.isFile() && !t.delete()) deleteFileViaShell(t);
+                                if (RemovableStorageFs.isFile(t) && !RemovableStorageFs.delete(t)) deleteFileViaShell(t);
                             }
                         }
                     }

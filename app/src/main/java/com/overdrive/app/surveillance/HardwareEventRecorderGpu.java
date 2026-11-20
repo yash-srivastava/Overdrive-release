@@ -1,5 +1,7 @@
 package com.overdrive.app.surveillance;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import android.media.MediaCodec;
 import com.overdrive.app.logging.DaemonLogger;
 import android.media.MediaCodecInfo;
@@ -3679,19 +3681,19 @@ public class HardwareEventRecorderGpu {
             
             // Ensure parent directory exists
             File parentDir = tempFile.getParentFile();
-            if (parentDir != null && !parentDir.exists()) {
-                boolean created = parentDir.mkdirs();
-                if (!created && !parentDir.exists()) {
+            if (parentDir != null && !RemovableStorageFs.exists(parentDir)) {
+                boolean created = RemovableStorageFs.mkdirs(parentDir);
+                if (!created && !RemovableStorageFs.exists(parentDir)) {
                     // Retry once after short delay (SD card may need time to be accessible)
                     try { Thread.sleep(100); } catch (InterruptedException ignored) {}
-                    created = parentDir.mkdirs();
+                    created = RemovableStorageFs.mkdirs(parentDir);
                 }
                 if (created) {
                     logger.info("Created parent directory: " + parentDir.getAbsolutePath());
-                    parentDir.setReadable(true, false);
-                    parentDir.setWritable(true, false);
-                    parentDir.setExecutable(true, false);
-                } else if (!parentDir.exists()) {
+                    RemovableStorageFs.setReadable(parentDir, true, false);
+                    RemovableStorageFs.setWritable(parentDir, true, false);
+                    RemovableStorageFs.setExecutable(parentDir, true, false);
+                } else if (!RemovableStorageFs.exists(parentDir)) {
                     logger.error("Failed to create parent directory: " + parentDir.getAbsolutePath());
                     return false;
                 }
@@ -3741,7 +3743,7 @@ public class HardwareEventRecorderGpu {
             // torn down during the wait is the real concern; check it.
             if (encoder == null) {
                 logger.warn("triggerEventRecording: encoder torn down during format wait");
-                if (tempFile != null && tempFile.exists()) tempFile.delete();
+                if (tempFile != null && RemovableStorageFs.exists(tempFile)) RemovableStorageFs.delete(tempFile);
                 tempFile = null;
                 return false;
             }
@@ -3752,8 +3754,7 @@ public class HardwareEventRecorderGpu {
             boolean openEnospc = false;
             synchronized (muxerLock) {
                 try {
-                    muxer = new MediaMuxer(tempFile.getAbsolutePath(),
-                            MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+                    muxer = RemovableStorageFs.newMuxer(new java.io.File(tempFile.getAbsolutePath()), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
 
                     // ISO 6709 location box in the moov atom. Apple Photos,
                     // GoPro Quik, VLC and most map-aware libraries surface
@@ -3799,7 +3800,7 @@ public class HardwareEventRecorderGpu {
             }
             if (!muxerOk) {
                 if (openEnospc) noteFolderEnospc(tempFile);
-                if (tempFile != null && tempFile.exists()) tempFile.delete();
+                if (tempFile != null && RemovableStorageFs.exists(tempFile)) RemovableStorageFs.delete(tempFile);
                 tempFile = null;
                 return false;
             }
@@ -4031,7 +4032,7 @@ public class HardwareEventRecorderGpu {
                 trackIndex = -1;
                 audioTrackIndex = -1;
             }
-            if (tempFile != null && tempFile.exists()) tempFile.delete();
+            if (tempFile != null && RemovableStorageFs.exists(tempFile)) RemovableStorageFs.delete(tempFile);
             tempFile = null;
             try { com.overdrive.app.server.timeline.RecordingSpanHints.close(outputPath); } catch (Throwable ignored) { }
             isWritingToFile = false;
@@ -4763,13 +4764,20 @@ public class HardwareEventRecorderGpu {
     }
 
     private static int renameErrno(File from, File to) {
+        boolean routedFrom = RemovableStorageFs.isRouted(from);
+        if (routedFrom || RemovableStorageFs.isRouted(to)) {
+            if (routedFrom != RemovableStorageFs.isRouted(to)) return android.system.OsConstants.EXDEV;
+            if (RemovableStorageFs.renameTo(from, to)) return 0;
+            return RemovableStorageFs.exists(from)
+                    ? android.system.OsConstants.EIO : android.system.OsConstants.ENOENT;
+        }
         try {
             android.system.Os.rename(from.getAbsolutePath(), to.getAbsolutePath());
             return 0;
         } catch (android.system.ErrnoException e) {
             return e.errno;
         } catch (RuntimeException e) {
-            return from.renameTo(to) ? 0 : -1;  // Os unavailable (JVM test stubs)
+            return RemovableStorageFs.renameTo(from, to) ? 0 : -1;  // Os unavailable (JVM test stubs)
         }
     }
 
@@ -4852,8 +4860,8 @@ public class HardwareEventRecorderGpu {
         final String outputPath = seg.outputPath;
         try { com.overdrive.app.server.timeline.RecordingSpanHints.close(outputPath); } catch (Throwable ignored) { }
         final boolean recordingBroken = !stopOk || seg.aborted;
-        if (tempFile != null && outputPath != null && tempFile.exists()) {
-            if (!recordingBroken && seg.recordedFrames > 0 && tempFile.length() > 1024) {
+        if (tempFile != null && outputPath != null && RemovableStorageFs.exists(tempFile)) {
+            if (!recordingBroken && seg.recordedFrames > 0 && RemovableStorageFs.length(tempFile) > 1024) {
                 File finalFile = new File(outputPath);
                 int renameErrno = renameWithFolderRelief(tempFile, finalFile,
                         () -> closeReliefWaitMs(seg),
@@ -4867,7 +4875,7 @@ public class HardwareEventRecorderGpu {
                             : seg.recordedFrames / (float) Math.max(1, seg.fps);
                     lastFinalizedDurationSec = Math.max(0, Math.round(durationSec));
                     logger.info(String.format("Event saved: %s (segment %d, %d frames, %.1f sec, %d KB, codec=%s, bitrate=%d Mbps)",
-                            finalFile.getName(), seg.segmentNumber, seg.recordedFrames, durationSec, finalFile.length() / 1024,
+                            finalFile.getName(), seg.segmentNumber, seg.recordedFrames, durationSec, RemovableStorageFs.length(finalFile) / 1024,
                             MediaFormat.MIMETYPE_VIDEO_HEVC.equals(seg.codecMime) ? "H.265" : "H.264",
                             seg.bitrate / 1_000_000));
 
@@ -4936,26 +4944,26 @@ public class HardwareEventRecorderGpu {
                 } else {
                     logger.error("Failed to rename temp file (" + errnoLabel(renameErrno)
                             + ") — deleting orphan");
-                    tempFile.delete();
+                    RemovableStorageFs.delete(tempFile);
                 }
             } else if (recordingBroken) {
                 // Quarantine: keep evidence under a sidecar extension so the
                 // recordings UI's *.mp4 listing doesn't pick it up. An
                 // operator can still find it on disk for diagnostics.
                 File broken = new File(outputPath + ".broken");
-                if (!tempFile.renameTo(broken)) {
+                if (!RemovableStorageFs.renameTo(tempFile, broken)) {
                     logger.warn("Quarantine rename failed; deleting broken tmp: " + tempFile.getName());
-                    tempFile.delete();
+                    RemovableStorageFs.delete(tempFile);
                 } else {
                     logger.warn("Quarantined broken recording (stopOk=" + stopOk
                             + ", writerAborted=" + seg.aborted
-                            + ", " + (broken.length() / 1024) + " KB): " + broken.getName());
+                            + ", " + (RemovableStorageFs.length(broken) / 1024) + " KB): " + broken.getName());
                 }
             } else {
                 // Empty / sub-1KB recording — drop it silently.
                 logger.warn("Deleting empty/corrupt temp file: " + tempFile.getName() +
-                        " (frames=" + seg.recordedFrames + ", size=" + tempFile.length() + ")");
-                tempFile.delete();
+                        " (frames=" + seg.recordedFrames + ", size=" + RemovableStorageFs.length(tempFile) + ")");
+                RemovableStorageFs.delete(tempFile);
             }
 
             // Every FAILURE branch above unlinks (or renames to .broken) a
@@ -5356,17 +5364,16 @@ public class HardwareEventRecorderGpu {
 
             try {
                 File parent = temp.getParentFile();
-                if (parent != null && !parent.exists()
-                        && !parent.mkdirs() && !parent.exists()) {
+                if (parent != null && !RemovableStorageFs.exists(parent)
+                        && !RemovableStorageFs.mkdirs(parent) && !RemovableStorageFs.exists(parent)) {
                     return false;
                 }
                 // Never delete an unknown .tmp. Another writer may have won a
                 // path race; replay_* normally makes that impossible, but the
                 // refusal keeps this method non-destructive by construction.
-                if (temp.exists() || outputFile.exists()) return false;
+                if (RemovableStorageFs.exists(temp) || RemovableStorageFs.exists(outputFile)) return false;
 
-                clipMuxer = new MediaMuxer(temp.getAbsolutePath(),
-                        MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+                clipMuxer = RemovableStorageFs.newMuxer(new java.io.File(temp.getAbsolutePath()), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
                 tempOwned = true;
                 int videoTrack = clipMuxer.addTrack(videoFormat);
                 int clipAudioTrack = -1;
@@ -5468,15 +5475,15 @@ public class HardwareEventRecorderGpu {
                 }
             }
 
-            if (!stopOk || videoFrames <= 0 || !temp.exists() || temp.length() <= 1024L) {
-                if (tempOwned && temp.exists() && !temp.delete()) {
+            if (!stopOk || videoFrames <= 0 || !RemovableStorageFs.exists(temp) || RemovableStorageFs.length(temp) <= 1024L) {
+                if (tempOwned && RemovableStorageFs.exists(temp) && !RemovableStorageFs.delete(temp)) {
                     logger.warn("Could not delete failed manual clip temp: " + temp.getName());
                 }
                 return false;
             }
-            if (outputFile.exists()) {
+            if (RemovableStorageFs.exists(outputFile)) {
                 logger.warn("Could not finalize manual clip: destination appeared during export");
-                if (tempOwned) temp.delete();
+                if (tempOwned) RemovableStorageFs.delete(temp);
                 return false;
             }
             // Before the rename, so the index's first look at the file already has its start.
@@ -5485,9 +5492,9 @@ public class HardwareEventRecorderGpu {
                         ? tlRingNow[1] - (tlRingNow[0] - lastVideoPtsUs) / 1000L : tlExportWallMs;
                 com.overdrive.app.server.timeline.RecordingSpanHints.record(outputFile.getName(), "replay", tlLastWall - (lastVideoPtsUs - firstVideoPtsUs) / 1000L);
             } catch (Throwable ignored) { }
-            if (!temp.renameTo(outputFile)) {
+            if (!RemovableStorageFs.renameTo(temp, outputFile)) {
                 logger.warn("Could not finalize manual clip: " + outputFile.getAbsolutePath());
-                if (tempOwned) temp.delete();
+                if (tempOwned) RemovableStorageFs.delete(temp);
                 return false;
             }
 
@@ -5500,7 +5507,7 @@ public class HardwareEventRecorderGpu {
             logger.info(String.format(Locale.US,
                     "Manual clip exported: %s (%d frames, %.1fs, %.1fMB)",
                     outputFile.getName(), videoFrames, durationSec,
-                    outputFile.length() / 1024.0 / 1024.0));
+                    RemovableStorageFs.length(outputFile) / 1024.0 / 1024.0));
             return true;
         } finally {
             cursor.close();
@@ -7042,8 +7049,7 @@ public class HardwareEventRecorderGpu {
         int newAudioTrackIndex = -1;
 
         try {
-            newMuxer = new MediaMuxer(newTempFile.getAbsolutePath(),
-                    MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+            newMuxer = RemovableStorageFs.newMuxer(new java.io.File(newTempFile.getAbsolutePath()), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
             if (savedFormat != null) {
                 newTrackIndex = newMuxer.addTrack(savedFormat);
                 // Re-evaluate audio for the new segment so a mid-recording
@@ -7134,7 +7140,7 @@ public class HardwareEventRecorderGpu {
                     + " superseded (ticket gen " + ticket.rotateGeneration
                     + ", live gen " + recordingGeneration + ")");
                 try { newMuxer.release(); } catch (Exception ignored) {}
-                if (newTempFile.exists()) newTempFile.delete();
+                if (RemovableStorageFs.exists(newTempFile)) RemovableStorageFs.delete(newTempFile);
                 if (move != null) move.outcome = SegmentMove.NOT_TAKEN;  // the recording ended, not the card
                 // No segmentNumber back-out: the bump only happens below,
                 // after this re-check passes.
@@ -7384,8 +7390,8 @@ public class HardwareEventRecorderGpu {
      * state inline) backs it out.
      */
     private void abortRotationKeepOldSegment(File newTempFile, boolean applyBackoff) {
-        if (newTempFile != null && newTempFile.exists()) {
-            try { newTempFile.delete(); } catch (Throwable ignored) {}
+        if (newTempFile != null && RemovableStorageFs.exists(newTempFile)) {
+            try { RemovableStorageFs.delete(newTempFile); } catch (Throwable ignored) {}
         }
         if (applyBackoff) {
             segmentStartTime = System.currentTimeMillis() - segmentDurationMs
@@ -7516,8 +7522,8 @@ public class HardwareEventRecorderGpu {
             boolean segmentBroken = !stopOk || wasAbortedAtRotation;
             try { com.overdrive.app.server.timeline.RecordingSpanHints.close(oldOutputPath); } catch (Throwable ignored) { }
             File finalisedSegment = null;
-            if (oldTemp != null && oldTemp.exists()) {
-                if (!segmentBroken && oldRecordedFrames > 0 && oldTemp.length() > 1024) {
+            if (oldTemp != null && RemovableStorageFs.exists(oldTemp)) {
+                if (!segmentBroken && oldRecordedFrames > 0 && RemovableStorageFs.length(oldTemp) > 1024) {
                     File finalFile = new File(oldOutputPath);
                     // Retried only while this recording still owns the segment callback.
                     int renameErrno = renameWithFolderRelief(oldTemp, finalFile,
@@ -7530,7 +7536,7 @@ public class HardwareEventRecorderGpu {
                                 : oldRecordedFrames / (float) fps;
                         logger.info(String.format("Segment %d saved: %s (%d frames, %.1f sec, %d KB)",
                                 oldSegmentNumber, finalFile.getName(), oldRecordedFrames,
-                                durationSec, finalFile.length() / 1024));
+                                durationSec, RemovableStorageFs.length(finalFile) / 1024));
                         try {
                             com.overdrive.app.storage.StorageManager.getInstance().onFileSaved(finalFile);
                         } catch (Exception e) {
@@ -7577,21 +7583,21 @@ public class HardwareEventRecorderGpu {
                     } else {
                         logger.error("Failed to rename segment " + oldSegmentNumber + " ("
                                 + errnoLabel(renameErrno) + ") — deleting orphan");
-                        oldTemp.delete();
+                        RemovableStorageFs.delete(oldTemp);
                     }
                 } else if (segmentBroken) {
                     File broken = new File(oldOutputPath + ".broken");
-                    if (!oldTemp.renameTo(broken)) {
+                    if (!RemovableStorageFs.renameTo(oldTemp, broken)) {
                         logger.warn("Quarantine rename failed; deleting broken tmp: " + oldTemp.getName());
-                        oldTemp.delete();
+                        RemovableStorageFs.delete(oldTemp);
                     } else {
                         logger.warn("Quarantined broken segment " + oldSegmentNumber
                                 + " (stopOk=" + stopOk + ", writerAborted=" + wasAbortedAtRotation
-                                + ", " + (broken.length() / 1024) + " KB): " + broken.getName());
+                                + ", " + (RemovableStorageFs.length(broken) / 1024) + " KB): " + broken.getName());
                     }
                 } else {
                     logger.warn("Deleting empty segment " + oldSegmentNumber + " tmp file");
-                    oldTemp.delete();
+                    RemovableStorageFs.delete(oldTemp);
                 }
 
                 // Same reason as closeEventRecording: the failure branches unlink a
@@ -7819,15 +7825,15 @@ public class HardwareEventRecorderGpu {
             muxerStarted = false;
             trackIndex = -1;
             audioTrackIndex = -1;
-            if (tempFile != null && tempFile.exists()) {
+            if (tempFile != null && RemovableStorageFs.exists(tempFile)) {
                 File broken = new File(outputPath + ".broken");
-                if (tempFile.renameTo(broken)) {
+                if (RemovableStorageFs.renameTo(tempFile, broken)) {
                     logger.warn("Quarantined writer-aborted segment: "
                         + broken.getName());
                 } else {
                     logger.warn("Quarantine rename failed; deleting aborted tmp: "
                         + tempFile.getName());
-                    tempFile.delete();
+                    RemovableStorageFs.delete(tempFile);
                 }
             }
             tempFile = null;
@@ -7964,7 +7970,7 @@ public class HardwareEventRecorderGpu {
                     String candidate = dir + prefix + "_" + fresh + ".mp4";
                     // Same-second rotation (or pre-existing file) — disambiguate
                     // with a short suffix rather than overwriting.
-                    if (new java.io.File(candidate).exists()
+                    if (RemovableStorageFs.exists(new java.io.File(candidate))
                             || candidate.equals(outputPath)) {
                         // Underscore (not dash) so the UI regexes in
                         // RecordingsApiHandler — CAM_PATTERN / EVENT_PATTERN /
@@ -8006,9 +8012,9 @@ public class HardwareEventRecorderGpu {
      * 5 minutes are removed.
      */
     public static void cleanupOrphanedTmpFiles(File directory) {
-        if (!directory.exists() || !directory.isDirectory()) return;
+        if (!RemovableStorageFs.exists(directory) || !RemovableStorageFs.isDirectory(directory)) return;
 
-        File[] orphans = directory.listFiles((dir, name) ->
+        File[] orphans = RemovableStorageFs.listFiles(directory, (dir, name) ->
                 name.endsWith(".tmp") || name.endsWith(".broken")
                         || name.endsWith(SegmentJournal.SUFFIX));
         if (orphans == null) {
@@ -8048,14 +8054,14 @@ public class HardwareEventRecorderGpu {
             String name = f.getName();
             if (SegmentRecovery.isPending(f)) continue;
             if (name.endsWith(SegmentJournal.SUFFIX)
-                    && new File(f.getPath().substring(0,
-                            f.getPath().length() - SegmentJournal.SUFFIX.length())).exists()) {
+                    && RemovableStorageFs.exists(new File(f.getPath().substring(0,
+                            f.getPath().length() - SegmentJournal.SUFFIX.length())))) {
                 continue;  // goes with its .mp4.tmp
             }
-            long age = now - f.lastModified();
+            long age = now - RemovableStorageFs.lastModified(f);
             if (age > 5 * 60 * 1000) { // Older than 5 minutes
-                long size = f.length();
-                boolean ok = f.delete();
+                long size = RemovableStorageFs.length(f);
+                boolean ok = RemovableStorageFs.delete(f);
                 if (!ok) {
                     // Java delete fails on the SD FUSE mount under UID 2000 the same
                     // way listFiles() does — fall back to a shell rm so the partial
@@ -8093,6 +8099,8 @@ public class HardwareEventRecorderGpu {
      *  (SD/USB FUSE mount owned by a different UID). Bounded so a stuck FUSE volume
      *  can't pin the sweep. Returns true on exit code 0. */
     private static boolean deleteViaShell(File file) {
+        // Routed volumes are only reachable through MediaStore: a shell rm cannot help.
+        if (RemovableStorageFs.isRouted(file)) return RemovableStorageFs.delete(file);
         Process p = null;
         try {
             p = Runtime.getRuntime().exec(new String[]{"rm", file.getAbsolutePath()});
@@ -8120,11 +8128,11 @@ public class HardwareEventRecorderGpu {
      * @param activeRecorder Optional recorder to check for active file (null = no protection)
      */
     public static void cleanupOldSegments(File directory, long maxSizeBytes, HardwareEventRecorderGpu activeRecorder) {
-        if (!directory.exists() || !directory.isDirectory()) {
+        if (!RemovableStorageFs.exists(directory) || !RemovableStorageFs.isDirectory(directory)) {
             return;
         }
         
-        File[] files = directory.listFiles((dir, name) -> name.endsWith(".mp4"));
+        File[] files = RemovableStorageFs.listFiles(directory, (dir, name) -> name.endsWith(".mp4"));
         if (files == null || files.length == 0) {
             return;
         }
@@ -8153,7 +8161,7 @@ public class HardwareEventRecorderGpu {
                 logger.debug("Skipping temp file in size calculation: " + file.getName());
                 continue;
             }
-            totalSize += file.length();
+            totalSize += RemovableStorageFs.length(file);
         }
         
         // Delete oldest files if over limit
@@ -8161,7 +8169,7 @@ public class HardwareEventRecorderGpu {
         if (totalSize > maxSizeBytes) {
             // Sort by last modified (oldest first)
             java.util.Arrays.sort(files, (f1, f2) -> 
-                Long.compare(f1.lastModified(), f2.lastModified()));
+                Long.compare(RemovableStorageFs.lastModified(f1), RemovableStorageFs.lastModified(f2)));
             
             for (File file : files) {
                 if (totalSize <= maxSizeBytes) {
@@ -8183,14 +8191,14 @@ public class HardwareEventRecorderGpu {
                 }
                 
                 // Skip very recent files (less than 5 seconds old) - may still be finalizing
-                long fileAge = System.currentTimeMillis() - file.lastModified();
+                long fileAge = System.currentTimeMillis() - RemovableStorageFs.lastModified(file);
                 if (fileAge < 5000) {
                     logger.warn("Skipping deletion of recent file (age=" + fileAge + "ms): " + file.getName());
                     continue;
                 }
                 
-                long fileSize = file.length();
-                if (file.delete()) {
+                long fileSize = RemovableStorageFs.length(file);
+                if (RemovableStorageFs.delete(file)) {
                     totalSize -= fileSize;
                     anyDeleted = true;
                     long sidecarBytes = deleteSegmentSidecars(file);
@@ -8243,25 +8251,25 @@ public class HardwareEventRecorderGpu {
         long freed = 0L;
 
         File jsonFile = new File(parent, base + ".json");
-        if (jsonFile.exists()) {
-            long s = jsonFile.length();
-            if (jsonFile.delete()) freed += s;
+        if (RemovableStorageFs.exists(jsonFile)) {
+            long s = RemovableStorageFs.length(jsonFile);
+            if (RemovableStorageFs.delete(jsonFile)) freed += s;
         }
         File heroFile = new File(parent, base + ".jpg");
-        if (heroFile.exists()) {
-            long s = heroFile.length();
-            if (heroFile.delete()) freed += s;
+        if (RemovableStorageFs.exists(heroFile)) {
+            long s = RemovableStorageFs.length(heroFile);
+            if (RemovableStorageFs.delete(heroFile)) freed += s;
         }
         // Anchor with "_a" so sibling segment thumbs (e.g. <base>_2's actor
         // thumbs at "thumb_<base>_2_a*.jpg") aren't swept when this segment
         // is rotated out. ThumbnailBuffer always writes "thumb_<base>_a<id>...".
         final String perActorPrefix = "thumb_" + base + "_a";
-        File[] perActor = parent.listFiles((d, name) ->
+        File[] perActor = RemovableStorageFs.listFiles(parent, (d, name) ->
                 name.startsWith(perActorPrefix) && name.endsWith(".jpg"));
         if (perActor != null) {
             for (File f : perActor) {
-                long s = f.length();
-                if (f.delete()) freed += s;
+                long s = RemovableStorageFs.length(f);
+                if (RemovableStorageFs.delete(f)) freed += s;
             }
         }
         return freed;

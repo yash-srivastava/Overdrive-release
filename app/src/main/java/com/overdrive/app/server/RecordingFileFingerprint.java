@@ -1,5 +1,7 @@
 package com.overdrive.app.server;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import java.io.File;
 
 final class RecordingFileFingerprint {
@@ -30,9 +32,9 @@ final class RecordingFileFingerprint {
                 mp4,
                 identity.recordingId,
                 mp4.getAbsolutePath(),
-                mp4.length(),
-                mp4.lastModified(),
-                sidecar.canRead() ? sidecar.lastModified() : 0L);
+                RemovableStorageFs.length(mp4),
+                RemovableStorageFs.lastModified(mp4),
+                RemovableStorageFs.canRead(sidecar) ? RemovableStorageFs.lastModified(sidecar) : 0L);
     }
 
     static File sidecarFor(File mp4) {

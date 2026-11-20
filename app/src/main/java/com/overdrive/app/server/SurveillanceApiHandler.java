@@ -1,5 +1,7 @@
 package com.overdrive.app.server;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.surveillance.GpuSurveillancePipeline;
 import com.overdrive.app.surveillance.SurveillanceConfig;
@@ -238,7 +240,7 @@ public class SurveillanceApiHandler {
                 return;
             }
             java.io.File file = new java.io.File(path).getCanonicalFile();
-            if (!file.isFile() || file.length() == 0) {
+            if (!RemovableStorageFs.isFile(file) || RemovableStorageFs.length(file) == 0) {
                 HttpResponse.sendError(out, 404, "Deterrent asset missing");
                 return;
             }
@@ -250,8 +252,8 @@ public class SurveillanceApiHandler {
             else if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) contentType = "image/jpeg";
             else contentType = "image/png";
             try {
-                input = new java.io.FileInputStream(file);
-                length = file.length();
+                input = RemovableStorageFs.openInput(file);
+                length = RemovableStorageFs.length(file);
             } catch (java.io.IOException missing) {
                 HttpResponse.sendError(out, 404, "Deterrent asset missing");
                 return;
@@ -345,13 +347,13 @@ public class SurveillanceApiHandler {
             OutputStream out, byte[] data, String ext, boolean isVideo) throws Exception {
         synchronized (SCREEN_DETERRENT_ASSET_LOCK) {
             java.io.File dir = new java.io.File(SCREEN_DETERRENT_DIR);
-            if (!dir.isDirectory() && !dir.mkdirs()) {
+            if (!RemovableStorageFs.isDirectory(dir) && !RemovableStorageFs.mkdirs(dir)) {
                 HttpResponse.sendJsonError(out, Messages.get("errors.surveillance_deterrent_dir_failed"));
                 return;
             }
             try {
-                dir.setReadable(true, false);
-                dir.setExecutable(true, false);
+                RemovableStorageFs.setReadable(dir, true, false);
+                RemovableStorageFs.setExecutable(dir, true, false);
             } catch (Exception ignored) {}
 
             java.io.File tmpFile = null;
@@ -365,11 +367,11 @@ public class SurveillanceApiHandler {
                 tmpFile = java.io.File.createTempFile(
                         SCREEN_DETERRENT_PREFIX + "upload.", ".tmp", dir);
                 try (java.io.FileOutputStream fos =
-                             new java.io.FileOutputStream(tmpFile, false)) {
+                             RemovableStorageFs.openOutput(tmpFile, false)) {
                     fos.write(data);
                     fos.getFD().sync();
                 }
-                try { tmpFile.setReadable(true, false); } catch (Exception ignored) {}
+                try { RemovableStorageFs.setReadable(tmpFile, true, false); } catch (Exception ignored) {}
 
                 String reject = isVideo
                         ? validateDeterrentVideo(tmpFile)
@@ -392,7 +394,7 @@ public class SurveillanceApiHandler {
                             tmpFile.toPath(), outFile.toPath());
                 }
                 tmpFile = null;
-                try { outFile.setReadable(true, false); } catch (Exception ignored) {}
+                try { RemovableStorageFs.setReadable(outFile, true, false); } catch (Exception ignored) {}
 
                 boolean persisted =
                         com.overdrive.app.config.UnifiedConfigManager.updateValues(
@@ -401,7 +403,7 @@ public class SurveillanceApiHandler {
                                         "screenDeterrentImagePath",
                                         outFile.getAbsolutePath()));
                 if (!persisted) {
-                    try { outFile.delete(); } catch (Exception ignored) {}
+                    try { RemovableStorageFs.delete(outFile); } catch (Exception ignored) {}
                     HttpResponse.sendJsonError(out, Messages.get("errors.surveillance_deterrent_save_failed"));
                     return;
                 }
@@ -419,7 +421,7 @@ public class SurveillanceApiHandler {
                 HttpResponse.sendJson(out, resp.toString());
             } catch (Throwable t) {
                 if (!configCommitted && outFile != null) {
-                    try { outFile.delete(); } catch (Exception ignored) {}
+                    try { RemovableStorageFs.delete(outFile); } catch (Exception ignored) {}
                 }
                 if (configCommitted) {
                     CameraDaemon.log("Screen deterrent asset committed but response failed: "
@@ -429,7 +431,7 @@ public class SurveillanceApiHandler {
                 }
             } finally {
                 if (tmpFile != null) {
-                    try { tmpFile.delete(); } catch (Exception ignored) {}
+                    try { RemovableStorageFs.delete(tmpFile); } catch (Exception ignored) {}
                 }
             }
         }
@@ -437,7 +439,7 @@ public class SurveillanceApiHandler {
 
     private static void deleteDeterrentAssetsExcept(
             java.io.File dir, java.io.File keep) {
-        java.io.File[] files = dir.listFiles();
+        java.io.File[] files = RemovableStorageFs.listFiles(dir);
         if (files == null) return;
         String keepPath = keep == null ? "" : keep.getAbsolutePath();
         for (java.io.File file : files) {
@@ -448,7 +450,7 @@ public class SurveillanceApiHandler {
             }
             boolean staging = name.endsWith(".tmp");
             if (!staging && !isAllowedDeterrentPath(file.getAbsolutePath())) continue;
-            try { file.delete(); } catch (Exception ignored) {}
+            try { RemovableStorageFs.delete(file); } catch (Exception ignored) {}
         }
     }
 
@@ -669,7 +671,7 @@ public class SurveillanceApiHandler {
         
         try {
             java.io.File unifiedFile = new java.io.File(UNIFIED_CONFIG_FILE);
-            config.put("lastModified", unifiedFile.exists() ? unifiedFile.lastModified() : System.currentTimeMillis());
+            config.put("lastModified", RemovableStorageFs.exists(unifiedFile) ? RemovableStorageFs.lastModified(unifiedFile) : System.currentTimeMillis());
         } catch (Exception e) {
             config.put("lastModified", System.currentTimeMillis());
         }
@@ -794,7 +796,7 @@ public class SurveillanceApiHandler {
         if (isAllowedDeterrentPath(imgPath)) {
             try {
                 java.io.File f = new java.io.File(imgPath).getCanonicalFile();
-                hasImage = f.isFile() && f.length() > 0;
+                hasImage = RemovableStorageFs.isFile(f) && RemovableStorageFs.length(f) > 0;
                 if (hasImage) imgPath = f.getAbsolutePath();
             } catch (Exception ignored) {}
         }
@@ -1906,7 +1908,7 @@ public class SurveillanceApiHandler {
                         return;
                     }
                     java.io.File dir = new java.io.File(SCREEN_DETERRENT_DIR);
-                    if (dir.isDirectory()) {
+                    if (RemovableStorageFs.isDirectory(dir)) {
                         deleteDeterrentAssetsExcept(dir, null);
                     }
                 }
@@ -3079,9 +3081,9 @@ public class SurveillanceApiHandler {
         try {
             com.overdrive.app.storage.StorageManager storage = com.overdrive.app.storage.StorageManager.getInstance();
             java.io.File survDir = storage.getSurveillanceDir();
-            if (survDir == null || !survDir.exists()) return null;
+            if (survDir == null || !RemovableStorageFs.exists(survDir)) return null;
             
-            java.io.File[] events = survDir.listFiles((dir, name) -> 
+            java.io.File[] events = RemovableStorageFs.listFiles(survDir, (dir, name) -> 
                     name.startsWith("event_") && name.endsWith(".mp4"));
             if (events == null || events.length == 0) return null;
             
@@ -3093,8 +3095,11 @@ public class SurveillanceApiHandler {
             // headless daemon because ActivityThread.currentApplication() is null.
             for (int i = 0; i < Math.min(3, events.length); i++) {
                 android.media.MediaMetadataRetriever retriever = new android.media.MediaMetadataRetriever();
-                try (java.io.FileInputStream fis = new java.io.FileInputStream(events[i])) {
-                    retriever.setDataSource(fis.getFD());
+                try (java.io.FileInputStream fis = RemovableStorageFs.openInput(events[i])) {
+                    // Card files on DiLink 100 are reached through MediaStore; their descriptors need the
+                    // MediaDataSource route (the FileDescriptor overload wants an app Context).
+                    if (RemovableStorageFs.isRouted(events[i])) RemovableStorageFs.setDataSource(retriever, events[i]);
+                    else retriever.setDataSource(fis.getFD());
                     android.graphics.Bitmap frame = retriever.getFrameAtTime(
                             1000000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
                     if (frame == null) {

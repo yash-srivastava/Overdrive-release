@@ -1,5 +1,7 @@
 package com.overdrive.app.server;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import org.json.JSONObject;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
@@ -272,19 +274,19 @@ public class HttpResponse {
      * this for small library files that buffer fine over the local loopback).
      */
     public static void sendMediaFile(OutputStream out, java.io.File file, String contentType) throws Exception {
-        if (!file.exists()) {
+        if (!RemovableStorageFs.exists(file)) {
             sendError(out, 404, "File not found");
             return;
         }
         StringBuilder headers = new StringBuilder();
         headers.append("HTTP/1.1 200 OK\r\n")
                .append("Content-Type: ").append(contentType).append("\r\n")
-               .append("Content-Length: ").append(file.length()).append("\r\n")
+               .append("Content-Length: ").append(RemovableStorageFs.length(file)).append("\r\n")
                .append("Accept-Ranges: bytes\r\n")
                .append("Cache-Control: no-cache\r\n")
                .append("Connection: close\r\n\r\n");
         out.write(headers.toString().getBytes());
-        try (java.io.FileInputStream fis = new java.io.FileInputStream(file)) {
+        try (java.io.FileInputStream fis = RemovableStorageFs.openInput(file)) {
             byte[] buffer = new byte[FILE_STREAM_BUFFER];
             int count;
             while ((count = fis.read(buffer)) != -1) {
@@ -308,11 +310,11 @@ public class HttpResponse {
      */
     public static void sendMediaFileRanged(OutputStream out, java.io.File file,
                                            String contentType, String rangeHeader) throws Exception {
-        if (!file.exists()) {
+        if (!RemovableStorageFs.exists(file)) {
             sendError(out, 404, "File not found");
             return;
         }
-        long fileLength = file.length();
+        long fileLength = RemovableStorageFs.length(file);
         long[] range;
         try {
             range = parseSingleByteRange(rangeHeader, fileLength);
@@ -341,7 +343,7 @@ public class HttpResponse {
                .append("Connection: close\r\n\r\n");
         out.write(headers.toString().getBytes());
 
-        try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(file, "r")) {
+        try (com.overdrive.app.storage.removable.SeekableFileReader raf = new com.overdrive.app.storage.removable.SeekableFileReader(file)) {
             raf.seek(start);
             byte[] buffer = new byte[FILE_STREAM_BUFFER];
             long remaining = contentLength;
@@ -414,7 +416,7 @@ public class HttpResponse {
     }
 
     private static void sendVideoInternal(OutputStream out, java.io.File file, String etag) throws Exception {
-        if (!file.exists()) {
+        if (!RemovableStorageFs.exists(file)) {
             sendError(out, 404, "File not found");
             return;
         }
@@ -422,7 +424,7 @@ public class HttpResponse {
         StringBuilder headers = new StringBuilder();
         headers.append("HTTP/1.1 200 OK\r\n")
                .append("Content-Type: video/mp4\r\n")
-               .append("Content-Length: ").append(file.length()).append("\r\n")
+               .append("Content-Length: ").append(RemovableStorageFs.length(file)).append("\r\n")
                .append("Accept-Ranges: bytes\r\n");
         if (etag != null) {
             headers.append("Cache-Control: ").append(VIDEO_CACHE_CONTROL).append("\r\n")
@@ -434,7 +436,7 @@ public class HttpResponse {
         out.write(headers.toString().getBytes());
 
         // Stream file in chunks
-        try (java.io.FileInputStream fis = new java.io.FileInputStream(file)) {
+        try (java.io.FileInputStream fis = RemovableStorageFs.openInput(file)) {
             byte[] buffer = new byte[FILE_STREAM_BUFFER];
             int count;
             while ((count = fis.read(buffer)) != -1) {
@@ -453,12 +455,12 @@ public class HttpResponse {
     }
 
     private static void sendVideoRangeInternal(OutputStream out, java.io.File file, long start, long end, String etag) throws Exception {
-        if (!file.exists()) {
+        if (!RemovableStorageFs.exists(file)) {
             sendError(out, 404, "File not found");
             return;
         }
 
-        long fileLength = file.length();
+        long fileLength = RemovableStorageFs.length(file);
         if (start < 0 || start >= fileLength) {
             sendRangeNotSatisfiable(out, fileLength, "Range Not Satisfiable");
             return;
@@ -487,7 +489,7 @@ public class HttpResponse {
         headers.append("Connection: close\r\n\r\n");
         out.write(headers.toString().getBytes());
 
-        try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(file, "r")) {
+        try (com.overdrive.app.storage.removable.SeekableFileReader raf = new com.overdrive.app.storage.removable.SeekableFileReader(file)) {
             raf.seek(start);
             byte[] buffer = new byte[FILE_STREAM_BUFFER];
             long remaining = contentLength;
@@ -549,19 +551,19 @@ public class HttpResponse {
      */
     public static void sendImage(OutputStream out, java.io.File file, String contentType,
                                   String cacheControl) throws Exception {
-        if (!file.exists()) {
+        if (!RemovableStorageFs.exists(file)) {
             sendError(out, 404, "Image not found");
             return;
         }
 
         String headers = "HTTP/1.1 200 OK\r\n" +
                         "Content-Type: " + contentType + "\r\n" +
-                        "Content-Length: " + file.length() + "\r\n" +
+                        "Content-Length: " + RemovableStorageFs.length(file) + "\r\n" +
                         "Cache-Control: " + cacheControl + "\r\n" +
                         "Connection: close\r\n\r\n";
         out.write(headers.getBytes());
 
-        try (java.io.FileInputStream fis = new java.io.FileInputStream(file)) {
+        try (java.io.FileInputStream fis = RemovableStorageFs.openInput(file)) {
             byte[] buffer = new byte[8192];
             int count;
             while ((count = fis.read(buffer)) != -1) {

@@ -1,5 +1,7 @@
 package com.overdrive.app.server;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.daemon.CameraDaemon;
 
 import org.json.JSONArray;
@@ -443,7 +445,7 @@ public class TcpCommandServer {
                 String codec = "H264";
                 try {
                     java.io.File unifiedFile = new java.io.File(com.overdrive.app.util.ScratchRoot.path("overdrive_config.json"));
-                    if (unifiedFile.exists()) {
+                    if (RemovableStorageFs.exists(unifiedFile)) {
                         java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.FileReader(unifiedFile));
                         StringBuilder sb = new StringBuilder();
                         String line;

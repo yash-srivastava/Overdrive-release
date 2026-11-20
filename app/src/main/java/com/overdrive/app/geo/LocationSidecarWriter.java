@@ -1,5 +1,7 @@
 package com.overdrive.app.geo;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.surveillance.SrtWriter;
 
@@ -275,20 +277,20 @@ public final class LocationSidecarWriter {
             File jsonFile = new File(parent, base + ".json");
             File tmpFile = new File(jsonFile.getAbsolutePath() + ".tmp");
 
-            try (FileWriter fw = new FileWriter(tmpFile)) {
+            try (java.io.Writer fw = new java.io.OutputStreamWriter(RemovableStorageFs.openOutput(tmpFile), java.nio.charset.StandardCharsets.UTF_8)) {
                 fw.write(root.toString());
             }
 
-            if (!tmpFile.renameTo(jsonFile)) {
+            if (!RemovableStorageFs.renameTo(tmpFile, jsonFile)) {
                 // Same fallback pattern as sentry: direct rewrite when
                 // rename fails (cross-FS / SD-card quirks). Loses
                 // atomicity but keeps the data on disk.
-                try (FileWriter fw = new FileWriter(jsonFile)) {
+                try (java.io.Writer fw = new java.io.OutputStreamWriter(RemovableStorageFs.openOutput(jsonFile), java.nio.charset.StandardCharsets.UTF_8)) {
                     fw.write(root.toString());
                 }
-                try { tmpFile.delete(); } catch (Throwable ignored) {}
+                try { RemovableStorageFs.delete(tmpFile); } catch (Throwable ignored) {}
             }
-            try { jsonFile.setReadable(true, false); } catch (Throwable ignored) {}
+            try { RemovableStorageFs.setReadable(jsonFile, true, false); } catch (Throwable ignored) {}
             // Idle cleanup gate: sidecars land AFTER the mp4's save hook fired,
             // so without this bump their bytes stay invisible to the parked-tick
             // skip until the hourly backstop. Best-effort.

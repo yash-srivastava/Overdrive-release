@@ -1,5 +1,7 @@
 package com.overdrive.app.server;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.storage.StorageManager;
 
@@ -822,7 +824,7 @@ public final class RecordingsIndex {
         for (String sfx : suffixes) {
             try {
                 File f = new File(DB_PATH + sfx);
-                if (f.exists() && f.delete()) {
+                if (RemovableStorageFs.exists(f) && RemovableStorageFs.delete(f)) {
                     logger.warn("Wiped corrupt index artifact: " + f.getName());
                 }
             } catch (Exception e) {
@@ -834,14 +836,14 @@ public final class RecordingsIndex {
     private void cleanupStaleLocks() {
         try {
             File lock = new File(DB_PATH + ".lock.db");
-            if (lock.exists()) {
-                long age = System.currentTimeMillis() - lock.lastModified();
-                if (age > 5 * 60 * 1000L && lock.delete()) {
+            if (RemovableStorageFs.exists(lock)) {
+                long age = System.currentTimeMillis() - RemovableStorageFs.lastModified(lock);
+                if (age > 5 * 60 * 1000L && RemovableStorageFs.delete(lock)) {
                     logger.info("Deleted stale lock file (age " + (age / 1000) + "s)");
                 }
             }
             File trace = new File(DB_PATH + ".trace.db");
-            if (trace.exists()) trace.delete();
+            if (RemovableStorageFs.exists(trace)) RemovableStorageFs.delete(trace);
         } catch (Exception e) {
             logger.debug("Lock cleanup failed: " + e.getMessage());
         }
@@ -926,7 +928,7 @@ public final class RecordingsIndex {
      *         when the file was removed while we were parsing.
      */
     public boolean upsert(File mp4) {
-        if (mp4 == null || !mp4.isFile() || !mp4.canRead()) return false;
+        if (mp4 == null || !RemovableStorageFs.isFile(mp4) || !RemovableStorageFs.canRead(mp4)) return false;
         if (!mp4.getName().endsWith(".mp4")) return false;
 
         // Sample BEFORE parsing so any remove() landing during the parse is
@@ -1581,7 +1583,7 @@ public final class RecordingsIndex {
             // SD-card .mp4).
             File[] files = sm.listMp4Files(dir);
             for (File f : files) {
-                if (!f.isFile() || f.length() <= 0 || !f.canRead()) continue;
+                if (!RemovableStorageFs.isFile(f) || RemovableStorageFs.length(f) <= 0 || !RemovableStorageFs.canRead(f)) continue;
                 out.add(new DirEntry(f, forceType));
             }
         }
@@ -1770,7 +1772,7 @@ public final class RecordingsIndex {
             for (File file : listing.files) {
                 RecordingIdentity identity = RecordingIdentity.fromFile(file);
                 scan.observedIds.add(identity.recordingId);
-                if (!file.isFile()) continue;
+                if (!RemovableStorageFs.isFile(file)) continue;
                 RecordingFileFingerprint fingerprint = RecordingFileFingerprint.from(file);
                 if (fingerprint.sizeBytes > 0) {
                     scan.files.put(fingerprint.recordingId, fingerprint);
@@ -1824,7 +1826,7 @@ public final class RecordingsIndex {
             // shell ls when listFiles() returns null on SD-card mounts.
             File[] files = sm.listMp4Files(dir);
             for (File f : files) {
-                if (f.isFile() && f.length() > 0) {
+                if (RemovableStorageFs.isFile(f) && RemovableStorageFs.length(f) > 0) {
                     out.add(RecordingIdentity.fromFile(f).recordingId);
                 }
             }
@@ -2383,8 +2385,8 @@ public final class RecordingsIndex {
         r.rootRank = 100;
         r.filename = name;
         r.absPath = mp4.getAbsolutePath();
-        r.sizeBytes = mp4.length();
-        r.mp4Mtime = mp4.lastModified();
+        r.sizeBytes = RemovableStorageFs.length(mp4);
+        r.mp4Mtime = RemovableStorageFs.lastModified(mp4);
         // Physical volume the clip lives on, classified from its path. Stored
         // as an indexed column so the recordings library can filter by volume
         // (INTERNAL / SD_CARD / USB). Best-effort — a classifier/singleton
@@ -2434,10 +2436,10 @@ public final class RecordingsIndex {
                 // Unknown filename grammar — fall back to mtime, tag as
                 // "normal" so it surfaces somewhere instead of vanishing.
                 r.type = "normal";
-                r.tsMs = mp4.lastModified();
+                r.tsMs = RemovableStorageFs.lastModified(mp4);
             }
         } catch (Exception e) {
-            r.tsMs = mp4.lastModified();
+            r.tsMs = RemovableStorageFs.lastModified(mp4);
             if (r.type == null) r.type = "normal";
         }
 
@@ -2453,13 +2455,13 @@ public final class RecordingsIndex {
         // RecordingsApiHandler.parseRecordingUncached, kept close to
         // identical so existing callers don't notice the swap.
         File sidecar = RecordingFileFingerprint.sidecarFor(mp4);
-        if (sidecar.exists() && sidecar.canRead()) {
-            r.sidecarMtime = sidecar.lastModified();
+        if (RemovableStorageFs.exists(sidecar) && RemovableStorageFs.canRead(sidecar)) {
+            r.sidecarMtime = RemovableStorageFs.lastModified(sidecar);
             try {
-                int cap = (int) Math.min(sidecar.length(), 65536L);
+                int cap = (int) Math.min(RemovableStorageFs.length(sidecar), 65536L);
                 StringBuilder sb = new StringBuilder(cap);
                 try (java.io.BufferedReader br = new java.io.BufferedReader(
-                        new java.io.FileReader(sidecar))) {
+                        new java.io.InputStreamReader(RemovableStorageFs.openInput(sidecar), java.nio.charset.StandardCharsets.UTF_8))) {
                     char[] buf = new char[4096];
                     int n;
                     while ((n = br.read(buf)) > 0) {
