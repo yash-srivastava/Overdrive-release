@@ -1639,9 +1639,8 @@ public class BydDataCollector {
                 return true;
             case "occupantDriver":
                 if (value != 1) return false;
-                com.overdrive.app.automation.Automations.update(
-                        com.overdrive.app.automation.condition.BydEvent.OCCUPANT_DRIVER,
-                        "occupied");
+                com.overdrive.app.automation.condition.BydEvent
+                        .publishDriverOccupancy(value);
                 return true;
             case com.overdrive.app.byd.dilink5.Dilink5RadarBridge.EVENT:
                 return com.overdrive.app.byd.dilink5.Dilink5RadarBridge.accept(
@@ -12518,7 +12517,11 @@ public class BydDataCollector {
         if (!isDiLink5ProducerActive()
                 && !com.overdrive.app.automation.condition.DoorEvent.shouldPoll()) return;
         boolean rightHandDrive = isRightHandDriveForDoorMapping();
-        for (int area = 1; area <= 7; area++) {
+        // When only driver occupancy needs the door lifecycle, sample just area 1. DiLink 5
+        // producer must still fill all seven bridge areas, regardless of automation rules.
+        int lastArea = diLink5 || com.overdrive.app.automation.condition.DoorEvent.hasDoorReferences()
+                ? 7 : BodyworkConstants.AREA_FRONT_DRIVER;
+        for (int area = 1; area <= lastArea; area++) {
             // Stamp before the getter so a slow Binder call cannot hide the read's age.
             long readAt = diLink5 ? SystemClock.elapsedRealtime() : 0L;
             try {

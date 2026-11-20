@@ -575,9 +575,10 @@ public class Conditions {
         //  - PASSENGER: getPassengerStatus area 1 when available; otherwise a disclosed
         //    belt/reminder estimate (buckled/reminder=occupied, unbuckled=empty).
         //  - DRIVER: no sensor exists; presence is INFERRED from the seatbelt-reminder mask
-        //    (bit 0) + the driver belt, and is POSITIVE-ONLY — it publishes "occupied" and never
-        //    "empty" (an unbuckled-but-present driver reads identically to an empty seat; see
-        //    BydDataCollector.readDriverOccupancyNow).
+        //    (bit 0) + the driver belt. Only positive evidence publishes "occupied". If the
+        //    driver door opens and that evidence disappears, the prior state becomes UNKNOWN
+        //    (not "empty") so the next confirmed presence can be a new edge. An unbuckled
+        //    driver with no active reminder is indistinguishable from an empty seat.
         // The schema carries ONE value enum per condition, so "empty" is still offered for the
         // driver seat in the picker. A driver+empty rule parses and loads, but can only ever be
         // satisfied while the state is unseeded — it is documented as unsupported in the

@@ -1359,7 +1359,7 @@
     "auto_lights": "Auto-Headlights",
     "auto_lights_description": "Fires when automatic headlight mode is enabled or disabled. This does not indicate darkness or whether the lamps are currently on.",
     "occupant": "Seat Occupancy",
-    "occupant_description": "Fires when a seat becomes occupied or empty. The passenger seat uses its occupancy sensor when available. On vehicles without that signal, it estimates occupancy from the passenger belt reminder and an established buckle state: a warning or buckle means Occupied; otherwise Empty. This estimate can be wrong if an empty belt is latched or the reminder is muted. The driver seat has no sensor, so it reports Occupied only, once per drive, and never Empty. For buckle/unbuckle edges use the Seatbelt trigger instead.",
+    "occupant_description": "Fires when a seat becomes occupied or empty. The passenger seat uses its occupancy sensor when available. On vehicles without that signal, it estimates occupancy from the passenger belt reminder and an established buckle state: a warning or buckle means Occupied; otherwise Empty. This estimate can be wrong if an empty belt is latched or the reminder is muted. The driver seat has no occupancy sensor: it reports Occupied only when the belt is buckled or the reminder is active, not merely when someone sits down. It never asserts Empty; after the driver door opens and positive evidence disappears, its state becomes unknown until presence is confirmed again. To act before fastening the belt, use a Driver Door trigger instead; for buckle/unbuckle edges use Seatbelt.",
     "occupied": "Occupied",
     "empty": "Empty",
     "boot": "System Boot",
