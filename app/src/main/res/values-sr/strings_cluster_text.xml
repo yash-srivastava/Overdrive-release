@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="cluster_text_title">Унос текста на инструмент табли</string>
+    <string name="cluster_text_service_label">OverDrive унос текста на инструмент табли</string>
+    <string name="cluster_text_service_description">Омогућава да са мултимедијалне јединице унесете текст у фокусирано текстуално поље апликације пројектоване на DiLink 5 инструмент таблу. Поља за лозинку су изузета. Укључите аутоматске упите само ако желите да се дијалог тастатуре отвори када текстуално поље на инструмент табли добије фокус.</string>
+    <string name="cluster_text_hint">Текст за апликацију на инструмент табли</string>
+    <string name="cluster_text_auto_prompt">Аутоматски отварајте за текстуална поља на инструмент табли</string>
+    <string name="cluster_text_send">Пошаљите текст</string>
+    <string name="cluster_text_send_submit">Пошаљите текст и притисните Enter</string>
+    <string name="cluster_text_retry">Проверите фокусирано поље</string>
+    <string name="cluster_text_enable_service">Подешавања приступачности</string>
+    <string name="cluster_text_enable_hint">Укључите „OverDrive унос текста на инструмент табли“ у подешавањима приступачности, па фокусирајте текстуално поље у пројектованој апликацији и проверите поново.</string>
+    <string name="cluster_text_checking">Провера текстуалног поља на инструмент табли…</string>
+    <string name="cluster_text_target">Текстуално поље у %1$s</string>
+    <string name="cluster_text_requires_android11">Унос текста на инструмент табли захтева DiLink 5 са Android 11 или новијим и приступ прозорима приступачности инструмент табле. Овај фирмвер не може да провери ком екрану припада текстуално поље.</string>
+    <string name="cluster_text_requires_cast">Покрените DiLink 5 пројекцију апликације пре уноса текста.</string>
+    <string name="cluster_text_no_field">На инструмент табли није пронађено приступачно, фокусирано текстуално поље. Фокусирајте поље у пројектованој апликацији и проверите поново. Поља за лозинку су изузета.</string>
+    <string name="cluster_text_field_changed">Сесија пројекције или фокусирано поље су се променили. Проверите поље поново пре слања.</string>
+    <string name="cluster_text_unavailable">Текстуално поље на инструмент табли није могло да се провери. Проверите пројекцију и везу приступачности, па покушајте поново.</string>
+    <string name="cluster_text_rejected">Апликација није потврдила текст. Проверите поље на инструмент табли пре поновног покушаја.</string>
+    <string name="cluster_text_submit_rejected">Текст је послат, али апликација није прихватила Enter. Потврдите у апликацији на инструмент табли.</string>
+</resources>

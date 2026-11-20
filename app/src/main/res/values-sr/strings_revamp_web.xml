@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="web_state_retry_now">Покушајте поново сада</string>
+    <string name="web_state_retry_in">Аутоматско поновно покушавање · следећи покушај за %1$d s</string>
+    <string name="web_state_retrying_now">Аутоматско поновно покушавање · покушава се сада…</string>
+    <string name="web_state_sign_in_title">Није могуће пријавити се на ову страницу</string>
+    <string name="web_state_sign_in_body">Позадински сервис камере ради, али није прихватио пријављивање апликације. OverDrive га аутоматски обнавља док је ADB повезан.</string>
+</resources>

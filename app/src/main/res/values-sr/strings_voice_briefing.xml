@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="voice_brief_starting">Покрећем навигацију.</string>
+    <string name="voice_brief_opening_waze">Отварам Waze.</string>
+    <string name="voice_brief_opening_gmaps">Отварам Google Maps.</string>
+    <string name="voice_brief_starting_car">Покрећем навигацију возила.</string>
+    <string name="voice_brief_app_missing">Та апликација није инсталирана. Изаберите апликацију на екрану.</string>
+</resources>

@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="nav_hud_roundabout_exit">Изађите на излазу %1$s</string>
+    <string name="nav_hud_roundabout_exit_onto">На излазу %1$s пређите на</string>
+    <string name="nav_hud_towards">Ка</string>
+    <string name="nav_hud_exit">Излаз %1$s</string>
+    <string name="nav_hud_then">Затим</string>
+    <string name="nav_hud_arrive">Долазак</string>
+    <string name="nav_hud_recenter">Поново центрирајте</string>
+    <string name="nav_hud_end">Завршите</string>
+    <string name="nav_hud_delay">+%1$s</string>
+    <string name="nav_hud_unit_m">m</string>
+    <string name="nav_hud_unit_km">km</string>
+    <string name="nav_hud_unit_ft">ft</string>
+    <string name="nav_hud_unit_mi">mi</string>
+    <string name="nav_hud_unit_kmh">km/h</string>
+    <string name="nav_hud_unit_mph">mph</string>
+    <string name="nav_hud_cd_mute">Утишајте гласовна упутства</string>
+    <string name="nav_hud_cd_unmute">Укључите звук гласовних упутстава</string>
+    <string name="nav_hud_cd_overview">Прикажите целу руту</string>
+    <string name="nav_hud_cd_overview_exit">Вратите се на приказ вожње</string>
+    <string name="nav_hud_cd_end">Завршите навигацију</string>
+    <string name="nav_hud_cd_recenter">Поново центрирајте на возило</string>
+    <string name="nav_hud_cd_compass_heading_up">Компас: смер кретања горе. Додирните за север горе</string>
+    <string name="nav_hud_cd_compass_north_up">Компас: север горе. Додирните за смер кретања горе</string>
+    <string name="nav_hud_cd_back">Напустите мапу</string>
+    <string name="nav_hud_cd_then">Затим %1$s за %2$s</string>
+    <string name="nav_hud_cd_trip">Долазак у %1$s, %2$s, преостало %3$s</string>
+    <string name="nav_hud_cd_delay">%1$s застоја у саобраћају</string>
+    <string-array name="nav_hud_verbs_bare">
+        <item>Наставите</item>
+        <item>Крените</item>
+        <item>Стигли сте</item>
+        <item>Стигли сте, одредиште је десно</item>
+        <item>Стигли сте, одредиште је лево</item>
+        <item>Благо скрените удесно</item>
+        <item>Скрените удесно</item>
+        <item>Оштро скрените удесно</item>
+        <item>Направите полукружно окретање</item>
+        <item>Оштро скрените улево</item>
+        <item>Скрените улево</item>
+        <item>Благо скрените улево</item>
+        <item>Идите на прикључни пут</item>
+        <item>Идите на излаз</item>
+        <item>Наставите право</item>
+        <item>Држите се десне стране</item>
+        <item>Држите се леве стране</item>
+        <item>Укључите се у саобраћај</item>
+        <item>Укључите се удесно</item>
+        <item>Укључите се улево</item>
+        <item>Уђите у кружни ток</item>
+        <item>Изађите из кружног тока</item>
+        <item>Укрцајте се на трајект</item>
+        <item>Искрцајте се са трајекта</item>
+    </string-array>
+    <string-array name="nav_hud_verbs_onto">
+        <item>Наставите путем</item>
+        <item>Крените путем</item>
+        <item>Стигли сте на:</item>
+        <item>Стигли сте, одредиште је десно на:</item>
+        <item>Стигли сте, одредиште је лево на:</item>
+        <item>Благо скрените удесно на</item>
+        <item>Скрените удесно на</item>
+        <item>Оштро скрените удесно на</item>
+        <item>Направите полукружно окретање на</item>
+        <item>Оштро скрените улево на</item>
+        <item>Скрените улево на</item>
+        <item>Благо скрените улево на</item>
+        <item>Идите прикључним путем на</item>
+        <item>Идите излазом на</item>
+        <item>Наставите право на</item>
+        <item>Држите се десне стране на</item>
+        <item>Држите се леве стране на</item>
+        <item>Укључите се на</item>
+        <item>Укључите се удесно на</item>
+        <item>Укључите се улево на</item>
+        <item>Уђите у кружни ток на</item>
+        <item>Изађите из кружног тока на</item>
+        <item>Укрцајте се на трајект до</item>
+        <item>Искрцајте се са трајекта на</item>
+    </string-array>
+    <string-array name="nav_hud_ordinals">
+        <item>1.</item>
+        <item>2.</item>
+        <item>3.</item>
+        <item>4.</item>
+        <item>5.</item>
+        <item>6.</item>
+        <item>7.</item>
+        <item>8.</item>
+        <item>9.</item>
+        <item>10.</item>
+    </string-array>
+</resources>

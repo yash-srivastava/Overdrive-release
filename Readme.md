@@ -422,6 +422,8 @@ Every line is checked before it ships (placeholders like `{name}` and `%s`, bran
 
 Developers can still send pull requests on the language files: `app/src/main/assets/web/i18n/<lang>.json`, `app/src/main/assets/server-i18n/<lang>.json` and `app/src/main/res/values-<lang>/`.
 
+Serbian translation catalogs are available in [Cyrillic](app/src/main/assets/web/i18n/sr.json) (`sr`) and [Latin](app/src/main/assets/web/i18n/sr-Latn.json) (`sr-Latn`). Latin Android resources use `values-b+sr+Latn/`. Serbian is not yet enabled in the app's language picker or the spreadsheet language list.
+
 ## Community
 
 - [Discord Server](https://discord.gg/PZutk9fg4h)

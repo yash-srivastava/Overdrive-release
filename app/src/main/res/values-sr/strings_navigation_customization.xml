@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_navigation_title">Навигација</string>
+    <string name="settings_navigation_subtitle">Изаберите која опциона одредишта остају закачена у левој навигацији.</string>
+    <string name="settings_navigation_fixed_hint">Контролна табла, подешавања и о апликацији увек остају доступни.</string>
+    <string name="settings_navigation_reset">Вратите подразумевано</string>
+    <string name="settings_navigation_reset_done">Навигација је враћена</string>
+    <string name="settings_navigation_shown">приказано</string>
+    <string name="settings_navigation_hidden">скривено</string>
+    <string name="settings_navigation_option_state">%1$s, %2$s у навигацији</string>
+</resources>
