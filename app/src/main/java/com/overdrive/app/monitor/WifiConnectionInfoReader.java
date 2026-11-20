@@ -1,11 +1,13 @@
 package com.overdrive.app.monitor;
 
 import android.net.wifi.SupplicantState;
+import android.net.wifi.WifiConfiguration;
 import android.net.wifi.WifiInfo;
 import android.os.IBinder;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
@@ -38,70 +40,96 @@ final class WifiConnectionInfoReader {
 
     static final Info NOT_CONNECTED = new Info(null, null, null);
 
-    private static final Object LOCK = new Object();
-    private static FutureTask<Info> inFlight;
-    private static long inFlightStartedNanos;
-    private static volatile String lastFailure = "";
+    /** Bounded independent reads: a stuck Wi-Fi service may never spawn unlimited workers. */
+    private static final BoundedRead<Info> CONNECTION = new BoundedRead<>();
+    private static final BoundedRead<OwnerMetering> OWNER = new BoundedRead<>();
 
     private WifiConnectionInfoReader() {}
 
-    /** Null when the call failed or missed {@code deadlineMs}. */
     static Info read(long deadlineMs) {
         return read(deadlineMs, WifiConnectionInfoReader::readNow);
     }
 
-    /**
-     * One call in flight at a time: concurrent callers share it, and a call still blocked past
-     * its deadline makes later callers return null at once instead of queueing behind it.
-     */
+    /** Package-visible injection preserves the existing timeout/concurrency contract. */
     static Info read(long deadlineMs, Callable<Info> source) {
-        FutureTask<Info> task;
-        long startedNanos;
-        boolean start = false;
-        synchronized (LOCK) {
-            if (inFlight == null || inFlight.isDone()) {
-                inFlight = new FutureTask<>(source);
-                inFlightStartedNanos = System.nanoTime();
-                start = true;
-            }
-            task = inFlight;
-            startedNanos = inFlightStartedNanos;
-        }
-        if (start) {
-            Thread worker = new Thread(task, "NetworkMonitor-WifiInfo");
-            worker.setDaemon(true);
-            worker.start();
-        }
-        long remainingMs = deadlineMs
-                - TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
-        if (remainingMs <= 0) {
-            lastFailure = "stalled";
-            return null;
-        }
-        try {
-            return task.get(remainingMs, TimeUnit.MILLISECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return null;
-        } catch (TimeoutException e) {
-            lastFailure = "timeout";
-            return null;
-        } catch (ExecutionException e) {
-            Throwable cause = e.getCause();
-            if (cause instanceof InvocationTargetException && cause.getCause() != null) {
-                cause = cause.getCause();
-            }
-            lastFailure = cause == null ? "failed" : cause.getClass().getSimpleName();
-            return null;
-        } catch (CancellationException e) {
-            lastFailure = "cancelled";
-            return null;
+        return CONNECTION.read(deadlineMs, source);
+    }
+
+    static String lastFailure() {
+        return CONNECTION.lastFailure;
+    }
+
+    /**
+     * Read the connected network id AND its saved owner metering configuration as shell.
+     * Never use the daemon's Context (which reports "android" for UID 2000), a Wi-Fi
+     * service dump, or an unbounded binder call. Missing evidence means refusal.
+     */
+    static OwnerMetering readOwnerMetering(long deadlineMs) {
+        return OWNER.read(deadlineMs, WifiConnectionInfoReader::readOwnerNow);
+    }
+
+    static String lastOwnerFailure() {
+        return OWNER.lastFailure;
+    }
+
+    static final class OwnerMetering {
+        final int networkId;
+        final Boolean apMeteredHint;
+        final boolean savedMeteredHint;
+        final int ownerOverride;
+
+        OwnerMetering(int networkId, Boolean apMeteredHint,
+                boolean savedMeteredHint, int ownerOverride) {
+            this.networkId = networkId;
+            this.apMeteredHint = apMeteredHint;
+            this.savedMeteredHint = savedMeteredHint;
+            this.ownerOverride = ownerOverride;
         }
     }
 
-    /** Why the last read returned null; "" before any failure. */
-    static String lastFailure() {
-        return lastFailure;
+    private static final class BoundedRead<T> {
+        private FutureTask<T> inFlight;
+        private long startedNanos;
+        volatile String lastFailure = "";
+
+        T read(long deadlineMs, Callable<T> source) {
+            FutureTask<T> task;
+            long started;
+            synchronized (this) {
+                if (inFlight == null || inFlight.isDone()) {
+                    inFlight = new FutureTask<>(source);
+                    startedNanos = System.nanoTime();
+                    Thread worker = new Thread(inFlight, "NetworkMonitor-WifiBinder");
+                    worker.setDaemon(true);
+                    worker.start();
+                }
+                task = inFlight;
+                started = startedNanos;
+            }
+            long remainingMs = deadlineMs
+                    - TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+            if (remainingMs <= 0) {
+                lastFailure = "stalled";
+                return null;
+            }
+            try {
+                return task.get(remainingMs, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                lastFailure = "interrupted";
+            } catch (TimeoutException e) {
+                lastFailure = "timeout";
+            } catch (ExecutionException e) {
+                Throwable cause = e.getCause();
+                if (cause instanceof InvocationTargetException && cause.getCause() != null) {
+                    cause = cause.getCause();
+                }
+                lastFailure = cause == null ? "failed" : cause.getClass().getSimpleName();
+            } catch (CancellationException e) {
+                lastFailure = "cancelled";
+            }
+            return null;
+        }
     }
 
     /** SDK 29: the connectivity service lists the Wi-Fi agent's SSID in its capabilities. */
@@ -139,7 +167,7 @@ final class WifiConnectionInfoReader {
         return null;
     }
 
-    private static Info readNow() throws Exception {
+    private static Object wifiService() throws Exception {
         try {
             com.overdrive.app.shell.HiddenApiBypass.INSTANCE.bypass();
         } catch (Throwable ignored) {
@@ -149,8 +177,11 @@ final class WifiConnectionInfoReader {
         if (binder == null) {
             throw new IllegalStateException("wifi service unavailable");
         }
-        Object service = Class.forName("android.net.wifi.IWifiManager$Stub")
+        return Class.forName("android.net.wifi.IWifiManager$Stub")
                 .getMethod("asInterface", IBinder.class).invoke(null, binder);
+    }
+
+    private static WifiInfo connectionInfo(Object service) throws Exception {
         Class<?> api = Class.forName("android.net.wifi.IWifiManager");
         Object result;
         Method withFeature = connectionInfoMethod(api, String.class, String.class);
@@ -166,14 +197,72 @@ final class WifiConnectionInfoReader {
         if (!(result instanceof WifiInfo)) {
             throw new IllegalStateException("no WifiInfo");
         }
-        return fromWifiInfo((WifiInfo) result);
+        return (WifiInfo) result;
+    }
+
+    private static Info readNow() throws Exception {
+        return fromWifiInfo(connectionInfo(wifiService()));
+    }
+
+    private static OwnerMetering readOwnerNow() throws Exception {
+        Object service = wifiService();
+        WifiInfo info = connectionInfo(service);
+        if (info.getSupplicantState() != SupplicantState.COMPLETED || info.getNetworkId() < 0) {
+            throw new IllegalStateException("connected shell Wi-Fi network id unavailable");
+        }
+        int networkId = info.getNetworkId();
+        Boolean apHint = meterHint(info);
+        Class<?> api = Class.forName("android.net.wifi.IWifiManager");
+        // Android 10: (package); Android 11: (package, featureId);
+        // newer framework: (package, featureId, callerNetworksOnly).
+        Method method = connectionInfoMethod(api, "getConfiguredNetworks", String.class, String.class, boolean.class);
+        Object result;
+        if (method != null) {
+            result = method.invoke(service, SHELL_PACKAGE, null, false);
+        } else {
+            method = connectionInfoMethod(api, "getConfiguredNetworks", String.class, String.class);
+            if (method != null) {
+                result = method.invoke(service, SHELL_PACKAGE, null);
+            } else {
+                method = connectionInfoMethod(api, "getConfiguredNetworks", String.class);
+                if (method == null) throw new NoSuchMethodException("getConfiguredNetworks");
+                result = method.invoke(service, SHELL_PACKAGE);
+            }
+        }
+        // IWifiManager returns ParceledListSlice, not List, on Android 10+.
+        Object entries = result instanceof List ? result
+                : result == null ? null : result.getClass().getMethod("getList").invoke(result);
+        if (!(entries instanceof List)) {
+            throw new IllegalStateException("saved Wi-Fi configs unavailable");
+        }
+        for (Object value : (List<?>) entries) {
+            if (!(value instanceof WifiConfiguration)) continue;
+            WifiConfiguration config = (WifiConfiguration) value;
+            if (config.networkId != networkId) continue;
+            int override = WifiConfiguration.class.getField("meteredOverride").getInt(config);
+            return new OwnerMetering(networkId, apHint, config.meteredHint, override);
+        }
+        throw new IllegalStateException("connected Wi-Fi config absent or redacted");
     }
 
     /** Android 11+ takes (package, featureId); Android 10 takes (package). */
     private static Method connectionInfoMethod(Class<?> api, Class<?>... params) {
+        return connectionInfoMethod(api, "getConnectionInfo", params);
+    }
+
+    private static Method connectionInfoMethod(Class<?> api, String name, Class<?>... params) {
         try {
-            return api.getMethod("getConnectionInfo", params);
+            return api.getMethod(name, params);
         } catch (NoSuchMethodException absent) {
+            return null;
+        }
+    }
+
+    private static Boolean meterHint(WifiInfo info) {
+        try {
+            Object hint = WifiInfo.class.getMethod("getMeteredHint").invoke(info);
+            return hint instanceof Boolean ? (Boolean) hint : null;
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
             return null;
         }
     }
@@ -182,14 +271,7 @@ final class WifiConnectionInfoReader {
         if (info.getSupplicantState() != SupplicantState.COMPLETED) {
             return NOT_CONNECTED;
         }
-        Boolean metered = null;
-        try {
-            Object hint = WifiInfo.class.getMethod("getMeteredHint").invoke(info);
-            if (hint instanceof Boolean) {
-                metered = (Boolean) hint;
-            }
-        } catch (Throwable ignored) {
-        }
+        Boolean metered = meterHint(info);
         int rssi = info.getRssi();
         return new Info(WifiStatusParser.normalizeSsid(info.getSSID()),
                 rssi > INVALID_RSSI && rssi <= 0 ? rssi : null, metered);

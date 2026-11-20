@@ -749,6 +749,9 @@
 
     <!-- Update channel selector (Settings → About) -->
     <string name="settings_update_channel_title">Update channel</string>
+    <string name="settings_auto_update_title">Install updates automatically</string>
+    <string name="settings_auto_update_desc">Off by default; Braveheart only. Checks at startup, then about every 6 hours (30 minutes while an update is pending) while the daemon runs. Requires Wi-Fi confirmed unmetered by Android (including your network Metered setting; refuses if that setting cannot be read), ACC off for 30 minutes, Sentry off and no recording. Vehicle-ON-only mode cannot install automatically because its daemon stops at ACC off. Requires a newer release label and versionCode, with the same APK signing key; custom builds with older labels may still be replaced. OverDrive restarts after installation.</string>
+    <string name="settings_auto_update_save_failed">Could not save automatic update preference</string>
     <string name="settings_update_channel_alpha">Alpha</string>
     <string name="settings_update_channel_braveheart">Braveheart</string>
     <string name="settings_update_channel_alpha_desc">The stable release. Every published version is kept — pick any to install (downgrades allowed). Recommended for everyday use.</string>
