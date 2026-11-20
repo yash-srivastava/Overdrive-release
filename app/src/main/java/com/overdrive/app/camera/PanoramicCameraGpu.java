@@ -10627,6 +10627,8 @@ public class PanoramicCameraGpu {
         logger.info("Reopening AVMCamera...");
         final boolean legacyOpenAttempt =
                 !USE_DILINK4_AVM_PATH && !USE_DILINK5_QCARCAM_PATH;
+        boolean di3AccHandoff = false;
+        LegacyAccOpenRetry accOpenRetry = null;
         boolean releaseRestartGate = true;
 
         // CRITICAL: Mark restart-in-progress BEFORE touching the camera so the
@@ -10637,6 +10639,15 @@ public class PanoramicCameraGpu {
         // every ACC OFF→ON transition. See log: "GL thread blocked for 3492ms".
 
         try {
+            if (legacyOpenAttempt && Di3AccHandoffPolicy.eligible(
+                    true, DiLink100Platform.isByd100f(),
+                    com.overdrive.app.camera.dilink5.DiLink5Platform.isDiLink4Selected(),
+                    com.overdrive.app.surveillance.RecordingEngine.isDiLink3HeadUnit(
+                            android.os.Build.PRODUCT, android.os.Build.DEVICE))) {
+                di3AccHandoff = true;
+                accOpenRetry = new LegacyAccOpenRetry();
+            }
+
             // Proper cleanup order via BydCameraCoordinator.
             // Null cameraObj BEFORE closeCamera() so the GL renderLoop's
             // `cameraObj == null` short-circuit (line ~616) kicks in immediately
@@ -10736,7 +10747,24 @@ public class PanoramicCameraGpu {
             }
 
             resetDeadSlotWalkForReopen();
-            if (legacyOpenAttempt) {
+            if (di3AccHandoff) {
+                LegacyAccOpenRetry.Result result = accOpenRetry.run(
+                        this::openLegacyCameraWithHardTimeout,
+                        () -> {
+                            if (cameraObj != null || !running || !restartInProgress.get()) {
+                                return false;
+                            }
+                            logger.warn("Retry camera open...");
+                            return true;
+                        },
+                        (phase, error) -> logger.error(
+                                phase + ": " + error.getMessage(), error));
+                if (result == LegacyAccOpenRetry.Result.TERMINAL_TIMEOUT) {
+                    releaseRestartGate = false;
+                    return;
+                }
+                if (result == LegacyAccOpenRetry.Result.FAILED) return;
+            } else if (legacyOpenAttempt) {
                 if (!openLegacyCameraWithHardTimeout("ACC ON camera reopen")) {
                     // The worker may still be inside the vendor Binder call.
                     // Process death is the only safe cancellation; keep the
@@ -10777,6 +10805,8 @@ public class PanoramicCameraGpu {
                 if (cameraObj == null) {
                     logger.warn("Retry camera open...");
                     if (legacyOpenAttempt) {
+                        // Keep the original catch retry if handoff failed before the helper.
+                        if (accOpenRetry != null && !accOpenRetry.canRetryInCatch()) return;
                         if (!openLegacyCameraWithHardTimeout(
                                 "ACC ON camera reopen retry")) {
                             releaseRestartGate = false;

@@ -73,7 +73,7 @@ public final class RecordingEngine {
     }
 
     /** Core version from the build identity ("DiLink3.0"), product first, then device. */
-    static boolean isDiLink3HeadUnit(String product, String device) {
+    public static boolean isDiLink3HeadUnit(String product, String device) {
         int v = coreVersion(product);
         if (v <= 0) v = coreVersion(device);
         return v == 3;
