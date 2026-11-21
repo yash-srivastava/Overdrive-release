@@ -1333,10 +1333,12 @@
             margin-top: 8px;
         }
 
-        /* "My location" finds the viewing device to show the way to the car.
-           In the car app that device is the car itself, already on the map,
-           and the WebView never grants geolocation, so hide it there. */
-        :root[data-android-embed="1"] #panelCameras .btn-my-location {
+        /* "My location" and the distance chip are about the viewing device:
+           where it is and how far the car is. In the car app that device is
+           the car itself, already on the map, and the WebView never grants
+           geolocation, so hide both there. */
+        :root[data-android-embed="1"] #panelCameras .btn-my-location,
+        :root[data-android-embed="1"] #panelCameras .location-distance-chip {
             display: none;
         }
         :root[data-android-embed="1"] #panelCameras .btn-my-location + .btn-map-float {
