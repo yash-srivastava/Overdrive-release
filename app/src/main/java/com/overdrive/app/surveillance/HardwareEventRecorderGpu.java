@@ -1895,6 +1895,9 @@ public class HardwareEventRecorderGpu {
         }
         try {
             initOnce();
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw interrupted;
         } catch (CpuInputRejectedException rejected) {
             // configure() refused YUV buffer input: this encoder records via the GPU.
             logger.warn("Encoder refused CPU frames (" + rejected.getMessage()
@@ -1943,6 +1946,10 @@ public class HardwareEventRecorderGpu {
     }
 
     private void initOnce() throws Exception {
+        // A pending interrupt would make the first join look like a codec timeout.
+        if (Thread.currentThread().isInterrupted()) {
+            throw new InterruptedException("Encoder initialization interrupted before worker start");
+        }
         // Reinit latch reset. release() leaves drainerRestartSuppressed
         // latched (its job: make release's FINAL drainer stop stick across
         // closeEventRecording's restart). This instance is now being
@@ -2224,7 +2231,15 @@ public class HardwareEventRecorderGpu {
                     // Ignore
                 }
                 encoder = null;
-                inputSurface = null;
+                if (inputSurface != null) {
+                    try {
+                        inputSurface.release();
+                    } catch (Throwable releaseError) {
+                        logger.warn("Input surface cleanup after encoder start timeout failed: "
+                            + releaseError.getMessage());
+                    }
+                    inputSurface = null;
+                }
                 throw new RuntimeException("Encoder start timeout - hardware encoder busy or stuck");
             }
             if (startError[0] != null) {
