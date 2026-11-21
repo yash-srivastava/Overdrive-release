@@ -148,6 +148,9 @@
 
         header.addEventListener('click', toggle);
         header.addEventListener('keydown', function (ev) {
+            // Key events from child controls bubble here. Let those controls
+            // handle their own keys without cancelling their default action.
+            if (ev.target !== header) return;
             if (ev.key === 'Enter' || ev.key === ' ' || ev.keyCode === 13 || ev.keyCode === 32) {
                 ev.preventDefault();
                 toggle(ev);
