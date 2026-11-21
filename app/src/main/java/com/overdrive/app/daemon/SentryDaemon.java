@@ -656,7 +656,7 @@ public class SentryDaemon {
         }
         // Null-safe overrides for fallback mode (base=null)
         @Override public Context getApplicationContext() {
-            try { return super.getApplicationContext(); } catch (NullPointerException e) { return this; }
+            try { Context c = super.getApplicationContext(); return c != null ? c : this; } catch (NullPointerException e) { return this; }
         }
         @Override public String getPackageName() {
             try { return super.getPackageName(); } catch (NullPointerException e) { return APP_PACKAGE_NAME(); }
