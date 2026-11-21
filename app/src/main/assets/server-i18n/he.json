@@ -302,10 +302,10 @@
     "remote_access_unlock_unconfirmed_title": "פתיחת קרבה לא אושרה",
     "remote_access_lock_failed_title": "נעילת קרבה נכשלה",
     "remote_access_unlock_failed_title": "פתיחת קרבה נכשלה",
-    "remote_access_lock_confirmed_body": "מצב הנעילה של דלת הנהג אושר — נעול.",
-    "remote_access_unlock_confirmed_body": "מצב הנעילה של דלת הנהג אושר — פתוח.",
-    "remote_access_lock_unconfirmed_body": "פקודת הנעילה התקבלה; לא ניתן לאשר את מצב הרכב.",
-    "remote_access_unlock_unconfirmed_body": "פקודת הפתיחה התקבלה; לא ניתן לאשר את מצב הרכב.",
+    "remote_access_lock_confirmed_body": "דלת הנהג נעולה.",
+    "remote_access_unlock_confirmed_body": "דלת הנהג פתוחה.",
+    "remote_access_lock_unconfirmed_body": "פקודת הנעילה התקבלה, אבל מצב הרכב לא אושר.",
+    "remote_access_unlock_unconfirmed_body": "פקודת הפתיחה התקבלה, אבל מצב הרכב לא אושר.",
     "remote_access_lock_failed_body": "פקודת הנעילה של הרכב נכשלה.",
     "remote_access_unlock_failed_body": "פקודת הפתיחה של הרכב נכשלה.",
     "remote_access_device_key_suffix": " מפתח: {0}.",
@@ -658,7 +658,7 @@
         "detected": "👁 זוהתה תנועה"
       },
       "tunnel": {
-        "connected": "🌐 מנהרת מחוברת:\n{0}",
+        "connected": "🌐 המנהרה מחוברת:\n{0}",
         "changed": "🔄 כתובת המנהרה השתנתה:\n{0}"
       },
       "video": {
