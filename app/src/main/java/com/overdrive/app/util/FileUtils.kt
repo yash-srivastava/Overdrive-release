@@ -13,11 +13,9 @@ object FileUtils {
     fun ensureDirectoryExists(path: String): Boolean {
         return try {
             val dir = File(path)
-            if (!dir.exists()) {
-                dir.mkdirs()
-            } else {
-                true
-            }
+            // An existing regular file cannot satisfy a directory request.
+            // Recheck after mkdirs() to handle another caller creating it first.
+            dir.isDirectory || dir.mkdirs() || dir.isDirectory
         } catch (e: Exception) {
             false
         }
