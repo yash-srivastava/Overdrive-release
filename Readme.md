@@ -84,7 +84,18 @@ Enable your preferred tunnel (Zrok, Cloudflared or Tailscale).
 
 ## Remote Access
 
-Three options for viewing your car's cameras remotely:
+OverDrive offers four ways to reach the dashboard: locally over LAN, or
+remotely through Cloudflared, Zrok, or Tailscale. WireGuard is an additional
+private-network tunnel primarily intended for services such as MQTT; publishing
+the dashboard over WireGuard is optional and disabled by default.
+
+| Connection | Best suited for | Dashboard access |
+|---|---|---|
+| LAN | Devices on the same WiFi network | Available at the car's LAN address |
+| Cloudflared | Remote access over the internet | Available through the Cloudflare HTTPS tunnel |
+| Zrok | Remote access over the internet | Available through the zrok HTTPS share |
+| Tailscale | Devices connected to the same tailnet | Available through Tailscale |
+| WireGuard | The car reaching services on a private network (such as MQTT) | Off by default; enable dashboard access in WireGuard settings if needed |
 
 ### Local Network (LAN)
 Access at `http://<car-ip>:8080` when on the same WiFi. Zero setup, fastest streaming.
