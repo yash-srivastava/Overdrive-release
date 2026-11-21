@@ -96,6 +96,7 @@ class SettingsAboutFragment : Fragment() {
         setupVehicleInformation(view)
 
         setupChannelToggle(view)
+        setupAutoUpdateSwitch(view)
 
         view.findViewById<View>(R.id.cardCheckUpdate).setOnClickListener {
             (activity as? MainActivity)?.invokeCheckForUpdates()
@@ -320,6 +321,51 @@ class SettingsAboutFragment : Fragment() {
                         suppressListener = false
                     }
                 }
+            }
+        }
+    }
+
+    /** Daemon-shared preference; all disk/IPC work stays off the main looper. */
+    private fun setupAutoUpdateSwitch(view: View) {
+        val control = view.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(
+            R.id.switchAutoUpdate)
+        val executor = avatarExecutor
+            ?: Executors.newSingleThreadExecutor().also { avatarExecutor = it }
+        control.isEnabled = false
+        executor.execute {
+            com.overdrive.app.config.UnifiedConfigManager.forceReload()
+            val enabled = com.overdrive.app.config.UnifiedConfigManager.isAutoUpdateEnabled()
+            mainHandler.post {
+                if (!isAdded || view.parent == null) return@post
+                control.isChecked = enabled
+                control.isEnabled = true
+                control.setOnCheckedChangeListener { _, checked ->
+                    saveAutoUpdateSwitch(control, executor, checked)
+                }
+            }
+        }
+    }
+
+    private fun saveAutoUpdateSwitch(
+        control: com.google.android.material.materialswitch.MaterialSwitch,
+        executor: ExecutorService,
+        enabled: Boolean
+    ) {
+        control.isEnabled = false
+        executor.execute {
+            val ok = com.overdrive.app.config.UnifiedConfigManager.setAutoUpdateEnabled(enabled)
+            mainHandler.post {
+                if (!isAdded || view == null) return@post
+                if (!ok) {
+                    control.setOnCheckedChangeListener(null)
+                    control.isChecked = !enabled
+                    control.setOnCheckedChangeListener { _, checked ->
+                        saveAutoUpdateSwitch(control, executor, checked)
+                    }
+                    Toast.makeText(requireContext(), R.string.settings_auto_update_save_failed,
+                        Toast.LENGTH_SHORT).show()
+                }
+                control.isEnabled = true
             }
         }
     }

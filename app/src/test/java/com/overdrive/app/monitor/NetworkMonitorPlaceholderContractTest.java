@@ -38,8 +38,8 @@ public class NetworkMonitorPlaceholderContractTest {
         assertTrue(nm.contains("BoundedShell.run("));
         assertTrue(nm.contains("BoundedShell.run(\"cmd wifi status\", SHELL_DEADLINE_MS)"));
         assertTrue(nm.contains("WifiStatusParser.parse("));
-        // Every shell fallback goes through the bounded runner (ip addr, cmd, wpa_cli x2).
-        assertEquals(4, count(nm, "BoundedShell.run("));
+        // Every shell fallback is bounded (ip addr, cmd, wpa_cli x2, route get).
+        assertEquals(5, count(nm, "BoundedShell.run("));
         assertTrue(nm.contains("SHELL_SSID_MIN_INTERVAL_MS = 10_000L"));
         assertTrue(nm.contains("now - lastShellSsidAttemptAtElapsed >= SHELL_SSID_MIN_INTERVAL_MS"));
     }
