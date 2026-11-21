@@ -36,6 +36,7 @@
                 <div class="dash-hero-copy" data-theme-dock>
                     <h1 data-i18n="dashboard.heading">Dashboard</h1>
                     <p id="dashHeroSubtitle" data-i18n="dashboard.subtitle">Vehicle status, position and main controls.</p>
+                    <p id="dashParkedDrain" class="dash-parked-drain" hidden aria-live="polite"></p>
                 </div>
 
                 <!-- Bento grid. The hero and the AI insight come first and carry
@@ -495,6 +496,12 @@
             line-height: 1.4;
             overflow-wrap: break-word;
         }
+        .dash-hero-copy .dash-parked-drain {
+            margin-top: 8px;
+            color: var(--on-surface);
+            font-weight: 600;
+        }
+        .dash-parked-drain[hidden] { display: none; }
 
         /* ── Bento grid ──────────────────────────────────────────────
            One grid holds the hero, the AI insight and the reorderable
@@ -2968,10 +2975,96 @@
             vehicleStatePollTimer: null,
             aiInsightTimer: null,
             aiInsightEnabled: false,
+            parkingDrainRequest: null,
+            parkingDrainSnapshot: null,
+            PARKING_DRAIN_POLL_MS: 60000,
             VEHICLE_STATE_STALE_AFTER_FAILURES: 2,
             VEHICLE_STATE_POLL_MS: 6000,
             VEHICLE_STATE_TIMEOUT_MS: 8000,
             AI_INSIGHT_POLL_MS: 300000,
+            // Parking Intelligence has live energy for an open session. After
+            // returning to the car, the head-unit dashboard's ACC-event delta
+            // remains available independently of Parking Intelligence.
+            renderParkingDrain: function(reading) {
+                this.parkingDrainSnapshot = reading || null;
+                var element = document.getElementById('dashParkedDrain');
+                if (!element) return;
+                var soc = reading && reading.deltaSoc;
+                if (typeof soc !== 'number' || !isFinite(soc)
+                        || soc >= -0.5 || soc < -100) {
+                    element.textContent = '';
+                    element.hidden = true;
+                    return;
+                }
+                var percent = (-soc).toFixed(1) + '%';
+                var kwh = reading.deltaKwh;
+                var hasKwh = typeof kwh === 'number' && isFinite(kwh)
+                    && kwh < 0 && kwh > -500;
+                var key = hasKwh
+                    ? 'dashboard.parked_drain_kwh' : 'dashboard.parked_drain';
+                var vars = { soc: percent };
+                if (hasKwh) vars.kwh = (-kwh).toFixed(1);
+                var translated = BYD.i18n.t(key, vars);
+                element.textContent = translated && translated !== key
+                    ? translated
+                    : ('Used ' + percent + ' while parked'
+                        + (hasKwh ? ' (≈' + vars.kwh + ' kWh)' : ''));
+                element.hidden = false;
+            },
+            refreshParkingDrain: function() {
+                if (document.hidden || this.parkingDrainRequest) return;
+                var self = this;
+                this.parkingDrainRequest = fetch('/api/parking/current', { cache: 'no-store' })
+                    .then(function(response) {
+                        if (!response.ok) throw new Error('Parking status unavailable');
+                        return response.json();
+                    })
+                    .catch(function() { return null; })
+                    .then(function(status) {
+                        if (status && status.success === true && status.current) {
+                            var current = status.current;
+                            var age = Date.now() - current.startedMs;
+                            var energy = current.energy;
+                            // Never show the last completed cycle during a new
+                            // open park, or infer a delta from an invalid clock.
+                            self.renderParkingDrain(current.open === true
+                                && current.clockUntrusted !== true
+                                && age >= 10 * 60 * 1000
+                                && energy && energy.live === true
+                                ? { deltaSoc: energy.socDelta, deltaKwh: energy.kwh }
+                                : null);
+                            return;
+                        }
+                        return fetch('/api/performance/parking-delta?maxAgeHours=72',
+                                { cache: 'no-store' })
+                            .then(function(response) {
+                                if (!response.ok) throw new Error('Parking delta unavailable');
+                                return response.json();
+                            })
+                            .then(function(delta) {
+                                var age = delta && Date.now() - delta.onTs;
+                                self.renderParkingDrain(delta && delta.available !== false
+                                    && typeof delta.onTs === 'number'
+                                    && age >= 0 && age <= 7 * 24 * 60 * 60 * 1000
+                                    ? delta : null);
+                            });
+                    })
+                    .catch(function() { self.renderParkingDrain(null); })
+                    .then(function() { self.parkingDrainRequest = null; });
+            },
+            initParkingDrain: function() {
+                var self = this;
+                BYD.i18n.onChange(function() {
+                    self.renderParkingDrain(self.parkingDrainSnapshot);
+                });
+                document.addEventListener('visibilitychange', function() {
+                    if (!document.hidden) self.refreshParkingDrain();
+                });
+                this.refreshParkingDrain();
+                setInterval(function() {
+                    if (!document.hidden) self.refreshParkingDrain();
+                }, this.PARKING_DRAIN_POLL_MS);
+            },
             initAiInsight: function() {
                 var self = this;
                 var card = document.getElementById('dashAiInsight');
@@ -4712,6 +4805,7 @@
             BYD.dashboard.refreshWifi();
             setInterval(function() { if (!document.hidden) BYD.dashboard.refreshWifi(); }, 30000);
             BYD.dashboard.initAiInsight();
+            BYD.dashboard.initParkingDrain();
             BYD.dashboard.refreshSecurityDigest();
             setInterval(function() { BYD.dashboard.refreshSecurityDigest(); }, 60000);
             // Once, after i18n: the labels are user-authored so they need no translation,

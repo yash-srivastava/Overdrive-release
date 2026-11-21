@@ -4239,6 +4239,8 @@
     "lock_door_open_warning": "Open: {parts}. The car may refuse to lock until it is closed.",
     "heading": "Dashboard",
     "subtitle": "Vehicle status, position and main controls.",
+    "parked_drain": "Used {soc} while parked",
+    "parked_drain_kwh": "Used {soc} while parked (≈{kwh} kWh)",
     "chip_device_pending": "Device --",
     "chip_surveillance_pending": "Surveillance --",
     "chip_gps_pending": "GPS --",
