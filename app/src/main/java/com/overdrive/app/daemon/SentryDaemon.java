@@ -951,20 +951,20 @@ public class SentryDaemon {
         log("Setting up Location permissions...");
         
         // Grant runtime permissions via pm grant (requires shell/root)
-        execShell("pm grant " + APP_PKG() + " android.permission.ACCESS_FINE_LOCATION");
-        execShell("pm grant " + APP_PKG() + " android.permission.ACCESS_COARSE_LOCATION");
-        execShell("pm grant " + APP_PKG() + " android.permission.ACCESS_BACKGROUND_LOCATION");
+        execShell("pm grant " + com.overdrive.app.util.ShellUser.flag() + " " + APP_PKG() + " android.permission.ACCESS_FINE_LOCATION");
+        execShell("pm grant " + com.overdrive.app.util.ShellUser.flag() + " " + APP_PKG() + " android.permission.ACCESS_COARSE_LOCATION");
+        execShell("pm grant " + com.overdrive.app.util.ShellUser.flag() + " " + APP_PKG() + " android.permission.ACCESS_BACKGROUND_LOCATION");
         
         // Allow background location via appops (DiLink 5: appops rejects these names, skip them).
         if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
-            execShell("appops set " + APP_PKG() + " ACCESS_FINE_LOCATION allow");
-            execShell("appops set " + APP_PKG() + " ACCESS_COARSE_LOCATION allow");
-            execShell("appops set " + APP_PKG() + " ACCESS_BACKGROUND_LOCATION allow");
+            execShell("appops set " + com.overdrive.app.util.ShellUser.flag() + " " + APP_PKG() + " ACCESS_FINE_LOCATION allow");
+            execShell("appops set " + com.overdrive.app.util.ShellUser.flag() + " " + APP_PKG() + " ACCESS_COARSE_LOCATION allow");
+            execShell("appops set " + com.overdrive.app.util.ShellUser.flag() + " " + APP_PKG() + " ACCESS_BACKGROUND_LOCATION allow");
         }
         
         // Allow background operation
-        execShell("appops set " + APP_PKG() + " RUN_IN_BACKGROUND allow");
-        execShell("appops set " + APP_PKG() + " RUN_ANY_IN_BACKGROUND allow");
+        execShell("appops set " + com.overdrive.app.util.ShellUser.flag() + " " + APP_PKG() + " RUN_IN_BACKGROUND allow");
+        execShell("appops set " + com.overdrive.app.util.ShellUser.flag() + " " + APP_PKG() + " RUN_ANY_IN_BACKGROUND allow");
         
         // Whitelist from battery optimization
         execShell("dumpsys deviceidle whitelist +" + APP_PKG());

@@ -1624,8 +1624,8 @@ object HotspotManager {
         // Set then READ BACK in one round-trip. A bare `appops set` prints nothing on
         // success, and runShell also yields "" when the shell itself failed, so the
         // output alone cannot distinguish the two — only the readback can.
-        val out = runShell("appops set $pkg WRITE_SETTINGS allow >/dev/null 2>&1; " +
-            "appops get $pkg WRITE_SETTINGS")
+        val out = runShell("appops set ${com.overdrive.app.util.ShellUser.flag()} $pkg WRITE_SETTINGS allow >/dev/null 2>&1; " +
+            "appops get ${com.overdrive.app.util.ShellUser.flag()} $pkg WRITE_SETTINGS")
         appopGranted = out != null && out.contains("allow", ignoreCase = true)
         if (!appopGranted) log.warn(TAG, "WRITE_SETTINGS app-op not granted (got: ${out?.trim()})")
     }

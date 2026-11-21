@@ -10792,7 +10792,7 @@ public class CameraDaemon {
         for (String perm : permissions) {
             try {
                 Process process = Runtime.getRuntime().exec(
-                    "pm grant com.overdrive.app " + perm);
+                    "pm grant " + com.overdrive.app.util.ShellUser.flag() + " com.overdrive.app " + perm);
                 int exitCode = process.waitFor();
                 if (exitCode == 0) {
                     log("Granted: " + perm);

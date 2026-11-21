@@ -68,16 +68,16 @@ class ServiceLauncher(
         
         val commands = listOf(
             // Grant runtime permissions via pm grant (requires shell/root)
-            "pm grant $PACKAGE_NAME android.permission.ACCESS_FINE_LOCATION",
-            "pm grant $PACKAGE_NAME android.permission.ACCESS_COARSE_LOCATION",
-            "pm grant $PACKAGE_NAME android.permission.ACCESS_BACKGROUND_LOCATION",
+            "pm grant ${com.overdrive.app.util.ShellUser.flag()} $PACKAGE_NAME android.permission.ACCESS_FINE_LOCATION",
+            "pm grant ${com.overdrive.app.util.ShellUser.flag()} $PACKAGE_NAME android.permission.ACCESS_COARSE_LOCATION",
+            "pm grant ${com.overdrive.app.util.ShellUser.flag()} $PACKAGE_NAME android.permission.ACCESS_BACKGROUND_LOCATION",
             // Grant location permissions via appops
-            "appops set $PACKAGE_NAME ACCESS_FINE_LOCATION allow",
-            "appops set $PACKAGE_NAME ACCESS_COARSE_LOCATION allow",
-            "appops set $PACKAGE_NAME ACCESS_BACKGROUND_LOCATION allow",
+            "appops set ${com.overdrive.app.util.ShellUser.flag()} $PACKAGE_NAME ACCESS_FINE_LOCATION allow",
+            "appops set ${com.overdrive.app.util.ShellUser.flag()} $PACKAGE_NAME ACCESS_COARSE_LOCATION allow",
+            "appops set ${com.overdrive.app.util.ShellUser.flag()} $PACKAGE_NAME ACCESS_BACKGROUND_LOCATION allow",
             // Additional permissions for background operation
-            "appops set $PACKAGE_NAME RUN_IN_BACKGROUND allow",
-            "appops set $PACKAGE_NAME RUN_ANY_IN_BACKGROUND allow",
+            "appops set ${com.overdrive.app.util.ShellUser.flag()} $PACKAGE_NAME RUN_IN_BACKGROUND allow",
+            "appops set ${com.overdrive.app.util.ShellUser.flag()} $PACKAGE_NAME RUN_ANY_IN_BACKGROUND allow",
             "dumpsys deviceidle whitelist +$PACKAGE_NAME"
         )
 
@@ -210,9 +210,9 @@ class ServiceLauncher(
             "service call accmodemanager 2 s16 '$packageName' 2>/dev/null",
             "service call accmodemanager 3 s16 '$packageName' 2>/dev/null",
             // Method 3: appops
-            "appops set $packageName RUN_IN_BACKGROUND allow 2>/dev/null",
-            "appops set $packageName RUN_ANY_IN_BACKGROUND allow 2>/dev/null",
-            "appops set $packageName WAKE_LOCK allow 2>/dev/null",
+            "appops set ${com.overdrive.app.util.ShellUser.flag()} $packageName RUN_IN_BACKGROUND allow 2>/dev/null",
+            "appops set ${com.overdrive.app.util.ShellUser.flag()} $packageName RUN_ANY_IN_BACKGROUND allow 2>/dev/null",
+            "appops set ${com.overdrive.app.util.ShellUser.flag()} $packageName WAKE_LOCK allow 2>/dev/null",
             // Method 4: Disable battery optimization
             "dumpsys deviceidle whitelist +$packageName 2>/dev/null",
             // Method 5: BYD Start Control whitelist — APPEND (merge), never
@@ -224,8 +224,8 @@ class ServiceLauncher(
             "CUR=\$(settings get secure ssc_whitelist 2>/dev/null); [ \"\$CUR\" = null ] && CUR=; case \",\$CUR,\" in *,$packageName,*) ;; *) settings put secure ssc_whitelist \"\${CUR:+\$CUR,}$packageName\" 2>/dev/null;; esac",
             // Method 6: BYD app startup manager
             "content call --uri content://com.byd.appstartup/whitelist --method add --arg '$packageName' 2>/dev/null",
-            "cmd appops set $packageName AUTO_START allow 2>/dev/null",
-            "cmd appops set $packageName BOOT_COMPLETED allow 2>/dev/null"
+            "cmd appops set ${com.overdrive.app.util.ShellUser.flag()} $packageName AUTO_START allow 2>/dev/null",
+            "cmd appops set ${com.overdrive.app.util.ShellUser.flag()} $packageName BOOT_COMPLETED allow 2>/dev/null"
         )
 
         executeCommandSequence(withoutDiLink5DeadCommands(commands), 0, callback) {
