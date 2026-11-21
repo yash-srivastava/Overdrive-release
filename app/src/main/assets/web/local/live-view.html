@@ -1333,6 +1333,16 @@
             margin-top: 8px;
         }
 
+        /* "My location" finds the viewing device to show the way to the car.
+           In the car app that device is the car itself, already on the map,
+           and the WebView never grants geolocation, so hide it there. */
+        :root[data-android-embed="1"] #panelCameras .btn-my-location {
+            display: none;
+        }
+        :root[data-android-embed="1"] #panelCameras .btn-my-location + .btn-map-float {
+            margin-top: 0;
+        }
+
         /* Map buttons: round, bar surface like the map chip; Directions is the
            filled main action. Size comes from styles.css and the car app. */
         .live-location-card .btn-map-float {
