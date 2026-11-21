@@ -109,6 +109,7 @@ public final class GeoCache {
     }
 
     public PlaceResult get(double lat, double lng, String locale) {
+        if (!GeoCoordinates.isUsable(lat, lng)) return null;
         ensureLoaded();
         String hash = Geohash.encode(lat, lng);
         PlaceResult pr = entries.get(key(hash, locale));
@@ -144,7 +145,7 @@ public final class GeoCache {
      * (e.g. SafeLocation invalidation, daemon shutdown).
      */
     public synchronized void put(double lat, double lng, PlaceResult pr) {
-        if (pr == null) return;
+        if (pr == null || !GeoCoordinates.isUsable(lat, lng)) return;
         // A cache write can be the first operation after daemon startup.
         // Preserve entries already on disk instead of replacing them with a
         // new map containing only this first put.
@@ -223,6 +224,7 @@ public final class GeoCache {
      * cheap.
      */
     public synchronized void invalidateNear(double lat, double lng, double radiusM) {
+        if (!GeoCoordinates.isUsable(lat, lng)) return;
         ensureLoaded();
         String prefix = Geohash.encode(lat, lng).substring(0, 6); // ≈ 1.2 km box
         boolean changed = false;

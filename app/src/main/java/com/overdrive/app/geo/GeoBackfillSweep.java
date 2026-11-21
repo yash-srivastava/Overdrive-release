@@ -241,8 +241,7 @@ public final class GeoBackfillSweep {
         if (o == null || !o.has("lat") || !o.has("lng")) return null;
         double lat = o.optDouble("lat", Double.NaN);
         double lng = o.optDouble("lng", Double.NaN);
-        if (Double.isNaN(lat) || Double.isNaN(lng)) return null;
-        if (lat == 0.0 && lng == 0.0) return null;   // ocean sentinel
+        if (!GeoCoordinates.isUsable(lat, lng)) return null;
         return new double[] {lat, lng};
     }
 
