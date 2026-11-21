@@ -23,6 +23,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import com.google.android.material.button.MaterialButton
+import com.overdrive.app.BuildConfig
 import com.overdrive.app.R
 import com.overdrive.app.ui.util.navigateDrillDown
 import com.overdrive.app.daemon.CameraDaemon
@@ -657,6 +658,12 @@ class WebViewFragment : Fragment() {
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun setupWebView() {
+        // Chrome 58 WebView needs explicit inspection enabled to set the
+        // session-only Broadway A/B switch from DevTools. Never enable it
+        // for release builds.
+        if (BuildConfig.DEBUG) {
+            WebView.setWebContentsDebuggingEnabled(true)
+        }
         webView?.let { clearCacheAfterAppUpdate(it) }
         webView?.apply {
             settings.javaScriptEnabled = true

@@ -39,7 +39,7 @@ public class LiveViewConnectionStateAssetTest {
         assertTrue(stream.contains("?decoder=broadway"));
         assertTrue(stream.contains("reuseMemory: this.isDiLink5 === true"));
         assertTrue(stream.contains("this.isDiLink5 = data.dilink5 === true"));
-        assertTrue(liveView.contains("stream.js?v=index7"));
+        assertTrue(liveView.contains("stream.js?v=index9"));
     }
 
     @Test

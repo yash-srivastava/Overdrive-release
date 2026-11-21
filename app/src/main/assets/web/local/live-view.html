@@ -28,8 +28,8 @@
     <script src="https://cdn.jsdelivr.net/npm/jmuxer@2.0.4/dist/jmuxer.min.js"></script>
     <script src="../shared/SotaPlayer.js?v=14"></script>
     <script src="../shared/Decoder.js"></script>
-    <script src="../shared/YUVCanvas.js"></script>
-    <script src="../shared/Player.js"></script>
+    <script src="../shared/YUVCanvas.js?v=2"></script>
+    <script src="../shared/Player.js?v=2"></script>
 </head>
 <body class="live-view-page">
     <div class="app-layout">
@@ -130,6 +130,11 @@
                                             <path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>
                                         </svg>
                                     </button>
+                                    <button type="button" id="broadwayAbButton"
+                                            class="broadway-ab-button" hidden
+                                            onclick="BYD.stream.cycleBroadwayAb()"
+                                            data-i18n-attr="title:liveview.broadway_diagnostic;aria-label:liveview.broadway_diagnostic"
+                                            title="Broadway diagnostic A/B" aria-label="Broadway diagnostic A/B"></button>
                                 </div>
                             </div>
 
@@ -153,6 +158,8 @@
                                     <span class="idle-text" data-i18n="stream.idle_hint">Tap a camera on the car below</span>
                                     <span class="idle-subtext" id="videoIdleSubtext"></span>
                                 </div>
+                                <div class="broadway-ab-summary" id="broadwayAbSummary"
+                                     role="status" aria-live="polite" hidden></div>
                                 <div class="camera-label-overlay" id="cameraLabelOverlay" style="display:none;">
                                     <span id="currentCameraLabel" data-i18n="stream.front_camera">Front Camera</span>
                                 </div>
@@ -1065,6 +1072,38 @@
             flex: 0 0 auto;
             padding: 14px 16px 0;
         }
+        /* Diagnostics live in the camera top bar; Cameras header stays intact. */
+        .broadway-ab-button {
+            min-height: 32px;
+            border: 1px solid var(--lv-pill-border-soft);
+            border-radius: 8px;
+            background: var(--lv-pill-bg);
+            color: inherit;
+            font-size: 11px;
+            cursor: pointer;
+            padding: 5px 8px;
+            white-space: nowrap;
+        }
+        .broadway-ab-button[hidden], .broadway-ab-summary[hidden] { display: none !important; }
+        .broadway-ab-summary {
+            position: absolute;
+            bottom: 8px;
+            left: 8px;
+            z-index: 35;
+            max-width: calc(100% - 16px);
+            max-height: 45%;
+            overflow: hidden;
+            pointer-events: none;
+            white-space: pre-line;
+            font-family: monospace;
+            font-size: 11px;
+            line-height: 1.45;
+            color: #fff;
+            background: rgba(0, 0, 0, .78);
+            border-radius: 6px;
+            padding: 6px 9px;
+        }
+        [dir="rtl"] .broadway-ab-summary { left: auto; right: 8px; }
 
         .camera-selector-card .car-selector-bottom {
             flex: 1 1 auto;
@@ -1747,10 +1786,65 @@
     <script src="../shared/core.js?v=27"></script>
     <script src="../shared/update-flow.js?v=3"></script>
     <script src="../shared/cabin-audio.js?v=2"></script>
-    <script src="../shared/stream.js?v=index7"></script>
+    <script src="../shared/stream.js?v=index9"></script>
     <script src="../shared/map.js?v=9"></script>
     <script src="../shared/surveillance.js?v=survtoggle20"></script>
     <script>
+        // Explicit diagnostic switch (same-tab only):
+        // sessionStorage.setItem('od.broadwayAbDiagnostic', '1'); location.reload();
+        // To leave diagnostics: sessionStorage.removeItem('od.broadwayAbDiagnostic');
+        // location.reload(); No query strings: the Android /live-view router
+        // matches the full path, and /live-view?decoder=broadway returns 404.
+        BYD.stream.updateBroadwayAbButton = function() {
+            var button = document.getElementById('broadwayAbButton');
+            if (!button) return;
+            button.hidden = !this.diagnosticBroadway;
+            if (button.hidden) return;
+            var key = !this.forceBroadway ? 'liveview.broadway_auto'
+                : (this.reusePlaneTextures ? 'liveview.broadway_on' : 'liveview.broadway_off');
+            button.textContent = BYD.i18n.t(key);
+            button.setAttribute('aria-label', BYD.i18n.t('liveview.broadway_diagnostic')
+                + ': ' + BYD.i18n.t(key));
+        };
+        BYD.stream.cycleBroadwayAb = function() {
+            if (!this.diagnosticBroadway) return;
+            var next = !this.forceBroadway ? 'off'
+                : (this.reusePlaneTextures ? 'auto' : 'on');
+            try {
+                if (next === 'auto') sessionStorage.removeItem('od.broadwayAbMode');
+                else sessionStorage.setItem('od.broadwayAbMode', next);
+            } catch (e) { return; }
+            window.location.reload();
+        };
+        BYD.stream.showBroadwaySummary = function(result) {
+            var el = document.getElementById('broadwayAbSummary');
+            if (!el || !this.diagnosticBroadway || !this.forceBroadway) return;
+            this._latestBroadwaySummary = result;
+            var t = function(key) { return BYD.i18n.t('liveview.' + key); };
+            var lines = [t('broadway_summary') + ' — '
+                + t(result.reusePlaneTextures ? 'broadway_on' : 'broadway_off')];
+            var buckets = [ ['normal', 'broadway_regular'],
+                ['every30th', 'broadway_refresh'], ['firstAfterResize', 'broadway_first'] ];
+            for (var i = 0; i < buckets.length; i++) {
+                var bucket = result[buckets[i][0]];
+                if (!bucket || !bucket.count) continue;
+                lines.push(t(buckets[i][1]) + ' (' + bucket.count + ' ' + t('broadway_frames') + ')');
+                if (bucket.cpu.count) lines.push('  ' + t('broadway_cpu') + ': '
+                    + bucket.cpu.meanMs + ' / ' + bucket.cpu.p95Ms + ' ms');
+                if (bucket.drawAndReadback.count) lines.push('  ' + t('broadway_readback') + ': '
+                    + bucket.drawAndReadback.meanMs + ' / ' + bucket.drawAndReadback.p95Ms + ' ms');
+            }
+            lines.splice(1, 0, t('broadway_mean_p95'));
+            el.textContent = lines.join('\n');
+            el.hidden = false;
+        };
+        BYD.i18n.onChange(function() {
+            BYD.stream.updateBroadwayAbButton();
+            if (BYD.stream._latestBroadwaySummary) {
+                BYD.stream.showBroadwaySummary(BYD.stream._latestBroadwaySummary);
+            }
+        });
+
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
             document.getElementById('sidebarOverlay').classList.toggle('show');
@@ -2296,8 +2390,9 @@
                 return false;
             }
 
-            // 4. Initialize SOTA Player (WebCodecs)
-            if ('VideoDecoder' in window && typeof SotaPlayer !== 'undefined') {
+            // 4. Initialize SOTA Player (WebCodecs), except when the A/B
+            // control explicitly forces Broadway for a genuine comparison.
+            if (!this.forceBroadway && 'VideoDecoder' in window && typeof SotaPlayer !== 'undefined') {
                 console.log("[Stream] Initializing SOTA Player (WebCodecs)...");
                 this.decoderMode = 'webcodecs';
                 
@@ -2718,6 +2813,7 @@
         // saved quality are ready, start the useful view immediately instead
         // of presenting an empty "select camera" state.
         BYD.i18n.init().then(async function () {
+            BYD.stream.updateBroadwayAbButton();
             BYD.core.init();
             BYD.cabinListener.init();
             BYD.stream.init();

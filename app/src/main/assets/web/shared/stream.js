@@ -50,6 +50,22 @@ BYD.stream = {
     _broadwayWorkerUrl: null,
     activeFps: 10,  // Updated from /api/stream/quality response; default matches MEDIUM preset
     isDiLink5: false,
+    // Diagnostics require an explicit session switch. No query strings are
+    // used: the Android page router matches /live-view verbatim.
+    diagnosticBroadway: (function() {
+        try { return sessionStorage.getItem('od.broadwayAbDiagnostic') === '1'; }
+        catch (e) { return false; }
+    }()),
+    forceBroadway: (function() {
+        try { return sessionStorage.getItem('od.broadwayAbDiagnostic') === '1'
+            && /^(off|on)$/.test(sessionStorage.getItem('od.broadwayAbMode') || ''); }
+        catch (e) { return false; }
+    }()),
+    reusePlaneTextures: (function() {
+        try { return sessionStorage.getItem('od.broadwayAbDiagnostic') === '1'
+            && sessionStorage.getItem('od.broadwayAbMode') === 'on'; }
+        catch (e) { return false; }
+    }()),
     // Last view mode the backend accepted; currentViewMode is set optimistically.
     confirmedViewMode: -1,
     // Bumped by stopStream. An async start/view-switch compares its captured
@@ -79,7 +95,7 @@ BYD.stream = {
     hasWebCodecs: typeof VideoDecoder !== 'undefined',
 
     _willUseBroadway() {
-        return this.decoderMode === 'broadway' ||
+        return this.forceBroadway || this.decoderMode === 'broadway' ||
             (!(this.hasWebCodecs && typeof SotaPlayer !== 'undefined') &&
              (this.isIOS || !window.MediaSource || typeof JMuxer === 'undefined'));
     },
@@ -381,6 +397,10 @@ BYD.stream = {
      * Priority: WebCodecs > JMuxer > Broadway
      */
     async initDecoder() {
+        // Diagnostic override: choose Broadway before WebCodecs/JMuxer, and
+        // send decoder=broadway to the backend from the first request.
+        if (this.forceBroadway) return await this.initBroadway();
+
         // Try WebCodecs first (SOTA - best performance)
         if (this.hasWebCodecs && typeof SotaPlayer !== 'undefined') {
             const success = await this.initWebCodecs();
@@ -584,10 +604,22 @@ BYD.stream = {
                 useWorker: true,
                 workerFile: workerUrl,
                 webgl: true,
+                // Opt-in diagnostics only; normal Broadway preserves the old GL path.
+                reusePlaneTextures: this.forceBroadway && this.reusePlaneTextures,
+                // GPU readback timings are collected only in forced diagnostic mode.
+                benchmarkPlaneTextures: this.forceBroadway === true,
                 reuseMemory: this.isDiLink5 === true,
                 size: { width: 1280, height: 960 }
             });
             
+            // The release WebView suppresses console logs; publish each 300-frame
+            // summary into the visible diagnostic overlay as well.
+            this.broadwayPlayer.onPlaneUploadSummary = (summary) => {
+                if (this.diagnosticBroadway && typeof this.showBroadwaySummary === 'function') {
+                    this.showBroadwaySummary(summary);
+                }
+            };
+
             // 6. Setup Canvas
             const container = document.getElementById('sw_container');
             if (container) {
