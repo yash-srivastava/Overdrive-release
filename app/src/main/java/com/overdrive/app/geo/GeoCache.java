@@ -210,21 +210,13 @@ public final class GeoCache {
     }
 
     /**
-     * Drop every entry whose centroid is within {@code radiusM} of
-     * {@code (lat, lng)}. Used when a SafeLocation is added/edited/removed
-     * so the cache can't keep returning the public address for a place the
-     * user has just renamed.
-     *
-     * <p>Approximate by hash centroid — fine for the SafeLocation use case
-     * (radii are 50–500 m and the precision-7 cell is ≈ 153 m, so we just
-     * sweep the cell containing (lat, lng) and its 8 neighbours by string
-     * comparison of the first 6 chars). This is intentionally over-sweepy:
-     * worse to keep one stale row than to evict a few extra; refetch is
-     * cheap.
+     * Drop cached place labels in cells that may overlap a SafeLocation radius.
+     * The precision-7 cell bound includes adjacent geohash parents, so locations
+     * near a prefix boundary do not retain stale public-address labels.
+     * Over-invalidation is intentional; fresh labels can be resolved on demand.
      */
     public synchronized void invalidateNear(double lat, double lng, double radiusM) {
         ensureLoaded();
-        String prefix = Geohash.encode(lat, lng).substring(0, 6); // ≈ 1.2 km box
         boolean changed = false;
         Iterator<Map.Entry<String, PlaceResult>> it = entries.entrySet().iterator();
         while (it.hasNext()) {
@@ -232,7 +224,7 @@ public final class GeoCache {
             String k = e.getKey();
             int pipe = k.indexOf('|');
             String hash = pipe > 0 ? k.substring(0, pipe) : k;
-            if (hash.startsWith(prefix)) {
+            if (Geohash.mayOverlapRadius(hash, lat, lng, radiusM)) {
                 it.remove();
                 changed = true;
             }

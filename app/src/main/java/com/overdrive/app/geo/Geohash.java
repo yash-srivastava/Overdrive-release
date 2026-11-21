@@ -56,4 +56,69 @@ public final class Geohash {
         }
         return sb.toString();
     }
+
+    /**
+     * Whether a precision-7 cache cell could touch a circle around a location.
+     *
+     * <p>Use the cell's enclosing circle (center to farthest corner), rather than
+     * matching a geohash prefix: adjacent cells can have different parents, and
+     * a SafeLocation radius can span several parents. The conservative bound
+     * may evict a few extra labels but cannot miss a cell at a prefix boundary.
+     * Great-circle distances also handle cells on either side of the date line.
+     */
+    static boolean mayOverlapRadius(String hash, double lat, double lng, double radiusM) {
+        if (hash == null || hash.length() != PRECISION_DEFAULT
+                || !Double.isFinite(lat) || lat < -90.0 || lat > 90.0
+                || !Double.isFinite(lng) || lng < -180.0 || lng > 180.0
+                || !Double.isFinite(radiusM) || radiusM < 0.0) {
+            return false;
+        }
+
+        double south = -90.0, north = 90.0;
+        double west = -180.0, east = 180.0;
+        boolean longitudeBit = true;
+        for (int i = 0; i < hash.length(); i++) {
+            int value = -1;
+            for (int j = 0; j < BASE32.length; j++) {
+                if (BASE32[j] == hash.charAt(i)) {
+                    value = j;
+                    break;
+                }
+            }
+            if (value < 0) return false; // Ignore malformed persisted cache keys.
+            for (int bit = 4; bit >= 0; bit--) {
+                boolean upperHalf = (value & (1 << bit)) != 0;
+                if (longitudeBit) {
+                    double mid = (west + east) / 2.0;
+                    if (upperHalf) west = mid;
+                    else east = mid;
+                } else {
+                    double mid = (south + north) / 2.0;
+                    if (upperHalf) south = mid;
+                    else north = mid;
+                }
+                longitudeBit = !longitudeBit;
+            }
+        }
+
+        double centerLat = (south + north) / 2.0;
+        double centerLng = (west + east) / 2.0;
+        double cellRadiusM = Math.max(
+                Math.max(distanceMeters(centerLat, centerLng, south, west),
+                         distanceMeters(centerLat, centerLng, south, east)),
+                Math.max(distanceMeters(centerLat, centerLng, north, west),
+                         distanceMeters(centerLat, centerLng, north, east)));
+        return distanceMeters(lat, lng, centerLat, centerLng) <= radiusM + cellRadiusM;
+    }
+
+    private static double distanceMeters(double lat1, double lng1, double lat2, double lng2) {
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLng = Math.toRadians(lng2 - lng1);
+        double sinLat = Math.sin(dLat / 2.0);
+        double sinLng = Math.sin(dLng / 2.0);
+        double a = sinLat * sinLat
+                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
+                * sinLng * sinLng;
+        return 2.0 * 6_371_000.0 * Math.asin(Math.sqrt(Math.min(1.0, Math.max(0.0, a))));
+    }
 }
