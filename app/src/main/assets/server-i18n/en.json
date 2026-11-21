@@ -289,7 +289,21 @@
     "camera_rear": "rear",
     "camera_left": "left",
     "test_title": "Test notification",
-    "test_body": "If you're seeing this, push delivery works."
+    "test_body": "If you're seeing this, push delivery works.",
+    "remote_access_lock_confirmed_title": "Proximity lock confirmed",
+    "remote_access_unlock_confirmed_title": "Proximity unlock confirmed",
+    "remote_access_lock_unconfirmed_title": "Proximity lock unconfirmed",
+    "remote_access_unlock_unconfirmed_title": "Proximity unlock unconfirmed",
+    "remote_access_lock_failed_title": "Proximity lock failed",
+    "remote_access_unlock_failed_title": "Proximity unlock failed",
+    "remote_access_lock_confirmed_body": "Driver-door lock state is locked.",
+    "remote_access_unlock_confirmed_body": "Driver-door lock state is unlocked.",
+    "remote_access_lock_unconfirmed_body": "The lock command was accepted; the vehicle state was not confirmed.",
+    "remote_access_unlock_unconfirmed_body": "The unlock command was accepted; the vehicle state was not confirmed.",
+    "remote_access_lock_failed_body": "The vehicle lock command failed.",
+    "remote_access_unlock_failed_body": "The vehicle unlock command failed.",
+    "remote_access_device_key_suffix": " Key: {0}.",
+    "remote_access_device_phone_suffix": " Phone: {0}."
   },
   "parking": {
     "notify": {
