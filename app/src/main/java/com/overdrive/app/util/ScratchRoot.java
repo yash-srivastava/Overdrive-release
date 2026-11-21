@@ -182,7 +182,8 @@ public final class ScratchRoot {
      * Identity while legacy, so existing command text is unchanged. Only
      * whole path components are rewritten: {@code /data/local/tmp/x} and
      * {@code /data/local/tmp} followed by a delimiter, never
-     * {@code /data/local/tmpfs}.
+     * {@code /data/local/tmpfs} or a nested path such as
+     * {@code /mnt/data/local/tmp}.
      */
     public static String remap(String command) {
         if (command == null || command.isEmpty()) return command;
@@ -195,10 +196,15 @@ public final class ScratchRoot {
         int legacyLength = LEGACY_DIR.length();
         while (idx >= 0) {
             int end = idx + legacyLength;
-            boolean boundary = end >= command.length()
+            // The legacy root must start at a path boundary as well as end at
+            // one. Otherwise a path like /mnt/data/local/tmp is corrupted.
+            boolean startBoundary = idx == 0
+                    || (!isPathWord(command.charAt(idx - 1))
+                        && command.charAt(idx - 1) != '/');
+            boolean endBoundary = end >= command.length()
                     || !isPathWord(command.charAt(end));
             out.append(command, from, idx);
-            out.append(boundary ? root : LEGACY_DIR);
+            out.append(startBoundary && endBoundary ? root : LEGACY_DIR);
             from = end;
             idx = command.indexOf(LEGACY_DIR, from);
         }

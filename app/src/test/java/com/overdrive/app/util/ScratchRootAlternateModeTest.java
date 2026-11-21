@@ -68,6 +68,16 @@ public class ScratchRootAlternateModeTest {
         // Look-alike prefixes are left alone.
         assertEquals("mount /data/local/tmpfs", ScratchRoot.remap("mount /data/local/tmpfs"));
         assertEquals("x /data/local/tmp_old y", ScratchRoot.remap("x /data/local/tmp_old y"));
+        // A path containing the legacy string is not the legacy directory.
+        assertEquals("cp /mnt/data/local/tmp/video.mp4 " + ALT + "/video.mp4",
+                ScratchRoot.remap("cp /mnt/data/local/tmp/video.mp4 /data/local/tmp/video.mp4"));
+        assertEquals("echo prefix/data/local/tmp && cd " + ALT,
+                ScratchRoot.remap("echo prefix/data/local/tmp && cd /data/local/tmp"));
+        assertEquals("echo //data/local/tmp && cd " + ALT,
+                ScratchRoot.remap("echo //data/local/tmp && cd /data/local/tmp"));
+        // Rewrite only the outer root, not a same-named nested subdirectory.
+        assertEquals("cat " + ALT + "/data/local/tmp/cache",
+                ScratchRoot.remap("cat /data/local/tmp/data/local/tmp/cache"));
         assertEquals("", ScratchRoot.remap(""));
         assertEquals(null, ScratchRoot.remap(null));
     }
