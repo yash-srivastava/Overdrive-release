@@ -5,3 +5,4 @@
 *.gradle text eol=lf
 *.properties text eol=lf
 *.json text eol=lf
+*.bat text eol=crlf
