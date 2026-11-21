@@ -245,7 +245,7 @@
         $('pkHeroSub').textContent = fmtDay(cur.startedMs) + ' · ' + fmtTime(cur.startedMs)
             + ' · ' + t('parking.gps_' + gpsQuality(cur).toLowerCase()) + ' · ' + t('parking.sentry_' + (cur.sentryState || 'unknown'))
             + (hasEnergy(cur) ? ' · ' + fmtEnergy(cur) : '');
-        $('pkHeroTag').textContent = 'LIVE';
+        $('pkHeroTag').textContent = t('surveillance.byd_badge_live');
         $('pkHeroDuration').textContent = fmtDur(Date.now() - cur.startedMs);
         $('pkHeroEvents').textContent = String(cur.eventCount || 0);
         $('pkHeroNeighbours').textContent = String(cur.neighbourCount || 0);
