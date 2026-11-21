@@ -52,6 +52,26 @@
         </LinearLayout>
     </LinearLayout>
 
+    <TextView
+        android:id="@+id/sendLogComponent"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="6dp"
+        android:lineSpacingMultiplier="1.25"
+        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/sendLogWhen"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        android:lineSpacingMultiplier="1.25"
+        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:visibility="gone" />
+
     <!-- Option: Upload & get a code -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/optionUpload"

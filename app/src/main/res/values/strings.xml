@@ -960,6 +960,8 @@
     <string name="logs_send_upload_desc">Sends the log to us and gives you a short code. Easiest for support.</string>
     <string name="logs_send_share">Share file…</string>
     <string name="logs_send_share_desc">Save or send the log yourself via the share sheet.</string>
+    <string name="logs_section_hint">Choose the log that best matches the issue. If you\'re unsure, send Camera first; for remote-access problems, also send the tunnel you use.</string>
+    <string name="logs_when_to_send_prefix">Send this log when: </string>
     <string name="logs_uploading_title">Uploading log…</string>
     <string name="logs_uploading_subtitle">Redacting secrets and sending securely</string>
     <string name="logs_uploaded_title">Log uploaded</string>
