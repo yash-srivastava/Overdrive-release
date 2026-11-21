@@ -662,7 +662,7 @@
     <string name="logs_send_upload_desc">מעלה את היומן אלינו ומספק לך קוד קצר. הדרך הנוחה ביותר לקבלת תמיכה.</string>
     <string name="logs_send_share">שתף קובץ…</string>
     <string name="logs_send_share_desc">שמור או שלח את היומן בעצמך דרך תפריט השיתוף של המערכת.</string>
-    <string name="logs_section_hint">בחר את היומן שהכי מתאים לבעיה. אם אינך בטוח, שלח קודם את Camera; בבעיות גישה מרחוק שלח גם את המנהרה שבה אתה משתמש.</string>
+    <string name="logs_section_hint">בחר את היומן שהכי מתאים לבעיה. אם אינך בטוח, שלח קודם את מצלמה; בבעיות גישה מרחוק שלח גם את המנהרה שבה אתה משתמש.</string>
     <string name="logs_when_to_send_prefix">שלח את היומן הזה כאשר: </string>
     <string name="logs_desc_camera_name">מצלמה</string>
     <string name="logs_desc_camera_component">שירות הליבה של OverDrive — ממשק Web, HTTP/API, שידורי מצלמה וסטרימינג, ואינטגרציות משותפות לרכב ולאפליקציות.</string>
