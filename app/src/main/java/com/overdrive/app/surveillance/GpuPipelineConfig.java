@@ -2,6 +2,8 @@ package com.overdrive.app.surveillance;
 
 import android.media.MediaFormat;
 
+import java.util.Locale;
+
 /**
  * GpuPipelineConfig - Configuration for GPU surveillance pipeline.
  * 
@@ -148,7 +150,7 @@ public class GpuPipelineConfig {
 
         public static RecordingQuality fromString(String name) {
             if (name == null) return STANDARD;
-            switch (name.toUpperCase()) {
+            switch (name.toUpperCase(Locale.ROOT)) {
                 case "ECONOMY": return ECONOMY;
                 case "STANDARD": return STANDARD;
                 case "HIGH": return HIGH;
@@ -283,7 +285,7 @@ public class GpuPipelineConfig {
         
         public static StreamingQuality fromString(String name) {
             if (name == null) return MEDIUM;
-            switch (name.toUpperCase()) {
+            switch (name.toUpperCase(Locale.ROOT)) {
                 case "ULTRA_LOW": return ULTRA_LOW;
                 case "LOW":
                 case "LQ": return LOW;

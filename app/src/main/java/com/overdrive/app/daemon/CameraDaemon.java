@@ -16,6 +16,7 @@ import com.overdrive.app.server.TcpCommandServer;
 import com.overdrive.app.daemon.proxy.Safe;
 
 import java.io.File;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -1625,7 +1626,7 @@ public class CameraDaemon {
             if (codec != null) {
                 // Just update the config, don't reinitialize encoder
                 com.overdrive.app.surveillance.GpuPipelineConfig.VideoCodec videoCodec;
-                switch (codec.toUpperCase()) {
+                switch (codec.toUpperCase(Locale.ROOT)) {
                     case "H265":
                     case "HEVC":
                         videoCodec = com.overdrive.app.surveillance.GpuPipelineConfig.VideoCodec.H265;
@@ -4834,7 +4835,7 @@ public class CameraDaemon {
             String persistedCodec = HttpServer.getRecordingCodec();
             if (persistedCodec != null) {
                 com.overdrive.app.surveillance.GpuPipelineConfig.VideoCodec videoCodec;
-                switch (persistedCodec.toUpperCase()) {
+                switch (persistedCodec.toUpperCase(Locale.ROOT)) {
                     case "H265":
                     case "HEVC":
                         videoCodec = com.overdrive.app.surveillance.GpuPipelineConfig.VideoCodec.H265;
@@ -4870,7 +4871,7 @@ public class CameraDaemon {
                 String persistedBitrate = HttpServer.getRecordingBitrate();
                 if (persistedBitrate != null) {
                     com.overdrive.app.surveillance.GpuPipelineConfig.BitratePreset preset;
-                    switch (persistedBitrate.toUpperCase()) {
+                    switch (persistedBitrate.toUpperCase(Locale.ROOT)) {
                         case "LOW":
                             preset = com.overdrive.app.surveillance.GpuPipelineConfig.BitratePreset.LOW;
                             break;
@@ -9809,7 +9810,7 @@ public class CameraDaemon {
     public static void setRecordingBitrate(String bitrate) {
         if (bitrate == null) return;
         String tier;
-        switch (bitrate.toUpperCase()) {
+        switch (bitrate.toUpperCase(Locale.ROOT)) {
             case "LOW":    tier = "ECONOMY"; break;
             case "MEDIUM": tier = "STANDARD"; break;
             case "HIGH":   tier = "HIGH"; break;
@@ -9831,7 +9832,7 @@ public class CameraDaemon {
 
         try {
             com.overdrive.app.surveillance.GpuPipelineConfig.VideoCodec videoCodec;
-            switch (codec.toUpperCase()) {
+            switch (codec.toUpperCase(Locale.ROOT)) {
                 case "H265":
                 case "HEVC":
                     videoCodec = com.overdrive.app.surveillance.GpuPipelineConfig.VideoCodec.H265;

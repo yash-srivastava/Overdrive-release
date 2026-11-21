@@ -8,6 +8,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.OutputStream;
+import java.util.Locale;
 
 /**
  * Streaming API Handler - manages WebSocket streaming configuration and control.
@@ -669,7 +670,7 @@ public class StreamingApiHandler {
             return true;
         }
         if (path.startsWith("/api/stream/quality/") && method.equals("POST")) {
-            String quality = path.substring(20).toUpperCase();
+            String quality = path.substring(20).toUpperCase(Locale.ROOT);
             handleSetStreamQuality(out, quality);
             return true;
         }
@@ -2736,7 +2737,7 @@ public class StreamingApiHandler {
     
     public static void setStreamingQuality(String quality) {
         if (quality == null) return;
-        String q = quality.toUpperCase();
+        String q = quality.toUpperCase(Locale.ROOT);
         // Mirror the StreamingQuality enum (GpuPipelineConfig). SMOOTH and MAX
         // are recent additions; the cold-start loader (QualitySettingsApiHandler.
         // loadPersistedSettings) calls this with whatever tag is on disk, so if

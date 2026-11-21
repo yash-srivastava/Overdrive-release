@@ -11,6 +11,7 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.OutputStream;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -362,7 +363,7 @@ public class QualitySettingsApiHandler {
      */
     private static StorageManager.StorageType parseStorageType(String s) {
         if (s == null) return StorageManager.StorageType.INTERNAL;
-        switch (s.toUpperCase()) {
+        switch (s.toUpperCase(Locale.ROOT)) {
             case "SD_CARD": return StorageManager.StorageType.SD_CARD;
             case "USB":     return StorageManager.StorageType.USB;
             default:        return StorageManager.StorageType.INTERNAL;
@@ -1110,7 +1111,7 @@ public class QualitySettingsApiHandler {
                         recordingQuality = fileTier;
                         recordingBitrate = fileTier;
                     } else if (recording.has("bitrate")) {
-                        String fileBitrate = recording.optString("bitrate", "").toUpperCase();
+                        String fileBitrate = recording.optString("bitrate", "").toUpperCase(Locale.ROOT);
                         String tier;
                         switch (fileBitrate) {
                             case "LOW":    tier = "ECONOMY"; break;
@@ -1366,7 +1367,7 @@ public class QualitySettingsApiHandler {
             // and skipped its restart.
             String pendingQuality = null;
             if (settings.has("recordingQuality")) {
-                String tier = settings.getString("recordingQuality").toUpperCase();
+                String tier = settings.getString("recordingQuality").toUpperCase(Locale.ROOT);
                 if (tier.equals("ECONOMY") || tier.equals("STANDARD")
                         || tier.equals("HIGH") || tier.equals("PREMIUM")
                         || tier.equals("MAX")) {
@@ -1386,7 +1387,7 @@ public class QualitySettingsApiHandler {
             // to the new tier system. UI should send `recordingQuality`
             // directly going forward; this branch only catches old clients.
             if (pendingQuality == null && settings.has("recordingBitrate")) {
-                String legacy = settings.getString("recordingBitrate").toUpperCase();
+                String legacy = settings.getString("recordingBitrate").toUpperCase(Locale.ROOT);
                 String tier;
                 switch (legacy) {
                     case "LOW":    tier = "ECONOMY"; break;
@@ -1401,7 +1402,7 @@ public class QualitySettingsApiHandler {
 
             String pendingCodec = null;
             if (settings.has("recordingCodec")) {
-                String codec = settings.getString("recordingCodec").toUpperCase();
+                String codec = settings.getString("recordingCodec").toUpperCase(Locale.ROOT);
                 if (codec.equals("H264") || codec.equals("H265")) {
                     pendingCodec = codec;
                     recordingCodec = codec;
@@ -1445,14 +1446,14 @@ public class QualitySettingsApiHandler {
             JSONObject oemBlock = settings.optJSONObject("oemDashcam");
             if (oemBlock != null) {
                 if (oemBlock.has("recordingQuality")) {
-                    String t = oemBlock.optString("recordingQuality", "").toUpperCase();
+                    String t = oemBlock.optString("recordingQuality", "").toUpperCase(Locale.ROOT);
                     if (t.equals("ECONOMY") || t.equals("STANDARD")
                             || t.equals("HIGH") || t.equals("PREMIUM") || t.equals("MAX")) {
                         oemDelta.put("recordingQuality", t);
                     }
                 }
                 if (oemBlock.has("codec")) {
-                    String c = oemBlock.optString("codec", "").toUpperCase();
+                    String c = oemBlock.optString("codec", "").toUpperCase(Locale.ROOT);
                     if (c.equals("H264") || c.equals("H265")) oemDelta.put("codec", c);
                 }
                 if (oemBlock.has("fps")) {
@@ -1528,7 +1529,7 @@ public class QualitySettingsApiHandler {
             // Streaming quality is a separate encoder; it doesn't share the
             // recording reinit cycle, so route it through its own setter.
             if (settings.has("streamingQuality")) {
-                String streamQuality = settings.getString("streamingQuality").toUpperCase();
+                String streamQuality = settings.getString("streamingQuality").toUpperCase(Locale.ROOT);
                 if (streamQuality.equals("ULTRA_LOW") || streamQuality.equals("LOW")
                         || streamQuality.equals("MEDIUM") || streamQuality.equals("HIGH")
                         || streamQuality.equals("ULTRA_HIGH") || streamQuality.equals("SMOOTH")
@@ -1584,7 +1585,7 @@ public class QualitySettingsApiHandler {
             // world until the user sends one of these keys.
             boolean surveillanceDirty = false;
             if (settings.has("surveillanceQuality")) {
-                String tier = settings.getString("surveillanceQuality").toUpperCase();
+                String tier = settings.getString("surveillanceQuality").toUpperCase(Locale.ROOT);
                 if (tier.equals("ECONOMY") || tier.equals("STANDARD")
                         || tier.equals("HIGH") || tier.equals("PREMIUM")
                         || tier.equals("MAX")) {
@@ -1729,7 +1730,7 @@ public class QualitySettingsApiHandler {
                         recordingBitrate = tier;  // mirror — keep in sync
                         CameraDaemon.log("Restored recording tier from unified: " + tier);
                     } else if (recording.has("bitrate")) {
-                        String legacyBitrate = recording.getString("bitrate").toUpperCase();
+                        String legacyBitrate = recording.getString("bitrate").toUpperCase(Locale.ROOT);
                         switch (legacyBitrate) {
                             case "LOW":    tier = "ECONOMY"; break;
                             case "MEDIUM": tier = "STANDARD"; break;
@@ -1787,13 +1788,13 @@ public class QualitySettingsApiHandler {
                 
                 // Canonical recordingQuality first; fall back to legacy bitrate.
                 if (settings.has("recordingQuality")) {
-                    String tier = settings.getString("recordingQuality").toUpperCase();
+                    String tier = settings.getString("recordingQuality").toUpperCase(Locale.ROOT);
                     if (isKnownTier(tier)) {
                         recordingQuality = tier;
                         recordingBitrate = tier;
                     }
                 } else if (settings.has("recordingBitrate")) {
-                    String bitrate = settings.getString("recordingBitrate").toUpperCase();
+                    String bitrate = settings.getString("recordingBitrate").toUpperCase(Locale.ROOT);
                     String tier;
                     switch (bitrate) {
                         case "LOW":    tier = "ECONOMY"; break;
@@ -1867,7 +1868,7 @@ public class QualitySettingsApiHandler {
         if (quality == null) return;
         String tier;
         if (isKnownTier(quality)) {
-            tier = quality.toUpperCase();
+            tier = quality.toUpperCase(Locale.ROOT);
         } else {
             // Legacy LOW/REDUCED/NORMAL → STANDARD.
             tier = "STANDARD";
@@ -1882,7 +1883,7 @@ public class QualitySettingsApiHandler {
     public static void setRecordingBitrate(String bitrate) {
         if (bitrate == null) return;
         String tier;
-        switch (bitrate.toUpperCase()) {
+        switch (bitrate.toUpperCase(Locale.ROOT)) {
             case "LOW":    tier = "ECONOMY"; break;
             case "MEDIUM": tier = "STANDARD"; break;
             case "HIGH":   tier = "HIGH"; break;
@@ -1896,7 +1897,7 @@ public class QualitySettingsApiHandler {
      *  is built — keep the check string-based and cheap). */
     private static boolean isKnownTier(String s) {
         if (s == null) return false;
-        switch (s.toUpperCase()) {
+        switch (s.toUpperCase(Locale.ROOT)) {
             case "ECONOMY":
             case "STANDARD":
             case "HIGH":
@@ -1920,7 +1921,7 @@ public class QualitySettingsApiHandler {
     // Accepts both canonical tier names (ECONOMY..MAX) and legacy LOW/MEDIUM/HIGH.
     public static void setRecordingBitrateStatic(String value) {
         if (value == null) return;
-        String v = value.toUpperCase();
+        String v = value.toUpperCase(Locale.ROOT);
         String tier;
         switch (v) {
             case "LOW":    tier = "ECONOMY"; break;
