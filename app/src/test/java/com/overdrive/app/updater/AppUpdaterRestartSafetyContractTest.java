@@ -360,10 +360,13 @@ public class AppUpdaterRestartSafetyContractTest {
                 "UpdateLifecycle.hardResetDaemons(this)"));
         assertTrue(main.contains(
                 "daemonStartupManager.initializeOnAppLaunch()"));
-        assertTrue(startup.contains(
-                "handler.postDelayed({ startCoreDaemons() }, 45000)"));
-        assertTrue(startup.contains(
-                "handler.postDelayed({ startOptionalDaemonsFromPreferences() }, 60000)"));
+        // The Activity now inherits monotonic startup deadlines instead of
+        // scheduling fresh literal delays. Assert the actual stage dispatches.
+        assertTrue(startup.contains("beginStartupCycle(boot = false"));
+        assertTrue(startup.contains("stage(DaemonBootSchedule.CORE_DELAY_MS, \"camera\")"));
+        assertTrue(startup.contains("if (boot) startCoreDaemonsViaAdb() else startCoreDaemons()"));
+        assertTrue(startup.contains("stage(DaemonBootSchedule.OPTIONAL_DELAY_MS, \"optional daemons and tunnels\")"));
+        assertTrue(startup.contains("if (boot) startOptionalDaemonsViaAdb() else startOptionalDaemonsFromPreferences()"));
     }
 
     private static boolean inRange(int value, int start, int end) {
