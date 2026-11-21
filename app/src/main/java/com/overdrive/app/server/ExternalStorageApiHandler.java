@@ -23,6 +23,9 @@ import java.util.Map;
  * - POST /api/storage/external/cleanup  - Trigger manual cleanup
  * - GET  /api/storage/external/preview  - Preview what would be deleted
  * - POST /api/storage/external/refresh  - Refresh SD card detection
+ * - GET  /api/storage/external/format/target - Read-only card identity (JWT only)
+ * - POST /api/storage/external/format   - Queue destructive format (JWT, same-origin if present)
+ * - GET  /api/storage/external/format/status - Poll background job status (JWT)
  */
 public class ExternalStorageApiHandler {
 
@@ -86,10 +89,107 @@ public class ExternalStorageApiHandler {
             refreshPaths(out);
             return true;
         }
+
+        if (path.equals("/api/storage/external/format/target") && method.equals("GET")) {
+            // BYD100F mounts the card for the driver (user 10), not shell/user 0.
+            // Do not report "no card" after attempting an inaccessible StatFs.
+            if (com.overdrive.app.storage.SdCardFormatter.isMultiUserRemovableStorage()) {
+                JSONObject unsupported = new JSONObject();
+                unsupported.put("success", false);
+                unsupported.put("reasonCode", "dilink100_unsupported");
+                unsupported.put("error", "DiLink 100 multi-user removable storage cannot be formatted safely.");
+                sendFormatJson(out, 409, unsupported);
+                return true;
+            }
+            com.overdrive.app.storage.SdCardFormatter.Preview preview =
+                    com.overdrive.app.storage.SdCardFormatter.getInstance().targetPreview();
+            com.overdrive.app.storage.SdCardFormatter.Target target = preview.target;
+            JSONObject response = new JSONObject();
+            // A mounted volume is not necessarily the built-in SD slot. Fail
+            // closed unless sysfs supplies a physical SD media identity.
+            boolean eligible = target != null && target.identityVerifiable;
+            response.put("success", eligible);
+            if (target != null) {
+                response.put("uuid", target.uuid);
+                response.put("label", "/storage/" + target.uuid);
+                response.put("capacityBytes", target.capacityBytes);
+                response.put("usedBytes", target.usedBytes);
+                response.put("identityVerifiable", target.identityVerifiable);
+                response.put("identityToken", target.identityToken);
+                if (!eligible) {
+                    response.put("error", "Cannot verify SD media identity on this firmware; format blocked.");
+                    response.put("reasonCode", preview.reasonCode);
+                }
+            } else {
+                response.put("error", "SD card preview is unavailable (" + preview.reasonCode + ").");
+                response.put("reasonCode", preview.reasonCode);
+            }
+            sendFormatJson(out, eligible ? 200 : 409, response);
+            return true;
+        }
+
+        if (path.equals("/api/storage/external/format/status") && method.equals("GET")) {
+            com.overdrive.app.storage.SdCardFormatter.Job job =
+                    com.overdrive.app.storage.SdCardFormatter.getInstance().status();
+            JSONObject response = new JSONObject();
+            response.put("success", true);
+            response.put("jobId", job.id);
+            response.put("state", job.state);
+            response.put("message", job.message);
+            response.put("reasonCode", com.overdrive.app.storage.SdCardFormatter.reasonCode(job.message));
+            sendFormatJson(out, 200, response);
+            return true;
+        }
+
+        if (path.equals("/api/storage/external/format") && method.equals("POST")) {
+            formatSdCard(body, out);
+            return true;
+        }
         
         return false;
     }
     
+    /** Queue once and answer immediately; the native bridge times out at 10 seconds. */
+    private static void formatSdCard(String body, OutputStream out) throws Exception {
+        JSONObject response = new JSONObject();
+        // Never parse or queue a format for the driver-user SD mount on BYD100F.
+        // In particular, do not probe StatFs, ps, pm or sm on this platform.
+        if (com.overdrive.app.storage.SdCardFormatter.isMultiUserRemovableStorage()) {
+            response.put("success", false);
+            response.put("reasonCode", "dilink100_unsupported");
+            response.put("error", "DiLink 100 multi-user removable storage cannot be formatted safely.");
+            sendFormatJson(out, 409, response);
+            return;
+        }
+        try {
+            JSONObject request = new JSONObject(body == null ? "{}" : body);
+            if (!request.optBoolean("confirmed", false)
+                    || !request.optString("expectedUuid", "").matches("[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+                    || !request.optString("expectedIdentityToken", "").matches("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")) {
+                response.put("success", false);
+                response.put("error", "Explicit confirmation, SD UUID, and physical media token are required.");
+                sendFormatJson(out, 400, response);
+                return;
+            }
+            String uuid = request.getString("expectedUuid");
+            com.overdrive.app.daemon.CameraDaemon.log("SD format: request for " + uuid);
+            com.overdrive.app.storage.SdCardFormatter.Job job =
+                    com.overdrive.app.storage.SdCardFormatter.getInstance().submit(
+                            uuid, request.getString("expectedIdentityToken"),
+                            request.optBoolean("stopFactoryDvr", false));
+            response.put("success", "running".equals(job.state));
+            response.put("jobId", job.id);
+            response.put("state", job.state);
+            response.put("message", job.message);
+            response.put("reasonCode", com.overdrive.app.storage.SdCardFormatter.reasonCode(job.message));
+            sendFormatJson(out, "running".equals(job.state) ? 202 : 409, response);
+        } catch (Exception e) {
+            response.put("success", false);
+            response.put("error", e.getMessage() == null ? "Unable to queue SD format." : e.getMessage());
+            sendFormatJson(out, 400, response);
+        }
+    }
+
     /**
      * GET /api/storage/external
      * Returns SD card status, CDR info, and cleanup configuration.
@@ -360,11 +460,15 @@ public class ExternalStorageApiHandler {
     /**
      * Send JSON response.
      */
+    private static void sendFormatJson(OutputStream out, int status, JSONObject json) throws Exception {
+        HttpResponse.sendJsonNoCors(out, status, json.toString());
+    }
+
     private static void sendJson(OutputStream out, int status, JSONObject json) throws Exception {
         String body = json.toString();
         byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
         
-        String statusText = status == 200 ? "OK" : (status == 400 ? "Bad Request" : "Error");
+        String statusText = status == 200 ? "OK" : status == 400 ? "Bad Request" : "Error";
         String response = "HTTP/1.1 " + status + " " + statusText + "\r\n" +
             "Content-Type: application/json\r\n" +
             "Content-Length: " + bodyBytes.length + "\r\n" +
