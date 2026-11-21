@@ -239,6 +239,7 @@ open class MainActivity : AppCompatActivity() {
         RailSection(
             R.id.railSectionSystem, R.string.rail_section_system,
             setOf(
+                NavigationRailCatalog.NOTIFICATIONS,
                 NavigationRailCatalog.NETWORK,
                 NavigationRailCatalog.DIAGNOSTICS,
                 RAIL_KEY_SETTINGS,
@@ -1841,6 +1842,7 @@ open class MainActivity : AppCompatActivity() {
                 R.id.parkingFragment,
                 R.id.vehicleControlFragment,
                 R.id.remoteAccessFragment,
+                R.id.notificationsFragment,
                 R.id.seatPositionsFragment,
                 R.id.projectionFragment,
                 R.id.tripsFragment,
@@ -1951,6 +1953,9 @@ open class MainActivity : AppCompatActivity() {
                     R.id.bydCloudFragment,
                     R.id.safeKeepFragment,
                 )),
+            RailItem(NavigationRailCatalog.NOTIFICATIONS, R.id.railDestNotifications,
+                R.id.notificationsFragment,
+                R.drawable.ic_notifications, R.string.rail_notifications),
             RailItem(NavigationRailCatalog.NETWORK, R.id.railDestNetwork,
                 R.id.networkFragment,
                 R.drawable.ic_hotspot, R.string.rail_network),

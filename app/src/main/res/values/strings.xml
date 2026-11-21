@@ -1024,6 +1024,7 @@
     <string name="nav_page_mqtt">MQTT</string>
     <string name="nav_page_byd_cloud">BYD Cloud</string>
     <string name="nav_page_remote_access">Proximity</string>
+    <string name="nav_page_notifications">Notifications</string>
     <string name="nav_page_assistant">Assistant</string>
 
     <!-- StatusOverlayService persistent notification (foreground service) -->
@@ -1058,6 +1059,7 @@
     <string name="rail_key_mapping">Key Mapping</string>
     <string name="rail_seat_positions">Seat Positions</string>
     <string name="rail_integrations">Integrations</string>
+    <string name="rail_notifications">Notifications</string>
     <string name="rail_diagnostics">Diagnostics</string>
     <string name="rail_settings">Settings</string>
     <string name="rail_expand">Show navigation labels</string>

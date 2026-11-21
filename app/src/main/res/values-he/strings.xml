@@ -701,6 +701,7 @@
     <string name="nav_page_mqtt">MQTT</string>
     <string name="nav_page_byd_cloud">BYD Cloud</string>
     <string name="nav_page_remote_access">קרבה</string>
+    <string name="nav_page_notifications">התראות</string>
     <string name="nav_page_assistant">עוזר</string>
     <string name="status_overlay_notif_title">סטטוס OverDrive</string>
     <string name="status_overlay_notif_text">שכבת סטטוס פעילה</string>
@@ -721,6 +722,7 @@
     <string name="rail_key_mapping">מיפוי מקשים</string>
     <string name="rail_seat_positions">מיקומי מושב</string>
     <string name="rail_integrations">אינטגרציות</string>
+    <string name="rail_notifications">התראות</string>
     <string name="rail_diagnostics">אבחון</string>
     <string name="rail_settings">הגדרות</string>
     <string name="rail_expand">הצג תוויות ניווט</string>

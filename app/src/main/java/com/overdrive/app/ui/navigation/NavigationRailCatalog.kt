@@ -31,6 +31,7 @@ object NavigationRailCatalog {
     const val ROAD_SENSE = "road_sense"
     const val MAP = "map"
     const val WIDGETS = "widgets"
+    const val NOTIFICATIONS = "notifications"
     const val NETWORK = "network"
     const val DIAGNOSTICS = "diagnostics"
 
@@ -53,6 +54,7 @@ object NavigationRailCatalog {
         NavigationRailOption(ROAD_SENSE, R.string.rail_roadsense, R.drawable.ic_roadsense),
         NavigationRailOption(MAP, R.string.rail_hazard_map, R.drawable.ic_roadsense_map),
         NavigationRailOption(WIDGETS, R.string.rail_widgets, R.drawable.ic_widgets),
+        NavigationRailOption(NOTIFICATIONS, R.string.rail_notifications, R.drawable.ic_notifications),
         NavigationRailOption(NETWORK, R.string.rail_network, R.drawable.ic_hotspot),
         NavigationRailOption(DIAGNOSTICS, R.string.rail_diagnostics, R.drawable.ic_diagnostics),
     )

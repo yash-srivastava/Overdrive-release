@@ -50,6 +50,10 @@
         android:icon="@drawable/ic_roadsense"
         android:title="@string/rail_roadsense" />
     <item
+        android:id="@+id/notificationsFragment"
+        android:icon="@drawable/ic_notifications"
+        android:title="@string/rail_notifications" />
+    <item
         android:id="@+id/networkFragment"
         android:icon="@drawable/ic_hotspot"
         android:title="@string/rail_network" />
