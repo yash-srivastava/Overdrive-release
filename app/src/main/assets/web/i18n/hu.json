@@ -2019,7 +2019,7 @@
     "daemon_title": "Daemon",
     "auto_start_acc_off": "Auto-start when vehicle is off",
     "auto_start_acc_off_desc": "Launch the Telegram bot daemon automatically when the vehicle goes to ACC OFF, so commands work while parked. The daemon stops when the vehicle starts up.",
-    "daemon_start_pointer": "Manual start / stop of the daemon lives on the Daemons page in the native app.",
+    "daemon_start_pointer": "Manual start / stop of the daemon lives on the {daemons} page in the native app.",
     "delivery_pointer": "Delivery preferences (which events reach the chat) live on the Notifications → Telegram tab."
   },
   "dashboard": {

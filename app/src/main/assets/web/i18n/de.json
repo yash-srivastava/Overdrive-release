@@ -2852,7 +2852,7 @@
     "daemon_title": "Daemon",
     "auto_start_acc_off": "Autostart, wenn das Fahrzeug aus ist",
     "auto_start_acc_off_desc": "Starten Sie den Telegram-Bot-Daemon automatisch, wenn das Fahrzeug auf ACC OFF geht, so dass die Befehle während des Parken funktionieren.",
-    "daemon_start_pointer": "Die manuelle Start-/Stop-Anleitung des Daemons findet sich auf der Daemons-Seite in der nativen App.",
+    "daemon_start_pointer": "Die manuelle Start-/Stop-Anleitung des Daemons findet sich auf der {daemons}-Seite in der nativen App.",
     "delivery_pointer": "Die Liefervorlieben (die Ereignisse erreichen den Chat) finden Sie im Tab \"Benachrichtigungen → Telegram\".",
     "tyre_alerts": "Reifendruck-Warnungen",
     "tyre_alerts_desc": "Senden Sie eine Telegramm-Nachricht, wenn ein Reifen außerhalb Ihres konfigurierten Druckbereichs oder wenn das TPMS ein Leck meldet. Verwendet die Grenzwerte unter Reifendruckgrenzen.",

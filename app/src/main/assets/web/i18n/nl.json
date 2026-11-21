@@ -2852,7 +2852,7 @@
     "daemon_title": "Daemon",
     "auto_start_acc_off": "Automatische start wanneer het voertuig uit is",
     "auto_start_acc_off_desc": "Launch de Telegram bot daemon automatisch wanneer het voertuig gaat naar ACC OFF, zodat commando's werken terwijl geparkeerd.",
-    "daemon_start_pointer": "De handmatige start / stop van de daemon leeft op de Daemons-pagina in de native app.",
+    "daemon_start_pointer": "De handmatige start / stop van de daemon leeft op de {daemons}-pagina in de native app.",
     "delivery_pointer": "Afleveringsvoorkeuren (waartoe de gebeurtenissen de chat bereiken) worden live geplaatst op het tabblad Notifications → Telegram.",
     "tyre_alerts": "Banddruk waarschuwingen",
     "tyre_alerts_desc": "Stuur een Telegram-bericht wanneer een band buiten je ingestelde drukbereik gaat of wanneer de TPMS een lek meldt. Maakt gebruik van de limieten onder de bandenspanningslimieten.",

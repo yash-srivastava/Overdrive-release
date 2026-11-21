@@ -2019,7 +2019,7 @@
     "daemon_title": "Daemon",
     "auto_start_acc_off": "Automatyczne uruchamianie po wyłączeniu pojazdu",
     "auto_start_acc_off_desc": "Uruchom demon bota Telegram automatycznie, gdy pojazd przejdzie do ACC wył. komendy działają podczas zaparkowania. Demon zatrzymuje się po uruchomieniu pojazdu.",
-    "daemon_start_pointer": "Ręczny start / zatrzymanie życia demona na stronie Daemons w natywnej aplikacji.",
+    "daemon_start_pointer": "Ręczny start / zatrzymanie życia demona na stronie {daemons} w natywnej aplikacji.",
     "delivery_pointer": "Preferencje dostawy (które wydarzenia trafiają na czat) na karcie Powiadomienia → Telegram."
   },
   "dashboard": {

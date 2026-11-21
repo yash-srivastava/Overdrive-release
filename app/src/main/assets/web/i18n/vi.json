@@ -2978,7 +2978,7 @@
     "daemon_title": "Daemon",
     "auto_start_acc_off": "Tự động khởi động khi xe tắt",
     "auto_start_acc_off_desc": "Tự động khởi chạy daemon bot Telegram khi xe chuyển sang ACC OFF, để các lệnh hoạt động khi đỗ xe. Daemon dừng khi xe khởi động.",
-    "daemon_start_pointer": "Việc khởi động/dừng thủ công daemon nằm ở trang Daemons trong ứng dụng gốc.",
+    "daemon_start_pointer": "Việc khởi động/dừng thủ công daemon nằm ở trang {daemons} trong ứng dụng gốc.",
     "delivery_pointer": "Tùy chọn gửi (sự kiện nào đến được cuộc trò chuyện) nằm ở tab Thông báo → Telegram.",
     "tyre_alerts_desc": "Gửi tin nhắn Telegram khi một lốp nằm ngoài dải áp suất bạn cấu hình, hoặc khi TPMS báo rò rỉ. Dùng các giới hạn đặt trong Giới hạn áp suất lốp.",
     "parking_messages": "Tin nhắn đỗ xe",

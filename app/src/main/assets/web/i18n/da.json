@@ -2019,7 +2019,7 @@
     "daemon_title": "Daemon",
     "auto_start_acc_off": "Auto-start, når køretøjet er slukket",
     "auto_start_acc_off_desc": "Start Telegram bot dæmonen automatisk, når køretøjet går til ACC OFF, så kommandoer fungerer mens parkeret. Dæmonen standser, når køretøjet starter.",
-    "daemon_start_pointer": "Manuel start / stop af dæmonen bor på dæmonsiden i den indfødte app.",
+    "daemon_start_pointer": "Manuel start / stop af dæmonen er på {daemons}-siden i den indfødte app.",
     "delivery_pointer": "Leveringspræferencer (som begivenheder nå chatten) live på fanen Meddelelser → Telegram."
   },
   "dashboard": {

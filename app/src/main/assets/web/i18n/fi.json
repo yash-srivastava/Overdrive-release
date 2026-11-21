@@ -2019,7 +2019,7 @@
     "daemon_title": "Daemon",
     "auto_start_acc_off": "Käynnistä automaattisesti kun ajoneuvo on pois päältä",
     "auto_start_acc_off_desc": "Käynnistä Telegram-botin demoni automaattisesti, kun ajoneuvo menee ACC OFFF:lle, joten komennot toimivat pysäköiden. Daemon pysähtyy, kun ajoneuvo käynnistyy.",
-    "daemon_start_pointer": "Daemonien manuaalinen alku / pysäytys elää Daemons-sivulla natiivi sovelluksessa.",
+    "daemon_start_pointer": "Daemonien manuaalinen alku / pysäytys elää {daemons}-sivulla natiivi sovelluksessa.",
     "delivery_pointer": "Toimitusasetukset (jolloin tapahtumat pääsevät chattiin) elävät Ilmoitukset → Telegram -välilehdessä."
   },
   "dashboard": {

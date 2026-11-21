@@ -3278,7 +3278,7 @@
     "daemon_title": "Daemon",
     "auto_start_acc_off": "Iniciar automáticamente con el vehículo apagado",
     "auto_start_acc_off_desc": "Inicia el daemon del bot de Telegram automáticamente cuando el vehículo pasa a ACC apagado, para que los comandos funcionen con el vehículo estacionado. El daemon se detiene cuando el vehículo arranca.",
-    "daemon_start_pointer": "El inicio y la detención manuales del daemon están en la página Daemons de la app nativa.",
+    "daemon_start_pointer": "El inicio y la detención manuales del daemon están en la página {daemons} de la app nativa.",
     "delivery_pointer": "Las preferencias de envío (qué eventos llegan al chat) están en la pestaña Notificaciones → Telegram.",
     "tyre_alerts": "Alertas de presión de neumáticos",
     "tyre_alerts_desc": "Envía un mensaje de Telegram cuando un neumático sale del rango de presión configurado o cuando el TPMS detecta una fuga. Usa los límites definidos en «Límites de presión de los neumáticos».",

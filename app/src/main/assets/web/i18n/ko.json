@@ -2536,7 +2536,7 @@
     "daemon_title": "데이몬",
     "auto_start_acc_off": "차량이 꺼져 있을 때 자동 시작",
     "auto_start_acc_off_desc": "차량이 ACC OFF로 이동할 때 Telegram 보트 데이몬을 자동으로 실행하여 주차할 때 명령이 작동합니다. 차량이 시작되면 데이몬이 멈춥니다.",
-    "daemon_start_pointer": "데몬의 수동 시작 / 종료는 네이티브 앱의 데몬 페이지에 있습니다.",
+    "daemon_start_pointer": "데몬의 수동 시작 / 종료는 네이티브 앱의 {daemons} 페이지에 있습니다.",
     "delivery_pointer": "전달 선호도 (이러한 이벤트가 채팅에 도달하는 경우) 는 알림 → Telegram 탭에서 생중계됩니다."
   },
   "dashboard": {

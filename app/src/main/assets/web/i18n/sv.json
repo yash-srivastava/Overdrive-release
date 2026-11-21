@@ -2019,7 +2019,7 @@
     "daemon_title": "Daemon",
     "auto_start_acc_off": "Auto-start när fordonet är avstängt",
     "auto_start_acc_off_desc": "Starta Telegram bot daemon automatiskt när fordonet går till ACC OFF, så kommandon fungerar medan parkerade. Dememonen stannar när fordonet startar.",
-    "daemon_start_pointer": "Manuell start / stopp av daemon liv på Daemons sida i den ursprungliga appen.",
+    "daemon_start_pointer": "Manuell start / stopp av daemon liv på {daemons} sida i den ursprungliga appen.",
     "delivery_pointer": "Leveransinställningar (som händelser når chatten) live på fliken Meddelanden → Telegram."
   },
   "dashboard": {

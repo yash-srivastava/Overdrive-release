@@ -2864,7 +2864,7 @@
     "daemon_title": "Daemon",
     "auto_start_acc_off": "Araç kapalıyken otomatik başlat",
     "auto_start_acc_off_desc": "Araç ACC OFF durumuna geçtiğinde Telegram bot daemon'unu otomatik başlatır; böylece park halindeyken komutlar çalışır. Araç çalıştırıldığında daemon durur.",
-    "daemon_start_pointer": "Daemon'u elle başlatıp durdurmak için yerel uygulamadaki Daemon'lar sayfasını kullanın.",
+    "daemon_start_pointer": "Daemon'u elle başlatıp durdurmak için yerel uygulamadaki {daemons} sayfasını kullanın.",
     "delivery_pointer": "Gönderim tercihleri (hangi olayların sohbete ulaşacağı) Bildirimler → Telegram sekmesindedir.",
     "tyre_alerts": "Lastik basıncı uyarıları",
     "tyre_alerts_desc": "Bir lastik ayarladığınız basınç aralığının dışına çıktığında ya da TPMS bir sızıntı bildirdiğinde Telegram mesajı gönderir. Lastik basıncı sınırları bölümünde belirlenen sınırları kullanır.",

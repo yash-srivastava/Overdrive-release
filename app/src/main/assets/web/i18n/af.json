@@ -2019,7 +2019,7 @@
     "daemon_title": "Agtergronddiens",
     "auto_start_acc_off": "Begin outomaties wanneer voertuig af is",
     "auto_start_acc_off_desc": "Begin die Telegram-bot-agtergronddiens outomaties wanneer die voertuig na ACC AF gaan, sodat opdragte werk terwyl dit geparkeer is. Die agtergronddiens stop wanneer die voertuig aanskakel.",
-    "daemon_start_pointer": "Handmatige begin / stop van die agtergronddiens is op die Daemons-bladsy in die inheemse toep.",
+    "daemon_start_pointer": "Handmatige begin / stop van die agtergronddiens is op die {daemons}-bladsy in die inheemse toep.",
     "delivery_pointer": "Afleweringsvoorkeure (watter gebeure die klets bereik) is op die Kennisgewings → Telegram-oortjie."
   },
   "dashboard": {

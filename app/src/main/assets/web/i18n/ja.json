@@ -2849,7 +2849,7 @@
     "daemon_title": "デイモン",
     "auto_start_acc_off": "車両が停止したときに自動起動",
     "auto_start_acc_off_desc": "Telegramボットダイモンを自動起動します 車両がACCOFFに移動すると,コマンドが駐車中に動作します. 車両が起動するとダイモンが停止します.",
-    "daemon_start_pointer": "デイモンの手動の開始/停止はネイティブアプリの デイモンページに表示されます.",
+    "daemon_start_pointer": "デイモンの手動の開始/停止はネイティブアプリの{daemons}ページに表示されます.",
     "delivery_pointer": "配信設定 (チャットに届くイベント) は,通知 → Telegramタブでライブです.",
     "tyre_alerts": "タイヤ圧アラート",
     "tyre_alerts_desc": "タイヤが設定された圧力範囲外に出たとき、またはTPMSが漏洩を報告したときにTelegramメッセージを送信します。 タイヤ圧限界で設定された制限を使用します。",

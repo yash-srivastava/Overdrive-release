@@ -2019,7 +2019,7 @@
     "daemon_title": "Daemon",
     "auto_start_acc_off": "Auto-pornește când vehiculul este oprit",
     "auto_start_acc_off_desc": "Lansați daemonul bot-ului Telegram automat când vehiculul merge la ACC OFF, astfel încât comenzile funcționează în timpul parcării. Zăpada se oprește când vehiculul pornește.",
-    "daemon_start_pointer": "Pornire manuală / oprirea vieţilor cotidianului pe pagina Daemons din aplicaţia nativă.",
+    "daemon_start_pointer": "Pornire manuală / oprirea vieţilor cotidianului pe pagina {daemons} din aplicaţia nativă.",
     "delivery_pointer": "Preferințe de livrare (care evenimente ajung la conversație) în direct pe tab-ul Notificări → Telegram."
   },
   "dashboard": {

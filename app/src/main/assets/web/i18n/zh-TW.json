@@ -2574,7 +2574,7 @@
     "daemon_title": "這樣的惡魔",
     "auto_start_acc_off": "自動啟動車輛停電時",
     "auto_start_acc_off_desc": "自動啟動 Telegram 機器人妖怪, 當車輛進入 ACC 關閉時,",
-    "daemon_start_pointer": "這種方式可以在本地應用程式中的 Daemons 頁面上使用.",
+    "daemon_start_pointer": "這種方式可以在本地應用程式中的 {daemons} 頁面上使用.",
     "delivery_pointer": "在通知 → Telegram 標籤上,",
     "tyre_alerts": "胎壓警示",
     "tyre_alerts_desc": "當輪胎氣壓超出您設定的範圍，或胎壓偵測系統回報漏氣時，發送 Telegram 訊息。系統將採用「胎壓限值」所設定的範圍。"

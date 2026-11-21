@@ -2019,7 +2019,7 @@
     "daemon_title": "Dimoni",
     "auto_start_acc_off": "Inici automàtic quan el vehicle està apagat",
     "auto_start_acc_off_desc": "Inicia el dimoni del bot de Telegram automàticament quan el vehicle passa a ACC OFF, perquè les ordres funcionin mentre està aparcat. El dimoni s'atura quan s'engega el vehicle.",
-    "daemon_start_pointer": "L'inici/aturada manual del dimoni es troba a la pàgina de Dimonis de l'aplicació nativa.",
+    "daemon_start_pointer": "L'inici/aturada manual del dimoni es troba a la pàgina {daemons} de l'aplicació nativa.",
     "delivery_pointer": "Les preferències d'enviament (quins esdeveniments arriben al xat) es troben a la pestanya Notificacions → Telegram."
   },
   "dashboard": {

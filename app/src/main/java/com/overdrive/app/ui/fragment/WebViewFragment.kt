@@ -1659,6 +1659,7 @@ class WebViewFragment : Fragment() {
             val destinationId = when (dest) {
                 "bydCloud" -> R.id.bydCloudFragment
                 "remoteAccess" -> R.id.remoteAccessFragment
+                "daemons" -> R.id.daemonsFragment
                 else -> return "unknown_destination"
             }
             return try {

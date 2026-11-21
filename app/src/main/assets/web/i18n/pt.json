@@ -2019,7 +2019,7 @@
     "daemon_title": "Daemon",
     "auto_start_acc_off": "Início automático quando o veículo estiver desligado",
     "auto_start_acc_off_desc": "Execute o daemon do bot do Telegram automaticamente quando o veículo for DESLIGAR ACC, então os comandos funcionam enquanto estiver estacionado. O daemon pára quando o veículo é iniciado.",
-    "daemon_start_pointer": "Iniciar/parar manualmente o daemon vive na página do Daemons no aplicativo nativo.",
+    "daemon_start_pointer": "Iniciar/parar manualmente o daemon vive na página do {daemons} no aplicativo nativo.",
     "delivery_pointer": "As preferências de entrega (quais eventos alcançam o chat) são exibidas na guia Notificações → Telegram."
   },
   "dashboard": {

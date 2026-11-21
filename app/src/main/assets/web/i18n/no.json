@@ -2439,7 +2439,7 @@
     "daemon_title": "Daemon",
     "auto_start_acc_off": "Start automatisk når kjøretøyet er av",
     "auto_start_acc_off_desc": "Start Telegram bot daemon automatisk når kjøretøyet går til ACC OFF, så kommandoer virker mens parked. Patronen stopper når kjøretøyet starter opp.",
-    "daemon_start_pointer": "Manuell start / stopp av daemonen lever på Daemons siden i den innebygde appen.",
+    "daemon_start_pointer": "Manuell start / stopp av daemonen lever på {daemons} siden i den innebygde appen.",
     "delivery_pointer": "Leveringsinnstillinger (noe som vil komme fram til chat) live på varslene → Telegram-fanen."
   },
   "dashboard": {

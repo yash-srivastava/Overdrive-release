@@ -2844,7 +2844,7 @@
     "daemon_title": "魔鬼",
     "auto_start_acc_off": "当车辆停车时自动启动",
     "auto_start_acc_off_desc": "自動啟動 Telegram 機器人妖怪, 當車輛進入 ACC 關閉時,",
-    "daemon_start_pointer": "在本地应用程序中的Daemons页面上使用手动启动/停止.",
+    "daemon_start_pointer": "在本地应用程序中的{daemons}页面上使用手动启动/停止.",
     "delivery_pointer": "在通知 → Telegram 页面上直接查看交付偏好 (哪些事件到达聊天室).",
     "tyre_alerts": "轮胎压力警报",
     "tyre_alerts_desc": "当轮胎超出您配置的压力范围时，或当TPM报告泄漏时，发送Telegram消息。 使用Tyre压力限制下设定的限制。",
