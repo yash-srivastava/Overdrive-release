@@ -13,7 +13,6 @@
     <script src="../shared/theme.js?v=12"></script>
     <script src="../shared/app-shell.js?v=23"></script>
     <link rel="stylesheet" href="../shared/leaflet.css">
-    <script src="../shared/leaflet.js"></script>
     <link rel="stylesheet" href="../shared/styles.css?v=38">
     <link rel="stylesheet" href="../shared/revamp.css?v=2">
 </head>
@@ -2953,6 +2952,9 @@
     <script src="../shared/core.js?v=27"></script>
     <script src="../shared/module-faults-dashboard.js?v=1"></script>
     <script src="../shared/update-flow.js?v=3"></script>
+    <!-- Load Leaflet after the dashboard markup to avoid blocking its parsing
+         on slow connections; keep it ahead of the map module. -->
+    <script src="../shared/leaflet.js"></script>
     <script src="../shared/map.js?v=9"></script>
     <script>
         function toggleSidebar() {
