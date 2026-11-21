@@ -9441,7 +9441,7 @@ public class AccSentryDaemon {
             return android.content.pm.PackageManager.PERMISSION_GRANTED;
         }
         @Override public Context getApplicationContext() {
-            try { return super.getApplicationContext(); } catch (NullPointerException e) { return this; }
+            try { Context c = super.getApplicationContext(); return c != null ? c : this; } catch (NullPointerException e) { return this; }
         }
         @Override public String getPackageName() {
             try { return super.getPackageName(); } catch (NullPointerException e) { return APP_PACKAGE_NAME(); }
