@@ -24,6 +24,14 @@ public class WebViewEmbedChromeAssetTest {
         assertTrue(fragment.contains("EMBED_ATTR = \"data-android-embed\""));
         assertTrue(fragment.contains("fun spliceEmbedChrome(html: String): String"));
         assertTrue(fragment.contains("spliceEmbedChrome("));
+        // Pages style themselves with :root[data-android-embed="1"], so the
+        // already-spliced guard must look for the injected setAttribute and
+        // not the bare attribute name, or those pages never get the flag.
+        assertTrue(fragment.contains("EMBED_MARKER = \"setAttribute('$EMBED_ATTR','1')\""));
+        assertTrue(fragment.contains("if (html.contains(EMBED_MARKER)) return html"));
+        assertFalse(fragment.contains("if (html.contains(EMBED_ATTR)) return html"));
+        assertTrue(readRepositoryFile("app/src/main/assets/web/local/live-view.html")
+                .contains(":root[data-android-embed=\"1\"]"));
 
         int chrome = fragment.indexOf("EMBED_CHROME =");
         assertTrue(chrome >= 0);
