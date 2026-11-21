@@ -118,11 +118,6 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content" />
                     <include
-                        android:id="@+id/railDestNotifications"
-                        layout="@layout/item_rail_destination"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content" />
-                    <include
                         android:id="@+id/railDestSeatPositions"
                         layout="@layout/item_rail_destination"
                         android:layout_width="match_parent"
@@ -184,6 +179,11 @@
                     <include
                         android:id="@+id/railSectionSystem"
                         layout="@layout/item_rail_section" />
+                    <include
+                        android:id="@+id/railDestNotifications"
+                        layout="@layout/item_rail_destination"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
                     <include
                         android:id="@+id/railDestNetwork"
                         layout="@layout/item_rail_destination"

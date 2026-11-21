@@ -214,7 +214,6 @@ open class MainActivity : AppCompatActivity() {
             setOf(
                 NavigationRailCatalog.VEHICLE,
                 NavigationRailCatalog.PROXIMITY,
-                NavigationRailCatalog.NOTIFICATIONS,
                 NavigationRailCatalog.SEAT_POSITIONS,
                 NavigationRailCatalog.PROJECTION,
                 NavigationRailCatalog.CHARGING,
@@ -240,6 +239,7 @@ open class MainActivity : AppCompatActivity() {
         RailSection(
             R.id.railSectionSystem, R.string.rail_section_system,
             setOf(
+                NavigationRailCatalog.NOTIFICATIONS,
                 NavigationRailCatalog.NETWORK,
                 NavigationRailCatalog.DIAGNOSTICS,
                 RAIL_KEY_SETTINGS,
@@ -1915,9 +1915,6 @@ open class MainActivity : AppCompatActivity() {
             RailItem(NavigationRailCatalog.PROXIMITY, R.id.railDestProximity,
                 R.id.remoteAccessFragment,
                 R.drawable.ic_overlay_mode_proximity, R.string.nav_page_remote_access),
-            RailItem(NavigationRailCatalog.NOTIFICATIONS, R.id.railDestNotifications,
-                R.id.notificationsFragment,
-                R.drawable.ic_notifications, R.string.rail_notifications),
             RailItem(NavigationRailCatalog.SEAT_POSITIONS, R.id.railDestSeatPositions,
                 R.id.seatPositionsFragment,
                 R.drawable.ic_seat_positions, R.string.rail_seat_positions),
@@ -1956,6 +1953,9 @@ open class MainActivity : AppCompatActivity() {
                     R.id.bydCloudFragment,
                     R.id.safeKeepFragment,
                 )),
+            RailItem(NavigationRailCatalog.NOTIFICATIONS, R.id.railDestNotifications,
+                R.id.notificationsFragment,
+                R.drawable.ic_notifications, R.string.rail_notifications),
             RailItem(NavigationRailCatalog.NETWORK, R.id.railDestNetwork,
                 R.id.networkFragment,
                 R.drawable.ic_hotspot, R.string.rail_network),

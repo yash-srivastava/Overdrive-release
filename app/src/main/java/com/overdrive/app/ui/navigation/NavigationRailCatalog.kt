@@ -21,7 +21,6 @@ object NavigationRailCatalog {
     const val PARKING = "parking"
     const val VEHICLE = "vehicle"
     const val PROXIMITY = "proximity"
-    const val NOTIFICATIONS = "notifications"
     const val SEAT_POSITIONS = "seat_positions"
     const val PROJECTION = "projection"
     const val TRIPS = "trips"
@@ -32,6 +31,7 @@ object NavigationRailCatalog {
     const val ROAD_SENSE = "road_sense"
     const val MAP = "map"
     const val WIDGETS = "widgets"
+    const val NOTIFICATIONS = "notifications"
     const val NETWORK = "network"
     const val DIAGNOSTICS = "diagnostics"
 
@@ -44,7 +44,6 @@ object NavigationRailCatalog {
         NavigationRailOption(PARKING, R.string.rail_parking, R.drawable.ic_parking),
         NavigationRailOption(VEHICLE, R.string.rail_vehicle, R.drawable.ic_vehicle_control),
         NavigationRailOption(PROXIMITY, R.string.nav_page_remote_access, R.drawable.ic_overlay_mode_proximity),
-        NavigationRailOption(NOTIFICATIONS, R.string.rail_notifications, R.drawable.ic_notifications),
         NavigationRailOption(SEAT_POSITIONS, R.string.rail_seat_positions, R.drawable.ic_seat_positions),
         NavigationRailOption(PROJECTION, R.string.rail_projection, R.drawable.ic_projection),
         NavigationRailOption(TRIPS, R.string.rail_trips, R.drawable.ic_trips),
@@ -55,6 +54,7 @@ object NavigationRailCatalog {
         NavigationRailOption(ROAD_SENSE, R.string.rail_roadsense, R.drawable.ic_roadsense),
         NavigationRailOption(MAP, R.string.rail_hazard_map, R.drawable.ic_roadsense_map),
         NavigationRailOption(WIDGETS, R.string.rail_widgets, R.drawable.ic_widgets),
+        NavigationRailOption(NOTIFICATIONS, R.string.rail_notifications, R.drawable.ic_notifications),
         NavigationRailOption(NETWORK, R.string.rail_network, R.drawable.ic_hotspot),
         NavigationRailOption(DIAGNOSTICS, R.string.rail_diagnostics, R.drawable.ic_diagnostics),
     )
