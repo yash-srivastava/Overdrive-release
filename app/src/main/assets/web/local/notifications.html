@@ -28,16 +28,15 @@
         })();
     </script>
     <!--
-      Bottom-tab manifest for Notifications. Three task-based tabs:
+      Bottom-tab manifest for Notifications. Task-based tabs:
+        Log      — persisted notification history
         Push     — per-device push permission + per-category toggles
         Telegram — Two-stage Telegram alerts + tier filter (was on Surveillance)
         Devices  — registered push subscriptions
-      Inside the head-unit WebView the Telegram block is the only piece
-      that makes sense — Web Push needs a tunnel origin the head unit
-      doesn't have, and the Devices list manages browsers, not the
-      built-in shell. Filter OT_TABS down to Telegram so the bottom-tab
-      bar collapses to a single chip (or app-tabs.js may hide the bar
-      entirely when only one tab remains).
+        Vehicle  — LHD/RHD layout + tyre pressure limits
+      Inside the head-unit WebView, Push and Devices are hidden (no tunnel
+      / wrong UA). Keep Telegram, Log, and Vehicle in OT_TABS so in-car
+      users can still reach Telegram delivery and vehicle setup.
       The Telegram block reuses the legacy IDs (v2TelegramSendStartPing,
       v2TelegramTierGroup, v2TelegramNotices/Alerts/Critical) so the
       SurvSettings bindings in shared/surveillance.js?v=survtoggle20 keep firing.
@@ -48,14 +47,27 @@
             __OT_LOG_TAB,
             { id: 'push',     label: 'Push',     i18n: 'notif.tab_push',     svg: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>' },
             { id: 'telegram', label: 'Telegram', i18n: 'notif.tab_telegram', svg: '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>' },
-            { id: 'devices',  label: 'Devices',  i18n: 'notif.tab_devices',  svg: '<rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/>', readOnly: true }
+            { id: 'devices',  label: 'Devices',  i18n: 'notif.tab_devices',  svg: '<rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/>', readOnly: true },
+            { id: 'vehicle',  label: 'Vehicle setup', i18n: 'notif.tab_vehicle', svg: '<path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/><circle cx="7" cy="17" r="2"/><path d="M9 17h6"/><circle cx="17" cy="17" r="2"/>' }
         ];
-        // The Log tab reads persisted history (no tunnel needed) so it is useful
-        // in the head-unit WebView too — keep it alongside Telegram there. Push
-        // and Devices still make no sense in-car and are filtered out.
+        // Log + Vehicle need no tunnel; Telegram is in-car. Push / Devices drop out.
         window.OT_TABS = (typeof window.AndroidBridge !== 'undefined')
-            ? __OT_ALL_TABS.filter(function (t) { return t.id === 'telegram' || t.id === 'log'; })
+            ? __OT_ALL_TABS.filter(function (t) { return t.id === 'telegram' || t.id === 'log' || t.id === 'vehicle'; })
             : __OT_ALL_TABS;
+        // Deep links use section ids (#tyreLimitsSection). Remap to #vehicle before
+        // app-tabs.js reads the hash, but remember the scroll target.
+        (function () {
+            var h = (location.hash || '').replace(/^#/, '');
+            if (h === 'driveSideSection' || h === 'tyreLimitsSection') {
+                window.__OT_NOTIF_SCROLL_TARGET = h;
+                var base = location.pathname + (location.search || '');
+                if (window.history && history.replaceState) {
+                    history.replaceState(null, '', base + '#vehicle');
+                } else {
+                    location.hash = 'vehicle';
+                }
+            }
+        })();
     </script>
     <script src="../shared/app-tabs.js?v=4"></script>
     <link rel="stylesheet" href="../shared/styles.css?v=38">
@@ -1106,15 +1118,11 @@
                         </div>
                     </div>
 
-                    <!-- ===== Vehicle layout (LHD / RHD) =====
-                         Cross-cuts every tab: door notifications fire from the
-                         camera daemon regardless of delivery channel, so the
-                         driver-side picker lives outside the tab grid. Saves
-                         to /api/models/selected (vehicle config section).
-                         The daemon force-reloads its config on every door
-                         edge so a flip here applies to the very next event
-                         without restart. -->
-                    <div class="notif-section" id="driveSideSection">
+                    <!-- ===== Vehicle layout (LHD / RHD) — Vehicle tab =====
+                         Saves to /api/models/selected (vehicle config section).
+                         The daemon force-reloads its config on every door edge so
+                         a flip here applies to the very next event without restart. -->
+                    <div class="notif-section" id="driveSideSection" data-tab="vehicle">
                         <div class="notif-head">
                             <span class="notif-head-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/><circle cx="7" cy="17" r="2"/><path d="M9 17h6"/><circle cx="17" cy="17" r="2"/></svg></span>
                             <div class="notif-head-text setting-stack">
@@ -1155,16 +1163,11 @@
                         </div>
                     </div>
 
-                    <!-- ===== Tyre pressure limits =====
-                         Also cross-cuts every tab (same reasoning as the
-                         vehicle-layout picker above): these limits drive BOTH
-                         delivery channels plus the Vehicle Control corner
-                         colouring, so they don't belong to the push or the
-                         Telegram tab. Saves to /api/tyres/limits, which
-                         persists the `tyres` section of the unified config.
-                         Values are kPa — the unit the BYD TPMS reports — so
-                         the comparison path never rounds. -->
-                    <div class="notif-section" id="tyreLimitsSection">
+                    <!-- ===== Tyre pressure limits — Vehicle tab =====
+                         Limits drive push/Telegram alerts and Vehicle Control
+                         corner colours. Saves to /api/tyres/limits (`tyres`
+                         section). Values are kPa — the unit BYD TPMS reports. -->
+                    <div class="notif-section" id="tyreLimitsSection" data-tab="vehicle">
                         <div class="notif-head">
                             <span class="notif-head-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg></span>
                             <div class="notif-head-text setting-stack">
@@ -3013,43 +3016,52 @@
         function escapeAttr(s) { return escapeHtml(s); }
 
         // ===== Notification Log tab wiring =====
-        // The Log tab reads persisted history via NOTIFLOG (notif-log.js). Two
-        // hooks: (1) lazy-load the log the first time the tab becomes active so
-        // the page's first paint stays cheap; (2) hide the always-visible
-        // Vehicle-layout picker and Tyre-limits card while the Log tab is
-        // active (both are untagged so app-tabs keeps them on every tab
-        // otherwise). Also refresh the log's relative timestamps whenever the
-        // user returns to it.
+        // Lazy-load NOTIFLOG the first time the Log tab becomes active; refresh
+        // relative timestamps when returning to it.
         function nlSyncChrome(activeId) {
-            var hideOnLog = ['driveSideSection', 'tyreLimitsSection'];
-            for (var i = 0; i < hideOnLog.length; i++) {
-                var el = document.getElementById(hideOnLog[i]);
-                if (el) el.style.display = (activeId === 'log') ? 'none' : '';
-            }
             if (activeId === 'log' && window.NOTIFLOG) {
                 if (!NOTIFLOG.loaded) NOTIFLOG.ensureLoaded();
                 else NOTIFLOG.load();
             }
         }
+        function nlIsVehicleSectionHash(h) {
+            return h === 'driveSideSection' || h === 'tyreLimitsSection';
+        }
+        function nlScrollToNotifSection() {
+            var id = window.__OT_NOTIF_SCROLL_TARGET;
+            if (!id) return;
+            var el = document.getElementById(id);
+            if (el && typeof el.scrollIntoView === 'function') {
+                try { el.scrollIntoView({ block: 'start', behavior: 'auto' }); }
+                catch (e) { el.scrollIntoView(true); }
+            }
+        }
+        function nlActivateVehicleTabAndScroll() {
+            var btn = document.querySelector('.bottom-tab[data-tab-target="vehicle"]');
+            if (btn) btn.click();
+            setTimeout(nlScrollToNotifSection, 0);
+        }
+        window.addEventListener('hashchange', function () {
+            var h = (location.hash || '').replace(/^#/, '');
+            if (!nlIsVehicleSectionHash(h)) return;
+            window.__OT_NOTIF_SCROLL_TARGET = h;
+            nlActivateVehicleTabAndScroll();
+        });
         document.addEventListener('ot-tabs:active-changed', function (ev) {
             var id = (ev && ev.detail) ? ev.detail.id : null;
             if (id) nlSyncChrome(id);
         });
 
-        // Resolve the active tab on load and sync chrome SYNCHRONOUSLY (no
-        // awaits) so the untagged Vehicle-layout picker can never paint on — or
-        // get stuck on — the Log tab if the async bootstrap below stalls or
-        // throws. Mirrors app-tabs' EXACT resolution: #hash wins, then the
-        // saved tab (key "ot-active-tab-<basename>"), then the first manifest
-        // tab. app-tabs fires no event on its initial mount, so we resolve it
-        // ourselves. Runs again on DOMContentLoaded in case the DOM/app-tabs
-        // bar isn't ready yet when this inline script executes.
+        // Resolve the active tab on load and sync Log chrome SYNCHRONOUSLY. Mirrors
+        // app-tabs: #hash (section ids already remapped to #vehicle in <head>),
+        // saved tab, then first manifest tab. app-tabs fires no event on mount.
         function nlResolveInitialTab() {
             try {
                 var tabs = window.OT_TABS || [];
                 function tabExists(id) { for (var i = 0; i < tabs.length; i++) { if (tabs[i].id === id) return true; } return false; }
                 var basename = (location.pathname || '').split('/').pop() || 'index';
                 var hash = (location.hash || '').replace(/^#/, '');
+                if (nlIsVehicleSectionHash(hash)) hash = 'vehicle';
                 var saved = null;
                 try { saved = localStorage.getItem('ot-active-tab-' + basename); } catch (e) {}
                 var activeNow = (hash && tabExists(hash)) ? hash
@@ -3060,7 +3072,12 @@
         }
         nlResolveInitialTab();
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', nlResolveInitialTab);
+            document.addEventListener('DOMContentLoaded', function () {
+                nlResolveInitialTab();
+                if (window.__OT_NOTIF_SCROLL_TARGET) setTimeout(nlScrollToNotifSection, 50);
+            });
+        } else if (window.__OT_NOTIF_SCROLL_TARGET) {
+            setTimeout(nlScrollToNotifSection, 50);
         }
 
         (async function () {

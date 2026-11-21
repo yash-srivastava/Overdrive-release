@@ -1136,6 +1136,7 @@
     "tab_push": "Push",
     "tab_telegram": "Telegram",
     "tab_devices": "Devices",
+    "tab_vehicle": "Vehicle setup",
     "telegram": "Telegram delivery",
     "telegram_sub": "Send surveillance events to a paired Telegram chat. Pair the bot in the Telegram daemon settings; toggles below decide which severities reach the chat. Off tiers are still recorded — only the message is suppressed.",
     "telegram_delivery_sub": "What kind of events Telegram receives. Independent from the per-tier filter above — these toggle entire categories on or off.",
