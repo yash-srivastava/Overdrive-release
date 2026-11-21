@@ -12,7 +12,6 @@ import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
-import java.io.RandomAccessFile;
 import java.util.LinkedList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -68,6 +67,9 @@ public class PerformanceMonitor {
     private long lastAppCpuTime = 0;
     private long lastCpuTimeForApp = 0;  // Tracks CPU time baseline for app CPU calculation
     private long lastIdleTime = 0;
+    // Reused output of parseAggregateCpuTimes(): {total jiffies, idle jiffies}.
+    // Only touched from the single scheduled sampler thread.
+    private final long[] cpuTimesScratch = new long[2];
 
     // GPU busy tracking — kgsl exposes "busy total" cumulative ticks on most
     // MSM kernels (filename varies: gpu_busy / gpubusy / gpu_busy_time). Usage
@@ -324,23 +326,20 @@ public class PerformanceMonitor {
     
     private void collectCpuMetrics(PerformanceSnapshot snapshot) {
         try {
-            // Read /proc/stat for system CPU
-            RandomAccessFile reader = new RandomAccessFile("/proc/stat", "r");
-            String line = reader.readLine();
-            reader.close();
-            
-            if (line != null && line.startsWith("cpu ")) {
-                String[] parts = line.split("\\s+");
-                long user = Long.parseLong(parts[1]);
-                long nice = Long.parseLong(parts[2]);
-                long system = Long.parseLong(parts[3]);
-                long idle = Long.parseLong(parts[4]);
-                long iowait = Long.parseLong(parts[5]);
-                long irq = Long.parseLong(parts[6]);
-                long softirq = Long.parseLong(parts[7]);
-                
-                long totalCpu = user + nice + system + idle + iowait + irq + softirq;
-                long totalIdle = idle + iowait;
+            // Read /proc/stat for system CPU. Only the aggregate first line is
+            // needed. A buffered reader pulls it in one read instead of the
+            // byte-per-read behavior of RandomAccessFile.readLine(), and the
+            // reader is closed even when the read fails.
+            String line;
+            try (BufferedReader reader = new BufferedReader(new FileReader("/proc/stat"))) {
+                line = reader.readLine();
+            }
+
+            // A malformed or truncated aggregate line only skips the system CPU
+            // update for this sample; the app CPU sample below still runs.
+            if (parseAggregateCpuTimes(line, cpuTimesScratch)) {
+                long totalCpu = cpuTimesScratch[0];
+                long totalIdle = cpuTimesScratch[1];
                 
                 if (lastCpuTime > 0) {
                     long cpuDelta = totalCpu - lastCpuTime;
@@ -356,9 +355,10 @@ public class PerformanceMonitor {
             }
             
             // Read /proc/[pid]/stat for app CPU
-            RandomAccessFile appReader = new RandomAccessFile("/proc/" + pid + "/stat", "r");
-            String appLine = appReader.readLine();
-            appReader.close();
+            String appLine;
+            try (BufferedReader appReader = new BufferedReader(new FileReader("/proc/" + pid + "/stat"))) {
+                appLine = appReader.readLine();
+            }
             
             if (appLine != null) {
                 // /proc/<pid>/stat field 2 (comm) is parenthesized and may
@@ -421,6 +421,49 @@ public class PerformanceMonitor {
     }
 
     
+    /**
+     * Parse the aggregate {@code cpu } line of /proc/stat without splitting it.
+     * Writes {@code out[0]} = user + nice + system + idle + iowait + irq + softirq
+     * and {@code out[1]} = idle + iowait, matching the totals the dashboard has
+     * always used (steal and later columns are not counted). Returns false and
+     * leaves {@code out} untouched when the line is not the aggregate line, has
+     * fewer than seven counters, or contains a non-numeric counter.
+     */
+    static boolean parseAggregateCpuTimes(String line, long[] out) {
+        if (line == null || out == null || out.length < 2 || !line.startsWith("cpu ")) {
+            return false;
+        }
+        final int length = line.length();
+        int cursor = 3;
+        long total = 0;
+        long idle = 0;
+        for (int field = 1; field <= 7; field++) {
+            while (cursor < length && Character.isWhitespace(line.charAt(cursor))) {
+                cursor++;
+            }
+            int start = cursor;
+            long value = 0;
+            while (cursor < length && !Character.isWhitespace(line.charAt(cursor))) {
+                char c = line.charAt(cursor);
+                if (c < '0' || c > '9' || cursor - start >= 18) {
+                    return false;
+                }
+                value = value * 10 + (c - '0');
+                cursor++;
+            }
+            if (cursor == start) {
+                return false;
+            }
+            total += value;
+            if (field == 4 || field == 5) {
+                idle += value;
+            }
+        }
+        out[0] = total;
+        out[1] = idle;
+        return true;
+    }
+
     /**
      * Read one numeric field from /proc/<pid>/stat without splitting the line.
      * Linux field 2 (comm) is enclosed in parentheses but can contain spaces
