@@ -295,7 +295,21 @@
     "camera_rear": "אחורית",
     "camera_left": "שמאלית",
     "test_title": "התראת בדיקה",
-    "test_body": "אם ההודעה הזו מוצגת, שליחת התראות Push עובדת."
+    "test_body": "אם ההודעה הזו מוצגת, שליחת התראות Push עובדת.",
+    "remote_access_lock_confirmed_title": "נעילת קרבה אושרה",
+    "remote_access_unlock_confirmed_title": "פתיחת קרבה אושרה",
+    "remote_access_lock_unconfirmed_title": "נעילת קרבה לא אושרה",
+    "remote_access_unlock_unconfirmed_title": "פתיחת קרבה לא אושרה",
+    "remote_access_lock_failed_title": "נעילת קרבה נכשלה",
+    "remote_access_unlock_failed_title": "פתיחת קרבה נכשלה",
+    "remote_access_lock_confirmed_body": "מצב הנעילה של דלת הנהג אושר — נעול.",
+    "remote_access_unlock_confirmed_body": "מצב הנעילה של דלת הנהג אושר — פתוח.",
+    "remote_access_lock_unconfirmed_body": "פקודת הנעילה התקבלה; לא ניתן לאשר את מצב הרכב.",
+    "remote_access_unlock_unconfirmed_body": "פקודת הפתיחה התקבלה; לא ניתן לאשר את מצב הרכב.",
+    "remote_access_lock_failed_body": "פקודת הנעילה של הרכב נכשלה.",
+    "remote_access_unlock_failed_body": "פקודת הפתיחה של הרכב נכשלה.",
+    "remote_access_device_key_suffix": " מפתח: {0}.",
+    "remote_access_device_phone_suffix": " טלפון: {0}."
   },
   "parking": {
     "notify": {
@@ -374,15 +388,15 @@
     },
     "daemon_names": {
       "camera": "מצלמה",
-      "acc_sentry": "ACC Sentry",
-      "sentry": "Sentry",
-      "telegram": "Telegram",
+      "acc_sentry": "מעקב ACC",
+      "sentry": "מצב שומר",
+      "telegram": "בוט Telegram",
       "surveillance": "מעקב",
-      "cloudflare_tunnel": "Cloudflare Tunnel",
-      "zrok_tunnel": "Zrok Tunnel",
-      "tailscale_tunnel": "Tailscale Tunnel",
+      "cloudflare_tunnel": "מנהרת Cloudflared",
+      "zrok_tunnel": "מנהרת Zrok",
+      "tailscale_tunnel": "מנהרת Tailscale",
       "wireguard_tunnel": "מנהרת WireGuard",
-      "sing_box": "Sing-Box"
+      "sing_box": "פרוקסי Sing-box"
     },
     "buttons": {
       "stop_named": "⛔ עצור את {0}",
@@ -393,7 +407,7 @@
       "start_surveillance": "✅ הפעל מעקב",
       "stop_surveillance": "⛔ עצור מעקב",
       "daemons": "🤖 תהליכי רקע",
-      "tunnel_url": "🌐 כתובת המנהרה (Tunnel)",
+      "tunnel_url": "🌐 כתובת מנהרה",
       "check_update": "⬆️ בדוק עדכונים",
       "backup": "💾 גיבוי",
       "stop": "⛔ עצור",
@@ -405,7 +419,7 @@
       "title": "🤖 *תהליכי רקע (Daemons)*\n\n"
     },
     "url": {
-      "none_running": "⚠️ אין מנהרה (tunnel) פועלת\n\nניתן להפעיל מנהרה באמצעות:\n`/daemon cloudflared start`\n`/daemon zrok start`\n`/daemon tailscale start`",
+      "none_running": "⚠️ אין מנהרה פועלת\n\nניתן להפעיל מנהרה באמצעות:\n`/daemon cloudflared start`\n`/daemon zrok start`\n`/daemon tailscale start`",
       "title": "🌐 *כתובות מנהרה (Tunnel URLs)*\n\n",
       "resolved_line": "• *{0}:* {1}\n",
       "pending_line": "• *{0}:* _מופעל כעת, הכתובת עדיין אינה זמינה_\n",
@@ -414,12 +428,12 @@
       "error": "⚠️ שגיאה: {0}"
     },
     "help": {
-      "text": "📖 *פקודות*\n_OverDrive {0}_\n\n*מעקב*\n`/start` - הפעל מעקב\n`/stop` - עצור מעקב\n`/status` - סטטוס מערכת\n\n*אירועים*\n`/events [שעות] [עמוד]` - רשימת הקלטות\n`/download <קובץ>` - הורדת סרטון\n\n*תהליכי רקע*\n`/daemons` - רשימת כל תהליכי הרקע\n`/daemon <שם> start|stop`\n\n*מערכת*\n`/url` - כתובת מנהרה (Tunnel)\n`/update` - בדיקת עדכון לאפליקציה\n`/backup` - ייצוא גיבוי הגדרות\n`/backup trips` - גיבוי כולל היסטוריית נסיעות\n`/where` - איפה חניתי?\n`/help` - הודעה זו"
+      "text": "📖 *פקודות*\n_OverDrive {0}_\n\n*מעקב*\n`/start` - הפעל מעקב\n`/stop` - עצור מעקב\n`/status` - סטטוס מערכת\n\n*אירועים*\n`/events [שעות] [עמוד]` - רשימת הקלטות\n`/download <קובץ>` - הורדת סרטון\n\n*תהליכי רקע*\n`/daemons` - רשימת כל תהליכי הרקע\n`/daemon <שם> start|stop`\n\n*מערכת*\n`/url` - כתובת מנהרה\n`/update` - בדיקת עדכון לאפליקציה\n`/backup` - ייצוא גיבוי הגדרות\n`/backup trips` - גיבוי כולל היסטוריית נסיעות\n`/where` - איפה חניתי?\n`/help` - הודעה זו"
     },
     "parking": {
       "where": {
         "unavailable": "⚠️ לא ניתן להגיע לתהליך הרקע של המצלמה. נסה: `/daemon camera start`.",
-        "disabled": "🅿️ חניה חכמה (Parking Intelligence) כבויה. ניתן להפעיל אותה תחת הגדרות מעקב ← חניה.",
+        "disabled": "🅿️ חניה חכמה כבויה. הפעל אותה תחת הגדרות מעקב ← חניה.",
         "none": "🅿️ עדיין לא תועדה חניה.",
         "title_open": "🅿️ *הרכב שלך בחניה*",
         "title_last": "🅿️ *חניה אחרונה*",
@@ -461,7 +475,7 @@
       "status_running": "{0}: ✅ פועל",
       "status_stopped": "{0}: ⛔ הופסק",
       "action_usage": "שימוש: /daemon {0} start|stop|status",
-      "tunnel_url": "🌐 *כתובת מנהרה (Tunnel)*\n{0}",
+      "tunnel_url": "🌐 *כתובת מנהרה*\n{0}",
       "tunnel_conflict": "⚠️ {0} כבר פועל.\n\nלעבור אל {1} (הפעולה תעצור את {0}), או להפעיל את שתי המנהרות במקביל?"
     },
     "events": {
@@ -566,7 +580,7 @@
       "success_no_name": "✅ הצימוד הצליח!\n\nהשתמש ב-/help לרשימת הפקודות הזמינות."
     },
     "tunnel": {
-      "notification_url": "🌐 *כתובת מנהרה (Tunnel)*\n{0}",
+      "notification_url": "🌐 *כתובת מנהרה*\n{0}",
       "notification_url_changed": "🔄 *כתובת המנהרה השתנתה*\n{0}"
     },
     "critical": {
@@ -644,7 +658,7 @@
         "detected": "👁 זוהתה תנועה"
       },
       "tunnel": {
-        "connected": "🌐 מנהרה (Tunnel) מחוברת:\n{0}",
+        "connected": "🌐 מנהרת מחוברת:\n{0}",
         "changed": "🔄 כתובת המנהרה השתנתה:\n{0}"
       },
       "video": {

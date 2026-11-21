@@ -3,6 +3,7 @@ package com.overdrive.app.remoteaccess;
 import com.overdrive.app.config.UnifiedConfigManager;
 import com.overdrive.app.notifications.NotificationBus;
 import com.overdrive.app.notifications.NotificationEvent;
+import com.overdrive.app.server.Messages;
 
 import org.json.JSONObject;
 
@@ -81,22 +82,38 @@ public final class RemoteAccessNotifications {
         boolean telegram = allows(settings, data, "telegram");
         if (!push && !telegram) return null;
 
-        String verb = "lock".equals(action) ? "lock" : "unlock";
         String title;
         String body;
         if ("confirmed".equals(outcome)) {
-            title = "Proximity " + ("lock".equals(action) ? "lock" : "unlock") + " confirmed";
-            body = "Driver-door lock state is " + ("lock".equals(action) ? "locked" : "unlocked") + ".";
+            title = Messages.get("lock".equals(action)
+                    ? "notifications.remote_access_lock_confirmed_title"
+                    : "notifications.remote_access_unlock_confirmed_title");
+            body = Messages.get("lock".equals(action)
+                    ? "notifications.remote_access_lock_confirmed_body"
+                    : "notifications.remote_access_unlock_confirmed_body");
         } else if ("unconfirmed".equals(outcome)) {
-            title = "Proximity " + verb + " unconfirmed";
-            body = "The " + verb + " command was accepted; the vehicle state was not confirmed.";
+            title = Messages.get("lock".equals(action)
+                    ? "notifications.remote_access_lock_unconfirmed_title"
+                    : "notifications.remote_access_unlock_unconfirmed_title");
+            body = Messages.get("lock".equals(action)
+                    ? "notifications.remote_access_lock_unconfirmed_body"
+                    : "notifications.remote_access_unlock_unconfirmed_body");
         } else {
-            title = "Proximity " + verb + " failed";
-            body = "The vehicle " + verb + " command failed.";
+            title = Messages.get("lock".equals(action)
+                    ? "notifications.remote_access_lock_failed_title"
+                    : "notifications.remote_access_unlock_failed_title");
+            body = Messages.get("lock".equals(action)
+                    ? "notifications.remote_access_lock_failed_body"
+                    : "notifications.remote_access_unlock_failed_body");
         }
         String name = data.optString("deviceName", "");
         String detail = data.optString("reason", "");
-        if (!name.isEmpty()) body += (isKeyFobSource(source) ? " Key: " : " Phone: ") + name + ".";
+        if (!name.isEmpty()) {
+            body += Messages.get(isKeyFobSource(source)
+                            ? "notifications.remote_access_device_key_suffix"
+                            : "notifications.remote_access_device_phone_suffix",
+                    name);
+        }
         if (!detail.isEmpty()) body += " " + detail;
         NotificationEvent event = new NotificationEvent(CATEGORY,
                 NotificationEvent.Severity.CRITICAL, title, body,
