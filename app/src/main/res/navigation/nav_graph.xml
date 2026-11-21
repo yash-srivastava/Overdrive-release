@@ -116,6 +116,18 @@
             android:defaultValue="/remote-access" />
     </fragment>
 
+    <!-- Notifications (web canonical) -->
+    <fragment
+        android:id="@+id/notificationsFragment"
+        android:name="com.overdrive.app.ui.fragment.WebViewFragment"
+        android:label="@string/nav_page_notifications"
+        tools:layout="@layout/fragment_webview">
+        <argument
+            android:name="page_path"
+            app:argType="string"
+            android:defaultValue="/notifications" />
+    </fragment>
+
     <!-- Projection (native only — cast + live mirror of the driver cluster) -->
     <fragment
         android:id="@+id/projectionFragment"

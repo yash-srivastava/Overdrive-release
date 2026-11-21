@@ -21,6 +21,7 @@ object NavigationRailCatalog {
     const val PARKING = "parking"
     const val VEHICLE = "vehicle"
     const val PROXIMITY = "proximity"
+    const val NOTIFICATIONS = "notifications"
     const val SEAT_POSITIONS = "seat_positions"
     const val PROJECTION = "projection"
     const val TRIPS = "trips"
@@ -43,6 +44,7 @@ object NavigationRailCatalog {
         NavigationRailOption(PARKING, R.string.rail_parking, R.drawable.ic_parking),
         NavigationRailOption(VEHICLE, R.string.rail_vehicle, R.drawable.ic_vehicle_control),
         NavigationRailOption(PROXIMITY, R.string.nav_page_remote_access, R.drawable.ic_overlay_mode_proximity),
+        NavigationRailOption(NOTIFICATIONS, R.string.rail_notifications, R.drawable.ic_notifications),
         NavigationRailOption(SEAT_POSITIONS, R.string.rail_seat_positions, R.drawable.ic_seat_positions),
         NavigationRailOption(PROJECTION, R.string.rail_projection, R.drawable.ic_projection),
         NavigationRailOption(TRIPS, R.string.rail_trips, R.drawable.ic_trips),

@@ -30,6 +30,10 @@
         android:icon="@drawable/ic_overlay_mode_proximity"
         android:title="@string/nav_page_remote_access" />
     <item
+        android:id="@+id/notificationsFragment"
+        android:icon="@drawable/ic_notifications"
+        android:title="@string/rail_notifications" />
+    <item
         android:id="@+id/tripsFragment"
         android:icon="@drawable/ic_trips"
         android:title="@string/rail_trips" />
