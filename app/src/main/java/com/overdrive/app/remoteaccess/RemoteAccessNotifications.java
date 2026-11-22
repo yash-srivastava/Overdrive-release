@@ -114,7 +114,7 @@ public final class RemoteAccessNotifications {
                             : "notifications.remote_access_device_phone_suffix",
                     name);
         }
-        if (!detail.isEmpty()) body += " " + detail;
+        if (!detail.isEmpty()) body += " " + RemoteAccessReasonText.localize(detail);
         NotificationEvent event = new NotificationEvent(CATEGORY,
                 NotificationEvent.Severity.CRITICAL, title, body,
                 "remote-access-" + action, "/remote-access.html", data);

@@ -8,6 +8,7 @@ import com.overdrive.app.automation.value.Label;
 import com.overdrive.app.notifications.NotificationBus;
 import com.overdrive.app.notifications.NotificationEvent;
 import com.overdrive.app.server.Messages;
+import com.overdrive.app.server.Messages;
 
 import java.util.List;
 
@@ -86,7 +87,7 @@ public class NotificationAction extends BaseAction {
         NotificationEvent event = new NotificationEvent(
                 "automation.action",
                 severity,
-                "Automation triggered",
+                Messages.get("notifications.automation_triggered_title"),
                 message,
                 "automation-" + System.currentTimeMillis(),
                 null,

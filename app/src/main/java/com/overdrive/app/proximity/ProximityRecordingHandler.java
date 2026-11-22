@@ -342,7 +342,8 @@ public class ProximityRecordingHandler {
             SimpleDateFormat sdf = new SimpleDateFormat(datePattern, locale);
             String timestamp = sdf.format(new Date());
             
-            String distance = triggerLevel.equals("RED") ? "0-0.5m" : "0-0.8m";
+            String distance = com.overdrive.app.telegram.TelegramMessages.get(
+                    "RED".equals(triggerLevel) ? "proximity.distance_red" : "proximity.distance_yellow");
             String triggerKey = "RED".equals(triggerLevel)
                     ? "proximity.trigger.red" : "proximity.trigger.yellow";
             String triggerLabel = TelegramMessages.get(triggerKey);
