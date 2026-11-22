@@ -174,7 +174,7 @@ public class TcpCommandServer {
 
             case "ping":
                 response.put("status", "ok");
-                response.put("message", "pong");
+                response.put("message", Messages.get("tcp_command.pong"));
                 break;
 
             case "getFrame":
@@ -190,11 +190,11 @@ public class TcpCommandServer {
                         response.put("timestamp", System.currentTimeMillis());
                     } else {
                         response.put("status", "error");
-                        response.put("message", "No frame available for view " + frameViewId);
+                        response.put("message", Messages.get("tcp_command.no_frame_for_view", frameViewId));
                     }
                 } else {
                     response.put("status", "error");
-                    response.put("message", "GPU pipeline not available");
+                    response.put("message", Messages.get("tcp_command.gpu_pipeline_unavailable"));
                 }
                 break;
 
@@ -243,7 +243,7 @@ public class TcpCommandServer {
             case "setRtmpUrl":
                 // VPS streaming removed - this command is now a no-op
                 response.put("status", "ok");
-                response.put("message", "VPS streaming removed - use local HTTP streaming");
+                response.put("message", Messages.get("tcp_command.vps_removed"));
                 break;
 
             case "streamStatus":
@@ -254,7 +254,7 @@ public class TcpCommandServer {
                 response.put("streaming", getStreamingCameras());
                 response.put("publisherCount", streamInfo.get("publisherCount"));
                 response.put("mode", streamInfo.get("mode"));
-                response.put("note", "VPS streaming removed - use local HTTP streaming");
+                response.put("note", Messages.get("tcp_command.vps_removed"));
                 break;
 
             case "setStreamMode":
@@ -263,10 +263,10 @@ public class TcpCommandServer {
                     CameraDaemon.setStreamMode(mode);
                     response.put("status", "ok");
                     response.put("mode", CameraDaemon.getStreamMode());
-                    response.put("message", "Stream mode set to " + mode + " (both use tunnel URLs now)");
+                    response.put("message", Messages.get("tcp_command.stream_mode_set", mode));
                 } else {
                     response.put("status", "error");
-                    response.put("message", "Invalid mode. Use 'private' or 'public'");
+                    response.put("message", Messages.get("tcp_command.invalid_stream_mode"));
                 }
                 break;
 
@@ -284,7 +284,7 @@ public class TcpCommandServer {
                 boolean accOn = com.overdrive.app.monitor.AccMonitor.isAccOn();
                 if (!com.overdrive.app.config.UnifiedConfigManager.setSurveillanceEnabled(true)) {
                     response.put("status", "error");
-                    response.put("message", "Failed to save the surveillance setting");
+                    response.put("message", Messages.get("errors.surveillance_setting_save_failed"));
                     break;
                 }
                 if (!accOn) {
@@ -307,7 +307,7 @@ public class TcpCommandServer {
                 boolean accOn = com.overdrive.app.monitor.AccMonitor.isAccOn();
                 if (!com.overdrive.app.config.UnifiedConfigManager.setSurveillanceEnabled(false)) {
                     response.put("status", "error");
-                    response.put("message", "Failed to save the surveillance setting");
+                    response.put("message", Messages.get("errors.surveillance_setting_save_failed"));
                     break;
                 }
                 if (!accOn) {
@@ -345,7 +345,7 @@ public class TcpCommandServer {
                     response.put("mode", CameraDaemon.getRecordingMode());
                 } else {
                     response.put("status", "error");
-                    response.put("message", "No mode specified");
+                    response.put("message", Messages.get("tcp_command.no_mode_specified"));
                 }
                 break;
             
@@ -364,10 +364,10 @@ public class TcpCommandServer {
                     HttpServer.setRecordingBitrate(bitrateValue);
                     response.put("status", "ok");
                     response.put("bitrate", bitrateValue);
-                    response.put("message", "Bitrate set to " + bitrateValue + " - applied immediately");
+                    response.put("message", Messages.get("tcp_command.bitrate_set", bitrateValue));
                 } else {
                     response.put("status", "error");
-                    response.put("message", "Invalid bitrate. Use LOW, MEDIUM, or HIGH");
+                    response.put("message", Messages.get("tcp_command.invalid_bitrate"));
                 }
                 break;
 
@@ -379,10 +379,10 @@ public class TcpCommandServer {
                     HttpServer.setRecordingCodec(codecValue);
                     response.put("status", "ok");
                     response.put("codec", codecValue);
-                    response.put("message", "Codec set to " + codecValue + " - restart recording to apply");
+                    response.put("message", Messages.get("tcp_command.codec_set", codecValue));
                 } else {
                     response.put("status", "error");
-                    response.put("message", "Invalid codec. Use H264 or H265");
+                    response.put("message", Messages.get("tcp_command.invalid_codec"));
                 }
                 break;
 
@@ -403,15 +403,15 @@ public class TcpCommandServer {
                         response.put("status", "ok");
                         response.put("storageType", recStorageTypeValue);
                         response.put("path", storageManager.getRecordingsPath());
-                        response.put("message", "Recordings storage set to " + recStorageTypeValue);
+                        response.put("message", Messages.get("tcp_command.recordings_storage_set", recStorageTypeValue));
                         CameraDaemon.log("Recordings storage type set to " + recStorageTypeValue + " via TCP IPC");
                     } else {
                         response.put("status", "error");
-                        response.put("message", recType.name() + " not available");
+                        response.put("message", Messages.get("tcp_command.storage_type_unavailable", recType.name()));
                     }
                 } else {
                     response.put("status", "error");
-                    response.put("message", "Invalid storage type. Use INTERNAL, SD_CARD, or USB");
+                    response.put("message", Messages.get("tcp_command.invalid_storage_type"));
                 }
                 break;
 
@@ -424,13 +424,14 @@ public class TcpCommandServer {
                     recLimitStorage.setRecordingsLimitMb(recLimitMb);
                     response.put("status", "ok");
                     response.put("limitMb", recLimitStorage.getRecordingsLimitMb());
-                    response.put("message", "Recordings limit set to " + recLimitStorage.getRecordingsLimitMb() + " MB");
+                    response.put("message", Messages.get("tcp_command.recordings_limit_set",
+                            recLimitStorage.getRecordingsLimitMb()));
                     CameraDaemon.log("Recordings limit set to " + recLimitStorage.getRecordingsLimitMb() + " MB via TCP IPC");
                     // Trigger async cleanup
                     new Thread(() -> recLimitStorage.ensureRecordingsSpace(0), "RecLimitCleanup").start();
                 } else {
                     response.put("status", "error");
-                    response.put("message", "Invalid limit value");
+                    response.put("message", Messages.get("tcp_command.invalid_limit_value"));
                 }
                 break;
 
@@ -483,7 +484,7 @@ public class TcpCommandServer {
                 com.overdrive.app.auth.AuthManager.invalidateCache();
                 CameraDaemon.log("Auth cache invalidated via IPC");
                 response.put("status", "ok");
-                response.put("message", "Auth cache invalidated");
+                response.put("message", Messages.get("tcp_command.auth_cache_invalidated"));
                 break;
 
             case "telenavUse":
@@ -498,7 +499,7 @@ public class TcpCommandServer {
 
             default:
                 response.put("status", "error");
-                response.put("message", "Unknown command: " + action);
+                response.put("message", Messages.get("tcp_command.unknown_command", action));
         }
         
         return response;

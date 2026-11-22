@@ -537,7 +537,8 @@ public final class GenAiInsights {
                     "genai.insight",
                     NotificationEvent.Severity.INFO,
                     item.optString(
-                            "title", "OverDrive insight"),
+                            "title", com.overdrive.app.server.Messages.get(
+                                    "notifications.genai_insight_default_title")),
                     body,
                     "genai-insight-"
                             + item.optString("source", "manual"),

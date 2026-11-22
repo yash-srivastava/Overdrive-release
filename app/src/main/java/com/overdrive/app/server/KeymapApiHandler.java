@@ -1581,7 +1581,7 @@ public final class KeymapApiHandler {
         if (!GROUPS_IN_FLIGHT.add(id)) {
             logger.info("Keymap action group " + id + " already running — ignoring repeat press");
             response.put("success", true);
-            response.put("message", "Already running");
+            response.put("message", Messages.get("errors.keymap_already_running"));
             return response;
         }
         Thread t = new Thread(() -> {

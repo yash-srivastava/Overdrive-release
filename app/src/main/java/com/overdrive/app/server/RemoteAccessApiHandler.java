@@ -2616,22 +2616,33 @@ public final class RemoteAccessApiHandler {
 
     private static String safeZoneMessage(String reason) {
         switch (reason) {
-            case "inside_safe_zone": return "Automatic action paused inside a selected safe zone";
-            case "safe_zone_boundary": return "Automatic action paused near a safe-zone boundary";
-            case "safe_zone_missing": return "A selected safe zone was removed; review the safe-zone selection";
-            case "safe_zone_invalid": return "Selected safe-zone geometry is unavailable or invalid";
-            case "no_safe_zones_selected": return "Choose a safe zone before restricting automatic actions";
-            case "gps_fix_stale": return withoutParkedPosition("Automatic action paused because the GPS fix is stale");
-            case "gps_accuracy_poor": return withoutParkedPosition("Automatic action paused because GPS accuracy is insufficient");
-            case "disabled": return "Proximity is disabled";
-            default: return withoutParkedPosition("Automatic action paused until a fresh, reliable GPS position is available");
+            case "inside_safe_zone":
+                return Messages.get("notifications.proximity_safe_zone.inside");
+            case "safe_zone_boundary":
+                return Messages.get("notifications.proximity_safe_zone.boundary");
+            case "safe_zone_missing":
+                return Messages.get("notifications.proximity_safe_zone.missing");
+            case "safe_zone_invalid":
+                return Messages.get("notifications.proximity_safe_zone.invalid");
+            case "no_safe_zones_selected":
+                return Messages.get("notifications.proximity_safe_zone.none_selected");
+            case "gps_fix_stale":
+                return withoutParkedPosition(Messages.get("notifications.proximity_safe_zone.gps_fix_stale"));
+            case "gps_accuracy_poor":
+                return withoutParkedPosition(Messages.get("notifications.proximity_safe_zone.gps_accuracy_poor"));
+            case "disabled":
+                return Messages.get("notifications.proximity_safe_zone.disabled");
+            default:
+                return withoutParkedPosition(Messages.get("notifications.proximity_safe_zone.gps_unavailable"));
         }
     }
 
     private static String withoutParkedPosition(String message) {
         try {
-            return message + "; no parked position ("
-                    + com.overdrive.app.monitor.ParkedPosition.get().unavailableReason() + ")";
+            String detail = com.overdrive.app.monitor.ParkedPositionMessages.localize(
+                    com.overdrive.app.monitor.ParkedPosition.get().unavailableReason());
+            return Messages.get("notifications.proximity_safe_zone.no_parked_position_suffix",
+                    message, detail);
         } catch (Throwable unavailable) {
             return message;
         }

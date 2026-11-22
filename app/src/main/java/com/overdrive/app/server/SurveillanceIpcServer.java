@@ -489,7 +489,7 @@ public class SurveillanceIpcServer implements Runnable {
                     if (!com.overdrive.app.config.UnifiedConfigManager.setSurveillanceEnabled(true)) {
                         logger.warn("Failed to persist surveillanceEnabled=true via Telegram IPC");
                         response.put("success", false);
-                        response.put("error", "Failed to save the surveillance setting");
+                        response.put("error", Messages.get("errors.surveillance_setting_save_failed"));
                         break;
                     }
                     if (!accOn) {
@@ -527,7 +527,7 @@ public class SurveillanceIpcServer implements Runnable {
                     if (!com.overdrive.app.config.UnifiedConfigManager.setSurveillanceEnabled(false)) {
                         logger.warn("Failed to persist surveillanceEnabled=false via Telegram IPC");
                         response.put("success", false);
-                        response.put("error", "Failed to save the surveillance setting");
+                        response.put("error", Messages.get("errors.surveillance_setting_save_failed"));
                         break;
                     }
                     if (!accOn) {
@@ -540,7 +540,7 @@ public class SurveillanceIpcServer implements Runnable {
                     response.put("success", true);
                     response.put("enabled", false);
                     response.put("deferred", accOn);
-                    response.put("message", "Surveillance stopped");
+                    response.put("message", Messages.get("ipc.surveillance_stopped"));
                     break;
                 }
                     
@@ -552,13 +552,13 @@ public class SurveillanceIpcServer implements Runnable {
                     String title;
                     String body;
                     if (com.overdrive.app.power.PowerNotice.KIND_LOW_12V_STOP.equals(kind)) {
-                        title = "Sentry paused: 12V battery low";
-                        body = "Sentry stopped to protect the 12V battery. It resumes when the battery recovers.";
+                        title = Messages.get("notifications.power_notice_low_12v_title");
+                        body = Messages.get("notifications.power_notice_low_12v_body");
                     } else if (com.overdrive.app.power.PowerNotice.KIND_SOC_CUTOFF.equals(kind)) {
-                        title = "Sentry stopped: low battery";
-                        body = "Overdrive stopped to protect the drive battery"
-                                + (detail.isEmpty() ? "." : " — " + detail + ".")
-                                + " It stays off until the car is next switched on.";
+                        title = Messages.get("notifications.power_notice_soc_title");
+                        body = detail.isEmpty()
+                                ? Messages.get("notifications.power_notice_soc_body")
+                                : Messages.get("notifications.power_notice_soc_body_with_detail", detail);
                     } else {
                         response.put("success", false);
                         response.put("error", "unknown notice kind");
@@ -603,7 +603,7 @@ public class SurveillanceIpcServer implements Runnable {
                     if (!com.overdrive.app.config.UnifiedConfigManager.setSurveillanceEnabled(true)) {
                         logger.warn("Failed to persist surveillanceEnabled=true via app-UI IPC");
                         response.put("success", false);
-                        response.put("error", "Failed to save the surveillance setting");
+                        response.put("error", Messages.get("errors.surveillance_setting_save_failed"));
                         break;
                     }
                     // OEM resolver: survSuppressed depends on master toggle.
@@ -624,7 +624,7 @@ public class SurveillanceIpcServer implements Runnable {
                     if (!com.overdrive.app.config.UnifiedConfigManager.setSurveillanceEnabled(false)) {
                         logger.warn("Failed to persist surveillanceEnabled=false via app-UI IPC");
                         response.put("success", false);
-                        response.put("error", "Failed to save the surveillance setting");
+                        response.put("error", Messages.get("errors.surveillance_setting_save_failed"));
                         break;
                     }
                     if (!accOn) {
@@ -1197,7 +1197,7 @@ public class SurveillanceIpcServer implements Runnable {
                 // acknowledging a change that won't survive.
                 if (!com.overdrive.app.config.UnifiedConfigManager.setSurveillanceEnabled(enabled)) {
                     logger.warn("Failed to persist surveillanceEnabled=" + enabled + " via IPC");
-                    return "Failed to save the surveillance setting";
+                    return Messages.get("errors.surveillance_setting_save_failed");
                 }
                 if (enabled) {
                     // RACE CONDITION FIX: Only enable surveillance if ACC is actually OFF.

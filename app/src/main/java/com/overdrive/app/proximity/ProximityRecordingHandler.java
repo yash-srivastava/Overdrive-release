@@ -169,8 +169,12 @@ public class ProximityRecordingHandler {
                             red
                                     ? com.overdrive.app.notifications.NotificationEvent.Severity.CRITICAL
                                     : com.overdrive.app.notifications.NotificationEvent.Severity.WARN,
-                            red ? "Object very close" : "Object nearby",
-                            red ? "Within 0.5 m" : "Within 0.8 m",
+                            com.overdrive.app.server.Messages.get(red
+                                    ? "notifications.proximity_push_title_red"
+                                    : "notifications.proximity_push_title_yellow"),
+                            com.overdrive.app.server.Messages.get(red
+                                    ? "notifications.proximity_push_body_red"
+                                    : "notifications.proximity_push_body_yellow"),
                             "proximity-" + triggerLevel,
                             url,
                             data));
@@ -266,8 +270,12 @@ public class ProximityRecordingHandler {
                             red
                                     ? com.overdrive.app.notifications.NotificationEvent.Severity.CRITICAL
                                     : com.overdrive.app.notifications.NotificationEvent.Severity.WARN,
-                            red ? "Object very close" : "Object nearby",
-                            red ? "Within 0.5 m" : "Within 0.8 m",
+                            com.overdrive.app.server.Messages.get(red
+                                    ? "notifications.proximity_push_title_red"
+                                    : "notifications.proximity_push_title_yellow"),
+                            com.overdrive.app.server.Messages.get(red
+                                    ? "notifications.proximity_push_body_red"
+                                    : "notifications.proximity_push_body_yellow"),
                             activeNotificationTag != null
                                     ? activeNotificationTag : "proximity-" + triggerLevel,
                             url,

@@ -1059,8 +1059,8 @@ object HotspotManager {
                 com.overdrive.app.notifications.NotificationEvent(
                     "network.hotspot.limit",
                     com.overdrive.app.notifications.NotificationEvent.Severity.WARN,
-                    "Hotspot data limit reached",
-                    "The hotspot used its ${capMb} MB limit and has been turned off.",
+                    com.overdrive.app.server.Messages.get("notifications.network_hotspot_limit_title"),
+                    com.overdrive.app.server.Messages.get("notifications.network_hotspot_limit_body", capMb),
                     "hotspot-limit",
                     "/network.html",
                     data

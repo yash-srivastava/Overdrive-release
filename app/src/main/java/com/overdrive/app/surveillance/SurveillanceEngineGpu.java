@@ -11580,8 +11580,8 @@ public class SurveillanceEngineGpu {
                         new com.overdrive.app.notifications.NotificationEvent(
                                 "surveillance.motion.notice",
                                 com.overdrive.app.notifications.NotificationEvent.Severity.INFO,
-                                "Motion cleared",
-                                "No event recorded",
+                                com.overdrive.app.server.Messages.get("notifications.motion_cleared_title"),
+                                com.overdrive.app.server.Messages.get("notifications.motion_cleared_body"),
                                 notificationTagFor(name),     // SAME tag → replaces the start banner
                                 "/events.html?filter=sentry",
                                 d));

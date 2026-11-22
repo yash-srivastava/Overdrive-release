@@ -5615,7 +5615,8 @@ public class StorageManager {
             writeFaultNotifiedAtMs[i] = now;
         }
         boolean sd = type == StorageType.SD_CARD;
-        String card = sd ? "SD card" : "USB drive";
+        String card = com.overdrive.app.server.Messages.get(sd
+                ? "notifications.storage_card_sd" : "notifications.storage_card_usb");
         try {
             JSONObject data = new JSONObject()
                 .put("volume", type.name())
@@ -5626,10 +5627,8 @@ public class StorageManager {
                 new com.overdrive.app.notifications.NotificationEvent(
                     "storage.write.error",
                     com.overdrive.app.notifications.NotificationEvent.Severity.WARN,
-                    card + " error",
-                    "The " + card + " is refusing to save files (it may be failing or corrupted). "
-                        + "New recordings and trips meant for it are being saved to internal "
-                        + "storage until it works again — check or replace it.",
+                    com.overdrive.app.server.Messages.get("notifications.storage_write_error_title", card),
+                    com.overdrive.app.server.Messages.get("notifications.storage_write_error_body", card),
                     "storage-write-fault-" + (sd ? "sd" : "usb"),
                     "/storage.html",
                     data));

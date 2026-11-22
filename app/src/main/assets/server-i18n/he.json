@@ -230,7 +230,9 @@
     "bydcloud_unsupported_test_action": "פעולת בדיקת ענן לא נתמכת",
     "oem_native_dvr_not_installed": "החבילה אינה מותקנת",
     "oem_native_dvr_disable_failed_with_detail": "ההשבתה לא נכנסה לתוקף: {0}",
-    "oem_native_dvr_enable_failed_with_detail": "ההפעלה לא נכנסה לתוקף: {0}"
+    "oem_native_dvr_enable_failed_with_detail": "ההפעלה לא נכנסה לתוקף: {0}",
+    "surveillance_setting_save_failed": "שמירת הגדרת המעקב נכשלה",
+    "keymap_already_running": "כבר פועל"
   },
   "notifications": {
     "charging_started": "הטעינה החלה",
@@ -295,7 +297,40 @@
     "camera_rear": "אחורית",
     "camera_left": "שמאלית",
     "test_title": "התראת בדיקה",
-    "test_body": "אם ההודעה הזו מוצגת, שליחת התראות Push עובדת."
+    "test_body": "אם ההודעה הזו מוצגת, שליחת התראות Push עובדת.",
+    "automation_triggered_title": "אוטומציה הופעלה",
+    "storage_card_sd": "כרטיס SD",
+    "storage_card_usb": "כונן USB",
+    "storage_write_error_title": "שגיאת {0}",
+    "storage_write_error_body": "ה-{0} מסרב לשמור קבצים (ייתכן שהוא תקול או פגום). הקלטות ונסיעות שמיועדים אליו נשמרים באחסון הפנימי עד שיחזור לעבוד. בדוק או החלף אותו.",
+    "network_hotspot_limit_title": "הגעת למגבלת הנתונים של הנקודה החמה",
+    "network_hotspot_limit_body": "הנקודה החמה נכבית לאחר שנצרך מכסת {0} MB.",
+    "proximity_push_title_red": "אובייקט קרוב מאוד",
+    "proximity_push_title_yellow": "אובייקט בקרבה",
+    "proximity_push_body_red": "בטווח 0.5 מ'",
+    "proximity_push_body_yellow": "בטווח 0.8 מ'",
+    "impact_title": "ייתכן שחבטה בזמן חניה",
+    "impact_body": "הרכב זיהה מכה או רעידה",
+    "motion_cleared_title": "התנועה הסתיימה",
+    "motion_cleared_body": "לא נרשם אירוע",
+    "genai_insight_default_title": "תובנת OverDrive",
+    "power_notice_low_12v_title": "שומר (Sentry) מושהה: סוללת 12V חלשה",
+    "power_notice_low_12v_body": "השומר נכבה כדי להגן על סוללת 12V. הוא יחזור כשהסוללה תתאושש.",
+    "power_notice_soc_title": "השומר נכבה: סוללה חלשה",
+    "power_notice_soc_body": "OverDrive נכבה כדי להגן על סוללת הנעה. הוא יישאר כבוי עד ההנעה הבאה של הרכב.",
+    "power_notice_soc_body_with_detail": "OverDrive נכבה כדי להגן על סוללת הנעה: {0}. הוא יישאר כבוי עד ההנעה הבאה של הרכב.",
+    "proximity_safe_zone": {
+      "inside": "הפעולה האוטומטית מושהית בתוך אזור בטוח שנבחר",
+      "boundary": "הפעולה האוטומטית מושהית ליד גבול של אזור בטוח",
+      "missing": "אזור בטוח שנבחר הוסר; בדוק את בחירת האזורים הבטוחים",
+      "invalid": "גבולות האזור הבטוח שנבחר לא זמינים או לא תקינים",
+      "none_selected": "בחר אזור בטוח לפני הגבלת פעולות אוטומטיות",
+      "gps_fix_stale": "הפעולה האוטומטית מושהית כי מיקום ה-GPS לא עדכני",
+      "gps_accuracy_poor": "הפעולה האוטומטית מושהית כי דיוק ה-GPS לא מספיק",
+      "gps_unavailable": "הפעולה האוטומטית מושהית עד שיהיה מיקום GPS עדכני ואמין",
+      "disabled": "הקרבה מושבתת",
+      "no_parked_position_suffix": "{0}; אין מיקום חניה ({1})"
+    }
   },
   "parking": {
     "notify": {
@@ -1613,6 +1648,38 @@
     "routine_error_decision_failed": "לא ניתן היה להחיל את ההחלטה על השגרה.",
     "routine_error_routine_persist_failed": "לא ניתן היה לשמור את ההחלטה על השגרה.",
     "routine_error_invalid_automation": "לא ניתן היה לבנות אוטומציית שגרה תקינה.",
-    "routine_error_automation_persist_failed": "לא ניתן היה לשמור את אוטומציית השגרה."
+    "routine_error_automation_persist_failed": "לא ניתן היה לשמור את אוטומציית השגרה.",
+    "incident_default_title": "דוח ראיות אירוע OverDrive"
+  },
+  "parked_position": {
+    "unavailable_no_gps": "לא נרשם אות GPS מאז הפעלת OverDrive",
+    "unavailable_no_odometer_before_fix": "אין קריאת מונה קילומטרים לפני תיקון ה-GPS האחרון",
+    "unavailable_odometer_unavailable": "מונה קילומטרים לא זמין",
+    "unavailable_odometer_lower": "מונה הקילומטרים נמוך יותר מאשר בתיקון ה-GPS האחרון",
+    "unavailable_driven_since_fix": "הרכב נסע {0} ק\"מ מאז תיקון ה-GPS האחרון"
+  },
+  "ipc": {
+    "surveillance_stopped": "המעקב (Surveillance) נעצר"
+  },
+  "tcp_command": {
+    "pong": "pong",
+    "no_frame_for_view": "אין פריים זמין עבור תצוגה {0}",
+    "gpu_pipeline_unavailable": "צינור ה-GPU אינו זמין",
+    "vps_removed": "הזרמת VPS הוסרה, השתמש בזרמת HTTP מקומית",
+    "stream_mode_set": "מצב הזרמה הוגדר ל-{0} (שני המצבים משתמשים בכתובות מנהרה)",
+    "invalid_stream_mode": "מצב לא תקין. השתמש ב-private או ב-public",
+    "surveillance_setting_save_failed": "שמירת הגדרת המעקב נכשלה",
+    "no_mode_specified": "לא צוין מצב",
+    "bitrate_set": "קצב סיביות הוגדר ל-{0}, הוחל מיד",
+    "invalid_bitrate": "קצב סיביות לא תקין. השתמש ב-LOW, MEDIUM או HIGH",
+    "codec_set": "קודק הוגדר ל-{0}, הפעל מחדש הקלטה כדי להחיל",
+    "invalid_codec": "קודק לא תקין. השתמש ב-H264 או H265",
+    "recordings_storage_set": "אחסון הקלטות הוגדר ל-{0}",
+    "storage_type_unavailable": "{0} אינו זמין",
+    "invalid_storage_type": "סוג אחסון לא תקין. השתמש ב-INTERNAL, SD_CARD או USB",
+    "recordings_limit_set": "מגבלת הקלטות הוגדרה ל-{0} MB",
+    "invalid_limit_value": "ערך מגבלה לא תקין",
+    "auth_cache_invalidated": "מטמון האימות אופס",
+    "unknown_command": "פקודה לא מוכרת: {0}"
   }
 }

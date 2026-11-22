@@ -224,7 +224,9 @@
     "bydcloud_unsupported_test_action": "Unsupported cloud test action",
     "oem_native_dvr_not_installed": "package not installed",
     "oem_native_dvr_disable_failed_with_detail": "disable did not take effect: {0}",
-    "oem_native_dvr_enable_failed_with_detail": "enable did not take effect: {0}"
+    "oem_native_dvr_enable_failed_with_detail": "enable did not take effect: {0}",
+    "surveillance_setting_save_failed": "Failed to save the surveillance setting",
+    "keymap_already_running": "Already running"
   },
   "notifications": {
     "charging_started": "Charging started",
@@ -289,7 +291,40 @@
     "camera_rear": "rear",
     "camera_left": "left",
     "test_title": "Test notification",
-    "test_body": "If you're seeing this, push delivery works."
+    "test_body": "If you're seeing this, push delivery works.",
+    "automation_triggered_title": "Automation triggered",
+    "storage_card_sd": "SD card",
+    "storage_card_usb": "USB drive",
+    "storage_write_error_title": "{0} error",
+    "storage_write_error_body": "The {0} is refusing to save files (it may be failing or corrupted). New recordings and trips meant for it are being saved to internal storage until it works again. Check or replace it.",
+    "network_hotspot_limit_title": "Hotspot data limit reached",
+    "network_hotspot_limit_body": "The hotspot used its {0} MB limit and has been turned off.",
+    "proximity_push_title_red": "Object very close",
+    "proximity_push_title_yellow": "Object nearby",
+    "proximity_push_body_red": "Within 0.5 m",
+    "proximity_push_body_yellow": "Within 0.8 m",
+    "impact_title": "Possible impact while parked",
+    "impact_body": "The car registered a knock or bump",
+    "motion_cleared_title": "Motion cleared",
+    "motion_cleared_body": "No event recorded",
+    "genai_insight_default_title": "OverDrive insight",
+    "power_notice_low_12v_title": "Sentry paused: 12V battery low",
+    "power_notice_low_12v_body": "Sentry stopped to protect the 12V battery. It resumes when the battery recovers.",
+    "power_notice_soc_title": "Sentry stopped: low battery",
+    "power_notice_soc_body": "Overdrive stopped to protect the drive battery. It stays off until the car is next switched on.",
+    "power_notice_soc_body_with_detail": "Overdrive stopped to protect the drive battery: {0}. It stays off until the car is next switched on.",
+    "proximity_safe_zone": {
+      "inside": "Automatic action paused inside a selected safe zone",
+      "boundary": "Automatic action paused near a safe-zone boundary",
+      "missing": "A selected safe zone was removed; review the safe-zone selection",
+      "invalid": "Selected safe-zone geometry is unavailable or invalid",
+      "none_selected": "Choose a safe zone before restricting automatic actions",
+      "gps_fix_stale": "Automatic action paused because the GPS fix is stale",
+      "gps_accuracy_poor": "Automatic action paused because GPS accuracy is insufficient",
+      "gps_unavailable": "Automatic action paused until a fresh, reliable GPS position is available",
+      "disabled": "Proximity is disabled",
+      "no_parked_position_suffix": "{0}; no parked position ({1})"
+    }
   },
   "parking": {
     "notify": {
@@ -1603,6 +1638,38 @@
     "routine_error_decision_failed": "Could not apply the routine decision.",
     "routine_error_routine_persist_failed": "Could not save the routine decision.",
     "routine_error_invalid_automation": "Could not build a valid routine automation.",
-    "routine_error_automation_persist_failed": "The routine automation could not be saved."
+    "routine_error_automation_persist_failed": "The routine automation could not be saved.",
+    "incident_default_title": "OverDrive Incident Evidence Report"
+  },
+  "parked_position": {
+    "unavailable_no_gps": "no GPS fix recorded since OverDrive started",
+    "unavailable_no_odometer_before_fix": "no odometer reading before the last GPS fix",
+    "unavailable_odometer_unavailable": "odometer unavailable",
+    "unavailable_odometer_lower": "odometer reads lower than at the last GPS fix",
+    "unavailable_driven_since_fix": "car has driven {0} km since its last GPS fix"
+  },
+  "ipc": {
+    "surveillance_stopped": "Surveillance stopped"
+  },
+  "tcp_command": {
+    "pong": "pong",
+    "no_frame_for_view": "No frame available for view {0}",
+    "gpu_pipeline_unavailable": "GPU pipeline not available",
+    "vps_removed": "VPS streaming removed - use local HTTP streaming",
+    "stream_mode_set": "Stream mode set to {0} (both use tunnel URLs now)",
+    "invalid_stream_mode": "Invalid mode. Use 'private' or 'public'",
+    "surveillance_setting_save_failed": "Failed to save the surveillance setting",
+    "no_mode_specified": "No mode specified",
+    "bitrate_set": "Bitrate set to {0} - applied immediately",
+    "invalid_bitrate": "Invalid bitrate. Use LOW, MEDIUM, or HIGH",
+    "codec_set": "Codec set to {0} - restart recording to apply",
+    "invalid_codec": "Invalid codec. Use H264 or H265",
+    "recordings_storage_set": "Recordings storage set to {0}",
+    "storage_type_unavailable": "{0} not available",
+    "invalid_storage_type": "Invalid storage type. Use INTERNAL, SD_CARD, or USB",
+    "recordings_limit_set": "Recordings limit set to {0} MB",
+    "invalid_limit_value": "Invalid limit value",
+    "auth_cache_invalidated": "Auth cache invalidated",
+    "unknown_command": "Unknown command: {0}"
   }
 }
