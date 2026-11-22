@@ -4494,9 +4494,22 @@ public class SurveillanceEngineGpu {
 
                     // With AI available, only a current-sequence person or
                     // new/moved non-baseline object may authorize recording.
-                    // This is final: motion-only timeout/proximity/salience
-                    // overrides cannot revive a static or unclassified scene.
-                    if (aiAvailable && !aiRecentlyConfirmed) {
+                    // This is final for the timeout/proximity overrides: they
+                    // cannot revive a static or unclassified scene.
+                    //
+                    // The ONE exception is the user's explicit "Record on strong
+                    // motion" opt-in (motionSalienceEnabled, default OFF). That
+                    // toggle promises a recording "even when the AI can't identify
+                    // it" (someone walking up in poor light, a large vehicle pulling
+                    // in close), but with YOLO loaded this gate re-suppressed every
+                    // such event, so the toggle could never record anything. It is
+                    // honoured here only through salienceExempts, which already
+                    // carries every salience brake: the live master flag, the 5s
+                    // latch TTL, the 15s SALIENCE_MIN_GAP_MS cooldown, the
+                    // brightness (I3) and deterrent guards, and the salient
+                    // quadrant's own live coherence. With the toggle off,
+                    // salienceExempts is always false and this gate is unchanged.
+                    if (aiAvailable && !aiRecentlyConfirmed && !salienceExempts) {
                         shouldSuppress = true;
                     }
                     
