@@ -1902,6 +1902,11 @@ public class HardwareEventRecorderGpu {
             cpuInput = false;
             initOnce();
         } catch (Exception hevcFailure) {
+            // Interruption is cancellation, not a codec failure. Never trigger the DiLink 5 fallback.
+            if (hevcFailure instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+                throw (InterruptedException) hevcFailure;
+            }
             if (!shouldRetryInitWithAvc()) throw hevcFailure;
             logger.warn("DI5 HEVC encoder init failed synchronously ("
                 + hevcFailure.getMessage() + ") — retrying THIS SESSION with "
@@ -2080,7 +2085,9 @@ public class HardwareEventRecorderGpu {
         try {
             createThread.join(10000);
         } catch (InterruptedException e) {
-            logger.warn("Encoder create interrupted");
+            Thread.currentThread().interrupt();
+            createThread.interrupt();
+            throw e;
         }
         if (createThread.isAlive()) {
             logger.error("MediaCodec.createEncoderByType TIMEOUT - hardware encoder stuck");
@@ -2134,7 +2141,9 @@ public class HardwareEventRecorderGpu {
         try {
             configThread.join(10000);
         } catch (InterruptedException e) {
-            logger.warn("Encoder config interrupted");
+            Thread.currentThread().interrupt();
+            configThread.interrupt();
+            throw e;
         }
         if (!configDone[0]) {
             if (configThread.isAlive()) {
@@ -2174,7 +2183,9 @@ public class HardwareEventRecorderGpu {
             try {
                 surfaceThread.join(10000);
             } catch (InterruptedException e) {
-                logger.warn("Surface create interrupted");
+                Thread.currentThread().interrupt();
+                surfaceThread.interrupt();
+                throw e;
             }
             if (surfaceResult[0] == null) {
                 if (surfaceThread.isAlive()) {
@@ -2210,7 +2221,9 @@ public class HardwareEventRecorderGpu {
         try {
             startThread.join(10000); // 10 second timeout
         } catch (InterruptedException e) {
-            logger.warn("Encoder start interrupted");
+            Thread.currentThread().interrupt();
+            startThread.interrupt();
+            throw e;
         }
         
         if (!startDone[0]) {
