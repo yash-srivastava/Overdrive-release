@@ -421,6 +421,97 @@ public final class BydFeatureIds {
     public static final int AC_CTRL_SOURCE_SET =
             resolveOrFallback("AC_CTRL_SOURCE_SET", 0x1DE00015);
 
+    // ── Electric air vents (front) ───────────────────────────────────────
+    // Per-side vent modes and per-vent direction, as used by the OEM AirConditioning app
+    // (AirConditioningFrontModel) and the OEM voice assistant. No numeric fallbacks: the
+    // framework assigns these per platform (CAN-FD trims get 0x4BB0xxxx/0x4EF0xxxx ids, other
+    // trims small table indices), so an id this framework does not publish is left
+    // UNRESOLVED and the vent API reports unsupported. See AcVentControl.
+    /** 2/3/4 = the car has electric (motorised) front vents. */
+    public static final int AC_FRONT_ELECTRIC_TUYERE_SELF_STUDY_MARKER =
+            resolveOrFallback("Ac.AC_FRONT_ELECTRIC_TUYERE_SELF_STUDY_MARKER", UNRESOLVED_ID);
+    /** Number of airflow (wind) modes the car offers: 5 or 7. */
+    public static final int AC_WIND_MODE_NUM =
+            resolveOrFallback("Ac.AC_WIND_MODE_NUM", UNRESOLVED_ID);
+
+    public static final int AC_MAIN_DRIVE_FREE_WIND_BUTTON_STATUS =
+            resolveOrFallback("Ac.AC_MAIN_DRIVE_FREE_WIND_BUTTON_STATUS", UNRESOLVED_ID);
+    public static final int AC_MAIN_DRIVE_FREE_WIND_BUTTON_STATUS_SET =
+            resolveOrFallback("Ac.AC_MAIN_DRIVE_FREE_WIND_BUTTON_STATUS_SET", UNRESOLVED_ID);
+    public static final int AC_MAIN_DRIVE_BLOWS_MODE_SIGNAL_TO_PEOPLE =
+            resolveOrFallback("Ac.AC_MAIN_DRIVE_BLOWS_MODE_SIGNAL_TO_PEOPLE", UNRESOLVED_ID);
+    public static final int AC_MAIN_DRIVE_BLOWS_MODE_SIGNAL_TO_PEOPLE_SET =
+            resolveOrFallback("Ac.AC_MAIN_DRIVE_BLOWS_MODE_SIGNAL_TO_PEOPLE_SET", UNRESOLVED_ID);
+    public static final int AC_MAIN_DRIVE_SIDE_TO_AVOID_BLOWING_MODE_SIGNAL_TO_PEOPLE =
+            resolveOrFallback("Ac.AC_MAIN_DRIVE_SIDE_TO_AVOID_BLOWING_MODE_SIGNAL_TO_PEOPLE", UNRESOLVED_ID);
+    public static final int AC_MAIN_DRIVE_SIDE_TO_AVOID_BLOWING_MODE_SIGNAL_TO_PEOPLE_SET =
+            resolveOrFallback("Ac.AC_MAIN_DRIVE_SIDE_TO_AVOID_BLOWING_MODE_SIGNAL_TO_PEOPLE_SET", UNRESOLVED_ID);
+    public static final int AC_MAIN_DRIVE_LEFT_AND_RIGHT_SWEEP_SIGNAL =
+            resolveOrFallback("Ac.AC_MAIN_DRIVE_LEFT_AND_RIGHT_SWEEP_SIGNAL", UNRESOLVED_ID);
+    public static final int AC_MAIN_DRIVE_LEFT_AND_RIGHT_SWEEP_SIGNAL_SET =
+            resolveOrFallback("Ac.AC_MAIN_DRIVE_LEFT_AND_RIGHT_SWEEP_SIGNAL_SET", UNRESOLVED_ID);
+    public static final int AC_MAIN_DRIVE_TUYERE_CLOSING_SIGNAL =
+            resolveOrFallback("Ac.AC_MAIN_DRIVE_TUYERE_CLOSING_SIGNAL", UNRESOLVED_ID);
+    public static final int AC_MAIN_DRIVE_TUYERE_CLOSING_SIGNAL_SET =
+            resolveOrFallback("Ac.AC_MAIN_DRIVE_TUYERE_CLOSING_SIGNAL_SET", UNRESOLVED_ID);
+
+    public static final int AC_PASSENGER_FREE_WIND_BUTTON_STATUS =
+            resolveOrFallback("Ac.AC_PASSENGER_FREE_WIND_BUTTON_STATUS", UNRESOLVED_ID);
+    public static final int AC_PASSENGER_FREE_WIND_BUTTON_STATUS_SET =
+            resolveOrFallback("Ac.AC_PASSENGER_FREE_WIND_BUTTON_STATUS_SET", UNRESOLVED_ID);
+    public static final int AC_PASSENGER_BLOWS_MODE_SIGNAL_TO_PEOPLE =
+            resolveOrFallback("Ac.AC_PASSENGER_BLOWS_MODE_SIGNAL_TO_PEOPLE", UNRESOLVED_ID);
+    public static final int AC_PASSENGER_BLOWS_MODE_SIGNAL_TO_PEOPLE_SET =
+            resolveOrFallback("Ac.AC_PASSENGER_BLOWS_MODE_SIGNAL_TO_PEOPLE_SET", UNRESOLVED_ID);
+    public static final int AC_PASSENGER_SIDE_TO_AVOID_BLOWING_MODE_SIGNAL_TO_PEOPLE =
+            resolveOrFallback("Ac.AC_PASSENGER_SIDE_TO_AVOID_BLOWING_MODE_SIGNAL_TO_PEOPLE", UNRESOLVED_ID);
+    public static final int AC_PASSENGER_SIDE_TO_AVOID_BLOWING_MODE_SIGNAL_TO_PEOPLE_SET =
+            resolveOrFallback("Ac.AC_PASSENGER_SIDE_TO_AVOID_BLOWING_MODE_SIGNAL_TO_PEOPLE_SET", UNRESOLVED_ID);
+    public static final int AC_PASSENGER_LEFT_AND_RIGHT_SWEEP_SIGNAL =
+            resolveOrFallback("Ac.AC_PASSENGER_LEFT_AND_RIGHT_SWEEP_SIGNAL", UNRESOLVED_ID);
+    public static final int AC_PASSENGER_LEFT_AND_RIGHT_SWEEP_SIGNAL_SET =
+            resolveOrFallback("Ac.AC_PASSENGER_LEFT_AND_RIGHT_SWEEP_SIGNAL_SET", UNRESOLVED_ID);
+    public static final int AC_PASSENGER_TUYERE_CLOSING_SIGNAL =
+            resolveOrFallback("Ac.AC_PASSENGER_TUYERE_CLOSING_SIGNAL", UNRESOLVED_ID);
+    public static final int AC_PASSENGER_TUYERE_CLOSING_SIGNAL_SET =
+            resolveOrFallback("Ac.AC_PASSENGER_TUYERE_CLOSING_SIGNAL_SET", UNRESOLVED_ID);
+
+    // Per-vent direction. LR = horizontal, UD = vertical. The driver-right LR write id carries
+    // the framework's own spelling, RIGHR.
+    public static final int AC_MAIN_DRIVE_LEFT_TUYERE_LEFT_AND_RIGHT_ADJUSTMENT_SIGNAL =
+            resolveOrFallback("Ac.AC_MAIN_DRIVE_LEFT_TUYERE_LEFT_AND_RIGHT_ADJUSTMENT_SIGNAL", UNRESOLVED_ID);
+    public static final int AC_MAIN_DRIVE_LEFT_TUYERE_UP_AND_DOWN_ADJUSTMENT_SIGNAL =
+            resolveOrFallback("Ac.AC_MAIN_DRIVE_LEFT_TUYERE_UP_AND_DOWN_ADJUSTMENT_SIGNAL", UNRESOLVED_ID);
+    public static final int AC_MAIN_DRIVE_RIGHT_TUYERE_LEFT_AND_RIGHT_ADJUSTMENT_SIGNAL =
+            resolveOrFallback("Ac.AC_MAIN_DRIVE_RIGHT_TUYERE_LEFT_AND_RIGHT_ADJUSTMENT_SIGNAL", UNRESOLVED_ID);
+    public static final int AC_MAIN_DRIVE_RIGHT_TUYERE_UP_AND_DOWN_ADJUSTMENT_SIGNAL =
+            resolveOrFallback("Ac.AC_MAIN_DRIVE_RIGHT_TUYERE_UP_AND_DOWN_ADJUSTMENT_SIGNAL", UNRESOLVED_ID);
+    public static final int AC_PASSENGER_LEFT_TUYERE_LEFT_AND_RIGHT_ADJUSTMENT_SIGNAL =
+            resolveOrFallback("Ac.AC_PASSENGER_LEFT_TUYERE_LEFT_AND_RIGHT_ADJUSTMENT_SIGNAL", UNRESOLVED_ID);
+    public static final int AC_PASSENGER_LEFT_TUYERE_UP_AND_DOWN_ADJUSTMENT_SIGNAL =
+            resolveOrFallback("Ac.AC_PASSENGER_LEFT_TUYERE_UP_AND_DOWN_ADJUSTMENT_SIGNAL", UNRESOLVED_ID);
+    public static final int AC_PASSENGER_RIGHT_TUYERE_LEFT_AND_RIGHT_ADJUSTMENT_SIGNAL =
+            resolveOrFallback("Ac.AC_PASSENGER_RIGHT_TUYERE_LEFT_AND_RIGHT_ADJUSTMENT_SIGNAL", UNRESOLVED_ID);
+    public static final int AC_PASSENGER_RIGHT_TUYERE_UP_AND_DOWN_ADJUSTMENT_SIGNAL =
+            resolveOrFallback("Ac.AC_PASSENGER_RIGHT_TUYERE_UP_AND_DOWN_ADJUSTMENT_SIGNAL", UNRESOLVED_ID);
+
+    public static final int AC_MAIN_DRIVE_LEFT_TUYERE_LEFT_AND_RIGHT_ADJUSTMENT_SIGNAL_SET =
+            resolveOrFallback("Ac.AC_MAIN_DRIVE_LEFT_TUYERE_LEFT_AND_RIGHT_ADJUSTMENT_SIGNAL_SET", UNRESOLVED_ID);
+    public static final int AC_MAIN_DRIVE_LEFT_TUYERE_UP_AND_DOWN_ADJUSTMENT_SIGNAL_SET =
+            resolveOrFallback("Ac.AC_MAIN_DRIVE_LEFT_TUYERE_UP_AND_DOWN_ADJUSTMENT_SIGNAL_SET", UNRESOLVED_ID);
+    public static final int AC_MAIN_DRIVE_RIGHT_TUYERE_LEFT_AND_RIGHT_ADJUSTMENT_SIGNAL_SET =
+            resolveOrFallback("Ac.AC_MAIN_DRIVE_RIGHR_TUYERE_LEFT_AND_RIGHT_ADJUSTMENT_SIGNAL_SET", UNRESOLVED_ID);
+    public static final int AC_MAIN_DRIVE_RIGHT_TUYERE_UP_AND_DOWN_ADJUSTMENT_SIGNAL_SET =
+            resolveOrFallback("Ac.AC_MAIN_DRIVE_RIGHT_TUYERE_UP_AND_DOWN_ADJUSTMENT_SIGNAL_SET", UNRESOLVED_ID);
+    public static final int AC_PASSENGER_LEFT_TUYERE_LEFT_AND_RIGHT_ADJUSTMENT_SIGNAL_SET =
+            resolveOrFallback("Ac.AC_PASSENGER_LEFT_TUYERE_LEFT_AND_RIGHT_ADJUSTMENT_SIGNAL_SET", UNRESOLVED_ID);
+    public static final int AC_PASSENGER_LEFT_TUYERE_UP_AND_DOWN_ADJUSTMENT_SIGNAL_SET =
+            resolveOrFallback("Ac.AC_PASSENGER_LEFT_TUYERE_UP_AND_DOWN_ADJUSTMENT_SIGNAL_SET", UNRESOLVED_ID);
+    public static final int AC_PASSENGER_RIGHT_TUYERE_LEFT_AND_RIGHT_ADJUSTMENT_SIGNAL_SET =
+            resolveOrFallback("Ac.AC_PASSENGER_RIGHT_TUYERE_LEFT_AND_RIGHT_ADJUSTMENT_SIGNAL_SET", UNRESOLVED_ID);
+    public static final int AC_PASSENGER_RIGHT_TUYERE_UP_AND_DOWN_ADJUSTMENT_SIGNAL_SET =
+            resolveOrFallback("Ac.AC_PASSENGER_RIGHT_TUYERE_UP_AND_DOWN_ADJUSTMENT_SIGNAL_SET", UNRESOLVED_ID);
+
     // ==================== ADAS ====================
     public static final int ADAS_OMS_DRIVER_DETECTION = resolveOrFallback("Adas.OMS_DRIVER_DETECTION_RESULT", 834666600);
     public static final int ADAS_OMS_PASSENGER_DETECTION = resolveOrFallback("Adas.OMS_PASSENGER_DETECTION_RESULT", 834666605);

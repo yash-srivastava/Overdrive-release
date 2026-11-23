@@ -2374,6 +2374,17 @@ public final class BydDeviceHelper {
      * The field form is kept only as a fallback for trims whose SDK lacks the int[] constructor.
      */
     public static int sendSetCommandGroupedRaw(Object device, int[] ids, int[] values) {
+        return sendSetCommandGroupedRaw(device, ids, values, true);
+    }
+
+    /**
+     * {@link #sendSetCommandGroupedRaw(Object, int[], int[])} with the event construction chosen
+     * by the caller. {@code preferIntArrayCtor=false} builds the event exactly as the OEM
+     * AirConditioning app does for its paired vent-direction write: no-arg constructor, then the
+     * {@code intArrayValue} field.
+     */
+    public static int sendSetCommandGroupedRaw(Object device, int[] ids, int[] values,
+            boolean preferIntArrayCtor) {
         if (device == null || ids == null || values == null || ids.length != values.length
                 || VehicleActuatorBridge.isDiLink5RequestExpired()) {
             return Integer.MIN_VALUE;
@@ -2385,6 +2396,7 @@ public final class BydDeviceHelper {
             Class<?> eventValueClass = Class.forName("android.hardware.bydauto.BYDAutoEventValue");
             Object eventValue;
             try {
+                if (!preferIntArrayCtor) throw new NoSuchMethodException("field form requested");
                 eventValue = eventValueClass.getConstructor(int[].class).newInstance((Object) values);
             } catch (ReflectiveOperationException noUsableIntArrayCtor) {
                 // Any SDK where that ctor is missing or unusable: fall back to the field form.

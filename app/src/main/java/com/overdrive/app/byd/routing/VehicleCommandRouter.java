@@ -1508,6 +1508,42 @@ public final class VehicleCommandRouter {
         public boolean executeViaSdk(BydDataCollector c) { return c.setAirPurify(on); }
     }
 
+    /** Front vent mode for one side (free/focus/avoid/swing/off). SDK-only. */
+    public static final class AcVentModeCommand extends VehicleCommand
+            implements CabinClimateCommand {
+        public final int side;
+        public final String mode;
+        public AcVentModeCommand(int side, String mode) { this.side = side; this.mode = mode; }
+        public String name() { return "ac-vent-mode"; }
+        public Capability sdkCapability() { return Capability.REQUIRED; }
+        public RoutePreference defaultPreference() { return RoutePreference.SDK_ONLY; }
+        public boolean executeViaSdk(BydDataCollector c) { return c.setAcVentMode(side, mode); }
+    }
+
+    /** Direction of one front vent, in degrees. SDK-only; publishes the clamped pair sent. */
+    public static final class AcVentDirectionCommand extends VehicleCommand
+            implements CabinClimateCommand {
+        public final int vent;
+        public final int h;
+        public final int v;
+        public final boolean rightHandDrive;
+        /** {h, v} actually written after clamping, or null. */
+        public volatile int[] sent;
+        public AcVentDirectionCommand(int vent, int h, int v, boolean rightHandDrive) {
+            this.vent = vent;
+            this.h = h;
+            this.v = v;
+            this.rightHandDrive = rightHandDrive;
+        }
+        public String name() { return "ac-vent-direction"; }
+        public Capability sdkCapability() { return Capability.REQUIRED; }
+        public RoutePreference defaultPreference() { return RoutePreference.SDK_ONLY; }
+        public boolean executeViaSdk(BydDataCollector c) {
+            sent = c.setAcVentDirection(vent, h, v, rightHandDrive);
+            return sent != null;
+        }
+    }
+
     /** Persistent setting: the vehicle closes its windows itself when rain is sensed. */
     public static final class RainCloseWindowCommand extends VehicleCommand {
         public final boolean on;

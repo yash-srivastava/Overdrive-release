@@ -41,6 +41,7 @@ import java.util.Map;
  *   POST /api/vehicle/power-on      — SDK_ONLY, blocked unless parked and stationary
  *   POST /api/vehicle/power-off     — SDK_ONLY, blocked unless parked and stationary
  *   POST /api/vehicle/climate       — power=SDK_FIRST with cloud fallback, set_temp/set_fan=SDK_ONLY
+ *                                     vent_mode/vent_direction=SDK_ONLY (DiLink 3)
  *   GET  /api/vehicle/climate-schedule — BOOKINGAIR booking list (cloud reported)
  *   POST /api/vehicle/climate-schedule — BOOKINGAIR create/update/delete, CLOUD_ONLY
  *   POST /api/vehicle/seat          — SDK_FIRST with guarded cloud fallback
@@ -1533,6 +1534,24 @@ public class VehicleControlApiHandler {
         if (remoteClimateActive != null) {
             climate.put("remoteClimateActive", remoteClimateActive.booleanValue());
         }
+        // Readbacks for controls that used to be write-only, and the front vents. Live reads
+        // on the AC device, DiLink 3 only, and only while powered (same staleness rule as the
+        // setpoints above). Each key is omitted when its read did not answer.
+        if (!diLink5 && vehiclePoweredOn) {
+            String windModeName = com.overdrive.app.byd.AcVentControl.windModeName(data.acWindMode);
+            if (windModeName != null) climate.put("windModeName", windModeName);
+            int windModeCount = collector.readAcWindModeCountNow();
+            if (windModeCount != BydVehicleData.UNAVAILABLE) climate.put("windModeCount", windModeCount);
+            if (data.acCycleMode == 0 || data.acCycleMode == 1) {
+                climate.put("recirculation", data.acCycleMode == 1);
+            }
+            putIfKnown(climate, "sync", collector.readAcTemperatureSyncNow());
+            putIfKnown(climate, "auto", collector.readAcAutoModeNow());
+            putIfKnown(climate, "defrostFront", collector.readAcDefrostNow(1));
+            putIfKnown(climate, "defrostRear", collector.readAcDefrostNow(2));
+            JSONObject vents = collector.readAcVentStateNow(isRightHandDrive());
+            if (vents != null) climate.put("vents", vents);
+        }
         response.put("climate", climate);
 
         // Tyres — per-corner pressure (kPa + PSI), temperature, and the three
@@ -2371,14 +2390,23 @@ public class VehicleControlApiHandler {
                 case "purify_off": cmd = new VehicleCommandRouter.AirPurifyCommand(false); break;
                 case "steering_heat_on":  cmd = new VehicleCommandRouter.SteeringWheelHeatCommand(true);  break;
                 case "steering_heat_off": cmd = new VehicleCommandRouter.SteeringWheelHeatCommand(false); break;
+                // Airflow mode: OEM AC_WINDMODE 1..7, or its name (face, face_foot, foot,
+                // foot_defrost, defrost, face_foot_defrost, face_defrost). Cars that offer
+                // only 5 modes (AC_WIND_MODE_NUM) refuse 6 and 7.
                 case "set_airflow": {
-                    Integer modeValue = jsonInteger(req, "mode");
-                    if (modeValue == null || modeValue.intValue() < BydDataCollector.AC_WIND_MODE_MIN
-                            || modeValue.intValue() > BydDataCollector.AC_WIND_MODE_MAX) {
-                        sendClimateInputError(out, response, "mode must be an integer from 1 to 7");
+                    Integer modeValue = req.opt("mode") instanceof String
+                            ? Integer.valueOf(com.overdrive.app.byd.AcVentControl
+                                    .windModeFromName(req.optString("mode")))
+                            : jsonInteger(req, "mode");
+                    int mode = modeValue == null ? -1 : modeValue.intValue();
+                    int count = BydDataCollector.getInstance().readAcWindModeCountNow();
+                    if (!com.overdrive.app.byd.AcVentControl.isValidWindMode(mode, count)) {
+                        sendClimateInputError(out, response, "mode must be 1.." + (count == 5 ? 5 : 7)
+                                + " or one of face, face_foot, foot, foot_defrost, defrost"
+                                + (count == 5 ? "" : ", face_foot_defrost, face_defrost"));
                         return;
                     }
-                    cmd = new VehicleCommandRouter.AcAirflowCommand(modeValue.intValue());
+                    cmd = new VehicleCommandRouter.AcAirflowCommand(mode);
                     break;
                 }
                 case "recirculate_on":  cmd = new VehicleCommandRouter.AcRecirculationCommand(true);  break;   // recirculation
@@ -2387,6 +2415,53 @@ public class VehicleControlApiHandler {
                 case "defrost_front_off": cmd = new VehicleCommandRouter.FrontDefrostCommand(false); break;
                 case "defrost_rear_on":  cmd = new VehicleCommandRouter.RearDefrostCommand(true);  break;
                 case "defrost_rear_off": cmd = new VehicleCommandRouter.RearDefrostCommand(false); break;
+                // Front vent mode per side: { side: driver|passenger, mode: free|focus|avoid|swing|off }.
+                case "vent_mode": {
+                    int side = climateSide(req);
+                    String mode = jsonString(req, "mode");
+                    if (side < 0) {
+                        sendClimateInputError(out, response, "side must be driver or passenger");
+                        return;
+                    }
+                    if (!com.overdrive.app.byd.AcVentControl.isValidMode(mode)) {
+                        sendClimateInputError(out, response,
+                                "mode must be one of free, focus, avoid, swing, off");
+                        return;
+                    }
+                    cmd = new VehicleCommandRouter.AcVentModeCommand(side, mode);
+                    break;
+                }
+                // One front vent's direction: { vent: driver_left|driver_right|passenger_left|
+                // passenger_right, h, v } in whole degrees from straight ahead, clamped to the
+                // vent's range. Answers with the values actually sent.
+                case "vent_direction": {
+                    int vent = com.overdrive.app.byd.AcVentControl.ventIndex(jsonString(req, "vent"));
+                    Integer h = jsonInteger(req, "h");
+                    Integer v = jsonInteger(req, "v");
+                    if (vent < 0) {
+                        sendClimateInputError(out, response,
+                                "vent must be driver_left, driver_right, passenger_left or passenger_right");
+                        return;
+                    }
+                    if (h == null || v == null || Math.abs(h.intValue()) > 90 || Math.abs(v.intValue()) > 90) {
+                        sendClimateInputError(out, response, "h and v must be integers from -90 to 90");
+                        return;
+                    }
+                    VehicleCommandRouter.AcVentDirectionCommand dir =
+                            new VehicleCommandRouter.AcVentDirectionCommand(
+                                    vent, h.intValue(), v.intValue(), isRightHandDrive());
+                    CommandResult dr = VehicleCommandRouter.getInstance().execute(dir);
+                    logger.info("Climate: action=vent_direction vent=" + vent + " h=" + h + " v=" + v
+                            + " " + dr.outcome + " path=" + dr.path);
+                    JSONObject dirResp = routedResponse(dr, action);
+                    int[] sent = dir.sent;
+                    if (sent != null) {
+                        dirResp.put("h", sent[0]);
+                        dirResp.put("v", sent[1]);
+                    }
+                    HttpResponse.sendJson(out, dirResp.toString());
+                    return;
+                }
                 default:
                     logger.warn("Climate: unknown action '" + action + "'");
                     response.put("success", false);
@@ -4636,6 +4711,21 @@ public class VehicleControlApiHandler {
             return (int) Math.round((setpoint - 32) * 5.0 / 9.0);
         }
         return setpoint;
+    }
+
+    private static void putIfKnown(JSONObject o, String key, Boolean value) throws Exception {
+        if (value != null) o.put(key, value.booleanValue());
+    }
+
+
+    /** "side": "driver" | "passenger", or 1 | 2. Returns AcVentControl.SIDE_*, or -1. */
+    static int climateSide(JSONObject req) {
+        Object side = req.opt("side");
+        if ("driver".equals(side)) return com.overdrive.app.byd.AcVentControl.SIDE_DRIVER;
+        if ("passenger".equals(side)) return com.overdrive.app.byd.AcVentControl.SIDE_PASSENGER;
+        Integer n = jsonInteger(req, "side");
+        return n != null && com.overdrive.app.byd.AcVentControl.isValidSide(n.intValue())
+                ? n.intValue() : -1;
     }
 
     /**

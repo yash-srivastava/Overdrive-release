@@ -16394,6 +16394,118 @@ public class BydDataCollector {
         }
     }
 
+    /** Airflow modes the car offers (AC_WIND_MODE_NUM: 5 or 7), or UNAVAILABLE. */
+    public int readAcWindModeCountNow() {
+        if (acDevice == null || isDiLink5Vehicle()
+                || !BydFeatureIds.isResolved(BydFeatureIds.AC_WIND_MODE_NUM)) {
+            return BydVehicleData.UNAVAILABLE;
+        }
+        int count = acVentHal().get(BydFeatureIds.AC_WIND_MODE_NUM);
+        return count == 5 || count == 7 ? count : BydVehicleData.UNAVAILABLE;
+    }
+
+    /**
+     * HAL adapter for {@link AcVentControl} over the AC device. The OEM's invalid-value
+     * sentinels read as "no answer", so a sleeping HAL is never taken for a flag that is off.
+     */
+    private AcVentControl.Hal acVentHal() {
+        final Object device = acDevice;
+        return new AcVentControl.Hal() {
+            @Override public int get(int featureId) {
+                Object value = BydDeviceHelper.callGet(device, featureId, Integer.class);
+                int raw = BydDeviceHelper.getIntValue(value);
+                return raw == BydFeatureIds.INVALID_VALUE || raw == BydFeatureIds.INVALID_VALUE_2
+                        ? Integer.MIN_VALUE : raw;
+            }
+            @Override public int set(int featureId, int value) {
+                return BydDeviceHelper.sendSetCommandRaw(device, featureId, value);
+            }
+            @Override public int setPair(int[] featureIds, int[] values) {
+                // Field-form event, as the OEM app builds its vent-direction write.
+                return BydDeviceHelper.sendSetCommandGroupedRaw(device, featureIds, values, false);
+            }
+        };
+    }
+
+    /** Select a front vent mode on one side (AcVentControl.MODE_*). Not on DiLink 5 (unverified). */
+    public boolean setAcVentMode(int side, String mode) {
+        if (acDevice == null || isDiLink5Vehicle()) return false;
+        try {
+            AcVentControl.Hal hal = acVentHal();
+            if (!AcVentControl.isSupported(hal)) {
+                logger.info("setAcVentMode: no electric vents on this car");
+                return false;
+            }
+            boolean ok = AcVentControl.setMode(hal, side, mode);
+            logger.info("setAcVentMode(side=" + side + ", " + mode + ") " + (ok ? "accepted" : "refused"));
+            return ok;
+        } catch (Exception e) {
+            logger.debug("setAcVentMode failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Point one front vent (AcVentControl vent index), degrees clamped to that vent's range.
+     * Returns the {h, v} actually sent, or null when refused. Not on DiLink 5 (unverified).
+     */
+    public int[] setAcVentDirection(int vent, int hDegrees, int vDegrees, boolean rightHandDrive) {
+        if (acDevice == null || isDiLink5Vehicle()) return null;
+        try {
+            AcVentControl.Hal hal = acVentHal();
+            if (!AcVentControl.isSupported(hal)) {
+                logger.info("setAcVentDirection: no electric vents on this car");
+                return null;
+            }
+            int[] sent = AcVentControl.setDirection(hal, vent, hDegrees, vDegrees, rightHandDrive);
+            logger.info("setAcVentDirection(vent=" + vent + ", h=" + hDegrees + ", v=" + vDegrees
+                    + ") " + (sent != null ? "accepted h=" + sent[0] + " v=" + sent[1] : "refused"));
+            return sent;
+        } catch (Exception e) {
+            logger.debug("setAcVentDirection failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /** Front vent readback for the vehicle state; null on DiLink 5 or without an AC device. */
+    public org.json.JSONObject readAcVentStateNow(boolean rightHandDrive) {
+        if (acDevice == null || isDiLink5Vehicle()) return null;
+        try {
+            return AcVentControl.readState(acVentHal(), rightHandDrive);
+        } catch (Exception e) {
+            logger.debug("readAcVentStateNow failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /** Named-getter int read on the AC device, or UNAVAILABLE. */
+    private int readAcGetterNow(String method, Integer arg) {
+        if (acDevice == null || isDiLink5Vehicle()) return BydVehicleData.UNAVAILABLE;
+        Object value = arg == null
+                ? BydDeviceHelper.callGetter(acDevice, method)
+                : BydDeviceHelper.callGetter(acDevice, method, arg.intValue());
+        return value instanceof Number ? ((Number) value).intValue() : BydVehicleData.UNAVAILABLE;
+    }
+
+    /** SYNC: true when the zones are linked (AC_TEMPCTRL_SEPARATE_OFF 0), null when unknown. */
+    public Boolean readAcTemperatureSyncNow() {
+        int mode = readAcGetterNow("getAcTemperatureControlMode", null);
+        return mode == 0 ? Boolean.TRUE : mode == 1 ? Boolean.FALSE : null;
+    }
+
+    /** AUTO: true for AC_CTRLMODE_AUTO 0, false for MANUAL 1, null when unknown. */
+    public Boolean readAcAutoModeNow() {
+        int mode = readAcGetterNow("getAcControlMode", null);
+        return mode == AC_CTRLMODE_AUTO ? Boolean.TRUE
+                : mode == AC_CTRLMODE_MANUAL ? Boolean.FALSE : null;
+    }
+
+    /** Defrost by area (1 front, 2 rear): AC_DEFROST_STATE_ON 1 / OFF 0, null when unknown. */
+    public Boolean readAcDefrostNow(int area) {
+        int state = readAcGetterNow("getAcDefrostState", Integer.valueOf(area));
+        return state == 1 ? Boolean.TRUE : state == 0 ? Boolean.FALSE : null;
+    }
+
     public boolean setFrontDefrost(boolean on) {
         // DiLink 5: setSource 0, AC_DEFROST_AREA_FRONT 1, state 1=on/0=off.
         if (isDiLink5Vehicle()) return diLink5HvacWrite("setAcDefrostState", 0, 1, on ? 1 : 0);
