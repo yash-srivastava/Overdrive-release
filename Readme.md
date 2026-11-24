@@ -336,18 +336,35 @@ Then build with Gradle:
 ./gradlew assembleRelease
 ```
 
-### Closed component: `libod.so`
+### What this repository doesn't include
 
-The blind-spot lens-projection coefficients ship as a prebuilt, closed-source
-`libod.so` (`app/src/main/jniLibs/arm64-v8a/`); its source (`cpp/od/`) is not
-part of this repository. At runtime the library authorizes against the app's
-signing certificate, so a **release** build signed with a different key will
-render the blind-spot camera card black.
+Official builds add a small private overlay to this tree. It holds:
 
-**Debug builds bypass this check** — `./gradlew assembleDebug` works normally
-from a clean clone, including for contributors, and the native build configures
-fine without the `od` source. Only release forks signed with a non-matching key
-are affected.
+- **Custom Layouts**: the full-cluster driver-display layouts, the Dashboard Builder and the cluster
+  carrier. Source builds use the no-op stand-ins in `app/src/oss/`. The Custom Layouts page and the
+  Dashboard Builder say they're part of the official build, and nothing else changes.
+- **DiLink 5 parked keep-alive transport**: shipped here as the prebuilt
+  `app/src/oss/jniLibs/arm64-v8a/libodpark.so`.
+- **Official signing key and service app IDs** (SafeKeep sign-in, log upload). Source builds
+  leave these empty, and SafeKeep asks for your own app registration.
+
+Everything else is in this repository, including the blind-spot lens projection (`app/src/main/cpp/od/`).
+A **release** build signed with a key other than the official one renders the blind-spot card black.
+Debug builds skip that check, so `./gradlew assembleDebug` works from a clean clone.
+
+### Verifying an official APK
+
+Official APKs are always signed with the same certificate:
+
+```bash
+apksigner verify --print-certs overdrive-release-*.apk
+# Signer #1 certificate SHA-256 digest: c4469339686b54b0696e62764586213e06b542cb23fc7e8bc249046b8fd410e5
+```
+
+Any other digest means the APK isn't an official build. From v65.1, every release also lists the APK's
+SHA-256 in `SHA256SUMS`, plus a `release-manifest.json` with the public source commit it was built from.
+The same commit is recorded inside the APK (`BuildConfig.SOURCE_SHA`).
+Building that commit yourself gives a different APK, because it lacks the private overlay and the official key.
 
 ## VLESS Proxy Setup (Optional)
 
@@ -447,7 +464,71 @@ Developers can still send pull requests on the language files: `app/src/main/ass
 
 ## Changelog
 
-Condensed highlights below. Full release notes for every version live in [RELEASE_NOTES.md](RELEASE_NOTES.md).
+The latest release in full, then earlier highlights. APKs and per-release notes are on
+[GitHub Releases](https://github.com/yash-srivastava/Overdrive-release/releases).
+
+### v65.0: Take Control of Your Full Driver Cluster + Face ID Lock
+
+#### ✨ New Features
+
+- **Full-screen cluster** — On supported DiLink 3 cars (starting with the 10.25" Seal), BYD's header and footer bars disappear, so Custom Layouts, the RoadSense map and projected apps get all 1920×720 pixels. On by default; restart the cluster once, parked, to switch it on.
+- **Clean screen** — Status and driver-assist icons step aside. Fault and safety warnings, turn signals and high beam always stay.
+- **Every layout redrawn** — Presets, Studio designs and Originals are rebuilt for the full screen, in light and dark, and size their text to your cluster (8.8", 10.25" or 12.3").
+- **Face ID or fingerprint lock** — Turn it on in Vehicle Control → Safety, and remote unlock, opening the trunk or switching the car on or off asks for your phone's Face ID or fingerprint first. The car screen, automations and proximity unlock never ask.
+- **Works when the car doesn't** — The web app opens instantly with your last-known data, clearly marked, instead of a "bad gateway" page, and switches to live data by itself the moment the car answers. While the car is offline, commands aren't sent and say so straight away.
+- **Climate API: vents and more** — On DiLink 3 cars with electric vents, the climate API sets each side's vent mode and points each front vent. Airflow takes names such as "foot", and the vehicle state now reports SYNC, AUTO, defrost and the vents.
+- **Timeline fullscreen and share** — The Recordings Timeline goes fullscreen with one tap, in the car and the browser. Share sends the clip that's playing once it's saved: from your phone straight to another app, from the car through the share sheet.
+
+#### ⚡ Optimizations & Fixes
+
+- **SD card that stops answering while parked** — When the card refuses writes and can't be read either, OverDrive now remounts it, instead of saving to internal storage until the head unit restarts.
+
+### Earlier releases
+
+- **v64.3** — Living Layouts & Drive-Start Fixes
+- **v64.0** — Pick Your Dashboard or Build Your Own
+- **v63.4.1** — Dashboard Builder
+- **v63.1** — Service Mode, DVR Live View Fixes & More
+- **v63.0** — Custom Layouts for the Driver Display, All Cameras + DVR & More
+- **v62.0** — Recordings Timeline, DiLink 5 Fixes & More
+- **v61.0** — ADB Recovery, DiLink 5 Controls & Projection, Range Calibration, Module Faults & Fixes
+- **v60.4** — Watched Clips, Tailscale Hardening & Fixes
+- **v60.3** — Factory DVR on the Web, Live View Actions & Fixes
+- **v60.1** — Smart Recording Engine, Clip Timer & Fixes
+- **v60.0** — Smoother Screen While Recording & Fixes
+- **v59.0** — Redesigned Car App & Fixes
+- **v58.3** — Sign-in Alerts, Deterrent Markers & Fixes
+- **v58.1** — Signed-in Browsers, Sharper Recordings & Fixes
+- **v58.0** — Trip Briefing, Cluster Layouts, HUD Navigation, New Widgets & Reliability Improvements
+- **v57.0** — Widget Builder & New Navigation Map
+- **v56.0** — Redesigned Web App & BlindSpot Recording
+- **v55.0** — Proximity Lock/Unlock & Voice Assistant: Train Your Voice, Play Your Music
+- **v54.0** — WireGuard Tunnel & Vehicle Setup
+- **v53.1** — RoadSense Slope & Altitude, Atto 3 EVO 360 Camera
+- **v53.0** — Hands-Free Voice & Floating Shortcuts
+- **v52.0** — Widgets Your Way, Odometer & Local Charging Schedules
+- **v51.2** — Local Vehicle Commands
+- **v51.0** — Glass Widgets & BYD Shark 6
+- **v50.0** — SafeKeep Cloud Backup
+- **v49.0** — Parking Intelligence
+- **v48.13** — DiLink 3.0 & 5.0 Fixes, Tailscale HTTPS
+- **v48.0** — Camera Reliability, Telemetry & Projection
+- **v47.0** — Redesigned In-Car Interface
+- **v46.0** — Smarter AI Assistant & Faster DiLink 5 Cameras
+- **v45.9** — Wi‑Fi Controls, IVI Reboot & Remote Back
+- **v45.0** — BYD Sealion 7 & DiLink 5 Support
+- **v44** — Bring Your Own AI Assistant
+- **v43** — Remote Dev View
+- **v42** — Saved Seat Positions
+- **v41** — Live Cabin Audio
+- **v40.2**
+- **v40**
+- **v39.1** — Improved System Performance, Manual Automations & DVR Stability
+- **v39** — New Surveillance Engine
+- **v38**
+- **v37.2**
+- **v37** — Dashboard Refresh, Lite Vehicle Controls & Simpler Camera Setup
+- **v36** — Charging Tariffs, AC Switch-Off Timer & Cabin-Temperature Fixes
 
 ### v35.0 — July 2026: Blind-Spot Camera Fixes & Pick-Your-Overlay
 
