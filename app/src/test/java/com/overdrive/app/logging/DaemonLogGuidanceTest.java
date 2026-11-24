@@ -1,8 +1,13 @@
 package com.overdrive.app.logging;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
+
+import java.util.Locale;
 
 import org.junit.Test;
 
@@ -27,5 +32,28 @@ public class DaemonLogGuidanceTest {
         assertNotNull(DaemonLogPaths.descriptionFor(" CAMERA "));
         assertTrue(DaemonLogPaths.descriptionFor("not-a-daemon") == null);
         assertTrue(DaemonLogPaths.descriptionFor(null) == null);
+    }
+
+    @Test
+    public void daemonLookupsIgnoreDefaultLocale() {
+        Locale previous = Locale.getDefault();
+        try {
+            Locale.setDefault(new Locale("tr", "TR"));
+            for (String key : DaemonLogPaths.keys()) {
+                String uppercase = " " + key.toUpperCase(Locale.ROOT) + " ";
+                String path = DaemonLogPaths.pathFor(key);
+                DaemonLogPaths.LogDescription description = DaemonLogPaths.descriptionFor(key);
+                assertNotNull(path);
+                assertNotNull(description);
+                assertEquals(key, path, DaemonLogPaths.pathFor(uppercase));
+                assertSame(key, description, DaemonLogPaths.descriptionFor(uppercase));
+            }
+            assertNull(DaemonLogPaths.pathFor(null));
+            assertNull(DaemonLogPaths.pathFor("unknown"));
+            assertNull(DaemonLogPaths.descriptionFor(null));
+            assertNull(DaemonLogPaths.descriptionFor("unknown"));
+        } finally {
+            Locale.setDefault(previous);
+        }
     }
 }
