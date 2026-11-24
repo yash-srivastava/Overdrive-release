@@ -380,15 +380,27 @@
     /** [cond] carries the ETag both ways: sent as If-None-Match, a 304 resolves UNCHANGED. A 401 goes to login here. */
     function fetchJson(url, cond) {
         var ctl = typeof AbortController === 'function' ? new AbortController() : null;
-        var timer = setTimeout(function () { if (ctl) ctl.abort(); }, FETCH_TIMEOUT_MS);
+        var timer, timeoutError;
+        // Fetch resolves at the headers, not at the end of the JSON body. Bound
+        // the whole operation, even on older WebViews without AbortController.
+        var timeout = new Promise(function (resolve, reject) {
+            timer = setTimeout(function () {
+                timeoutError = new Error('Timeline request timed out');
+                timeoutError.offline = true;
+                reject(timeoutError);
+                if (ctl) ctl.abort();
+            }, FETCH_TIMEOUT_MS);
+        });
         var headers = authHeaders();
         if (cond && cond.etag) headers['If-None-Match'] = cond.etag;
         var opts = { cache: 'no-store', headers: headers };
         if (ctl) opts.signal = ctl.signal;
         var req;
         try { req = root.fetch(url, opts); } catch (e) { req = Promise.reject(e); }
-        return Promise.resolve(req).then(function (r) {
-            clearTimeout(timer);
+        var body = Promise.resolve(req).then(function (r) {
+            // A late response on a browser without abort support must not
+            // redirect to login or process an expired request's headers.
+            if (timeoutError) throw timeoutError;
             if (r && r.status === 304 && cond && cond.etag) return UNCHANGED;
             if (!r || !r.ok) {
                 var err = new Error('http ' + (r ? r.status : 0));
@@ -400,10 +412,16 @@
             if (cond) cond.etag = (r.headers && r.headers.get('ETag')) || null;
             return r.json();
         }, function (e) {
-            clearTimeout(timer);
             var err = new Error('offline');
             err.offline = true;
             err.cause = e;
+            throw err;
+        });
+        return Promise.race([body, timeout]).then(function (value) {
+            clearTimeout(timer);
+            return value;
+        }, function (err) {
+            clearTimeout(timer);
             throw err;
         });
     }
