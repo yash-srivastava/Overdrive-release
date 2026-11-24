@@ -856,7 +856,6 @@
          deterrent screen all run independently regardless of this state. -->
     <string name="settings_security_title">Turvallisuus</string>
     <string name="settings_security_subtitle">Lukitse OverDrive-sovellus, joten matkustajat ja kuvakkeet eivät voi avata sitä ilman PIN-koodiasi.</string>
-    <string name="settings_security_stance_title">Vain käyttöliittymän lukitus</string>
     <string name="settings_security_stance_body">Valvonta, tallennus, pesu, hälytykset ja taustapalvelut toimivat sovelluksen ollessa lukittu. PIN vie OverDrive-käyttöliittymän, ei mitään muuta.</string>
     <string name="settings_security_overline_lock">Sovelluksen lukitus</string>
     <string name="settings_security_overline_recovery">Jos unohdat PIN-koodisi</string>

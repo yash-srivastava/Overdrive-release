@@ -1011,7 +1011,6 @@ Questa azione non puo essere annullata.</string>
          deterrent screen all run independently regardless of this state. -->
     <string name="settings_security_title">Sicurezza</string>
     <string name="settings_security_subtitle">Blocca l\'app OverDrive in modo che passeggeri e valvole non possano aprirla senza il PIN.</string>
-    <string name="settings_security_stance_title">Solo blocco interfaccia utente</string>
     <string name="settings_security_stance_body">La sorveglianza, la registrazione, il deterrente, gli avvisi e i servizi in background continuano ad essere in esecuzione mentre l\'applicazione è bloccata. Il PIN cancella l\'interfaccia OverDrive, nient\'altro.</string>
     <string name="settings_security_overline_lock">Blocco app</string>
     <string name="settings_security_overline_recovery">Se dimentichi il PIN</string>

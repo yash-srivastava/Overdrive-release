@@ -856,7 +856,6 @@
          deterrent screen all run independently regardless of this state. -->
     <string name="settings_security_title">Säkerhet</string>
     <string name="settings_security_subtitle">Lås OverDrive-appen så att passagerare och valörer inte kan öppna den utan din PIN-kod.</string>
-    <string name="settings_security_stance_title">Endast UI-lås</string>
     <string name="settings_security_stance_body">Övervakning, inspelning, avskräckande, varningar och bakgrundstjänster fortsätter att köras medan appen är låst. PIN-koden portar OverDrive-gränssnittet, inget annat.</string>
     <string name="settings_security_overline_lock">Appens lås</string>
     <string name="settings_security_overline_recovery">Om du glömmer din PIN-kod</string>

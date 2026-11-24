@@ -1015,7 +1015,6 @@
          deterrent screen all run independently regardless of this state. -->
     <string name="settings_security_title">Безопасность</string>
     <string name="settings_security_subtitle">Заблокируйте приложение OverDrive, чтобы пассажиры и доспехи не могли открыть его без вашего PIN-кода.</string>
-    <string name="settings_security_stance_title">Только UI блокировка</string>
     <string name="settings_security_stance_body">Наблюдение, запись, сдерживание, оповещения и фоновые сервисы остаются работающими пока приложение заблокировано. ПИН-код открывает интерфейс OverDrive, ничего больше.</string>
     <string name="settings_security_overline_lock">Блокировка приложений</string>
     <string name="settings_security_overline_recovery">Если вы забыли PIN-код</string>

@@ -860,7 +860,6 @@
          deterrent screen all run independently regardless of this state. -->
     <string name="settings_security_title">ความปลอดภัย</string>
     <string name="settings_security_subtitle">ล็อกแอป OverDrive เพื่อไม่ให้ผู้โดยสารและพนักงานรับรถเปิดได้หากไม่มี PIN ของคุณ</string>
-    <string name="settings_security_stance_title">ล็อก UI เท่านั้น</string>
     <string name="settings_security_stance_body">การเฝ้าระวัง การบันทึก การป้องกัน การแจ้งเตือน และบริการเบื้องหลังยังคงทำงานอยู่ขณะที่แอปถูกล็อก PIN ใช้สำหรับล็อกส่วนติดต่อผู้ใช้ OverDrive เท่านั้น</string>
     <string name="settings_security_overline_lock">ล็อกแอป</string>
     <string name="settings_security_overline_recovery">หากคุณลืม PIN</string>

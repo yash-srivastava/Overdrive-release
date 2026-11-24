@@ -865,7 +865,6 @@
          deterrent screen all run independently regardless of this state. -->
     <string name="settings_security_title">安全性</string>
     <string name="settings_security_subtitle">鎖定 OverDrive 應用程式，讓乘客與代客泊車人員在沒有你的 PIN 時無法開啟。</string>
-    <string name="settings_security_stance_title">僅鎖定介面</string>
     <string name="settings_security_stance_body">應用程式鎖定期間，監控、錄製、威懾、警示與背景服務仍持續運作。PIN 只把關 OverDrive 介面，其他一律不受影響。</string>
     <string name="settings_security_overline_lock">應用程式鎖</string>
     <string name="settings_security_overline_recovery">若你忘記 PIN</string>

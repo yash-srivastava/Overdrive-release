@@ -856,7 +856,6 @@
          deterrent screen all run independently regardless of this state. -->
     <string name="settings_security_title">Ασφάλεια</string>
     <string name="settings_security_subtitle">Κλειδώστε την εφαρμογή OverDrive ώστε οι επιβάτες και οι βαλίτσες να μην μπορούν να την ανοίξουν χωρίς το PIN σας.</string>
-    <string name="settings_security_stance_title">Μόνο κλειδαριά UI</string>
     <string name="settings_security_stance_body">Η επιτήρηση, η καταγραφή, η αποτροπή, οι ειδοποιήσεις και οι υπηρεσίες παρασκηνίου συνεχίζουν να λειτουργούν όσο η εφαρμογή είναι κλειδωμένη. Οι πύλες PIN είναι η διεπαφή OverDrive, τίποτα άλλο.</string>
     <string name="settings_security_overline_lock">Κλείδωμα εφαρμογής</string>
     <string name="settings_security_overline_recovery">Εάν ξεχάσετε το PIN σας</string>

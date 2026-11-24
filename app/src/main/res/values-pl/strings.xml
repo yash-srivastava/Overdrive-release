@@ -862,7 +862,6 @@
          deterrent screen all run independently regardless of this state. -->
     <string name="settings_security_title">Bezpieczeństwo</string>
     <string name="settings_security_subtitle">Zablokuj aplikację OverDrive, aby pasażerowie i valety nie mogli otworzyć jej bez twojego kodu PIN.</string>
-    <string name="settings_security_stance_title">Tylko blokada interfejsu użytkownika</string>
     <string name="settings_security_stance_body">Nadzór, nagrywanie, odstraszanie, alarmy i usługi w tle są nadal uruchomione, gdy aplikacja jest zablokowana. PIN bramuje interfejs OverDrive, nic innego.</string>
     <string name="settings_security_overline_lock">Blokada aplikacji</string>
     <string name="settings_security_overline_recovery">Pominięcie kodu PIN</string>

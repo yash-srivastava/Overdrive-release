@@ -911,7 +911,6 @@
          deterrent screen all run independently regardless of this state. -->
     <string name="settings_security_title">Bảo mật</string>
     <string name="settings_security_subtitle">Khóa ứng dụng OverDrive để hành khách và nhân viên đỗ xe không thể mở nếu không có PIN của bạn.</string>
-    <string name="settings_security_stance_title">Chỉ khóa giao diện</string>
     <string name="settings_security_stance_body">Giám sát, ghi hình, răn đe, cảnh báo và dịch vụ nền vẫn chạy khi ứng dụng bị khóa. PIN chỉ chặn giao diện OverDrive, không gì khác.</string>
     <string name="settings_security_overline_lock">Khóa ứng dụng</string>
     <string name="settings_security_overline_recovery">Nếu bạn quên PIN</string>

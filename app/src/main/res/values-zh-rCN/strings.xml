@@ -1006,7 +1006,6 @@
          deterrent screen all run independently regardless of this state. -->
     <string name="settings_security_title">安全</string>
     <string name="settings_security_subtitle">锁定OverDrive应用，否则乘客和阀无法在没有您的 PIN 码的情况下打开它。</string>
-    <string name="settings_security_stance_title">仅锁定界面</string>
     <string name="settings_security_stance_body">监视、录制、威慑、警报和后台服务在锁定应用程序时继续运行。PIN码仅锁定 OverDrive 界面，别无其他。</string>
     <string name="settings_security_overline_lock">应用锁</string>
     <string name="settings_security_overline_recovery">如果您忘记了您的 PIN</string>

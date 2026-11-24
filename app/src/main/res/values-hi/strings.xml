@@ -863,7 +863,6 @@
          deterrent screen all run independently regardless of this state. -->
     <string name="settings_security_title">सुरक्षा</string>
     <string name="settings_security_subtitle">OverDrive ऐप को लॉक करें ताकि यात्री और वैलेट आपके PIN के बिना इसे न खोल सकें।</string>
-    <string name="settings_security_stance_title">केवल UI लॉक</string>
     <string name="settings_security_stance_body">ऐप लॉक रहने के दौरान सर्विलांस, रिकॉर्डिंग, डिटरेंट, अलर्ट और बैकग्राउंड सेवाएँ चलती रहती हैं। PIN केवल OverDrive इंटरफ़ेस को रोकता है, और कुछ नहीं।</string>
     <string name="settings_security_overline_lock">ऐप लॉक</string>
     <string name="settings_security_overline_recovery">यदि आप अपना PIN भूल जाते हैं</string>
