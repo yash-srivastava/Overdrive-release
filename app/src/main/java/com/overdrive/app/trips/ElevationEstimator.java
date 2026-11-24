@@ -25,8 +25,8 @@ import java.util.Arrays;
  *     at standstill), carry a plausible altitude, and pass the vertical-accuracy
  *     gate when the fix reports one.
  *  2. RESET: the filter state is cleared when the MSL/ellipsoid source flips or
- *     after a long gap in accepted samples, so a step change in the altitude
- *     datum can never be integrated as real climb.
+ *     after a long gap or backward timestamp jump in accepted samples, so
+ *     discontinuities cannot be integrated as real climb.
  *  3. SMOOTH: a time-based (10 s) moving MEDIAN over accepted altitudes. Median
  *     (not mean) so a single multipath spike inside the window contributes
  *     nothing. Works at both the live 5 Hz rate and the recovered 1 Hz rate
@@ -123,9 +123,12 @@ public final class ElevationEstimator {
         lastSourceMsl = altitudeIsMsl;
         haveSource = true;
 
-        // Long-gap reset.
+        // The median window assumes chronological samples. A backward clock
+        // jump would otherwise retain future-dated samples and bridge the jump.
+        // Reset only the filter, preserving already accumulated gain and loss.
         if (lastAcceptedTs != Long.MIN_VALUE
-                && timestampMs - lastAcceptedTs > MAX_ALT_GAP_MS) {
+                && (timestampMs < lastAcceptedTs
+                    || timestampMs - lastAcceptedTs > MAX_ALT_GAP_MS)) {
             reset();
         }
         lastAcceptedTs = timestampMs;
