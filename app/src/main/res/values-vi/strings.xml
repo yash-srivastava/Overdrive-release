@@ -1478,6 +1478,7 @@
     <string name="settings_remote_emergency_title">Tắt khẩn cấp</string>
     <string name="settings_remote_emergency_subtitle">Ngay lập tức dừng và chặn giọng nói từ xa, nghe khoang lái và tin nhắn.</string>
     <string name="settings_remote_save_failed">Không thể lưu cài đặt liên lạc từ xa</string>
+    <string name="settings_about_tier_hall_of_fame">Đại sảnh Danh vọng</string>
     <string name="settings_about_tier_diamond">Kim cương</string>
     <string name="settings_about_tier_platinum">Bạch kim</string>
     <string name="settings_about_tier_gold">Vàng</string>
@@ -1671,7 +1672,7 @@
     <string name="settings_remote_listener_title">Bật nghe khoang lái</string>
     <string name="settings_remote_listener_subtitle">Cho phép các phiên Xem trực tiếp và Liên lạc đã xác thực nghe micrô khoang lái khi xe đang bật.</string>
     <string name="settings_remote_audio_channel_title">Tương thích giọng nói</string>
-    <string name="settings_remote_audio_channel_subtitle">Media giữ nguyên đường loa và micrô hiện có. Navigation khớp với định tuyến Di+ và thu micrô 8 kHz.</string>
+    <string name="settings_remote_audio_channel_subtitle">Media giữ nguyên đường loa và micrô hiện có. Navigation khớp với định tuyến BYD và thu micrô 8 kHz.</string>
     <string name="settings_remote_audio_channel_media">Media</string>
     <string name="settings_remote_audio_channel_navigation">Dẫn đường</string>
     <string name="cabin_audio_notification_channel">Nghe khoang lái</string>

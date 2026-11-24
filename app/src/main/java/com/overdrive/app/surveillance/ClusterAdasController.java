@@ -38,6 +38,9 @@ public final class ClusterAdasController {
     private static final long CONFIG_TTL_MS = 1_000L;
     private static volatile boolean hideEnabled;
     private static volatile long hideEnabledReadAt = -CONFIG_TTL_MS;
+    // Custom Layouts' request while its session is live. In memory only, so the user's own
+    // setting is never rewritten and a daemon restart drops the request.
+    private static volatile boolean customLayoutsHide;
     private static final AtomicBoolean started = new AtomicBoolean();
     private static volatile ScheduledExecutorService worker;
     private static ClusterAdasLifecycle lifecycle; // Accessed only on worker.
@@ -85,8 +88,14 @@ public final class ClusterAdasController {
         try { CameraDaemon.log(message); } catch (Throwable ignored) { }
     }
 
+    /** Custom Layouts hides the OEM box while active; false falls back to the user's setting. */
+    public static void setCustomLayoutsHide(boolean hide) {
+        customLayoutsHide = hide;
+    }
+
     /** User opt-in, re-read at most once a second; any thread. Off blocks hide work, never restore. */
     static boolean hideEnabled() {
+        if (customLayoutsHide) return true;
         long now = SystemClock.elapsedRealtime();
         if (now - hideEnabledReadAt < CONFIG_TTL_MS) return hideEnabled;
         try {

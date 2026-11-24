@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="nav_hud_roundabout_exit">Izađite na izlazu %1$s</string>
+    <string name="nav_hud_roundabout_exit_onto">Na izlazu %1$s pređite na</string>
+    <string name="nav_hud_towards">Ka</string>
+    <string name="nav_hud_exit">Izlaz %1$s</string>
+    <string name="nav_hud_then">Zatim</string>
+    <string name="nav_hud_arrive">Dolazak</string>
+    <string name="nav_hud_recenter">Ponovo centrirajte</string>
+    <string name="nav_hud_end">Završite</string>
+    <string name="nav_hud_delay">+%1$s</string>
+    <string name="nav_hud_unit_m">m</string>
+    <string name="nav_hud_unit_km">km</string>
+    <string name="nav_hud_unit_ft">ft</string>
+    <string name="nav_hud_unit_mi">mi</string>
+    <string name="nav_hud_unit_kmh">km/h</string>
+    <string name="nav_hud_unit_mph">mph</string>
+    <string name="nav_hud_cd_mute">Utišajte glasovna uputstva</string>
+    <string name="nav_hud_cd_unmute">Uključite zvuk glasovnih uputstava</string>
+    <string name="nav_hud_cd_overview">Prikažite celu rutu</string>
+    <string name="nav_hud_cd_overview_exit">Vratite se na prikaz vožnje</string>
+    <string name="nav_hud_cd_end">Završite navigaciju</string>
+    <string name="nav_hud_cd_recenter">Ponovo centrirajte na vozilo</string>
+    <string name="nav_hud_cd_compass_heading_up">Kompas: smer kretanja gore. Dodirnite za sever gore</string>
+    <string name="nav_hud_cd_compass_north_up">Kompas: sever gore. Dodirnite za smer kretanja gore</string>
+    <string name="nav_hud_cd_back">Napustite mapu</string>
+    <string name="nav_hud_cd_then">Zatim %1$s za %2$s</string>
+    <string name="nav_hud_cd_trip">Dolazak u %1$s, %2$s, preostalo %3$s</string>
+    <string name="nav_hud_cd_delay">%1$s zastoja u saobraćaju</string>
+    <string-array name="nav_hud_verbs_bare">
+        <item>Nastavite</item>
+        <item>Krenite</item>
+        <item>Stigli ste</item>
+        <item>Stigli ste, odredište je desno</item>
+        <item>Stigli ste, odredište je levo</item>
+        <item>Blago skrenite udesno</item>
+        <item>Skrenite udesno</item>
+        <item>Oštro skrenite udesno</item>
+        <item>Napravite polukružno okretanje</item>
+        <item>Oštro skrenite ulevo</item>
+        <item>Skrenite ulevo</item>
+        <item>Blago skrenite ulevo</item>
+        <item>Idite na priključni put</item>
+        <item>Idite na izlaz</item>
+        <item>Nastavite pravo</item>
+        <item>Držite se desne strane</item>
+        <item>Držite se leve strane</item>
+        <item>Uključite se u saobraćaj</item>
+        <item>Uključite se udesno</item>
+        <item>Uključite se ulevo</item>
+        <item>Uđite u kružni tok</item>
+        <item>Izađite iz kružnog toka</item>
+        <item>Ukrcajte se na trajekt</item>
+        <item>Iskrcajte se sa trajekta</item>
+    </string-array>
+    <string-array name="nav_hud_verbs_onto">
+        <item>Nastavite putem</item>
+        <item>Krenite putem</item>
+        <item>Stigli ste na:</item>
+        <item>Stigli ste, odredište je desno na:</item>
+        <item>Stigli ste, odredište je levo na:</item>
+        <item>Blago skrenite udesno na</item>
+        <item>Skrenite udesno na</item>
+        <item>Oštro skrenite udesno na</item>
+        <item>Napravite polukružno okretanje na</item>
+        <item>Oštro skrenite ulevo na</item>
+        <item>Skrenite ulevo na</item>
+        <item>Blago skrenite ulevo na</item>
+        <item>Idite priključnim putem na</item>
+        <item>Idite izlazom na</item>
+        <item>Nastavite pravo na</item>
+        <item>Držite se desne strane na</item>
+        <item>Držite se leve strane na</item>
+        <item>Uključite se na</item>
+        <item>Uključite se udesno na</item>
+        <item>Uključite se ulevo na</item>
+        <item>Uđite u kružni tok na</item>
+        <item>Izađite iz kružnog toka na</item>
+        <item>Ukrcajte se na trajekt do</item>
+        <item>Iskrcajte se sa trajekta na</item>
+    </string-array>
+    <string-array name="nav_hud_ordinals">
+        <item>1.</item>
+        <item>2.</item>
+        <item>3.</item>
+        <item>4.</item>
+        <item>5.</item>
+        <item>6.</item>
+        <item>7.</item>
+        <item>8.</item>
+        <item>9.</item>
+        <item>10.</item>
+    </string-array>
+</resources>

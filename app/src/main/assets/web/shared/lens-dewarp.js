@@ -21,7 +21,7 @@
         'precision mediump float;',
         '#endif',
         'uniform sampler2D uTex;',
-        'uniform float uK1, uK2, uAspect;',
+        'uniform float uK1, uK2, uAspect, uStrip;',
         'uniform vec2 uHalfTexel;',
         'varying vec2 vUV;',
         'vec2 rectify(vec2 t) {',
@@ -37,9 +37,12 @@
         'void main() {',
         '    // Picture space, y down: texture row 0 is the top of the <video> frame.',
         '    vec2 p = vec2(vUV.x, 1.0 - vUV.y);',
+        '    // The telemetry strip at the top is shown as recorded, never sampled for the picture.',
+        '    if (p.y < uStrip) { gl_FragColor = texture2D(uTex, p); return; }',
         '    vec2 tile = step(vec2(0.5), p) * 0.5;',
-        '    vec2 src = tile + rectify((p - tile) * 2.0) * 0.5;',
-        '    gl_FragColor = texture2D(uTex, clamp(src, tile + uHalfTexel, tile + 0.5 - uHalfTexel));',
+        '    vec2 src = clamp(tile + rectify((p - tile) * 2.0) * 0.5, tile + uHalfTexel, tile + 0.5 - uHalfTexel);',
+        '    src.y = max(src.y, uStrip + uHalfTexel.y);',
+        '    gl_FragColor = texture2D(uTex, src);',
         '}'
     ].join('\n');
 
@@ -92,6 +95,7 @@
         this.uK1 = gl.getUniformLocation(prog, 'uK1');
         this.uK2 = gl.getUniformLocation(prog, 'uK2');
         this.uAspect = gl.getUniformLocation(prog, 'uAspect');
+        this.uStrip = gl.getUniformLocation(prog, 'uStrip');
         this.uHalfTexel = gl.getUniformLocation(prog, 'uHalfTexel');
 
         this.vbo = gl.createBuffer();
@@ -271,6 +275,7 @@
         gl.uniform1f(this.uK1, spec.k1);
         gl.uniform1f(this.uK2, spec.k2);
         gl.uniform1f(this.uAspect, spec.aspect);
+        gl.uniform1f(this.uStrip, spec.strip > 0 && spec.strip < 0.5 ? spec.strip : 0);
         gl.uniform2f(this.uHalfTexel, 0.5 / v.videoWidth, 0.5 / v.videoHeight);
 
         gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
@@ -288,7 +293,11 @@
         if (t === 0) return null;
         const aspect = Number(lens.aspect);
         if (!(aspect >= 0.25 && aspect <= 1.0)) return null;
-        return { k1: 0.30 * t, k2: 0.10 * t, aspect: aspect };
+        // `strip`: rows of the opaque telemetry strip at the top, as a fraction of the frame.
+        const rows = Number(lens.strip);
+        const frameH = lens.frame ? Number(lens.frame.height) : 0;
+        const strip = rows > 0 && frameH > 0 && rows * 2 < frameH ? rows / frameH : 0;
+        return { k1: 0.30 * t, k2: 0.10 * t, aspect: aspect, strip: strip };
     };
 
     // GET /api/settings/unified answers {success, config: {recording: {...}}}.

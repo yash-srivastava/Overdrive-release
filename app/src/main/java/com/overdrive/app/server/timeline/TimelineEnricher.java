@@ -1,5 +1,7 @@
 package com.overdrive.app.server.timeline;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.logging.DaemonLogger;
 
 import java.io.File;
@@ -431,7 +433,7 @@ public final class TimelineEnricher {
         if (row.absPath == null) return false;
         File mp4 = new File(row.absPath);
         // A vanished or rewritten file is re-queued by its own index refresh.
-        if (!mp4.isFile() || mp4.length() != row.sizeBytes) return false;
+        if (!RemovableStorageFs.isFile(mp4) || RemovableStorageFs.length(mp4) != row.sizeBytes) return false;
         try {
             return enrichFile(row, mp4, fingerprint);
         } finally {
@@ -448,7 +450,7 @@ public final class TimelineEnricher {
             hint = row.tlStart;
         }
         SpanRules.Span span = SpanRules.compute(row.type, row.fileName, row.tsMs, durationMs,
-                facts, hint, mp4.lastModified());
+                facts, hint, RemovableStorageFs.lastModified(mp4));
         String layout = SidecarTimeline.layoutFor(row.type, row.fileName, facts);
         List<SidecarTimeline.Mark> marks = SidecarTimeline.marks(facts, span.start);
 

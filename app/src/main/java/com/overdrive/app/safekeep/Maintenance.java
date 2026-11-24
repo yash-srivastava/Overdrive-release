@@ -1,5 +1,7 @@
 package com.overdrive.app.safekeep;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.safekeep.dest.DestError;
 import com.overdrive.app.safekeep.dest.Destination;
@@ -157,7 +159,7 @@ final class Maintenance {
                     if (ts > 0 && ts < w.getValue()) continue;
                     if (missingFor(w.getKey(), file, recent)) need.add(w.getKey());
                 }
-                if (need.isEmpty() || !file.isFile()) continue;
+                if (need.isEmpty() || !RemovableStorageFs.isFile(file)) continue;
                 enqueued += e.enqueuer.enqueueMedia(file, kind, false, false, false, need);
             }
             if (rows.size() < RECONCILE_PAGE) {
@@ -179,7 +181,7 @@ final class Maintenance {
         String stem = Naming.stem(anchor.getName());
         for (String ext : SIDECARS) {
             File sc = new File(dir, stem + ext);
-            if (sc.isFile() && sc.length() > 0 && !e.ledger.hasRowFor(destId, Naming.fileKey(sc.getName()))) return true;
+            if (RemovableStorageFs.isFile(sc) && RemovableStorageFs.length(sc) > 0 && !e.ledger.hasRowFor(destId, Naming.fileKey(sc.getName()))) return true;
         }
         return false;
     }

@@ -18,6 +18,7 @@ object GoogleMapStyle {
 
     const val BASE_SOURCE_ID = "google-base"
     const val BASE_LAYER_ID = "google-base-layer"
+    const val PROGRAM_RESET_LAYER_ID = "google-program-reset"
     const val TRAFFIC_SOURCE_ID = "google-traffic"
     const val TRAFFIC_LAYER_ID = "google-traffic-layer"
     const val GLYPHS_URL = "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf"
@@ -49,12 +50,18 @@ object GoogleMapStyle {
             .put("type", "raster")
             .put("source", BASE_SOURCE_ID)
             .put("paint", JSONObject().put("raster-fade-duration", 100))
+        // Draws every frame with a non-raster program: MapLibre 11.13's LocationIndicatorLayer unbinds the GL program,
+        // and the rasters rebind theirs only after another program has been used.
+        val programReset = JSONObject()
+            .put("id", PROGRAM_RESET_LAYER_ID)
+            .put("type", "background")
+            .put("paint", JSONObject().put("background-color", "rgba(0,0,0,0)"))
         return JSONObject()
             .put("version", 8)
             .put("name", "google")
             .put("glyphs", GLYPHS_URL)
             .put("sources", JSONObject().put(BASE_SOURCE_ID, source))
-            .put("layers", JSONArray().put(background).put(raster))
+            .put("layers", JSONArray().put(background).put(raster).put(programReset))
             .toString()
     }
 

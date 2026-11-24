@@ -1,5 +1,7 @@
 package com.overdrive.app.safekeep;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.trips.TripRecord;
 
 import org.json.JSONObject;
@@ -102,10 +104,10 @@ public final class TripExporter {
     }
 
     static void forEachPoint(File telemetry, PointSink sink) {
-        if (telemetry == null || !telemetry.isFile()) return;
+        if (telemetry == null || !RemovableStorageFs.isFile(telemetry)) return;
         int n = 0;
         try (BufferedReader r = new BufferedReader(new InputStreamReader(
-                new GZIPInputStream(new FileInputStream(telemetry)), StandardCharsets.UTF_8))) {
+                new GZIPInputStream(RemovableStorageFs.openInput(telemetry)), StandardCharsets.UTF_8))) {
             String line;
             while ((line = r.readLine()) != null && n < MAX_POINTS) {
                 if (line.isEmpty() || line.charAt(0) != '{') continue;

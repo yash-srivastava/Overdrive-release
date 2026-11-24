@@ -138,6 +138,7 @@ public final class QuickControlsApiHandler {
 
         JSONObject section = new JSONObject();
         section.put("buttons", clean);
+        if (!StepUpGate.requireBundle("config", "Change quick controls", out)) return true;
         boolean ok = UnifiedConfigManager.setQuickControls(section);
         if (!ok) {
             HttpResponse.sendJsonError(out, "Failed to persist quick controls");
@@ -183,10 +184,12 @@ public final class QuickControlsApiHandler {
         }
         JSONArray buttons = UnifiedConfigManager.getQuickControlButtons();
         JSONObject action = null;
+        String label = "";
         for (int i = 0; i < buttons.length(); i++) {
             JSONObject b = buttons.optJSONObject(i);
             if (b != null && id.equals(b.optString("id", ""))) {
                 action = b.optJSONObject("action");
+                label = b.optString("label", "").trim();
                 break;
             }
         }
@@ -199,6 +202,8 @@ public final class QuickControlsApiHandler {
         // the request handler — which the server can only log while the client waits.
         JSONObject result;
         try {
+            if (!KeymapApiHandler.stepUpForAction(action,
+                    label.isEmpty() ? "a quick control" : label, out)) return true;
             result = KeymapApiHandler.runBoundAction(action);
         } catch (Exception e) {
             logger.warn("quick-control " + id + " failed: " + e.getMessage());

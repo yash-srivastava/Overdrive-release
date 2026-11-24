@@ -1,4 +1,6 @@
 package com.overdrive.app.surveillance;
+
+import com.overdrive.app.storage.removable.RemovableStorageFs;
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.storage.StorageManager;
 import com.overdrive.app.telemetry.TelemetryDataCollector;
@@ -2303,8 +2305,8 @@ public class GpuSurveillancePipeline {
         logger.info("Initializing GPU surveillance pipeline...");
         
         // Ensure output directory exists
-        if (!eventOutputDir.exists()) {
-            eventOutputDir.mkdirs();
+        if (!RemovableStorageFs.exists(eventOutputDir)) {
+            RemovableStorageFs.mkdirs(eventOutputDir);
         }
         
         // SOTA: Release any stuck encoder resources before creating new one
@@ -4623,20 +4625,22 @@ public class GpuSurveillancePipeline {
             // No probe outstanding — this call owns the slot.
             Thread t = new Thread(() -> {
                 try {
-                    if (!target.exists()) {
-                        target.mkdirs();
+                    if (!RemovableStorageFs.exists(target)) {
+                        RemovableStorageFs.mkdirs(target);
                     }
-                    if (!target.isDirectory()) return;
+                    if (!RemovableStorageFs.isDirectory(target)) return;
+                    // MediaStore-routed volumes (DiLink 100) do not allow names starting with a dot.
                     java.io.File probeFile = new java.io.File(target,
-                        ".wrprobe_" + android.os.Process.myPid());
-                    java.io.FileOutputStream fos = new java.io.FileOutputStream(probeFile);
+                        (RemovableStorageFs.isRouted(target) ? "wrprobe_" : ".wrprobe_")
+                            + android.os.Process.myPid());
+                    java.io.FileOutputStream fos = RemovableStorageFs.openOutput(probeFile);
                     try {
                         fos.write(0);
                         fos.flush();
                     } finally {
                         try { fos.close(); } catch (Exception ignored) {}
                     }
-                    probeFile.delete();
+                    RemovableStorageFs.delete(probeFile);
                     ok[0] = true;
                 } catch (Throwable ignored) {
                     // ok stays false — volume not write-ready
@@ -6509,7 +6513,9 @@ public class GpuSurveillancePipeline {
         // cluster→head-unit camview show would otherwise be suppressed by the
         // stale bsTarget, feeding the overlay a null that clears the fresh edge
         // rect), bsTarget otherwise. Callers need no cluster gate of their own.
-        if (camViewClaim ? isCamViewClusterTarget() : "cluster".equals(bsTarget)) {
+        // Custom Layouts' cluster slot owning the card counts as a cluster target too.
+        if ((camViewClaim ? isCamViewClusterTarget() : "cluster".equals(bsTarget))
+                || (!camViewClaim && clSlotOwnsCard() && !camViewOwnsLane())) {
             return null;
         }
         int[] g = camViewClaim ? camViewGeomRect : bsGeomRect;
@@ -7219,6 +7225,9 @@ public class GpuSurveillancePipeline {
         // Publish to the render loop's PASS 1C (no encoder on the native path —
         // PASS 1C skips drainEncoder when the encoder is null).
         camera.setBsStreamingComponents(bsScaler, null);
+        // Custom Layouts may place this lane's card in its cluster slot; inert until it starts.
+        com.overdrive.app.customlayouts.daemon.bs.CustomLayoutsBlindSpot.attachLane(
+                this, bsLayer, bsScaler, this::requestBlindSpotTick);
         return true;
         } catch (Throwable t) {
             // BS-LIFECYCLE-1: release the partially-built lane in the correct
@@ -7929,7 +7938,14 @@ public class GpuSurveillancePipeline {
     }
 
     /** True when the blind-spot display target is the driver cluster. */
-    private boolean isClusterTarget() { return "cluster".equals(bsTarget); }
+    private boolean isClusterTarget() {
+        return "cluster".equals(bsTarget) && !clSlotOwnsCard();
+    }
+
+    /** Custom Layouts owns the cluster and puts the card in its slot; BS then never opens or closes the projection. */
+    private static boolean clSlotOwnsCard() {
+        return com.overdrive.app.customlayouts.daemon.bs.CustomLayoutsBlindSpot.ownsPlacement();
+    }
 
     /** The panel size of the active target (head-unit vs cluster). The cluster
      *  metrics are only valid while an OEM projection is open; otherwise
@@ -8070,7 +8086,9 @@ public class GpuSurveillancePipeline {
     }
 
     /** Current BS display target string for API/status ("head_unit"|"cluster"). */
-    public String getBsTargetString() { return bsTarget; }
+    public String getBsTargetString() {
+        return (clSlotOwnsCard() && !camViewOwnsLane()) ? "cluster" : bsTarget;
+    }
 
     /** Invoked by ClusterProjectionController when the cluster projection CLOSES
      *  (linger / max-cap / disarm / any forceClose). Hide the BS layer + drop the
@@ -8346,8 +8364,10 @@ public class GpuSurveillancePipeline {
             bsTarget = newTarget;
             com.overdrive.app.surveillance.BsNativeLayer layer = bsLayer;
             if (wasCluster && !isClusterTarget()) {
-                // Leaving the cluster — restore gauges and move the card home.
-                try { com.overdrive.app.surveillance.ClusterProjectionController.getInstance().forceClose("retarget-headunit"); } catch (Throwable ignored) {}
+                // Leaving the cluster — restore gauges and move the card home. Custom Layouts keeps its own projection.
+                if (!com.overdrive.app.customlayouts.daemon.CustomLayoutsController.ownsCluster()) {
+                    try { com.overdrive.app.surveillance.ClusterProjectionController.getInstance().forceClose("retarget-headunit"); } catch (Throwable ignored) {}
+                }
                 if (layer != null) layer.setLayerStack(0);
             }
             resolveBsGeometry();
@@ -8389,6 +8409,13 @@ public class GpuSurveillancePipeline {
         } catch (Throwable t) {
             logger.debug("dismissOrphanClusterMap failed: " + t.getMessage());
         }
+    }
+
+    /** One turn tick now, on the turn thread; Custom Layouts calls it when its activity sees the indicator first. */
+    private void requestBlindSpotTick() {
+        java.util.concurrent.ScheduledExecutorService ex = bsTurnExec;
+        if (ex == null) return;
+        try { ex.execute(this::bsTurnTick); } catch (Throwable ignored) {}
     }
 
     /** Start the daemon-side turn-trigger loop (idempotent). Reads turn lamps +
@@ -8633,6 +8660,19 @@ public class GpuSurveillancePipeline {
             if (!blindSpotEnabled) {
                 if (camViewActive) { camViewTick(); }
                 return;
+            }
+            com.overdrive.app.surveillance.BsNativeLayer placedLayer = bsLayer;
+            if (!clSlotOwnsCard() && isBlindSpotCardShowing() && placedLayer != null
+                    && placedLayer.isShown() && placedLayer.isSlotApplied()) {
+                if (isClusterTarget()) {
+                    // Hide the old slot so the normal cluster path resolves the saved panel/stack
+                    // on projThread. The code below re-drives an active turn on this same tick.
+                    setBlindSpotVisible(false);
+                } else {
+                    // Head-unit stack and saved geometry are restored together, including during
+                    // the turn lamp's blink-off phase. Keep the warm camera and visibility gate.
+                    setBlindSpotVisible(true);
+                }
             }
             // Config + turn-signal read hoisted ABOVE the program re-assert below: the
             // camview yield needs both to decide whether blind-spot wants the lane at
@@ -8902,7 +8942,7 @@ public class GpuSurveillancePipeline {
                 // the cluster branch would blank a live safety card for a projThread hop.
                 // Every other PROG_NONE route already clears bsLayerVisible first.
                 if (bsLayerVisible && laneProgram == PROG_CAMVIEW) {
-                    if (!isClusterTarget()) {
+                    if (!isClusterTarget() && !clSlotOwnsCard()) {
                         // Re-asserts layerStack 0 + the restored rect in one transaction.
                         // Idempotent, and the fps-ramp edge is already latched true.
                         setBlindSpotVisible(true);
@@ -8922,7 +8962,7 @@ public class GpuSurveillancePipeline {
             // against the live panel and re-apply. Cheap check (one displaySize).
             // For the cluster target this is skipped (panel is constant), and the
             // cluster metrics aren't valid until the projection is open anyway.
-            if (!cluster) {
+            if (!cluster && !clSlotOwnsCard()) {
                 try {
                     android.content.Context ctx = savedContext;
                     if (ctx == null) ctx = com.overdrive.app.daemon.CameraDaemon.getAppContext();
@@ -9160,7 +9200,8 @@ public class GpuSurveillancePipeline {
             // SAFETY: if a cluster projection is open AND no other program keeps it,
             // restore the gauges FIRST, before any teardown. Gated on isClusterTarget()
             // so a head-unit-only user never even constructs the controller.
-            if (isClusterTarget() && !camviewKeepsLane) {
+            if (isClusterTarget() && !camviewKeepsLane
+                    && !com.overdrive.app.customlayouts.daemon.CustomLayoutsController.ownsCluster()) {
                 try { com.overdrive.app.surveillance.ClusterProjectionController.getInstance().forceClose("bs-disabled"); } catch (Throwable ignored) {}
             }
             blindSpotEnabled = false;
@@ -10168,7 +10209,7 @@ public class GpuSurveillancePipeline {
     /**
      * Sets the stream view mode (which camera to show).
      * 
-    * @param mode 0=Mosaic (2x2 grid), 1=Front, 2=Right, 3=Rear, 4=Left
+    * @param mode 0=Mosaic (2x2 grid), 1=Front, 2=Right, 3=Rear, 4=Left, 9=AVM + DVR
      */
     public void setStreamViewMode(int mode) {
         com.overdrive.app.streaming.GpuStreamScaler scaler = streamScaler;
@@ -10956,6 +10997,60 @@ public class GpuSurveillancePipeline {
         }
     }
 
+    /** Bind the running OEM camera as a secondary GPU texture without changing
+     * the WebSocket encoder source. Used by combined AVM + DVR view mode 9. */
+    public boolean bindOemSourceForComposite(
+            com.overdrive.app.camera.OemDashcamPipeline oemPipeline) {
+        streamLifecycleLock.lock();
+        try {
+            // No frame-age gate: the scaler keeps uOemActive=0 (black band) until
+            // this source publishes its first transform.
+            if (!streamingEnabled || streamScaler == null || oemPipeline == null
+                    || !oemPipeline.isRouteReady()) {
+                return false;
+            }
+            int texture = oemPipeline.getCameraTextureId();
+            android.graphics.SurfaceTexture surface = oemPipeline.getCameraSurfaceTexture();
+            if (texture == 0 || surface == null) return false;
+            boolean sourceWasBound = streamScaler.isOemSourceBound();
+            streamScaler.bindOemSource(texture, surface);
+            if (!sourceWasBound) oemSourceFenceGeneration++;
+            oemPipeline.setStreamScalerForOemPublish(streamScaler);
+            // The source's next transform publish makes the sampler active on
+            // the GL thread.
+            return streamScaler.isOemSourceBound();
+        } catch (Throwable t) {
+            logger.warn("bindOemSourceForComposite failed: " + t.getMessage());
+            return false;
+        } finally {
+            streamLifecycleLock.unlock();
+        }
+    }
+
+    /** Rebind and activate the combined view while holding the same lifecycle
+     * lock that protects streamScaler teardown. A reconnect and an HTTP view
+     * selection can overlap, so never promote a stale view-9 request after the
+     * user has moved on to another camera. */
+    public boolean activateCombinedViewIfDesired(
+            com.overdrive.app.camera.OemDashcamPipeline oemPipeline) {
+        streamLifecycleLock.lock();
+        try {
+            if (com.overdrive.app.server.StreamingApiHandler.getLastDesiredViewMode() != 9) {
+                return false;
+            }
+            if (!bindOemSourceForComposite(oemPipeline)) return false;
+            // Binding can race a newer selection, even when the scaler itself
+            // survives. Re-check while the lifecycle lock is still held.
+            if (com.overdrive.app.server.StreamingApiHandler.getLastDesiredViewMode() != 9) {
+                return false;
+            }
+            setStreamViewMode(9);
+            return true;
+        } finally {
+            streamLifecycleLock.unlock();
+        }
+    }
+
     /**
      * Restore the AVM mosaic as the streamScaler's source. Called by the
      * existing /api/stream/view/{0..4} path after the scaler view-mode is
@@ -10978,7 +11073,7 @@ public class GpuSurveillancePipeline {
             // that nulls streamScaler post-capture can't NPE us.
             final com.overdrive.app.streaming.GpuStreamScaler scaler = streamScaler;
             if (!streamingEnabled || scaler == null) return false;
-            if (!externalStreamSourceActive) return false;
+            if (!externalStreamSourceActive && !scaler.isOemSourceBound()) return false;
             externalStreamSourceActive = false;
             try {
                 scaler.unbindOemSource();

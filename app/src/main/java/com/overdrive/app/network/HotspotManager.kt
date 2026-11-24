@@ -1050,6 +1050,11 @@ object HotspotManager {
         return usedBytes / (1024L * 1024L) >= capMb
     }
 
+    // Also runs in the app process, where Messages may have no catalog and returns the key.
+    private fun text(key: String, english: String, vararg args: Any): String = try {
+        com.overdrive.app.server.Messages.get(key, *args).takeIf { it != key } ?: english
+    } catch (t: Throwable) { english }
+
     private fun notifyCapReached(capMb: Long, usedBytes: Long) {
         try {
             val data = org.json.JSONObject()
@@ -1059,8 +1064,9 @@ object HotspotManager {
                 com.overdrive.app.notifications.NotificationEvent(
                     "network.hotspot.limit",
                     com.overdrive.app.notifications.NotificationEvent.Severity.WARN,
-                    "Hotspot data limit reached",
-                    "The hotspot used its ${capMb} MB limit and has been turned off.",
+                    text("notifications.network_hotspot_limit_title", "Hotspot data limit reached"),
+                    text("notifications.network_hotspot_limit_body",
+                        "The hotspot used its ${capMb} MB limit and has been turned off.", capMb.toString()),
                     "hotspot-limit",
                     "/network.html",
                     data
@@ -1624,8 +1630,8 @@ object HotspotManager {
         // Set then READ BACK in one round-trip. A bare `appops set` prints nothing on
         // success, and runShell also yields "" when the shell itself failed, so the
         // output alone cannot distinguish the two — only the readback can.
-        val out = runShell("appops set $pkg WRITE_SETTINGS allow >/dev/null 2>&1; " +
-            "appops get $pkg WRITE_SETTINGS")
+        val out = runShell("appops set ${com.overdrive.app.util.ShellUser.flag()} $pkg WRITE_SETTINGS allow >/dev/null 2>&1; " +
+            "appops get ${com.overdrive.app.util.ShellUser.flag()} $pkg WRITE_SETTINGS")
         appopGranted = out != null && out.contains("allow", ignoreCase = true)
         if (!appopGranted) log.warn(TAG, "WRITE_SETTINGS app-op not granted (got: ${out?.trim()})")
     }

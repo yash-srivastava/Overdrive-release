@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="navmap_google_layers_cd">Слојеви мапе</string>
+    <string name="navmap_google_type_default">Google мапа</string>
+    <string name="navmap_google_type_satellite">Сателит</string>
+    <string name="navmap_google_type_hybrid">Хибрид</string>
+    <string name="navmap_google_type_terrain">Терен</string>
+    <string name="navmap_google_type_overdrive">OverDrive мапа</string>
+    <string name="navmap_google_traffic">Саобраћај уживо</string>
+    <string name="navmap_google_traffic_on">Саобраћај уживо је укључен</string>
+    <string name="navmap_google_traffic_off">Саобраћај уживо је искључен</string>
+    <string name="navmap_google_traffic_paused">Саобраћај уживо је паузиран до %1$s (бесплатно дневно ограничење)</string>
+    <string name="navmap_google_map_paused">Google мапа је паузирана до %1$s (бесплатно дневно ограничење)</string>
+    <string name="navmap_google_map_unavailable">Google мапа није доступна, приказује се OverDrive мапа</string>
+    <string name="navmap_google_key_problem">Проблем са Google Maps кључем. Проверите RoadSense подешавања.</string>
+    <string name="navmap_google_route_key_problem">Google рутирање је одбило кључ. Проверите RoadSense подешавања.</string>
+    <string name="navmap_google_route_limit">Достигнуто је данашње ограничење Google рутирања</string>
+    <string name="navmap_google_arrived">Стигли сте на одредиште</string>
+    <string name="navmap_google_traffic_delay">+%1$s због саобраћаја</string>
+    <string name="navmap_google_no_delays">Нема застоја у саобраћају</string>
+    <string name="navmap_google_faster_route">Пронађена је бржа рута, штеди %1$s</string>
+    <string name="navmap_google_faster_route_switch">Пребаците</string>
+    <string name="navmap_google_routes_by_google">Руте обезбеђује Google</string>
+    <string name="navmap_google_routing_provided_by">Рутирање обезбеђује %1$s</string>
+    <string name="navmap_google_place_failed">Није могуће отворити то место</string>
+    <string name="navmap_google_finding_place">Проналажење места…</string>
+</resources>

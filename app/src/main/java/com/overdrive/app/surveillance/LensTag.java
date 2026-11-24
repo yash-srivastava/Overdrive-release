@@ -1,5 +1,7 @@
 package com.overdrive.app.surveillance;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import org.json.JSONObject;
 
 import java.io.File;
@@ -8,11 +10,15 @@ import java.util.Map;
 
 /**
  * Sidecar {@code lens} marker: the clip's pixels are raw strip tiles (CPU
- * engine, no burned-in overlay) and players dewarp them at display time with
- * the live lens slider. Captured when a clip closes, from the encoder that
- * wrote it; sidecar writers look it up by the final mp4 path.
+ * engine) and players dewarp them at display time with the live lens slider.
+ * {@link #STRIP}, when present, is the height in frame rows of the opaque
+ * telemetry strip at the top, which players show as recorded. Captured when a
+ * clip closes, from the encoder that wrote it; sidecar writers look it up by
+ * the final mp4 path.
  */
 public final class LensTag {
+
+    public static final String STRIP = "strip";
 
     private static final int MAX_ENTRIES = 256;
     private static final Map<String, JSONObject> BY_PATH =
@@ -59,18 +65,18 @@ public final class LensTag {
         boolean created = false;
         try {
             // O_EXCL create: another writer's sidecar is never replaced, theirs may replace this one.
-            if (!json.createNewFile()) return false;
+            if (!RemovableStorageFs.createNewFile(json)) return false;
             created = true;
             JSONObject root = new JSONObject();
             root.put("version", 3);
             root.put("lens", tag);
-            try (java.io.FileWriter w = new java.io.FileWriter(json)) {
+            try (java.io.Writer w = new java.io.OutputStreamWriter(RemovableStorageFs.openOutput(json), java.nio.charset.StandardCharsets.UTF_8)) {
                 w.write(root.toString());
             }
-            json.setReadable(true, false);
+            RemovableStorageFs.setReadable(json, true, false);
             return true;
         } catch (Throwable t) {
-            if (created) json.delete();
+            if (created) RemovableStorageFs.delete(json);
             return false;
         }
     }
@@ -80,9 +86,9 @@ public final class LensTag {
         JSONObject tag = forFile(mp4);
         if (tag != null || mp4 == null || mp4.getParentFile() == null) return tag;
         File json = new File(mp4.getParentFile(), mp4.getName().replace(".mp4", ".json"));
-        if (!json.isFile() || json.length() <= 0 || json.length() > 1_048_576) return null;
+        if (!RemovableStorageFs.isFile(json) || RemovableStorageFs.length(json) <= 0 || RemovableStorageFs.length(json) > 1_048_576) return null;
         try {
-            byte[] bytes = java.nio.file.Files.readAllBytes(json.toPath());
+            byte[] bytes = RemovableStorageFs.readAllBytes(json);
             JSONObject lens = new JSONObject(new String(bytes, java.nio.charset.StandardCharsets.UTF_8))
                 .optJSONObject("lens");
             return lens != null && lens.optBoolean("raw", false) && "divide".equals(lens.optString("model"))
@@ -108,15 +114,22 @@ public final class LensTag {
         double k1 = 0.30 * t, k2 = 0.10 * t;
         double a2 = aspect * aspect;
         double zoom = 1 + k1 * a2 + k2 * a2 * a2;
+        int stripRows = (int) Math.round(stripFraction(tag) * h);
         try {
             android.graphics.Bitmap out = src.copy(android.graphics.Bitmap.Config.ARGB_8888, true);
             if (out == null) return src;
             int[] in = new int[tw * th];
             int[] px = new int[tw * th];
             for (int ty = 0; ty < 2; ty++) {
+                // Top tiles: the strip rows stay as recorded and are never sampled for the picture.
+                int strip = ty == 0 ? Math.min(stripRows, th - 1) : 0;
                 for (int tx = 0; tx < 2; tx++) {
                     src.getPixels(in, 0, tw, tx * tw, ty * th, tw, th);
                     for (int y = 0; y < th; y++) {
+                        if (y < strip) {
+                            System.arraycopy(in, y * tw, px, y * tw, tw);
+                            continue;
+                        }
                         double ny = ((y + 0.5) / th) * 2 - 1;
                         for (int x = 0; x < tw; x++) {
                             double nx = ((x + 0.5) / tw) * 2 - 1;
@@ -125,7 +138,7 @@ public final class LensTag {
                             double inv = zoom / (1 + k1 * r2 + k2 * r2 * r2);
                             double u = Math.max(0, Math.min(1, nx * inv * 0.5 + 0.5)) * tw - 0.5;
                             double v = Math.max(0, Math.min(1, ny * inv * 0.5 + 0.5)) * th - 0.5;
-                            px[y * tw + x] = bilinear(in, tw, th, u, v);
+                            px[y * tw + x] = bilinear(in, tw, th, u, Math.max(v, strip));
                         }
                     }
                     out.setPixels(px, 0, tw, tx * tw, ty * th, tw, th);
@@ -135,6 +148,16 @@ public final class LensTag {
         } catch (Throwable oom) {
             return src;
         }
+    }
+
+    /** Height of the tag's opaque top strip as a fraction of the frame, or 0 for none. */
+    public static double stripFraction(JSONObject tag) {
+        if (tag == null) return 0;
+        int strip = tag.optInt(STRIP, 0);
+        JSONObject frame = tag.optJSONObject("frame");
+        int frameHeight = frame != null ? frame.optInt("height", 0) : 0;
+        if (strip <= 0 || frameHeight <= 0 || strip * 2 >= frameHeight) return 0;
+        return (double) strip / frameHeight;
     }
 
     /** {@link #dewarpFrame} at the live slider; recycles {@code src} when a new frame replaces it. */
@@ -181,6 +204,7 @@ public final class LensTag {
             frame.put("height", r.getViewportHeight());
             root.put("frame", frame);
             root.put("aspect", (double) r.getRectifyAspect());
+            root.put(STRIP, r.cpuOverlayBandHeight());
         } catch (Throwable t) {
             return null;
         }

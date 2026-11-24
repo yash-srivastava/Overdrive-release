@@ -1359,14 +1359,8 @@ public final class VehicleControlCatalog {
         // select entities: HA renders a dropdown, keymap binds one option, the
         // automation UI exposes the same option set. Payloads are readable words
         // mapped to the BYD SDK int enum; pInt() also accepts a raw int.
-        // drive_mode: telemetry publishes operationMode under "op_mode" (not
-        // "operation_mode") as a raw int; bind the state topic there and map the
-        // int→word via value_template so the HA select accepts live telemetry.
-        // The echo emits the option word directly (in-domain).
-        // drive_mode: op_mode telemetry is normalized onto the OverDrive config axis
-        // (NORMAL=1, ECO=2, SPORT=3, SNOW=4). BydDataCollector maps the authoritative
-        // energy-device getOperationMode value onto this axis and uses getDriveConfig only
-        // as a legacy fallback. Echo the word and map int→word using the same values.
+        // The collector resolves all drive-mode sources to Normal=1, Eco=2, Sport=3, Snow=4.
+        // A confirmed command echo uses the corresponding option word on the same topic.
         register(select("drive_mode", "Drive Mode", "mdi:car-shift-pattern", null, "op_mode",
                 DRIVE_MODES,
                 "{% set m = value | int(-1) %}{{ 'normal' if m == 1 else 'eco' if m == 2 else 'sport' if m == 3 else 'snow' if m == 4 else value }}",

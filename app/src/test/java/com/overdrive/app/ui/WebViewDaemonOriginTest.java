@@ -1,8 +1,11 @@
 package com.overdrive.app.ui;
 
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+import com.overdrive.app.R;
 import com.overdrive.app.ui.fragment.WebViewFragment;
 import java.net.MalformedURLException;
 import java.net.URL;
@@ -31,6 +34,15 @@ public class WebViewDaemonOriginTest {
         allowed("http://localhost:8080/events.html?file=fixture.mp4");
         allowed("http://127.0.0.1:8080/shared/fixture.js?v=58");
         allowed("http://127.0.0.1:8080/video.mp4?start=0");
+    }
+
+    @Test
+    public void bothBuildersGiveBrowserGuidanceAcrossTheirSupportedPageRoutes() throws Exception {
+        assertEquals(Integer.valueOf(R.string.widget_builder_open_elsewhere),
+                WebViewFragment.browserBuilderMessage("/widget-builder.html"));
+        assertNull(WebViewFragment.browserBuilderMessage("/widgets.html"));
+        assertNull(WebViewFragment.browserBuilderMessage("/shared/dashboard-builder/editor.js"));
+        assertNull(WebViewFragment.browserBuilderMessage("/api/custom-layouts/dashboards"));
     }
 
     @Test

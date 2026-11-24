@@ -12,6 +12,7 @@ import com.overdrive.app.monitor.GearMonitor
 import com.overdrive.app.monitor.GpsMonitor
 import com.overdrive.app.monitor.VehicleDataMonitor
 import com.overdrive.app.roadsense.store.RoadSenseStore
+import com.overdrive.app.storage.removable.RemovableStorageFs
 import com.overdrive.app.surveillance.SafeLocationManager
 import com.overdrive.app.telenav.DeferredNavManager
 import com.overdrive.app.trips.TelemetryStore
@@ -278,7 +279,7 @@ internal object DaemonBriefingEnv : BriefingEnv {
         val path = rec?.telemetryFilePath
         val file = if (path.isNullOrEmpty() || TripDatabase.isImportedPath(path)) null else File(path)
         // A long drive's 5 Hz file decodes to tens of MB at car start; skip it rather than stall.
-        if (file == null || !file.isFile || file.length() > MAX_TRACK_FILE_BYTES) {
+        if (file == null || !RemovableStorageFs.isFile(file) || RemovableStorageFs.length(file) > MAX_TRACK_FILE_BYTES) {
             null
         } else {
             TelemetryStore.readFromFile(file).mapNotNull { s ->

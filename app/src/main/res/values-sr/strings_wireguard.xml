@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="daemon_name_wireguard">WireGuard тунел</string>
+    <string name="daemon_config_no_wireguard">Нема WireGuard конфигурације</string>
+    <string name="daemon_status_wireguard_connected">Повезано · %1$s</string>
+    <string name="daemon_status_wireguard_connecting">Повезивање са %1$s…</string>
+    <string name="daemon_status_wireguard_error">Грешка: %1$s</string>
+</resources>

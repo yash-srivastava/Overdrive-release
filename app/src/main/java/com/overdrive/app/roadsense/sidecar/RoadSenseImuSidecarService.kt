@@ -16,6 +16,7 @@ import android.os.IBinder
 import android.os.Process
 import android.os.SystemClock
 import android.util.Log
+import com.overdrive.app.BuildConfig
 import com.overdrive.app.R
 import com.overdrive.app.roadsense.detect.ImuAccelSample
 import com.overdrive.app.roadsense.detect.ImuFrameCodec
@@ -25,6 +26,7 @@ import com.overdrive.app.services.DaemonKeepaliveService
 import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
+import org.json.JSONObject
 
 /**
  * The ONLY app-process component of RoadSense (D-023).
@@ -74,6 +76,12 @@ class RoadSenseImuSidecarService : Service(), SensorEventListener {
     private var ipcSocket: Socket? = null
     private var ipcOut: OutputStream? = null
 
+    // DiLink 5 path (daemon passes EXTRA_PLATFORM); null on every other platform.
+    @Volatile private var diLink5Requested = false
+    private var diLink5: DiLink5ImuPump? = null
+    private var batchesSent = 0L
+    private var sendFailures = 0L
+
     enum class ImuRate { FAST, SLOW }
 
     override fun onCreate() {
@@ -88,6 +96,7 @@ class RoadSenseImuSidecarService : Service(), SensorEventListener {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val rateName = intent?.getStringExtra(EXTRA_RATE)
+        if (intent?.getStringExtra(EXTRA_PLATFORM) == PLATFORM_DILINK5) diLink5Requested = true
         currentRate = if (rateName == ImuRate.SLOW.name) ImuRate.SLOW else ImuRate.FAST
         ioHandler?.post { applyRate(currentRate) }
         // Not sticky: the daemon owns our lifecycle (D-021). If the OS kills us,
@@ -101,6 +110,7 @@ class RoadSenseImuSidecarService : Service(), SensorEventListener {
         registeredRate = null
         // Close the persistent IPC socket on the thread that owns it, before the
         // looper quits. quitSafely() lets already-posted work (this close) run.
+        ioHandler?.post { diLink5?.stop() }
         ioHandler?.post { closeIpcSocket() }
         ioThread?.quitSafely()
         ioThread = null
@@ -127,21 +137,33 @@ class RoadSenseImuSidecarService : Service(), SensorEventListener {
         // Every mode transition starts from a clean listener/batch state. In
         // particular, don't let a partial FAST batch escape after gear leaves D.
         sm.unregisterListener(this)
+        diLink5?.stop()
         registeredRate = null
         accelBatch.clear()
         gyroBatch.clear()
         batchStartMs = 0L
 
         if (accel == null) {
-            val resolved = ImuSource.resolve(sm)
-            if (!resolved.usableForDetection) {
-                // R-EXT-6 graceful fallback: no real -iner accel on this trim.
-                Log.w(TAG, "no usable -iner accelerometer on this trim; stopping IMU sidecar")
-                stopSelf()
-                return
+            val single = if (diLink5Requested) ImuSource.resolveDiLink5(sm) else null
+            val handler = ioHandler
+            if (single != null && handler != null) {
+                accel = single.accelerometer
+                gyro = single.gyroscope
+                diLink5 = DiLink5ImuPump(this, handler, this, diLink5Sink)
+                reportDiLink5Selection(sm, single)
+            } else {
+                val resolved = ImuSource.resolve(sm)
+                if (!resolved.usableForDetection) {
+                    // R-EXT-6 graceful fallback: no real -iner accel on this trim.
+                    Log.w(TAG, "no usable -iner accelerometer on this trim; stopping IMU sidecar")
+                    sendStatus("unsupported: no usable accelerometer (dilink5=$diLink5Requested) " +
+                        ImuSource.inventory(sm))
+                    stopSelf()
+                    return
+                }
+                accel = resolved.accelerometer
+                gyro = resolved.gyroscope
             }
-            accel = resolved.accelerometer
-            gyro = resolved.gyroscope
         }
 
         if (rate == ImuRate.SLOW) {
@@ -158,6 +180,13 @@ class RoadSenseImuSidecarService : Service(), SensorEventListener {
         val activeAccel = accel ?: run {
             Log.w(TAG, "resolved accelerometer disappeared; stopping IMU sidecar")
             stopSelf()
+            return
+        }
+
+        val pump = diLink5
+        if (pump != null) {
+            registeredRate = ImuRate.FAST
+            pump.start(sm, activeAccel, gyro)
             return
         }
 
@@ -184,6 +213,10 @@ class RoadSenseImuSidecarService : Service(), SensorEventListener {
         // unregisterListener can race with an already-queued callback. Once RELAXED
         // has been applied, ignore that tail event instead of recreating a batch.
         if (registeredRate != ImuRate.FAST) return
+        diLink5?.let {
+            it.onListenerEvent(event)
+            return
+        }
         val tMs = wallClockFromElapsed(event.timestamp)
         if (batchStartMs == 0L) batchStartMs = tMs
         when (event.sensor.type) {
@@ -205,11 +238,59 @@ class RoadSenseImuSidecarService : Service(), SensorEventListener {
     /** Encode the current batch and ship it; runs on ioHandler's thread. */
     private fun flush() {
         if (accelBatch.isEmpty() && gyroBatch.isEmpty()) return
-        val line = ImuFrameCodec.encode(accelBatch, gyroBatch)
+        val line = ImuFrameCodec.encode(accelBatch, gyroBatch, diLink5?.periodMs)
         accelBatch.clear()
         gyroBatch.clear()
         batchStartMs = 0L
-        sendLine(line)
+        if (sendLine(line)) batchesSent++ else sendFailures++
+    }
+
+    /** DiLink 5 samples; same batching as [onSensorChanged], tagged with the pump's period. */
+    private fun appendSample(type: Int, tMs: Long, x: Float, y: Float, z: Float) {
+        if (registeredRate != ImuRate.FAST) return
+        if (batchStartMs == 0L) batchStartMs = tMs
+        when (type) {
+            Sensor.TYPE_ACCELEROMETER -> accelBatch.add(ImuAccelSample(tMs, x, y, z))
+            Sensor.TYPE_GYROSCOPE -> gyroBatch.add(ImuGyroSample(tMs, x, y, z))
+        }
+        val span = tMs - batchStartMs
+        val overCap = accelBatch.size >= ImuFrameCodec.MAX_SAMPLES_PER_FRAME ||
+            gyroBatch.size >= ImuFrameCodec.MAX_SAMPLES_PER_FRAME
+        if (span >= ImuFrameCodec.TARGET_BATCH_MS || overCap) flush()
+    }
+
+    private val diLink5Sink = object : DiLink5ImuPump.Sink {
+        override fun onSample(type: Int, timestampNs: Long, x: Float, y: Float, z: Float) =
+            appendSample(type, wallClockFromElapsed(timestampNs), x, y, z)
+
+        override fun onStatus(message: String) = sendStatus(message)
+
+        override fun onUnsupported(reason: String) {
+            sensorManager?.unregisterListener(this@RoadSenseImuSidecarService)
+            diLink5?.stop()
+            registeredRate = null
+            Log.w(TAG, "DiLink 5 IMU unusable: $reason; stopping IMU sidecar")
+            sendStatus("unsupported: $reason")
+            stopSelf()
+        }
+
+        override fun healthExtras(): String = "batches=$batchesSent ipcFail=$sendFailures"
+    }
+
+    private fun reportDiLink5Selection(sm: SensorManager, single: ImuSource.SingleImu) {
+        if (!inventoryReported) {
+            inventoryReported = true
+            sendStatus("start v=${BuildConfig.VERSION_NAME}/${BuildConfig.VERSION_CODE} " +
+                "sdk=${Build.VERSION.SDK_INT} sensors=${ImuSource.inventory(sm)}")
+        }
+        sendStatus("select accel='${single.accelerometer.name}' " +
+            "gyro='${single.gyroscope?.name ?: "none"}' path=dilink5-single")
+    }
+
+    /** One diagnostic line for the daemon log (and logcat). */
+    private fun sendStatus(message: String) {
+        Log.i(TAG, message)
+        sendLine(JSONObject().put("command", ImuFrameCodec.STATUS_COMMAND).put("m", message).toString())
     }
 
     /**
@@ -217,12 +298,12 @@ class RoadSenseImuSidecarService : Service(), SensorEventListener {
      * Fire-and-forget: we don't read the daemon's ack (newline-delimited write
      * is all the server needs). Runs on ioHandler's thread only.
      */
-    private fun sendLine(line: String) {
+    private fun sendLine(line: String): Boolean {
         val payload = (line + "\n").toByteArray()  // newline-delimit so the server's readLine() frames it
         // First attempt on the existing connection; if the write fails (daemon
         // restarted / socket reset), reconnect once and retry. A failure after
         // reconnect just drops the batch — the next batch reconnects again.
-        if (writeWithReconnect(payload, allowReconnect = true)) return
+        return writeWithReconnect(payload, allowReconnect = true)
     }
 
     /** @return true if the payload was written. */
@@ -316,6 +397,12 @@ class RoadSenseImuSidecarService : Service(), SensorEventListener {
         /** Intent extra carrying the desired [ImuRate] name (D-021 rate scaling). */
         const val EXTRA_RATE = "rate"
 
+        /** Intent extra naming the daemon's platform; [PLATFORM_DILINK5] enables the DiLink 5 IMU path. */
+        const val EXTRA_PLATFORM = "platform"
+        const val PLATFORM_DILINK5 = "dilink5"
+
+        @Volatile private var inventoryReported = false
+
         /** Fully-qualified component for the daemon's `am` launch (see [start]). */
         private const val COMPONENT =
             "com.overdrive.app/com.overdrive.app.roadsense.sidecar.RoadSenseImuSidecarService"
@@ -333,7 +420,10 @@ class RoadSenseImuSidecarService : Service(), SensorEventListener {
          * as a string extra.
          */
         fun start(rate: ImuRate) {
-            exec("am start-foreground-service -n $COMPONENT --es $EXTRA_RATE ${rate.name}")
+            val platform = if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+                " --es $EXTRA_PLATFORM $PLATFORM_DILINK5"
+            } else ""
+            exec("am start-foreground-service -n $COMPONENT --es $EXTRA_RATE ${rate.name}$platform")
         }
 
         fun stop() {

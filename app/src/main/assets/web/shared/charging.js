@@ -201,6 +201,12 @@ var CHARGING = {
                 }, 0);
             }
         } catch (e) {}
+        if (window.BYD && BYD.offline && typeof BYD.offline.onReconnect === 'function') {
+            // Same refresh as a return to the page; hidden, that return does it.
+            BYD.offline.onReconnect(function () {
+                if (document.visibilityState !== 'hidden') self._restartVisibleRefresh(true);
+            });
+        }
     },
 
     _syncTabPresentation: function (activeId) {

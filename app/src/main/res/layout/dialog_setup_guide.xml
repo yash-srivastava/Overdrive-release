@@ -200,6 +200,27 @@
                 android:text="@string/setup_autostart_button"
                 android:textAppearance="@style/TextAppearance.Material3.LabelLarge" />
 
+            <!-- Opt-in AutoStartReapply; shown only where BYD's dialog exists. -->
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/swAutoStartReapply"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/setup_autostart_reapply"
+                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                android:textColor="?attr/colorOnSurface"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/tvAutoStartReapplyHint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="@string/setup_autostart_reapply_hint"
+                android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:visibility="gone" />
+
         </LinearLayout>
 
         <!-- Step 3: Overlay permission. Re-rendered every time the dialog

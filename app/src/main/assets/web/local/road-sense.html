@@ -6,7 +6,7 @@
     <title data-i18n="app.road_sense_title">RoadSense - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
     <script src="../shared/theme.js?v=12"></script>
-    <script src="../shared/app-shell.js?v=23"></script>
+    <script src="../shared/app-shell.js?v=26"></script>
     <!--
       Bottom-tab manifest. Tabs grouping the RoadSense settings cards:
         General      — master enable + calibration mode
@@ -130,7 +130,7 @@
 </head>
 <body class="r-settings">
     <div class="app-layout">
-        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=23) -->
+        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=24) -->
         <div id="app-shell-mount"></div>
         <!-- Main Content -->
         <main class="main-content" aria-busy="true" inert style="pointer-events:none">
@@ -557,6 +557,39 @@
                                     <input type="checkbox" id="rsClusterAdasHide" onchange="RoadSenseSettings.toggleClusterAdasHide()">
                                     <span class="toggle-slider"></span>
                                 </label>
+                            </div>
+                        </div>
+                        <!-- Same setting as the Custom Layouts and Projection screens: cluster.removeOemBars (DI3 cars). -->
+                        <div class="setting-row" id="rsClusterBarsRow" style="display:none">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="road_sense.map_cluster_bars">Full cluster (remove BYD bars)</div>
+                                <div class="setting-desc" id="rsClusterBarsStatus">Checking this car&rsquo;s cluster&hellip;</div>
+                            </div>
+                            <div class="setting-control">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="rsClusterBars" onchange="RoadSenseSettings.toggleClusterBars('removeOemBars', 'rsClusterBars')">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="setting-row" id="rsClusterIconsRow" style="display:none">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="road_sense.map_cluster_icons">Remove vehicle &amp; ADAS icons</div>
+                                <div class="setting-desc" data-i18n="road_sense.map_cluster_icons_desc">Hides BYD&rsquo;s lamp, assist and mode icons while the full cluster runs. BYD fault and safety warnings always stay visible.</div>
+                            </div>
+                            <div class="setting-control">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="rsClusterIcons" onchange="RoadSenseSettings.toggleClusterBars('hideVehicleIcons', 'rsClusterIcons')">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="setting-row" id="rsClusterBarsActions" style="display:none">
+                            <div class="setting-info">
+                                <div class="setting-desc" data-i18n="road_sense.map_cluster_bars_restart_hint">To restart the cluster, use Custom Layouts or Projection in the car app while parked.</div>
+                            </div>
+                            <div class="setting-control">
+                                <button class="btn btn-secondary" id="rsClusterBarsRestore" onclick="RoadSenseSettings.restoreClusterBars()" data-i18n="road_sense.map_cluster_bars_restore">Restore BYD cluster</button>
                             </div>
                         </div>
                         <!-- Cluster size profile. This is the SAME setting as the blind-spot
@@ -1375,10 +1408,10 @@
     <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
     <div id="toastContainer" class="toast-container"></div>
 
-    <script src="../shared/auth.js"></script>
-    <script src="../shared/core.js?v=27"></script>
+    <script src="../shared/auth.js?v=18"></script>
+    <script src="../shared/core.js?v=31"></script>
     <script src="../shared/settings-hydration.js?v=1"></script>
-    <script src="../shared/update-flow.js?v=3"></script>
+    <script src="../shared/update-flow.js?v=6"></script>
     <script src="../shared/road-sense.js?v=bsux3"></script>
     <script>
         function toggleSidebar() {

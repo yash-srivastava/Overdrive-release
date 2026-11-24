@@ -481,7 +481,7 @@ public class CamViewOwnershipContractTest {
         // healthy replacement and declared the close safe.
         // 1. stopDrainerThread must be sticky: reference dropped only on a
         //    verified exit, honest boolean result.
-        int sibling = recorder.indexOf("private boolean stopDrainerThread()");
+        int sibling = recorder.indexOf("private boolean stopDrainerThread(");
         int siblingExitBranch = recorder.indexOf("if (exited) {", sibling);
         int siblingDrop = recorder.indexOf("drainerThread = null;", siblingExitBranch);
         assertTrue(sibling >= 0);
@@ -490,7 +490,7 @@ public class CamViewOwnershipContractTest {
         // 2. The recording-close path must consume the result and bail out —
         //    no synchronous drain, no muxer stop, no drainer restart, and an
         //    escalation to the trip-safe restart.
-        int close = recorder.indexOf("if (!stopDrainerThread())");
+        int close = recorder.indexOf("if (!stopDrainerThread(");
         int closeEscalate = recorder.indexOf(
                 "requestProcessRestartPreservingTrip", close);
         assertTrue(close >= 0);
@@ -515,7 +515,7 @@ public class CamViewOwnershipContractTest {
         // diskWriterRunning flag would reactivate it), and the verdict COMBINED
         // into stopDrainerThread's result — a writer wedged inside
         // writeSampleData makes muxer.stop() exactly as unsafe.
-        int stop = recorder.indexOf("private boolean stopDiskWriterThread()");
+        int stop = recorder.indexOf("private boolean stopDiskWriterThread(");
         int fail = recorder.indexOf("return false;", stop);
         int drop = recorder.indexOf("diskWriterThread = null;", stop);
         assertTrue(stop >= 0);
@@ -549,7 +549,7 @@ public class CamViewOwnershipContractTest {
         // writer wedged inside writeSampleData HOLDS that lock, and the old
         // flag-gating under it blocked the close thread forever BEFORE the
         // restart request could fire.
-        int bail = recorder.indexOf("if (!stopDrainerThread())");
+        int bail = recorder.indexOf("if (!stopDrainerThread(");
         int bailEnd = recorder.indexOf("return;", bail);
         String bailBody = recorder.substring(bail, bailEnd);
         assertFalse("bail path must not acquire muxerLock",

@@ -7,6 +7,7 @@ import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
@@ -96,6 +97,7 @@ class SettingsAboutFragment : Fragment() {
         setupVehicleInformation(view)
 
         setupChannelToggle(view)
+        setupAutoUpdateSwitch(view)
 
         view.findViewById<View>(R.id.cardCheckUpdate).setOnClickListener {
             (activity as? MainActivity)?.invokeCheckForUpdates()
@@ -320,6 +322,51 @@ class SettingsAboutFragment : Fragment() {
                         suppressListener = false
                     }
                 }
+            }
+        }
+    }
+
+    /** Daemon-shared preference; all disk/IPC work stays off the main looper. */
+    private fun setupAutoUpdateSwitch(view: View) {
+        val control = view.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(
+            R.id.switchAutoUpdate)
+        val executor = avatarExecutor
+            ?: Executors.newSingleThreadExecutor().also { avatarExecutor = it }
+        control.isEnabled = false
+        executor.execute {
+            com.overdrive.app.config.UnifiedConfigManager.forceReload()
+            val enabled = com.overdrive.app.config.UnifiedConfigManager.isAutoUpdateEnabled()
+            mainHandler.post {
+                if (!isAdded || view.parent == null) return@post
+                control.isChecked = enabled
+                control.isEnabled = true
+                control.setOnCheckedChangeListener { _, checked ->
+                    saveAutoUpdateSwitch(control, executor, checked)
+                }
+            }
+        }
+    }
+
+    private fun saveAutoUpdateSwitch(
+        control: com.google.android.material.materialswitch.MaterialSwitch,
+        executor: ExecutorService,
+        enabled: Boolean
+    ) {
+        control.isEnabled = false
+        executor.execute {
+            val ok = com.overdrive.app.config.UnifiedConfigManager.setAutoUpdateEnabled(enabled)
+            mainHandler.post {
+                if (!isAdded || view == null) return@post
+                if (!ok) {
+                    control.setOnCheckedChangeListener(null)
+                    control.isChecked = !enabled
+                    control.setOnCheckedChangeListener { _, checked ->
+                        saveAutoUpdateSwitch(control, executor, checked)
+                    }
+                    Toast.makeText(requireContext(), R.string.settings_auto_update_save_failed,
+                        Toast.LENGTH_SHORT).show()
+                }
+                control.isEnabled = true
             }
         }
     }
@@ -790,6 +837,13 @@ class SettingsAboutFragment : Fragment() {
         // Bound the SAF import read so a malformed/huge file can't OOM the head
         // unit. 32 MiB covers trip-history bundles without allowing unbounded reads.
         private const val MAX_IMPORT_CHARS = 32 * 1024 * 1024
+
+        private const val TIER_HALL_OF_FAME = "halloffame"
+        // Material "star" outline on a 24-unit grid (x 2..22, y 2..21); same shape as about.html.
+        private val STAR_POINTS = floatArrayOf(
+            12f, 2f, 14.81f, 8.63f, 22f, 9.24f, 16.54f, 13.97f, 18.18f, 21f,
+            12f, 17.27f, 5.82f, 21f, 7.46f, 13.97f, 2f, 9.24f, 9.19f, 8.63f
+        )
     }
 
     private fun populateThanks(root: View) {
@@ -816,7 +870,7 @@ class SettingsAboutFragment : Fragment() {
         // Only surface the tier/×N explainer when the data actually uses them.
         val hasTiers = (0 until (supporters?.length() ?: 0)).any { i ->
             val o = supporters?.optJSONObject(i) ?: return@any false
-            tierLabel(o.optString("tier").trim().lowercase()) != null || o.optInt("count", 0) > 1
+            tierLabel(tierKey(o.optString("tier"))) != null || o.optInt("count", 0) > 1
         }
         root.findViewById<TextView>(R.id.textSupportersLegend)?.visibility =
             if (hasTiers) View.VISIBLE else View.GONE
@@ -839,7 +893,7 @@ class SettingsAboutFragment : Fragment() {
             val name = obj.optString("name").trim()
             if (name.isEmpty()) continue
             val github = if (withGithub) obj.optString("github").trim().ifEmpty { null } else null
-            val tier = obj.optString("tier").trim().lowercase()
+            val tier = tierKey(obj.optString("tier"))
             // Only a count above 1 earns a badge; "x1" reads as "only once".
             val count = obj.optInt("count", 0).let { if (it > 1) it else 0 }
             container.addView(buildRow(container, name, github, tier, count))
@@ -879,9 +933,16 @@ class SettingsAboutFragment : Fragment() {
         val avatarSize = dp(avatarDp)
         val avatar = ImageView(ctx).apply {
             layoutParams = LinearLayout.LayoutParams(avatarSize, avatarSize)
-            setImageDrawable(initialCircle(name, avatarDp, ringColor))
+            setImageDrawable(initialCircle(
+                name, avatarDp, ringColor,
+                starColor = if (tier == TIER_HALL_OF_FAME) ringColor else null
+            ))
         }
         row.addView(avatar)
+        if (tier == TIER_HALL_OF_FAME) {
+            row.clipChildren = false
+            row.clipToPadding = false
+        }
         if (github != null) {
             loadGithubAvatar(github, avatar)
         }
@@ -900,7 +961,7 @@ class SettingsAboutFragment : Fragment() {
         val tierName = tierLabel(tier)
         if (tierName != null && ringColor != null) {
             row.addView(TextView(ctx).apply {
-                this.text = tierName.uppercase()
+                this.text = tierName.uppercase(resources.configuration.locales[0])
                 setTextColor(resolveAttr(android.R.attr.textColorSecondary))
                 textSize = 11f
                 letterSpacing = 0.04f
@@ -1067,7 +1128,12 @@ class SettingsAboutFragment : Fragment() {
      * the glyph is scaled off it, so a hardcoded size would leave a large
      * tier avatar with a small letter. [ringColor] draws the tier ring.
      */
-    private fun initialCircle(name: String, sizeDp: Int = 36, ringColor: Int? = null): Drawable {
+    private fun initialCircle(
+        name: String,
+        sizeDp: Int = 36,
+        ringColor: Int? = null,
+        starColor: Int? = null
+    ): Drawable {
         val initial = name.firstOrNull { it.isLetterOrDigit() }?.uppercaseChar() ?: '?'
         val palette = intArrayOf(
             0xFF6366F1.toInt(), 0xFFEC4899.toInt(), 0xFF14B8A6.toInt(),
@@ -1077,11 +1143,38 @@ class SettingsAboutFragment : Fragment() {
         val color = palette[Math.floorMod(name.hashCode(), palette.size)]
         val sz = dp(sizeDp)
         val ringPx = if (ringColor == null) 0f else if (sizeDp >= 56) dp(2).toFloat() else dp(2).toFloat() * 0.75f
+        val starEdgePx = dp(2).toFloat() * 0.75f
+        // Stroke in the card colour so the star reads as cut out of the avatar.
+        val starEdgeColor = if (starColor == null) Color.TRANSPARENT else
+            com.google.android.material.color.MaterialColors.getColor(
+                requireContext(), com.google.android.material.R.attr.colorSurfaceContainer, Color.TRANSPARENT
+            )
 
         return object : Drawable() {
             private val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 this.color = color
                 style = Paint.Style.FILL
+            }
+            private val starFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                this.color = starColor ?: Color.TRANSPARENT
+            }
+            private val starEdge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                this.color = starEdgeColor
+                style = Paint.Style.STROKE
+                strokeWidth = starEdgePx * 2f
+                strokeJoin = Paint.Join.ROUND
+            }
+            private var star: Path? = null
+
+            // Star centred on the avatar edge at 45° (overflows bounds; buildRow turns off row clipping).
+            override fun onBoundsChange(bounds: android.graphics.Rect) {
+                star = if (starColor == null) null else {
+                    val s = bounds.width() * 0.5f
+                    val off = bounds.width() / 2f * 0.7071f
+                    val cx = bounds.exactCenterX() + off
+                    val cy = bounds.exactCenterY() + off
+                    starPath(cx - s / 2f, cy - s * 0.55f, s)
+                }
             }
             private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 this.color = ringColor ?: Color.TRANSPARENT
@@ -1105,10 +1198,18 @@ class SettingsAboutFragment : Fragment() {
                 if (ringColor != null) canvas.drawCircle(cx, cy, r, ringPaint)
                 val baseline = cy - (textPaint.descent() + textPaint.ascent()) / 2f
                 canvas.drawText(initial.toString(), cx, baseline, textPaint)
+                star?.let {
+                    canvas.drawPath(it, starEdge)
+                    canvas.drawPath(it, starFill)
+                }
             }
-            override fun setAlpha(alpha: Int) { bgPaint.alpha = alpha; textPaint.alpha = alpha }
+            override fun setAlpha(alpha: Int) {
+                bgPaint.alpha = alpha; textPaint.alpha = alpha
+                starFill.alpha = alpha; starEdge.alpha = alpha
+            }
             override fun setColorFilter(cf: android.graphics.ColorFilter?) {
                 bgPaint.colorFilter = cf; textPaint.colorFilter = cf
+                starFill.colorFilter = cf; starEdge.colorFilter = cf
             }
             @Deprecated("Deprecated in API 29")
             override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
@@ -1131,6 +1232,7 @@ class SettingsAboutFragment : Fragment() {
     private fun medalColor(tier: String): Int? {
         val night = isNightMode()
         return when (tier) {
+            TIER_HALL_OF_FAME -> if (night) 0xFFB79CFF.toInt() else 0xFF6D28D9.toInt()
             "diamond" -> if (night) 0xFF7FE0F5.toInt() else 0xFF0E8FB0.toInt()
             "platinum" -> if (night) 0xFFD8E2EA.toInt() else 0xFF5C6A78.toInt()
             "gold" -> if (night) 0xFFF0C043.toInt() else 0xFFE0A81F.toInt()
@@ -1146,6 +1248,8 @@ class SettingsAboutFragment : Fragment() {
      * measures ΔE 1.0), so the top two carry shape as the primary channel.
      */
     private fun medalPip(tier: String, color: Int, size: Int): Drawable = when (tier) {
+        // A star covers less area than a dot, so it gets a larger box.
+        TIER_HALL_OF_FAME -> starDrawable(color, (size * 1.25f).toInt())
         "diamond" -> android.graphics.drawable.RotateDrawable().apply {
             drawable = android.graphics.drawable.GradientDrawable().apply {
                 shape = android.graphics.drawable.GradientDrawable.RECTANGLE
@@ -1172,7 +1276,39 @@ class SettingsAboutFragment : Fragment() {
         }
     }
 
+    private fun starPath(left: Float, top: Float, size: Float): Path {
+        val s = size / 20f
+        return Path().apply {
+            for (i in STAR_POINTS.indices step 2) {
+                val x = left + (STAR_POINTS[i] - 2f) * s
+                val y = top + (STAR_POINTS[i + 1] - 1.5f) * s
+                if (i == 0) moveTo(x, y) else lineTo(x, y)
+            }
+            close()
+        }
+    }
+
+    private fun starDrawable(color: Int, size: Int): Drawable = object : Drawable() {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color }
+        private var path = Path()
+
+        override fun onBoundsChange(bounds: android.graphics.Rect) {
+            path = starPath(bounds.left.toFloat(), bounds.top.toFloat(), bounds.width().toFloat())
+        }
+        override fun draw(canvas: Canvas) { canvas.drawPath(path, paint) }
+        override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+        override fun setColorFilter(cf: android.graphics.ColorFilter?) { paint.colorFilter = cf }
+        @Deprecated("Deprecated in API 29")
+        override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
+        override fun getIntrinsicWidth(): Int = size
+        override fun getIntrinsicHeight(): Int = size
+    }.apply { setBounds(0, 0, size, size) }
+
+    /** "hallOfFame", "hall_of_fame" and "Hall of Fame" all map to "halloffame". */
+    private fun tierKey(raw: String): String = raw.lowercase().filter { it in 'a'..'z' }
+
     private fun tierLabel(tier: String): String? = when (tier) {
+        TIER_HALL_OF_FAME -> getString(R.string.settings_about_tier_hall_of_fame)
         "diamond" -> getString(R.string.settings_about_tier_diamond)
         "platinum" -> getString(R.string.settings_about_tier_platinum)
         "gold" -> getString(R.string.settings_about_tier_gold)

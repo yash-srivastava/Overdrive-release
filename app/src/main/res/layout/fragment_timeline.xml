@@ -236,6 +236,27 @@
                 android:scaleType="fitCenter"
                 android:src="@drawable/tl_ic_skip_next" />
 
+            <ImageButton
+                android:id="@+id/tlFullscreen"
+                android:layout_width="64dp"
+                android:layout_height="64dp"
+                android:layout_marginStart="@dimen/od_space_4"
+                android:background="@drawable/tl_glass_ripple"
+                android:contentDescription="@string/timeline_cd_fullscreen"
+                android:padding="17dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_fullscreen" />
+
+            <ImageButton
+                android:id="@+id/tlShare"
+                android:layout_width="64dp"
+                android:layout_height="64dp"
+                android:background="@drawable/tl_glass_ripple"
+                android:contentDescription="@string/timeline_cd_share"
+                android:padding="17dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_share" />
+
             <TextView
                 android:id="@+id/tlSpeed"
                 android:layout_width="wrap_content"

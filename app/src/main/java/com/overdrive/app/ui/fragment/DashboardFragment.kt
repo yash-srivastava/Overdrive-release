@@ -175,6 +175,7 @@ class DashboardFragment : Fragment() {
     // figure occupies the main range column.
     private var vehicleHalRangeColumn: View? = null
     private var vehicleHalRangeValue: TextView? = null
+    private var personalizedRangeFirst = true
     private var vehicleArt: ImageView? = null
     private var quickTrips: View? = null
     private var quickVehicleControl: View? = null
@@ -801,11 +802,16 @@ class DashboardFragment : Fragment() {
             mainHandler.post {
                 if (!isAdded || view == null || generation != viewGeneration) return@post
                 val previousVehicleState = dashboardState.vehicle
+                val previousRangePreference = personalizedRangeFirst
+                if (result is DashboardStatusResult.Available) {
+                    personalizedRangeFirst = result.snapshot.personalizedRangeFirst
+                }
                 dashboardState = DashboardStateReducer.status(dashboardState, result)
                 skeleton?.markLoaded(R.id.vehicleSocSkeleton)
                 skeleton?.markLoaded(R.id.vehicleRangeSkeleton)
                 // Most polls return the same values; skip the repaint and SOC gauge animation then.
-                if (dashboardState.vehicle != previousVehicleState) {
+                if (dashboardState.vehicle != previousVehicleState
+                    || personalizedRangeFirst != previousRangePreference) {
                     renderVehicleState()
                 }
                 if (dashboardResumed) {
@@ -951,14 +957,13 @@ class DashboardFragment : Fragment() {
                         scrollRemoteIntoView()
                     }
                 }
-                // Personalized range (learned from the driver's own trips via
-                // /api/trips/range) headlines the metric when available; the
-                // plain HAL estimate stays as the fallback so the card never
-                // regresses to a blank value.
-                // When BOTH figures exist, the vehicle's own estimate sits beside
-                // it so the two can be compared at a glance.
+                // Headline preference affects only presentation, never the
+                // learned estimate or the vehicle's original HAL reading.
                 val personalized = snapshot.rangeDetails?.personalized
-                vehicleRangeValue.text = (personalized ?: snapshot.range)?.let {
+                val halRange = snapshot.range
+                val vehicleFirst = !personalizedRangeFirst && halRange != null
+                val primaryRange = if (vehicleFirst) halRange else (personalized ?: halRange)
+                vehicleRangeValue.text = primaryRange?.let {
                     leadNumber(
                         getString(R.string.dashboard_modern_distance, it.value, it.unit.label),
                         formatLocalized("%d", it.value),
@@ -967,15 +972,21 @@ class DashboardFragment : Fragment() {
                     )
                 } ?: getString(R.string.dashboard_metric_value_pending)
                 vehicleRangeLabel?.setText(
-                    if (personalized != null) R.string.dashboard_modern_personalized_range
+                    if (vehicleFirst) R.string.dashboard_modern_vehicle_range
+                    else if (personalized != null) R.string.dashboard_modern_personalized_range
                     else R.string.dash_range_caption
                 )
-                val halRange = snapshot.range
                 val showHalColumn = personalized != null && halRange != null
-                if (showHalColumn && halRange != null) {
-                    vehicleHalRangeValue?.text = vehicleEstimateText(
-                        getString(R.string.dashboard_modern_distance, halRange.value, halRange.unit.label)
-                    )
+                if (showHalColumn) {
+                    val secondary = if (vehicleFirst) personalized else halRange
+                    val label = if (vehicleFirst) R.string.dashboard_modern_personalized_range
+                        else R.string.dashboard_modern_vehicle_range
+                    if (secondary != null) {
+                        vehicleHalRangeValue?.text = rangeComparisonText(
+                            getString(label),
+                            getString(R.string.dashboard_modern_distance, secondary.value, secondary.unit.label)
+                        )
+                    }
                 }
                 setHalRangeColumnVisible(showHalColumn)
                 renderSocGauge(snapshot.socPercent)
@@ -988,9 +999,8 @@ class DashboardFragment : Fragment() {
         }
     }
 
-    /** "Vehicle estimate 398 km", the figure in the primary text colour. */
-    private fun vehicleEstimateText(distance: String): CharSequence {
-        val label = getString(R.string.dashboard_modern_vehicle_range)
+    /** Secondary range label + figure, retaining the existing emphasized number. */
+    private fun rangeComparisonText(label: String, distance: String): CharSequence {
         val out = SpannableString("$label $distance")
         val start = label.length + 1
         out.setSpan(

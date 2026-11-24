@@ -81,6 +81,26 @@
         el.checked = want;
     }
 
+    var reconnectBound = false, reconnectDeferred = false;
+    function onReconnect() {
+        // Hidden: on the next return to the page, once.
+        if (document.hidden) {
+            if (reconnectDeferred) return;
+            reconnectDeferred = true;
+            document.addEventListener('visibilitychange', function shown() {
+                if (document.hidden) return;
+                document.removeEventListener('visibilitychange', shown);
+                reconnectDeferred = false;
+                onReconnect();
+            });
+            return;
+        }
+        // A number being typed keeps its value; its change event saves it.
+        var focused = document.activeElement;
+        if (focused && /^parking/.test(focused.id || '')) return;
+        ParkingSettings.init();
+    }
+
     var ParkingSettings = {
         /** Optional page hook: called with the saved config after every successful write. */
         onSaved: null,
@@ -89,6 +109,10 @@
         loadGeocoding: loadGeocoding,
         init: function () {
             if (!$('parkingEnabled')) return Promise.resolve();
+            if (!reconnectBound && window.BYD && BYD.offline && typeof BYD.offline.onReconnect === 'function') {
+                reconnectBound = true;
+                BYD.offline.onReconnect(onReconnect);
+            }
             loadGeocoding();
             return fetch('/api/parking/status', { cache: 'no-store' })
                 .then(function (r) { return r.json(); })

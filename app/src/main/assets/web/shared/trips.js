@@ -257,6 +257,12 @@ const TRIPS = {
             }
         });
 
+        // Before the reads below: a page with a handler is refreshed in place, never reloaded.
+        if (!this._reconnectBound && window.BYD && BYD.offline && typeof BYD.offline.onReconnect === 'function') {
+            this._reconnectBound = true;
+            BYD.offline.onReconnect(() => this._refreshAfterReconnect());
+        }
+
         // Render skeletons immediately so the user sees something while the
         // bootstrap fetch is in flight. The storage card especially used to
         // sit blank for the entire 10-20 minute SD-card walk; even though
@@ -270,6 +276,7 @@ const TRIPS = {
         // returns an unsuccessful payload — worst-case behaviour is
         // unchanged.
         let usedBootstrap = false;
+        let bootstrapStale = false;
         // The bootstrap trip page participates in the same generation scheme as
         // filter/list requests. If the user changes the filter while this
         // composite request is in flight, its config/storage slices may still be
@@ -280,10 +287,14 @@ const TRIPS = {
             this._daysSummaryKey(this.currentDays), false);
         try {
             const bootstrapResp = await fetch('/api/trips/bootstrap');
+            // A copied bootstrap shows, but its list reloads and its settings read again once the car answers.
+            const copied = this._fromCopy(bootstrapResp);
+            bootstrapListRequest.copied = copied;
             const bootstrapData = await bootstrapResp.json();
             if (bootstrapData && bootstrapData.success && bootstrapData.bootstrap) {
                 const b = bootstrapData.bootstrap;
-                if (b.config)  this._applyConfigPayload(b.config);
+                bootstrapStale = copied || this._offlineShown();
+                if (b.config)  this._applyConfigPayload(b.config, copied);
                 if (b.storage) this._applyStoragePayload(b.storage);
                 if (b.dna)     this._applyDnaPayload(b.dna);
                 if (b.summary) this._applySummaryPayload(b.summary, bootstrapSummaryRequest);
@@ -334,6 +345,12 @@ const TRIPS = {
                 if (self.trips && self.trips.length > 0) self.renderTripList(self.trips);
             });
         }
+        // A reconnect while the reads above were on their way: refresh now what came from the copy or failed.
+        // A banner that shows again gets its own reconnect.
+        if (this._reconnectDuringInit) {
+            this._reconnectDuringInit = false;
+            if ((!usedBootstrap || bootstrapStale) && !this._offlineShown()) this._refreshAfterReconnect();
+        }
         try {
             const deepLinkId =
                 new URLSearchParams(window.location.search).get('id');
@@ -342,6 +359,56 @@ const TRIPS = {
             }
         } catch (e) {}
         console.log('[Trips] Initialized (bootstrap=' + usedBootstrap + ')');
+    },
+
+    /** After an outage (while hidden: on the next return to the page, once; while init reads: when it's done).
+     *  Settings never read from the car read again; their edits were refused. The list reloads page 1 only if it
+     *  failed, is still loading or came from the copy, so live pages and the scroll stay. DNA, range, summary read. */
+    _refreshAfterReconnect() {
+        if (document.hidden) {
+            if (this._reconnectDeferred) return;
+            this._reconnectDeferred = true;
+            const shown = () => {
+                if (document.hidden) return;
+                document.removeEventListener('visibilitychange', shown);
+                this._reconnectDeferred = false;
+                this._refreshAfterReconnect();
+            };
+            document.addEventListener('visibilitychange', shown);
+            return;
+        }
+        if (!this._hydrated) { this._reconnectDuringInit = true; return; }
+        if (!this._configLoaded) this.loadConfig();
+        this.loadDna();
+        this.loadRange();
+        const ranged = this.rangeFromMs != null;
+        if (this._listFailed || this._listPending || this._listCopied) {
+            if (ranged) this.loadTripsBetween(this.rangeFromMs, this.rangeToMs, 0);
+            else this.loadTrips(this.currentDays, 0);
+        }
+        if (ranged) this.loadSummaryRange(this.rangeFromMs, this.rangeToMs);
+        else this.loadSummary(this.currentDays);
+    },
+
+    /** True, with a toast, until the car's trip settings arrived: saving before that would write defaults. */
+    _configBlocked() {
+        if (this._configLoaded) return false;
+        const key = 'trip.settings.not_loaded';
+        let text = BYD.i18n && BYD.i18n.t ? BYD.i18n.t(key) : null;
+        if (!text || text === key) text = 'Could not read the saved trip settings — reload the page before changing them.';
+        if (BYD.utils && BYD.utils.toast) BYD.utils.toast(text, 'error');
+        return true;
+    },
+
+    /** The reply was the phone's saved copy, not the car. */
+    _fromCopy(resp) {
+        return !!(resp && resp.headers && typeof resp.headers.get === 'function'
+            && resp.headers.get('X-OverDrive-Offline') !== null);
+    },
+
+    /** The offline or connecting banner shows: what renders now may be the copy. */
+    _offlineShown() {
+        return !!(window.BYD && BYD.offline && typeof BYD.offline.isActive === 'function' && BYD.offline.isActive());
     },
 
     /**
@@ -457,8 +524,10 @@ const TRIPS = {
      * missing or unsuccessful payload is a no-op so the bootstrap path
      * can pass through partial responses without guarding here.
      */
-    _applyConfigPayload(data) {
+    _applyConfigPayload(data, copied) {
         if (!data || !data.config) return;
+        // Only a read from the car sets this; the copy, a refused or failed toggle never do.
+        if (!copied) this._configLoaded = true;
         const el = document.getElementById('tripsEnabled');
         if (el) el.checked = data.config.enabled || false;
         // Remember it so the Trips-tab empty state can distinguish "feature is
@@ -519,6 +588,10 @@ const TRIPS = {
     async toggleEnabled() {
         const el = document.getElementById('tripsEnabled');
         if (!el || !this._hydrated) return false;
+        if (this._configBlocked()) {
+            el.checked = !el.checked;
+            return false;
+        }
         const checked = el.checked;
         const previous = !!this.tripsEnabled;
         this.tripsEnabled = checked;
@@ -708,7 +781,7 @@ const TRIPS = {
     /** Switch tank/price unit between L and gal — preserves stored litres. */
     setFuelUnit(unit) {
         const next = unit === 'gal' ? 'gal' : 'L';
-        if (next === this.fuelUnit) return;
+        if (next === this.fuelUnit || this._configBlocked()) return;
         this.fuelUnit = next;
         this.applyFuelInputs();
         this.showApplyNeeded();
@@ -717,7 +790,7 @@ const TRIPS = {
     async setDistanceUnit(unit) {
         if (!this._hydrated || (unit !== 'km' && unit !== 'mi')) return;
         const previous = BYD.units.mode;
-        if (unit === previous) return;
+        if (unit === previous || this._configBlocked()) return;
         const kmBtn = document.getElementById('unitKm');
         const miBtn = document.getElementById('unitMi');
         this.updateDistanceUnitButtons(unit);
@@ -1141,6 +1214,7 @@ const TRIPS = {
     },
 
     showApplyNeeded() {
+        if (this._configBlocked()) return;
         const btn = document.getElementById('storageApplyBtn');
         if (btn) { btn.disabled = false; btn.textContent = BYD.i18n.t('trip.apply_changes'); }
     },
@@ -1151,6 +1225,7 @@ const TRIPS = {
     },
 
     async applyStorageSettings() {
+        if (this._configBlocked()) return;
         const btn = document.getElementById('storageApplyBtn');
         const body = {};
         if (this.pendingStorageType !== null) body.storageType = this.pendingStorageType;
@@ -1650,11 +1725,13 @@ const TRIPS = {
             const resp = request.controller
                 ? await fetch(q, { signal: request.controller.signal })
                 : await fetch(q);
+            request.copied = this._fromCopy(resp);
             const data = await resp.json();
             if (!this._isCurrentListRequest(request)) return;
             this._applyTripsPayload(data, off, request);
         } catch (e) {
             if (!this._isCurrentListRequest(request) || this._isAbortError(e)) return;
+            if (!request.loadMore) this._listFailed = true;
             console.warn('[Trips] Load trips for range failed:', e);
             const skel = document.getElementById('tripListSkeleton');
             if (skel) skel.style.display = 'none';
@@ -1867,6 +1944,8 @@ const TRIPS = {
         this._activeListKey = key;
         this._listAbortController = controller;
         this._listLoadMoreInFlight = request.loadMore;
+        // A page-1 read is on its way (the reconnect handler reloads a list that is pending or failed).
+        if (!request.loadMore) this._listPending = true;
 
         const btn = document.getElementById('loadMoreBtn');
         if (btn) btn.disabled = request.loadMore;
@@ -1881,6 +1960,7 @@ const TRIPS = {
 
     _finishListRequest(request) {
         if (!this._isCurrentListRequest(request)) return;
+        if (!request.loadMore) this._listPending = false;
         if (this._listAbortController === request.controller) {
             this._listAbortController = null;
         }
@@ -1945,11 +2025,13 @@ const TRIPS = {
             const resp = request.controller
                 ? await fetch(url, { signal: request.controller.signal })
                 : await fetch(url);
+            request.copied = this._fromCopy(resp);
             const data = await resp.json();
             if (!this._isCurrentListRequest(request)) return;
             this._applyTripsPayload(data, off, request);
         } catch (e) {
             if (!this._isCurrentListRequest(request) || this._isAbortError(e)) return;
+            if (!request.loadMore) this._listFailed = true;
             console.warn('[Trips] Load trips failed:', e);
             const skel = document.getElementById('tripListSkeleton');
             if (skel) skel.style.display = 'none';
@@ -1974,6 +2056,7 @@ const TRIPS = {
         if (!data || data.error || !Array.isArray(data.trips)) {
             console.warn('[Trips] Trip list response failed:',
                 data && data.error ? data.error : 'invalid response');
+            if (request ? !request.loadMore : off === 0) this._listFailed = true;
             return false;
         }
         const page = data.trips;
@@ -2005,6 +2088,15 @@ const TRIPS = {
             // Don't touch this.trips; just hide the button.
             this.currentCursor = null;
             if (btn) btn.style.display = 'none';
+        }
+        // Rows from the copy are replaced by page 1 once the car answers; so is a page 1 shown under the
+        // offline banner. A live Load more page under the banner keeps the pages.
+        const copied = !!(request && request.copied);
+        if (reset) {
+            this._listFailed = false;
+            this._listCopied = copied || this._offlineShown();
+        } else if (copied) {
+            this._listCopied = true;
         }
         return true;
     },
@@ -2451,10 +2543,15 @@ const TRIPS = {
     // ==================== DNA & SUMMARY ====================
 
     async loadDna() {
+        // A reply paints unless a newer success already did; failures paint nothing here.
+        const seq = this._dnaSeq = (this._dnaSeq || 0) + 1;
         try {
             const resp = await fetch('/api/trips/dna?days=30');
             const data = await resp.json();
-            this._applyDnaPayload(data);
+            if (data && data.dna && seq > (this._dnaOk || 0)) {
+                this._dnaOk = seq;
+                this._applyDnaPayload(data);
+            }
         } catch (e) { console.warn('[Trips] DNA load failed:', e); }
     },
 
@@ -2913,12 +3010,20 @@ const TRIPS = {
     },
 
     async loadRange() {
+        // A success paints unless a newer success already did; a failure only if nothing newer painted.
+        const seq = this._rangeSeq = (this._rangeSeq || 0) + 1;
         try {
             const resp = await fetch('/api/trips/range');
             const data = await resp.json();
+            const ok = !!data && data.success !== false;
+            if (ok ? seq < (this._rangeOk || 0) : seq < (this._rangeLast || 0)) return;
+            if (ok) this._rangeOk = seq;
+            this._rangeLast = Math.max(this._rangeLast || 0, seq);
             this._applyRangePayload(data);
         } catch (e) {
             console.warn('[Trips] Range load failed:', e);
+            if (seq < (this._rangeLast || 0)) return;
+            this._rangeLast = seq;
             this.renderCircleGauge('rangeCircleCanvas', 0, 'rgba(14,165,233,0.2)');
             this.renderPetrolRange(null);
         }

@@ -67,8 +67,34 @@ public final class WeatherTemperature {
     private static volatile int cachedPrecipProb = -1;
     // The same next-hours window as {localHour, probability %} pairs (Trip Briefing's rain note).
     private static volatile int[][] cachedPrecipSlots = new int[0][];
+    // Current conditions from the same fetch (Custom Layouts' environment engine); null until fetched.
+    private static volatile Conditions cachedConditions;
+
+    /** WMO weather code, cloud cover 0..1, visibility in metres and wind in km/h; NaN where Open-Meteo omits one. */
+    public static final class Conditions {
+        public final int code;
+        public final double cloud;
+        public final double visibilityM;
+        public final double windKmh;
+        public final long fetchedAtMs;
+
+        Conditions(int code, double cloud, double visibilityM, double windKmh, long fetchedAtMs) {
+            this.code = code;
+            this.cloud = cloud;
+            this.visibilityM = visibilityM;
+            this.windKmh = windKmh;
+            this.fetchedAtMs = fetchedAtMs;
+        }
+    }
 
     private WeatherTemperature() {}
+
+    /** The last fetched current conditions, or null if none yet or older than {@link #STALE_MS}. Never blocks. */
+    public static Conditions getCachedConditions() {
+        Conditions c = cachedConditions;
+        if (c == null || System.currentTimeMillis() - c.fetchedAtMs > STALE_MS) return null;
+        return c;
+    }
 
     /**
      * Mean precipitation probability (%) over roughly the next {@value #PRECIP_HOURS}
@@ -136,7 +162,8 @@ public final class WeatherTemperature {
             // precipitation-probability series (for the "rain likely" automation trigger).
             String url = String.format(Locale.US,
                     "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
-                    + "&current=temperature_2m&hourly=precipitation_probability&forecast_days=1&timezone=auto",
+                    + "&current=temperature_2m,weather_code,cloud_cover,visibility,wind_speed_10m"
+                    + "&hourly=precipitation_probability&forecast_days=1&timezone=auto",
                     lat, lon);
             Request request = new Request.Builder()
                     .url(url)
@@ -157,6 +184,13 @@ public final class WeatherTemperature {
                         cachedPrecipSlots = parsePrecipSlots(root);
                     }
                     JSONObject current = root.optJSONObject("current");
+                    if (current != null && current.has("weather_code") && !current.isNull("weather_code")) {
+                        cachedConditions = new Conditions(current.optInt("weather_code"),
+                                current.optDouble("cloud_cover", Double.NaN) / 100.0,
+                                current.optDouble("visibility", Double.NaN),
+                                current.optDouble("wind_speed_10m", Double.NaN),
+                                System.currentTimeMillis());
+                    }
                     if (current != null && current.has("temperature_2m")) {
                         double temp = current.getDouble("temperature_2m");
                         cachedTemp = temp;

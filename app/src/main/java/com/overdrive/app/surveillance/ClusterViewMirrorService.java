@@ -523,7 +523,7 @@ public final class ClusterViewMirrorService extends Binder {
                                 ? com.overdrive.app.launcher.ClusterLayouts.generation() : 0L;
                 final boolean layoutSource = layoutGenerationAtAttach > 0L;
                 boolean diLink5 = !layoutSource
-                        && com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5();
+                        && com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService();
                 // A hard close marks the source non-open before detaching us. Refuse an attach
                 // that arrives in the detach→close window so it cannot bind a fresh mirror to a
                 // fission display that is about to be destroyed.

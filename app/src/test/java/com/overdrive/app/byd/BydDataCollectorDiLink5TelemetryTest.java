@@ -118,7 +118,7 @@ public class BydDataCollectorDiLink5TelemetryTest {
         assertFalse(BydDataCollector.isValidTyreTemperatureC(-41));
         assertFalse(BydDataCollector.isValidTyreTemperatureC(126));
 
-        assertEquals(2, BydDataCollector.normalizeDiLink5DriveMode(1));
+        assertEquals(BydVehicleData.UNAVAILABLE, BydDataCollector.normalizeDiLink5DriveMode(1));
         assertEquals(3, BydDataCollector.normalizeDiLink5DriveMode(2));
         assertEquals(1, BydDataCollector.normalizeDiLink5DriveMode(3));
         assertEquals(4, BydDataCollector.normalizeDiLink5DriveMode(4));

@@ -62,8 +62,13 @@ class RemoteDevViewBridgeService : Service() {
         ensureListening()
         // A service can be recreated while the Application stays alive.
         // Restore saved monitoring here as well as at process startup.
-        com.overdrive.app.remoteaccess.KeyFobAccessMonitor.resumeIfEnabled(application)
-        com.overdrive.app.remoteaccess.BluetoothAccessMonitor.resumeIfEnabled(application)
+        if (com.overdrive.app.config.ServiceModeFeatureGate.isPausedInConfig("proximity")) {
+            com.overdrive.app.remoteaccess.KeyFobAccessMonitor.stop()
+            com.overdrive.app.remoteaccess.BluetoothAccessMonitor.stop()
+        } else {
+            com.overdrive.app.remoteaccess.KeyFobAccessMonitor.resumeIfEnabled(application)
+            com.overdrive.app.remoteaccess.BluetoothAccessMonitor.resumeIfEnabled(application)
+        }
         return START_NOT_STICKY
     }
 

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="dash_vehicle_line">%1$s · %2$.1f kWh</string>
+    <string name="dash_range_caption">domet</string>
+    <string name="dash_status_remote_on">Udaljeni pristup je uključen</string>
+    <string name="dash_status_remote_off">Udaljeni pristup je isključen</string>
+    <string name="dash_status_remote_state">Udaljeni pristup · %1$s</string>
+    <string name="dash_status_services">%1$d od %2$d servisa</string>
+    <string name="dash_status_view">Prikažite</string>
+    <string name="dash_status_recording_idle">Snimanje miruje</string>
+    <string name="dash_services_running">Radi %1$d od %2$d</string>
+    <string name="dash_charge_eta_left">Preostalo %1$s</string>
+    <string name="dash_charge_session_inline">%1$s u ovoj sesiji</string>
+    <plurals name="dash_clip_count">
+        <item quantity="one">%1$d snimak</item>
+        <item quantity="few">%1$d snimka</item>
+        <item quantity="other">%1$d snimaka</item>
+    </plurals>
+</resources>

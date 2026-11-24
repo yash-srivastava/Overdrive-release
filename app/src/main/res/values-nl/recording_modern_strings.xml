@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="recording_library_loading">Opnames laden</string>
+    <string name="recording_library_refreshing">Opnames verversen</string>
+    <string name="recording_library_loading_more">Meer opnames laden</string>
+    <string name="recording_library_page_error">Meer opnames laden is mislukt.</string>
+    <string name="recording_library_page_unavailable">Meer opnames zijn tijdelijk niet beschikbaar.</string>
+    <string name="recording_library_refresh_error">Verversen is mislukt. De al geladen opnames worden getoond.</string>
+    <string name="recording_library_fatal_title">Kon opnames niet openen</string>
+    <string name="recording_library_fatal_body">Controleer de opnameservice en de opslag en probeer het opnieuw.</string>
+    <string name="recording_library_select">Selecteer opnames</string>
+    <string name="recording_library_open_filters">Opnames filteren</string>
+    <string name="recording_library_clear_search">Locatiezoekopdracht wissen</string>
+    <string name="recording_preview_details">Opnamedetails</string>
+    <string name="cd_expand_recording_details">Toon opnamedetails</string>
+    <string name="cd_collapse_recording_details">Verberg opnamedetails</string>
+    <string name="recording_item_description">%1$s, %2$s, %3$s. Open opname.</string>
+    <string name="recording_item_selection_description">%1$s, %2$s, %3$s. %4$s</string>
+    <string name="recording_item_selected_action">Geselecteerd. Tik tweemaal om de selectie op te heffen.</string>
+    <string name="recording_item_not_selected_action">Niet geselecteerd. Tik tweemaal om te selecteren.</string>
+    <string name="recording_item_select">Selecteer %1$s</string>
+    <string name="recording_item_deselect">Deselecteer %1$s</string>
+    <string name="cd_pause">Pauzeren</string>
+    <string name="cd_player_unmute">Zet geluid aan</string>
+    <string name="cd_player_mute_audio">Zet geluid uit</string>
+    <string name="video_player_buffering">Video laden</string>
+    <string name="video_player_error_title">Kan deze opname niet afspelen</string>
+    <string name="video_player_error_body">Het bestand is mogelijk niet beschikbaar of de verbinding met het opslagapparaat is mogelijk verbroken.</string>
+    <string name="video_player_retry">Opnieuw proberen</string>
+    <string name="video_player_next">Volgende opname</string>
+    <string name="video_timeline_empty">Gebeurtenissentijdlijn. Geen gebeurtenissen gedetecteerd.</string>
+    <string name="video_timeline_events">Gebeurtenissentijdlijn. %1$d gebeurtenissen gedetecteerd. Tik om naar de dichtstbijzijnde gebeurtenis te springen.</string>
+    <string name="video_timeline_selected">%1$s-gebeurtenis om %2$s</string>
+</resources>

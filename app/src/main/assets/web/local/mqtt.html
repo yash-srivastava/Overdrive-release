@@ -6,7 +6,7 @@
     <title data-i18n="app.mqtt_title">MQTT - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
     <script src="../shared/theme.js?v=12"></script>
-    <script src="../shared/app-shell.js?v=23"></script>
+    <script src="../shared/app-shell.js?v=26"></script>
     <!--
       Bottom-tab manifest for MQTT — three task-based tabs:
         Connections — broker list (or empty-state with a CTA that switches to Add)
@@ -181,7 +181,7 @@
 <body class="r-settings">
     <div class="app-layout">
         <!-- Sidebar -->
-        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=23) -->
+        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=24) -->
         <div id="app-shell-mount"></div>
         <!-- Main Content -->
         <main class="main-content">
@@ -394,9 +394,9 @@
     <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
     <div id="toastContainer" class="toast-container"></div>
 
-    <script src="../shared/auth.js"></script>
-    <script src="../shared/core.js?v=27"></script>
-    <script src="../shared/update-flow.js?v=3"></script>
+    <script src="../shared/auth.js?v=18"></script>
+    <script src="../shared/core.js?v=31"></script>
+    <script src="../shared/update-flow.js?v=6"></script>
     <script src="../shared/mqtt.js?v=6"></script>
     <script>
         function toggleSidebar() {

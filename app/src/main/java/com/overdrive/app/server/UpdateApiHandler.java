@@ -68,13 +68,27 @@ public class UpdateApiHandler {
         // (?value=…) still route here.
         if (path.startsWith("/api/update/channel")) {
             if (method.equals("GET")) { handleGetChannel(out); return true; }
-            if (method.equals("POST")) { handleSetChannel(path, out); return true; }
+            if (method.equals("POST")) {
+                // An older build would not know the lock.
+                if (!StepUpGate.requireBundle("config", "Change the update channel", out)) return true;
+                handleSetChannel(path, out);
+                return true;
+            }
+        }
+        if (path.startsWith("/api/update/auto")) {
+            if (method.equals("GET")) { handleGetAuto(out); return true; }
+            if (method.equals("POST")) {
+                if (!StepUpGate.requireBundle("config", "Change automatic updates", out)) return true;
+                handleSetAuto(path, out);
+                return true;
+            }
         }
         if (path.startsWith("/api/update/versions") && method.equals("GET")) {
             handleVersions(out);
             return true;
         }
         if (path.startsWith("/api/update/install") && method.equals("POST")) {
+            if (!StepUpGate.requireBundle("config", "Install an update", out)) return true;
             handleInstall(path, out);
             return true;
         }
@@ -111,7 +125,7 @@ public class UpdateApiHandler {
             JSONObject r = new JSONObject();
             r.put("available", false);
             r.put("channel", channel);
-            r.put("currentVersion", AppUpdater.getDisplayVersion(ctx));
+            r.put("currentVersion", AppUpdater.getDisplayVersionFromFile());
             r.put("catalogEndpoint", "/api/update/versions");
             HttpResponse.sendJson(out, r.toString());
             return;
@@ -161,7 +175,7 @@ public class UpdateApiHandler {
                     r.put("available", false);
                     r.put("channel", channel);
                     r.put("error", error != null ? error : "unknown");
-                    r.put("currentVersion", AppUpdater.getDisplayVersion(ctx));
+                    r.put("currentVersion", AppUpdater.getDisplayVersionFromFile());
                 } catch (Exception ignored) {}
                 resultRef[0] = r;
                 signal(lock, done);
@@ -241,6 +255,37 @@ public class UpdateApiHandler {
         HttpResponse.sendJson(out, r.toString());
     }
 
+    // ================== /api/update/auto ==================
+
+    /** Public-mode can inspect the value, but only the owner can enable it. */
+    private static void handleGetAuto(OutputStream out) throws Exception {
+        com.overdrive.app.config.UnifiedConfigManager.forceReload();
+        JSONObject response = new JSONObject();
+        response.put("enabled", com.overdrive.app.config.UnifiedConfigManager.isAutoUpdateEnabled());
+        response.put("channel", com.overdrive.app.config.UnifiedConfigManager.getUpdateChannel());
+        HttpResponse.sendJson(out, response.toString());
+    }
+
+    private static void handleSetAuto(String path, OutputStream out) throws Exception {
+        if (CameraDaemon.isPublicMode()) {
+            HttpResponse.sendJsonError(out, Messages.get("errors.update_disabled_in_public_mode"));
+            return;
+        }
+        String value = queryParam(path, "enabled");
+        if (!"true".equals(value) && !"false".equals(value)) {
+            HttpResponse.sendJsonError(out, "Expected enabled=true or enabled=false");
+            return;
+        }
+        boolean enabled = "true".equals(value);
+        if (!com.overdrive.app.config.UnifiedConfigManager.setAutoUpdateEnabled(enabled)) {
+            HttpResponse.sendJsonError(out, "Could not save automatic update preference");
+            return;
+        }
+        JSONObject response = new JSONObject();
+        response.put("enabled", enabled);
+        HttpResponse.sendJson(out, response.toString());
+    }
+
     // ================== /api/update/versions ==================
 
     /**
@@ -286,7 +331,7 @@ public class UpdateApiHandler {
                         try {
                             r.put("channel", channel);
                             r.put("error", error != null ? error : "unknown");
-                            r.put("currentVersion", AppUpdater.getDisplayVersion(ctx));
+                            r.put("currentVersion", AppUpdater.getDisplayVersionFromFile());
                         } catch (Exception ignored) {}
                         resultRef[0] = r;
                         signal(lock, done);
@@ -309,7 +354,7 @@ public class UpdateApiHandler {
                         try {
                             r.put("channel", channel);
                             r.put("error", error != null ? error : "unknown");
-                            r.put("currentVersion", AppUpdater.getDisplayVersion(ctx));
+                            r.put("currentVersion", AppUpdater.getDisplayVersionFromFile());
                         } catch (Exception ignored) {}
                         resultRef[0] = r;
                         signal(lock, done);

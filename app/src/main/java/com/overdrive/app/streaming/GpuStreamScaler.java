@@ -114,6 +114,15 @@ public class GpuStreamScaler {
     private volatile float bsCardAspect    = 0.0f;
     private int uBsCardWidthFracLocation = -1;
     private int uBsCardShiftXLocation    = -1;
+    // Custom Layouts slot mask (views 7/8): the slot's shape replaces the card outline.
+    // Null = off; every existing path is then unchanged.
+    private volatile BsSlotMask bsSlotMask;
+    private BsSlotMask uploadedSlotMask;   // GL thread only
+    private int uBsSlotOnLocation  = -1;
+    private int uBsSlotBoxLocation = -1;
+    private int uBsHoleALocation   = -1;
+    private int uBsHoleBLocation   = -1;
+    private int uBsHoleRLocation   = -1;
     private int uApaModeLocation;
     private int uTexMatrixLocation;
     private int uApplyManualYFlipLocation;
@@ -407,6 +416,11 @@ public class GpuStreamScaler {
         uBsContentActiveLocation = GLES20.glGetUniformLocation(programId, "uBsContentActive");
         uBsCardWidthFracLocation = GLES20.glGetUniformLocation(programId, "uBsCardWidthFrac");
         uBsCardShiftXLocation    = GLES20.glGetUniformLocation(programId, "uBsCardShiftX");
+        uBsSlotOnLocation  = GLES20.glGetUniformLocation(programId, "uBsSlotOn");
+        uBsSlotBoxLocation = GLES20.glGetUniformLocation(programId, "uBsSlotBox");
+        uBsHoleALocation   = GLES20.glGetUniformLocation(programId, "uBsHoleA");
+        uBsHoleBLocation   = GLES20.glGetUniformLocation(programId, "uBsHoleB");
+        uBsHoleRLocation   = GLES20.glGetUniformLocation(programId, "uBsHoleR");
         uApaModeLocation = GLES20.glGetUniformLocation(programId, "uApaMode");
         uTexMatrixLocation = GLES20.glGetUniformLocation(programId, "uTexMatrix");
         uApplyManualYFlipLocation = GLES20.glGetUniformLocation(programId, "uApplyManualYFlip");
@@ -564,7 +578,20 @@ public class GpuStreamScaler {
                         : GLES11Ext.GL_TEXTURE_EXTERNAL_OES,
             cameraTextureId);
         GLES20.glUniform1i(uCameraTexLocation, 0);
-        
+
+        // Custom Layouts slot mask, uploaded on change. Entering or leaving slot mode also
+        // re-uploads the card uniforms and the quad rotation, which slot mode neutralises.
+        BsSlotMask slotMask = bsCard ? bsSlotMask : null;
+        if (slotMask != uploadedSlotMask) {
+            if ((slotMask == null) != (uploadedSlotMask == null)) {
+                uniformsDirty.set(true);
+                synchronized (producerCornerMapLock) { rotationDirty = true; }
+            }
+            uploadedSlotMask = slotMask;
+            uploadBsSlotMask(slotMask);
+        }
+        final boolean slotOn = uploadedSlotMask != null;
+
         // Quasi-static uniforms — only re-upload when a setter flagged
         // a change. uTexMatrix is exempt (camera transform changes every
         // frame, written by setTextureMatrix below).
@@ -579,7 +606,7 @@ public class GpuStreamScaler {
             // circular; feather ≈ 1.5px in output-height units for a clean AA edge.
             if (uBsRadiusLocation >= 0) {
                 boolean bs = (currentViewMode == 7 || currentViewMode == 8);
-                GLES20.glUniform1f(uBsRadiusLocation, bs ? bsCornerRadius : 0.0f);
+                GLES20.glUniform1f(uBsRadiusLocation, bs && !slotOn ? bsCornerRadius : 0.0f);
             }
             if (uBsAspectLocation >= 0) {
                 GLES20.glUniform1f(uBsAspectLocation,
@@ -598,7 +625,7 @@ public class GpuStreamScaler {
             // steady-state frames pay nothing for these uniforms.
             {
                 boolean bsv = (currentViewMode == 7 || currentViewMode == 8);
-                if (uBsMarginLocation     >= 0) GLES20.glUniform1f(uBsMarginLocation,     bsv ? bsMargin : 0.0f);
+                if (uBsMarginLocation     >= 0) GLES20.glUniform1f(uBsMarginLocation,     bsv && !slotOn ? bsMargin : 0.0f);
                 if (uBsBevelWLocation     >= 0) GLES20.glUniform1f(uBsBevelWLocation,     bsBevelW);
                 if (uBsBevelLightLocation >= 0) GLES20.glUniform1f(uBsBevelLightLocation, bsBevelLight);
                 if (uBsBevelDarkLocation  >= 0) GLES20.glUniform1f(uBsBevelDarkLocation,  bsBevelDark);
@@ -640,7 +667,8 @@ public class GpuStreamScaler {
                     GLES20.glUniform1f(uBsCardWidthFracLocation, bsv ? bsCardWidthFrac : 1.0f);
                 }
                 if (uBsCardShiftXLocation >= 0) {
-                    GLES20.glUniform1f(uBsCardShiftXLocation, bsv ? bsCardShiftX : 0.0f);
+                    // A slot centres the card in its own crop window, so the anchor shift is dropped.
+                    GLES20.glUniform1f(uBsCardShiftXLocation, bsv && !slotOn ? bsCardShiftX : 0.0f);
                 }
             }
             if (uApplyManualYFlipLocation >= 0) {
@@ -766,6 +794,11 @@ public class GpuStreamScaler {
                 ro[0] = rotationOffset[0]; ro[1] = rotationOffset[1];
                 rotationDirty = false;
             }
+            if (slotOn) {
+                // The slot fixes the card's orientation; quarter turns resume when it ends.
+                rm[0] = 1f; rm[1] = 0f; rm[2] = 0f; rm[3] = 1f;
+                ro[0] = 0f; ro[1] = 0f;
+            }
             GLES20.glUniformMatrix2fv(uRotationLocation, 1, false, rm, 0);
             if (uRotationOffsetLocation >= 0) GLES20.glUniform2f(uRotationOffsetLocation, ro[0], ro[1]);
         }
@@ -814,10 +847,10 @@ public class GpuStreamScaler {
      *
      * @param mode 0=Mosaic, 1=Front, 2=Right, 3=Rear, 4=Left,
      *             5=Raw (legacy debug passthrough — pano strip), 6=OEM Dashcam,
-     *             7=BlindSpot L, 8=BlindSpot R
+     *             7=BlindSpot L, 8=BlindSpot R, 9=AVM mosaic + DVR
      */
     public void setViewMode(int mode) {
-        if (mode < 0 || mode > 8) return;
+        if (mode < 0 || mode > 9) return;
         if (mode != 6) {
             synchronized (oemViewLock) {
                 oemViewRequested = false;
@@ -1195,6 +1228,60 @@ public class GpuStreamScaler {
     public float getBsCardAspect() { return bsCardAspect; }
 
     /**
+     * Custom Layouts slot mask for views 7/8, in the card's aspect space: buffer-height
+     * units, origin at the buffer centre, y down. A radius of at least the smaller half
+     * extent gives a circle. Holes are {cx, cy, hx, hy, r} cut-outs, or null.
+     */
+    public static final class BsSlotMask {
+        public final float halfW, halfH, radius;
+        public final float[] holeA, holeB;
+
+        public BsSlotMask(float halfW, float halfH, float radius, float[] holeA, float[] holeB) {
+            this.halfW = halfW;
+            this.halfH = halfH;
+            this.radius = radius;
+            this.holeA = validHole(holeA);
+            this.holeB = validHole(holeB);
+        }
+
+        private static float[] validHole(float[] h) {
+            return (h != null && h.length >= 5 && h[2] > 0f && h[3] > 0f) ? h.clone() : null;
+        }
+
+        public boolean sameAs(BsSlotMask o) {
+            return o != null && o.halfW == halfW && o.halfH == halfH && o.radius == radius
+                    && java.util.Arrays.equals(o.holeA, holeA)
+                    && java.util.Arrays.equals(o.holeB, holeB);
+        }
+    }
+
+    /** Install (or clear, with null) the slot mask; the next BS frame uploads it. */
+    public void setBsSlotMask(BsSlotMask mask) { this.bsSlotMask = mask; }
+
+    /** The installed slot mask, or null. */
+    public BsSlotMask getBsSlotMask() { return bsSlotMask; }
+
+    /** GL thread, program bound. uBsSlotOn = 0 turns every slot term off in the shader. */
+    private void uploadBsSlotMask(BsSlotMask m) {
+        if (uBsSlotOnLocation >= 0) GLES20.glUniform1f(uBsSlotOnLocation, m != null ? 1.0f : 0.0f);
+        if (m == null) return;
+        if (uBsSlotBoxLocation >= 0) GLES20.glUniform3f(uBsSlotBoxLocation, m.halfW, m.halfH, m.radius);
+        float[] a = m.holeA;
+        float[] b = m.holeB;
+        if (uBsHoleALocation >= 0) {
+            if (a != null) GLES20.glUniform4f(uBsHoleALocation, a[0], a[1], a[2], a[3]);
+            else GLES20.glUniform4f(uBsHoleALocation, 0f, 0f, 0f, 0f);
+        }
+        if (uBsHoleBLocation >= 0) {
+            if (b != null) GLES20.glUniform4f(uBsHoleBLocation, b[0], b[1], b[2], b[3]);
+            else GLES20.glUniform4f(uBsHoleBLocation, 0f, 0f, 0f, 0f);
+        }
+        if (uBsHoleRLocation >= 0) {
+            GLES20.glUniform2f(uBsHoleRLocation, a != null ? a[4] : 0f, b != null ? b[4] : 0f);
+        }
+    }
+
+    /**
      * Copy the live content affine out as {@code [m00, m10, m01, m11, offX, offY]}.
      * Returns whether it is active. Never called on the GL thread's hot path.
      *
@@ -1245,6 +1332,15 @@ public class GpuStreamScaler {
             this.oemBindingDirty.set(true);
         }
         logger.info("OEM source bound to streamScaler (tex=" + oemTextureId + ")");
+    }
+
+    /** True when a shared OEM texture has published its first frame transform. */
+    public boolean isOemSourceBound() {
+        return oemSourceActive && oemTextureId != 0 && oemSurfaceTexture != null;
+    }
+
+    public boolean isOemSourceReady() {
+        return isOemSourceBound() && oemTexMatrixSnapshot != null;
     }
 
     public void unbindOemSource() {
@@ -1682,6 +1778,11 @@ public class GpuStreamScaler {
             "uniform mat4 uOemTexMatrix;\n" +
             "uniform int uOemActive;\n" +
             "uniform int uViewMode;\n" +
+            // View 9 remaps the AVM grid before the producer transform. These
+            // uniforms are stage-local: declarations in VERTEX_SHADER are not
+            // visible to the fragment compiler.
+            "uniform mat4 uTexMatrix;\n" +
+            "uniform float uApplyManualYFlip;\n" +
             "uniform float uApaMode;\n" +
             com.overdrive.app.camera.dilink5.DiLink5FisheyeModel.GLSL +
             "uniform vec2 uProducerForFront;\n" +
@@ -1906,6 +2007,27 @@ public class GpuStreamScaler {
             "    float spec = specBand * max(-nrm.y, 0.0) * uBsSpecInt;\n" +  // thin top highlight
             "    return clamp(rgb + vec3(spec), 0.0, 1.0);\n" +
             "}\n" +
+            // Custom Layouts slot (views 7/8): the slot's shape replaces the card outline.
+            // uBsSlotOn == 0 leaves all of this unused, so the card renders exactly as before.
+            "uniform float uBsSlotOn;\n" +
+            "uniform vec3  uBsSlotBox;\n" +     // half extents xy, corner radius z
+            "uniform vec4  uBsHoleA;\n" +       // cut-out centre xy, half extents zw
+            "uniform vec4  uBsHoleB;\n" +
+            "uniform vec2  uBsHoleR;\n" +       // cut-out corner radii
+            // Output position in the card's aspect space (centre origin, y down). vUnit is the
+            // raw quad coord, so this never depends on the camera texture matrix.
+            "vec2 bsSlotP() {\n" +
+            "    return vec2((vUnit.x - 0.5) * uBsAspect, 0.5 - vUnit.y);\n" +
+            "}\n" +
+            "float bsHoleSD(vec2 q, vec4 h, float r) {\n" +
+            "    if (h.z <= 0.0) return 1000.0;\n" +
+            "    return bsRoundBoxSDF(q - h.xy, h.zw, min(r, min(h.z, h.w)));\n" +
+            "}\n" +
+            "float bsSlotSD(vec2 q) {\n" +
+            "    float s = bsRoundBoxSDF(q, uBsSlotBox.xy, min(uBsSlotBox.z, min(uBsSlotBox.x, uBsSlotBox.y)));\n" +
+            "    float hole = min(bsHoleSD(q, uBsHoleA, uBsHoleR.x), bsHoleSD(q, uBsHoleB, uBsHoleR.y));\n" +
+            "    return max(s, -hole);\n" +
+            "}\n" +
             "void main() {\n" +
             "    // View 6 with OEM bound: sample the OEM camera external\n" +
             "    // texture using its own transform matrix on the\n" +
@@ -1914,6 +2036,19 @@ public class GpuStreamScaler {
             "    // encodes the producer's Y-flip — applying a manual\n" +
             "    // 1.0 - vUnit.y on top double-flips and lands the feed\n" +
             "    // upside-down. Sample with the raw vUnit.\n" +
+            // Combined view 9: position and crop the DVR band in output-quad
+            // (screen) coordinates. vTexCoord belongs to the pano camera and
+            // carries its SurfaceTexture transform, which moves the band to
+            // the opposite edge and inverts its local Y on some HAL layouts.
+            // vUnit is the untransformed output coordinate; the OEM matrix is
+            // applied only after deriving the band's local screen-space UV.
+            // The lower two-thirds retain Front/Right/Rear/Left order.
+            "    if (uViewMode == 9 && uOemActive == 1 && vUnit.y >= (2.0 / 3.0)) {\n" +
+            "        vec2 panelUv = vec2(vUnit.x, (vUnit.y - (2.0 / 3.0)) * 3.0);\n" +
+            "        vec2 oemTc = (uOemTexMatrix * vec4(panelUv, 0.0, 1.0)).xy;\n" +
+            "        gl_FragColor = texture2D(uOemTex, oemTc);\n" +
+            "        return;\n" +
+            "    }\n" +
             "    if (uViewMode == 6 && uOemActive == 1) {\n" +
             "        vec2 oemTc = (uOemTexMatrix * vec4(vUnit, 0.0, 1.0)).xy;\n" +
             "        gl_FragColor = texture2D(uOemTex, oemTc);\n" +
@@ -1926,25 +2061,40 @@ public class GpuStreamScaler {
             "        gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);\n" +
             "        return;\n" +
             "    }\n" +
+            "    if (uViewMode == 9 && uOemActive != 1 && vUnit.y >= (2.0 / 3.0)) {\n" +
+            "        gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0); return;\n" +
+            "    }\n" +
+            "    vec2 sampleCoord = vTexCoord;\n" +
+            // Expand the lower output region into a full mosaic BEFORE applying
+            // the camera texture transform. Scaling vTexCoord instead selects
+            // the wrong producer tiles whenever the HAL transforms the image.
+            "    if (uViewMode == 9) {\n" +
+            "        vec2 gridUv = vec2(vUnit.x, vUnit.y * 1.5);\n" +
+            "        if (uApplyManualYFlip > 0.5) gridUv.y = 1.0 - gridUv.y;\n" +
+            "        sampleCoord = (uTexMatrix * vec4(gridUv, 0.0, 1.0)).xy;\n" +
+            "    }\n" +
+            // Use the producer-transformed coordinate for tile selection and
+            // role flips (DiLink 3/4); screen-space gridUv mirrors layouts.
+            "    vec2 gridCoord = sampleCoord;\n" +
             "    vec2 samplePos;\n" +
             "    float frontOffset = %.5f;\n" +
             "    float rightOffset = %.5f;\n" +
             "    float rearOffset  = %.5f;\n" +
             "    float leftOffset  = %.5f;\n" +
-            "    if (uApaMode > 2.5 && uViewMode == 0) {\n" +
+            "    if (uApaMode > 2.5 && (uViewMode == 0 || uViewMode == 9)) {\n" +
             "        // DiLink 4 mosaic: rearrange the HAL's 2x2 into the\n" +
             "        // canonical Front=TL / Right=TR / Rear=BL / Left=BR\n" +
             "        // arrangement with per-role X/Y flip applied inside the\n" +
             "        // role's 0.5×0.5 slot. Mirrors GpuMosaicRecorder so the\n" +
             "        // live stream matches the recording.\n" +
-            "        bool inRight = (vTexCoord.x >= 0.5 && vTexCoord.y <  0.5);\n" +
-            "        bool inRear  = (vTexCoord.x <  0.5 && vTexCoord.y >= 0.5);\n" +
-            "        bool inLeft  = (vTexCoord.x >= 0.5 && vTexCoord.y >= 0.5);\n" +
+            "        bool inRight = (gridCoord.x >= 0.5 && gridCoord.y <  0.5);\n" +
+            "        bool inRear  = (gridCoord.x <  0.5 && gridCoord.y >= 0.5);\n" +
+            "        bool inLeft  = (gridCoord.x >= 0.5 && gridCoord.y >= 0.5);\n" +
             "        vec2 localOffset = vec2(0.0);\n" +
             "        if (inRight) localOffset = vec2(0.5, 0.0);\n" +
             "        else if (inRear) localOffset = vec2(0.0, 0.5);\n" +
             "        else if (inLeft) localOffset = vec2(0.5, 0.5);\n" +
-            "        vec2 local = vTexCoord - localOffset;\n" +
+            "        vec2 local = gridCoord - localOffset;\n" +
             "        vec2 producerCorner = uProducerForFront;\n" +
             "        vec2 flip = uFlipForFront;\n" +
             "        if (inRight) { producerCorner = uProducerForRight; flip = uFlipForRight; }\n" +
@@ -1993,6 +2143,16 @@ public class GpuStreamScaler {
             "        vec2 cardHe = vec2(he.x * uBsCardWidthFrac, he.y) - mrg;\n" +
             "        float cardR = min(rr, min(cardHe.x, cardHe.y));\n" +
             "        float sd    = bsRoundBoxSDF(p, cardHe, cardR);\n" +
+            // Slot mode: intersect with the slot shape and light the slot's own rim.
+            "        vec2 rimP   = p;\n" +
+            "        vec2 rimHe  = cardHe;\n" +
+            "        float rimR  = cardR;\n" +
+            "        if (uBsSlotOn > 0.5) {\n" +
+            "            rimP  = bsSlotP();\n" +
+            "            rimHe = uBsSlotBox.xy;\n" +
+            "            rimR  = min(uBsSlotBox.z, min(rimHe.x, rimHe.y));\n" +
+            "            sd    = max(sd, bsSlotSD(rimP));\n" +
+            "        }\n" +
             "        float bsCov = 1.0 - smoothstep(-uBsFeather, uBsFeather, sd);\n" +
             "        vec3 rgb = vec3(0.0);\n" +
             "        float vidCov = 0.0;\n" +    // od coverage; 0 where the projection has no pixels
@@ -2045,7 +2205,7 @@ public class GpuStreamScaler {
             "                               sideSign, cardUv.x, cardUv.y);\n" +
             "            }\n" +
             "            vidCov = bsCol.a * contentCov;\n" +   // 1 where video covers, 0 where it doesn't
-            "            rgb = bsApplyRim(bsCol.rgb, p, cardHe, cardR, sd);\n" +
+            "            rgb = bsApplyRim(bsCol.rgb, rimP, rimHe, rimR, sd);\n" +
             "        }\n" +
             // Alpha = card coverage × video coverage: rounded corners AND any region
             // the od projection doesn't fill are TRANSPARENT (map shows through), not
@@ -2058,31 +2218,37 @@ public class GpuStreamScaler {
             "    } else if (uViewMode == 5) {\n" +
             "        samplePos = vTexCoord;\n" +
             "    } else if (uApaMode > 1.5) {\n" +
-            "        if (uViewMode == 1) { samplePos = vec2(0.75 + vTexCoord.x * 0.25, vTexCoord.y); }\n" +
-            "        else if (uViewMode == 3) { samplePos = vec2(vTexCoord.x * 0.25, vTexCoord.y); }\n" +
-            "        else if (uViewMode == 2 || uViewMode == 4) { samplePos = vec2(0.25 + vTexCoord.x * 0.5, vTexCoord.y); }\n" +
+            "        if (uViewMode == 1) { samplePos = vec2(0.75 + sampleCoord.x * 0.25, sampleCoord.y); }\n" +
+            "        else if (uViewMode == 3) { samplePos = vec2(sampleCoord.x * 0.25, sampleCoord.y); }\n" +
+            "        else if (uViewMode == 2 || uViewMode == 4) { samplePos = vec2(0.25 + sampleCoord.x * 0.5, sampleCoord.y); }\n" +
             "        else {\n" +
-            "            if (vTexCoord.x < 0.5) {\n" +
-            "                float lx = vTexCoord.x * 0.5;\n" +
-            "                float ly = mod(vTexCoord.y, 0.5) * 2.0;\n" +
-            "                if (vTexCoord.y < 0.5) { samplePos = vec2(lx + 0.75, ly); }\n" +
+            "            if (sampleCoord.x < 0.5) {\n" +
+            "                float lx = sampleCoord.x * 0.5;\n" +
+            "                float ly = mod(sampleCoord.y, 0.5) * 2.0;\n" +
+            "                if (sampleCoord.y < 0.5) { samplePos = vec2(lx + 0.75, ly); }\n" +
             "                else { samplePos = vec2(lx, ly); }\n" +
             "            } else {\n" +
-            "                samplePos = vec2(0.25 + (vTexCoord.x - 0.5) * 0.5, vTexCoord.y);\n" +
+            "                samplePos = vec2(0.25 + (sampleCoord.x - 0.5) * 0.5, sampleCoord.y);\n" +
             "            }\n" +
             "        }\n" +
             "    } else if (uApaMode > 0.5) {\n" +
+            // Keep the existing DiLink 5 sampling path unchanged for views
+            // 0–8; only mode 9 needs the vertically remapped mosaic UV.
+            "        if (uViewMode == 9) {\n" +
+            "            samplePos = dl5UnfishMosaic(sampleCoord);\n" +
+            "        } else {\n" +
             fullFrameSampling +
-            "    } else if (uViewMode == 0) {\n" +
-            "        vec2 gridPos = step(0.5, vTexCoord);\n" +
+            "        }\n" +
+            "    } else if (uViewMode == 0 || uViewMode == 9) {\n" +
+            "        vec2 gridPos = step(0.5, uViewMode == 9 ? gridCoord : sampleCoord);\n" +
             "        float stripOffsetX;\n" +
             "        if (gridPos.x < 0.5) {\n" +
             "            stripOffsetX = gridPos.y < 0.5 ? frontOffset : rearOffset;\n" +
             "        } else {\n" +
             "            stripOffsetX = gridPos.y < 0.5 ? rightOffset : leftOffset;\n" +
             "        }\n" +
-            "        float localX = mod(vTexCoord.x, 0.5) * 0.5;\n" +
-            "        float localY = mod(vTexCoord.y, 0.5) * 2.0;\n" +
+            "        float localX = mod(uViewMode == 9 ? gridCoord.x : sampleCoord.x, 0.5) * 0.5;\n" +
+            "        float localY = mod(uViewMode == 9 ? gridCoord.y : sampleCoord.y, 0.5) * 2.0;\n" +
             "        samplePos = vec2(localX + stripOffsetX, localY);\n" +
             "    } else if (uViewMode == 7 || uViewMode == 8) {\n" +
             "        // View 7/8 sampler (legacy 4-strip).\n" +
@@ -2104,6 +2270,16 @@ public class GpuStreamScaler {
             "        vec2 cardHe = vec2(he.x * uBsCardWidthFrac, he.y) - mrg;\n" +
             "        float cardR = min(rr, min(cardHe.x, cardHe.y));\n" +
             "        float sd    = bsRoundBoxSDF(p, cardHe, cardR);\n" +
+            // Slot mode: intersect with the slot shape and light the slot's own rim.
+            "        vec2 rimP   = p;\n" +
+            "        vec2 rimHe  = cardHe;\n" +
+            "        float rimR  = cardR;\n" +
+            "        if (uBsSlotOn > 0.5) {\n" +
+            "            rimP  = bsSlotP();\n" +
+            "            rimHe = uBsSlotBox.xy;\n" +
+            "            rimR  = min(uBsSlotBox.z, min(rimHe.x, rimHe.y));\n" +
+            "            sd    = max(sd, bsSlotSD(rimP));\n" +
+            "        }\n" +
             "        float bsCov = 1.0 - smoothstep(-uBsFeather, uBsFeather, sd);\n" +
             "        vec3 rgb = vec3(0.0);\n" +
             "        float vidCov = 0.0;\n" +
@@ -2148,7 +2324,7 @@ public class GpuStreamScaler {
             "                               sideSign, cardUv.x, cardUv.y);\n" +
             "            }\n" +
             "            vidCov = bsCol.a * contentCov;\n" +
-            "            rgb = bsApplyRim(bsCol.rgb, p, cardHe, cardR, sd);\n" +
+            "            rgb = bsApplyRim(bsCol.rgb, rimP, rimHe, rimR, sd);\n" +
             "        }\n" +
             "        float outA = bsCov * vidCov;\n" +   // transparent corners + no-coverage
             "        gl_FragColor = vec4(rgb * outA, outA);\n" +   // premultiplied once

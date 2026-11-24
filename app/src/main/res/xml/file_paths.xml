@@ -20,6 +20,11 @@
         name="incident_packs"
         path="incident-packs/" />
 
+    <!-- The timeline clip being shared from the native recordings timeline. -->
+    <cache-path
+        name="timeline_share"
+        path="timeline-share/" />
+
     <!--
       Removable storage volumes (SD card / USB). Recordings on a configured
       SD card live at /storage/<uuid>/Overdrive/recordings/... (e.g.

@@ -36,10 +36,12 @@ object DiLink5HostedProjectionBridge {
     const val EXTRA_BUFFER_WIDTH = "hosted_projection_buffer_width"
     const val EXTRA_BUFFER_HEIGHT = "hosted_projection_buffer_height"
     const val EXTRA_DENSITY = "hosted_projection_density"
+    internal const val EXTRA_AAOS_MAP_AREA = "hosted_projection_aaos_map_area"
     internal const val RESULT_DISPLAY_ID = "display_id"
     internal const val RESULT_DISPLAY_WIDTH = "display_width"
     internal const val RESULT_DISPLAY_HEIGHT = "display_height"
     internal const val RESULT_DISPLAY_DENSITY = "display_density"
+    internal const val RESULT_CONFIRMED_MAP_BOUNDS = "confirmed_map_bounds"
 
     private const val TX_CREATE = IBinder.FIRST_CALL_TRANSACTION
     internal const val TX_RELEASE_FROM_APP = IBinder.FIRST_CALL_TRANSACTION + 1
@@ -58,11 +60,12 @@ object DiLink5HostedProjectionBridge {
     private val pendingReleases = HashMap<Long, ReleasePending>()
     @Volatile private var context: Context? = null
 
-    data class AppDisplayInfo(
+    data class AppDisplayInfo @JvmOverloads constructor(
         val displayId: Int,
         val width: Int,
         val height: Int,
         val densityDpi: Int,
+        val confirmedMapBounds: HostedProjectionGeometry.Bounds? = null,
     )
 
     data class HostedSession(
@@ -194,24 +197,32 @@ object DiLink5HostedProjectionBridge {
     }
 
     @JvmStatic
-    fun probeAppDisplay(daemonContext: Context, physicalDisplayId: Int): AppDisplayInfo? {
+    @JvmOverloads
+    fun probeAppDisplay(
+        daemonContext: Context, physicalDisplayId: Int, aaosMapArea: Boolean = false,
+    ): AppDisplayInfo? {
         if (physicalDisplayId <= 0) return null
         attachDaemonContext(daemonContext)
         // PROJECT_MEDIA may make the OEM display visible to the app UID. Probe the actual
         // app display even if the grant/readback failed; a shell-only decision needs that proof.
-        ensureProjectionAppOps()
+        if (!aaosMapArea) ensureProjectionAppOps()
         val complete = CountDownLatch(1)
         val observed = AtomicReference<AppDisplayInfo?>()
         val receiver = object : ResultReceiver(null) {
             override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
                 if (resultCode == 1 && resultData != null) {
+                    val width = resultData.getInt(RESULT_DISPLAY_WIDTH, 0)
+                    val height = resultData.getInt(RESULT_DISPLAY_HEIGHT, 0)
                     val info = AppDisplayInfo(
                         resultData.getInt(RESULT_DISPLAY_ID, -1),
-                        resultData.getInt(RESULT_DISPLAY_WIDTH, 0),
-                        resultData.getInt(RESULT_DISPLAY_HEIGHT, 0),
+                        width,
+                        height,
                         resultData.getInt(RESULT_DISPLAY_DENSITY, 0),
+                        HostedProjectionBoundary.mapBoundsFromProbe(
+                            resultData.getIntArray(RESULT_CONFIRMED_MAP_BOUNDS), width, height,
+                        ),
                     )
-                    if (HostedProjectionBoundary.appDisplayInfoValid(
+                    if ((!aaosMapArea || info.confirmedMapBounds != null) && HostedProjectionBoundary.appDisplayInfoValid(
                             info.displayId,
                             physicalDisplayId,
                             info.width,
@@ -227,6 +238,7 @@ object DiLink5HostedProjectionBridge {
             val request = Intent(context, DiLink5HostedProjectionService::class.java)
                 .setAction(ACTION_PROBE_DISPLAY)
                 .putExtra(EXTRA_PHYSICAL_DISPLAY, physicalDisplayId)
+                .putExtra(EXTRA_AAOS_MAP_AREA, aaosMapArea)
                 .putExtra(EXTRA_RESULT_RECEIVER, receiver)
             if (context?.startService(request) == null) return null
             if (complete.await(WAIT_MS, TimeUnit.MILLISECONDS)) observed.get() else null
@@ -243,16 +255,18 @@ object DiLink5HostedProjectionBridge {
         probeAppDisplay(daemonContext, physicalDisplayId) != null
 
     @JvmStatic
+    @JvmOverloads
     fun start(
         daemonContext: Context,
         generation: Long,
         physicalDisplayId: Int,
         physicalDisplayName: String,
-        geometry: HostedProjectionGeometry
+        geometry: HostedProjectionGeometry,
+        aaosMapArea: Boolean = false,
     ): HostedSession? {
         if (generation <= 0 || physicalDisplayId <= 0) return null
         attachDaemonContext(daemonContext)
-        if (!ensureProjectionAppOps()) return null
+        if (!aaosMapArea && !ensureProjectionAppOps()) return null
         val ticket = Pending()
         synchronized(lock) {
             if (sessions.containsKey(generation) || retainedDisplays.containsKey(generation) ||
@@ -268,6 +282,7 @@ object DiLink5HostedProjectionBridge {
             .putExtra(EXTRA_GENERATION, generation)
             .putExtra(EXTRA_PHYSICAL_DISPLAY, physicalDisplayId)
             .putExtra(EXTRA_PHYSICAL_NAME, physicalDisplayName)
+            .putExtra(EXTRA_AAOS_MAP_AREA, aaosMapArea)
             .putExtra(EXTRA_LEFT, geometry.overlay.left)
             .putExtra(EXTRA_TOP, geometry.overlay.top)
             .putExtra(EXTRA_WIDTH, geometry.overlay.width())
@@ -381,6 +396,13 @@ object DiLink5HostedProjectionBridge {
     @JvmStatic
     fun isSurfaceAlive(generation: Long): Boolean = synchronized(lock) {
         sessions[generation]?.surfaceLost == false
+    }
+
+    /** Withdraw the physical window immediately; Cast restores the task before releasing its VD. */
+    internal fun withdrawMapArea(generation: Long) {
+        synchronized(lock) { sessions[generation]?.surfaceLost = true }
+        requestAppRelease(generation)
+        com.overdrive.app.launcher.DiLink5ClusterCast.onHostedSurfaceLost(generation)
     }
 
     /**
@@ -725,6 +747,14 @@ internal object HostedProjectionBoundary {
         densityDpi: Int,
     ): Boolean = expectedDisplayId > 0 && observedDisplayId == expectedDisplayId &&
         width > 1 && height > 1 && densityDpi > 0
+
+    fun mapBoundsFromProbe(values: IntArray?, panelWidth: Int, panelHeight: Int): HostedProjectionGeometry.Bounds? {
+        if (values == null || values.size != 4) return null
+        val (left, top, right, bottom) = values
+        if (left < 0 || top < 0 || right > panelWidth || bottom > panelHeight ||
+            right <= left || bottom <= top) return null
+        return HostedProjectionGeometry.Bounds(left, top, right, bottom)
+    }
 
     fun appDisplayVisible(
         displayPresent: Boolean,

@@ -30,13 +30,17 @@ class PlaybackDewarp(
     private val spec: Spec,
     private val onFailure: (PlaybackDewarp) -> Unit,
 ) {
-    /** Per-clip dewarp parameters: live slider coefficients + the tag's geometry. */
+    /**
+     * Per-clip dewarp parameters: live slider coefficients + the tag's geometry.
+     * [stripFrac]: the opaque telemetry strip at the top, as a fraction of the frame; 0 = none.
+     */
     data class Spec(
         val k1: Float,
         val k2: Float,
         val aspect: Float,
         val frameWidth: Int,
         val frameHeight: Int,
+        val stripFrac: Float = 0f,
     )
 
     private val thread = HandlerThread("PlaybackDewarp").apply { start() }
@@ -60,6 +64,7 @@ class PlaybackDewarp(
     private var uK = -1
     private var uAspect = -1
     private var uHalfTexel = -1
+    private var uStrip = -1
     private val stMatrix = FloatArray(16)
     private val surfaceSize = IntArray(1)
 
@@ -151,6 +156,7 @@ class PlaybackDewarp(
         uK = GLES20.glGetUniformLocation(program, "uK")
         uAspect = GLES20.glGetUniformLocation(program, "uAspect")
         uHalfTexel = GLES20.glGetUniformLocation(program, "uHalfTexel")
+        uStrip = GLES20.glGetUniformLocation(program, "uStrip")
 
         quad = ByteBuffer.allocateDirect(QUAD.size * 4).order(ByteOrder.nativeOrder())
             .asFloatBuffer().put(QUAD).apply { position(0) }
@@ -235,6 +241,7 @@ class PlaybackDewarp(
             GLES20.glUniform2f(uK, spec.k1, spec.k2)
             GLES20.glUniform1f(uAspect, spec.aspect)
             GLES20.glUniform2f(uHalfTexel, 0.5f / spec.frameWidth, 0.5f / spec.frameHeight)
+            GLES20.glUniform1f(uStrip, spec.stripFrac)
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
             GLES20.glDisableVertexAttribArray(aPosition)
             GLES20.glDisableVertexAttribArray(aTexCoord)
@@ -312,6 +319,7 @@ uniform mat4 uStMatrix;
 uniform vec2 uK;
 uniform float uAspect;
 uniform vec2 uHalfTexel;
+uniform float uStrip;
 varying vec2 vTex;
 vec2 rectifyTile(vec2 t) {
     vec2 nxy = t * 2.0 - 1.0;
@@ -325,9 +333,15 @@ vec2 rectifyTile(vec2 t) {
     return clamp(camUV, vec2(0.0), vec2(1.0));
 }
 void main() {
+    // The telemetry strip (top of the frame) is shown as recorded, never sampled for the picture.
+    if (vTex.y > 1.0 - uStrip) {
+        gl_FragColor = texture2D(uTex, (uStMatrix * vec4(vTex, 0.0, 1.0)).xy);
+        return;
+    }
     vec2 tile = step(vec2(0.5), vTex) * 0.5;
     vec2 cam = rectifyTile((vTex - tile) * 2.0);
     vec2 src = clamp(tile + cam * 0.5, tile + uHalfTexel, tile + 0.5 - uHalfTexel);
+    src.y = min(src.y, 1.0 - uStrip - uHalfTexel.y);
     gl_FragColor = texture2D(uTex, (uStMatrix * vec4(src, 0.0, 1.0)).xy);
 }
 """
@@ -347,7 +361,9 @@ void main() {
             if (!(aspect in 0.25f..1.0f)) return null
             val t = liveStrength().coerceIn(0, 100) / 100f
             if (t <= 0f) return null
-            return Spec(0.30f * t, 0.10f * t, aspect, w, h)
+            val strip = lens.optInt("strip", 0)
+            val stripFrac = if (strip > 0 && strip * 2 < h) strip.toFloat() / h else 0f
+            return Spec(0.30f * t, 0.10f * t, aspect, w, h, stripFrac)
         }
 
         /** Live lens slider (recording.rectifyStrength), 0 when unreadable. */

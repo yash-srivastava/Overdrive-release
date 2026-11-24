@@ -30,7 +30,7 @@ public class ScreenDeterrentSettingsContractTest {
         assertTrue(web.contains("self.config[configKey] = self.savedConfig"));
         assertTrue(web.contains("_deterrentPreviewRequestId"));
         assertTrue(web.contains("previewVideo.muted = true"));
-        assertTrue(html.contains("surveillance.js?v=survtoggle20"));
+        assertTrue(html.contains("surveillance.js?v=survtoggle22"));
     }
 
     private static String readRepositoryFile(String relativePath) throws Exception {

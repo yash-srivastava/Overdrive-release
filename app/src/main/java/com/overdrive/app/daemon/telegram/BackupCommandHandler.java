@@ -1,5 +1,7 @@
 package com.overdrive.app.daemon.telegram;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import org.json.JSONObject;
 
 import java.io.File;
@@ -85,19 +87,19 @@ public class BackupCommandHandler implements TelegramCommandHandler {
             // create the file empty, chmod it, THEN write. Setting permissions
             // after writing leaves a window where the DID + credentials are
             // world-readable on the shared /data/local/tmp.
-            try { tmp.delete(); } catch (Exception ignored) {}
-            if (!tmp.createNewFile()) {
+            try { RemovableStorageFs.delete(tmp); } catch (Exception ignored) {}
+            if (!RemovableStorageFs.createNewFile(tmp)) {
                 // Pre-existing (e.g. a prior crashed run) — still tighten it.
             }
-            tmp.setReadable(false, false);
-            tmp.setWritable(false, false);
-            tmp.setReadable(true, true);
-            tmp.setWritable(true, true);
-            try (FileWriter w = new FileWriter(tmp)) {
+            RemovableStorageFs.setReadable(tmp, false, false);
+            RemovableStorageFs.setWritable(tmp, false, false);
+            RemovableStorageFs.setReadable(tmp, true, true);
+            RemovableStorageFs.setWritable(tmp, true, true);
+            try (java.io.Writer w = new java.io.OutputStreamWriter(RemovableStorageFs.openOutput(tmp), java.nio.charset.StandardCharsets.UTF_8)) {
                 w.write(bundle.toString(2));
             }
         } catch (Exception e) {
-            try { tmp.delete(); } catch (Exception ignored) {}
+            try { RemovableStorageFs.delete(tmp); } catch (Exception ignored) {}
             ctx.sendMessage(chatId, ctx.tr("backup.write_failed",
                     ctx.technicalDetail(e.getMessage())));
             return;
@@ -126,7 +128,7 @@ public class BackupCommandHandler implements TelegramCommandHandler {
         try {
             sent = ctx.sendDocument(chatId, tmp.getAbsolutePath(), caption);
         } finally {
-            try { tmp.delete(); } catch (Exception ignored) {}
+            try { RemovableStorageFs.delete(tmp); } catch (Exception ignored) {}
         }
 
         if (!sent) {

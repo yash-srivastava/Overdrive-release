@@ -267,6 +267,7 @@ public class AppUpdater {
     private String releaseNotes;
     private String remoteVersion;
     private String remoteUpdatedAt;
+    private String latestApkDigest;
     /**
      * Channel the pending install BELONGS to, captured at the SEED point
      * (checkForUpdate = the resolved channel; prepareInstall = alpha, since the
@@ -908,6 +909,7 @@ public class AppUpdater {
                     latestDownloadUrl = apkUrl;
                     latestApkSizeBytes = Long.parseLong(apk[3]);
                     remoteUpdatedAt = updatedAt;
+                    latestApkDigest = apkDigest;
                     // Bind the pending install to THIS channel at the seed
                     // point so downloadAndInstall advances the right baseline
                     // even if the channel toggle flips mid-install.
@@ -1132,10 +1134,148 @@ public class AppUpdater {
     }
 
     /**
-     * Download APK, then stop daemons, then install silently.
-     * Download happens first so user can cancel before daemons are killed.
+     * Download before stopping daemons; guard is null for manual installs.
+     * Recheck admission before the irreversible stop/pm-install handoff.
      */
+    public interface AutoInstallGuard {
+        boolean canInstall();
+    }
+
+    /** A scheduled install cannot switch channels, downgrade or overwrite same-version builds. */
+    public boolean isEligibleForAutomaticInstall() {
+        String installed = getInstalledVersion();
+        String remote = remoteVersion;
+        return CHANNEL_BRAVEHEART.equals(pendingChannel)
+                && installed != null && installed.matches("braveheart-v[0-9]+(\\.[0-9]+)*")
+                && remote != null && remote.matches("braveheart-v[0-9]+(\\.[0-9]+)*")
+                && isNewerVersion(numericVersion(installed), numericVersion(remote))
+                && latestApkDigest != null
+                && latestApkDigest.matches("sha256:[0-9a-fA-F]{64}");
+    }
+
+    String automaticAssetDigest() { return normalizedDigest(); }
+
+    public boolean wasAutomaticAssetAttempted() {
+        return AutoUpdateAttemptState.isAttempted(normalizedDigest())
+                || AutoUpdateAttemptState.isRejected(normalizedDigest());
+    }
+
+    private String normalizedDigest() {
+        return latestApkDigest == null ? "" : latestApkDigest.toLowerCase(java.util.Locale.ROOT);
+    }
+
+    /** Distinguish stable APK incompatibility from a transient PackageManager failure. */
+    private static final class AutoApkCompatibilityResult {
+        final String error;
+        final boolean deterministic;
+
+        private AutoApkCompatibilityResult(String error, boolean deterministic) {
+            this.error = error;
+            this.deterministic = deterministic;
+        }
+
+        static AutoApkCompatibilityResult reject(String reason) {
+            return new AutoApkCompatibilityResult(reason, true);
+        }
+
+        static AutoApkCompatibilityResult retry(String reason) {
+            return new AutoApkCompatibilityResult(reason, false);
+        }
+    }
+
+    /** Fail closed before teardown, but only persist a proven package/code/signer mismatch. */
+    private AutoApkCompatibilityResult automaticApkCompatibilityError() {
+        try {
+            android.content.pm.PackageManager pm = context.getPackageManager();
+            // Android 10 archive parsing requires GET_SIGNATURES even when requesting signingInfo.
+            int flags = android.content.pm.PackageManager.GET_SIGNATURES;
+            if (android.os.Build.VERSION.SDK_INT >= 28) {
+                flags |= android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES;
+            }
+            android.content.pm.PackageInfo staged = pm.getPackageArchiveInfo(APK_PATH, flags);
+            android.content.pm.PackageInfo installed = pm.getPackageInfo(BuildConfig.APPLICATION_ID, flags);
+            if (staged == null || installed == null) {
+                return AutoApkCompatibilityResult.retry("APK archive/package details unavailable");
+            }
+            if (staged.packageName == null || installed.packageName == null) {
+                return AutoApkCompatibilityResult.retry("APK package identity unavailable");
+            }
+            if (!BuildConfig.APPLICATION_ID.equals(staged.packageName)
+                    || !BuildConfig.APPLICATION_ID.equals(installed.packageName)) {
+                return AutoApkCompatibilityResult.reject("APK package identity differs");
+            }
+            long stagedCode = android.os.Build.VERSION.SDK_INT >= 28
+                    ? staged.getLongVersionCode() : staged.versionCode;
+            long installedCode = android.os.Build.VERSION.SDK_INT >= 28
+                    ? installed.getLongVersionCode() : installed.versionCode;
+            if (stagedCode <= installedCode) {
+                return AutoApkCompatibilityResult.reject("staged versionCode " + stagedCode
+                        + " is not newer than installed " + installedCode);
+            }
+            android.content.pm.Signature[] stagedSigners = apkSigners(staged);
+            android.content.pm.Signature[] installedSigners = apkSigners(installed);
+            if (stagedSigners == null || installedSigners == null
+                    || stagedSigners.length == 0 || installedSigners.length == 0) {
+                return AutoApkCompatibilityResult.retry("APK signing certificates unavailable");
+            }
+            if (stagedSigners.length != installedSigners.length) {
+                return AutoApkCompatibilityResult.reject("APK signing certificates differ");
+            }
+            java.util.List<String> incoming = new java.util.ArrayList<>();
+            java.util.List<String> existing = new java.util.ArrayList<>();
+            for (android.content.pm.Signature signature : stagedSigners) {
+                incoming.add(signature.toCharsString());
+            }
+            for (android.content.pm.Signature signature : installedSigners) {
+                existing.add(signature.toCharsString());
+            }
+            java.util.Collections.sort(incoming);
+            java.util.Collections.sort(existing);
+            return incoming.equals(existing) ? null
+                    : AutoApkCompatibilityResult.reject("APK signing certificates differ");
+        } catch (Exception e) {
+            com.overdrive.app.logging.DaemonLogger.getInstance("CameraDaemon")
+                    .warn("Auto-update: APK preflight unavailable; will retry: " + e);
+            return AutoApkCompatibilityResult.retry(
+                    "APK preflight unavailable: " + e.getClass().getSimpleName());
+        }
+    }
+
+    private static android.content.pm.Signature[] apkSigners(android.content.pm.PackageInfo info) {
+        if (android.os.Build.VERSION.SDK_INT >= 28 && info.signingInfo != null) {
+            return info.signingInfo.getApkContentsSigners();
+        }
+        // API 29 getPackageArchiveInfo can populate only legacy signatures.
+        return info.signatures;
+    }
+
+    /** For auto installs only: SHA-256 of bytes staged, prior to any daemon stop. */
+    /** TRUE/FALSE once a hash was computed; null when the digest or the hash is unavailable. */
+    private Boolean automaticApkSha256Matches() throws Exception {
+        String digest = normalizedDigest();
+        if (!digest.matches("sha256:[0-9a-f]{64}")) return null;
+        if (canWriteLocalTmp()) {
+            return digest.substring(7).equals(sha256Hex(new File(APK_PATH)));
+        }
+        final boolean[] done = {false};
+        final String[] result = {null};
+        runShell("sha256sum " + APK_PATH, new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
+            @Override public void onLog(String message) { result[0] = message; }
+            @Override public void onLaunched() { synchronized (done) { done[0] = true; done.notifyAll(); } }
+            @Override public void onError(String error) { synchronized (done) { done[0] = true; done.notifyAll(); } }
+        });
+        awaitFlag(done, 30_000L);
+        String line = done[0] && result[0] != null
+                ? result[0].trim().toLowerCase(java.util.Locale.ROOT) : "";
+        if (!line.matches("^[0-9a-f]{64}\\s+.*")) return null;
+        return line.startsWith(digest.substring(7));
+    }
+
     public void downloadAndInstall(InstallCallback callback) {
+        downloadAndInstall(callback, null);
+    }
+
+    public void downloadAndInstall(InstallCallback callback, AutoInstallGuard guard) {
         cancelled = false;
         executor.execute(() -> {
             boolean rollbackMetadataOnException = false;
@@ -1146,6 +1286,17 @@ public class AppUpdater {
             try {
                 if (latestDownloadUrl == null) {
                     postInstallError(callback, "No download URL");
+                    return;
+                }
+                if (guard != null && (!guard.canInstall() || !isEligibleForAutomaticInstall()
+                        || wasAutomaticAssetAttempted())) {
+                    postInstallError(callback, "Automatic update deferred: ineligible release or unsafe vehicle");
+                    return;
+                }
+                // The shell/ADB download fallback cannot observe metering
+                // changes per chunk. Never use it for unattended downloads.
+                if (guard != null && !canWriteLocalTmp()) {
+                    postInstallError(callback, "Automatic update deferred: direct download unavailable");
                     return;
                 }
 
@@ -1193,10 +1344,12 @@ public class AppUpdater {
                 if (canWriteLocalTmp()) {
                     // Direct OkHttp — runs synchronously on the executor thread.
                     try {
-                        downloadApkOkHttp(latestDownloadUrl, APK_PATH, callback);
+                        downloadApkOkHttp(latestDownloadUrl, APK_PATH, callback, guard);
                         dlResult[0] = "OK";
                     } catch (Exception e) {
-                        dlResult[0] = "ERROR: " + (e.getMessage() == null ? "download failed" : e.getMessage());
+                        dlResult[0] = "ERROR: " + (guard != null && !guard.canInstall()
+                                ? "Automatic update deferred: admission lost during download"
+                                : (e.getMessage() == null ? "download failed" : e.getMessage()));
                     }
                     dlDone[0] = true;
                 } else {
@@ -1238,7 +1391,14 @@ public class AppUpdater {
 
                 String dlOutput = dlResult[0] != null ? dlResult[0] : "";
                 if (dlOutput.startsWith("ERROR") || !dlOutput.contains("OK")) {
-                    postInstallError(callback, "Download failed: " + dlOutput);
+                    // Lost admission takes precedence over any transport error or timeout.
+                    if (guard != null && !guard.canInstall()) {
+                        postInstallError(callback, "Automatic update deferred: admission lost during download");
+                    } else if (guard != null && dlOutput.startsWith("ERROR: Automatic update deferred:")) {
+                        postInstallError(callback, dlOutput.substring("ERROR: ".length()));
+                    } else {
+                        postInstallError(callback, "Download failed: " + dlOutput);
+                    }
                     return;
                 }
 
@@ -1277,6 +1437,46 @@ public class AppUpdater {
                     return;
                 }
 
+                Boolean shaMatches = guard == null ? Boolean.TRUE : automaticApkSha256Matches();
+                if (!Boolean.TRUE.equals(shaMatches)) {
+                    new File(APK_PATH).delete();
+                    // Full fresh download over TLS: a computed mismatch is stored; no hash backs off.
+                    if (shaMatches != null) {
+                        AutoUpdateAttemptState.reject(normalizedDigest(), "staged APK SHA-256 mismatch");
+                    }
+                    postInstallError(callback, "Automatic update preflight failed: SHA-256 "
+                            + (shaMatches == null ? "unavailable" : "mismatch"));
+                    return;
+                }
+
+                // Reject incompatible APKs before touching the camera or its
+                // persisted update metadata. Parsing/signing failures fail closed.
+                if (guard != null) {
+                    AutoApkCompatibilityResult incompatible = automaticApkCompatibilityError();
+                    if (incompatible != null) {
+                        com.overdrive.app.logging.DaemonLogger.getInstance("CameraDaemon")
+                                .warn("Auto-update: staged APK preflight: " + incompatible.error);
+                        if (incompatible.deterministic) {
+                            AutoUpdateAttemptState.reject(normalizedDigest(), incompatible.error);
+                        }
+                        // A PackageManager exception, unreadable archive or
+                        // missing signing data may be transient. Back off, never
+                        // store these as permanent per-digest rejections.
+                        postInstallError(callback, (incompatible.deterministic
+                                ? "Automatic update rejected: " : "Automatic update preflight failed: ")
+                                + incompatible.error);
+                        return;
+                    }
+                }
+
+                // The car may have switched ACC ON during the (potentially
+                // lengthy) APK download. An automatic install MUST NOT stop
+                // camera daemons on an outdated parking observation.
+                if (guard != null && !guard.canInstall()) {
+                    postInstallError(callback, "Automatic update deferred: vehicle became active");
+                    return;
+                }
+
                 // OTA is intentionally force-forward: do not gate installation
                 // on /prepare-restart. On the legacy camera path a planned
                 // teardown can emit HAL event 1002, race the automatic camera
@@ -1291,6 +1491,12 @@ public class AppUpdater {
                 // the update retryable and never reads as "install underway".
                 boolean cameraPrepareAttempted = prepareDiLink5CameraForInstall();
                 abortCameraOnException = cameraPrepareAttempted;
+
+                if (guard != null && !guard.canInstall()) {
+                    if (abortCameraOnException) abortPreparedCameraRestart();
+                    postInstallError(callback, "Automatic update deferred: vehicle became active");
+                    return;
+                }
 
                 // Step 3: Save update info BEFORE we touch any daemon (the daemon
                 // process — if we're running inside it — is about to die, and the
@@ -1360,12 +1566,33 @@ public class AppUpdater {
                 //   /data/local/tmp/ and kick it off detached (subshell + closed
                 //   stdio so init reparents it), then return. The script runs
                 //   on its own; our death is fine.
+                if (guard != null && !guard.canInstall()) {
+                    rollbackPreparedUpdateMetadata(
+                            channel, priorUpdateTimestamp, priorDisplayVersion);
+                    if (abortCameraOnException) abortPreparedCameraRestart();
+                    rollbackMetadataOnException = false;
+                    postInstallError(callback, "Automatic update deferred: vehicle became active");
+                    return;
+                }
+                // This reservation survives the detached pm-install failure and
+                // relaunch, including a crash before the failure callback. A new
+                // GitHub APK digest is the only way to permit another attempt.
+                if (guard != null && !AutoUpdateAttemptState.reserve(normalizedDigest())) {
+                    rollbackPreparedUpdateMetadata(channel, priorUpdateTimestamp, priorDisplayVersion);
+                    if (abortCameraOnException) abortPreparedCameraRestart();
+                    rollbackMetadataOnException = false;
+                    postInstallError(callback, "Could not persist automatic install attempt");
+                    return;
+                }
                 if (canWriteLocalTmp()) {
                     postProgress(callback, "Stopping daemons & installing...");
                     boolean detachedStarted = runDetachedInstall(
                             callback, channel, priorUpdateTimestamp,
-                            priorDisplayVersion);
+                            priorDisplayVersion, guard != null);
                     if (!detachedStarted) {
+                        if (guard != null) {
+                            AutoUpdateAttemptState.releaseReservation(normalizedDigest());
+                        }
                         if (abortCameraOnException) abortPreparedCameraRestart();
                         rollbackPreparedUpdateMetadata(
                                 channel, priorUpdateTimestamp,
@@ -1399,7 +1626,7 @@ public class AppUpdater {
 
                 // Bulk lane: pm install of a ~60MB APK can run minutes on slow
                 // flash with no output; must not hold or sever the control lane.
-                String installCmd = "pm install -r -d " + APK_PATH +
+                String installCmd = (guard == null ? "pm install -r -d " : "pm install -r ") + APK_PATH +
                     "; rm -f " + APK_PATH +
                     "; sleep 2; am start -n com.overdrive.app/.ui.MainActivity" +
                     " --ez " + UpdateLifecycle.EXTRA_POST_UPDATE + " true" +
@@ -1511,7 +1738,9 @@ public class AppUpdater {
                             preparedPriorDisplayVersion);
                 }
                 Log.e(TAG, "Install error: " + e.getMessage());
-                postInstallError(callback, e.getMessage());
+                postInstallError(callback, guard != null && !guard.canInstall()
+                        ? "Automatic update deferred: admission lost during install preparation"
+                        : e.getMessage());
             }
         });
     }
@@ -1755,6 +1984,11 @@ public class AppUpdater {
      */
     private void downloadApkOkHttp(String url, String outputPath, InstallCallback callback)
             throws Exception {
+        downloadApkOkHttp(url, outputPath, callback, null);
+    }
+
+    private void downloadApkOkHttp(String url, String outputPath, InstallCallback callback,
+                                   AutoInstallGuard guard) throws Exception {
         // Drop any stale APK from a previous attempt so a partial download
         // can't be confused with a complete one if we fail mid-stream.
         new File(outputPath).delete();
@@ -1774,20 +2008,25 @@ public class AppUpdater {
             java.net.Proxy proxy = com.overdrive.app.mqtt.ProxyHelper.getHttpProxy();
             boolean usedProxy = proxy != null && proxy.type() != java.net.Proxy.Type.DIRECT;
             try {
-                doStreamingDownload(url, outputPath, proxy, callback, deadlineNanos);
+                doStreamingDownload(url, outputPath, proxy, callback, deadlineNanos, guard);
             } catch (Exception primary) {
                 // If we tried via sing-box/Tailscale and failed, the proxy may
                 // have died mid-flight (sing-box restart, Tailscale link drop).
-                if (cancelled) throw primary;
-                if (!usedProxy) throw primary;
+                if (guard != null && !guard.canInstall()) {
+                    throw new java.io.IOException("Automatic update deferred: admission lost after proxy failure", primary);
+                }
+                if (cancelled || !usedProxy) throw primary;
                 Log.w(TAG, "Download via proxy failed (" + primary.getMessage()
                         + "); retrying direct");
                 com.overdrive.app.mqtt.ProxyHelper.invalidateCache();
                 try {
-                    doStreamingDownload(url, outputPath, java.net.Proxy.NO_PROXY, callback, deadlineNanos);
+                    doStreamingDownload(url, outputPath, java.net.Proxy.NO_PROXY, callback, deadlineNanos, guard);
                 } catch (Exception retry) {
+                    if (guard != null && !guard.canInstall()) {
+                        throw new java.io.IOException("Automatic update deferred: admission lost on direct retry", retry);
+                    }
                     throw new java.io.IOException(
-                            primary.getMessage() + " (direct retry: " + retry.getMessage() + ")");
+                            primary.getMessage() + " (direct retry: " + retry.getMessage() + ")", retry);
                 }
             }
             completed = true;
@@ -1801,7 +2040,7 @@ public class AppUpdater {
      */
     private void doStreamingDownload(String url, String outputPath,
                                      java.net.Proxy proxy, InstallCallback callback,
-                                     long deadlineNanos)
+                                     long deadlineNanos, AutoInstallGuard guard)
             throws Exception {
         if (System.nanoTime() > deadlineNanos) {
             throw new java.io.IOException("Download deadline exceeded before attempt");
@@ -1844,6 +2083,15 @@ public class AppUpdater {
                 while ((n = in.read(buf)) != -1) {
                     if (cancelled) {
                         throw new java.io.IOException("Cancelled");
+                    }
+                    if (guard != null && !AutoUpdateScheduler.unmetered()) {
+                        throw new java.io.IOException("Automatic update deferred: network became metered");
+                    }
+                    // Expensive ACC/probe/config reads only on each 4 MiB boundary.
+                    // The lightweight metering check above runs on EVERY chunk.
+                    if (guard != null && bytesRead / (4L * MIB)
+                            != (bytesRead + n) / (4L * MIB) && !guard.canInstall()) {
+                        throw new java.io.IOException("Automatic update deferred: vehicle no longer safe");
                     }
                     // Absolute cap — per-read timeouts reset on every packet
                     // and never bound a slow-but-flowing stream (see caller).
@@ -2151,8 +2399,9 @@ public class AppUpdater {
                     + APK_PATH + " /data/local/tmp/overdrive_install.sh "
                     + com.overdrive.app.util.ScratchRoot.path("overdrive_install.sh.tmp"));
             runShell(
-                    "for S in /data/local/tmp/camera_daemon.disabled "
-                            + com.overdrive.app.util.ScratchRoot.path("acc_sentry_daemon.disabled;") + " do "
+                    "for S in "
+                            + com.overdrive.app.util.ScratchRoot.path("camera_daemon.disabled") + " "
+                            + com.overdrive.app.util.ScratchRoot.path("acc_sentry_daemon.disabled") + "; do "
                             + "R=$(head -1 \"$S\" 2>/dev/null); "
                             + "case \"$R\" in 'disabled for update'*|"
                             + "'disabled by stopAllDaemons sweep'*|"
@@ -2189,7 +2438,7 @@ public class AppUpdater {
      */
     private boolean runDetachedInstall(InstallCallback callback, String channel,
                                        String priorUpdateTimestamp,
-                                       String priorDisplayVersion) {
+                                       String priorDisplayVersion, boolean automatic) {
         String scriptPath = com.overdrive.app.util.ScratchRoot.path("overdrive_install.sh");
         String logPath = com.overdrive.app.util.ScratchRoot.path("overdrive_install.log");
         String diLink5CaptureCleanup = diLink5CaptureKillScript();
@@ -2280,12 +2529,12 @@ public class AppUpdater {
         // UpdateLifecycle.hardResetDaemons() clears these machine-written markers post-update
         // once the newly installed app is booted and ready to service IPC/broadcasts.
         script.append("sleep 2\n");
-        // Step 4: install. `pm install -r -d` allows downgrades (-d) so a
-        // bad release doesn't strand the user, and replaces the existing app
-        // (-r). Stdout is captured into PM_OUT so step 4b can include the
+        // Step 4: manual installs keep their existing -d downgrade option;
+        // automatic installs use -r only. Stdout is captured into PM_OUT so step 4b can include the
         // failure reason in the progress JSON if `pm install` exits non-zero.
         script.append("echo \"[install] running pm install\"\n");
-        script.append("PM_OUT=$(pm install -r -d ").append(APK_PATH).append(" 2>&1)\n");
+        script.append(automatic ? "PM_OUT=$(pm install -r " : "PM_OUT=$(pm install -r -d ")
+                .append(APK_PATH).append(" 2>&1)\n");
         script.append("INSTALL_RC=$?\n");
         script.append("echo \"$PM_OUT\"\n");
         script.append("rm -f ").append(APK_PATH).append("\n");
@@ -2341,7 +2590,8 @@ public class AppUpdater {
               .append("\",\"priorDisplayVersion\":\"")
               .append(shellSafe(priorDisplayVersion))
               .append("\",\"ts\":%s}' ");
-        script.append("\"$PM_ESC\" \"$TS\" > /data/local/tmp/overdrive_update_progress.json\n");
+        // The daemon reads progress from the active scratch root (the alternate dir on some DiLink 5 cars).
+        script.append("\"$PM_ESC\" \"$TS\" > " + com.overdrive.app.util.ScratchRoot.path("overdrive_update_progress.json") + "\n");
         script.append("  echo \"[install] FAILED rc=$INSTALL_RC\"\n");
         // Roll back the on-disk baseline + display files the daemon advanced
         // before pm install (the app-process consumeFailedUpdateError only
@@ -2421,7 +2671,7 @@ public class AppUpdater {
         // onSuccess path, never reached here). Nothing else overwrites it until
         // the NEXT install's "queued" write, so delete it now — pure hygiene so
         // a fresh poll doesn't see a stale terminal record.
-        script.append("  rm -f /data/local/tmp/overdrive_update_progress.json\n");
+        script.append("  rm -f " + com.overdrive.app.util.ScratchRoot.path("overdrive_update_progress.json") + "\n");
         // Advance the persisted display label NOW — and ONLY here, on pm-install
         // success. VERSION_FILE drives the user-visible "current version" on every
         // surface (About / status / toast), so it must move only after the new

@@ -374,7 +374,7 @@ public class CameraDaemonRestartSafetyContractTest {
         assertTrue(camera.contains("\"GL watchdog heartbeat timeout\");"));
         assertTrue(watchdogLog > watchdogUrgent);
 
-        // Twelve urgent sites in the camera layer: helper, GL watchdog, the
+        // Thirteen urgent sites in the camera layer: helper, GL watchdog, the
         // stall-recovery legacy HAL open hard bound, the DiLink 4 HAL open still
         // blocked past its late-open deadline, the ACC-ON legacy reopen's
         // timeout/interruption bounds, the legacy stop/open ownership fence, a
@@ -389,9 +389,25 @@ public class CameraDaemonRestartSafetyContractTest {
         // the lane site is held-gated with the conservative
         // requestProcessRestartPreservingTrip fallback like the helper. DI4
         // pano has no ownership-handoff escape sites because it keeps its
-        // single AVMCamera producer open continuously.
+        // single AVMCamera producer open continuously. The additional opt-in
+        // SurfaceTexture site runs only when its owned vendor handle refuses close.
         assertTrue(count(camera,
-                "requestUrgentCameraReleaseRestart(") == 12);
+                "requestUrgentCameraReleaseRestart(") == 13);
+        int surfaceTextureCloseStart = camera.indexOf(
+                "if (USE_AVM_SURFACE_TEXTURE_PATH) {",
+                camera.indexOf("private boolean closeCameraForPath("));
+        int surfaceTextureCloseEnd = camera.indexOf(
+                "\n        if (USE_DILINK4_AVM_PATH) {", surfaceTextureCloseStart);
+        assertTrue(surfaceTextureCloseStart >= 0);
+        assertTrue(surfaceTextureCloseEnd > surfaceTextureCloseStart);
+        String surfaceTextureClose = camera.substring(
+                surfaceTextureCloseStart, surfaceTextureCloseEnd);
+        assertOrdered(surfaceTextureClose,
+                "surfaceTextureBackends.get(cam)",
+                "if (backend == null) return true;",
+                "boolean clean = backend.close();",
+                "} else {",
+                "requestUrgentCameraReleaseRestart(");
 
         // Retiring-stream-encoder wedge in the surveillance pipeline: same
         // gate, same request-before-log ordering, urgent only while held.

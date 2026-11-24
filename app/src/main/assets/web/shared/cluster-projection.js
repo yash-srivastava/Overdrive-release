@@ -18,6 +18,8 @@
  */
 window.ClusterProjection = (function () {
   var VALID = [29, 30, 31];
+  // Per select id: the car's value arrived, read counters, a reconnect handler is registered or deferred.
+  var loaded = {}, loadSeq = {}, loadOk = {}, bound = {}, deferred = {};
 
   // Render the shared selector into the container with id `containerId`. `selectId` is
   // the <select> element id (unique per page). Safe to call before or after i18n applies
@@ -48,6 +50,25 @@ window.ClusterProjection = (function () {
       sel.addEventListener('change', function () { save(sel.value, sel); });
     }
     load(selectId);
+    // After an outage, read again only if the first read never landed, and not under an open picker.
+    if (!bound[selectId] && window.BYD && BYD.offline && typeof BYD.offline.onReconnect === 'function') {
+      bound[selectId] = true;
+      BYD.offline.onReconnect(function reread() {
+        // Hidden: on the next return to the page, once.
+        if (document.hidden) {
+          if (deferred[selectId]) return;
+          deferred[selectId] = true;
+          document.addEventListener('visibilitychange', function shown() {
+            if (document.hidden) return;
+            document.removeEventListener('visibilitychange', shown);
+            deferred[selectId] = false;
+            reread();
+          });
+          return;
+        }
+        if (!loaded[selectId] && document.activeElement !== document.getElementById(selectId)) load(selectId);
+      });
+    }
     // Re-apply translations to the freshly-injected nodes if the page's i18n is ready.
     try {
       if (window.BYD && BYD.i18n && BYD.i18n.hydrate) BYD.i18n.hydrate(row);
@@ -56,15 +77,20 @@ window.ClusterProjection = (function () {
 
   // Read the current shared size from unified config → blindspot.clusterSizeProfile.
   function load(selectId) {
+    var seq = loadSeq[selectId] = (loadSeq[selectId] || 0) + 1;
     fetch('/api/settings/unified', { cache: 'no-store' }).then(function (r) {
       return r.json();
     }).then(function (data) {
+      // Not the car's value (an error reply has no config), or a newer read already painted: ignored.
+      if (!data || data.success === false || !data.config || seq < (loadOk[selectId] || 0)) return;
+      loadOk[selectId] = seq;
       // Same shape road-sense.js reads: data.config.blindspot.clusterSizeProfile.
       var bs = data && data.config && data.config.blindspot;
       var n = bs ? parseInt(bs.clusterSizeProfile, 10) : NaN;
       if (VALID.indexOf(n) === -1) n = 31; // default 10.25" (matches daemon seed default)
       var sel = document.getElementById(selectId);
       if (sel) sel.value = String(n);
+      loaded[selectId] = true;
     }).catch(function () { /* leave the default selected */ });
   }
 
@@ -73,6 +99,12 @@ window.ClusterProjection = (function () {
   function save(v, sel) {
     var n = parseInt(v, 10);
     if (VALID.indexOf(n) === -1) return;
+    if (sel && sel.id && !loaded[sel.id]) {
+      // The picker still shows the default, not the car's value: put it back and save nothing.
+      sel.value = '31';
+      notLoaded();
+      return;
+    }
     fetch('/api/settings/unified', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -94,6 +126,15 @@ window.ClusterProjection = (function () {
       if (window.BYD && BYD.utils && BYD.utils.toast) {
         BYD.utils.toast(BYD.i18n.t(key), kind);
       }
+    } catch (e) { /* toast is best-effort */ }
+  }
+
+  function notLoaded() {
+    var key = 'road_sense.cluster_size_not_loaded', text = null;
+    try { text = BYD.i18n.t(key); } catch (e) { /* no catalog yet */ }
+    if (!text || text === key) text = 'Could not read the saved cluster size — reload the page before changing it.';
+    try {
+      if (window.BYD && BYD.utils && BYD.utils.toast) BYD.utils.toast(text, 'error');
     } catch (e) { /* toast is best-effort */ }
   }
 

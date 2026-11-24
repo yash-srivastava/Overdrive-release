@@ -1,5 +1,7 @@
 package com.overdrive.app.surveillance;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import android.media.MediaCodec;
 import android.media.MediaFormat;
 import android.media.MediaMuxer;
@@ -12,7 +14,7 @@ import java.io.EOFException;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.RandomAccessFile;
+import com.overdrive.app.storage.removable.SeekableFileReader;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -65,16 +67,16 @@ public final class SegmentRecovery {
         if (inProgress.contains(path)) return true;
         if (attempted.contains(path)) return false;
         File jnl = SegmentJournal.fileFor(tmp);
-        if (!jnl.isFile()) return false;
+        if (!RemovableStorageFs.isFile(jnl)) return false;
         if (startupPassesRunning) return true;
-        long age = System.currentTimeMillis() - jnl.lastModified();
+        long age = System.currentTimeMillis() - RemovableStorageFs.lastModified(jnl);
         return age >= 0 && age < PENDING_WINDOW_MS;
     }
 
     /** Recovers every orphaned journaled segment in {@code dir}; returns the count recovered. */
     public static int recoverOrphans(File dir) {
-        if (dir == null || !dir.isDirectory()) return 0;
-        File[] tmps = dir.listFiles((d, name) -> name.endsWith(".mp4.tmp"));
+        if (dir == null || !RemovableStorageFs.isDirectory(dir)) return 0;
+        File[] tmps = RemovableStorageFs.listFiles(dir, (d, name) -> name.endsWith(".mp4.tmp"));
         if (tmps == null) {
             try {
                 tmps = com.overdrive.app.storage.StorageManager.getInstance()
@@ -88,9 +90,9 @@ public final class SegmentRecovery {
         for (File tmp : tmps) {
             File jnl = SegmentJournal.fileFor(tmp);
             String path = tmp.getAbsolutePath();
-            if (!jnl.isFile() || attempted.contains(path) || inProgress.contains(path)) continue;
+            if (!RemovableStorageFs.isFile(jnl) || attempted.contains(path) || inProgress.contains(path)) continue;
             if (SegmentJournal.isActive(jnl)) continue;
-            long age = System.currentTimeMillis() - jnl.lastModified();
+            long age = System.currentTimeMillis() - RemovableStorageFs.lastModified(jnl);
             if (age >= 0 && age < MIN_JOURNAL_AGE_MS) continue;  // negative = clock reset: old
             inProgress.add(path);
             try {
@@ -128,7 +130,7 @@ public final class SegmentRecovery {
     private static Journal readJournal(File jnl) throws IOException {
         Journal j = new Journal();
         try (DataInputStream in = new DataInputStream(
-                new BufferedInputStream(new FileInputStream(jnl), 64 * 1024))) {
+                new BufferedInputStream(RemovableStorageFs.openInput(jnl), 64 * 1024))) {
             if (in.readInt() != SegmentJournal.MAGIC) return null;
             j.mime = in.readUTF();
             j.width = in.readInt();
@@ -167,10 +169,10 @@ public final class SegmentRecovery {
             logger.warn("Recovery skipped (unreadable journal): " + tmp.getName());
             return null;
         }
-        long len = tmp.length();
+        long len = RemovableStorageFs.length(tmp);
         if (len <= 0 || len > MAX_TMP_BYTES) return null;
         List<long[]> valid = new ArrayList<>();  // {offset, flags, size, ptsUs}
-        try (RandomAccessFile raf = new RandomAccessFile(tmp, "r")) {
+        try (SeekableFileReader raf = new SeekableFileReader(tmp)) {
             long pos = findMdatPayload(raf, len);
             if (pos < 0) return null;
             long lastPts = Long.MIN_VALUE;
@@ -190,29 +192,29 @@ public final class SegmentRecovery {
         }
         String tmpPath = tmp.getAbsolutePath();
         File target = new File(tmpPath.substring(0, tmpPath.length() - ".tmp".length()));
-        if (target.exists()) {
+        if (RemovableStorageFs.exists(target)) {
             String p = target.getAbsolutePath();
             target = new File(p.substring(0, p.length() - ".mp4".length()) + "_recovered.mp4");
-            if (target.exists()) return null;
+            if (RemovableStorageFs.exists(target)) return null;
         }
         File staging = new File(target.getAbsolutePath() + ".recovering");
         boolean ok = false;
         try {
             remux(tmp, j, valid, staging);
-            ok = staging.renameTo(target);
+            ok = RemovableStorageFs.renameTo(staging, target);
         } finally {
-            if (!ok) staging.delete();
+            if (!ok) RemovableStorageFs.delete(staging);
         }
         if (!ok) return null;
-        tmp.delete();
-        jnl.delete();
+        RemovableStorageFs.delete(tmp);
+        RemovableStorageFs.delete(jnl);
         long durMs = (valid.get(valid.size() - 1)[3] - valid.get(0)[3]) / 1000L;
         logger.info("Recovered interrupted clip " + target.getName() + ": " + valid.size()
                 + " of " + j.samples.size() + " journaled frames, " + durMs + " ms");
         return target;
     }
 
-    private static long findMdatPayload(RandomAccessFile raf, long len) throws IOException {
+    private static long findMdatPayload(SeekableFileReader raf, long len) throws IOException {
         long pos = 0;
         while (pos + 8 <= len) {
             raf.seek(pos);
@@ -230,7 +232,7 @@ public final class SegmentRecovery {
         return -1;
     }
 
-    private static boolean isLengthPrefixedSample(RandomAccessFile raf, long start, int size)
+    private static boolean isLengthPrefixedSample(SeekableFileReader raf, long start, int size)
             throws IOException {
         long end = start + size;
         long p = start;
@@ -255,9 +257,8 @@ public final class SegmentRecovery {
         byte[] bytes = new byte[max];
         ByteBuffer buf = ByteBuffer.allocateDirect(max);
         MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
-        MediaMuxer mux = new MediaMuxer(staging.getAbsolutePath(),
-                MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
-        try (RandomAccessFile raf = new RandomAccessFile(tmp, "r")) {
+        MediaMuxer mux = RemovableStorageFs.newMuxer(new java.io.File(staging.getAbsolutePath()), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+        try (SeekableFileReader raf = new SeekableFileReader(tmp)) {
             int track = mux.addTrack(format);
             mux.start();
             long origin = valid.get(0)[3];

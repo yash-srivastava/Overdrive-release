@@ -125,7 +125,7 @@ object CustomSignals {
         m["driving"] = s?.driving
         m["reversing"] = s?.reversing
         m["speed"] = d(live?.kmh)
-        m["power"] = d(live?.kw) ?: d(s?.packKw)
+        m["power"] = d(live?.kw) ?: d(live?.driveKw) ?: d(s?.packKw) ?: d(s?.driveKw)
         m["accel_pct"] = d(live?.accel)
         m["brake_pct"] = d(live?.brake)
         m["motor_front_rpm"] = d(live?.frontRpm) ?: d(s?.frontRpm)

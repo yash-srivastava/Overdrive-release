@@ -1,5 +1,7 @@
 package com.overdrive.app.server.timeline;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -203,9 +205,9 @@ public final class RecordingSpanHints {
         long nowEl = elapsedMs();
         if (path == null || !path.startsWith("/") || nowEl - hint.openElapsedMs < GRACE_MS) return true;
         File tmp = new File(path.endsWith(".tmp") ? path : path + ".tmp");
-        long len = tmp.length();
-        if (len <= 0L && !tmp.exists()) return false;
-        long mtime = tmp.lastModified();
+        long len = RemovableStorageFs.length(tmp);
+        if (len <= 0L && !RemovableStorageFs.exists(tmp)) return false;
+        long mtime = RemovableStorageFs.lastModified(tmp);
         long age = System.currentTimeMillis() - mtime;
         // A future mtime (clock stepped back) proves nothing; growth decides then.
         boolean fresh = mtime > 0L && age >= -2_000L && age < STALL_MS;

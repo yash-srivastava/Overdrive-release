@@ -353,6 +353,23 @@ BYD.surveillance = {
         street:   { sensitivityLevel: 3, detectionZone: 'normal', loiteringTime: 5, shadowFilter: 3 }
     },
 
+    /** A first load that failed runs init() again once the car answers. Never after a success:
+     *  its clock, poll and listeners would double. */
+    _retryInitOnReconnect() {
+        if (this._initRetryBound || !(window.BYD && BYD.offline && typeof BYD.offline.onReconnect === 'function')) return;
+        this._initRetryBound = true;
+        BYD.offline.onReconnect(() => this._retryInit());
+    },
+
+    /** While a load is still on its way, its failure retries instead. */
+    _retryInit() {
+        if (this._hydrated) return;
+        if (this._initLoading) { this._reconnectDuringInit = true; return; }
+        if (this._initRetrying) return;
+        this._initRetrying = true;
+        this.init().catch(() => {}).then(() => { this._initRetrying = false; });
+    },
+
     async init() {
         // loadConfig() must land FIRST and alone — every loader below reads or
         // writes this.config, and updateUI() renders from it.
@@ -366,8 +383,16 @@ BYD.surveillance = {
         // this page take seconds to become usable, with Apply disabled, the OEM
         // picker dimmed and the Detection tab inert the whole time.
         // Same fix recording.js already carries (see its init()): ~11 RTTs → ~3.
+        // Before the first read: the car answering again while it's on its way retries a failure at once.
+        this._retryInitOnReconnect();
+        this._initLoading = true;
         const configLoaded = await this.loadConfig();
         if (!configLoaded) {
+            this._initLoading = false;
+            if (this._reconnectDuringInit) {
+                this._reconnectDuringInit = false;
+                setTimeout(() => this._retryInit(), 0);
+            }
             throw new Error('Failed to load surveillance configuration');
         }
         await Promise.all([
@@ -393,6 +418,7 @@ BYD.surveillance = {
             }, 5000);
         }
         this._hydrated = true;
+        this._initLoading = false;
         this.updateBluetoothKeepAliveUI();
         this.startClock();
 

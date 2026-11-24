@@ -73,8 +73,7 @@ var VC = {
         // null = not read yet. The wheel heater is on/off only (no low/high), and
         // an unread state must not render as "off" — see updateSteeringHeatUI.
         steeringHeat: null,
-        // Cloud-only readback; null until a fresh snapshot reports it.
-        batteryHeat: null,
+        batteryHeatStatus: 'unknown',
         acChargeCurrentLimit: {
             state: null,
             supported: null,
@@ -98,8 +97,10 @@ var VC = {
     _seatPending: 0,
     _steeringHeatRevision: 0,
     _steeringHeatPending: 0,
-    _batteryHeatRevision: 0,
-    _batteryHeatPending: 0,
+    _batteryHeatPoll: 0,
+    _batteryHeatLastPoll: 0,
+    _batteryHeatPending: null,
+    _batteryHeatRequestedAt: 0,
     _climateScheduleRevision: 0,
     _climateScheduleFetchRevision: 0,
     _climateScheduleDirty: false,
@@ -166,6 +167,7 @@ var VC = {
                 self.updateHUD();
                 self.updateCloudIndicator();
                 self.updateCloudControlAvailability();
+                self.updateBatteryHeatUI();
             });
         }
         if (this.liteMode) {
@@ -175,6 +177,7 @@ var VC = {
         }
         this.bindControls();
         this.bindSafetyControls();
+        this.bindStepUpControls();
         this.bindRemoteKeyDiagControls();
         // Read once at boot so the Safety tab dot shows a switched-off guard before it is opened.
         this.fetchSafetySettings();
@@ -186,6 +189,9 @@ var VC = {
         this.initCloudModal();
         this.initVisibilitySync();
         this.initViewModeToggle();
+        if (window.BYD && BYD.offline && typeof BYD.offline.onReconnect === 'function') {
+            BYD.offline.onReconnect(function() { self.refreshAfterReconnect(); });
+        }
     },
 
     /**
@@ -221,6 +227,7 @@ var VC = {
             // Apply persisted color BEFORE loading the model so the model's body-paint
             // traversal picks up the saved baseColor on first paint, no recolor flash.
             if (selected && selected.color) {
+                self._savedColor = selected.color;
                 self.applyColor(selected.color, true);
             }
             // Server has already validated modelId against the manifest, so trust the response.
@@ -1583,9 +1590,10 @@ var VC = {
 
     openColorModal: function() {
         var overlay = document.getElementById('colorModal');
-        if (!overlay || !this.baseColor) return;
-        this._setColorModalDraft(
-            '#' + this.baseColor.clone().convertLinearToSRGB().getHexString());
+        if (!overlay) return;
+        this._setColorModalDraft(this.baseColor
+            ? '#' + this.baseColor.clone().convertLinearToSRGB().getHexString()
+            : (this._savedColor || this.colorPresets[0].hex));
         overlay.classList.add('visible');
     },
 
@@ -1733,28 +1741,31 @@ var VC = {
         // pose only — no need to track body colour while we're inside the bowl.
         if (this.rimLight && !this._3dViewActive) this.rimLight.color.copy(linearColor);
 
-        if (syncSwatch) {
-            var swatches = document.querySelectorAll('.vc-swatch');
-            for (var j = 0; j < swatches.length; j++) {
-                swatches[j].classList.remove('active');
-                var dataHex = swatches[j].getAttribute('data-hex');
-                if (dataHex && dataHex.toLowerCase() === hex.toLowerCase()) {
-                    swatches[j].classList.add('active');
-                }
+        if (syncSwatch) this._markSwatch(hex);
+    },
+
+    /** Highlights the preset matching [hex], else the custom button (a saved custom paint). */
+    _markSwatch: function(hex) {
+        var swatches = document.querySelectorAll('.vc-swatch');
+        var matched = false;
+        for (var j = 0; j < swatches.length; j++) {
+            swatches[j].classList.remove('active');
+            var dataHex = swatches[j].getAttribute('data-hex');
+            if (dataHex && hex && dataHex.toLowerCase() === hex.toLowerCase()) {
+                swatches[j].classList.add('active');
+                matched = true;
             }
         }
+        var custom = document.getElementById('colorSwatchCustom');
+        if (custom) custom.classList.toggle('active', !matched && !!hex);
     },
 
     setColor: function(hex, activeSwatch) {
-        // The row is populated while the vendor stack is still downloading, so
-        // there may be no THREE and no baseColor to paint into yet.
-        if (!this.baseColor) return;
-        this.applyColor(hex, false);
-
-        var swatches = document.querySelectorAll('.vc-swatch');
-        for (var i = 0; i < swatches.length; i++) swatches[i].classList.remove('active');
-        if (activeSwatch) activeSwatch.classList.add('active');
-
+        // The row is filled while the vendor stack is still downloading: save the pick
+        // now and paint it once the scene exists (its load reads the saved colour).
+        this._savedColor = hex;
+        if (this.baseColor) this.applyColor(hex, false);
+        this._markSwatch(hex);
         this._saveSelected({ color: hex });
     },
 
@@ -2175,6 +2186,7 @@ var VC = {
         // Re-read on open: Automations → Safety writes the same settings.
         if (panelId === 'panelSafety') {
             this.fetchSafetySettings();
+            this.openStepUp();
         }
         if (panelId === 'panelRemoteKeyDiag') {
             this.fetchRemoteKeyDiag();
@@ -2204,12 +2216,28 @@ var VC = {
      */
     fetchEngineSoundState: function() {
         var self = this;
+        // Overlapping reads: a reply paints unless a newer one that worked did; a failure (the "unavailable"
+        // hint) only if nothing newer painted.
+        var seq = this._engineSoundSeq = (this._engineSoundSeq || 0) + 1;
+        var applies = function(ok) {
+            if (ok ? seq < (self._engineSoundOk || 0) : seq < (self._engineSoundLast || 0)) return false;
+            if (ok) self._engineSoundOk = seq;
+            if (seq > (self._engineSoundLast || 0)) self._engineSoundLast = seq;
+            return true;
+        };
         fetch('/api/audio/engine-sound').then(function(resp) {
             return resp.json();
         }).then(function(data) {
+            // An error reply ({success:false}, also the car-unreachable one) counts as a failed read.
+            var ok = !!data && data.success !== false;
+            if (!applies(ok)) return;
             var hint = document.getElementById('avasUnavailableHint');
             var engineRow = document.getElementById('engineSoundRow');
-            if (!data || data.avasAvailable === false) {
+            if (!ok) {
+                if (hint) hint.style.display = '';
+                return;
+            }
+            if (data.avasAvailable === false) {
                 if (hint) hint.style.display = '';
                 if (engineRow) engineRow.style.display = 'none';
                 return;
@@ -2222,6 +2250,7 @@ var VC = {
             }
             self.updateEngineSoundUI();
         }).catch(function() {
+            if (!applies(false)) return;
             var hint = document.getElementById('avasUnavailableHint');
             if (hint) hint.style.display = '';
         });
@@ -2422,35 +2451,8 @@ var VC = {
             });
         });
 
-        // Battery preconditioning heat — cloud-only in both directions. The state
-        // now comes from the cloud snapshot via /api/vehicle/state, so the tile
-        // reflects reality across reloads; previously it was write-only, and after
-        // a reload every tap re-sent "on" with no way to switch it off.
-        this.bindBtn('btnBatteryHeat', function() {
-            if (!self.requireCloud()) return;
-            var current = !!(self.vehicleState && self.vehicleState.batteryHeat);
-            var next = !current;
-            var revision = ++self._batteryHeatRevision;
-            self._batteryHeatPending = revision;
-            self.setPending('btnBatteryHeat', true);
-            self.apiPost('/api/vehicle/battery-heat', { enabled: next }).then(function(result) {
-                if (revision !== self._batteryHeatRevision) return;
-                self._batteryHeatPending = 0;
-                self.setPending('btnBatteryHeat', false);
-                if (result.success) {
-                    if (!self.vehicleState) self.vehicleState = {};
-                    self.vehicleState.batteryHeat = next;
-                    self.updateBatteryHeatUI();
-                }
-                self.toastFromResult(result, BYD.i18n.t('vehicle_control.battery_heat_label'), null);
-            }).catch(function(e) {
-                if (revision !== self._batteryHeatRevision) return;
-                self._batteryHeatPending = 0;
-                self.setPending('btnBatteryHeat', false);
-                self.toastFromResult({ success: false, error: e.message }, null,
-                    BYD.i18n.t('vehicle_control.battery_heat_label'));
-            });
-        });
+        this.bindBtn('btnBatteryHeatOn', function() { self.requestBatteryHeat(true); });
+        this.bindBtn('btnBatteryHeatOff', function() { self.requestBatteryHeat(false); });
 
         // Per-window preset levels — backend runs closed-loop to drive the
         // window to the target % and auto-stops. UI just sends the target.
@@ -3635,6 +3637,46 @@ var VC = {
         }
     },
 
+    /**
+     * The car answers again: the pollers restart as on a return to the page, and the open panel reads what
+     * opening it reads. Safety and diagnostics forms that loaded stay. While hidden, all of it waits for the
+     * next return, once; that return's visibility handler restarts the pollers itself.
+     */
+    refreshAfterReconnect: function(afterReturn) {
+        var self = this;
+        if (document.hidden) {
+            if (this._reconnectDeferred) return;
+            this._reconnectDeferred = true;
+            document.addEventListener('visibilitychange', function shown() {
+                if (document.hidden) return;
+                document.removeEventListener('visibilitychange', shown);
+                self._reconnectDeferred = false;
+                self.refreshAfterReconnect(true);
+            });
+            return;
+        }
+        if (!afterReturn) {
+            this.startStateSync();
+            this.startAcChargeCurrentSync();
+            this.startCloudStatusSync();
+            this.startCloudLockSync();
+        }
+        if (!this._safetyLoaded) this.fetchSafetySettings();
+        var panel = this._activePanel;
+        if (panel === 'panelSafety') {
+            this.fetchStepUpStatus();
+        } else if (panel === 'panelCharging') {
+            this.fetchChargingSchedule();
+            this.fetchChargeCap();
+        } else if (panel === 'panelClimate') {
+            this.fetchClimateSchedule();
+        } else if (panel === 'panelSound') {
+            this.fetchEngineSoundState();
+        } else if (panel === 'panelRemoteKeyDiag' && !this._rkdiagLoaded) {
+            this.fetchRemoteKeyDiag();
+        }
+    },
+
     fetchState: function() {
         var self = this;
         var climatePowerRevision = this._climatePowerRevision;
@@ -3642,10 +3684,11 @@ var VC = {
         var climateFanRevision = this._climateFanRevision;
         var seatCommandRevision = this._seatCommandRevision;
         var steeringHeatRevision = this._steeringHeatRevision;
-        var batteryHeatRevision = this._batteryHeatRevision;
+        var batteryHeatPoll = ++this._batteryHeatPoll;
         fetch('/api/vehicle/state').then(function(resp) {
             return resp.json();
         }).then(function(data) {
+            self.receiveBatteryHeat(data, batteryHeatPoll);
             var systemTab = document.querySelector('[data-panel="panelSystem"]');
             var systemAvailable = data.iviRebootAvailable === true
                 || data.dilink5 === true;
@@ -3802,13 +3845,6 @@ var VC = {
                     && data.seats && typeof data.seats.steeringHeat === 'boolean') {
                 self.vehicleState.steeringHeat = data.seats.steeringHeat;
             }
-            // Cloud-only, and omitted when no fresh snapshot reported it — so an
-            // absent key leaves the previous reading rather than asserting "off".
-            if (batteryHeatRevision === self._batteryHeatRevision
-                    && !self._batteryHeatPending
-                    && typeof data.batteryHeat === 'boolean') {
-                self.vehicleState.batteryHeat = data.batteryHeat;
-            }
             if (data.seats) {
                 var seatSupport = data.seats.ventilatedSupportedBySeat;
                 for (var ci = 0; ci < 2; ci++) {
@@ -3844,7 +3880,6 @@ var VC = {
             self.updateClimateUI();
             self.updateSeatUI();
             self.updateSteeringHeatUI();
-            self.updateBatteryHeatUI();
             self.updateSeatGlows();
             self.updateTabIndicators();
             self.updateLightsUI();
@@ -3856,6 +3891,7 @@ var VC = {
 
         }).catch(function(e) {
             console.warn('[VC] State fetch error:', e);
+            self.receiveBatteryHeat({}, batteryHeatPoll);
             if (window.BYD && BYD.skeleton) {
                 BYD.skeleton.resolve('vcLock');
                 BYD.skeleton.resolve('vcTyres');
@@ -3939,7 +3975,8 @@ var VC = {
             // fresh partial reading and get promoted to scope 'vehicle'.
             var isStale = s.lockState === 'unknown'
                     || s.lastMessageAge === -1
-                    || (typeof s.lastMessageAge === 'number' && s.lastMessageAge > self.STALE_RESPONSE_AGE_S);
+                    || (typeof s.lastMessageAge === 'number' && s.lastMessageAge > self.STALE_RESPONSE_AGE_S)
+                    || document.documentElement.getAttribute('data-od-offline') === '1';
             var haveLocalReading =
                     self.vehicleState.locked === true || self.vehicleState.locked === false;
             if (!localIsAuthoritative && !(isStale && haveLocalReading)) {
@@ -4040,6 +4077,8 @@ var VC = {
         if (result && result.success) return;
         // A movement-gate refusal is answered by the Safety tab, not by an account.
         if (result && result.outcome === 'blocked_driving') return;
+        // Nor is a Face ID / fingerprint refusal or a link that can't reach the car.
+        if (result && /^(step_up_|car_unreachable$)/.test(String(result.code || result.error || ''))) return;
         if (this.vehicleState.cloudConfigured) return;
         this.showCloudModal();
     },
@@ -4250,7 +4289,9 @@ var VC = {
                 return resp.json().then(function(data) {
                     if (!resp.ok || !data || data.success !== true
                             || !self.applySafetySettings(data.drivingSafety)) {
-                        throw new Error('safety setting was not persisted');
+                        var refused = new Error('safety setting was not persisted');
+                        refused.reply = data;
+                        throw refused;
                     }
                 });
             }).then(function() {
@@ -4260,11 +4301,813 @@ var VC = {
                 console.warn('[VC] Failed to save safety setting:', e);
                 el.checked = !enabled;
                 self._safetySaving = false;
-                self.toast(self.translatedText('common.settings_save_failed',
-                    'Failed to save settings'), 'error');
+                var reply = e && e.reply;
+                var said = reply && typeof reply.message === 'string' && reply.message ? reply.message
+                    : (reply && typeof reply.error === 'string' ? reply.error : '');
+                self.toast(said || self.translatedText('common.settings_save_failed', 'Failed to save settings'),
+                    self.stepUpToastType(reply));
                 // The write may have landed before its response was lost, so re-read it.
                 return self.fetchSafetySettings();
             });
+        });
+    },
+
+    // ==================== FACE ID / FINGERPRINT LOCK ====================
+
+    // The section appears only once /api/stepup/status answers (older daemons have no such API).
+    // One request runs at a time; every change ends with a fresh status read.
+    _stepUp: null,
+    _stepUpJson: null,
+    _stepUpRevision: 0,
+    _stepUpBusy: false,
+    // Car-screen pairing { id, state, code, expiresAt, known, until }: waiting/ready poll the pairing
+    // every second; used (the phone is creating its passkey) polls the status every 2 s for 3 min.
+    _stepUpPair: null,
+    _stepUpPairTimer: null,
+    _stepUpPairInFlight: false,
+    // Phone: register/options reply { id, publicKey, label, failed }, kept until success or expiry.
+    _stepUpReg: null,
+    _stepUpRegTimer: null,
+    // Used when a reply carries no message (replies through auth.js always do).
+    STEP_UP_CODE_TEXT: {
+        step_up_no_phone: ['stepup.enable_needs_phone', 'Add a phone first.'],
+        step_up_wrong_code: ['stepup.wrong_code', "That code didn't work. Check it and try again."],
+        step_up_too_many_codes: ['stepup.too_many_codes', 'Too many wrong codes. Start again on the car screen.'],
+        step_up_code_expired: ['stepup.pair_expired', 'The code expired. Start again.'],
+        step_up_already_added: ['stepup.already_added', 'This phone is already added.']
+    },
+
+    stepUpText: function(key, fallback, vars) {
+        var value = BYD.i18n && typeof BYD.i18n.t === 'function' ? BYD.i18n.t(key, vars) : null;
+        if (value && value !== key) return value;
+        return String(fallback).replace(/\{(\w+)\}/g, function(match, name) {
+            return vars && vars[name] != null ? vars[name] : match;
+        });
+    },
+
+    showStepUpEl: function(id, show) {
+        var el = document.getElementById(id);
+        if (el) el.style.display = show ? '' : 'none';
+    },
+
+    stepUpCode: function(data) {
+        var code = data ? (data.code || data.error) : '';
+        return typeof code === 'string' ? code : '';
+    },
+
+    bindStepUpControls: function() {
+        var self = this;
+        var enable = document.getElementById('vcStepUpEnable');
+        if (enable) {
+            enable.addEventListener('change', function() {
+                self.saveStepUpSettings({ enabled: !!enable.checked });
+            });
+        }
+        var boxes = document.querySelectorAll('#vcStepUp [data-vc-stepup-action]');
+        for (var i = 0; i < boxes.length; i++) {
+            boxes[i].addEventListener('change', function() {
+                var actions = {};
+                actions[this.getAttribute('data-vc-stepup-action')] = !!this.checked;
+                self.saveStepUpSettings({ actions: actions });
+            });
+        }
+        this.bindBtn('vcStepUpPairStart', function() { self.startStepUpPairing(); });
+        this.bindBtn('vcStepUpPairCancel', function() { self.cancelStepUpPairing(); });
+        this.bindBtn('vcStepUpRegOpen', function() { self.showStepUpForm(!self.stepUpFormOpen()); });
+        this.bindBtn('vcStepUpRegCancel', function() { self.showStepUpForm(false); });
+        this.bindBtn('vcStepUpCreateCancel', function() {
+            self.dropStepUpRegistration();
+            self.renderStepUpRegistration();
+        });
+        var form = document.getElementById('vcStepUpRegForm');
+        if (form) {
+            form.addEventListener('submit', function(e) {
+                e.preventDefault();
+                self.registerStepUpPhone();
+            });
+        }
+        // A plain click handler: create() has to run inside the tap's own user gesture.
+        var create = document.getElementById('vcStepUpCreate');
+        if (create) create.addEventListener('click', function() { self.createStepUpPasskey(); });
+        if (BYD.i18n && typeof BYD.i18n.onChange === 'function') {
+            BYD.i18n.onChange(function() { self.renderStepUp(); });
+        }
+        document.addEventListener('visibilitychange', function() {
+            // Back on screen: the car, not this clock, says where a pairing stands.
+            if (!document.hidden && self._activePanel === 'panelSafety') self.fetchStepUpStatus();
+        });
+    },
+
+    /** Safety panel opened: drop a finished pairing's message and re-read the lock. */
+    openStepUp: function() {
+        if (this._stepUpPair && !this.stepUpPairActive(this._stepUpPair)) this.endStepUpPairing();
+        return this.fetchStepUpStatus();
+    },
+
+    stepUpRequest: function(url, method, body) {
+        var init = { method: method, cache: 'no-store' };
+        if (body) {
+            init.headers = { 'Content-Type': 'application/json' };
+            init.body = JSON.stringify(body);
+        }
+        return fetch(url, init).then(function(resp) {
+            return resp.json().catch(function() { return null; }).then(function(data) {
+                return { ok: resp.ok && !!data && data.success !== false, status: resp.status, data: data };
+            });
+        }, function() {
+            return { ok: false, status: 0, data: null };
+        });
+    },
+
+    fetchStepUpStatus: function() {
+        var self = this;
+        var revision = ++this._stepUpRevision;
+        return this.stepUpRequest('/api/stepup/status', 'GET').then(function(result) {
+            // A write in flight repaints from its own follow-up read.
+            if (revision !== self._stepUpRevision || self._stepUpBusy) return;
+            var data = result.data;
+            // Only a missing API (404 or a non-JSON reply) hides the section; a dropped link or a
+            // 5xx keeps the last state and lets pairing or registration carry on.
+            if (result.status === 404 || (result.status !== 0 && !data)) {
+                self._stepUp = null;
+                self._stepUpJson = null;
+                self.renderStepUp();
+                return;
+            }
+            if (result.ok && data.success === true) {
+                var json = JSON.stringify(data);
+                // An unchanged reply leaves the rendered rows, and their focus, alone.
+                if (json !== self._stepUpJson) {
+                    self._stepUp = data;
+                    self._stepUpJson = json;
+                    self.renderStepUp();
+                }
+                self.noteStepUpPhones();
+            }
+            self.resumeStepUpPairing();
+        });
+    },
+
+    // Write replies share the status shape; fields a reply leaves out keep their last value.
+    adoptStepUp: function(data) {
+        if (!data || !Array.isArray(data.credentials) || !this._stepUp) return;
+        this._stepUp = Object.assign({}, this._stepUp, data);
+        this._stepUpJson = null;
+    },
+
+    setStepUpBusy: function(busy) {
+        this._stepUpBusy = busy;
+        this.renderStepUp();
+    },
+
+    stepUpToastType: function(data) {
+        var code = this.stepUpCode(data);
+        return code === 'step_up_busy' || code === 'step_up_cancelled' ? 'info' : 'error';
+    },
+
+    stepUpErrorText: function(data) {
+        if (data && typeof data.message === 'string' && data.message) return data.message;
+        var code = this.stepUpCode(data);
+        if (Object.prototype.hasOwnProperty.call(this.STEP_UP_CODE_TEXT, code)) {
+            return this.stepUpText(this.STEP_UP_CODE_TEXT[code][0], this.STEP_UP_CODE_TEXT[code][1]);
+        }
+        return this.stepUpText('stepup.error_generic', "Couldn't save. Try again.");
+    },
+
+    renderStepUp: function() {
+        var root = document.getElementById('vcStepUp');
+        var st = this._stepUp;
+        if (!root) return;
+        if (!st) {
+            root.style.display = 'none';
+            return;
+        }
+        var creds = Array.isArray(st.credentials) ? st.credentials : [];
+        var caller = st.caller || {};
+        var actions = st.actions || {};
+        var busy = this._stepUpBusy;
+        var enabled = st.enabled === true;
+        var viewActive = st.remoteViewActive === true;
+        var i;
+        root.style.display = '';
+        var enable = document.getElementById('vcStepUpEnable');
+        if (enable) {
+            enable.checked = enabled;
+            // Switching the lock off stays possible even with no phone left.
+            enable.disabled = busy || (!enabled && creds.length === 0);
+        }
+        this.showStepUpEl('vcStepUpEnableHint', creds.length === 0);
+        var boxes = root.querySelectorAll('[data-vc-stepup-action]');
+        for (i = 0; i < boxes.length; i++) {
+            boxes[i].checked = actions[boxes[i].getAttribute('data-vc-stepup-action')] === true;
+            boxes[i].disabled = busy;
+        }
+        this.renderStepUpPhones(creds, busy);
+        this.showStepUpEl('vcStepUpPair', caller.canPair === true && !viewActive);
+        this.showStepUpEl('vcStepUpPairBlocked', viewActive && (caller.canPair === true || caller.inCar === true));
+        this.showStepUpEl('vcStepUpRegister', caller.canRegister === true);
+        this.showStepUpEl('vcStepUpNeedLink', caller.canRegister !== true && caller.inCar !== true
+                && (caller.remote === true || caller.lan === true));
+        this.showStepUpEl('vcStepUpWarnAdb', st.remoteAdbOn === true);
+        this.showStepUpEl('vcStepUpWarnView', viewActive);
+        var buttons = ['vcStepUpPairStart', 'vcStepUpPairCancel', 'vcStepUpRegOpen', 'vcStepUpRegSubmit',
+            'vcStepUpRegCancel', 'vcStepUpCreate', 'vcStepUpCreateCancel'];
+        for (i = 0; i < buttons.length; i++) {
+            var button = document.getElementById(buttons[i]);
+            if (button) button.disabled = busy;
+        }
+        if (this._stepUpPair && !this.stepUpCanPair()) this.cancelStepUpPairing();
+        else this.renderStepUpPairing();
+        this.renderStepUpRegistration();
+    },
+
+    renderStepUpPhones: function(creds, busy) {
+        var self = this;
+        var list = document.getElementById('vcStepUpPhones');
+        if (!list) return;
+        while (list.firstChild) list.removeChild(list.firstChild);
+        this.showStepUpEl('vcStepUpPhonesEmpty', creds.length === 0);
+        creds.forEach(function(cred, index) {
+            if (!cred || typeof cred !== 'object') return;
+            var row = document.createElement('div');
+            row.className = 'vc-safety-row vc-stepup-phone';
+            var info = document.createElement('div');
+            info.className = 'vc-safety-info';
+            var name = document.createElement('span');
+            name.className = 'vc-safety-name';
+            name.id = 'vcStepUpPhoneName' + index;
+            name.textContent = cred.label || cred.rpId || '';
+            info.appendChild(name);
+            if (cred.rpId) {
+                var host = document.createElement('span');
+                host.className = 'vc-safety-desc';
+                host.setAttribute('data-screenshot-private', '');
+                host.textContent = cred.rpId;
+                info.appendChild(host);
+            }
+            var dates = [];
+            if (cred.createdAt > 0) {
+                dates.push(self.stepUpText('stepup.phone_added', 'Added {date}',
+                    { date: self.stepUpDate(cred.createdAt) }));
+            }
+            if (cred.lastUsedAt > 0) {
+                dates.push(self.stepUpText('stepup.phone_last_used', 'Last used {date}',
+                    { date: self.stepUpDate(cred.lastUsedAt) }));
+            }
+            if (dates.length) {
+                var when = document.createElement('span');
+                when.className = 'vc-safety-desc';
+                when.textContent = dates.join(' · ');
+                info.appendChild(when);
+            }
+            row.appendChild(info);
+            var remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'vc-modal-btn vc-stepup-remove';
+            remove.id = 'vcStepUpRemove' + index;
+            remove.textContent = self.stepUpText('stepup.phone_remove', 'Remove');
+            remove.setAttribute('aria-describedby', name.id);
+            remove.disabled = busy;
+            row.appendChild(remove);
+            list.appendChild(row);
+            self.bindBtn(remove.id, function() { self.removeStepUpPhone(cred); });
+        });
+    },
+
+    stepUpDate: function(ms) {
+        var d = new Date(Number(ms));
+        var lang = BYD.i18n && typeof BYD.i18n.getLang === 'function' ? BYD.i18n.getLang() : undefined;
+        try {
+            return d.toLocaleDateString(lang, { year: 'numeric', month: 'short', day: 'numeric' });
+        } catch (e) {
+            return d.toLocaleDateString();
+        }
+    },
+
+    stepUpPhoneIds: function() {
+        var st = this._stepUp;
+        var creds = st && Array.isArray(st.credentials) ? st.credentials : [];
+        return creds.map(function(cred) { return cred ? String(cred.id) : ''; });
+    },
+
+    saveStepUpSettings: function(patch) {
+        var self = this;
+        if (this._stepUpBusy || !this._stepUp) {
+            this.renderStepUp();
+            return;
+        }
+        this.setStepUpBusy(true);
+        this.stepUpRequest('/api/stepup/settings', 'POST', patch).then(function(result) {
+            // A refused write repaints the last verified state.
+            if (result.ok) self.adoptStepUp(result.data);
+            self.setStepUpBusy(false);
+            if (!result.ok) self.toast(self.stepUpErrorText(result.data), self.stepUpToastType(result.data));
+            return self.fetchStepUpStatus();
+        });
+    },
+
+    removeStepUpPhone: function(cred) {
+        var self = this;
+        var st = this._stepUp;
+        if (this._stepUpBusy || !st || !cred || cred.id == null) return;
+        var creds = Array.isArray(st.credentials) ? st.credentials : [];
+        var body = creds.length === 1 && st.enabled === true
+            ? this.stepUpText('stepup.remove_last_confirm',
+                'This is the last phone. Removing it turns the lock off. Continue?')
+            : this.stepUpText('stepup.phone_remove_confirm',
+                'Remove this phone? It will no longer be able to approve remote actions.');
+        var removeLabel = this.stepUpText('stepup.phone_remove', 'Remove');
+        var confirmation = window.BYD && BYD.utils && BYD.utils.confirmDialog
+            ? BYD.utils.confirmDialog({
+                title: cred.label || removeLabel,
+                body: body,
+                confirmLabel: removeLabel,
+                cancelLabel: this.stepUpText('stepup.cancel', 'Cancel'),
+                danger: true
+            })
+            : Promise.resolve(window.confirm(body));
+        Promise.resolve(confirmation).then(function(confirmed) {
+            if (!confirmed || self._stepUpBusy) return;
+            self.setStepUpBusy(true);
+            return self.stepUpRequest('/api/stepup/credentials/' + encodeURIComponent(cred.id), 'DELETE')
+                .then(function(result) {
+                    if (result.ok) self.adoptStepUp(result.data);
+                    self.setStepUpBusy(false);
+                    if (!result.ok) self.toast(self.stepUpErrorText(result.data), self.stepUpToastType(result.data));
+                    return self.fetchStepUpStatus();
+                });
+        });
+    },
+
+    stepUpCanPair: function() {
+        var st = this._stepUp;
+        return !!st && !!st.caller && st.caller.canPair === true && st.remoteViewActive !== true;
+    },
+
+    stepUpPairActive: function(pair) {
+        return !!pair && (pair.state === 'waiting' || pair.state === 'ready' || pair.state === 'used');
+    },
+
+    startStepUpPairing: function() {
+        var self = this;
+        var pair = this._stepUpPair;
+        if (this._stepUpBusy || !this.stepUpCanPair() || (pair && pair.state === 'used')) return;
+        this.endStepUpPairing();
+        // Phones already listed now can't be the one this pairing adds.
+        var known = this.stepUpPhoneIds();
+        this.setStepUpBusy(true);
+        this.stepUpRequest('/api/stepup/pairing/start', 'POST', {}).then(function(result) {
+            self.setStepUpBusy(false);
+            var data = result.data;
+            if (!result.ok || data.pairingId == null) {
+                self.toast(self.stepUpErrorText(data), 'error');
+                return self.fetchStepUpStatus();
+            }
+            self._stepUpPair = {
+                id: String(data.pairingId),
+                state: data.state === 'ready' ? 'ready' : 'waiting',
+                code: null,
+                expiresAt: Number(data.expiresAt) || 0,
+                known: known,
+                until: 0
+            };
+            self.renderStepUpPairing();
+            self.resumeStepUpPairing();
+        });
+    },
+
+    /** Cancel on the car, or remote screen control took over: tell the car, then forget it here. */
+    cancelStepUpPairing: function() {
+        var self = this;
+        var pair = this._stepUpPair;
+        if (!this.stepUpPairActive(pair)) {
+            this.endStepUpPairing();
+            return;
+        }
+        this.haltStepUpPairPoll();
+        // The car may already have saved the phone: then say so instead of "cancelled".
+        this.stepUpRequest('/api/stepup/pairing/' + encodeURIComponent(pair.id), 'DELETE').then(function(result) {
+            if (self._stepUpPair !== pair) return;
+            var data = (result && result.data) || {};
+            if (result && result.status === 409
+                    && (data.code || data.error) === 'step_up_already_added') {
+                pair.state = 'added';
+                self.renderStepUpPairing();
+                self.fetchStepUpStatus();
+                return;
+            }
+            self.endStepUpPairing();
+        });
+    },
+
+    endStepUpPairing: function() {
+        this.haltStepUpPairPoll();
+        this._stepUpPair = null;
+        this.renderStepUpPairing();
+    },
+
+    haltStepUpPairPoll: function() {
+        if (this._stepUpPairTimer) clearInterval(this._stepUpPairTimer);
+        this._stepUpPairTimer = null;
+    },
+
+    stepUpPairVisible: function() {
+        return this._activePanel === 'panelSafety' && !document.hidden && this.stepUpCanPair();
+    },
+
+    resumeStepUpPairing: function() {
+        var self = this;
+        var pair = this._stepUpPair;
+        if (!this.stepUpPairActive(pair) || this._stepUpPairTimer || !this.stepUpPairVisible()) return;
+        this._stepUpPairTimer = setInterval(function() { self.tickStepUpPairing(); },
+            pair.state === 'used' ? 2000 : 1000);
+        this.tickStepUpPairing();
+    },
+
+    // Car screen: the pairing's phone is done once a passkey that wasn't listed at the start shows up.
+    noteStepUpPhones: function() {
+        var pair = this._stepUpPair;
+        if (!pair || pair.state !== 'used' || !this._stepUp) return;
+        var ids = this.stepUpPhoneIds();
+        for (var i = 0; i < ids.length; i++) {
+            if (pair.known.indexOf(ids[i]) < 0) {
+                pair.state = 'added';
+                this.haltStepUpPairPoll();
+                this.renderStepUpPairing();
+                return;
+            }
+        }
+    },
+
+    // Never expires a code from this clock (the head unit's can jump): every tick asks the car, and
+    // for a used code reads the phone list first.
+    tickStepUpPairing: function() {
+        var self = this;
+        var pair = this._stepUpPair;
+        if (!this.stepUpPairActive(pair) || !this.stepUpPairVisible()) {
+            this.haltStepUpPairPoll();
+            return;
+        }
+        this.renderStepUpPairing();
+        if (this._stepUpPairInFlight) return;
+        this._stepUpPairInFlight = true;
+        var phones = pair.state === 'used' ? this.fetchStepUpStatus() : Promise.resolve();
+        phones.then(function() {
+            if (self._stepUpPair !== pair || !self.stepUpPairActive(pair)) return null;
+            return self.stepUpRequest('/api/stepup/pairing/' + encodeURIComponent(pair.id), 'GET');
+        }).then(function(result) {
+            self._stepUpPairInFlight = false;
+            if (result && self._stepUpPair === pair && self.stepUpPairActive(pair)) {
+                self.applyStepUpPairing(pair, result);
+            }
+        }, function() {
+            self._stepUpPairInFlight = false;
+        });
+    },
+
+    // Monotonic where available: the 3 min watch must not follow a wall-clock jump.
+    stepUpClock: function() {
+        return window.performance && typeof performance.now === 'function' ? performance.now() : Date.now();
+    },
+
+    applyStepUpPairing: function(pair, result) {
+        var data = result.data;
+        var wasUsed = pair.state === 'used';
+        if (result.status === 403) {
+            // Remote screen control started: the status read shows why.
+            this.cancelStepUpPairing();
+            this.fetchStepUpStatus();
+            return;
+        }
+        if (result.status === 200 && data && typeof data.state === 'string') {
+            pair.state = ['waiting', 'ready', 'used'].indexOf(data.state) >= 0 ? data.state : 'expired';
+            if (data.code != null) pair.code = String(data.code);
+            if (Number(data.expiresAt) > 0) pair.expiresAt = Number(data.expiresAt);
+        } else if (result.status >= 400 && result.status < 500) {
+            pair.state = 'expired';
+        } else {
+            return;
+        }
+        if (pair.state === 'used' && !wasUsed) {
+            pair.until = this.stepUpClock() + 180000;
+            this.haltStepUpPairPoll();
+            this.renderStepUpPairing();
+            this.resumeStepUpPairing();
+            return;
+        }
+        // The car keeps a used code "used"; with no new phone after 3 min the watch ends as expired.
+        if (pair.state === 'used' && this.stepUpClock() >= pair.until) {
+            pair.state = 'expired';
+            this.haltStepUpPairPoll();
+            this.renderStepUpPairing();
+            return;
+        }
+        if (!this.stepUpPairActive(pair)) this.haltStepUpPairPoll();
+        this.renderStepUpPairing();
+    },
+
+    renderStepUpPairing: function() {
+        var pair = this._stepUpPair;
+        var state = pair ? pair.state : null;
+        var polling = state === 'waiting' || state === 'ready';
+        this.showStepUpEl('vcStepUpPairStart', !polling);
+        var start = document.getElementById('vcStepUpPairStart');
+        // One phone at a time: "Add a phone" waits while the last code's phone is still finishing.
+        if (start) start.disabled = this._stepUpBusy || state === 'used';
+        this.showStepUpEl('vcStepUpPairArea', !!pair);
+        this.showStepUpEl('vcStepUpPairPresence', state === 'waiting');
+        this.showStepUpEl('vcStepUpPairReady', state === 'ready');
+        this.showStepUpEl('vcStepUpPairCountdown', state === 'ready');
+        this.showStepUpEl('vcStepUpPairWaiting', state === 'used');
+        this.showStepUpEl('vcStepUpPairDone', state === 'added');
+        this.showStepUpEl('vcStepUpPairExpired', state === 'expired');
+        this.showStepUpEl('vcStepUpPairCancel', polling || state === 'used');
+        if (state !== 'ready') return;
+        var code = document.getElementById('vcStepUpPairCode');
+        if (code && code.textContent !== (pair.code || '')) code.textContent = pair.code || '';
+        var countdown = document.getElementById('vcStepUpPairCountdown');
+        if (!countdown) return;
+        var seconds = pair.expiresAt ? Math.ceil((pair.expiresAt - Date.now()) / 1000) : 0;
+        countdown.textContent = seconds > 0
+            ? this.stepUpText('stepup.pair_expires', 'Code expires in {seconds} s', { seconds: seconds })
+            : '';
+    },
+
+    stepUpFormOpen: function() {
+        var form = document.getElementById('vcStepUpRegForm');
+        return !!form && form.style.display !== 'none';
+    },
+
+    showStepUpForm: function(open) {
+        var toggle = document.getElementById('vcStepUpRegOpen');
+        this.showStepUpEl('vcStepUpRegForm', open);
+        if (toggle) toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (!open) return;
+        this.setStepUpResult(null);
+        var label = document.getElementById('vcStepUpLabel');
+        if (label && !label.value) label.value = this.stepUpDefaultLabel();
+        var code = document.getElementById('vcStepUpCode');
+        if (code) {
+            try { code.focus(); } catch (e) { /* not focusable */ }
+        }
+    },
+
+    /** The phone flow's outcome, read out from its live region; focus moves there when asked. */
+    setStepUpResult: function(message, isError, focus) {
+        var el = document.getElementById('vcStepUpRegResult');
+        if (!el) return;
+        el.textContent = message || '';
+        el.style.display = message ? '' : 'none';
+        if (isError) el.classList.add('is-error');
+        else el.classList.remove('is-error');
+        if (message && focus) {
+            try { el.focus(); } catch (e) { /* not focusable */ }
+        }
+    },
+
+    stepUpDefaultLabel: function() {
+        var ua = navigator.userAgent || '';
+        if (/iPhone/.test(ua)) return 'iPhone';
+        if (/iPad/.test(ua)) return 'iPad';
+        if (/Android/.test(ua)) return 'Android';
+        return '';
+    },
+
+    // Decimal digits of any script (Arabic-Indic, Devanagari, full-width...) as ASCII; the rest dropped.
+    stepUpDigits: function(value) {
+        var zeros = [0x30, 0x660, 0x6F0, 0x7C0, 0x966, 0x9E6, 0xA66, 0xAE6, 0xB66, 0xBE6, 0xC66,
+            0xCE6, 0xD66, 0xDE6, 0xE50, 0xED0, 0xF20, 0x1040, 0x17E0, 0x1810, 0xFF10];
+        var text = String(value || '');
+        var out = '';
+        for (var i = 0; i < text.length; i++) {
+            var c = text.charCodeAt(i);
+            for (var z = 0; z < zeros.length; z++) {
+                if (c >= zeros[z] && c <= zeros[z] + 9) {
+                    out += String(c - zeros[z]);
+                    break;
+                }
+            }
+        }
+        return out;
+    },
+
+    // Checked before register/options, which spends the car's code.
+    stepUpSupportsCreate: function() {
+        var Attestation = window.AuthenticatorAttestationResponse;
+        var proto = Attestation && Attestation.prototype;
+        return typeof BYDAuth !== 'undefined' && typeof BYDAuth.b64urlEncode === 'function'
+            && !!window.PublicKeyCredential && !!navigator.credentials
+            && typeof navigator.credentials.create === 'function' && !!proto
+            && typeof proto.getPublicKey === 'function'
+            && typeof proto.getAuthenticatorData === 'function'
+            && typeof proto.getPublicKeyAlgorithm === 'function';
+    },
+
+    registerStepUpErrorText: function(err) {
+        var name = err && err.name;
+        if (name === 'InvalidStateError') {
+            return this.stepUpText('stepup.already_added', 'This phone is already added.');
+        }
+        if (name === 'NotAllowedError' || name === 'AbortError') {
+            return this.stepUpText('stepup.setup_cancelled', 'Cancelled. Nothing was added.');
+        }
+        if (name === 'NotSupportedError' || name === 'SecurityError') {
+            return this.stepUpText('stepup.not_supported', "This browser can't use Face ID or fingerprint here.");
+        }
+        return this.stepUpText('stepup.error_generic', "Couldn't save. Try again.");
+    },
+
+    decodeStepUpCreation: function(auth, pk) {
+        var out = Object.assign({}, pk);
+        out.challenge = auth.b64urlDecode(pk.challenge);
+        if (pk.user) out.user = Object.assign({}, pk.user, { id: auth.b64urlDecode(pk.user.id) });
+        if (Array.isArray(pk.excludeCredentials)) {
+            out.excludeCredentials = pk.excludeCredentials.map(function(cred) {
+                return Object.assign({}, cred, { id: auth.b64urlDecode(cred.id) });
+            });
+        }
+        return out;
+    },
+
+    /** Form submit (Enter or Add): spend the code for passkey options, then offer "Create passkey". */
+    registerStepUpPhone: function() {
+        var self = this;
+        if (this._stepUpBusy || this._stepUpReg) return;
+        var codeEl = document.getElementById('vcStepUpCode');
+        var labelEl = document.getElementById('vcStepUpLabel');
+        var code = this.stepUpDigits(codeEl ? codeEl.value : '');
+        var label = labelEl ? String(labelEl.value || '').trim() : '';
+        if (code.length !== 6) {
+            this.setStepUpResult(this.stepUpText('stepup.wrong_code',
+                "That code didn't work. Check it and try again."), true, true);
+            return;
+        }
+        if (!this.stepUpSupportsCreate()) {
+            this.setStepUpResult(this.stepUpText('stepup.not_supported',
+                "This browser can't use Face ID or fingerprint here."), true, true);
+            return;
+        }
+        if (document.activeElement && typeof document.activeElement.blur === 'function') {
+            document.activeElement.blur();
+        }
+        this.setStepUpResult(null);
+        this.setStepUpBusy(true);
+        this.stepUpRequest('/api/stepup/register/options', 'POST', {
+            code: code, rpId: window.location.hostname, label: label
+        }).then(function(result) {
+            self.setStepUpBusy(false);
+            var data = result.data;
+            if (!result.ok || !data.registrationId || !data.publicKey) {
+                self.setStepUpResult(self.stepUpErrorText(data), true, true);
+                return;
+            }
+            if (codeEl) codeEl.value = '';
+            self.holdStepUpRegistration(data, label);
+            var create = document.getElementById('vcStepUpCreate');
+            if (create) {
+                try { create.focus(); } catch (e) { /* not focusable */ }
+            }
+        });
+    },
+
+    holdStepUpRegistration: function(data, label) {
+        var self = this;
+        this.dropStepUpRegistration();
+        var reg = { id: data.registrationId, publicKey: data.publicKey, label: label, failed: false, finish: null };
+        this._stepUpReg = reg;
+        this._stepUpRegTimer = setTimeout(function() { self.lapseStepUpRegistration(reg); }, 170000);
+        this.renderStepUpRegistration();
+    },
+
+    // The car keeps a registration 180 s. Near the end no new passkey is offered (it could only be
+    // orphaned on the phone); one already made is sent once more and the car's answer decides.
+    lapseStepUpRegistration: function(reg) {
+        var self = this;
+        if (this._stepUpReg !== reg) return;
+        if (this._stepUpBusy) {
+            this._stepUpRegTimer = setTimeout(function() { self.lapseStepUpRegistration(reg); }, 5000);
+            return;
+        }
+        if (reg.finish) {
+            this.finishStepUpRegistration(reg);
+            return;
+        }
+        this.dropStepUpRegistration();
+        this.renderStepUpRegistration();
+        this.setStepUpResult(this.stepUpText('stepup.pair_expired', 'The code expired. Start again.'), true, false);
+    },
+
+    dropStepUpRegistration: function() {
+        if (this._stepUpRegTimer) clearTimeout(this._stepUpRegTimer);
+        this._stepUpRegTimer = null;
+        this._stepUpReg = null;
+    },
+
+    renderStepUpRegistration: function() {
+        var reg = this._stepUpReg;
+        this.showStepUpEl('vcStepUpCreateRow', !!reg);
+        this.showStepUpEl('vcStepUpRegOpen', !reg);
+        if (reg && this.stepUpFormOpen()) this.showStepUpForm(false);
+        var create = document.getElementById('vcStepUpCreate');
+        if (!create) return;
+        var key = reg && reg.failed ? 'stepup.try_again' : 'stepup.create_passkey';
+        // data-i18n follows the label so a locale re-hydrate keeps it.
+        create.setAttribute('data-i18n', key);
+        create.textContent = this.stepUpText(key, reg && reg.failed ? 'Try again' : 'Create passkey');
+        create.disabled = this._stepUpBusy;
+    },
+
+    /** "Create passkey" / "Try again". create() runs synchronously in this tap; a passkey this phone
+     *  already made is only ever re-sent to the car, never made twice. */
+    createStepUpPasskey: function() {
+        var self = this;
+        var reg = this._stepUpReg;
+        if (!reg || this._stepUpBusy || typeof BYDAuth === 'undefined') return;
+        if (reg.finish) {
+            this.finishStepUpRegistration(reg);
+            return;
+        }
+        var auth = BYDAuth;
+        var pending;
+        try {
+            pending = navigator.credentials.create({ publicKey: this.decodeStepUpCreation(auth, reg.publicKey) });
+        } catch (e) {
+            pending = Promise.reject(e);
+        }
+        this.setStepUpResult(null);
+        this.setStepUpBusy(true);
+        Promise.resolve(pending).then(function(cred) {
+            var response = cred && cred.response;
+            var publicKey = response && typeof response.getPublicKey === 'function'
+                    && typeof response.getAuthenticatorData === 'function'
+                    && typeof response.getPublicKeyAlgorithm === 'function'
+                ? response.getPublicKey() : null;
+            if (!publicKey) {
+                var unsupported = new Error('passkey public key unavailable');
+                unsupported.name = 'NotSupportedError';
+                throw unsupported;
+            }
+            reg.finish = {
+                registrationId: reg.id,
+                id: auth.b64urlEncode(cred.rawId),
+                clientDataJSON: auth.b64urlEncode(response.clientDataJSON),
+                authenticatorData: auth.b64urlEncode(response.getAuthenticatorData()),
+                publicKey: auth.b64urlEncode(publicKey),
+                publicKeyAlgorithm: response.getPublicKeyAlgorithm(),
+                label: reg.label
+            };
+        }).then(function() {
+            self.setStepUpBusy(false);
+            if (self._stepUpReg === reg) return self.finishStepUpRegistration(reg);
+        }, function(err) {
+            // Only create() failed, so "Try again" runs it again, unless the phone already has a passkey here.
+            if (err && err.name === 'InvalidStateError') self.dropStepUpRegistration();
+            else if (self._stepUpReg === reg) reg.failed = true;
+            self.setStepUpBusy(false);
+            self.setStepUpResult(self.registerStepUpErrorText(err), true, true);
+        });
+    },
+
+    /** Sends the stored finish payload. Unanswered or 5xx: keep it for "Try again". Expired or already
+     *  added: the phone list decides (an earlier send may have landed with its reply lost). Other 4xx: over. */
+    finishStepUpRegistration: function(reg) {
+        var self = this;
+        this.setStepUpResult(null);
+        this.setStepUpBusy(true);
+        return this.stepUpRequest('/api/stepup/register/finish', 'POST', reg.finish).then(function(result) {
+            var code = self.stepUpCode(result.data);
+            if (result.ok) return { added: true, done: true, data: result.data };
+            // No answer or a 5xx (link check included): the same payload can go again.
+            if (result.status === 0 || result.status >= 500) return { added: false, done: false, data: result.data };
+            if (result.status === 410 || code === 'step_up_code_expired' || code === 'step_up_already_added') {
+                return self.stepUpRequest('/api/stepup/status', 'GET').then(function(status) {
+                    // An unreadable list settles nothing: keep the payload for "Try again".
+                    if (!status.ok || status.data.success !== true) {
+                        return { added: false, done: false, data: status.data };
+                    }
+                    var creds = Array.isArray(status.data.credentials) ? status.data.credentials : [];
+                    var listed = creds.some(function(cred) { return !!cred && String(cred.id) === reg.finish.id; });
+                    return { added: listed, done: true, data: listed ? status.data : result.data };
+                });
+            }
+            // Any other refusal won't change on a re-send: start over from the car screen.
+            return { added: false, done: true, restart: true, data: result.data };
+        }).then(function(outcome) {
+            if (outcome.done) {
+                if (self._stepUpReg === reg) self.dropStepUpRegistration();
+            } else if (self._stepUpReg === reg) {
+                reg.failed = true;
+            }
+            if (outcome.added) self.adoptStepUp(outcome.data);
+            self.setStepUpBusy(false);
+            var message = outcome.added
+                ? self.stepUpText('stepup.added_ok', 'This phone can now approve remote actions.')
+                : outcome.restart
+                    ? self.stepUpText('stepup.start_on_car',
+                        'Start on the car screen: Vehicle Control → Safety → Add a phone. Then enter the code here.')
+                    : self.stepUpErrorText(outcome.data);
+            self.setStepUpResult(message, !outcome.added, true);
+            return self.fetchStepUpStatus();
         });
     },
 
@@ -4758,12 +5601,70 @@ var VC = {
         if (this.vehicleState.steeringHeat === true) btn.classList.add('on2');
     },
 
-    /** Battery preconditioning tile. Unlit for both "off" and "not yet read". */
+    requestBatteryHeat: function(enabled) {
+        if (this._batteryHeatPending || !this.requireCloud()) return;
+        var self = this;
+        var pending = { enabled: enabled, accepted: false };
+        this._batteryHeatPending = pending;
+        this.updateBatteryHeatUI();
+        // A lost response or a car that never reports back must leave the controls usable.
+        pending.timeout = setTimeout(function() {
+            if (self._batteryHeatPending !== pending) return;
+            self._batteryHeatPending = null;
+            if (!pending.accepted) self.vehicleState.batteryHeatStatus = 'unknown';
+            self.updateBatteryHeatUI();
+        }, 60000);
+        this.apiPost('/api/vehicle/battery-heat', { enabled: enabled }).then(function(result) {
+            if (self._batteryHeatPending !== pending) return;
+            if (result.success) {
+                pending.accepted = true;
+                self._batteryHeatRequestedAt = Number(result.requestedAtMs) || 0;
+                self.vehicleState.batteryHeatStatus = 'unknown';
+                // Discard any poll already in flight when the command was acknowledged.
+                self._batteryHeatLastPoll = self._batteryHeatPoll;
+                self.fetchState();
+            } else {
+                clearTimeout(pending.timeout);
+                self._batteryHeatPending = null;
+            }
+            self.updateBatteryHeatUI();
+            self.toastFromResult(result, self.translatedText('status.waiting_vehicle', 'Waiting for vehicle…'), null);
+        });
+    },
+
+    receiveBatteryHeat: function(data, poll) {
+        if (poll <= this._batteryHeatLastPoll) return;
+        this._batteryHeatLastPoll = poll;
+        var status = data.batteryHeatStatus;
+        if (status === undefined && typeof data.batteryHeat === 'boolean') {
+            status = data.batteryHeat ? 'on' : 'off';
+        }
+        if (status !== 'on' && status !== 'off' && status !== 'completed') status = 'unknown';
+        var observedAt = Number(data.batteryHeatObservedAtMs) || 0;
+        if (this._batteryHeatRequestedAt && observedAt < this._batteryHeatRequestedAt) status = 'unknown';
+        this.vehicleState.batteryHeatStatus = status;
+        var pending = this._batteryHeatPending;
+        if (pending && pending.accepted && status !== 'unknown'
+                && (status === (pending.enabled ? 'on' : 'off') || status === 'completed')) {
+            clearTimeout(pending.timeout);
+            this._batteryHeatPending = null;
+        }
+        this.updateBatteryHeatUI();
+    },
+
     updateBatteryHeatUI: function() {
-        var btn = document.getElementById('btnBatteryHeat');
-        if (!btn) return;
-        if (this.vehicleState.batteryHeat === true) btn.classList.add('on');
-        else btn.classList.remove('on');
+        var status = document.getElementById('batteryHeatStatus');
+        if (!status) return;
+        var pending = this._batteryHeatPending;
+        var value = this.vehicleState.batteryHeatStatus;
+        var text = this.translatedText('common.unknown', 'Unknown');
+        if (pending) text = this.translatedText('status.waiting_vehicle', 'Waiting for vehicle…');
+        else if (value === 'on') text = this.translatedText('keymap.on', 'On');
+        else if (value === 'off') text = this.translatedText('keymap.off', 'Off');
+        else if (value === 'completed') text = this.translatedText('common.done', 'Done');
+        if (status.textContent !== text) status.textContent = text;
+        document.getElementById('btnBatteryHeatOn').disabled = !!pending;
+        document.getElementById('btnBatteryHeatOff').disabled = !!pending;
     },
 
     updateLightsUI: function() {
@@ -7157,6 +8058,7 @@ var VC = {
         if (result.success) type = 'success';
         else if (result.outcome === 'auth_required') type = 'info';
         else if (result.outcome === 'rate_limited') type = 'info';
+        else if (result.code === 'step_up_busy' || result.code === 'step_up_cancelled') type = 'info';
         else type = 'error';
         this.toast(msg, type);
     },

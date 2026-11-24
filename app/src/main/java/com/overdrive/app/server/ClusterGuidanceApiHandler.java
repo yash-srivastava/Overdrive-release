@@ -1,6 +1,7 @@
 package com.overdrive.app.server;
 
 import com.overdrive.app.config.UnifiedConfigManager;
+import com.overdrive.app.customlayouts.daemon.feed.CustomLayoutsFeed;
 import com.overdrive.app.navmap.cluster.ClusterGuidanceDaemon;
 import com.overdrive.app.navmap.cluster.ClusterGuidanceFrame;
 
@@ -35,13 +36,19 @@ public final class ClusterGuidanceApiHandler {
                 if (!ClusterGuidanceFrame.validSource(source) || sequence <= 0)
                     throw new IllegalArgumentException("invalid source or sequence");
                 boolean accepted = true;
-                if (method.equals("DELETE") || input.optBoolean("clear", false))
+                if (method.equals("DELETE") || input.optBoolean("clear", false)) {
                     ClusterGuidanceDaemon.clear(source, sequence);
-                else accepted = ClusterGuidanceDaemon.submit(new ClusterGuidanceFrame(source,
-                        input.getInt("maneuverType"), input.getInt("distanceMeters"),
-                        input.optString("roadName", ""), input.optInt("remainingDistanceMeters", -1),
-                        input.optInt("remainingTimeSeconds", -1), input.optInt("roundaboutExit", 0),
-                        input.optInt("canIconOverride", 0)), sequence);
+                    CustomLayoutsFeed.onGuidanceClear(source, sequence);
+                } else {
+                    ClusterGuidanceFrame frame = new ClusterGuidanceFrame(source,
+                            input.getInt("maneuverType"), input.getInt("distanceMeters"),
+                            input.optString("roadName", ""), input.optInt("remainingDistanceMeters", -1),
+                            input.optInt("remainingTimeSeconds", -1), input.optInt("roundaboutExit", 0),
+                            input.optInt("canIconOverride", 0));
+                    accepted = ClusterGuidanceDaemon.submit(frame, sequence);
+                    // Custom Layouts draws the turn itself, whether or not the vendor cluster takes it.
+                    CustomLayoutsFeed.onGuidance(frame, sequence, input);
+                }
                 HttpResponse.sendJson(out, new JSONObject().put("accepted", accepted).toString());
             } catch (IllegalArgumentException | org.json.JSONException invalid) {
                 HttpResponse.sendError(out, 400, "invalid guidance frame");

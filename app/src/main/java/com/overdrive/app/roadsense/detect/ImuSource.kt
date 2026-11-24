@@ -1,6 +1,7 @@
 package com.overdrive.app.roadsense.detect
 
 import android.hardware.Sensor
+import android.hardware.SensorDirectChannel
 import android.hardware.SensorManager
 import android.util.Log
 
@@ -89,6 +90,46 @@ object ImuSource {
 
     private fun Sensor?.isInertial(): Boolean =
         this != null && name.contains(INERTIAL_MARKER, ignoreCase = true)
+
+    /** The single real IMU of a DiLink 5 table (no "-iner" twin, no stub). */
+    data class SingleImu(val accelerometer: Sensor, val gyroscope: Sensor?)
+
+    /**
+     * DiLink 5 only: the sole non-wake-up accelerometer (and gyro) when the table has no
+     * "-iner" sensor. Null when the table doesn't have that shape, so callers keep [resolve].
+     */
+    fun resolveDiLink5(sm: SensorManager): SingleImu? {
+        val accels = sm.getSensorList(Sensor.TYPE_ACCELEROMETER)
+        if (accels.any { it.name.contains(INERTIAL_MARKER, ignoreCase = true) }) return null
+        val accel = soleCandidate(accels) ?: return null
+        return SingleImu(accel, soleCandidate(sm.getSensorList(Sensor.TYPE_GYROSCOPE)))
+    }
+
+    private fun soleCandidate(list: List<Sensor>): Sensor? =
+        list.filter { !it.isWakeUpSensor && !it.name.equals(STUB_NAME, ignoreCase = true) }
+            .singleOrNull()
+
+    /** Motion-sensor table for the daemon log (rates, FIFO, direct-channel support). */
+    fun inventory(sm: SensorManager): String =
+        sm.getSensorList(Sensor.TYPE_ALL)
+            .filter { it.type in INVENTORY_TYPES }
+            .joinToString(prefix = "[", postfix = "]", separator = "; ") { s ->
+                val memFile = s.isDirectChannelTypeSupported(SensorDirectChannel.TYPE_MEMORY_FILE)
+                "t${s.type} '${s.name}' ${s.vendor} v${s.version} minDelay=${s.minDelay} " +
+                    "maxDelay=${s.maxDelay} fifo=${s.fifoMaxEventCount} wake=${s.isWakeUpSensor} " +
+                    "direct=${s.highestDirectReportRateLevel}${if (memFile) "/memfile" else ""}"
+            }
+
+    private val INVENTORY_TYPES = setOf(
+        Sensor.TYPE_ACCELEROMETER,
+        Sensor.TYPE_ACCELEROMETER_UNCALIBRATED,
+        Sensor.TYPE_GYROSCOPE,
+        Sensor.TYPE_GYROSCOPE_UNCALIBRATED,
+        Sensor.TYPE_GRAVITY,
+        Sensor.TYPE_LINEAR_ACCELERATION,
+        Sensor.TYPE_ROTATION_VECTOR,
+        Sensor.TYPE_GAME_ROTATION_VECTOR,
+    )
 
     /** One-time inventory log so we can audit any trim's sensor table from logcat. */
     private fun logInventory(sm: SensorManager) {

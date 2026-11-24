@@ -1,5 +1,7 @@
 package com.overdrive.app.camera;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import android.graphics.SurfaceTexture;
 import android.media.MediaFormat;
 import android.opengl.EGLSurface;
@@ -207,11 +209,9 @@ public class OemDashcamPipeline {
     private int overlayUTextureLoc = -1;
     private java.nio.FloatBuffer overlayVertexBuffer;
     private java.nio.FloatBuffer overlayTexCoordBuffer;
-    // Renderer that produces the 1280×80 ARGB bitmap each frame. Allocated
-    // lazily on the GL thread once the context is current — Bitmap creation
-    // is thread-agnostic, but holding it on the GL thread keeps lifetimes
-    // simple (created in init, released in stop).
-    private OverlayBitmapRenderer overlayRenderer;
+    // Built by overlayLifecycle off the GL thread, only once burn-in is enabled;
+    // the GL thread reads it once per frame.
+    private volatile OverlayBitmapRenderer overlayRenderer;
     private int overlayFrameCounter = 0;
     private boolean overlayTextureInitialized = false;
     private boolean overlayTextureReady = false;
@@ -257,6 +257,7 @@ public class OemDashcamPipeline {
     private final AtomicBoolean recording = new AtomicBoolean(false);
     private volatile long cameraAttachedAtMs = 0L;   // elapsedRealtime; 0 = not attached
     private volatile boolean cameraFrameSeen = false;
+    private volatile long lastCameraFrameElapsedMs = 0L;
     // True when the in-flight clip was opened by the surveillance EVENT path
     // (tryStartIfIdle), as opposed to the continuous / resolver path
     // (startRecording). The trigger-lifecycle resolver must NOT finalize a
@@ -381,6 +382,53 @@ public class OemDashcamPipeline {
     private volatile com.overdrive.app.telemetry.TelemetryFields overlayFields =
         com.overdrive.app.telemetry.TelemetryFields.legacyDefault();
 
+    // Serializes overlay config, recording, writer-abort, start/stop and collector
+    // changes; each polling start is released on the collector that took it.
+    private final OemOverlayLifecycle<TelemetryDataCollector, OverlayBitmapRenderer>
+            overlayLifecycle = new OemOverlayLifecycle<>(
+        new OemOverlayLifecycle.Operations<TelemetryDataCollector, OverlayBitmapRenderer>() {
+            @Override public OverlayBitmapRenderer createRenderer() {
+                try {
+                    OverlayBitmapRenderer renderer = new OverlayBitmapRenderer();
+                    overlayRenderer = renderer;
+                    return renderer;
+                } catch (Throwable t) {
+                    logger.warn("OverlayBitmapRenderer init failed: " + t.getMessage());
+                    return null;
+                }
+            }
+            @Override public void updateFields(OverlayBitmapRenderer renderer) {
+                renderer.setActiveFields(overlayFields);
+            }
+            @Override public void updateDemand(TelemetryDataCollector collector) {
+                collector.setOverlayFieldDemand("oem",
+                    overlayFields.has(com.overdrive.app.telemetry.TelemetryFields.Field.TURN_SIGNALS),
+                    overlayFields.hasAny(
+                        com.overdrive.app.telemetry.TelemetryFields.Field.SEATBELT_DRIVER,
+                        com.overdrive.app.telemetry.TelemetryFields.Field.SEATBELT_PASSENGER));
+            }
+            @Override public void acquirePolling(TelemetryDataCollector collector) {
+                collector.setOverlayRecordingActive(true);
+                collector.startPolling();
+            }
+            @Override public void releasePolling(TelemetryDataCollector collector) {
+                collector.clearOverlayFieldDemand("oem");
+                collector.setOverlayRecordingActive(false);
+                collector.stopPolling();
+            }
+            @Override public void startRaster(OverlayBitmapRenderer renderer,
+                    TelemetryDataCollector collector) {
+                renderer.startWorker(collector);
+            }
+            @Override public void stopRaster(OverlayBitmapRenderer renderer) {
+                renderer.stopWorker();
+            }
+            @Override public void releaseRenderer(OverlayBitmapRenderer renderer) {
+                overlayRenderer = null;
+                renderer.release();
+            }
+        });
+
     public OemDashcamPipeline(String outputDir) {
         this.outputDir = outputDir;
     }
@@ -470,6 +518,9 @@ public class OemDashcamPipeline {
 
             startThreads();
             try {
+                // Burn-in assets are built here, off the GL thread, only if enabled.
+                overlayLifecycle.beginSession();
+                reconcileTelemetryHold();
                 initEglAndEncoder();
                 requireStartCurrent(
                     cameraStartEpoch, lifecycleOwnerCurrent, "post-EGL setup");
@@ -477,6 +528,8 @@ public class OemDashcamPipeline {
                     cameraStartEpoch, lifecycleOwnerCurrent);
                 requireStartCurrent(
                     cameraStartEpoch, lifecycleOwnerCurrent, "post-camera open");
+                cameraFrameSeen = false;
+                lastCameraFrameElapsedMs = 0L;
                 installFrameCallback();
                 cameraAttachedAtMs = SystemClock.elapsedRealtime();
                 requireStartCurrent(
@@ -791,7 +844,7 @@ public class OemDashcamPipeline {
         if (enc != null) enc.stopEventRecording(true, Math.max(0L, postRecordMs));
         reapplyIdleStrideAfterStop();
         reconcileTelemetryHold();
-        if (path == null || !new File(path).isFile()) return null;
+        if (path == null || !RemovableStorageFs.isFile(new File(path))) return null;
         return new FinalizedClip(path, enc != null ? enc.getLastFinalizedDurationSec() : 0);
     }
 
@@ -978,14 +1031,6 @@ public class OemDashcamPipeline {
         reconcileTelemetryHold();
     }
 
-    /**
-     * Tracks whether THIS pipeline currently holds a polling refcount on
-     * the shared TelemetryDataCollector. Mirrors GpuSurveillancePipeline's
-     * overlayPollingHeld discipline so two consumers (pano + OEM) never
-     * underflow each other's start/stop pairs.
-     */
-    private boolean overlayPollingHeld = false;
-
     public void setOverlayEnabled(boolean enabled) {
         overlayEnabled = enabled;
         reconcileTelemetryHold();
@@ -1044,69 +1089,17 @@ public class OemDashcamPipeline {
         }
     }
 
-    private void reconcileTelemetryHold() {
-        // Stop the overlay raster worker whenever the collector is gone (it has
-        // nothing to read) — do this BEFORE the early return so a cleared
-        // collector reliably tears the worker down.
-        OverlayBitmapRenderer r = overlayRenderer;
-        // Keep the renderer's field selection current whenever it exists.
-        if (r != null) r.setActiveFields(overlayFields);
-        if (telemetryCollector == null) {
-            if (r != null) r.stopWorker();
-            // Drop any beam demand this flow published — the overlay can't draw
-            // without a collector, and a stale entry would keep the light poll
-            // alive for a flow that has stopped.
-            com.overdrive.app.byd.BydDataCollector.setOverlayBeamDemand("oem", false);
-            return;
-        }
-        // Hold polling only when overlay is enabled AND we're actively
-        // recording (no need to poll CAN/GPS just because the user opted
-        // in — the overlay only paints into clips that are actually being
-        // written to disk).
-        boolean shouldHold = overlayEnabled && running.get() && recording.get();
-        // Report which overlay-only signals this flow draws so the collector can
-        // skip the reflective turn-signal / seatbelt reads when unused. Issued on
-        // EVERY reconcile while holding (not just the start edge) so a LIVE field
-        // change mid-recording — setOverlayFields() -> reconcileTelemetryHold()
-        // with shouldHold already true — re-reports demand. Without this, newly
-        // enabling turn/seatbelt mid-clip would draw a field whose HAL read is
-        // still skipped (stale/dead). setOverlayFieldDemand is idempotent.
-        if (shouldHold) {
-            telemetryCollector.setOverlayFieldDemand(
-                "oem",
-                overlayFields.has(com.overdrive.app.telemetry.TelemetryFields.Field.TURN_SIGNALS),
-                overlayFields.hasAny(
-                    com.overdrive.app.telemetry.TelemetryFields.Field.SEATBELT_DRIVER,
-                    com.overdrive.app.telemetry.TelemetryFields.Field.SEATBELT_PASSENGER));
-        }
-        // Beams live on BydDataCollector's 5 s poll (not the telemetry collector)
-        // and that poll is otherwise automation-gated, so declare demand here or
-        // the beam glyphs stay frozen at their boot state. Outside the shouldHold
-        // branch so the demand is also CLEARED when this flow stops drawing.
-        com.overdrive.app.byd.BydDataCollector.setOverlayBeamDemand(
-            "oem",
+    private synchronized void reconcileTelemetryHold() {
+        TelemetryDataCollector collector = telemetryCollector;
+        boolean shouldHold = overlayLifecycle.reconcile(collector,
+            overlayEnabled, running.get(), recording.get());
+        // Beams live on BydDataCollector's separate 5 s poll. Publish the
+        // actual held state, not just an enabled flag (a failed renderer or
+        // absent collector cannot render the beam glyphs).
+        com.overdrive.app.byd.BydDataCollector.setOverlayBeamDemand("oem",
             shouldHold && overlayFields.hasAny(
                 com.overdrive.app.telemetry.TelemetryFields.Field.LOW_BEAM,
                 com.overdrive.app.telemetry.TelemetryFields.Field.HIGH_BEAM));
-        if (shouldHold && !overlayPollingHeld) {
-            telemetryCollector.setOverlayRecordingActive(true);
-            telemetryCollector.startPolling();
-            overlayPollingHeld = true;
-        } else if (!shouldHold && overlayPollingHeld) {
-            telemetryCollector.clearOverlayFieldDemand("oem");
-            telemetryCollector.setOverlayRecordingActive(false);
-            telemetryCollector.stopPolling();
-            overlayPollingHeld = false;
-        }
-        // Run the off-GL-thread overlay raster worker on the same condition the
-        // GL composite uses (overlayEnabled && recording). startWorker/stopWorker
-        // are idempotent. overlayRenderer is created lazily on the GL thread
-        // (line ~1175); if not up yet, the next reconcile (or the GL-init path)
-        // starts it.
-        if (r != null) {
-            if (shouldHold) r.startWorker(telemetryCollector);
-            else r.stopWorker();
-        }
     }
 
     /**
@@ -1634,18 +1627,6 @@ public class OemDashcamPipeline {
                     overlayTextureInitialized = false;
                     overlayTextureReady = false;
                     overlayFrameCounter = 0;
-
-                    try {
-                        overlayRenderer = new OverlayBitmapRenderer();
-                        // Renderer is created lazily here on the GL thread, possibly
-                        // AFTER reconcileTelemetryHold already wanted the worker up —
-                        // reconcile now that the renderer exists so the off-thread
-                        // raster starts if overlay is active.
-                        reconcileTelemetryHold();
-                    } catch (Throwable t) {
-                        logger.warn("OverlayBitmapRenderer init failed: " + t.getMessage());
-                        overlayRenderer = null;
-                    }
                 }
             } catch (Exception e) {
                 throw new RuntimeException(e);
@@ -1837,6 +1818,7 @@ public class OemDashcamPipeline {
         // dispatch is the only reason this thread exists.
         cameraSurfaceTexture.setOnFrameAvailableListener(st -> {
             cameraFrameSeen = true;
+            lastCameraFrameElapsedMs = SystemClock.elapsedRealtime();
             synchronized (frameSync) {
                 imagePending = true;
                 frameSync.notify();
@@ -1847,6 +1829,13 @@ public class OemDashcamPipeline {
     /** True once the camera has delivered at least one frame since start(). */
     public boolean hasDeliveredFrame() {
         return cameraFrameSeen;
+    }
+
+    /** True only while a frame has arrived recently enough to represent a live feed. */
+    public boolean hasRecentFrame(long maxAgeMs) {
+        long last = lastCameraFrameElapsedMs;
+        return running.get() && cameraFrameSeen && last > 0L
+            && SystemClock.elapsedRealtime() - last <= Math.max(1L, maxAgeMs);
     }
 
     /** Ms since the camera attached with no frame yet; -1 if streamed, stopped or not attached. */
@@ -2132,10 +2121,11 @@ public class OemDashcamPipeline {
         // while a clip is actively being written, the user opted in,
         // and we have a renderer + collector to source the bitmap from.
         // Cheap when off: a single boolean check on the volatile flag.
+        final OverlayBitmapRenderer renderer = overlayRenderer;
         if (overlayEnabled
                 && recording.get()
                 && overlayProgramId != 0
-                && overlayRenderer != null
+                && renderer != null
                 && telemetryCollector != null) {
             overlayFrameCounter++;
             try {
@@ -2148,7 +2138,7 @@ public class OemDashcamPipeline {
                 // Upload the new bitmap only when the double buffer
                 // actually swapped — texSubImage2D on an unchanged
                 // bitmap is wasted bandwidth (matches the pano impl).
-                android.graphics.Bitmap overlayBitmap = overlayRenderer.swapAndGetFront();
+                android.graphics.Bitmap overlayBitmap = renderer.swapAndGetFront();
                 if (overlayBitmap != null && !overlayBitmap.isRecycled()) {
                     GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, overlayTextureId);
                     if (!overlayTextureInitialized) {
@@ -2561,12 +2551,9 @@ public class OemDashcamPipeline {
         overlayTextureInitialized = false;
         overlayTextureReady = false;
         overlayFrameCounter = 0;
-        if (overlayRenderer != null) {
-            // Stop+join the raster worker BEFORE recycling its bitmaps so it
-            // can't draw into a recycled bitmap (use-after-free).
-            try { overlayRenderer.stopWorker(); } catch (Throwable ignored) {}
-            try { overlayRenderer.release(); } catch (Throwable ignored) {}
-            overlayRenderer = null;
+        // Stops and joins the raster worker before its bitmaps are recycled.
+        try { overlayLifecycle.finishSession(); } catch (Throwable t) {
+            logger.warn("stop: overlay release failed: " + t.getMessage());
         }
         eglCore = null;
 

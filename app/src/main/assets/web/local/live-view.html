@@ -12,11 +12,18 @@
     <meta name="theme-color" content="#00876C">
     <script src="../shared/theme.js?v=12"></script>
     <script src="../shared/skeleton.js?v=4"></script>
-    <script src="../shared/app-shell.js?v=23"></script>
+    <script src="../shared/app-shell.js?v=26"></script>
     <script>
         if (typeof window.AndroidBridge !== 'undefined') {
             document.documentElement.classList.add('is-app-webview');
         }
+        // Last stream aspect sizes the phone stage before the first frame arrives.
+        try {
+            var lvAspect = parseFloat(localStorage.getItem('lv_video_aspect'));
+            if (lvAspect >= 0.5 && lvAspect <= 3) {
+                document.documentElement.style.setProperty('--lv-video-aspect', String(lvAspect));
+            }
+        } catch (e) {}
     </script>
     <style>
         html.is-app-webview .cabin-listen-btn { display: none !important; }
@@ -28,335 +35,11 @@
     <script src="https://cdn.jsdelivr.net/npm/jmuxer@2.0.4/dist/jmuxer.min.js"></script>
     <script src="../shared/SotaPlayer.js?v=14"></script>
     <script src="../shared/Decoder.js"></script>
-    <script src="../shared/YUVCanvas.js"></script>
-    <script src="../shared/Player.js"></script>
+    <script src="../shared/YUVCanvas.js?v=2"></script>
+    <script src="../shared/Player.js?v=2"></script>
 </head>
 <body class="live-view-page">
-    <div class="app-layout">
-        <!-- Sidebar -->
-        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=23) -->
-        <div id="app-shell-mount"></div>
-        <!-- Main Content -->
-        <main class="main-content">
-            <div class="mobile-header" id="mobileHeader">
-                <button class="menu-toggle" onclick="toggleSidebar()">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/>
-                    </svg>
-                </button>
-                <span style="font-weight:600;" data-i18n="nav.live_view">Live View</span>
-                <div style="width:40px;"></div>
-            </div>
-
-            <div class="live-tabs-view" id="tabsView">
-                <div class="tab-content">
-                    <!-- Camera-first Live dashboard. In landscape the camera
-                         stage keeps most of the canvas while the selector and
-                         location preview share a utility rail on the right. -->
-                    <div class="tab-panel active" id="panelCameras">
-                        <div class="seamless-camera-view">
-                            <div class="camera-stage">
-                            <!-- Top Bar -->
-                            <div class="camera-top-bar">
-                                <div class="top-bar-left">
-                                    <div class="connection-status" id="connectionStatus" role="status"
-                                         aria-label="Select Camera"
-                                         data-i18n-attr="aria-label:pip.select_camera">
-                                        <span class="conn-dot"></span>
-                                    </div>
-                                </div>
-                                <div class="top-bar-right">
-                                    <!-- The <select> stays the source of truth for the
-                                         quality value and its localized labels; the
-                                         trigger and list mirror it because a native
-                                         option popup can't be themed. -->
-                                    <div class="quality-menu is-loading" id="qualityMenu" aria-busy="true">
-                                        <select id="qualitySelector" class="quality-menu__native" onchange="BYD.stream.setQuality(this.value)">
-                                            <option value="ULTRA_LOW"  data-i18n="stream.quality_ultra_low">Ultra Low (400k)</option>
-                                            <option value="LOW"        data-i18n="stream.quality_low">Low (600k)</option>
-                                            <option value="MEDIUM"     selected data-i18n="stream.quality_medium">Medium (1M)</option>
-                                            <option value="HIGH"       data-i18n="stream.quality_high">High (1.5M)</option>
-                                            <option value="ULTRA_HIGH" data-i18n="stream.quality_ultra_high">Ultra High (2.5M)</option>
-                                            <option value="SMOOTH"     data-i18n="stream.quality_smooth">Smooth (3.5M, 25 fps)</option>
-                                            <option value="MAX"        data-i18n="stream.quality_max">Max (5M, 30 fps)</option>
-                                        </select>
-                                        <button type="button" class="quality-menu__trigger" id="qualityMenuTrigger"
-                                                aria-haspopup="listbox" aria-expanded="false"
-                                                data-i18n-attr="aria-label:recording.video_quality_title"
-                                                aria-label="Video Quality">
-                                            <span class="quality-menu__value" id="qualityMenuValue">Medium (1M)</span>
-                                            <svg class="quality-menu__chevron" viewBox="0 0 24 24" fill="none"
-                                                 stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                                <path d="m6 9 6 6 6-6"/>
-                                            </svg>
-                                        </button>
-                                        <div class="quality-menu__list" id="qualityMenuList" role="listbox"></div>
-                                    </div>
-                                    <button class="top-bar-btn cabin-listen-btn"
-                                            id="cabinListenButton"
-                                            type="button"
-                                            onclick="BYD.cabinListener.toggle()"
-                                            aria-pressed="false"
-                                            data-i18n-attr="title:liveview.listen_cabin;aria-label:liveview.listen_cabin"
-                                            title="Listen to cabin"
-                                            aria-label="Listen to cabin">
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                            <path d="M11 5 6 9H2v6h4l5 4V5Z"/>
-                                            <path d="M15.5 8.5a5 5 0 0 1 0 7"/>
-                                            <path d="M18.5 5.5a9 9 0 0 1 0 13"/>
-                                        </svg>
-                                    </button>
-                                    <button type="button" class="top-bar-btn vehicle-actions-trigger" id="vehicleActionsTrigger"
-                                            onclick="BYD.stream.toggleVehicleActions()" aria-haspopup="true"
-                                            aria-controls="deterrentControls" aria-expanded="false"
-                                            data-i18n-attr="title:liveview.actions;aria-label:liveview.actions"
-                                            title="Actions" aria-label="Actions">
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                            <path d="m6 9 6 6 6-6"/>
-                                        </svg>
-                                        <span data-i18n="liveview.actions">Actions</span>
-                                    </button>
-                                    <button type="button" class="top-bar-btn" id="liveRewindBtn"
-                                            onclick="location.href='events.html?view=timeline&amp;t='+(new Date().getTime()-60000)"
-                                            data-i18n-attr="title:tlview.rewind;aria-label:tlview.rewind"
-                                            title="Rewind" aria-label="Rewind">
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                            <path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>
-                                        </svg>
-                                    </button>
-                                    <button class="top-bar-btn" onclick="BYD.stream.toggleFullscreen()" aria-label="Fullscreen" data-i18n-attr="aria-label:events.player_fullscreen;title:events.player_fullscreen" title="Fullscreen">
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            <path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/>
-                                            <path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>
-                                        </svg>
-                                    </button>
-                                </div>
-                            </div>
-
-                            <!-- Video Display -->
-                            <div class="video-display-area" id="videoDisplayArea">
-                                <video id="hw_player" autoplay muted playsinline></video>
-                                <div id="sw_container"></div>
-                                <canvas id="sota_canvas"></canvas>
-                                <div class="video-idle-state" id="videoIdleState">
-                                    <div class="idle-icon">
-                                        <svg class="idle-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                            <path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/>
-                                        </svg>
-                                        <svg class="idle-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                             stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
-                                            <path d="M12 9v4"/><path d="M12 17h.01"/>
-                                            <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/>
-                                        </svg>
-                                        <span class="idle-spinner" aria-hidden="true"></span>
-                                    </div>
-                                    <span class="idle-text" data-i18n="stream.idle_hint">Tap a camera on the car below</span>
-                                    <span class="idle-subtext" id="videoIdleSubtext"></span>
-                                </div>
-                                <div class="camera-label-overlay" id="cameraLabelOverlay" style="display:none;">
-                                    <span id="currentCameraLabel" data-i18n="stream.front_camera">Front Camera</span>
-                                </div>
-
-                                <!-- Popover hidden until Actions is opened. Keep issue #425
-                                     Lock/Unlock behavior and issue #118 deterrent handlers. -->
-                                <div class="deterrent-controls" id="deterrentControls" style="display:none;"
-                                     role="group" data-i18n-attr="aria-label:liveview.actions" aria-label="Actions">
-                                    <!-- Door lock / unlock. Unlike horn + flash these have a local
-                                         rail (SDK_FIRST, cloud as fallback), so the row is shown
-                                         when either cloud or the local remote key is available. -->
-                                    <div class="vehicle-lock-row" id="vehicleLockRow" style="display:none;">
-                                        <button type="button" class="deterrent-btn deterrent-lock" id="vehicleLockBtn"
-                                                onclick="BYD.stream.fireLiveAction('lock')"
-                                                data-i18n-attr="title:dashboard.cmd_lock;aria-label:dashboard.cmd_lock"
-                                                title="Lock" aria-label="Lock">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                                <rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>
-                                            </svg>
-                                            <span class="deterrent-label" data-i18n="dashboard.cmd_lock">Lock</span>
-                                        </button>
-                                        <button type="button" class="deterrent-btn deterrent-unlock" id="vehicleUnlockBtn"
-                                                onclick="BYD.stream.fireLiveAction('unlock')"
-                                                data-i18n-attr="title:dashboard.cmd_unlock;aria-label:dashboard.cmd_unlock"
-                                                title="Unlock" aria-label="Unlock">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                                <rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/>
-                                            </svg>
-                                            <span class="deterrent-label" data-i18n="dashboard.cmd_unlock">Unlock</span>
-                                        </button>
-                                    </div>
-                                    <button type="button" class="deterrent-btn deterrent-flash" id="deterrentFlashBtn" style="display:none;"
-                                            onclick="BYD.stream.fireLiveAction('flash')"
-                                            data-i18n-attr="title:liveview.deterrent_flash;aria-label:liveview.deterrent_flash"
-                                            title="Flash" aria-label="Flash">
-                                        <!-- Lucide lightbulb -->
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                            <path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/>
-                                        </svg>
-                                        <span class="deterrent-label" data-i18n="liveview.deterrent_flash">Flash</span>
-                                    </button>
-                                    <button type="button" class="deterrent-btn deterrent-horn" id="deterrentHornBtn" style="display:none;"
-                                            onclick="BYD.stream.fireLiveAction('horn')"
-                                            data-i18n-attr="title:liveview.deterrent_horn;aria-label:liveview.deterrent_horn"
-                                            title="Horn" aria-label="Horn">
-                                        <!-- Lucide megaphone -->
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                            <path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>
-                                        </svg>
-                                        <span class="deterrent-label" data-i18n="liveview.deterrent_horn">Horn</span>
-                                    </button>
-                                    <button type="button" class="deterrent-btn" id="vehiclePowerOnBtn" style="display:none;"
-                                            onclick="BYD.stream.fireLiveAction('powerOn')">
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></svg>
-                                        <span class="deterrent-label" data-i18n="vehicle.power_on">Power on</span>
-                                    </button>
-                                    <button type="button" class="deterrent-btn" id="vehiclePowerOffBtn" style="display:none;"
-                                            onclick="BYD.stream.fireLiveAction('powerOff')">
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18.36 6.64A9 9 0 0 1 20.77 15"/><path d="M6.16 6.16a9 9 0 1 0 12.68 12.68"/><path d="M12 2v4"/><line x1="2" y1="2" x2="22" y2="22"/></svg>
-                                        <span class="deterrent-label" data-i18n="vehicle.power_off">Power off</span>
-                                    </button>
-                                    <button type="button" class="deterrent-btn" id="vehicleTrunkOpenBtn"
-                                            onclick="BYD.stream.fireLiveAction('trunkOpen')">
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 21H2"/><path d="M10 4a2 2 0 0 1 2.36-1.968l5.41.992A1.5 1.5 0 0 1 19 4.5V21l-7.876.992A1 1 0 0 1 10 21z"/><path d="M10.268 3H7a2 2 0 0 0-2 2v16"/><path d="M14 12h.01"/><path d="M22 21h-3"/></svg>
-                                        <span class="deterrent-label" data-i18n="dashboard.cmd_trunk_open">Open trunk</span>
-                                    </button>
-                                    <button type="button" class="deterrent-btn" id="vehicleTrunkCloseBtn"
-                                            onclick="BYD.stream.fireLiveAction('trunkClose')">
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v16"/><path d="M2 21h20"/><path d="M9 12h.01"/></svg>
-                                        <span class="deterrent-label" data-i18n="dashboard.cmd_trunk_close">Close trunk</span>
-                                    </button>
-                                </div>
-                            </div>
-                            </div>
-
-                            <aside class="live-utility-rail" id="liveUtilityRail">
-                            <section class="camera-selector-card" aria-label="Camera selector">
-                            <!-- Camera selector — first card in the landscape utility rail. -->
-                            <div class="selector-card-header">
-                                <h2 data-i18n="liveview.cameras">Cameras</h2>
-                            </div>
-                            <div class="car-selector-bottom">
-                                <div class="car-image-container">
-                                    <img class="car-image-fallback"
-                                         src="../shared/car-icon.webp"
-                                         alt=""
-                                         aria-hidden="true">
-                                    <canvas id="liveCarCanvas" class="car-image" aria-hidden="true"></canvas>
-                                    
-                                    <!-- Camera Hotspots with Pulse Animation -->
-                                    <div class="cam-hotspot" data-cam="1" onclick="BYD.stream.selectCamera(1)">
-                                        <div class="hotspot-pulse"></div>
-                                        <div class="hotspot-ring"></div>
-                                        <span class="hotspot-label" data-i18n="stream.hotspot_front">FRONT</span>
-                                    </div>
-                                    <!-- OEM Dashcam (data-cam=6). Hidden by default; the
-                                         init script unhides it iff /api/settings/quality
-                                         reports oemDashcam.oemDashcamCameraId >= 0. The
-                                         "DVR" pill sits on the hood, slightly off-centre
-                                         from the FRONT quadrant marker so users see the
-                                         standalone dashcam sensor as distinct from the
-                                         AVM front-quadrant stitch. -->
-                                    <div class="cam-hotspot cam-dvr" data-cam="6" style="display:none;" onclick="BYD.stream.selectCamera(6)">
-                                        <div class="hotspot-pulse"></div>
-                                        <div class="hotspot-ring"></div>
-                                        <span class="hotspot-label" data-i18n="stream.hotspot_oem_dashcam">DVR</span>
-                                    </div>
-                                    <div class="cam-hotspot" data-cam="3" onclick="BYD.stream.selectCamera(3)">
-                                        <div class="hotspot-pulse"></div>
-                                        <div class="hotspot-ring"></div>
-                                        <span class="hotspot-label" data-i18n="stream.hotspot_rear">REAR</span>
-                                    </div>
-                                    <div class="cam-hotspot" data-cam="4" onclick="BYD.stream.selectCamera(4)">
-                                        <div class="hotspot-pulse"></div>
-                                        <div class="hotspot-ring"></div>
-                                        <span class="hotspot-label" data-i18n="stream.hotspot_left">LEFT</span>
-                                    </div>
-                                    <div class="cam-hotspot" data-cam="2" onclick="BYD.stream.selectCamera(2)">
-                                        <div class="hotspot-pulse"></div>
-                                        <div class="hotspot-ring"></div>
-                                        <span class="hotspot-label" data-i18n="stream.hotspot_right">RIGHT</span>
-                                    </div>
-                                    <div class="cam-hotspot cam-all" data-cam="0" onclick="BYD.stream.selectCamera(0)">
-                                        <div class="hotspot-pulse"></div>
-                                        <div class="hotspot-ring"></div>
-                                        <span class="hotspot-label" data-i18n="stream.hotspot_all">ALL</span>
-                                    </div>
-                                </div>
-                            </div>
-                            </section>
-
-                            <section class="live-location-card" id="locationCard">
-                                <div class="location-card-header">
-                                    <div>
-                                        <h2 data-i18n="dashboard.card_location">Vehicle location</h2>
-                                        <div class="location-freshness is-sk">
-                                            <span class="location-freshness-dot"></span>
-                                            <span class="location-freshness-label">
-                                                <span id="lastGpsUpdate">—</span>
-                                            </span>
-                                            <span class="sk sk-cover" data-sk-group="gpsFreshness"></span>
-                                        </div>
-                                    </div>
-                                    <button type="button" class="location-close-button"
-                                            onclick="BYD.liveLayout.setMapExpanded(false)"
-                                            data-i18n-attr="aria-label:liveview.back_to_cameras"
-                                            aria-label="Back to cameras">
-                                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                                            <path fill="currentColor" d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l8.92-7.92L13.5 5.5 8 11h12z"/>
-                                        </svg>
-                                    </button>
-                                </div>
-
-                                <div class="location-map-frame">
-                                    <div class="map-container" id="mapContainer"></div>
-                                    <div class="map-overlay-actions">
-                                        <button class="btn-map-float btn-my-location"
-                                                onclick="BYD.map.showMyLocation()"
-                                                data-i18n-attr="aria-label:liveview.my_location"
-                                                aria-label="Show my location">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                <circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/>
-                                            </svg>
-                                        </button>
-                                        <button class="btn-map-float btn-directions"
-                                                onclick="BYD.map.openDirections()"
-                                                data-i18n-attr="aria-label:liveview.directions"
-                                                aria-label="Directions to vehicle">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l19-9-9 19-2-8-8-2z"/></svg>
-                                        </button>
-                                    </div>
-                                    <div class="location-distance-chip is-sk">
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
-                                        </svg>
-                                        <span class="location-distance-label">
-                                            <span id="distanceToCar">—</span>
-                                        </span>
-                                        <span class="sk sk-cover" data-sk-group="gpsDistance"></span>
-                                    </div>
-                                </div>
-
-                                <button type="button" class="location-expand-button"
-                                        id="locationExpandButton"
-                                        onclick="BYD.liveLayout.toggleMap()"
-                                        aria-expanded="false">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/>
-                                        <path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>
-                                    </svg>
-                                    <span id="locationExpandLabel" data-i18n="liveview.expand_map">Expand map</span>
-                                </button>
-                            </section>
-                            </aside>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </main>
-    </div>
-
-    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
-    <div id="toastContainer" class="toast-container"></div>
-
+    <!-- Styles before the markup so a slow load never paints it unstyled; in <body> so they stay after styles injected into <head>. -->
     <style>
         /* Theme tokens for the Live View page. The rail cards use the shared
            tile tokens. Controls over the video are dark glass in both schemes,
@@ -1062,9 +745,125 @@
         }
 
         .selector-card-header {
+            display: flex;
             flex: 0 0 auto;
+            align-items: center;
+            justify-content: space-between;
             padding: 14px 16px 0;
         }
+        .selector-card-header h2 { min-width: 0; }
+
+        /* All + DVR: a layout choice above the car, in the car hotspots' pill style. */
+        .cam-view-chip {
+            display: inline-flex;
+            flex: 0 0 auto;
+            align-items: center;
+            min-height: 30px;
+            margin: 0 0 0 12px;
+            padding: 0 12px 0 9px;
+            border: 1px solid var(--lv-hotspot-label-border);
+            border-radius: 999px;
+            background: var(--lv-hotspot-label-bg);
+            color: var(--lv-hotspot-label-text);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.32);
+            font-family: inherit;
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.06em;
+            line-height: 1;
+            text-transform: uppercase;
+            white-space: nowrap;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+            transition: color 0.2s, border-color 0.2s, background-color 0.2s, box-shadow 0.2s;
+        }
+        [dir="rtl"] .cam-view-chip { margin: 0 12px 0 0; padding: 0 9px 0 12px; }
+        /* The pill is taller than the title; the header grows instead of crowding FRONT. */
+        .camera-selector-card.has-view-chip .selector-card-header { padding-top: 10px; }
+        .cam-view-chip svg {
+            flex: 0 0 auto;
+            width: 15px;
+            height: 15px;
+            margin-right: 6px;
+            color: var(--lv-hotspot-active-text);
+        }
+        [dir="rtl"] .cam-view-chip svg { margin-right: 0; margin-left: 6px; }
+        .cam-view-chip.active {
+            color: var(--lv-hotspot-active-text);
+            background: rgba(0,35,31,0.96);
+            border-color: rgba(114,244,217,0.72);
+            box-shadow: 0 0 0 3px rgba(114,244,217,0.18), 0 2px 6px rgba(0,0,0,0.5);
+        }
+        .cam-view-chip:focus-visible {
+            outline: 2px solid var(--lv-hotspot-active-text);
+            outline-offset: 2px;
+        }
+        @media (hover: hover) {
+            .cam-view-chip:not(.active):hover {
+                color: var(--lv-hotspot-active-text);
+                border-color: rgba(114,244,217,0.62);
+            }
+        }
+        /* Waiting for a camera's first frame: the tapped target spins until it is live. */
+        .cam-hotspot.is-pending .hotspot-ring {
+            border-style: dashed;
+            border-color: var(--lv-hotspot-active-text);
+            animation: hotspotPendingSpin 1.2s linear infinite;
+        }
+        .cam-view-chip.is-pending { border-color: rgba(114,244,217,0.62); }
+        .cam-view-chip.is-pending svg { animation: chipPendingPulse 0.8s ease-in-out infinite alternate; }
+        @keyframes hotspotPendingSpin { to { transform: rotate(360deg); } }
+        @keyframes chipPendingPulse { from { opacity: 1; } to { opacity: 0.35; } }
+        @media (prefers-reduced-motion: reduce) {
+            .cam-hotspot.is-pending .hotspot-ring,
+            .cam-view-chip.is-pending svg { animation: none; }
+        }
+        /* The combined view lights the two sources it composes on the car itself. */
+        .camera-selector-card.is-combined-view .cam-hotspot.cam-all .hotspot-ring,
+        .camera-selector-card.is-combined-view .cam-hotspot[data-cam="6"] .hotspot-ring {
+            border-color: var(--lv-hotspot-active-text);
+            background: rgba(0,48,40,0.94);
+        }
+        .camera-selector-card.is-combined-view .cam-hotspot.cam-all .hotspot-label,
+        .camera-selector-card.is-combined-view .cam-hotspot[data-cam="6"] .hotspot-label {
+            color: var(--lv-hotspot-active-text);
+            background: rgba(0,35,31,0.96);
+            border-color: rgba(114,244,217,0.72);
+        }
+
+        /* Diagnostics live in the camera top bar; Cameras header stays intact. */
+        .broadway-ab-button {
+            min-height: 32px;
+            border: 1px solid var(--lv-pill-border-soft);
+            border-radius: 8px;
+            background: var(--lv-pill-bg);
+            color: inherit;
+            font-size: 11px;
+            cursor: pointer;
+            padding: 5px 8px;
+            white-space: nowrap;
+        }
+        .broadway-ab-button[hidden], .broadway-ab-summary[hidden] { display: none !important; }
+        .broadway-ab-summary {
+            position: absolute;
+            bottom: 8px;
+            left: 8px;
+            z-index: 35;
+            max-width: calc(100% - 16px);
+            max-height: 45%;
+            overflow: hidden;
+            pointer-events: none;
+            white-space: pre-line;
+            font-family: monospace;
+            font-size: 11px;
+            line-height: 1.45;
+            color: #fff;
+            background: rgba(0, 0, 0, .78);
+            border-radius: 6px;
+            padding: 6px 9px;
+        }
+        [dir="rtl"] .broadway-ab-summary { left: auto; right: 8px; }
 
         .camera-selector-card .car-selector-bottom {
             flex: 1 1 auto;
@@ -1333,6 +1132,16 @@
             margin-top: 8px;
         }
 
+        /* Both are about the viewing device; in the car app that is the car
+           itself and the WebView never grants geolocation. */
+        :root[data-android-embed="1"] #panelCameras .btn-my-location,
+        :root[data-android-embed="1"] #panelCameras .location-distance-chip {
+            display: none;
+        }
+        :root[data-android-embed="1"] #panelCameras .btn-my-location + .btn-map-float {
+            margin-top: 0;
+        }
+
         /* Map buttons: round, bar surface like the map chip; Directions is the
            filled main action. Size comes from styles.css and the car app. */
         .live-location-card .btn-map-float {
@@ -1502,12 +1311,20 @@
             #panelCameras .seamless-camera-view {
                 overflow: hidden;
             }
+            /* The stage hugs the stream's aspect so a tall phone shows no blank band
+               under the video; the cards below take the remaining height. */
             #panelCameras .camera-stage {
-                flex: 1 1 auto;
+                flex: 0 1 auto;
+                height: calc(100vw / var(--lv-video-aspect, 1.3333));
                 min-height: 0;
             }
+            #panelCameras .video-display-area { min-height: 0; }
+            #panelCameras .seamless-camera-view.fullscreen .camera-stage {
+                flex: 1 1 auto;
+                height: auto;
+            }
             #panelCameras .live-utility-rail {
-                flex: 0 0 calc(220px + var(--safe-bottom, 0px));
+                flex: 1 0 calc(220px + var(--safe-bottom, 0px));
                 flex-direction: row;
                 min-height: calc(220px + var(--safe-bottom, 0px));
                 padding: 4px 8px 0;
@@ -1535,6 +1352,22 @@
             #panelCameras .selector-card-header {
                 padding: 9px 10px 0;
             }
+            #panelCameras .seamless-camera-view.fullscreen .live-utility-rail {
+                flex: 0 0 calc(220px + var(--safe-bottom, 0px));
+            }
+            #panelCameras .camera-selector-card.has-view-chip .selector-card-header { padding-top: 6px; }
+            /* FRONT's label hangs 22px above the car; keep it below the pill. */
+            #panelCameras .camera-selector-card.has-view-chip .car-image-container { --car-gutter-top: 24px; }
+            #panelCameras .cam-view-chip {
+                min-height: 24px;
+                margin: 0 0 0 6px;
+                padding: 0 9px 0 7px;
+                font-size: 9px;
+                letter-spacing: 0.05em;
+            }
+            [dir="rtl"] #panelCameras .cam-view-chip { margin: 0 6px 0 0; padding: 0 7px 0 9px; }
+            #panelCameras .cam-view-chip svg { width: 13px; height: 13px; margin-right: 4px; }
+            [dir="rtl"] #panelCameras .cam-view-chip svg { margin-right: 0; margin-left: 4px; }
             #panelCameras .selector-card-header h2,
             #panelCameras .location-card-header h2 {
                 overflow: hidden;
@@ -1551,6 +1384,20 @@
                 width: 60px;
                 height: 126px;
                 transform: none;
+            }
+            /* The car grows with a taller card, bounded so LEFT/RIGHT labels stay inside it. */
+            @supports (aspect-ratio: 1 / 1) and (container-type: size) {
+                #panelCameras .camera-selector-card .car-selector-bottom {
+                    container-type: size;
+                    min-height: 0;
+                }
+                #panelCameras .camera-selector-card .car-image-container {
+                    width: auto;
+                    height: min(230px,
+                        calc(100cqh - var(--car-gutter-top) - var(--car-gutter-bottom)),
+                        max(126px, calc((58vw - 145px) * 2.1)));
+                    aspect-ratio: 60 / 126;
+                }
             }
             #panelCameras .cam-hotspot {
                 width: 32px;
@@ -1569,7 +1416,7 @@
             #panelCameras .cam-hotspot[data-cam="3"] { bottom: -6px; }
             #panelCameras .cam-hotspot[data-cam="4"] { left: -16px; }
             #panelCameras .cam-hotspot[data-cam="2"] { right: -16px; }
-            #panelCameras .cam-hotspot[data-cam="6"] { top: 18px; }
+            #panelCameras .cam-hotspot[data-cam="6"] { top: calc(27% - 16px); }
             #panelCameras .cam-hotspot.cam-all .hotspot-label {
                 top: calc(50% + 13px);
             }
@@ -1704,6 +1551,9 @@
         :root[data-android-embed="1"] .location-expand-button { font-size: var(--fs-body); }
         :root[data-android-embed="1"] #panelCameras .location-expand-button { flex-basis: 56px; }
         :root[data-android-embed="1"] .location-close-button { width: 56px; height: 56px; }
+        :root[data-android-embed="1"] .cam-view-chip { min-height: 40px; padding: 0 14px 0 11px; font-size: 12px; }
+        :root[data-android-embed="1"][dir="rtl"] .cam-view-chip { padding: 0 11px 0 14px; }
+        :root[data-android-embed="1"] .cam-view-chip svg { width: 18px; height: 18px; }
 
         /* Phone bottom bar (app-shell.js, browser only, shown under 769px). The
            panel already ends above it (main-content padding), so the camera view
@@ -1742,15 +1592,406 @@
         }
     </style>
 
-    <script src="../shared/auth.js"></script>
+    <div class="app-layout">
+        <!-- Sidebar -->
+        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=24) -->
+        <div id="app-shell-mount"></div>
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="mobile-header" id="mobileHeader">
+                <button class="menu-toggle" onclick="toggleSidebar()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/>
+                    </svg>
+                </button>
+                <span style="font-weight:600;" data-i18n="nav.live_view">Live View</span>
+                <div style="width:40px;"></div>
+            </div>
+
+            <div class="live-tabs-view" id="tabsView">
+                <div class="tab-content">
+                    <!-- Camera-first Live dashboard. In landscape the camera
+                         stage keeps most of the canvas while the selector and
+                         location preview share a utility rail on the right. -->
+                    <div class="tab-panel active" id="panelCameras">
+                        <div class="seamless-camera-view">
+                            <div class="camera-stage">
+                            <!-- Top Bar -->
+                            <div class="camera-top-bar">
+                                <div class="top-bar-left">
+                                    <div class="connection-status" id="connectionStatus" role="status"
+                                         aria-label="Select Camera"
+                                         data-i18n-attr="aria-label:pip.select_camera">
+                                        <span class="conn-dot"></span>
+                                    </div>
+                                </div>
+                                <div class="top-bar-right">
+                                    <!-- The <select> stays the source of truth for the
+                                         quality value and its localized labels; the
+                                         trigger and list mirror it because a native
+                                         option popup can't be themed. -->
+                                    <div class="quality-menu is-loading" id="qualityMenu" aria-busy="true">
+                                        <select id="qualitySelector" class="quality-menu__native" onchange="BYD.stream.setQuality(this.value)">
+                                            <option value="ULTRA_LOW"  data-i18n="stream.quality_ultra_low">Ultra Low (400k)</option>
+                                            <option value="LOW"        data-i18n="stream.quality_low">Low (600k)</option>
+                                            <option value="MEDIUM"     selected data-i18n="stream.quality_medium">Medium (1M)</option>
+                                            <option value="HIGH"       data-i18n="stream.quality_high">High (1.5M)</option>
+                                            <option value="ULTRA_HIGH" data-i18n="stream.quality_ultra_high">Ultra High (2.5M)</option>
+                                            <option value="SMOOTH"     data-i18n="stream.quality_smooth">Smooth (3.5M, 25 fps)</option>
+                                            <option value="MAX"        data-i18n="stream.quality_max">Max (5M, 30 fps)</option>
+                                        </select>
+                                        <button type="button" class="quality-menu__trigger" id="qualityMenuTrigger"
+                                                aria-haspopup="listbox" aria-expanded="false"
+                                                data-i18n-attr="aria-label:recording.video_quality_title"
+                                                aria-label="Video Quality">
+                                            <span class="quality-menu__value" id="qualityMenuValue">Medium (1M)</span>
+                                            <svg class="quality-menu__chevron" viewBox="0 0 24 24" fill="none"
+                                                 stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                                <path d="m6 9 6 6 6-6"/>
+                                            </svg>
+                                        </button>
+                                        <div class="quality-menu__list" id="qualityMenuList" role="listbox"></div>
+                                    </div>
+                                    <button class="top-bar-btn cabin-listen-btn"
+                                            id="cabinListenButton"
+                                            type="button"
+                                            onclick="BYD.cabinListener.toggle()"
+                                            aria-pressed="false"
+                                            data-i18n-attr="title:liveview.listen_cabin;aria-label:liveview.listen_cabin"
+                                            title="Listen to cabin"
+                                            aria-label="Listen to cabin">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                            <path d="M11 5 6 9H2v6h4l5 4V5Z"/>
+                                            <path d="M15.5 8.5a5 5 0 0 1 0 7"/>
+                                            <path d="M18.5 5.5a9 9 0 0 1 0 13"/>
+                                        </svg>
+                                    </button>
+                                    <button type="button" class="top-bar-btn vehicle-actions-trigger" id="vehicleActionsTrigger"
+                                            onclick="BYD.stream.toggleVehicleActions()" aria-haspopup="true"
+                                            aria-controls="deterrentControls" aria-expanded="false"
+                                            data-i18n-attr="title:liveview.actions;aria-label:liveview.actions"
+                                            title="Actions" aria-label="Actions">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                            <path d="m6 9 6 6 6-6"/>
+                                        </svg>
+                                        <span data-i18n="liveview.actions">Actions</span>
+                                    </button>
+                                    <button type="button" class="top-bar-btn" id="liveRewindBtn"
+                                            onclick="location.href='events.html?view=timeline&amp;t='+(new Date().getTime()-60000)"
+                                            data-i18n-attr="title:tlview.rewind;aria-label:tlview.rewind"
+                                            title="Rewind" aria-label="Rewind">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>
+                                        </svg>
+                                    </button>
+                                    <button class="top-bar-btn" onclick="BYD.stream.toggleFullscreen()" aria-label="Fullscreen" data-i18n-attr="aria-label:events.player_fullscreen;title:events.player_fullscreen" title="Fullscreen">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/>
+                                            <path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>
+                                        </svg>
+                                    </button>
+                                    <button type="button" id="broadwayAbButton"
+                                            class="broadway-ab-button" hidden
+                                            onclick="BYD.stream.cycleBroadwayAb()"
+                                            data-i18n-attr="title:liveview.broadway_diagnostic;aria-label:liveview.broadway_diagnostic"
+                                            title="Broadway diagnostic A/B" aria-label="Broadway diagnostic A/B"></button>
+                                </div>
+                            </div>
+
+                            <!-- Video Display -->
+                            <div class="video-display-area" id="videoDisplayArea">
+                                <video id="hw_player" autoplay muted playsinline></video>
+                                <div id="sw_container"></div>
+                                <canvas id="sota_canvas"></canvas>
+                                <div class="video-idle-state" id="videoIdleState">
+                                    <div class="idle-icon">
+                                        <svg class="idle-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                            <path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/>
+                                        </svg>
+                                        <svg class="idle-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                             stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+                                            <path d="M12 9v4"/><path d="M12 17h.01"/>
+                                            <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/>
+                                        </svg>
+                                        <span class="idle-spinner" aria-hidden="true"></span>
+                                    </div>
+                                    <span class="idle-text" data-i18n="stream.idle_hint">Tap a camera on the car below</span>
+                                    <span class="idle-subtext" id="videoIdleSubtext"></span>
+                                </div>
+                                <div class="broadway-ab-summary" id="broadwayAbSummary"
+                                     role="status" aria-live="polite" hidden></div>
+                                <div class="camera-label-overlay" id="cameraLabelOverlay" style="display:none;">
+                                    <span id="currentCameraLabel" data-i18n="stream.front_camera">Front Camera</span>
+                                </div>
+
+                                <!-- Popover hidden until Actions is opened. Keep issue #425
+                                     Lock/Unlock behavior and issue #118 deterrent handlers. -->
+                                <div class="deterrent-controls" id="deterrentControls" style="display:none;"
+                                     role="group" data-i18n-attr="aria-label:liveview.actions" aria-label="Actions">
+                                    <!-- Door lock / unlock. Unlike horn + flash these have a local
+                                         rail (SDK_FIRST, cloud as fallback), so the row is shown
+                                         when either cloud or the local remote key is available. -->
+                                    <div class="vehicle-lock-row" id="vehicleLockRow" style="display:none;">
+                                        <button type="button" class="deterrent-btn deterrent-lock" id="vehicleLockBtn"
+                                                onclick="BYD.stream.fireLiveAction('lock')"
+                                                data-i18n-attr="title:dashboard.cmd_lock;aria-label:dashboard.cmd_lock"
+                                                title="Lock" aria-label="Lock">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                                <rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+                                            </svg>
+                                            <span class="deterrent-label" data-i18n="dashboard.cmd_lock">Lock</span>
+                                        </button>
+                                        <button type="button" class="deterrent-btn deterrent-unlock" id="vehicleUnlockBtn"
+                                                onclick="BYD.stream.fireLiveAction('unlock')"
+                                                data-i18n-attr="title:dashboard.cmd_unlock;aria-label:dashboard.cmd_unlock"
+                                                title="Unlock" aria-label="Unlock">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                                <rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/>
+                                            </svg>
+                                            <span class="deterrent-label" data-i18n="dashboard.cmd_unlock">Unlock</span>
+                                        </button>
+                                    </div>
+                                    <button type="button" class="deterrent-btn deterrent-flash" id="deterrentFlashBtn" style="display:none;"
+                                            onclick="BYD.stream.fireLiveAction('flash')"
+                                            data-i18n-attr="title:liveview.deterrent_flash;aria-label:liveview.deterrent_flash"
+                                            title="Flash" aria-label="Flash">
+                                        <!-- Lucide lightbulb -->
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/>
+                                        </svg>
+                                        <span class="deterrent-label" data-i18n="liveview.deterrent_flash">Flash</span>
+                                    </button>
+                                    <button type="button" class="deterrent-btn deterrent-horn" id="deterrentHornBtn" style="display:none;"
+                                            onclick="BYD.stream.fireLiveAction('horn')"
+                                            data-i18n-attr="title:liveview.deterrent_horn;aria-label:liveview.deterrent_horn"
+                                            title="Horn" aria-label="Horn">
+                                        <!-- Lucide megaphone -->
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>
+                                        </svg>
+                                        <span class="deterrent-label" data-i18n="liveview.deterrent_horn">Horn</span>
+                                    </button>
+                                    <button type="button" class="deterrent-btn" id="vehiclePowerOnBtn" style="display:none;"
+                                            onclick="BYD.stream.fireLiveAction('powerOn')">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></svg>
+                                        <span class="deterrent-label" data-i18n="vehicle.power_on">Power on</span>
+                                    </button>
+                                    <button type="button" class="deterrent-btn" id="vehiclePowerOffBtn" style="display:none;"
+                                            onclick="BYD.stream.fireLiveAction('powerOff')">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18.36 6.64A9 9 0 0 1 20.77 15"/><path d="M6.16 6.16a9 9 0 1 0 12.68 12.68"/><path d="M12 2v4"/><line x1="2" y1="2" x2="22" y2="22"/></svg>
+                                        <span class="deterrent-label" data-i18n="vehicle.power_off">Power off</span>
+                                    </button>
+                                    <button type="button" class="deterrent-btn" id="vehicleTrunkOpenBtn"
+                                            onclick="BYD.stream.fireLiveAction('trunkOpen')">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 21H2"/><path d="M10 4a2 2 0 0 1 2.36-1.968l5.41.992A1.5 1.5 0 0 1 19 4.5V21l-7.876.992A1 1 0 0 1 10 21z"/><path d="M10.268 3H7a2 2 0 0 0-2 2v16"/><path d="M14 12h.01"/><path d="M22 21h-3"/></svg>
+                                        <span class="deterrent-label" data-i18n="dashboard.cmd_trunk_open">Open trunk</span>
+                                    </button>
+                                    <button type="button" class="deterrent-btn" id="vehicleTrunkCloseBtn"
+                                            onclick="BYD.stream.fireLiveAction('trunkClose')">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v16"/><path d="M2 21h20"/><path d="M9 12h.01"/></svg>
+                                        <span class="deterrent-label" data-i18n="dashboard.cmd_trunk_close">Close trunk</span>
+                                    </button>
+                                </div>
+                            </div>
+                            </div>
+
+                            <aside class="live-utility-rail" id="liveUtilityRail">
+                            <section class="camera-selector-card" aria-label="Camera selector">
+                            <!-- Camera selector — first card in the landscape utility rail. -->
+                            <div class="selector-card-header">
+                                <h2 data-i18n="liveview.cameras">Cameras</h2>
+                                <!-- Combined view 9 is a layout, not a camera position, so it sits in
+                                     the card header instead of on the car. Shown only where the car
+                                     can stream the 360 cameras and the DVR together. -->
+                                <button type="button" class="cam-view-chip" data-cam="9" style="display:none;" onclick="BYD.stream.selectCamera(9)">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="6" rx="1.5"/><rect x="3" y="11.5" width="8" height="4" rx="1"/><rect x="13" y="11.5" width="8" height="4" rx="1"/><rect x="3" y="17.5" width="8" height="3.5" rx="1"/><rect x="13" y="17.5" width="8" height="3.5" rx="1"/></svg>
+                                    <span data-i18n="stream.combined_view_label">All + DVR</span>
+                                </button>
+                            </div>
+                            <div class="car-selector-bottom">
+                                <div class="car-image-container">
+                                    <img class="car-image-fallback"
+                                         src="../shared/car-icon.webp"
+                                         alt=""
+                                         aria-hidden="true">
+                                    <canvas id="liveCarCanvas" class="car-image" aria-hidden="true"></canvas>
+                                    
+                                    <!-- Camera Hotspots with Pulse Animation -->
+                                    <div class="cam-hotspot" data-cam="1" onclick="BYD.stream.selectCamera(1)">
+                                        <div class="hotspot-pulse"></div>
+                                        <div class="hotspot-ring"></div>
+                                        <span class="hotspot-label" data-i18n="stream.hotspot_front">FRONT</span>
+                                    </div>
+                                    <!-- OEM Dashcam (data-cam=6). Hidden by default; the
+                                         init script unhides it iff /api/settings/quality
+                                         reports oemDashcam.oemDashcamCameraId >= 0. The
+                                         "DVR" pill sits on the hood, slightly off-centre
+                                         from the FRONT quadrant marker so users see the
+                                         standalone dashcam sensor as distinct from the
+                                         AVM front-quadrant stitch. -->
+                                    <div class="cam-hotspot cam-dvr" data-cam="6" style="display:none;" onclick="BYD.stream.selectCamera(6)">
+                                        <div class="hotspot-pulse"></div>
+                                        <div class="hotspot-ring"></div>
+                                        <span class="hotspot-label" data-i18n="stream.hotspot_oem_dashcam">DVR</span>
+                                    </div>
+                                    <div class="cam-hotspot" data-cam="3" onclick="BYD.stream.selectCamera(3)">
+                                        <div class="hotspot-pulse"></div>
+                                        <div class="hotspot-ring"></div>
+                                        <span class="hotspot-label" data-i18n="stream.hotspot_rear">REAR</span>
+                                    </div>
+                                    <div class="cam-hotspot" data-cam="4" onclick="BYD.stream.selectCamera(4)">
+                                        <div class="hotspot-pulse"></div>
+                                        <div class="hotspot-ring"></div>
+                                        <span class="hotspot-label" data-i18n="stream.hotspot_left">LEFT</span>
+                                    </div>
+                                    <div class="cam-hotspot" data-cam="2" onclick="BYD.stream.selectCamera(2)">
+                                        <div class="hotspot-pulse"></div>
+                                        <div class="hotspot-ring"></div>
+                                        <span class="hotspot-label" data-i18n="stream.hotspot_right">RIGHT</span>
+                                    </div>
+                                    <div class="cam-hotspot cam-all" data-cam="0" onclick="BYD.stream.selectCamera(0)">
+                                        <div class="hotspot-pulse"></div>
+                                        <div class="hotspot-ring"></div>
+                                        <span class="hotspot-label" data-i18n="stream.hotspot_all">ALL</span>
+                                    </div>
+                                </div>
+                            </div>
+                            </section>
+
+                            <section class="live-location-card" id="locationCard">
+                                <div class="location-card-header">
+                                    <div>
+                                        <h2 data-i18n="dashboard.card_location">Vehicle location</h2>
+                                        <div class="location-freshness is-sk">
+                                            <span class="location-freshness-dot"></span>
+                                            <span class="location-freshness-label">
+                                                <span id="lastGpsUpdate">—</span>
+                                            </span>
+                                            <span class="sk sk-cover" data-sk-group="gpsFreshness"></span>
+                                        </div>
+                                    </div>
+                                    <button type="button" class="location-close-button"
+                                            onclick="BYD.liveLayout.setMapExpanded(false)"
+                                            data-i18n-attr="aria-label:liveview.back_to_cameras"
+                                            aria-label="Back to cameras">
+                                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                                            <path fill="currentColor" d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l8.92-7.92L13.5 5.5 8 11h12z"/>
+                                        </svg>
+                                    </button>
+                                </div>
+
+                                <div class="location-map-frame">
+                                    <div class="map-container" id="mapContainer"></div>
+                                    <div class="map-overlay-actions">
+                                        <button class="btn-map-float btn-my-location"
+                                                onclick="BYD.map.showMyLocation()"
+                                                data-i18n-attr="aria-label:liveview.my_location"
+                                                aria-label="Show my location">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/>
+                                            </svg>
+                                        </button>
+                                        <button class="btn-map-float btn-directions"
+                                                onclick="BYD.map.openDirections()"
+                                                data-i18n-attr="aria-label:liveview.directions"
+                                                aria-label="Directions to vehicle">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l19-9-9 19-2-8-8-2z"/></svg>
+                                        </button>
+                                    </div>
+                                    <div class="location-distance-chip is-sk">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
+                                        </svg>
+                                        <span class="location-distance-label">
+                                            <span id="distanceToCar">—</span>
+                                        </span>
+                                        <span class="sk sk-cover" data-sk-group="gpsDistance"></span>
+                                    </div>
+                                </div>
+
+                                <button type="button" class="location-expand-button"
+                                        id="locationExpandButton"
+                                        onclick="BYD.liveLayout.toggleMap()"
+                                        aria-expanded="false">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/>
+                                        <path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>
+                                    </svg>
+                                    <span id="locationExpandLabel" data-i18n="liveview.expand_map">Expand map</span>
+                                </button>
+                            </section>
+                            </aside>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+    <div id="toastContainer" class="toast-container"></div>
+
+    <script src="../shared/auth.js?v=18"></script>
     <script src="../shared/pwa-init.js?v=index1"></script>
-    <script src="../shared/core.js?v=27"></script>
-    <script src="../shared/update-flow.js?v=3"></script>
+    <script src="../shared/core.js?v=31"></script>
+    <script src="../shared/update-flow.js?v=6"></script>
     <script src="../shared/cabin-audio.js?v=2"></script>
-    <script src="../shared/stream.js?v=index7"></script>
+    <script src="../shared/stream.js?v=index9"></script>
     <script src="../shared/map.js?v=9"></script>
-    <script src="../shared/surveillance.js?v=survtoggle20"></script>
+    <script src="../shared/surveillance.js?v=survtoggle22"></script>
     <script>
+        // Diagnostic only (sessionStorage od.broadwayAbDiagnostic='1'). Modes live in
+        // sessionStorage and reload in place: the app's /live-view route 404s on a query.
+        BYD.stream.updateBroadwayAbButton = function() {
+            var button = document.getElementById('broadwayAbButton');
+            if (!button) return;
+            button.hidden = !this.diagnosticBroadway;
+            if (button.hidden) return;
+            var key = !this.forceBroadway ? 'liveview.broadway_auto'
+                : (this.reusePlaneTextures ? 'liveview.broadway_on' : 'liveview.broadway_off');
+            button.textContent = BYD.i18n.t(key);
+            button.setAttribute('aria-label', BYD.i18n.t('liveview.broadway_diagnostic')
+                + ': ' + BYD.i18n.t(key));
+        };
+        BYD.stream.cycleBroadwayAb = function() {
+            if (!this.diagnosticBroadway) return;
+            var next = !this.forceBroadway ? 'off'
+                : (this.reusePlaneTextures ? 'auto' : 'on');
+            try {
+                if (next === 'auto') sessionStorage.removeItem('od.broadwayAbMode');
+                else sessionStorage.setItem('od.broadwayAbMode', next);
+            } catch (e) { return; }
+            window.location.reload();
+        };
+        BYD.stream.showBroadwaySummary = function(result) {
+            var el = document.getElementById('broadwayAbSummary');
+            if (!el || !this.diagnosticBroadway || !this.forceBroadway) return;
+            this._latestBroadwaySummary = result;
+            var t = function(key) { return BYD.i18n.t('liveview.' + key); };
+            var lines = [t('broadway_summary') + ' — '
+                + t(result.reusePlaneTextures ? 'broadway_on' : 'broadway_off')];
+            var buckets = [ ['normal', 'broadway_regular'],
+                ['every30th', 'broadway_refresh'], ['firstAfterResize', 'broadway_first'] ];
+            for (var i = 0; i < buckets.length; i++) {
+                var bucket = result[buckets[i][0]];
+                if (!bucket || !bucket.count) continue;
+                lines.push(t(buckets[i][1]) + ' (' + bucket.count + ' ' + t('broadway_frames') + ')');
+                if (bucket.cpu.count) lines.push('  ' + t('broadway_cpu') + ': '
+                    + bucket.cpu.meanMs + ' / ' + bucket.cpu.p95Ms + ' ms');
+                if (bucket.drawAndReadback.count) lines.push('  ' + t('broadway_readback') + ': '
+                    + bucket.drawAndReadback.meanMs + ' / ' + bucket.drawAndReadback.p95Ms + ' ms');
+            }
+            lines.splice(1, 0, t('broadway_mean_p95'));
+            el.textContent = lines.join('\n');
+            el.hidden = false;
+        };
+        BYD.i18n.onChange(function() {
+            BYD.stream.updateBroadwayAbButton();
+            if (BYD.stream._latestBroadwaySummary) {
+                BYD.stream.showBroadwaySummary(BYD.stream._latestBroadwaySummary);
+            }
+        });
+
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
             document.getElementById('sidebarOverlay').classList.toggle('show');
@@ -2006,7 +2247,37 @@
         // Camera-first entry: ALL is selected before the stream starts.
         BYD.stream.currentViewMode = 0;
         
+        // Marks the tapped target while its route settles (the DVR takes seconds).
+        function setCameraPendingUi(mode) {
+            document.querySelectorAll('.cam-hotspot, .cam-view-chip').forEach(function (el) {
+                el.classList.toggle('is-pending', parseInt(el.dataset.cam, 10) === mode);
+            });
+        }
+
+        // A repeated tap on a target that is still starting keeps waiting; it is
+        // not the toggle-off that a tap on the live camera means.
         BYD.stream.selectCamera = async function(mode) {
+            const pending = this._pendingCameraSelection;
+            if (pending && pending.mode === mode
+                    && pending.token === this._viewSelectionToken) {
+                return;
+            }
+            const marker = { mode: mode, token: -1 };
+            this._pendingCameraSelection = marker;
+            setCameraPendingUi(mode);
+            try {
+                const run = this._selectCameraNow(mode);
+                marker.token = this._viewSelectionToken;
+                return await run;
+            } finally {
+                if (this._pendingCameraSelection === marker) {
+                    this._pendingCameraSelection = null;
+                    setCameraPendingUi(-1);
+                }
+            }
+        };
+
+        BYD.stream._selectCameraNow = async function(mode) {
             // Invalidate every older route response, including a DVR
             // first-frame poll. A newer non-DVR click must always win.
             const selectionToken = (this._viewSelectionToken || 0) + 1;
@@ -2052,7 +2323,7 @@
                 this._requestStreamDisable(this._viewSelectionToken).catch(() => {});
 
                 // Remove active state from hotspots
-                document.querySelectorAll('.cam-hotspot').forEach(el => el.classList.remove('active'));
+                document.querySelectorAll('.cam-hotspot, .cam-view-chip').forEach(el => el.classList.remove('active'));
 
                 // Update UI
                 const labelEl = document.getElementById('currentCameraLabel');
@@ -2065,7 +2336,7 @@
                 return;
             }
             
-            const camKeys = {0: 'pip.title_all_cameras', 1: 'pip.title_front_camera', 2: 'pip.title_right_camera', 3: 'pip.title_rear_camera', 4: 'pip.title_left_camera', 6: 'pip.title_oem_dashcam'};
+            const camKeys = {0: 'pip.title_all_cameras', 1: 'pip.title_front_camera', 2: 'pip.title_right_camera', 3: 'pip.title_rear_camera', 4: 'pip.title_left_camera', 6: 'pip.title_oem_dashcam', 9: 'stream.view_name_9'};
             const labelEl = document.getElementById('currentCameraLabel');
             const overlayEl = document.getElementById('cameraLabelOverlay');
 
@@ -2073,7 +2344,7 @@
             // waits for its first frame. Committing these optimistically made
             // AVM frames look like a mislabeled DVR feed.
             const commitSelectionUi = (selectedMode) => {
-                document.querySelectorAll('.cam-hotspot').forEach(el => {
+                document.querySelectorAll('.cam-hotspot, .cam-view-chip').forEach(el => {
                     el.classList.toggle('active', parseInt(el.dataset.cam) === selectedMode);
                 });
                 if (labelEl) {
@@ -2084,7 +2355,7 @@
                 if (overlayEl) overlayEl.style.display = 'block';
             };
             const restorePriorUi = () => {
-                document.querySelectorAll('.cam-hotspot').forEach(el => {
+                document.querySelectorAll('.cam-hotspot, .cam-view-chip').forEach(el => {
                     el.classList.toggle('active', parseInt(el.dataset.cam) === priorMode);
                 });
                 if (labelEl) labelEl.textContent = priorLabelText;
@@ -2262,7 +2533,7 @@
                             : (d.errorCode
                                 ? BYD.i18n.t('stream.' + d.errorCode)
                                 : (d.error || BYD.i18n.t('stream.view_unavailable')));
-                        document.querySelectorAll('.cam-hotspot').forEach(el => el.classList.remove('active'));
+                        document.querySelectorAll('.cam-hotspot, .cam-view-chip').forEach(el => el.classList.remove('active'));
                         this.currentViewMode = -1;
                         this.confirmedViewMode = -1;
                         this.streamStarted = false;
@@ -2296,8 +2567,9 @@
                 return false;
             }
 
-            // 4. Initialize SOTA Player (WebCodecs)
-            if ('VideoDecoder' in window && typeof SotaPlayer !== 'undefined') {
+            // 4. Initialize SOTA Player (WebCodecs), except when the A/B
+            // control explicitly forces Broadway for a genuine comparison.
+            if (!this.forceBroadway && 'VideoDecoder' in window && typeof SotaPlayer !== 'undefined') {
                 console.log("[Stream] Initializing SOTA Player (WebCodecs)...");
                 this.decoderMode = 'webcodecs';
                 
@@ -2416,9 +2688,41 @@
          */
         BYD.stream.showStartupStatus = function(message) {
             const stage = document.getElementById('videoIdleState');
-            if (!stage || stage.classList.contains('hidden')) return;
+            if (!stage) return;
+            // A switch from a live feed keeps that feed on screen, so say it in a toast.
+            if (stage.classList.contains('hidden')) {
+                if (BYD.utils && BYD.utils.toast) BYD.utils.toast(message, 'info');
+                return;
+            }
             this.setStagePhase('busy', message);
         };
+
+        // The phone stage follows the decoded stream's aspect (--lv-video-aspect).
+        function syncVideoAspect() {
+            const sota = document.getElementById('sota_canvas');
+            const hw = document.getElementById('hw_player');
+            let w = 0, h = 0;
+            if (sota && sota.classList.contains('active')) {
+                w = sota.width; h = sota.height;
+            } else if (hw && hw.classList.contains('active')) {
+                w = hw.videoWidth; h = hw.videoHeight;
+            }
+            if (!(w > 0 && h > 0)) return;
+            const aspect = Math.round((w / h) * 10000) / 10000;
+            if (aspect < 0.5 || aspect > 3) return;
+            document.documentElement.style.setProperty('--lv-video-aspect', String(aspect));
+            try { localStorage.setItem('lv_video_aspect', String(aspect)); } catch (e) {}
+        }
+        const baseNoteFrameReceived = BYD.stream.noteFrameReceived;
+        BYD.stream.noteFrameReceived = function(count) {
+            const firstFrame = !this._frameStatusLive;
+            baseNoteFrameReceived.call(this, count);
+            if (firstFrame) syncVideoAspect();
+        };
+        (function () {
+            const hw = document.getElementById('hw_player');
+            if (hw) hw.addEventListener('resize', syncVideoAspect);
+        })();
 
         BYD.stream.updateConnectionStatus = function(status) {
             const el = document.getElementById('connectionStatus');
@@ -2718,6 +3022,7 @@
         // saved quality are ready, start the useful view immediately instead
         // of presenting an empty "select camera" state.
         BYD.i18n.init().then(async function () {
+            BYD.stream.updateBroadwayAbButton();
             BYD.core.init();
             BYD.cabinListener.init();
             BYD.stream.init();
@@ -2752,6 +3057,14 @@
                 if (hotspot) {
                     hotspot.style.display = camId >= 0 ? '' : 'none';
                 }
+                // All + DVR follows capability; selecting it starts the DVR when needed.
+                const combined = document.querySelector('.cam-view-chip[data-cam="9"]');
+                if (combined) {
+                    const combinedSupported = camId >= 0 && oem.concurrentAvmSupported === 1;
+                    combined.style.display = combinedSupported ? '' : 'none';
+                    const selectorCard = combined.closest('.camera-selector-card');
+                    if (selectorCard) selectorCard.classList.toggle('has-view-chip', combinedSupported);
+                }
             } catch (e) {
                 // Backend unreachable or response shape changed — leave
                 // the hotspot hidden (its inline default). The feature
@@ -2759,7 +3072,19 @@
                 console.log('[Init] OEM dashcam gating skipped:', e && e.message);
             }
         })();
-        
+
+        // Mirror the All + DVR selection onto the car: the ALL and DVR hotspots light with it.
+        (function () {
+            const chip = document.querySelector('.cam-view-chip[data-cam="9"]');
+            const card = chip && chip.closest('.camera-selector-card');
+            if (!card || typeof MutationObserver === 'undefined') return;
+            const sync = function () {
+                card.classList.toggle('is-combined-view', chip.classList.contains('active'));
+            };
+            new MutationObserver(sync).observe(chip, { attributes: true, attributeFilter: ['class'] });
+            sync();
+        })();
+
         // Gate the car controls on a path to the car: Horn / Flash (issue #118) on
         // BYD Cloud, Lock / Unlock on cloud or the local remote key. Hiding a row
         // until the probe confirms its path keeps the camera view honest: a
@@ -2768,7 +3093,7 @@
         // user re-enters the live view after configuring cloud, so a
         // perpetual poll would just burn cycles). Cluster defaults to
         // display:none inline, so any failure path leaves it safely hidden.
-        (async function () {
+        async function loadCarControlRows() {
             try {
                 const res = await fetch('/api/vehicle/cloud-status');
                 const data = await res.json();
@@ -2793,7 +3118,14 @@
                 // availability; silent suppression is the safe fallback.
                 console.log('[Init] Deterrent controls gating skipped:', e && e.message);
             }
-        })();
+        }
+        loadCarControlRows();
+        // Rows only ever appear, so a second run is safe. A saved-copy page registers nothing, so it
+        // reloads once that's safe: the camera it tried to start offline starts only on that reload.
+        if (!document.querySelector('meta[name="od-offline-shell"]')
+                && window.BYD && BYD.offline && typeof BYD.offline.onReconnect === 'function') {
+            BYD.offline.onReconnect(loadCarControlRows);
+        }
 
         // Draggable mini-preview chip with snap-to-corner.
         //

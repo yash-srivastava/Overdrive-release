@@ -6,19 +6,20 @@ import android.os.Build;
 import android.os.SystemClock;
 import android.util.Log;
 import com.overdrive.app.byd.BydDeviceHelper;
+import com.overdrive.app.byd.OtaReportListeners;
+import com.overdrive.app.camera.dilink5.DiLink5Platform;
 import com.overdrive.app.config.UnifiedConfigManager;
 import com.overdrive.app.remote.RemoteDevViewBridgeAuth;
 import com.overdrive.app.util.DaemonHttpClient;
 import org.json.JSONObject;
 import java.io.OutputStream;
-import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
-import java.util.Collection;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ForkJoinPool;
 
 /**
  * Opt-in fob observer: passive approach frames and optional instrument presence
@@ -30,7 +31,7 @@ import java.util.UUID;
 public final class KeyFobAccessMonitor {
     private static final String TAG = "KeyFobAccessMonitor";
     private static final int OTA = 1032, VEHICLE_DATA = 1048;
-    private static final int CALLBACK = 0x9900001e, TABLE_FEATURE = 0xaa000020;
+    private static final int CALLBACK = OtaReportListeners.DYNAMIC_REPORT, TABLE_FEATURE = 0xaa000020;
     private static final byte[] ADD = {0, 0, 1, (byte) 0x80, 0, 0, 1, 1};
     private static final byte[] REMOVE = {0, 0, 1, (byte) 0x80, 0, 0, 1, 2};
     private static final String MARKER_PREFS = "proximity_key_fob_receiver";
@@ -48,6 +49,7 @@ public final class KeyFobAccessMonitor {
     private final KeyFobSourceRecovery recovery = new KeyFobSourceRecovery();
     private final Thread worker;
     private final KeyFobPresenceSearch presenceSearch;
+    private final KeyFobWelcomeLight welcomeLight;
     private final SharedPreferences marker;
     private volatile boolean running = true, accepting, registered, tableRegistered;
     private volatile boolean cleanupPending;
@@ -74,6 +76,12 @@ public final class KeyFobAccessMonitor {
         cleanupPending = marker.getBoolean(MARKER, false);
         worker = new Thread(this::collect, "OverDrive-Proximity-KeyFob");
         worker.setDaemon(true);
+        welcomeLight = new KeyFobWelcomeLight(ForkJoinPool.commonPool(),
+                () -> BydDeviceHelper.getDevice(
+                        "android.hardware.bydauto.setting.BYDAutoSettingDevice", this.context),
+                () -> VehiclePowerReader.readNow(this.context) == 0
+                        && KeyFobWelcomeLight.enabled(RemoteAccessSettings.read())
+                        && !DiLink5Platform.isSelected() && !UnifiedConfigManager.isVehicleOnOnlyMode() && running);
         presenceSearch = new KeyFobPresenceSearch(this.context, events::wake,
                 () -> running && config.optBoolean("keyFobLockEnabled")
                         && !worker.isInterrupted()
@@ -87,7 +95,8 @@ public final class KeyFobAccessMonitor {
     }
 
     public static synchronized void apply(Context context, JSONObject settings) {
-        boolean enabled = consent(settings);
+        boolean enabled = consent(settings)
+                && !com.overdrive.app.config.ServiceModeFeatureGate.isPausedInConfig("proximity");
         if (instance != null && (!enabled || !sameFobRules(settings, instance.config)
                 || !instance.running)) stop();
         if (!enabled) {
@@ -172,7 +181,7 @@ public final class KeyFobAccessMonitor {
 
     private boolean stillConsented() {
         try {
-            if (!running) return false;
+            if (!running || com.overdrive.app.config.ServiceModeFeatureGate.isPausedInConfig("proximity")) return false;
             JSONObject live = RemoteAccessSettings.read();
             if (!sameFobRules(live, config)) return false;
             // A1: a revision-only change is adopted in place so the next heartbeat carries it.
@@ -225,6 +234,7 @@ public final class KeyFobAccessMonitor {
                     if (!vehicleOnOnly) readScope();
                     nextScope = SystemClock.elapsedRealtime() + SCOPE_INTERVAL_MS;
                     if (vehicleOnOnly) {
+                        welcomeLight.observe(-1, false);
                         reason = "vehicle_on_only";
                         deactivate();
                     } else if (power < 0 || driverLock < 0) {
@@ -318,6 +328,7 @@ public final class KeyFobAccessMonitor {
             Log.w(TAG, "Receiver stopped: " + unavailable.getClass().getSimpleName());
         } finally {
             running = false;
+            welcomeLight.observe(-1, false);
             presenceSearch.close(false);
             deactivate();
             // Settings changes clear daemon state directly. This final relay also
@@ -377,6 +388,7 @@ public final class KeyFobAccessMonitor {
                 driverLock = (Integer) value;
         } catch (Throwable unavailable) { /* Unknown revokes the receiver. */ }
         scopeObservedMs = SystemClock.elapsedRealtime();
+        welcomeLight.observe(power, KeyFobWelcomeLight.enabled(config) && !DiLink5Platform.isSelected());
     }
 
     /** A service failure retires every old edge before the same worker can retry. */
@@ -436,14 +448,8 @@ public final class KeyFobAccessMonitor {
             unregister = otaDevice.getClass().getMethod("unregisterListener", type);
             // AbsBYDAutoDevice owns a listener-ID map. Its unregister disables
             // OTA only when the last listener leaves; existing telemetry survives.
-            Object listenerMap = findField(otaDevice.getClass(), "mIBYDAutoListenerMap").get(otaDevice);
-            synchronized (listenerMap) {
-                if (!listenerMapAllowsAddition(listenerMap))
-                    throw new IllegalStateException("registration_failed");
-                otaDevice.getClass().getMethod("registerListener", type, int[].class)
-                        .invoke(otaDevice, listener, new int[]{CALLBACK});
-                if (!listenerIsMapped()) throw new IllegalStateException("registration_failed");
-            }
+            if (!OtaReportListeners.register(otaDevice, type, listener))
+                throw new IllegalStateException("registration_failed");
             registered = true;
             // Sparse first frames can arrive during the ADD/getter calls.
             // Buffer them now; no edge is relayed until activate finishes with
@@ -478,24 +484,7 @@ public final class KeyFobAccessMonitor {
     }
 
     private boolean listenerIsMapped() throws Exception {
-        Field mapField = findField(otaDevice.getClass(), "mIBYDAutoListenerMap");
-        Object map = mapField.get(otaDevice);
-        Method getListeners = map.getClass().getMethod("getIdListeners", int.class);
-        getListeners.setAccessible(true);
-        Object values = getListeners.invoke(map, CALLBACK);
-        return values instanceof Collection && ((Collection<?>) values).contains(listener);
-    }
-
-    private boolean listenerMapAllowsAddition(Object map) throws Exception {
-        Method empty = map.getClass().getMethod("isListenerEmpty");
-        Method allEmpty = map.getClass().getMethod("isListenerAllIdsEmpty");
-        empty.setAccessible(true);
-        allEmpty.setAccessible(true);
-        // This firmware replaces native narrowed filters on each enable. Its
-        // Java map therefore cannot safely union two independent narrowed
-        // subscriptions. Existing subscribe-all OTA telemetry is compatible.
-        return Boolean.TRUE.equals(empty.invoke(map))
-                || Boolean.FALSE.equals(allEmpty.invoke(map));
+        return OtaReportListeners.contains(otaDevice, listener);
     }
 
     private void deactivate() { deactivate(false); }
@@ -641,16 +630,5 @@ public final class KeyFobAccessMonitor {
             relay = null;
             if (connection != null) connection.disconnect();
         }
-    }
-
-    private static Field findField(Class<?> type, String name) throws NoSuchFieldException {
-        for (Class<?> current = type; current != null; current = current.getSuperclass()) {
-            try {
-                Field field = current.getDeclaredField(name);
-                field.setAccessible(true);
-                return field;
-            } catch (NoSuchFieldException ignored) { }
-        }
-        throw new NoSuchFieldException(name);
     }
 }

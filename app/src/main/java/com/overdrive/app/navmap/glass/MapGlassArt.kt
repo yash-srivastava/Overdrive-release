@@ -36,10 +36,10 @@ object MapGlassArt {
 
     // LocationIndicatorLayer paint values for od-puck / od-puck-shadow (tuned for the follow camera's 55–57° tilt).
     /**
-     * bearing-image-size / shadow-image-size by zoom: the 92 dp image (and 72 dp pool) at 1:1 at the follow camera's
-     * z17.4, where the chevron is the mock's 64 dp; zoomed out or top-down the indicator would otherwise keep that size.
+     * bearing-image-size / shadow-image-size by zoom: the 92 dp image (64 dp chevron) at 1:1 from z16.5, and 0.9 at the
+     * 130 km/h drive zoom (15.3), so the car keeps its size as the camera zooms out with speed; overview zooms shrink it.
      */
-    private val PUCK_ZOOM = doubleArrayOf(11.0, 0.42, 14.0, 0.5, 16.0, 0.66, 17.0, 0.9, 17.4, 1.0)
+    private val PUCK_ZOOM = doubleArrayOf(11.0, 0.42, 13.0, 0.6, 14.5, 0.82, 15.5, 0.92, 16.5, 1.0)
     /** image-tilt-displacement: drops the shadow D·pitch(rad)·cos(pitch) ≈ 12 dp down-screen at 56°, where the mock's pool sits. */
     const val PUCK_TILT_DISPLACEMENT = 21.8f
     /** perspective-compensation: 0.5 scales off-centre like the mock's map-pitched icons (0.5 + 0.5·distance ratio). */

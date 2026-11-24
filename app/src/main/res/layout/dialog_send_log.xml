@@ -3,11 +3,16 @@
      app's dialog idiom (see dialog_reset_data.xml): surface-container-high
      background, icon+title+subtitle header, M3 option cards. Replaces the bare
      setItems(...) list that did not carry the Overdrive M3 styling. -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- Scrolls on short head-unit screens now that the guidance text sits above the options. -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:background="?attr/colorSurfaceContainerHigh"
+    android:background="?attr/colorSurfaceContainerHigh">
+
+<LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
     android:orientation="vertical"
     android:padding="24dp">
 
@@ -51,6 +56,26 @@
                 android:textColor="?attr/colorOnSurfaceVariant" />
         </LinearLayout>
     </LinearLayout>
+
+    <TextView
+        android:id="@+id/sendLogComponent"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="6dp"
+        android:lineSpacingMultiplier="1.25"
+        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/sendLogWhen"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        android:lineSpacingMultiplier="1.25"
+        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:visibility="gone" />
 
     <!-- Option: Upload & get a code -->
     <com.google.android.material.card.MaterialCardView
@@ -173,3 +198,4 @@
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 </LinearLayout>
+</ScrollView>

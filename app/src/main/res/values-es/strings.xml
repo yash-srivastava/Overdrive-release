@@ -1573,7 +1573,7 @@
     <string name="settings_remote_listener_title" tools:ignore="MissingTranslation">Activar la escucha del habitáculo</string>
     <string name="settings_remote_listener_subtitle" tools:ignore="MissingTranslation">Permite que las sesiones autenticadas de Vista en directo y de Comunicar oigan el micrófono del habitáculo mientras el vehículo está encendido.</string>
     <string name="settings_remote_audio_channel_title" tools:ignore="MissingTranslation">Compatibilidad de voz</string>
-    <string name="settings_remote_audio_channel_subtitle" tools:ignore="MissingTranslation">«Multimedia» mantiene las rutas actuales de altavoz y micrófono. «Navegación» coincide con el enrutamiento de Di+ y la captura de micrófono a 8 kHz.</string>
+    <string name="settings_remote_audio_channel_subtitle" tools:ignore="MissingTranslation">«Multimedia» mantiene las rutas actuales de altavoz y micrófono. «Navegación» coincide con el enrutamiento de BYD y la captura de micrófono a 8 kHz.</string>
     <string name="settings_remote_audio_channel_media" tools:ignore="MissingTranslation">Multimedia</string>
     <string name="settings_remote_audio_channel_navigation" tools:ignore="MissingTranslation">Navegación</string>
     <string name="settings_remote_output_override_title">Usar un volumen de voz personalizado</string>
@@ -1614,6 +1614,7 @@
     <string name="settings_about_vehicle_vin_hidden_a11y">VIN oculto</string>
     <string name="settings_about_vehicle_loading">Cargando&#8230;</string>
     <string name="settings_about_vehicle_unavailable">No disponible</string>
+    <string name="settings_about_tier_hall_of_fame">Salón de la Fama</string>
     <string name="settings_about_tier_diamond">Diamante</string>
     <string name="settings_about_tier_platinum">Platino</string>
     <string name="settings_about_tier_gold">Oro</string>

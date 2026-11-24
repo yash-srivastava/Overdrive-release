@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="cluster_text_title">Unos teksta na instrument tabli</string>
+    <string name="cluster_text_service_label">OverDrive unos teksta na instrument tabli</string>
+    <string name="cluster_text_service_description">Omogućava da sa multimedijalne jedinice unesete tekst u fokusirano tekstualno polje aplikacije projektovane na DiLink 5 instrument tablu. Polja za lozinku su izuzeta. Uključite automatske upite samo ako želite da se dijalog tastature otvori kada tekstualno polje na instrument tabli dobije fokus.</string>
+    <string name="cluster_text_hint">Tekst za aplikaciju na instrument tabli</string>
+    <string name="cluster_text_auto_prompt">Automatski otvarajte za tekstualna polja na instrument tabli</string>
+    <string name="cluster_text_send">Pošaljite tekst</string>
+    <string name="cluster_text_send_submit">Pošaljite tekst i pritisnite Enter</string>
+    <string name="cluster_text_retry">Proverite fokusirano polje</string>
+    <string name="cluster_text_enable_service">Podešavanja pristupačnosti</string>
+    <string name="cluster_text_enable_hint">Uključite „OverDrive unos teksta na instrument tabli“ u podešavanjima pristupačnosti, pa fokusirajte tekstualno polje u projektovanoj aplikaciji i proverite ponovo.</string>
+    <string name="cluster_text_checking">Provera tekstualnog polja na instrument tabli…</string>
+    <string name="cluster_text_target">Tekstualno polje u %1$s</string>
+    <string name="cluster_text_requires_android11">Unos teksta na instrument tabli zahteva DiLink 5 sa Android 11 ili novijim i pristup prozorima pristupačnosti instrument table. Ovaj firmver ne može da proveri kom ekranu pripada tekstualno polje.</string>
+    <string name="cluster_text_requires_cast">Pokrenite DiLink 5 projekciju aplikacije pre unosa teksta.</string>
+    <string name="cluster_text_no_field">Na instrument tabli nije pronađeno pristupačno, fokusirano tekstualno polje. Fokusirajte polje u projektovanoj aplikaciji i proverite ponovo. Polja za lozinku su izuzeta.</string>
+    <string name="cluster_text_field_changed">Sesija projekcije ili fokusirano polje su se promenili. Proverite polje ponovo pre slanja.</string>
+    <string name="cluster_text_unavailable">Tekstualno polje na instrument tabli nije moglo da se proveri. Proverite projekciju i vezu pristupačnosti, pa pokušajte ponovo.</string>
+    <string name="cluster_text_rejected">Aplikacija nije potvrdila tekst. Proverite polje na instrument tabli pre ponovnog pokušaja.</string>
+    <string name="cluster_text_submit_rejected">Tekst je poslat, ali aplikacija nije prihvatila Enter. Potvrdite u aplikaciji na instrument tabli.</string>
+</resources>

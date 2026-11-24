@@ -97,7 +97,10 @@ BYD.events = {
     _QUADRANT_HIDE_MS: 3000,
     _quadrantHideTimer: null,
     _activeRecordingKey: null,
+    _activeRecording: null,
     _recordingNavBusy: false,
+    _recordingNavSerial: 0,
+    _recordingNavBoundary: { '-1': false, '1': false },
     _timelineSeq: 0,
 
     recordingKey(rec) {
@@ -129,32 +132,108 @@ BYD.events = {
         return -1;
     },
 
-    /** Previous / next follow the list as displayed, across its pages. */
+    /** Prefer stable-ID seeks to OFFSET pages, which shift as new clips arrive. */
+    _canSeekRecording() {
+        return !!(this._activeRecording && this._activeRecording.id
+            && /^[a-f0-9]{32}$/i.test(this._activeRecording.id)
+            && !this._externalRecordingKey
+            && document.getElementById('recordingsList'));
+    },
+
+    /** Previous / next keep the recording identity stable even across pages. */
     _refreshRecordingNav() {
         const nav = document.getElementById('videoNav');
         if (!nav) return;
         const index = this._activeRecordingIndex();
         const total = Math.max(this.totalCount || 0, this.recordings.length);
-        const shown = index >= 0 && total > 1;
+        const anchored = this._canSeekRecording();
+        const shown = !!this._activeRecordingKey && total > 1 && (anchored || index >= 0);
         nav.hidden = !shown;
         const header = nav.parentNode;
         if (header && header.classList) header.classList.toggle('has-nav', shown);
         const prev = document.getElementById('videoPrevBtn');
         const next = document.getElementById('videoNextBtn');
         const busy = this._recordingNavBusy;
-        if (prev) prev.disabled = busy || index < 0 || (index === 0 && this.currentPage <= 1);
-        if (next) next.disabled = busy || index < 0
-            || (index === this.recordings.length - 1 && this.currentPage >= this.totalPages);
+        if (anchored) {
+            // Page one already contains the newest row: Previous has no work.
+            // For a clip outside the loaded page, defer to an indexed seek.
+            if (prev) prev.disabled = busy || this._recordingNavBoundary['-1']
+                || (index === 0 && this.currentPage === 1);
+            if (next) next.disabled = busy || this._recordingNavBoundary['1'];
+        } else {
+            // Parking's external player retains its existing local-list behavior.
+            if (prev) prev.disabled = busy || index < 0 || (index === 0 && this.currentPage <= 1);
+            if (next) next.disabled = busy || index < 0
+                || (index === this.recordings.length - 1 && this.currentPage >= this.totalPages);
+        }
+    },
+
+    /** A loaded page always navigates locally, even while the daemon warms. */
+    _navigateLoadedRecording(step) {
+        const index = this._activeRecordingIndex();
+        const target = index + step;
+        if (index < 0 || target < 0 || target >= this.recordings.length) return false;
+        this._openAdjacentRecording(this.recordingKey(this.recordings[target]));
+        return true;
     },
 
     async navigateRecording(step) {
-        const index = this._activeRecordingIndex();
-        if (index < 0 || this._recordingNavBusy) return;
-        const target = index + step;
-        if (target >= 0 && target < this.recordings.length) {
-            this._openAdjacentRecording(this.recordingKey(this.recordings[target]));
-            return;
+        if ((step !== -1 && step !== 1) || this._recordingNavBusy) return;
+        // No HTTP request for either direction inside the already loaded page.
+        if (this._navigateLoadedRecording(step)) return;
+        if (this._canSeekRecording()) {
+            const fromId = this._activeRecording.id;
+            const openedKey = this._activeRecordingKey;
+            const serial = this._recordingNavSerial;
+            let pageFallback = false;
+            this._recordingNavBusy = true;
+            this._refreshRecordingNav();
+            try {
+                const params = this._recordingFilterParams();
+                params.push('fromId=' + encodeURIComponent(fromId));
+                params.push('step=' + step);
+                params.push('pageSize=' + this.pageSize);
+                const response = await fetch('/api/recordings/adjacent?' + params.join('&'));
+                const data = await response.json();
+                const modal = document.getElementById('videoModal');
+                if (!modal || !modal.classList.contains('active')
+                        || this._recordingNavSerial !== serial
+                        || this._activeRecordingKey !== openedKey) return;
+                if (!response.ok || !data.success) {
+                    // Deleted/offline anchor, cold boot and failed SQL are NOT ends:
+                    // step inside the loaded page, else take the page-based step below.
+                    pageFallback = !this._navigateLoadedRecording(step);
+                    if (pageFallback) {
+                        console.warn('[events] Adjacent recording unavailable:', data.status || data.error || response.status);
+                    }
+                } else if (data.status === 'found' && data.recording) {
+                    this._openAdjacentRecording(this.recordingKey(data.recording), data.recording);
+                    if (Number.isInteger(data.page) && data.page > 0
+                            && (this.currentPage !== data.page
+                                || this._activeRecordingIndex() < 0)) {
+                        this.currentPage = data.page;
+                        // Keep playback responsive; refresh the list and watched
+                        // badge independently of the already opened new clip.
+                        this.loadRecordings();
+                    }
+                } else if (data.status === 'end') {
+                    this._recordingNavBoundary[String(step)] = true;
+                }
+            } catch (error) {
+                // Failed transport is not the end either; never latch a boundary.
+                if (this._recordingNavSerial === serial) pageFallback = !this._navigateLoadedRecording(step);
+                console.warn('[events] Unable to navigate recording:', error);
+            } finally {
+                this._recordingNavBusy = false;
+                this._refreshRecordingNav();
+            }
+            if (!pageFallback) return;
         }
+
+        // Legacy/parking clips, and indexed clips whose seek failed: page-based
+        // step on the loaded list.
+        const index = this._activeRecordingIndex();
+        if (index < 0) return;
         const page = this.currentPage + step;
         if (page < 1 || page > this.totalPages) return;
         const openedKey = this._activeRecordingKey;
@@ -169,7 +248,6 @@ BYD.events = {
             this._recordingNavBusy = false;
         }
         if (this.recordings === previousRecordings) {
-            // The page did not load; keep the list the user came from.
             this.currentPage = previousPage;
             this.renderRecordings();
             this.updatePagination();
@@ -185,14 +263,15 @@ BYD.events = {
     },
 
     /** Switches the open player to another clip, keeping fullscreen and the chosen speed. */
-    _openAdjacentRecording(key) {
+    _openAdjacentRecording(key, recording) {
         const player = document.getElementById('videoPlayer');
         const box = document.querySelector('.video-container');
         const rate = player.playbackRate || 1;
         const keep = box ? ['is-fullscreen', 'is-video-only'].filter(c => box.classList.contains(c)) : [];
         player.pause();
-        this.playVideo(key);
-        keep.forEach(c => box.classList.add(c));
+        if (recording) this.openRecording(recording);
+        else this.playVideo(key);
+        if (box) keep.forEach(c => box.classList.add(c));
         const t = this._transport;
         if (t) {
             t.handlers.onFullscreenChange();
@@ -697,9 +776,19 @@ BYD.events = {
         this.renderCalendar();
         this.updateRecordingsTitle();
         this.updateCalendarButton();
+        // Before the reads below: a page with a handler is refreshed in place, never reloaded.
+        if (window.BYD && BYD.offline && typeof BYD.offline.onReconnect === 'function') {
+            BYD.offline.onReconnect(() => this._refreshAfterReconnect());
+        }
         await this.loadDatesWithRecordings();
         await this.loadStorageStats();
         await this.loadRecordings();
+        this._initDone = true;
+        // A reconnect while the reads above were on their way: read again now (a banner that shows again gets its own).
+        if (this._reconnectDuringInit) {
+            this._reconnectDuringInit = false;
+            if (!(BYD.offline && typeof BYD.offline.isActive === 'function' && BYD.offline.isActive())) this._refreshAfterReconnect();
+        }
         this.initPlayer();
 
         // Deep-link from a notification.
@@ -760,6 +849,28 @@ BYD.events = {
                 this.scheduleIndexDownRetry(0);
             }
         });
+    },
+
+    /** A list on screen stays (reloading it flashes a spinner and loses the scroll); a failed one, or one still
+     *  on its way from the outage, loads again. While hidden: on the next return to the page, once; while init
+     *  reads: when it's done. */
+    _refreshAfterReconnect() {
+        if (document.hidden) {
+            if (this._reconnectDeferred) return;
+            this._reconnectDeferred = true;
+            const shown = () => {
+                if (document.hidden) return;
+                document.removeEventListener('visibilitychange', shown);
+                this._reconnectDeferred = false;
+                this._refreshAfterReconnect();
+            };
+            document.addEventListener('visibilitychange', shown);
+            return;
+        }
+        if (!this._initDone) { this._reconnectDuringInit = true; return; }
+        this.loadStorageStats();
+        this.loadDatesWithRecordings();
+        if (this._listFailed || this._listPending) this.loadRecordings();
     },
 
     // Timeline mode hides the list: a poll falling due there is held (no request) until the list shows again.
@@ -1725,38 +1836,56 @@ BYD.events = {
             '</div>';
     },
 
+    /** Shared by the list and stable-ID navigation; filters must match exactly. */
+    _recordingFilterParams() {
+        const params = [];
+        if (this.currentFilter !== 'all') params.push('type=' + this.currentFilter);
+        if (this.selectedDate) params.push('date=' + this.selectedDate);
+        // v3 actor filters (item 6) + place filter (item 7) — all
+        // server-side now so pagination + totalCount stay honest
+        // under any combination of narrowing chips.
+        if (this.actorFilter && this.actorFilter.class)     params.push('class=' + encodeURIComponent(this.actorFilter.class));
+        if (this.actorFilter && this.actorFilter.severity)  params.push('severity=' + encodeURIComponent(this.actorFilter.severity));
+        if (this.actorFilter && this.actorFilter.proximity) params.push('proximity=' + encodeURIComponent(this.actorFilter.proximity));
+        if (this.actorFilter && this.actorFilter.place)     params.push('place=' + encodeURIComponent(this.actorFilter.place));
+        // Substring narrowing — stacks with the chip filter; SQL
+        // AND-chains them so the user sees clips matching BOTH the
+        // exact chip AND the typed substring. Indexed via place_short
+        // / place_medium / place_display LIKE in RecordingsIndex.
+        if (this.placeContainsQuery)                        params.push('placeContains=' + encodeURIComponent(this.placeContainsQuery));
+        // Storage-volume narrowing — '' = all volumes.
+        if (this.storageFilter)                             params.push('storage=' + encodeURIComponent(this.storageFilter));
+        // Parking Intelligence deep-link (?parkingSessionId=…): only the
+        // sentry clips stamped with that session.
+        if (this.parkingSessionId)                          params.push('parkingSessionId=' + encodeURIComponent(this.parkingSessionId));
+        return params;
+    },
+
     async loadRecordings() {
         const list = document.getElementById('recordingsList');
         list.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+        // Overlapping reads: a reply for other filters never paints; a success paints unless a newer
+        // success did, a failure only if nothing newer painted. Failed/pending feed the reconnect handler.
+        const seq = this._listSeq = (this._listSeq || 0) + 1;
+        this._listPending = true;
+        let reqUrl = null;
 
         try {
             let url = '/api/recordings';
-            const params = [];
-            if (this.currentFilter !== 'all') params.push('type=' + this.currentFilter);
-            if (this.selectedDate) params.push('date=' + this.selectedDate);
-            // v3 actor filters (item 6) + place filter (item 7) — all
-            // server-side now so pagination + totalCount stay honest
-            // under any combination of narrowing chips.
-            if (this.actorFilter && this.actorFilter.class)     params.push('class=' + encodeURIComponent(this.actorFilter.class));
-            if (this.actorFilter && this.actorFilter.severity)  params.push('severity=' + encodeURIComponent(this.actorFilter.severity));
-            if (this.actorFilter && this.actorFilter.proximity) params.push('proximity=' + encodeURIComponent(this.actorFilter.proximity));
-            if (this.actorFilter && this.actorFilter.place)     params.push('place=' + encodeURIComponent(this.actorFilter.place));
-            // Substring narrowing — stacks with the chip filter; SQL
-            // AND-chains them so the user sees clips matching BOTH the
-            // exact chip AND the typed substring. Indexed via place_short
-            // / place_medium / place_display LIKE in RecordingsIndex.
-            if (this.placeContainsQuery)                        params.push('placeContains=' + encodeURIComponent(this.placeContainsQuery));
-            // Storage-volume narrowing — '' = all volumes.
-            if (this.storageFilter)                             params.push('storage=' + encodeURIComponent(this.storageFilter));
-            // Parking Intelligence deep-link (?parkingSessionId=…): only the
-            // sentry clips stamped with that session.
-            if (this.parkingSessionId)                          params.push('parkingSessionId=' + encodeURIComponent(this.parkingSessionId));
+            const params = this._recordingFilterParams();
             params.push('page=' + this.currentPage);
             params.push('pageSize=' + this.pageSize);
             url += '?' + params.join('&');
+            reqUrl = this._listUrl = url;
 
             const res = await fetch(url);
             const data = await res.json();
+            const ok = !!data && (data.success === true || !!data.indexUnavailable);
+            if (url !== this._listUrl || (ok ? seq < (this._listOk || 0) : seq < (this._listLast || 0))) return;
+            if (ok) this._listOk = seq;
+            if (seq > (this._listLast || 0)) this._listLast = seq;
+            if (seq === this._listSeq) this._listPending = false;
+            this._listFailed = !ok;
 
             // Daemon reports its recordings index is down (H2 closed the
             // store). The clips ARE on disk — this is explicitly NOT an
@@ -1804,6 +1933,9 @@ BYD.events = {
                     if (this.loadDatesWithRecordings) this.loadDatesWithRecordings();
                 }
                 this.recordings = data.recordings || [];
+                // Newly indexed clips can extend an end that was previously
+                // empty while the player remains open.
+                this._recordingNavBoundary = { '-1': false, '1': false };
                 this.totalPages = data.totalPages || 1;
                 this.totalCount = data.totalCount || this.recordings.length;
                 this.renderRecordings();
@@ -1834,11 +1966,21 @@ BYD.events = {
                 // AFTER the recordings render so the user-visible list
                 // doesn't wait on this auxiliary fetch.
                 this.loadPlaceChips();
+            } else {
+                list.innerHTML = this._failedCardHtml();
             }
         } catch (e) {
+            if ((reqUrl !== null && reqUrl !== this._listUrl) || seq < (this._listLast || 0)) return;
+            this._listLast = seq;
+            if (seq === this._listSeq) this._listPending = false;
+            this._listFailed = true;
             console.error('Failed to load recordings:', e);
-            list.innerHTML = '<div class="empty-state"><svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><div class="empty-title">' + BYD.i18n.t('events.empty_failed_title') + '</div><div class="empty-text">' + BYD.i18n.t('events.empty_failed_text') + '</div></div>';
+            list.innerHTML = this._failedCardHtml();
         }
+    },
+
+    _failedCardHtml() {
+        return '<div class="empty-state"><svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><div class="empty-title">' + BYD.i18n.t('events.empty_failed_title') + '</div><div class="empty-text">' + BYD.i18n.t('events.empty_failed_text') + '</div></div>';
     },
     
     // Build the per-clip storage chip (INTERNAL / SD_CARD / USB) for the
@@ -1976,9 +2118,26 @@ BYD.events = {
             if (animalCount > 0)  actorPills += '<span class="pill" title="' + BYD.i18n.t('events.actor_animal') + '">' + icons.animal + animalCount + '</span>';
             actorPills += sevBadge;
             if (proxLabel)        actorPills += '<span class="pill prox-' + (rec.peakProximity || 'UNKNOWN') + '">' + proxLabel + '</span>';
-            // deterrentFlags: 1 = Cloud deterrent sent, 2 = Screen deterrent shown during this clip.
+            // Cloud marks are indexed by action, not by the currently selected
+            // setting (which may have changed since this clip was recorded).
             const deterrentFlags = rec.deterrentFlags || 0;
-            if (deterrentFlags & 1) actorPills += '<span class="pill">' + BYD.i18n.t('events.legend_deterrent_cloud') + '</span>';
+            const cloudActions = rec.cloudDeterrentActions;
+            if (cloudActions && typeof cloudActions === 'object') {
+                const labels = {
+                    flash_lights: 'surveillance.deterrent_flash_option',
+                    find_car: 'surveillance.deterrent_horn_option',
+                    other: 'events.legend_deterrent_cloud'
+                };
+                for (const action of Object.keys(labels)) {
+                    const count = Number(cloudActions[action]);
+                    if (Number.isSafeInteger(count) && count > 0) {
+                        actorPills += '<span class="pill">' + BYD.i18n.t(labels[action]) + ' ×' + count + '</span>';
+                    }
+                }
+            } else if (deterrentFlags & 1) {
+                // Older index/API without per-action data: do not invent a count.
+                actorPills += '<span class="pill">' + BYD.i18n.t('events.legend_deterrent_cloud') + '</span>';
+            }
             if (deterrentFlags & 2) actorPills += '<span class="pill">' + BYD.i18n.t('events.legend_deterrent_screen') + '</span>';
             const actorRow = actorPills ? '<div class="actor-summary">' + actorPills + '</div>' : '';
 
@@ -2014,6 +2173,8 @@ BYD.events = {
                 '<span class="sk-badge" data-sk-file="' + this._esc(rec.filename) + '" hidden></span>' +
                 '</div>' +
                 '<div class="recording-info">' +
+                '<span class="clip-watch-state clip-watch-state--unwatched"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="6"/></svg>' + this._esc(BYD.i18n.t('events.unwatched_clip')) + '</span>' +
+                '<span class="clip-watch-state clip-watch-state--watched"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="m4 12 5 5L20 6"/></svg>' + this._esc(BYD.i18n.t('events.watched_clip')) + '</span>' +
                 '<div class="clip-line"><span class="clip-time">' + rec.timeFormatted + '</span>' + storageChip + '</div>' +
                 placeRow +
                 actorRow +
@@ -2108,7 +2269,8 @@ BYD.events = {
         const schedule = () => {
             const key = this._watchActiveKey;
             if (!key || this._watchTimer !== null || document.hidden || player.paused) return;
-            const rec = this.findRecording(key);
+            const rec = (this._activeRecording && this.recordingKey(this._activeRecording) === key)
+                ? this._activeRecording : this.findRecording(key);
             if (!rec || rec.watched || !rec.id) return;
             // Start the threshold only when playback genuinely begins;
             // opening the modal, buffering, or seeking alone does not count.
@@ -2149,6 +2311,11 @@ BYD.events = {
             rec.watched = true;
             // The list may have been reloaded while the POST was in flight.
             const current = this.findRecording(key);
+            if (this._activeRecording && this._activeRecording.id === rec.id
+                    && this._activeRecording.size === rec.size
+                    && this._activeRecording.mp4Mtime === rec.mp4Mtime) {
+                this._activeRecording.watched = true;
+            }
             if (current && current.id === rec.id && current.size === rec.size
                     && current.mp4Mtime === rec.mp4Mtime) current.watched = true;
             if (current && current.id === rec.id && current.size === rec.size
@@ -2222,6 +2389,9 @@ BYD.events = {
         document.getElementById('videoModal').classList.add('active');
         player.load();
         this._activeRecordingKey = this.recordingKey(rec);
+        this._activeRecording = rec;
+        this._recordingNavSerial++;
+        this._recordingNavBoundary = { '-1': false, '1': false };
         this._refreshRecordingNav();
 
         // Bind the external transport (play/pause, mute, time, scrubber)
@@ -2290,6 +2460,9 @@ BYD.events = {
         if (_lensWrap) _lensWrap.classList.remove('lens-dewarp');
         document.getElementById('videoModal').classList.remove('active');
         this._activeRecordingKey = null;
+        this._activeRecording = null;
+        this._recordingNavSerial++;
+        this._recordingNavBoundary = { '-1': false, '1': false };
         this._refreshRecordingNav();
         // Restore the theme FAB (and any other body-level chrome the
         // .video-modal-open class hides).

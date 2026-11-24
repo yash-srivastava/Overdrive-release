@@ -39,7 +39,9 @@ import com.google.android.material.button.MaterialButtonToggleGroup
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.materialswitch.MaterialSwitch
 import com.overdrive.app.R
+import com.overdrive.app.launcher.dilink5.cluster.DiLink5ProjectionConfig.Transport.FACTORY_MINI
 import com.overdrive.app.ui.MainActivity
+import com.overdrive.app.ui.view.AaosMapAreaCheck
 import com.overdrive.app.ui.view.ClusterViewMirrorClient
 import com.overdrive.app.ui.view.ProjectionBoundsGeometry
 import com.overdrive.app.ui.view.ProjectionBoundsView
@@ -85,6 +87,7 @@ class ProjectionFragment : Fragment() {
     private var btnCast: Button? = null
     private var btnStop: Button? = null
     private var btnAdjust: Button? = null
+    private var clusterInputKeys: MaterialButton? = null
     private var statusText: TextView? = null
     private var statusDot: View? = null
     private var appToast: AppToast? = null
@@ -101,6 +104,8 @@ class ProjectionFragment : Fragment() {
     private var transportGroup: MaterialButtonToggleGroup? = null
     private var transportStatus: TextView? = null
     private var projectionPathGroup: MaterialButtonToggleGroup? = null
+    private var aaosMapCheck: AaosMapAreaCheck? = null
+    private var projectionPathDescription: TextView? = null
     private var projectionTargetGroup: MaterialButtonToggleGroup? = null
     private var projectionPathStatus: TextView? = null
     private var projectionGeometryControls: View? = null
@@ -152,8 +157,9 @@ class ProjectionFragment : Fragment() {
     @Volatile private var castPackage = ""
     @Volatile private var castSessionGeneration = 0L
     @Volatile private var resolvedProjectionTransport = ""
-    @Volatile private var activeProjectionPath = "none"
-    private var activeHostedBounds: IntArray? = null
+    private val aaosHostedMap: Boolean get() = resolvedProjectionTransport == "aaos_hdmi"
+    private var daemonOwnsWindow = false
+    private var activeWindowBounds: IntArray? = null
     // The package the box's CURRENT rect actually describes — set by restoreWindowFor (the only
     // thing that binds a rect to an app) and read by geometryPackage(). Empty until the first bind.
     // This is what keeps a persist from being keyed to a browsed spinner pick or to a stale
@@ -256,6 +262,8 @@ class ProjectionFragment : Fragment() {
         }
     }
 
+    private var clusterBarsCard: com.overdrive.app.customlayouts.ui.ClusterBarsCard? = null
+
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         // Layout failed to inflate (degraded fallback view is showing) — do NO setup: the
@@ -282,9 +290,12 @@ class ProjectionFragment : Fragment() {
             autoStartSwitch = view.findViewById(R.id.projectionAutoStartSwitch)
             speedOverlaySwitch.bind(view.findViewById(R.id.projectionSpeedOverlaySwitch))
             adasHideSwitch.bind(view.findViewById(R.id.projectionAdasHideSwitch))
+            bindClusterBarsCard(view.findViewById(R.id.projectionAdasHideSwitch))
             transportGroup = view.findViewById(R.id.projectionTransportGroup)
             transportStatus = view.findViewById(R.id.projectionTransportStatus)
             projectionPathGroup = view.findViewById(R.id.projectionPathGroup)
+            aaosMapCheck = AaosMapAreaCheck(view.findViewById(R.id.projectionAaosMapCheck))
+            projectionPathDescription = view.findViewById(R.id.projectionPathDescription)
             projectionTargetGroup = view.findViewById(R.id.projectionTargetGroup)
             projectionPathStatus = view.findViewById(R.id.projectionPathStatus)
             projectionGeometryControls = view.findViewById(R.id.projectionGeometryControls)
@@ -340,9 +351,20 @@ class ProjectionFragment : Fragment() {
         }
     }
 
+    /** The shared "remove BYD bars" card (also on Custom Layouts), placed after the card holding the ADAS switch. */
+    private fun bindClusterBarsCard(anchor: View?) {
+        var card: View? = anchor
+        while (card != null && card !is com.google.android.material.card.MaterialCardView) card = card.parent as? View
+        val column = card?.parent as? ViewGroup ?: return
+        clusterBarsCard = com.overdrive.app.customlayouts.ui.ClusterBarsCard(this) { appToast }
+            .also { it.attach(column, column.indexOfChild(card) + 1) }
+    }
+
     override fun onResume() {
         super.onResume()
         if (inflateFailed) return
+        clusterBarsCard?.start()
+        aaosMapCheck?.resume()
         mirrorRequested = true
         val requestGeneration = ++mirrorRequestGeneration
         registerMirrorBinderReceiver()
@@ -366,6 +388,8 @@ class ProjectionFragment : Fragment() {
     override fun onPause() {
         super.onPause()
         if (inflateFailed) return
+        clusterBarsCard?.stop()
+        aaosMapCheck?.pause()
         mirrorRequested = false
         mirrorRequestGeneration++
         cancelPendingMirrorRestart()
@@ -405,6 +429,10 @@ class ProjectionFragment : Fragment() {
     }
 
     override fun onDestroyView() {
+        clusterBarsCard?.destroy()
+        clusterBarsCard = null
+        aaosMapCheck?.close()
+        aaosMapCheck = null
         alive = false
         mirrorRequested = false
         mirrorRequestGeneration++
@@ -426,6 +454,7 @@ class ProjectionFragment : Fragment() {
             (activity as? MainActivity)?.setContentImmersive(false)
         }
         spinnerApps = null; btnCast = null; btnStop = null; btnAdjust = null
+        clusterInputKeys = null
         appToast?.cancel()
         appToast = null
         lastStickyError = null
@@ -433,6 +462,7 @@ class ProjectionFragment : Fragment() {
         scaleGroup = null; presetGroup = null; aspectLockSwitch = null
         autoStartSwitch = null; transportGroup = null; transportStatus = null
         projectionPathGroup = null; projectionTargetGroup = null; projectionPathStatus = null
+        projectionPathDescription = null
         projectionGeometryControls = null; diLink5ProjectionControls = null
         projectionSliders.clear(); projectionSliderValues.clear()
         speedOverlaySwitch.unbind(); adasHideSwitch.unbind()
@@ -493,7 +523,7 @@ class ProjectionFragment : Fragment() {
         // (never the square the old view-px + separately-resolved-aspect model produced) and needs
         // no conversion before being handed to the daemon as freeform window bounds.
         b.onWindowChanged = window@{ l, t, r, bot, commit ->
-            if (layoutActive || layoutBusy) return@window
+            if (aaosHostedMap || layoutActive || layoutBusy) return@window
             // The box is the cast app's FREEFORM BOUNDS on the cluster — NOT a head-unit preview
             // sub-rect. The mirror always shows the whole cluster and does not move with the box,
             // so a box change never re-casts the mirror.
@@ -538,6 +568,7 @@ class ProjectionFragment : Fragment() {
             if (start != null && end != null) submitIo { postSwipe(start, end, ms, generation, epoch) }
         }
         b.onTouchFrame = stream@{ event ->
+            if (aaosHostedMap) return@stream false
             if (event.actionMasked == MotionEvent.ACTION_DOWN
                 && !ClusterViewMirrorClient.supportsTouchStream(mirrorSessionId)) return@stream false
             val rect = lastPaneRect
@@ -577,9 +608,11 @@ class ProjectionFragment : Fragment() {
                 MaterialAlertDialogBuilder(requireContext())
                     .setTitle(R.string.projection_cluster_controls)
                     .setItems(labels) { _, index ->
+                        if (aaosHostedMap) return@setItems
                         val eventTime = android.os.SystemClock.uptimeMillis()
                         val inputEpoch = ClusterViewMirrorClient.currentInputEpoch()
                         submitClusterInput {
+                            if (aaosHostedMap) return@submitClusterInput
                             val accepted = ClusterViewMirrorClient.key(
                                 mirrorSessionId, keys[index], eventTime, inputEpoch)
                             if (!accepted) postMain {
@@ -590,6 +623,7 @@ class ProjectionFragment : Fragment() {
                     }.show()
             }
         }
+        clusterInputKeys = button
         row.addView(button)
     }
 
@@ -709,7 +743,7 @@ class ProjectionFragment : Fragment() {
             return
         }
         lastPaneRect = r
-        val mode = scaleMode
+        val mode = if (aaosHostedMap) SCALE_FIT else scaleMode
         val generation = surfaceGeneration
         if (!mirrorAttachRunning.compareAndSet(false, true)) {
             mirrorAttachAgain.set(true)
@@ -996,6 +1030,10 @@ class ProjectionFragment : Fragment() {
 
     private fun setTransportStatusLine(resolved: String, source: String) {
         if (resolved.isEmpty()) return
+        if (aaosHostedMap) {
+            transportStatus?.setText(if (casting) R.string.aaos_map_cast_active else R.string.aaos_map_cast_idle)
+            return
+        }
         transportStatus?.text =
             getString(R.string.projection_transport_active, resolved, source)
     }
@@ -1061,6 +1099,7 @@ class ProjectionFragment : Fragment() {
             val value = when (id) {
                 R.id.projectionPathHosted -> "hosted"
                 R.id.projectionPathDirect -> "direct"
+                R.id.projectionPathFactoryMini -> FACTORY_MINI.wire
                 else -> "auto"
             }
             if (value != configuredProjectionPath) saveProjectionChoice(
@@ -1139,14 +1178,24 @@ class ProjectionFragment : Fragment() {
 
     private fun updateProjectionControlMode() {
         val diLink5 = projectionUsesDiLink5Controls(resolvedProjectionTransport)
+        val factoryMini = configuredProjectionPath == FACTORY_MINI.wire
+        val standard = if (aaosHostedMap) View.GONE else View.VISIBLE
+        view?.findViewById<View>(R.id.projectionEditableWindowCard)?.visibility = standard
+        view?.findViewById<View>(R.id.projectionStandardSettings)?.visibility = standard
+        btnAdjust?.visibility = standard
+        clusterInputKeys?.visibility = standard
         diLink5ProjectionControls?.visibility = if (diLink5) View.VISIBLE else View.GONE
-        val hostedEnabled = configuredProjectionPath != "direct"
+        projectionPathDescription?.setText(
+            if (factoryMini) R.string.projection_path_factory_mini_hint else R.string.projection_path_desc
+        )
+        projectionTargetGroup?.visibility = if (factoryMini) View.GONE else View.VISIBLE
+        projectionGeometryControls?.visibility = if (factoryMini) View.GONE else View.VISIBLE
+        val hostedEnabled = configuredProjectionPath != "direct" && !factoryMini
         val directEnabled = configuredProjectionPath != "hosted"
         PROJECTION_SLIDERS.forEach { spec ->
             projectionSliders[spec.key]?.isEnabled =
                 diLink5 && if (spec.key == "di5DirectScalePercent") directEnabled else hostedEnabled
         }
-        projectionGeometryControls?.visibility = View.VISIBLE
     }
 
     private fun saveProjectionChoice(
@@ -1166,6 +1215,7 @@ class ProjectionFragment : Fragment() {
         val id = when (value) {
             "hosted" -> R.id.projectionPathHosted
             "direct" -> R.id.projectionPathDirect
+            FACTORY_MINI.wire -> R.id.projectionPathFactoryMini
             else -> R.id.projectionPathAuto
         }
         suppressProjectionPathListener = true
@@ -1308,7 +1358,7 @@ class ProjectionFragment : Fragment() {
             JSONObject().put("section", section).put("data", data))
 
     private fun toggleAdjust() {
-        if (layoutActive || layoutBusy) return
+        if (aaosHostedMap || layoutActive || layoutBusy) return
         adjusting = !adjusting
         applyBoundsMode()
         btnAdjust?.setText(
@@ -1332,6 +1382,7 @@ class ProjectionFragment : Fragment() {
     private fun applyBoundsMode() {
         val b = bounds ?: return
         b.mode = when {
+            aaosHostedMap -> ProjectionBoundsView.Mode.IDLE
             adjusting -> ProjectionBoundsView.Mode.ADJUST
             mirrorMode == MODE_ACTIVE -> ProjectionBoundsView.Mode.CONTROL
             else -> ProjectionBoundsView.Mode.IDLE
@@ -1487,7 +1538,8 @@ class ProjectionFragment : Fragment() {
         // stop must not write the (now-ended) cast app's rect under a package it no longer describes.
         castPackage = ""
         castSessionGeneration = 0L
-        activeHostedBounds = null
+        daemonOwnsWindow = false
+        activeWindowBounds = null
         commitSeq++
         cancelPendingMirrorRestart()
         detachMirror()
@@ -1550,8 +1602,9 @@ class ProjectionFragment : Fragment() {
         castPackage = st.castPackage
         castSessionGeneration = st.castSessionGeneration
         resolvedProjectionTransport = st.clusterTransport
-        activeProjectionPath = st.projectionPathActive
-        activeHostedBounds = st.hostedProjectionBounds
+        if (aaosHostedMap) adjusting = false
+        daemonOwnsWindow = st.projectionPathActive == "hosted" || st.factoryMiniMap
+        activeWindowBounds = st.activeWindowBounds
         if (previousCastPackage != castPackage || previousCastGeneration != castSessionGeneration) {
             commitSeq++ // late replies/retries cannot acquire the replacement session's token
         }
@@ -1595,7 +1648,7 @@ class ProjectionFragment : Fragment() {
         if (st.casting && st.castPackage.isNotEmpty() &&
             (st.castPackage != previousCastPackage ||
                 st.castSessionGeneration != previousCastGeneration ||
-                (st.projectionPathActive == "hosted" && bounds?.isAdjusting() != true))
+                (daemonOwnsWindow && bounds?.isAdjusting() != true))
         ) restoreWindowFor(st.castPackage)
 
         updateButtons()
@@ -1810,9 +1863,10 @@ class ProjectionFragment : Fragment() {
         // Repositioning acts on the CLUSTER window (via the daemon), so it's available whenever an
         // app is cast — even before the head-unit mirror preview comes up. The presets + aspect
         // lock follow the same rule.
-        btnAdjust?.isEnabled = casting && !layoutActive && !layoutBusy
-        presetGroup?.isEnabled = casting && !layoutActive && !layoutBusy
-        aspectLockSwitch?.isEnabled = casting && !layoutActive && !layoutBusy
+        val canResize = casting && !aaosHostedMap && !layoutActive && !layoutBusy
+        btnAdjust?.isEnabled = canResize
+        presetGroup?.isEnabled = canResize
+        aspectLockSwitch?.isEnabled = canResize
     }
 
     // ── UI helpers ─────────────────────────────────────────────────────────────────
@@ -1904,17 +1958,17 @@ class ProjectionFragment : Fragment() {
      *  after layout when width/height are known. Safe if the view is torn down (guards on `bounds`
      *  + alive). */
     private fun restoreWindowFor(pkg: String?) {
-        if (layoutActive || layoutBusy) return
+        if (aaosHostedMap || layoutActive || layoutBusy) return
         val b = bounds ?: return
         b.post {
-            if (!alive || bounds !== b || layoutActive || layoutBusy) return@post
+            if (!alive || bounds !== b || aaosHostedMap || layoutActive || layoutBusy) return@post
             if (casting && !castPackage.isNullOrEmpty() && castPackage != pkg) return@post
             // Bind the box to this app BEFORE touching the rect, so any persist triggered by what
             // follows (applyPreset emits a commit) is keyed to the app the rect now describes.
             boxPackage = pkg ?: ""
-            if (reflectHostedProjectionWindow(
-                    casting && activeProjectionPath == "hosted",
-                    activeHostedBounds,
+            if (reflectActiveProjectionWindow(
+                    casting && daemonOwnsWindow,
+                    activeWindowBounds,
                     reflect = { actual ->
                         b.setWindowRect(actual[0], actual[1], actual[2], actual[3])
                     },
@@ -1941,10 +1995,10 @@ class ProjectionFragment : Fragment() {
                 submitIo {
                     val remote = if (pkg != null) fetchClusterWindow(pkg) else null
                     postMain {
-                        if (!alive || bounds !== b || boxPackage != (pkg ?: "")) return@postMain
-                        if (reflectHostedProjectionWindow(
-                                casting && activeProjectionPath == "hosted",
-                                activeHostedBounds,
+                        if (!alive || bounds !== b || aaosHostedMap || boxPackage != (pkg ?: "")) return@postMain
+                        if (reflectActiveProjectionWindow(
+                                casting && daemonOwnsWindow,
+                                activeWindowBounds,
                                 reflect = { actual ->
                                     b.setWindowRect(actual[0], actual[1], actual[2], actual[3])
                                 },
@@ -2018,7 +2072,7 @@ class ProjectionFragment : Fragment() {
     }
 
     private fun persistWindow(l: Int, t: Int, r: Int, bot: Int) {
-        if (layoutActive || layoutBusy) return
+        if (aaosHostedMap || layoutActive || layoutBusy) return
         val pkg = geometryPackage() ?: return
         val pw = panelW.coerceAtLeast(1).toFloat()
         val ph = panelH.coerceAtLeast(1).toFloat()
@@ -2143,7 +2197,8 @@ class ProjectionFragment : Fragment() {
         val layoutBusy: Boolean,
         val layoutGeneration: Long,
         val castSessionGeneration: Long,
-        val hostedProjectionBounds: IntArray?,
+        val factoryMiniMap: Boolean,
+        val activeWindowBounds: IntArray?,
     )
 
     private fun fetchStatus(): Status? {
@@ -2191,7 +2246,8 @@ class ProjectionFragment : Fragment() {
                 j.optBoolean("layoutBusy", layouts?.optBoolean("busy", false) ?: false),
                 j.optLong("layoutGeneration", layouts?.optLong("generation", 0L) ?: 0L),
                 j.optLong("castSessionGeneration", 0L),
-                j.optJSONObject("hostedProjectionBounds")?.let {
+                j.optBoolean("factoryMiniMap", false),
+                (j.optJSONObject("miniMapProjectionBounds") ?: j.optJSONObject("hostedProjectionBounds"))?.let {
                     intArrayOf(it.optInt("l", -1), it.optInt("t", -1),
                         it.optInt("r", -1), it.optInt("b", -1))
                 },
@@ -2240,6 +2296,7 @@ class ProjectionFragment : Fragment() {
     private fun postClusterResize(l: Int, t: Int, r: Int, bot: Int, commit: Boolean,
                                   seq: Long = 0L, pkg: String = "", attempt: Int = 0,
                                   sessionGeneration: Long = 0L) {
+        if (aaosHostedMap) return
         val body = httpPostForBody("/api/vehicle/cluster-resize",
             JSONObject().put("l", l).put("t", t).put("r", r).put("b", bot).put("commit", commit)
                 .put("package", pkg).put("sessionGeneration", sessionGeneration))
@@ -2320,14 +2377,14 @@ class ProjectionFragment : Fragment() {
     }
 
     private fun postTap(v: DoubleArray, generation: Long, epoch: Long) {
-        if (epoch != ClusterViewMirrorClient.currentInputEpoch()) return
+        if (aaosHostedMap || epoch != ClusterViewMirrorClient.currentInputEpoch()) return
         httpPostSuccess("/api/vehicle/cluster-touch",
             JSONObject().put("type", "tap").put("sx", v[0]).put("sy", v[1])
                 .put("layoutGeneration", generation))
     }
 
     private fun postSwipe(a: DoubleArray, b: DoubleArray, ms: Int, generation: Long, epoch: Long) {
-        if (epoch != ClusterViewMirrorClient.currentInputEpoch()) return
+        if (aaosHostedMap || epoch != ClusterViewMirrorClient.currentInputEpoch()) return
         httpPostSuccess("/api/vehicle/cluster-touch", JSONObject().put("type", "swipe")
             .put("sx", a[0]).put("sy", a[1]).put("sx2", b[0]).put("sy2", b[1]).put("ms", ms)
             .put("layoutGeneration", generation))
@@ -2429,15 +2486,15 @@ internal fun projectionUsesDiLink5Controls(transport: String): Boolean =
     transport.equals("dilink5", ignoreCase = true)
 
 /**
- * An active hosted overlay owns its physical geometry. Opening this screen cannot reinterpret a
- * remembered legacy task rectangle as a resize request; unknown bounds wait for the next poll.
+ * The daemon supplies the physical rectangle of its hosted overlay or verified factory mini-map.
+ * Wait for its next status if placement is still in progress.
  */
-internal fun reflectHostedProjectionWindow(
-    hostedActive: Boolean,
+internal fun reflectActiveProjectionWindow(
+    daemonOwnsWindow: Boolean,
     actual: IntArray?,
     reflect: (IntArray) -> Unit,
 ): Boolean {
-    if (!hostedActive) return false
+    if (!daemonOwnsWindow) return false
     if (actual != null && actual.size == 4 &&
         actual[0] >= 0 && actual[1] >= 0 && actual[2] > actual[0] && actual[3] > actual[1]
     ) reflect(actual.copyOf())

@@ -126,6 +126,8 @@ public class RemoteAccessApiHandlerCloudFallbackTest {
                 + "                    cloudLeg = dispatchCloudFallback(decision, settings, collector, command, finalEvidence != null,\n"
                 + "                            actuationRail, target, true, dispatchedAtElapsed,\n"
                 + "                            DiLink5GateActuationPolicy.confirmationWindowMs(actuationRail), \"unconfirmed\");"));
+        assertTrue(decision.contains("                } else if (confirmation == DiLink5GateActuationPolicy.Confirmation.UNCONFIRMED\n"
+                + "                        && cloudLeg.worthASecondWindow()) {"));
         assertEquals(1, count(decision, "CloudLeg cloudLeg = null;"));
         // The router is reached exactly once in the file, from the bounded helper-thread runner only.
         assertEquals(1, count(handler, "executeCloudOnly("));
@@ -191,6 +193,8 @@ public class RemoteAccessApiHandlerCloudFallbackTest {
                 "} catch (Throwable t) {\n"
                         + "            skipped = \"re-validation failed: \" + t.getClass().getSimpleName();",
                 "return new CloudLeg(null, skipped, DiLink5GateActuationPolicy.PATH_SDK);",
+                "String transportSkip = VehicleCommandRouter.getInstance()\n"
+                        + "                .proximityCloudFallbackTransportSkipReason(command);",
                 "VehicleCommandRouter.CommandResult result = runCloudLegBounded(command, cloudTimeoutMs);",
                 "if (result.outcome == VehicleCommandRouter.Outcome.AUTH_REQUIRED) skipped = \"cloud not configured\";",
                 "else if (result.outcome == VehicleCommandRouter.Outcome.NOT_SUPPORTED) skipped = \"cloud leg not available for this command\";",

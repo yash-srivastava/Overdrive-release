@@ -135,6 +135,20 @@
         android:label="@string/rail_projection"
         tools:layout="@layout/fragment_projection" />
 
+    <!-- Custom Layouts: settings for the full instrument-cluster renderer (native only). -->
+    <fragment
+        android:id="@+id/customLayoutsFragment"
+        android:name="com.overdrive.app.customlayouts.ui.CustomLayoutsFragment"
+        android:label="@string/rail_custom_layouts"
+        tools:layout="@layout/fragment_custom_layouts" />
+
+    <!-- A head unit may restore an older back stack after upgrading from the in-car editor. -->
+    <fragment
+        android:id="@+id/dashboardBuilderFragment"
+        android:name="com.overdrive.app.customlayouts.ui.CustomLayoutsFragment"
+        android:label="@string/rail_custom_layouts"
+        tools:layout="@layout/fragment_custom_layouts" />
+
     <!-- Trips (web canonical) -->
     <fragment
         android:id="@+id/tripsFragment"
@@ -270,6 +284,12 @@
         android:id="@+id/roadSenseFragment"
         android:name="com.overdrive.app.ui.fragment.RoadSenseFragment"
         android:label="@string/rail_roadsense" />
+
+    <!-- Service Mode: shared authenticated WebUI page embedded in native Settings. -->
+    <fragment
+        android:id="@+id/serviceModeFragment"
+        android:name="com.overdrive.app.ui.fragment.ServiceModeFragment"
+        android:label="@string/settings_section_service_mode" />
 
     <!-- Widgets: the glass widgets overlay settings (web /widgets page). -->
     <fragment

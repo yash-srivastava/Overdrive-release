@@ -1508,6 +1508,42 @@ public final class VehicleCommandRouter {
         public boolean executeViaSdk(BydDataCollector c) { return c.setAirPurify(on); }
     }
 
+    /** Front vent mode for one side (free/focus/avoid/swing/off). SDK-only. */
+    public static final class AcVentModeCommand extends VehicleCommand
+            implements CabinClimateCommand {
+        public final int side;
+        public final String mode;
+        public AcVentModeCommand(int side, String mode) { this.side = side; this.mode = mode; }
+        public String name() { return "ac-vent-mode"; }
+        public Capability sdkCapability() { return Capability.REQUIRED; }
+        public RoutePreference defaultPreference() { return RoutePreference.SDK_ONLY; }
+        public boolean executeViaSdk(BydDataCollector c) { return c.setAcVentMode(side, mode); }
+    }
+
+    /** Direction of one front vent, in degrees. SDK-only; publishes the clamped pair sent. */
+    public static final class AcVentDirectionCommand extends VehicleCommand
+            implements CabinClimateCommand {
+        public final int vent;
+        public final int h;
+        public final int v;
+        public final boolean rightHandDrive;
+        /** {h, v} actually written after clamping, or null. */
+        public volatile int[] sent;
+        public AcVentDirectionCommand(int vent, int h, int v, boolean rightHandDrive) {
+            this.vent = vent;
+            this.h = h;
+            this.v = v;
+            this.rightHandDrive = rightHandDrive;
+        }
+        public String name() { return "ac-vent-direction"; }
+        public Capability sdkCapability() { return Capability.REQUIRED; }
+        public RoutePreference defaultPreference() { return RoutePreference.SDK_ONLY; }
+        public boolean executeViaSdk(BydDataCollector c) {
+            sent = c.setAcVentDirection(vent, h, v, rightHandDrive);
+            return sent != null;
+        }
+    }
+
     /** Persistent setting: the vehicle closes its windows itself when rain is sensed. */
     public static final class RainCloseWindowCommand extends VehicleCommand {
         public final boolean on;
@@ -2385,6 +2421,32 @@ public final class VehicleCommandRouter {
         return Outcome.UNKNOWN;
     }
 
+    /**
+     * Safety net behind the HTTP gates: with the Face ID / fingerprint lock on, a remote request that
+     * reaches a gated command without an approval on its thread is refused.
+     */
+    private static CommandResult stepUpRefusal(VehicleCommand cmd) {
+        String action = null;
+        if (cmd instanceof UnlockCommand) action = com.overdrive.app.server.StepUpGate.UNLOCK;
+        else if (cmd instanceof TrunkOpenCommand || cmd instanceof TrunkOpenSdkCommand) {
+            action = com.overdrive.app.server.StepUpGate.TRUNK_OPEN;
+        } else if (cmd instanceof VehiclePowerOffCommand) action = com.overdrive.app.server.StepUpGate.POWER_OFF;
+        else if (cmd instanceof VehiclePowerOnCommand || cmd.wakeVehicleIfOff()) {
+            action = com.overdrive.app.server.StepUpGate.POWER_ON;
+        }
+        try {
+            if (action == null || !com.overdrive.app.server.StepUpGate.isGated(action)
+                    || com.overdrive.app.server.StepUpGate.callerExempt()) {
+                return null;
+            }
+        } catch (Throwable t) {
+            return null;
+        }
+        logger.warn("Refused " + cmd.name() + ": remote caller without Face ID / fingerprint approval");
+        return CommandResult.notSupported(
+                "This needs Face ID or fingerprint. Use your secure link or the car screen.");
+    }
+
     public CommandResult execute(VehicleCommand cmd) {
         if (cmd instanceof NativeVehicleCommand) {
             return CommandResult.notSupported("Manual native vehicle commands require owner action");
@@ -2393,6 +2455,8 @@ public final class VehicleCommandRouter {
         // a still-earlier message-ingress snapshot, so an already-queued open cannot overtake
         // a STOP while its per-connection worker is busy.
         long tailgateOpenStopGeneration = tailgateOpenStopGeneration(cmd);
+        CommandResult stepUp = stepUpRefusal(cmd);
+        if (stepUp != null) return stepUp;
         cmd.beginLocalAttempt();
         if (cmd instanceof SeatClimateCommand) {
             synchronized (seatCommandLock) {
@@ -2746,6 +2810,8 @@ public final class VehicleCommandRouter {
         // See execute(): this must happen before checkDrivingSafety() in the
         // unserialized helper so STOP invalidates an already-entered request.
         long tailgateOpenStopGeneration = tailgateOpenStopGeneration(cmd);
+        CommandResult stepUp = stepUpRefusal(cmd);
+        if (stepUp != null) return stepUp;
         cmd.beginLocalAttempt();
         if (cmd instanceof SeatClimateCommand) {
             synchronized (seatCommandLock) {
@@ -2882,6 +2948,8 @@ public final class VehicleCommandRouter {
         if (cmd instanceof NativeVehicleCommand) {
             return CommandResult.notSupported("Manual native vehicle commands require owner action");
         }
+        CommandResult stepUp = stepUpRefusal(cmd);
+        if (stepUp != null) return stepUp;
         CommandResult blocked = checkDrivingSafety(cmd);
         if (blocked != null) return blocked;
         if (resolveEffectivePreference(cmd) == RoutePreference.SDK_ONLY) {
@@ -2890,6 +2958,46 @@ public final class VehicleCommandRouter {
         CommandResult stopped = stoppedLocalAttempt(cmd, 0L);
         if (stopped != null) return stopped;
         return finishCommand(cmd, runCloudOnly(cmd));
+    }
+
+    /**
+     * Proximity cloud-fallback admission before {@link #runCloudOnly}: same handshake and policy
+     * gates as {@link #executeCloudOnly}, plus a default-network check so a head unit with no
+     * network at all does not burn the decision budget on an HTTP timeout.
+     *
+     * @return skip reason when the leg must not run; {@code null} when it may.
+     */
+    public String proximityCloudFallbackTransportSkipReason(VehicleCommand cmd) {
+        if (!cmd.hasCloudPath()) return "cloud leg not available for this command";
+        if (resolveEffectivePreference(cmd) == RoutePreference.SDK_ONLY) {
+            return "cloud leg not available for this command";
+        }
+        if (!cloudHandshakeSatisfied(cmd)) return "cloud not configured";
+        if (!hasDefaultInternetNetwork()) return "no network";
+        return null;
+    }
+
+    /**
+     * False only when there is no default network or it has no internet capability. An
+     * unvalidated network still counts: Android's validation probe can fail where the BYD cloud
+     * is reachable, and skipping a working leg costs more than the bounded timeout. Unknown
+     * (no context, no service, any error) counts as online, i.e. today's behaviour.
+     */
+    private static boolean hasDefaultInternetNetwork() {
+        try {
+            android.content.Context ctx = com.overdrive.app.daemon.CameraDaemon.getAppContext();
+            if (ctx == null) return true;
+            android.net.ConnectivityManager cm = (android.net.ConnectivityManager)
+                    ctx.getSystemService(android.content.Context.CONNECTIVITY_SERVICE);
+            if (cm == null) return true;
+            android.net.Network network = cm.getActiveNetwork();
+            if (network == null) return false;
+            android.net.NetworkCapabilities caps = cm.getNetworkCapabilities(network);
+            return caps == null
+                    || caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET);
+        } catch (Throwable ignored) {
+            return true;
+        }
     }
 
     private CommandResult runCloudFirst(VehicleCommand cmd) {

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_section_adb">ADB</string>
+    <string name="settings_adb_subtitle">Povezivanje, uključivanje i automatski oporavak.</string>
+    <string name="settings_adb_connection_title">Veza</string>
+    <string name="settings_adb_automatic_title">Automatski oporavak</string>
+    <string name="settings_adb_automatic_restore">Automatski obnovite ADB</string>
+    <string name="settings_adb_automatic_description">Obnovite ADB podešavanje pri pokretanju i kad god se isključi. Radi bez Wi-Fi mreže kada je dozvola za podešavanja već dodeljena. DiLink 5 može da koristi i bežični oporavak na proverenoj Wi-Fi mreži sa prethodno ovlašćenim ključem.</string>
+    <string name="settings_adb_recover">Oporavite ADB sada</string>
+    <string name="settings_adb_cancel_recovery">Otkažite oporavak</string>
+    <string name="settings_adb_manual_title">Ručno uključivanje</string>
+    <string name="settings_adb_manual_description">Koristite kompatibilne BYD alatke da zatražite ADB pristup. Wi-Fi veza nije potrebna.</string>
+    <string name="settings_adb_enable">Omogućite ADB</string>
+    <string name="settings_adb_advanced_tools">Napredne alatke</string>
+    <string name="settings_adb_hide_advanced">Sakrijte napredne alatke</string>
+    <string name="settings_adb_advanced_description">Dijagnostikujte probleme, otvorite BYD alatke ili poništite ručni pokušaj.</string>
+    <string name="settings_adb_open_developer">Otvorite opcije za programere</string>
+    <string name="settings_adb_developer_page">Zatražite BYD stranicu za programere</string>
+    <string name="settings_adb_diagnostics">Proverite kompatibilnost i vezu</string>
+    <string name="settings_adb_restore">Poništite promene ručnog uključivanja</string>
+    <string name="settings_adb_export">Izvezite APK BYD alatki za programere</string>
+    <string name="settings_adb_dialog_confirm">Odobrite bežično otklanjanje grešaka na ovoj mreži</string>
+    <string name="settings_adb_dialog_confirm_description">Prvo se povežite na proverenu Wi-Fi mrežu. Dozvolite da OverDrive potvrdi dijalog bežičnog otklanjanja grešaka samo za ovu mrežu.</string>
+    <string name="settings_adb_tools_unavailable">Ručno uključivanje nije dostupno za trenutni režim ili instalirane BYD alatke.</string>
+    <string name="settings_adb_recovery_availability">Za lokalni oporavak potrebna je dozvola za podešavanja dodeljena tokom ADB podešavanja. Nije potreban Wi-Fi ni DiLink 5 režim.</string>
+    <string name="settings_adb_recovery_confirm_body">OverDrive će obnoviti ADB podešavanje pomoću prethodno dodeljene dozvole za podešavanja, bez potrebe za Wi-Fi mrežom. Na DiLink 5, bežični oporavak može da koristi i proverenu Wi-Fi mrežu i vaš prethodno ovlašćeni ključ. ADB na portu 5555 može biti dostupan drugim uređajima na mreži vozila. Koristite mrežu kojoj verujete. Potvrda identiteta ADB ključem ostaje uključena.</string>
+    <string name="settings_adb_recovery_permission_missing">Nedostaje dozvola za podešavanja. Ako ni ADB nije dostupan, prvo koristite „Omogućite ADB“ ili opcije za programere, pa ponovo dovršite ADB podešavanje.</string>
+    <string name="settings_adb_recovery_setting_enabled">ADB podešavanje je uključeno. ADB veza sa potvrđenim identitetom nije potvrđena.</string>
+    <string name="settings_adb_recovery_setting_failed">ADB podešavanje nije moglo da se uključi i proveri. Ovaj firmver možda odbija promenu.</string>
+    <string name="settings_adb_recovery_save_failed">Podešavanje automatskog oporavka nije moglo da se sačuva. Proverite ADB i pokušajte ponovo.</string>
+    <string name="settings_adb_details_title">Detalji poslednjeg pokušaja</string>
+</resources>

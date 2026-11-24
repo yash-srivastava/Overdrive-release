@@ -717,6 +717,17 @@ final class ClusterFreeformWindow {
 
     private static volatile DockRecord lastDock;
 
+    /** Some firmware imposes a larger minimum than its framework/API advertises. Only count
+     * growth observed during this task's verified dock operation and anchored at its target. */
+    static boolean dockGrewFromRequest(String pkg, int displayId, Rect requested, Rect actual, Rect panel) {
+        DockRecord last = lastDock;
+        if (last == null || !sameRect(last.actual, actual) || requested.equals(panel)) return false;
+        Rect minimum = fitTaskMinimum(pkg, displayId, requested, panel);
+        return minimum != null && sameRect(last.target, minimum) && grownFrom(actual, minimum)
+                && !coversPanel(actual, minimum, panel.width(), panel.height())
+                && last.taskId == findTaskIdViaAtm(pkg, displayId);
+    }
+
     /** {@code IWindowManager.setDockedStackCreateState(TOP_OR_LEFT, null)}. Best-effort. */
     private static void clearDockedCreateBounds() {
         try {
@@ -825,7 +836,7 @@ final class ClusterFreeformWindow {
 
     /** {@code setTaskWindowingMode} with {@code toTop=false}: changes the mode without moving
      *  the task's stack (or its display) to the front. */
-    private static boolean setTaskWindowingModeInPlace(Object svc, int taskId, int mode) {
+    static boolean setTaskWindowingModeInPlace(Object svc, int taskId, int mode) {
         for (String name : new String[] { "setTaskWindowingMode", "setCustomTaskWindowingMode" }) {
             try {
                 Method m = svc.getClass().getMethod(name, int.class, int.class, boolean.class);
@@ -871,7 +882,7 @@ final class ClusterFreeformWindow {
     }
 
     /** {@code r} grown to the minimum on each short side and slid back onto the panel. */
-    private static Rect fitMinimumSize(Rect r, int minW, int minH, int panelW, int panelH) {
+    static Rect fitMinimumSize(Rect r, int minW, int minH, int panelW, int panelH) {
         int w = Math.max(r.width(), minW);
         int h = Math.max(r.height(), minH);
         int left = r.left;
@@ -887,7 +898,7 @@ final class ClusterFreeformWindow {
         return new Rect(left, top, left + w, top + h);
     }
 
-    private static boolean sameRect(Rect a, Rect b) {
+    static boolean sameRect(Rect a, Rect b) {
         return a != null && b != null
                 && Math.abs(a.left - b.left) <= DOCK_TOLERANCE_PX
                 && Math.abs(a.top - b.top) <= DOCK_TOLERANCE_PX
@@ -1080,7 +1091,7 @@ final class ClusterFreeformWindow {
     }
 
     /** {@code getTaskBounds(int)} → Rect, or null when unavailable. */
-    private static Rect getTaskBounds(Object svc, int taskId) {
+    static Rect getTaskBounds(Object svc, int taskId) {
         try {
             Method m = svc.getClass().getMethod("getTaskBounds", int.class);
             Object res = m.invoke(svc, taskId);
@@ -1088,6 +1099,37 @@ final class ClusterFreeformWindow {
         } catch (Throwable t) {
             return null;
         }
+    }
+
+    /** Fresh package and display match. A task cached before a launch or reparent is insufficient. */
+    static Rect liveTaskBounds(String pkg, int displayId) {
+        if (displayId <= 0) return null;
+        int task = findTaskIdViaAtm(pkg, displayId);
+        TaskCache cached = cacheFor(pkg, displayId);
+        if (cached != null && cached.taskId != task) invalidateTaskCache();
+        if (task < 0) return null;
+        Rect actual = getTaskBounds(service(), task);
+        return actual != null && !actual.isEmpty() ? actual : null;
+    }
+
+    /** Size the package's existing freeform window on the factory mini-map display. */
+    static Rect resizeFactoryMiniMapTask(String pkg, int displayId, Rect bounds, boolean commit) {
+        if (displayId <= 0 || bounds == null || bounds.isEmpty()) return null;
+        int taskId = findTaskIdViaAtm(pkg, displayId);
+        Object svc = service();
+        if (taskId < 0 || svc == null) return null;
+        if (!invokeResizeTask(svc, taskId, bounds)) return null;
+        if (!commit) return bounds;
+        Rect actual = liveTaskBounds(pkg, displayId);
+        return sameRect(actual, bounds) ? actual : null;
+    }
+
+    /** An explicit box may be enlarged to the task's actual declared/framework minimum. */
+    static Rect fitTaskMinimum(String pkg, int displayId, Rect target, Rect panel) {
+        int task = findTaskIdViaAtm(pkg, displayId);
+        if (task < 0) return null;
+        int[] min = minTaskSizePx(service(), task);
+        return fitMinimumSize(target, min[0], min[1], panel.width(), panel.height());
     }
 
     private static String describeTaskBounds(Object svc, int taskId) {
@@ -1317,6 +1359,24 @@ final class ClusterFreeformWindow {
     static Boolean packageTaskOnDisplay(String pkg, int displayId) {
         Boolean reclaimed = packageTasksReclaimedFromDisplay(pkg, displayId);
         return reclaimed == null ? null : !reclaimed;
+    }
+
+    /** Top visible activity on a single display. Reads root-task metadata in one ATM query. */
+    static String visiblePackageOnDisplay(int displayId) {
+        if (displayId <= 0) return null;
+        try {
+            String visible = "";
+            for (Object root : atmTaskList(service())) {
+                if (!Integer.valueOf(displayId).equals(readFieldNoThrow(root, "displayId"))) continue;
+                if (!Boolean.TRUE.equals(readFieldNoThrow(root, "visible"))) continue;
+                Object top = readFieldNoThrow(root, "topActivity");
+                if (!(top instanceof android.content.ComponentName)) return null;
+                String pkg = ((android.content.ComponentName) top).getPackageName();
+                if (!visible.isEmpty() && !visible.equals(pkg)) return null;
+                visible = pkg;
+            }
+            return visible;
+        } catch (Throwable unavailable) { return null; }
     }
 
     static Boolean allTasksReclaimedFromDisplay(

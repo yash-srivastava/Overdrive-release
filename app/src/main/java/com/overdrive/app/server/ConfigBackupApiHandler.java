@@ -111,6 +111,7 @@ public class ConfigBackupApiHandler {
         // Previewing the un-stripped bundle let a tunnel user be shown a restore that
         // silently differs from the one they then confirm.
         stripShellGatesIfUntrusted(bundle);
+        if (!preview && !StepUpGate.requireBundle("config", "Restore a backup", out)) return;
 
         ConfigBackupService.ApplyResult result = preview
                 ? ConfigBackupService.validateBundle(bundle, appVer, model)

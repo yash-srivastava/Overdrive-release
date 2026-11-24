@@ -130,6 +130,19 @@ public class BydVehicleData {
 
     // ==================== CHARGING ====================
     public final int chargingState;
+    /** Manual traction-battery preheating feedback. 0 off, 1 heating, 2 completed. */
+    public final int batteryPreheatState;
+    public final long batteryPreheatObservedAtMs;
+
+    public static boolean isBatteryPreheatState(int state) {
+        return state >= 0 && state <= 2;
+    }
+
+    public boolean hasFreshBatteryPreheat(long nowMs) {
+        long age = nowMs - batteryPreheatObservedAtMs;
+        return isBatteryPreheatState(batteryPreheatState) && batteryPreheatObservedAtMs > 0L
+                && age >= 0L && age < 2 * BydDataCollector.POLL_INTERVAL_PARKED_MS;
+    }
     /** Wall-clock time when {@link #chargingState} last changed; 0 when never observed. */
     public final long chargingStateAtMs;
     public final int chargingGunState;
@@ -388,6 +401,8 @@ public class BydVehicleData {
         this.evMileageKm = b.evMileageKm;
         this.hevMileageKm = b.hevMileageKm;
         this.chargingState = b.chargingState;
+        this.batteryPreheatState = b.batteryPreheatState;
+        this.batteryPreheatObservedAtMs = b.batteryPreheatObservedAtMs;
         this.chargingStateAtMs = b.chargingStateAtMs;
         this.chargingGunState = b.chargingGunState;
         this.chargerWorkState = b.chargerWorkState;
@@ -638,6 +653,10 @@ public class BydVehicleData {
             // Charging
             JSONObject chg = new JSONObject();
             if (chargingState != UNAVAILABLE) chg.put("state", chargingState);
+            if (isBatteryPreheatState(batteryPreheatState)) {
+                chg.put("batteryPreheatState", batteryPreheatState);
+                chg.put("batteryPreheatObservedAtMs", batteryPreheatObservedAtMs);
+            }
             if (chargingGunState != UNAVAILABLE) chg.put("gunState", chargingGunState);
             if (chargerWorkState != UNAVAILABLE) chg.put("chargerState", chargerWorkState);
             if (chargingMode != UNAVAILABLE) chg.put("mode", chargingMode);
@@ -1093,6 +1112,8 @@ public class BydVehicleData {
             JSONObject charging = json.optJSONObject("charging");
             if (charging != null) {
                 b.chargingState = charging.optInt("state", UNAVAILABLE);
+                b.batteryPreheat(charging.optInt("batteryPreheatState", UNAVAILABLE),
+                        charging.optLong("batteryPreheatObservedAtMs", 0L));
                 b.chargingGunState = charging.optInt("gunState", UNAVAILABLE);
                 b.chargerWorkState =
                         charging.optInt("chargerState", UNAVAILABLE);
@@ -1415,6 +1436,7 @@ public class BydVehicleData {
         b.bodyworkRangeKm = bodyworkRangeKm; b.totalMileageKm = totalMileageKm;
         b.evMileageKm = evMileageKm; b.hevMileageKm = hevMileageKm; b.chargingState = chargingState;
         b.chargingStateAtMs = chargingStateAtMs;
+        b.batteryPreheat(batteryPreheatState, batteryPreheatObservedAtMs);
         b.chargingGunState = chargingGunState; b.chargerWorkState = chargerWorkState;
         b.chargingMode = chargingMode;
         b.chargingPowerKw = chargingPowerKw; b.chargingPowerAtMs = chargingPowerAtMs;
@@ -1516,6 +1538,8 @@ public class BydVehicleData {
         double fuelPercent = NaN;
         int totalMileageKm = UNAVAILABLE, evMileageKm = UNAVAILABLE, hevMileageKm = UNAVAILABLE;
         int chargingState = UNAVAILABLE, chargingGunState = UNAVAILABLE, chargerWorkState = UNAVAILABLE;
+        int batteryPreheatState = UNAVAILABLE;
+        long batteryPreheatObservedAtMs;
         long chargingStateAtMs = 0L;
         int chargingMode = UNAVAILABLE;
         double chargingPowerKw = NaN, externalChargingPowerKw = NaN, chargePowerKw = NaN;
@@ -1673,6 +1697,12 @@ public class BydVehicleData {
         }
         /** Preserve the source observation time when copying a newer charging edge. */
         public Builder chargingStateAtMs(long v) { chargingStateAtMs = v; return this; }
+        public Builder batteryPreheat(int state, long observedAtMs) {
+            batteryPreheatState = isBatteryPreheatState(state) && observedAtMs > 0L
+                    ? state : UNAVAILABLE;
+            batteryPreheatObservedAtMs = batteryPreheatState == UNAVAILABLE ? 0L : observedAtMs;
+            return this;
+        }
         public Builder chargingGunState(int v) { chargingGunState = v; return this; }
         public Builder chargerWorkState(int v) { chargerWorkState = v; return this; }
         public Builder chargingMode(int v) { chargingMode = v; return this; }

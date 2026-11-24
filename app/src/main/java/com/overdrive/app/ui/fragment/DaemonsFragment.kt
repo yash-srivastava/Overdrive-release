@@ -19,6 +19,7 @@ import androidx.fragment.app.activityViewModels
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.switchmaterial.SwitchMaterial
+import com.overdrive.app.logging.DaemonLogGuidance
 import com.overdrive.app.ui.adapter.DaemonAdapter
 import com.overdrive.app.ui.viewmodel.DaemonsViewModel
 import com.overdrive.app.ui.model.DaemonType
@@ -56,6 +57,7 @@ class DaemonsFragment : Fragment() {
     private val daemonsViewModel: DaemonsViewModel by activityViewModels()
     private lateinit var recyclerDaemons: RecyclerView
     private lateinit var tvDaemonsCount: TextView
+    private var tvDaemonsLogHint: TextView? = null
     private lateinit var swWifiAutoEnable: SwitchMaterial
     private lateinit var daemonAdapter: DaemonAdapter
     private var applyingWifiAutoEnable = false
@@ -91,6 +93,7 @@ class DaemonsFragment : Fragment() {
     private fun initViews(view: View) {
         recyclerDaemons = view.findViewById(R.id.recyclerDaemons)
         tvDaemonsCount = view.findViewById(R.id.tvDaemonsCount)
+        tvDaemonsLogHint = view.findViewById(R.id.tvDaemonsLogHint)
         swWifiAutoEnable = view.findViewById(R.id.swWifiAutoEnable)
         swWifiAutoEnable.isEnabled = false
 
@@ -207,6 +210,10 @@ class DaemonsFragment : Fragment() {
                 { type -> onDownloadLogClicked(type) }
             } else null
         )
+
+        tvDaemonsLogHint?.visibility = if (
+            com.overdrive.app.BuildConfig.DEBUG || com.overdrive.app.BuildConfig.LOG_CAPTURE
+        ) View.VISIBLE else View.GONE
         
         recyclerDaemons.apply {
             layoutManager = LinearLayoutManager(context)
@@ -801,35 +808,53 @@ class DaemonsFragment : Fragment() {
     private fun onDownloadLogClicked(type: DaemonType) {
         val logPath = DaemonAdapter.getLogFilePath(type) ?: return
         val ctx = context ?: return
-        val daemonName = type.displayName.replace(" ", "_").lowercase()
         val localizedName = type.localizedName(ctx)
+        val uploadConfigured = com.overdrive.app.logging.LogUploader.isUploadConfigured()
 
-        // In braveheart (LOG_CAPTURE) with a Worker URL configured, offer two
-        // ways to send: upload-and-get-a-code (zero-friction for support) or
-        // the existing Android share-sheet. Debug builds keep share-only.
-        if (com.overdrive.app.logging.LogUploader.isUploadConfigured()) {
-            val dialogView = LayoutInflater.from(ctx).inflate(R.layout.dialog_send_log, null)
-            dialogView.findViewById<TextView>(R.id.sendLogSubtitle)?.text =
-                getString(R.string.logs_send_subtitle, localizedName)
+        val dialogView = LayoutInflater.from(ctx).inflate(R.layout.dialog_send_log, null)
+        bindSendLogGuidance(dialogView, type, localizedName)
 
-            val dialog = com.google.android.material.dialog.MaterialAlertDialogBuilder(
-                ctx, R.style.Theme_Overdrive_M3_Dialog)
-                .setView(dialogView)
-                .setNegativeButton(android.R.string.cancel, null)
-                .create()
+        if (!uploadConfigured) {
+            dialogView.findViewById<View>(R.id.optionUpload)?.visibility = View.GONE
+        }
 
-            dialogView.findViewById<View>(R.id.optionUpload)?.setOnClickListener {
-                dialog.dismiss()
-                uploadDaemonLog(type, localizedName)
-            }
-            dialogView.findViewById<View>(R.id.optionShare)?.setOnClickListener {
-                dialog.dismiss()
-                shareDaemonLog(type)
-            }
-            dialog.show()
+        val dialog = com.google.android.material.dialog.MaterialAlertDialogBuilder(
+            ctx, R.style.Theme_Overdrive_M3_Dialog)
+            .setView(dialogView)
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+
+        dialogView.findViewById<View>(R.id.optionUpload)?.setOnClickListener {
+            dialog.dismiss()
+            uploadDaemonLog(type, localizedName)
+        }
+        dialogView.findViewById<View>(R.id.optionShare)?.setOnClickListener {
+            dialog.dismiss()
+            shareDaemonLog(type)
+        }
+        dialog.show()
+    }
+
+    private fun bindSendLogGuidance(dialogView: View, type: DaemonType, localizedName: String) {
+        dialogView.findViewById<TextView>(R.id.sendLogSubtitle)?.text =
+            getString(R.string.logs_send_subtitle, localizedName)
+        val key = DaemonAdapter.daemonLogKey(type)
+        val guidance = key?.let { DaemonLogGuidance.textForKey(requireContext(), it) }
+        val componentView = dialogView.findViewById<TextView>(R.id.sendLogComponent)
+        val whenView = dialogView.findViewById<TextView>(R.id.sendLogWhen)
+        if (guidance == null) {
+            componentView?.visibility = View.GONE
+            whenView?.visibility = View.GONE
             return
         }
-        shareDaemonLog(type)
+        componentView?.apply {
+            text = guidance.component
+            visibility = View.VISIBLE
+        }
+        whenView?.apply {
+            text = DaemonLogGuidance.whenToSendPrefix(requireContext()) + guidance.sendWhen
+            visibility = View.VISIBLE
+        }
     }
 
     /**

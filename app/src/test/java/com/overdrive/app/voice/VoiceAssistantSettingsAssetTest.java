@@ -34,7 +34,7 @@ public class VoiceAssistantSettingsAssetTest {
         assertTrue(html.contains("voice_assistant.direct_fallback_desc"));
         // v=9: confirm before forgetting voices (v=8 a trained voice per person, v=7 training over
         // music, v=6 wake-word training, v=5 resume-media/location toggles, v=4 pause-media + mic select).
-        assertTrue(html.contains("../shared/voice-assistant.js?v=9"));
+        assertTrue(html.contains("../shared/voice-assistant.js?v=11"));
         assertFalse(html.contains("voice-assistant.js?v=2"));
         assertFalse(html.contains("voice-assistant.js?v=3"));
         assertFalse(html.contains("voice-assistant.js?v=4"));

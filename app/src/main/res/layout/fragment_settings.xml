@@ -542,7 +542,7 @@
             style="@style/Widget.Overdrive.Revamp.Card"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="0dp"
+            android:layout_marginBottom="@dimen/od_space_12"
             android:clickable="true"
             android:focusable="true">
 
@@ -580,6 +580,61 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="@dimen/od_space_2"
                         android:text="@string/settings_section_daemons_subtitle"
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowMeta" />
+                </LinearLayout>
+
+                <ImageView
+                    android:layout_width="@dimen/od_icon_md"
+                    android:layout_height="@dimen/od_icon_md"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_chevron_right"
+                    app:tint="?attr/colorOnSurfaceVariant" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardSectionServiceMode"
+            style="@style/Widget.Overdrive.Revamp.Card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="0dp"
+            android:clickable="true"
+            android:focusable="true">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:minHeight="@dimen/od_touch_standard"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:layout_width="@dimen/od_icon_md"
+                    android:layout_height="@dimen/od_icon_md"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_directions_car"
+                    app:tint="?attr/colorOnSurfaceVariant" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/od_space_16"
+                    android:layout_marginEnd="@dimen/od_space_12"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_section_service_mode"
+                        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle"
+                        android:textSize="16sp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/od_space_2"
+                        android:text="@string/settings_section_service_mode_subtitle"
                         android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowMeta" />
                 </LinearLayout>
 

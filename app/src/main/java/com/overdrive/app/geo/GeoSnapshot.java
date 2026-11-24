@@ -43,9 +43,9 @@ public final class GeoSnapshot {
         this.relMs = relMs;
     }
 
-    /** True iff lat/lng are real coordinates (not NaN). */
+    /** True iff both coordinates describe a usable GPS fix. */
     public boolean hasFix() {
-        return !Double.isNaN(lat) && !Double.isNaN(lng);
+        return GeoCoordinates.isUsable(lat, lng);
     }
 
     /** Sentinel "no fix" snapshot. */

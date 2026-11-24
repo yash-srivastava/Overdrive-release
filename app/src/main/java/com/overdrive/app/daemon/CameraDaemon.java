@@ -1,5 +1,7 @@
 package com.overdrive.app.daemon;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import android.os.Handler;
 import android.os.Looper;
 
@@ -16,6 +18,7 @@ import com.overdrive.app.server.TcpCommandServer;
 import com.overdrive.app.daemon.proxy.Safe;
 
 import java.io.File;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -559,7 +562,7 @@ public class CameraDaemon {
 
     // Build stamp printed at startup so logs identify the running build.
     // BUMP THIS on every code change you intend to deploy + verify.
-    private static final String BUILD_TAG = "20261020-fob-near-snappy-locks-1+cluster-overlay-4";
+    private static final String BUILD_TAG = "20261121-dashboard-builder-63.4.1-1";
     // Source contract for the DiLink 5 generation-owned ACC authority and
     // heartbeat recovery path. Kept separate from BUILD_TAG so unrelated
     // camera build diagnostics retain their established identifier.
@@ -741,9 +744,9 @@ public class CameraDaemon {
         }
 
         // Create directories
-        new File(outputDir).mkdirs();
-        new File(STREAM_DIR()).mkdirs();
-        new File(APP_STREAM_DIR).mkdirs();
+        RemovableStorageFs.mkdirs(new File(outputDir));
+        RemovableStorageFs.mkdirs(new File(STREAM_DIR()));
+        RemovableStorageFs.mkdirs(new File(APP_STREAM_DIR));
 
         // Generate device ID
         generateDeviceId();
@@ -838,6 +841,12 @@ public class CameraDaemon {
             com.overdrive.app.launcher.ClusterLayouts.recoverAtBoot();
         } catch (Throwable failure) {
             log("Cluster layout boot recovery unavailable: " + failure.getClass().getSimpleName());
+        }
+        // Custom Layouts: owner of its cluster session in this process only; idle costs nothing.
+        try {
+            com.overdrive.app.customlayouts.daemon.CustomLayoutsController.init(sharedAppContext);
+        } catch (Throwable failure) {
+            log("Custom Layouts init skipped: " + failure.getClass().getSimpleName());
         }
 
         // Dark-panel recovery (boot). If a previous session turned the backlight
@@ -992,6 +1001,8 @@ public class CameraDaemon {
         // a hole where the HTTP server returned empty recordings until the
         // user cycled ACC OFF→ON.
         storageManager.startSdCardWatchdog();
+        // Journal recovery runs even when all configured storage is INTERNAL.
+        com.overdrive.app.storage.SdCardFormatter.getInstance().recoverAtDaemonStart();
 
         // Start the accessibility bind watchdog. Key mapping rides on the
         // app-process KeepAliveAccessibilityService, whose OS bind can wedge in
@@ -1581,6 +1592,7 @@ public class CameraDaemon {
         // one ActivityManager.getMemoryInfo() + one Runtime.totalMemory()
         // every 5 minutes.
         startPeriodicMemoryLogging();
+        com.overdrive.app.updater.AutoUpdateScheduler.start(getAppContext());
 
         // RESILIENT LOOPER: BYD framework listeners (gearbox, bodywork, etc.) can throw
         // uncaught exceptions from their internal processing (e.g., learningEPB → CarSettings
@@ -1625,7 +1637,7 @@ public class CameraDaemon {
             if (codec != null) {
                 // Just update the config, don't reinitialize encoder
                 com.overdrive.app.surveillance.GpuPipelineConfig.VideoCodec videoCodec;
-                switch (codec.toUpperCase()) {
+                switch (codec.toUpperCase(Locale.ROOT)) {
                     case "H265":
                     case "HEVC":
                         videoCodec = com.overdrive.app.surveillance.GpuPipelineConfig.VideoCodec.H265;
@@ -2456,17 +2468,17 @@ public class CameraDaemon {
             // fsync every 4s on the car-ON path would be a real disk-flush cost on
             // exactly the path this change exists to make cheap, so it's omitted.
             java.io.File tmp = new java.io.File(CAMERA_ACTIVE_LEASE_PATH + ".tmp");
-            try (java.io.FileOutputStream fos = new java.io.FileOutputStream(tmp)) {
+            try (java.io.FileOutputStream fos = RemovableStorageFs.openOutput(tmp)) {
                 fos.write(payload);
             }
             java.io.File dest = new java.io.File(CAMERA_ACTIVE_LEASE_PATH);
-            if (!tmp.renameTo(dest)) {
+            if (!RemovableStorageFs.renameTo(tmp, dest)) {
                 // Rename can fail across some FUSE quirks — fall back to a direct
                 // overwrite (the value is a single token, torn read fails safe).
-                try (java.io.FileOutputStream fos = new java.io.FileOutputStream(dest)) {
+                try (java.io.FileOutputStream fos = RemovableStorageFs.openOutput(dest)) {
                     fos.write(payload);
                 }
-                tmp.delete();
+                RemovableStorageFs.delete(tmp);
             }
             // Match the UnifiedConfigManager invariant for /data/local/tmp files:
             // world-readable/writable so a non-creator UID could open it. The only
@@ -2474,8 +2486,8 @@ public class CameraDaemon {
             // strictly required now, but it keeps parity with the config files and
             // future-proofs against an app-UID (10xxx) reader. Cheap: perms are
             // sticky to the inode, so this is a no-op stat/chmod once set.
-            dest.setReadable(true, false);
-            dest.setWritable(true, false);
+            RemovableStorageFs.setReadable(dest, true, false);
+            RemovableStorageFs.setWritable(dest, true, false);
         } catch (Throwable t) {
             // Throttled by the caller's cadence; a failed lease write just means
             // the peer daemon may run one backlight-off tick during active camera,
@@ -2533,6 +2545,15 @@ public class CameraDaemon {
         memoryLogScheduler.scheduleAtFixedRate(
             CameraDaemon::logMemoryStatus,
             1, 5, java.util.concurrent.TimeUnit.MINUTES);
+        // Age the read-only phone automation signal even if the Bluetooth collector stops.
+        // Reuse this daemon's existing scheduler: no new worker or proximity actuator.
+        memoryLogScheduler.scheduleAtFixedRate(() -> {
+            try {
+                com.overdrive.app.server.RemoteAccessApiHandler.refreshAutomationPresence();
+            } catch (Throwable t) {
+                log("Proximity automation maintenance failed: " + t.getClass().getSimpleName());
+            }
+        }, 5, 5, java.util.concurrent.TimeUnit.SECONDS);
         // Piggy-back recording-cache prune onto the same scheduler. The
         // RecordingsApiHandler.RECORDING_CACHE is invalidated synchronously
         // when the daemon itself rotates an mp4 (HardwareEventRecorderGpu)
@@ -2682,6 +2703,7 @@ public class CameraDaemon {
     private static final String DISABLE_SENTINEL = com.overdrive.app.util.ScratchRoot.path("camera_daemon.disabled");
 
     public static void shutdown() {
+        com.overdrive.app.updater.AutoUpdateScheduler.stop();
         shutdownInternal(true);
     }
 
@@ -2864,8 +2886,8 @@ public class CameraDaemon {
 
     private static boolean parkedShutdownMarkerExists() {
         try {
-            return new java.io.File(
-                com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH).exists();
+            return RemovableStorageFs.exists(new java.io.File(
+                com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH));
         } catch (Throwable ignored) {
             return true;
         }
@@ -2985,7 +3007,7 @@ public class CameraDaemon {
             byte[] contents = (Long.toString(timestampMs) + "\n")
                 .getBytes(java.nio.charset.StandardCharsets.US_ASCII);
             try (java.io.FileOutputStream output =
-                    new java.io.FileOutputStream(temporary, false)) {
+                    RemovableStorageFs.openOutput(temporary, false)) {
                 output.write(contents);
                 output.flush();
                 output.getFD().sync();
@@ -3004,10 +3026,10 @@ public class CameraDaemon {
                 return false;
             }
             try {
-                marker.setReadable(true, false);
-                marker.setWritable(true, false);
+                RemovableStorageFs.setReadable(marker, true, false);
+                RemovableStorageFs.setWritable(marker, true, false);
             } catch (Exception ignored) {}
-            if (!marker.exists() || marker.length() == 0L) {
+            if (!RemovableStorageFs.exists(marker) || RemovableStorageFs.length(marker) == 0L) {
                 log("WARNING: Parked-shutdown marker write could not be verified: " + path);
                 return false;
             }
@@ -3089,7 +3111,7 @@ public class CameraDaemon {
         try {
             java.io.File marker = new java.io.File(path);
             java.io.File parent = marker.getParentFile();
-            if (!marker.exists()) {
+            if (!RemovableStorageFs.exists(marker)) {
                 boolean synced = forceDirectorySync(parent);
                 if (synced) {
                     parkMarkerGeneration = 0L;
@@ -3097,7 +3119,7 @@ public class CameraDaemon {
                 }
                 return synced;
             }
-            if (!java.nio.file.Files.deleteIfExists(marker.toPath()) || marker.exists()) {
+            if (!java.nio.file.Files.deleteIfExists(marker.toPath()) || RemovableStorageFs.exists(marker)) {
                 log("WARNING: ACC ON could not clear parked-shutdown marker: " + path);
                 return false;
             }
@@ -3114,6 +3136,7 @@ public class CameraDaemon {
     }
 
     private static void shutdownInternal(boolean writeDisableSentinel) {
+        com.overdrive.app.updater.AutoUpdateScheduler.stop();
         synchronized (TRIP_ANALYTICS_LIFECYCLE_LOCK) {
             if (!shutdownStarted.compareAndSet(false, true)) {
                 return;
@@ -3217,7 +3240,7 @@ public class CameraDaemon {
             com.overdrive.app.surveillance.ClusterViewMirrorService
                 .forceDetachIfActive("daemon-shutdown");
             com.overdrive.app.surveillance.ClusterMirrorController.shutdownIfActive();
-            if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) {
+            if (com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()) {
                 if (!com.overdrive.app.launcher.DiLink5ClusterCast
                         .shutdownIfActive()) {
                     log("DI5 cluster shutdown incomplete; recovery marker retained");
@@ -3536,7 +3559,7 @@ public class CameraDaemon {
      */
     private static void writeDisableSentinel() {
         try {
-            java.io.FileWriter fw = new java.io.FileWriter(DISABLE_SENTINEL);
+            java.io.Writer fw = new java.io.OutputStreamWriter(RemovableStorageFs.openOutput(new java.io.File(DISABLE_SENTINEL)), java.nio.charset.StandardCharsets.UTF_8);
             fw.write("disabled at " + new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss",
                 java.util.Locale.US).format(new java.util.Date()) + "\n");
             fw.write("pid=" + android.os.Process.myPid() + "\n");
@@ -3555,23 +3578,23 @@ public class CameraDaemon {
         try {
             // Try PID file first
             java.io.File pidFile = new java.io.File(com.overdrive.app.util.ScratchRoot.path("cam_watchdog.pid"));
-            if (pidFile.exists()) {
+            if (RemovableStorageFs.exists(pidFile)) {
                 String pid = new java.util.Scanner(pidFile).useDelimiter("\\A").next().trim();
                 Runtime.getRuntime().exec(new String[]{"kill", "-9", pid});
                 log("Killed watchdog wrapper via PID file (pid=" + pid + ")");
-                pidFile.delete();
+                RemovableStorageFs.delete(pidFile);
             }
             // Also pkill as fallback
             Runtime.getRuntime().exec(new String[]{"pkill", "-9", "-f", "start_cam_daemon"});
             // Delete the script so it can't be accidentally re-run
-            new java.io.File(com.overdrive.app.util.ScratchRoot.path("start_cam_daemon.sh")).delete();
+            RemovableStorageFs.delete(new java.io.File(com.overdrive.app.util.ScratchRoot.path("start_cam_daemon.sh")));
             // SIGKILL bypasses the watchdog EXIT trap. Remove the exact
             // directory-lock contents so a later start is not blocked by
             // stale ownership.
             java.io.File watchdogLock =
                 new java.io.File(com.overdrive.app.util.ScratchRoot.path("cam_watchdog.lock"));
-            new java.io.File(watchdogLock, "pid").delete();
-            watchdogLock.delete();
+            RemovableStorageFs.delete(new java.io.File(watchdogLock, "pid"));
+            RemovableStorageFs.delete(watchdogLock);
         } catch (Exception e) {
             log("Watchdog wrapper kill error (non-fatal): " + e.getMessage());
         }
@@ -3583,7 +3606,7 @@ public class CameraDaemon {
      * Also callable from Java to check state.
      */
     public static boolean isDisabledBySentinel() {
-        return new java.io.File(DISABLE_SENTINEL).exists();
+        return RemovableStorageFs.exists(new java.io.File(DISABLE_SENTINEL));
     }
 
     /**
@@ -3626,7 +3649,7 @@ public class CameraDaemon {
                         if (pid == myPid) {
                             stale = true;
                             reason = "lock held by our own PID (previous crash)";
-                        } else if (!new File("/proc/" + pid).exists()) {
+                        } else if (!RemovableStorageFs.exists(new File("/proc/" + pid))) {
                             stale = true;
                             reason = "dead PID " + pid;
                         } else {
@@ -3690,7 +3713,7 @@ public class CameraDaemon {
                     }
                     log("Singleton: stale lock (" + reason + ") — cleaning up");
                     try { lockFile.close(); } catch (Exception ignored) {}
-                    lockFileObj.delete();
+                    RemovableStorageFs.delete(lockFileObj);
 
                     // Small delay so the kernel releases the inode lock before retry
                     try { Thread.sleep(200); } catch (InterruptedException ignored) {}
@@ -3827,7 +3850,7 @@ public class CameraDaemon {
                 // 0.5b THEN close the OEM cluster projection + restore gauges.
                 try {
                     boolean diLink5ProjectionRestored = true;
-                    if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) {
+                    if (com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()) {
                         diLink5ProjectionRestored =
                                 com.overdrive.app.launcher.DiLink5ClusterCast
                                         .shutdownIfActive();
@@ -4078,8 +4101,8 @@ public class CameraDaemon {
      */
     private static CmdlineMatch classifyCmdline(int pid) {
         java.io.File f = new java.io.File("/proc/" + pid + "/cmdline");
-        if (!f.exists()) return CmdlineMatch.NO_MATCH; // PID gone in our window
-        if (!f.canRead()) return CmdlineMatch.UNKNOWN; // EACCES / hidepid
+        if (!RemovableStorageFs.exists(f)) return CmdlineMatch.NO_MATCH; // PID gone in our window
+        if (!RemovableStorageFs.canRead(f)) return CmdlineMatch.UNKNOWN; // EACCES / hidepid
         String cmdline = readProcCmdline(pid);
         if (cmdline.isEmpty()) {
             // canRead() said yes but read produced nothing — could be a
@@ -4104,8 +4127,8 @@ public class CameraDaemon {
      */
     private static String readProcCmdline(int pid) {
         java.io.File f = new java.io.File("/proc/" + pid + "/cmdline");
-        if (!f.exists()) return "";
-        try (java.io.FileInputStream fis = new java.io.FileInputStream(f)) {
+        if (!RemovableStorageFs.exists(f)) return "";
+        try (java.io.FileInputStream fis = RemovableStorageFs.openInput(f)) {
             byte[] buf = new byte[4096];
             int total = 0;
             int n;
@@ -4170,7 +4193,7 @@ public class CameraDaemon {
 
     /** Sweep /proc for a daemon process other than ourselves. */
     private static DaemonScan scanForRivalDaemon(StringBuilder describeInto) {
-        String[] entries = new java.io.File("/proc").list();
+        String[] entries = RemovableStorageFs.list(new java.io.File("/proc"));
         if (entries == null) return DaemonScan.UNKNOWN;
         int myPid = android.os.Process.myPid();
         for (String entry : entries) {
@@ -4205,7 +4228,7 @@ public class CameraDaemon {
                 lockFile = null;
             }
             // Delete lock file
-            new File(LOCK_FILE).delete();
+            RemovableStorageFs.delete(new File(LOCK_FILE));
             log("Released singleton lock");
         } catch (Exception e) {
             log("Error releasing singleton lock: " + e.getMessage());
@@ -4299,7 +4322,7 @@ public class CameraDaemon {
                     || sohEstimatorSnapshot.getNominalCapacityKwh() <= 0
                     || sohEstimatorSnapshot.getNominalCapacityKwh() >= 30.0
                     || manager.getDatabase() == null
-                    || marker.exists()) {
+                    || RemovableStorageFs.exists(marker)) {
                 return;
             }
             manager.getDatabase().clearConsumptionBuckets();
@@ -4834,7 +4857,7 @@ public class CameraDaemon {
             String persistedCodec = HttpServer.getRecordingCodec();
             if (persistedCodec != null) {
                 com.overdrive.app.surveillance.GpuPipelineConfig.VideoCodec videoCodec;
-                switch (persistedCodec.toUpperCase()) {
+                switch (persistedCodec.toUpperCase(Locale.ROOT)) {
                     case "H265":
                     case "HEVC":
                         videoCodec = com.overdrive.app.surveillance.GpuPipelineConfig.VideoCodec.H265;
@@ -4870,7 +4893,7 @@ public class CameraDaemon {
                 String persistedBitrate = HttpServer.getRecordingBitrate();
                 if (persistedBitrate != null) {
                     com.overdrive.app.surveillance.GpuPipelineConfig.BitratePreset preset;
-                    switch (persistedBitrate.toUpperCase()) {
+                    switch (persistedBitrate.toUpperCase(Locale.ROOT)) {
                         case "LOW":
                             preset = com.overdrive.app.surveillance.GpuPipelineConfig.BitratePreset.LOW;
                             break;
@@ -9530,6 +9553,35 @@ public class CameraDaemon {
         return surveillanceEnabled;
     }
 
+    /** Fail closed unless ACC OFF is confirmed for 30 minutes and cameras are idle.
+     * Cold-boot OFF defaults and stale DiLink 5 parking states are not sufficient. */
+    public static boolean isSafeForAutomaticUpdate() {
+        if (!running.get() || isProcessRestartPending()
+                || !isAccOffAdmitted() || isParkShutdownCommitted() || surveillanceEnabled
+                || com.overdrive.app.config.UnifiedConfigManager.isSurveillanceEnabled()
+                || doorLockListenerArmed || pendingAccOn || pendingAccOff) {
+            return false;
+        }
+        final long generation = captureAccObservationGeneration();
+        final long offSince = captureCurrentAccOffEnteredAtElapsedMs(generation);
+        final long now = android.os.SystemClock.elapsedRealtime();
+        if (offSince <= 0L || now - offSince < 30L * 60L * 1000L) return false;
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            // Never trust a cached ACC OFF while the driver sits in P.
+            Boolean live = com.overdrive.app.monitor.AccMonitor
+                    .probeDiLink5AccOnForTransition(sharedAppContext, false, false);
+            if (!Boolean.FALSE.equals(live) || !isAccObservationCurrent(generation)) return false;
+        }
+        com.overdrive.app.surveillance.GpuSurveillancePipeline pano = gpuPipeline;
+        // Do not infer idle from a missing recorder during daemon startup.
+        if (pano == null || pano.isRecording()
+                || pano.getPendingRecordingPrefix() != null) {
+            return false;
+        }
+        com.overdrive.app.camera.OemDashcamPipeline oem = oemDashcamPipeline;
+        return oem == null || !oem.isRecording();
+    }
+
     /** True if surveillance was requested but suppressed because car is in a safe zone. */
     public static boolean isSafeZoneSuppressed() {
         return safeZoneSuppressed;
@@ -9809,7 +9861,7 @@ public class CameraDaemon {
     public static void setRecordingBitrate(String bitrate) {
         if (bitrate == null) return;
         String tier;
-        switch (bitrate.toUpperCase()) {
+        switch (bitrate.toUpperCase(Locale.ROOT)) {
             case "LOW":    tier = "ECONOMY"; break;
             case "MEDIUM": tier = "STANDARD"; break;
             case "HIGH":   tier = "HIGH"; break;
@@ -9831,7 +9883,7 @@ public class CameraDaemon {
 
         try {
             com.overdrive.app.surveillance.GpuPipelineConfig.VideoCodec videoCodec;
-            switch (codec.toUpperCase()) {
+            switch (codec.toUpperCase(Locale.ROOT)) {
                 case "H265":
                 case "HEVC":
                     videoCodec = com.overdrive.app.surveillance.GpuPipelineConfig.VideoCodec.H265;
@@ -9989,7 +10041,7 @@ public class CameraDaemon {
 
         try {
             com.overdrive.app.recording.RecordingModeManager.Mode modeEnum =
-                com.overdrive.app.recording.RecordingModeManager.Mode.valueOf(mode.toUpperCase());
+                com.overdrive.app.recording.RecordingModeManager.Mode.valueOf(mode.toUpperCase(java.util.Locale.ROOT));
             recordingModeManager.setMode(modeEnum);
             log("Recording mode set to: " + mode);
         } catch (IllegalArgumentException e) {
@@ -10128,24 +10180,24 @@ public class CameraDaemon {
             java.io.File sentryDir = storageManager.getSurveillanceDir();
             java.io.File[] files = null;
 
-            if (sentryDir.exists() && sentryDir.isDirectory()) {
-                files = sentryDir.listFiles((dir, name) ->
+            if (RemovableStorageFs.exists(sentryDir) && RemovableStorageFs.isDirectory(sentryDir)) {
+                files = RemovableStorageFs.listFiles(sentryDir, (dir, name) ->
                     name.startsWith(todayPrefix) && name.endsWith(".mp4"));
             }
 
             // Fallback to legacy locations for backward compatibility
             if (files == null || files.length == 0) {
                 sentryDir = new java.io.File(outputDir, "sentry_events");
-                if (sentryDir.exists() && sentryDir.isDirectory()) {
-                    files = sentryDir.listFiles((dir, name) ->
+                if (RemovableStorageFs.exists(sentryDir) && RemovableStorageFs.isDirectory(sentryDir)) {
+                    files = RemovableStorageFs.listFiles(sentryDir, (dir, name) ->
                         name.startsWith(todayPrefix) && name.endsWith(".mp4"));
                 }
             }
 
             if (files == null || files.length == 0) {
                 sentryDir = new java.io.File("/storage/emulated/0/Android/data/com.overdrive.app/files/sentry_events");
-                if (sentryDir.exists() && sentryDir.isDirectory()) {
-                    files = sentryDir.listFiles((dir, name) ->
+                if (RemovableStorageFs.exists(sentryDir) && RemovableStorageFs.isDirectory(sentryDir)) {
+                    files = RemovableStorageFs.listFiles(sentryDir, (dir, name) ->
                         name.startsWith(todayPrefix) && name.endsWith(".mp4"));
                 }
             }
@@ -10157,7 +10209,7 @@ public class CameraDaemon {
                 for (java.io.File file : files) {
                     java.util.Map<String, Object> event = new java.util.HashMap<>();
                     event.put("filename", file.getName());
-                    event.put("size", file.length() / 1024); // KB
+                    event.put("size", RemovableStorageFs.length(file) / 1024); // KB
 
                     // Extract time from filename: event_YYYYMMDD_HHMMSS.mp4
                     String name = file.getName();
@@ -10229,7 +10281,7 @@ public class CameraDaemon {
      */
     private static void saveStreamMode(String mode) {
         try {
-            java.io.FileWriter writer = new java.io.FileWriter(PATH_STREAM_MODE_FILE());
+            java.io.Writer writer = new java.io.OutputStreamWriter(RemovableStorageFs.openOutput(new java.io.File(PATH_STREAM_MODE_FILE())), java.nio.charset.StandardCharsets.UTF_8);
             writer.write(mode);
             writer.close();
         } catch (Exception e) {
@@ -10243,7 +10295,7 @@ public class CameraDaemon {
     private static void loadStreamMode() {
         try {
             File file = new File(PATH_STREAM_MODE_FILE());
-            if (file.exists()) {
+            if (RemovableStorageFs.exists(file)) {
                 java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.FileReader(file));
                 String mode = reader.readLine();
                 reader.close();
@@ -10297,7 +10349,7 @@ public class CameraDaemon {
         // This ensures daemon uses the same ID as the app
         try {
             File idFile = new File(PATH_DEVICE_ID_FILE());
-            if (idFile.exists()) {
+            if (RemovableStorageFs.exists(idFile)) {
                 // Self-heal for older installs: the legacy saveDeviceId()
                 // didn't chmod the file, leaving it at the shell-UID-only
                 // mode 0600 default. The app UID couldn't read it, so
@@ -10307,8 +10359,8 @@ public class CameraDaemon {
                 // install. Apply on every daemon start so a re-deploy
                 // repairs older devices automatically.
                 try {
-                    idFile.setReadable(true, false);
-                    idFile.setWritable(true, false);
+                    RemovableStorageFs.setReadable(idFile, true, false);
+                    RemovableStorageFs.setWritable(idFile, true, false);
                 } catch (Exception ignored) {}
                 java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.FileReader(idFile));
                 String fileId = reader.readLine();
@@ -10350,7 +10402,7 @@ public class CameraDaemon {
     private static void saveDeviceId(String id) {
         try {
             File idFile = new File(PATH_DEVICE_ID_FILE());
-            java.io.FileWriter writer = new java.io.FileWriter(idFile);
+            java.io.Writer writer = new java.io.OutputStreamWriter(RemovableStorageFs.openOutput(idFile), java.nio.charset.StandardCharsets.UTF_8);
             writer.write(id);
             writer.close();
             // Files created in /data/local/tmp by the shell-UID daemon land
@@ -10361,8 +10413,8 @@ public class CameraDaemon {
             // Set world-readable so both UIDs read the same DID and derive
             // the same key. setWritable too so the app can update the DID
             // if a future migration ever needs to.
-            idFile.setReadable(true, false);
-            idFile.setWritable(true, false);
+            RemovableStorageFs.setReadable(idFile, true, false);
+            RemovableStorageFs.setWritable(idFile, true, false);
         } catch (Exception e) {
             log("WARN: Could not save device ID to file: " + e.getMessage());
         }
@@ -10450,7 +10502,7 @@ public class CameraDaemon {
         };
 
         for (String libPath : surveillancePaths) {
-            if (new File(libPath).exists()) {
+            if (RemovableStorageFs.exists(new File(libPath))) {
                 try {
                     System.load(libPath);
                     log("SUCCESS: Surveillance library loaded from: " + libPath);
@@ -10656,7 +10708,7 @@ public class CameraDaemon {
         }
 
         java.io.File pushDir = new java.io.File(com.overdrive.app.util.ScratchRoot.path(".push"));
-        if (!pushDir.exists()) pushDir.mkdirs();
+        if (!RemovableStorageFs.exists(pushDir)) RemovableStorageFs.mkdirs(pushDir);
 
         com.overdrive.app.notifications.push.VapidKeyStore keyStore =
                 new com.overdrive.app.notifications.push.VapidKeyStore(
@@ -10792,7 +10844,7 @@ public class CameraDaemon {
         for (String perm : permissions) {
             try {
                 Process process = Runtime.getRuntime().exec(
-                    "pm grant com.overdrive.app " + perm);
+                    "pm grant " + com.overdrive.app.util.ShellUser.flag() + " com.overdrive.app " + perm);
                 int exitCode = process.waitFor();
                 if (exitCode == 0) {
                     log("Granted: " + perm);

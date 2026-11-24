@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Public-build stand-ins for Custom Layouts resources referenced by shared UI.
+     Official builds get the real definitions from the private overlay instead. -->
+<resources>
+    <string name="rail_custom_layouts">Custom Layouts</string>
+    <string name="custom_layouts_oss_unavailable">Custom Layouts is available in the official OverDrive build.</string>
+</resources>

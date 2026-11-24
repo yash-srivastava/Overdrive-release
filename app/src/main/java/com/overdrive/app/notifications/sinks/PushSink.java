@@ -14,11 +14,8 @@ import com.overdrive.app.notifications.push.VapidSigner;
 import org.json.JSONObject;
 
 import java.util.List;
-import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -36,7 +33,6 @@ public final class PushSink implements NotificationBus.Sink {
 
     private static final DaemonLogger logger = DaemonLogger.getInstance("PushSink");
     private static final int TTL_SECONDS = 86_400; // 24h
-    private static final int MAX_PENDING_DELIVERIES = 128;
 
     private final SubscriptionStore subs;
     private final CategoryRegistry registry;
@@ -115,7 +111,6 @@ public final class PushSink implements NotificationBus.Sink {
 
         long now = System.currentTimeMillis();
         ExecutorService exec = null; // lazy
-        int rejectedDeliveries = 0;
         for (PushSubscription sub : all) {
             if (targetId != null && !targetId.equals(sub.id)) continue;
             if (!bypassPrefs) {
@@ -129,17 +124,7 @@ public final class PushSink implements NotificationBus.Sink {
             }
             if (exec == null) exec = executor();
             final PushSubscription target = sub;
-            try {
-                exec.execute(() -> sendOne(target, enriched));
-            } catch (RejectedExecutionException saturated) {
-                // Do not let a slow/unreachable push service retain an
-                // unbounded number of stale notification tasks in memory.
-                rejectedDeliveries++;
-            }
-        }
-        if (rejectedDeliveries > 0) {
-            logger.warn("push delivery queue full; skipped " + rejectedDeliveries
-                    + " delivery(s) for category " + event.category);
+            exec.execute(() -> sendOne(target, enriched));
         }
     }
 
@@ -150,18 +135,11 @@ public final class PushSink implements NotificationBus.Sink {
     private ExecutorService executor() {
         ExecutorService e = executorRef.get();
         if (e != null) return e;
-        ExecutorService created = new ThreadPoolExecutor(
-                2,
-                2,
-                0L,
-                TimeUnit.MILLISECONDS,
-                new ArrayBlockingQueue<>(MAX_PENDING_DELIVERIES),
-                r -> {
-                    Thread t = new Thread(r, "PushSink");
-                    t.setDaemon(true);
-                    return t;
-                },
-                new ThreadPoolExecutor.AbortPolicy());
+        ExecutorService created = Executors.newFixedThreadPool(2, r -> {
+            Thread t = new Thread(r, "PushSink");
+            t.setDaemon(true);
+            return t;
+        });
         if (executorRef.compareAndSet(null, created)) return created;
         // lost the race — shut ours down
         created.shutdown();

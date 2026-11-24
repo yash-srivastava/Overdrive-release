@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notif_channel_roadsense_overlay">RoadSense 悬浮窗</string>
+    <string name="notif_roadsense_overlay_text">危险提示悬浮窗已激活</string>
+    <string name="notif_channel_roadsense_imu">RoadSense IMU</string>
+    <string name="notif_roadsense_imu_text">道路感知已激活</string>
+    <string name="notif_channel_onscreen_messages">屏幕消息</string>
+    <string name="notif_onscreen_message_title">屏幕消息</string>
+    <string name="notif_channel_parked_impact">停车碰撞监测</string>
+    <string name="notif_parked_impact_title">哨兵模式</string>
+    <string name="notif_parked_impact_text">停车时正在监测碰撞</string>
+    <string name="notif_network_hotspot">网络与热点</string>
+    <string name="notif_channel_media_playback">媒体播放</string>
+    <string name="notif_roadsense_chime_title">RoadSense 警告</string>
+    <string name="notif_roadsense_chime_text">正在播放安全提示音</string>
+    <string name="notif_channel_location">定位服务</string>
+    <string name="notif_channel_location_desc">用于监控的 GPS 追踪</string>
+    <string name="notif_location_title">定位已激活</string>
+    <string name="notif_location_text">GPS 追踪运行中</string>
+    <string name="notif_vehicle_control">车辆控制</string>
+    <string name="notif_media_title">正在播放音频</string>
+    <string name="notif_media_text">OverDrive 自动化</string>
+    <string name="notif_channel_keepalive">守护进程保活</string>
+    <string name="notif_channel_keepalive_desc">保持守护进程在后台运行</string>
+    <string name="notif_channel_summary">Overdrive 状态</string>
+    <string name="notif_channel_summary_desc">Overdrive 后台服务的合并状态栏</string>
+    <string name="notif_channel_remote_voice">远程语音</string>
+    <string name="notif_channel_status_overlay">状态悬浮窗</string>
+    <string name="notif_channel_status_overlay_desc">录制和行程状态悬浮窗</string>
+</resources>

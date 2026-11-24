@@ -33,8 +33,8 @@ public class AutomationPickerGroupingAssetTest {
         assertTrue(keyMapping.contains("BYD.i18n.onChange(refreshLocale)"));
         assertTrue(keyMapping.contains(
                 "action.textContent = describeAction(b.action) || b.label || '';"));
-        assertTrue(automationsPage.contains("automations.js?v=av75"));
-        assertTrue(keyMappingPage.contains("key-mapping.js?v=40"));
+        assertTrue(automationsPage.contains("automations.js?v=av78"));
+        assertTrue(keyMappingPage.contains("key-mapping.js?v=44"));
     }
 
     @Test

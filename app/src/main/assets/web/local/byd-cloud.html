@@ -11,7 +11,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#00876C">
     <script src="../shared/theme.js?v=12"></script>
-    <script src="../shared/app-shell.js?v=23"></script>
+    <script src="../shared/app-shell.js?v=26"></script>
     <!--
       Bottom-tab manifest. Three task-based tabs:
         Account  — credential form (region, email, password, PIN, Save / Test)
@@ -282,13 +282,13 @@
     <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
     <div id="toastContainer" class="toast-container"></div>
 
-    <script src="../shared/auth.js"></script>
+    <script src="../shared/auth.js?v=18"></script>
     <script src="../shared/pwa-init.js?v=index1"></script>
-    <script src="../shared/core.js?v=27"></script>
+    <script src="../shared/core.js?v=31"></script>
     <script src="../shared/settings-hydration.js?v=1"></script>
-    <script src="../shared/update-flow.js?v=3"></script>
+    <script src="../shared/update-flow.js?v=6"></script>
     <!-- BydCloud module + SurvSettings stubs live in surveillance.js. -->
-    <script src="../shared/surveillance.js?v=survtoggle20"></script>
+    <script src="../shared/surveillance.js?v=survtoggle22"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');

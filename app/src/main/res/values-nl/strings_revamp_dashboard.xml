@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="dash_vehicle_line">%1$s · %2$.1f kWh</string>
-    <string name="dash_range_caption">bereik</string>
+    <string name="dash_range_caption">actieradius</string>
     <string name="dash_status_remote_on">Toegang op afstand aan</string>
     <string name="dash_status_remote_off">Toegang op afstand uit</string>
     <string name="dash_status_remote_state">Toegang op afstand · %1$s</string>
-    <string name="dash_status_services">%1$d van %2$d diensten</string>
+    <string name="dash_status_services">%1$d van %2$d services</string>
     <string name="dash_status_view">Bekijk</string>
     <string name="dash_status_recording_idle">Opname inactief</string>
     <string name="dash_services_running">%1$d van %2$d actief</string>

@@ -354,7 +354,7 @@ public final class PermissionGranter {
     private static int execGrant(String packageName, String permission) {
         try {
             Process process = Runtime.getRuntime().exec(
-                new String[]{"sh", "-c", com.overdrive.app.util.ScratchRoot.remap("pm grant " + packageName + " " + permission + " 2>&1")});
+                new String[]{"sh", "-c", com.overdrive.app.util.ScratchRoot.remap("pm grant " + com.overdrive.app.util.ShellUser.flag() + " " + packageName + " " + permission + " 2>&1")});
             
             BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
             StringBuilder output = new StringBuilder();

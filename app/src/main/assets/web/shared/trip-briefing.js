@@ -370,6 +370,10 @@
                 });
             }
             this.onShown();
+            // onShown reads only while the Briefing tab is on screen; opening it later reads then.
+            if (window.BYD && BYD.offline && typeof BYD.offline.onReconnect === 'function') {
+                BYD.offline.onReconnect(function () { self.onShown(); });
+            }
         },
 
         bind: function () {

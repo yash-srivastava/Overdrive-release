@@ -1,5 +1,7 @@
 package com.overdrive.app.surveillance;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import android.media.MediaFormat;
 
 import java.io.BufferedOutputStream;
@@ -53,7 +55,7 @@ final class SegmentJournal {
             ByteBuffer csd0 = format.getByteBuffer("csd-0");
             if (mime == null || csd0 == null) return null;
             ByteBuffer csd1 = format.containsKey("csd-1") ? format.getByteBuffer("csd-1") : null;
-            out = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(f), 16 * 1024));
+            out = new DataOutputStream(new BufferedOutputStream(RemovableStorageFs.openOutput(f), 16 * 1024));
             out.writeInt(MAGIC);
             out.writeUTF(mime);
             out.writeInt(format.getInteger(MediaFormat.KEY_WIDTH));
@@ -66,7 +68,7 @@ final class SegmentJournal {
             if (out != null) {
                 try { out.close(); } catch (Throwable ignored) {}
             }
-            f.delete();
+            RemovableStorageFs.delete(f);
             return null;
         }
     }
@@ -116,7 +118,7 @@ final class SegmentJournal {
     /** Closes and deletes the journal (segment discarded or journal unusable). */
     void abandon() {
         close();
-        file.delete();
+        RemovableStorageFs.delete(file);
         ACTIVE.remove(file.getAbsolutePath());
     }
 
@@ -125,7 +127,7 @@ final class SegmentJournal {
         if (tmp == null) return;
         File f = fileFor(tmp);
         try {
-            f.delete();
+            RemovableStorageFs.delete(f);
         } catch (Throwable ignored) {
         }
         ACTIVE.remove(f.getAbsolutePath());

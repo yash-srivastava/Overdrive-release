@@ -29,7 +29,7 @@
         return (v == null || v === key) ? fallback(key, vars) : v;
     }
     var FALLBACK = {
-        'parking.now_parked': 'Parked now', 'parking.parked_for': 'Parked for {d}', 'parking.stat_parked_for': 'Parked for',
+        'parking.now_parked': 'Parked now', 'parking.live_tag': 'LIVE', 'parking.parked_for': 'Parked for {d}', 'parking.stat_parked_for': 'Parked for',
         'parking.no_sessions_title': 'No parking sessions yet', 'parking.no_sessions': 'The first one is created the next time the car is switched off.',
         'parking.no_sessions_range': 'No parking sessions in this range.', 'parking.disabled_title': 'Parking Intelligence is off',
         'parking.disabled_body': 'When on, every switch-off opens a parking session: where the car is, a four-camera still after you walk away, which vehicles arrived or left next to you while sentry watched, and a "Back at car" summary when you return.',
@@ -245,7 +245,7 @@
         $('pkHeroSub').textContent = fmtDay(cur.startedMs) + ' · ' + fmtTime(cur.startedMs)
             + ' · ' + t('parking.gps_' + gpsQuality(cur).toLowerCase()) + ' · ' + t('parking.sentry_' + (cur.sentryState || 'unknown'))
             + (hasEnergy(cur) ? ' · ' + fmtEnergy(cur) : '');
-        $('pkHeroTag').textContent = 'LIVE';
+        $('pkHeroTag').textContent = t('parking.live_tag');
         $('pkHeroDuration').textContent = fmtDur(Date.now() - cur.startedMs);
         $('pkHeroEvents').textContent = String(cur.eventCount || 0);
         $('pkHeroNeighbours').textContent = String(cur.neighbourCount || 0);
@@ -335,6 +335,11 @@
         empty.style.display = 'flex';
     }
 
+    /** The reply was the phone's saved copy, not the car. */
+    function fromCopy(r) {
+        return !!(r && r.headers && typeof r.headers.get === 'function' && r.headers.get('X-OverDrive-Offline') !== null);
+    }
+
     function rangeFrom() {
         return state.days > 0 ? Date.now() - state.days * 86400000 : 0;
     }
@@ -345,6 +350,8 @@
         var req = ++state.listRequest;
         var box = $('pkSessions'), empty = $('pkEmptyState'), more = $('pkMoreBtn');
         if (!append) {
+            // Page 1 isn't on screen until this reset read lands (the reconnect handler reloads it then).
+            state.listOk = false;
             state.offset = 0;
             state.sessions = [];
             box.innerHTML = '<div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card"></div>';
@@ -354,8 +361,9 @@
         var url = '/api/parking/sessions?limit=' + PAGE + '&offset=' + state.offset;
         var from = rangeFrom();
         if (from > 0) url += '&from=' + from;
+        var copied = false;
         return fetch(url, { cache: 'no-store' })
-            .then(function (r) { return r.json(); })
+            .then(function (r) { copied = fromCopy(r); return r.json(); })
             .then(function (d) {
                 if (req !== state.listRequest) return;      // a newer filter owns the list
                 state.loading = false;
@@ -374,13 +382,25 @@
                 // last page was full (the server total counts ALL sessions).
                 more.style.display = (list.length === PAGE) ? 'block' : 'none';
                 if (state.detailId != null) paintPager();
+                // Rows from the phone's saved copy reload like a failed list (no-store reads never get one today).
+                if (!append) state.listOk = !!(d && Array.isArray(d.sessions)) && !copied;
+                else if (copied) state.listOk = false;
             })
             .catch(function () {
                 if (req !== state.listRequest) return;
                 state.loading = false;
+                state.listOk = false;
                 box.innerHTML = '';
                 showEmpty('none');
             });
+    }
+
+    /** Overlapping status reads: a success applies unless a newer success did, a failure only if nothing newer applied. */
+    function statusApplies(req, ok) {
+        if (ok ? req < (state.statusOk || 0) : req < (state.statusLast || 0)) return false;
+        if (ok) state.statusOk = req;
+        if (req > (state.statusLast || 0)) state.statusLast = req;
+        return true;
     }
 
     function showList() {
@@ -392,16 +412,32 @@
         detail.innerHTML = '';
         state.detail = null;
         revokeAll();
+        var statusReq = state.statusRequest = (state.statusRequest || 0) + 1;
         fetch('/api/parking/status', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (st) {
+            if (!st || st.success === false) throw new Error('parking status unavailable');
+            if (!statusApplies(statusReq, true)) return;
             state.status = st;
             renderHeader();
             renderHero(st.current || null);
             if (window.ParkingSettings) ParkingSettings.paint(st.config, st);
             loadSessions(false);
         }).catch(function () {
+            if (!statusApplies(statusReq, false)) return;
             renderHero(null);
             loadSessions(false);
         });
+    }
+
+    /** Header, hero and the settings card from a fresh status, leaving the list as it is. */
+    function refreshStatusView() {
+        var statusReq = state.statusRequest = (state.statusRequest || 0) + 1;
+        fetch('/api/parking/status', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (st) {
+            if (!st || st.success === false || !statusApplies(statusReq, true)) return;
+            state.status = st;
+            renderHeader();
+            renderHero(st.current || null);
+            if (window.ParkingSettings) ParkingSettings.paint(st.config, st);
+        }).catch(function () { /* keep the last render */ });
     }
 
     // ---------------------------------------------------------------- detail
@@ -761,6 +797,38 @@
         if (m) showDetail(m[1]); else showList();
     }
 
+    // Header, hero and settings refresh; the list reloads page 1 (day filter kept) only if it failed or is
+    // still loading, so loaded pages and the scroll stay. Not on a detail, which scrolls to the top, nor under
+    // an open clip or photo, nor while a settings number is typed. While hidden: on the next return, once.
+    var reconnectDeferred = false;
+    function onReconnect() {
+        if (document.hidden) {
+            if (reconnectDeferred) return;
+            reconnectDeferred = true;
+            document.addEventListener('visibilitychange', function shown() {
+                if (document.hidden) return;
+                document.removeEventListener('visibilitychange', shown);
+                reconnectDeferred = false;
+                onReconnect();
+            });
+            return;
+        }
+        if (/^#\/session\//.test(location.hash || '')) return;
+        var modal = $('videoModal'), box = $('pkLightbox'), focused = document.activeElement;
+        if ((modal && modal.classList.contains('active')) || (box && box.classList.contains('open'))) return;
+        if (focused && /^parking/.test(focused.id || '')) return;
+        refreshStatusView();
+        if (!state.listOk) {
+            // A page-1 read still on its way from the outage is dropped (its reply is ignored) so this one runs.
+            if (state.loading) {
+                state.listRequest++;
+                state.loading = false;
+            }
+            loadSessions(false);
+        }
+        if (window.ParkingSettings) ParkingSettings.loadGeocoding();
+    }
+
     window.Parking = {
         init: function () {
             if (window.BYD && BYD.events && typeof BYD.events.initPlayer === 'function') {
@@ -819,6 +887,9 @@
                     .then(function (st) { state.status = st; renderHeader(); renderHero(st.current || null); })
                     .catch(function () { /* server sleeps while parked (onOnly) — keep the last render */ });
             }, 45000);
+            if (window.BYD && BYD.offline && typeof BYD.offline.onReconnect === 'function') {
+                BYD.offline.onReconnect(onReconnect);
+            }
         },
         playClip: playClip,
         quickFilter: function (days, btn) {

@@ -165,6 +165,8 @@ data class DetectionCandidate(
      *  default is false so any test/caller that doesn't supply the horizontal
      *  channel stays safely inert. */
     val asymmetryValid: Boolean = false,
+    /** False when the stream's sample period is too coarse for [riseTimeMs] to mean anything. */
+    val riseResolved: Boolean = true,
 )
 
 /** Verdict from [RejectionFilter]: is this candidate a real road hazard? */

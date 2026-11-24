@@ -375,59 +375,10 @@ object CarSvcTelemetry {
     @JvmStatic
     fun powerModeLine(): String? {
         if (!isActive()) return null
-        val snapshot = dumpSnapshot()
-        if (snapshot != null) {
-            return freshPowerModeLine(
-                snapshot.text, snapshot.observedAtElapsedMs
-            ) { android.os.SystemClock.elapsedRealtime() }
-        }
-        val fastSnapshot = dumpAudioPowerModeSnapshot() ?: return null
+        val snapshot = dumpSnapshot() ?: return null
         return freshPowerModeLine(
-            fastSnapshot.first, fastSnapshot.second
+            snapshot.text, snapshot.observedAtElapsedMs
         ) { android.os.SystemClock.elapsedRealtime() }
-    }
-
-    /**
-     * Targeted fallback dump of CarEnhancedAudioCore / CarAudioService (~30 ms)
-     * used when the full VHAL car_service dump exceeds DUMP_TTL_MS under load.
-     */
-    private fun dumpAudioPowerModeSnapshot(): Pair<String, Long>? {
-        val path = com.overdrive.app.util.ScratchRoot.path(
-            ".carsvc_audio_${Thread.currentThread().id}_${System.nanoTime()}.txt"
-        )
-        val file = File(path)
-        var process: Process? = null
-        return try {
-            val observedAtElapsedMs = android.os.SystemClock.elapsedRealtime()
-            process = Runtime.getRuntime().exec(
-                arrayOf(
-                    "/system/bin/sh",
-                    "-c",
-                    com.overdrive.app.util.ScratchRoot.remap(
-                        "dumpsys -t 2 car_service --services CarEnhancedAudioCore CarAudioService > $path 2>&1"
-                    )
-                )
-            )
-            if (!process.waitFor(DUMP_TTL_MS, TimeUnit.MILLISECONDS)) {
-                process.destroyForcibly()
-                return null
-            }
-            if (!file.isFile) return null
-            val text = file.readText()
-            if (text.isBlank()) return null
-            if (!dumpSourceFresh(android.os.SystemClock.elapsedRealtime(), observedAtElapsedMs)) {
-                return null
-            }
-            text to observedAtElapsedMs
-        } catch (_: Throwable) {
-            null
-        } finally {
-            try {
-                process?.destroy()
-                if (file.exists()) file.delete()
-            } catch (_: Throwable) {
-            }
-        }
     }
 
     internal fun freshPowerModeLine(
@@ -1170,95 +1121,6 @@ object CarSvcTelemetry {
         if (temps[0] >= 0) builder.acSetpointDriver(temps[0])
         if (temps[1] >= 0) builder.acSetpointPassenger(temps[1])
 
-    }
-
-    /**
-     * Daemon-side non-spawning snapshot overlay for DiLink 5 bridge consumers.
-     * Uses ONLY [cachedDump] (never invokes `dumpsys`) to enrich parked/daemon
-     * snapshots with float 12V battery voltage, per-door lock states (falling back
-     * to [fallbackDoorLockState] when VHAL lock properties are absent), and VHAL
-     * charging power/gun/BMS state.
-     */
-    @JvmStatic
-    fun applyCachedDaemonOverlay(
-        data: BydVehicleData?,
-        nowElapsedMs: Long,
-        maxAgeMs: Long,
-        fallbackDoorLockState: Int
-    ): BydVehicleData? {
-        if (data == null) return null
-        val dump = cachedDump()
-        val dumpFresh = dump != null
-            && nowElapsedMs >= dump.observedAtElapsedMs
-            && (nowElapsedMs - dump.observedAtElapsedMs) <= maxAgeMs
-        return applyDaemonOverlayFromDump(
-            data,
-            if (dumpFresh) dump?.text else null,
-            fallbackDoorLockState
-        )
-    }
-
-    @JvmStatic
-    fun applyDaemonOverlayFromDump(
-        data: BydVehicleData?,
-        dumpText: String?,
-        fallbackDoorLockState: Int
-    ): BydVehicleData? {
-        if (data == null) return null
-        val builder = data.toBuilder()
-        var changed = false
-
-        val mergedLocks = data.doorLockStatus?.copyOf(maxOf(7, data.doorLockStatus.size))
-            ?: IntArray(7) { BydVehicleData.UNAVAILABLE }
-        var locksUpdated = false
-
-        if (!dumpText.isNullOrBlank()) {
-            val v12 = batteryVoltage12v(dumpText)
-            if (v12 in 8f..16f && (data.voltage12v.isNaN() || data.voltage12v == Math.floor(data.voltage12v))) {
-                builder.voltage12v(v12.toDouble())
-                changed = true
-            }
-            val locks = doorsArray(dumpText)
-            if (locks.any { it == 1 || it == 2 }) {
-                for (i in locks.indices) {
-                    if (locks[i] >= 0 && mergedLocks[i] < 0) {
-                        mergedLocks[i] = locks[i]
-                        locksUpdated = true
-                    }
-                }
-            }
-            val chg = parseChargingObservation(dumpText)
-            if (chg.isAvailable()) {
-                if (data.chargingGunState == BydVehicleData.UNAVAILABLE && chg.gunState != BydVehicleData.UNAVAILABLE) {
-                    builder.chargingGunState(chg.gunState)
-                    changed = true
-                }
-                if (data.chargingState == BydVehicleData.UNAVAILABLE && chg.bmsState != BydVehicleData.UNAVAILABLE) {
-                    builder.chargingState(chg.bmsState)
-                    changed = true
-                }
-                if (chg.charging && chg.powerKw.isFinite() && (data.chargingPowerKw.isNaN() || data.chargingPowerKw <= 0.0)) {
-                    builder.chargingPowerKw(chg.powerKw)
-                        .chargingPowerAtMs(System.currentTimeMillis())
-                    changed = true
-                }
-            }
-        }
-
-        val cabinLocksMissing = (0..3).all { mergedLocks[it] < 0 }
-        if (cabinLocksMissing && (fallbackDoorLockState == 1 || fallbackDoorLockState == 2)) {
-            for (i in 0..3) mergedLocks[i] = fallbackDoorLockState
-            if (mergedLocks.size > 6 && mergedLocks[6] < 0) {
-                mergedLocks[6] = fallbackDoorLockState
-            }
-            locksUpdated = true
-        }
-        if (locksUpdated) {
-            builder.doorLockStatus(mergedLocks)
-            changed = true
-        }
-
-        return if (changed) builder.buildPreservingTimestamp() else data
     }
 
     private fun applyTurn(builder: BydVehicleData.Builder, turn: Int) {

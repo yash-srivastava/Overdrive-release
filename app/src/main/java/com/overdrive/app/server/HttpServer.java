@@ -319,6 +319,12 @@ public class HttpServer {
         // Initialize auth system
         AuthManager.initialize();
         CameraDaemon.log("Auth system initialized");
+        // Apply persisted pause gates before the first HTTP request can dispatch actions.
+        try {
+            ServiceModeManager.start();
+        } catch (Throwable error) {
+            CameraDaemon.log("Service Mode startup failed: " + error.getMessage());
+        }
         HeadUnitClock.setting(); // start the 12/24-hour read before the first page asks
 
         while (running && CameraDaemon.isRunning()) {
@@ -578,7 +584,7 @@ public class HttpServer {
             // Reuse this same stream for the body: no header-byte read-ahead is lost.
             BufferedInputStream input = new BufferedInputStream(client.getInputStream(), 8192);
             HttpRequestHead head = new HttpRequestHead(input);
-            out = new BufferedOutputStream(client.getOutputStream());
+            out = new MarkerHeaderOutputStream(new BufferedOutputStream(client.getOutputStream()));
 
             String requestLine = head.readRequestLine();
             if (requestLine == null) {
@@ -626,6 +632,7 @@ public class HttpServer {
             // reads /api/briefing/gear at 4 Hz while it is up.
             // All other requests still log.
             if (!(requestLine.contains("/api/stream/turn")
+                    || requestLine.contains("/api/stream/combined-availability")
                     || requestLine.contains("/api/bs/status")
                     || requestLine.contains("/api/bs/live")
                     || requestLine.startsWith("GET /status")
@@ -666,6 +673,7 @@ public class HttpServer {
             // X-Forwarded-Host. Captured here so isPwaOrigin can match it.
             String forwardedHostHeader = null;
             String secFetchSiteHeader = null;
+            String stepUpHeader = null;
 
             while (!(line = head.readHeaderLine()).isEmpty()) {
                 framing.accept(line);
@@ -704,6 +712,8 @@ public class HttpServer {
                     originHeader = originHeader == null ? line.substring(7).trim() : "null";
                 } else if (lower.startsWith("sec-fetch-site:")) {
                     secFetchSiteHeader = line.substring(15).trim();
+                } else if (lower.startsWith("x-od-stepup:")) {
+                    stepUpHeader = line.substring(12).trim();
                 } else if (lower.startsWith("x-forwarded-for:")) {
                     hasTunnelHeaders = true;
                     forwardedFor = forwardedForValue(
@@ -761,7 +771,13 @@ public class HttpServer {
                 path.startsWith("/api/vehicle/unlock") || path.startsWith("/api/vehicle/flash")) {
                 client.setSoTimeout(60000);
             }
-            
+
+            boolean socketLoopback = client.getInetAddress() != null
+                    && client.getInetAddress().isLoopbackAddress();
+            String publicHost = DaemonsApiHandler.bareHost(
+                    forwardedHostHeader != null ? forwardedHostHeader : hostHeader);
+            String rawQuery = path.indexOf('?') >= 0 ? path.substring(path.indexOf('?') + 1) : null;
+
             // WebSocket upgrades (check auth first). /ws is the H.264 stream;
             // /ws/communicate is the inbound PCM push-to-talk stream. Query
             // tokens are supported because browser WebSocket clients cannot set
@@ -807,6 +823,10 @@ public class HttpServer {
                     client.close();
                     return;
                 }
+                // The session runs on this thread, so StepUpGate sees the WebSocket's caller.
+                CALLER.set(new CallerContext(hasTunnelHeaders, cookieHeader, wsAuthHeader, socketLoopback,
+                        publicHost, stepUpHeader, method, wsPathOnly, rawQuery, hasProxyProtocol,
+                        client.getInetAddress(), body));
                 if (wsPathOnly.equals(RemoteDevViewWebSocketStream.PATH)) {
                     String devViewSession = RemoteDevViewWebSocketStream
                         .sessionFromProtocols(websocketProtocolHeader);
@@ -823,11 +843,19 @@ public class HttpServer {
                 } else if (wsPathOnly.equals("/ws/cabin-audio")) {
                     CabinAudioWebSocket.handle(client, websocketKey);
                 } else if (wsPathOnly.equals(GenAiVoiceWebSocket.PATH)) {
+                    // Voice commands run on another thread, so the exemption is captured here.
+                    boolean voiceExempt;
+                    try {
+                        voiceExempt = StepUpGate.captureExemption();
+                    } catch (Throwable t) {
+                        voiceExempt = false;
+                    }
                     GenAiVoiceWebSocket.handle(
                             client, websocketKey,
                             GenAiApiHandler.queryParam(path, "lang"),
                             GenAiApiHandler.queryParam(path, "mic"),
-                            GenAiApiHandler.queryParam(path, "brief"));
+                            GenAiApiHandler.queryParam(path, "brief"),
+                            voiceExempt);
                 } else if (wsPathOnly.equals(GenAiChatWebSocket.PATH)) {
                     GenAiChatWebSocket.handle(client, websocketKey);
                 } else {
@@ -881,6 +909,20 @@ public class HttpServer {
                 return;
             }
             
+            boolean destructiveStorageFormatRequest = pathOnly.equals("/api/storage/external/format");
+            boolean storageFormatApi = destructiveStorageFormatRequest
+                    || pathOnly.equals("/api/storage/external/format/target")
+                    || pathOnly.equals("/api/storage/external/format/status");
+            // Native bridge POSTs have no Origin. Foreign Origins are refused.
+            if (destructiveStorageFormatRequest && !method.equals("OPTIONS")
+                    && !GenAiRequestSecurity.isAllowedOrigin(
+                            originHeader, hostHeader, forwardedHostHeader)) {
+                CameraDaemon.log("SD format: rejected foreign Origin");
+                HttpResponse.sendJsonNoCors(out, 403,
+                        "{\"success\":false,\"error\":\"Forbidden origin\"}");
+                client.close();
+                return;
+            }
             boolean genAiRequest = GenAiRequestSecurity.isGenAiPath(pathOnly);
             if (genAiRequest && !GenAiRequestSecurity.isAllowedOrigin(
                     originHeader, hostHeader, forwardedHostHeader)) {
@@ -894,6 +936,12 @@ public class HttpServer {
             // The in-app WebView is same-origin so it skips this, but the external webapp needs it.
             // Must be handled BEFORE auth check — preflight requests don't carry cookies/tokens.
             if (method.equals("OPTIONS")) {
+                if (storageFormatApi) {
+                    HttpResponse.sendJsonNoCors(out, 403,
+                            "{\"success\":false,\"error\":\"Cross-origin formatting is not allowed\"}");
+                    client.close();
+                    return;
+                }
                 if (genAiRequest) {
                     HttpResponse.sendCorsPreflightResponse(out, originHeader);
                 } else {
@@ -912,6 +960,10 @@ public class HttpServer {
                     || pathOnly.equals("/wireguard.html")
                     || pathOnly.equals("/api/wireguard")
                     || pathOnly.startsWith("/api/wireguard/");
+            // This UI and its mutating API require a JWT even on loopback.
+            boolean serviceModeRequest = pathOnly.equals("/service-mode")
+                    || pathOnly.equals("/service-mode.html")
+                    || pathOnly.startsWith("/api/service-mode/");
             boolean remoteAccessRequest = pathOnly.equals("/remote-access")
                     || pathOnly.equals("/remote-access.html")
                     || pathOnly.startsWith("/api/remote-access/");
@@ -936,10 +988,33 @@ public class HttpServer {
                 client.close();
                 return;
             }
+            // Service Mode disables apps: changes only from this site's own pages.
+            if (pathOnly.startsWith("/api/service-mode/")
+                    && !method.equals("GET") && !method.equals("OPTIONS")
+                    && !GenAiRequestSecurity.isAllowedOrigin(originHeader, hostHeader, forwardedHostHeader)) {
+                HttpResponse.sendError(out, 403, "Forbidden origin");
+                client.close();
+                return;
+            }
             if (pathOnly.equals("/api/remote-access/relay")
                     && (!client.getInetAddress().isLoopbackAddress() || hasTunnelHeaders)) {
                 CameraDaemon.log("HTTP: refused non-local " + redactQueryToken(requestLine));
                 HttpResponse.sendError(out, 403, "Signal relay is local only");
+                client.close();
+                return;
+            }
+            boolean dashboardBuilderRequest = com.overdrive.app.customlayouts.daemon.DashboardApi.matches(pathOnly);
+            if (dashboardBuilderRequest && !method.equals("GET") && !method.equals("OPTIONS")
+                    && !GenAiRequestSecurity.isAllowedOrigin(originHeader, hostHeader, forwardedHostHeader)) {
+                HttpResponse.sendError(out, 403, "Forbidden origin");
+                client.close();
+                return;
+            }
+            // The projection stream and controls are private to the head unit.
+            if (pathOnly.startsWith("/api/custom-layouts/") && !dashboardBuilderRequest
+                    && (!client.getInetAddress().isLoopbackAddress() || hasTunnelHeaders)) {
+                CameraDaemon.log("HTTP: refused non-local " + redactQueryToken(requestLine));
+                HttpResponse.sendError(out, 403, "Custom Layouts is local only");
                 client.close();
                 return;
             }
@@ -953,8 +1028,8 @@ public class HttpServer {
                     || pathOnly.equals("/api/factory-dvr")
                     || pathOnly.startsWith("/api/factory-dvr/");
             boolean authenticated = remoteDevRequest || genAiRequest || wireGuardRequest || remoteAccessRequest
-                    || widgetWriteRequest || briefingRequest || secretRequest || sessionsRequest
-                    || factoryDvrRequest || rangeCalibrationWrite
+                    || widgetWriteRequest || dashboardBuilderRequest || briefingRequest || secretRequest || sessionsRequest
+                    || factoryDvrRequest || rangeCalibrationWrite || serviceModeRequest || storageFormatApi
                 ? AuthMiddleware.checkJwtOnly(path, cookieHeader, authHeader, out)
                 : AuthMiddleware.checkAuth(path, cookieHeader, authHeader, out,
                     client.getRemoteSocketAddress(), hasTunnelHeaders,
@@ -966,8 +1041,9 @@ public class HttpServer {
 
             // Record who this is for canGrantShellAccess(). Set for every network
             // request so a socket caller can never inherit the in-process default.
-            CALLER.set(new CallerContext(hasTunnelHeaders, cookieHeader, authHeader,
-                    client.getInetAddress() != null && client.getInetAddress().isLoopbackAddress()));
+            CALLER.set(new CallerContext(hasTunnelHeaders, cookieHeader, authHeader, socketLoopback,
+                    publicHost, stepUpHeader, method, pathOnly, rawQuery, hasProxyProtocol,
+                    client.getInetAddress(), body));
             TimelineApiHandler.bindRequest(client, secFetchSiteHeader);
 
             // Route to modular handlers first
@@ -1032,6 +1108,10 @@ public class HttpServer {
                 if (!serveStaticFile(out, "local/module-faults.html")) {
                     HttpResponse.sendError(out, 404, "module-faults.html not found");
                 }
+            } else if (path.equals("/service-mode.html") || path.equals("/service-mode")) {
+                if (!serveStaticFile(out, "local/service-mode.html")) {
+                    HttpResponse.sendError(out, 404, "service-mode.html not found");
+                }
             } else if (path.equals("/remote-dev-view.html") || path.equals("/remote-dev-view")) {
                 if (!serveStaticFile(out, "local/remote-dev-view.html")) {
                     HttpResponse.sendError(out, 404, "remote-dev-view.html not found");
@@ -1087,6 +1167,10 @@ public class HttpServer {
             } else if (path.equals("/widgets.html") || path.equals("/widgets")) {
                 if (!serveStaticFile(out, "local/widgets.html")) {
                     HttpResponse.sendError(out, 404, "widgets.html not found");
+                }
+            } else if (pathOnly.equals("/dashboard-builder.html") || pathOnly.equals("/dashboard-builder")) {
+                if (!serveStaticFile(out, "local/dashboard-builder.html")) {
+                    HttpResponse.sendError(out, 404, "dashboard-builder.html not found");
                 }
             } else if (pathOnly.equals("/widget-builder.html") || pathOnly.equals("/widget-builder")) {
                 if (!serveStaticFile(out, "local/widget-builder.html")) {
@@ -1191,6 +1275,8 @@ public class HttpServer {
             CameraDaemon.log("HTTP error: " + e.getMessage());
         } finally {
             CALLER.remove();
+            // Guarded so a gate failure can never skip the socket close below.
+            try { StepUpGate.clearThread(); } catch (Throwable ignored) {}
             TimelineApiHandler.bindRequest(null, null);
             try { client.close(); } catch (Exception e) {}
         }
@@ -1238,13 +1324,96 @@ public class HttpServer {
         final String cookieHeader;
         final String authHeader;
         final boolean loopback;
+        final String publicHost;
+        final String stepUpHeader;
+        final String method;
+        final String path;
+        final String query;
+        final boolean viaProxyProtocol;
+        final InetAddress remoteAddress;
+        final String body;
+        private CallerFacts facts;
 
-        CallerContext(boolean tunnelRelayed, String cookieHeader, String authHeader, boolean loopback) {
+        CallerContext(boolean tunnelRelayed, String cookieHeader, String authHeader, boolean loopback,
+                      String publicHost, String stepUpHeader, String method, String path, String query,
+                      boolean viaProxyProtocol, InetAddress remoteAddress, String body) {
             this.tunnelRelayed = tunnelRelayed;
             this.cookieHeader = cookieHeader;
             this.authHeader = authHeader;
             this.loopback = loopback;
+            this.publicHost = publicHost;
+            this.stepUpHeader = stepUpHeader;
+            this.method = method;
+            this.path = path;
+            this.query = query;
+            this.viaProxyProtocol = viaProxyProtocol;
+            this.remoteAddress = remoteAddress;
+            this.body = body;
         }
+
+        CallerFacts facts() {
+            if (facts == null) {
+                facts = new CallerFacts(loopback, tunnelRelayed, publicHost,
+                        AuthMiddleware.sessionToken(cookieHeader, authHeader), stepUpHeader, method, path,
+                        viaProxyProtocol, remoteAddress, query, bodyHash(body));
+            }
+            return facts;
+        }
+    }
+
+    /** Base64url SHA-256 of the UTF-8 body; "" when there is none. */
+    static String bodyHash(String body) {
+        if (body == null || body.isEmpty()) return "";
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(body.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /** The current HTTP request's caller, for the step-up gate. */
+    public static final class CallerFacts {
+        public final boolean loopback, tunnelRelayed;
+        /** X-Forwarded-Host else Host, lower-case, no port; may be null. */
+        public final String publicHost;
+        /** The session token as sent (not validated); may be null. */
+        public final String sessionToken;
+        /** Raw X-OD-StepUp value; may be null. */
+        public final String stepUpHeader;
+        /** Request method and path without query. */
+        public final String method, path;
+        /** PROXY v1 preamble: Tailscale TCP or wgproxy, a plain-http tunnel. */
+        public final boolean viaProxyProtocol;
+        /** Socket peer; may be null. */
+        public final InetAddress remoteAddress;
+        /** Raw query string (may hold ?token=, never log it); null when absent. */
+        public final String query;
+        /** Base64url SHA-256 of the UTF-8 body; "" when there is none. */
+        public final String bodyHash;
+
+        CallerFacts(boolean loopback, boolean tunnelRelayed, String publicHost, String sessionToken,
+                    String stepUpHeader, String method, String path, boolean viaProxyProtocol,
+                    InetAddress remoteAddress, String query, String bodyHash) {
+            this.loopback = loopback;
+            this.tunnelRelayed = tunnelRelayed;
+            this.publicHost = publicHost;
+            this.sessionToken = sessionToken;
+            this.stepUpHeader = stepUpHeader;
+            this.method = method;
+            this.path = path;
+            this.viaProxyProtocol = viaProxyProtocol;
+            this.remoteAddress = remoteAddress;
+            this.query = query;
+            this.bodyHash = bodyHash;
+        }
+    }
+
+    /** Null outside an HTTP request thread. */
+    public static CallerFacts callerFacts() {
+        CallerContext c = CALLER.get();
+        return c == null ? null : c.facts();
     }
 
     /** A caller on this head unit (not relayed through a tunnel) holding a valid session: the app itself. */
@@ -1369,6 +1538,9 @@ public class HttpServer {
      */
     private boolean routeToHandlers(String method, String path, String body, String rangeHeader,
                                      String ifNoneMatchHeader, OutputStream out) throws Exception {
+        if (path.startsWith("/api/service-mode/")) {
+            return ServiceModeApiHandler.handle(method, path, body, out);
+        }
         if (path.equals("/api/auth/handoff") || path.equals("/api/auth/regenerate")) {
             AuthApiHandler.handleSecret(method, path, isLocalSessionCaller(), out);
             return true;
@@ -1378,6 +1550,9 @@ public class HttpServer {
             AuthApiHandler.handleSessions(method, path, body, out, caller == null ? null
                     : AuthMiddleware.sessionToken(caller.cookieHeader, caller.authHeader));
             return true;
+        }
+        if (path.startsWith("/api/stepup/")) {
+            return StepUpApiHandler.handle(method, path, body, out);
         }
         if (path.startsWith("/api/remote-access/")) {
             try {
@@ -1475,6 +1650,16 @@ public class HttpServer {
 
         if (path.startsWith("/api/cluster/layouts")) {
             return ClusterLayoutsApiHandler.handle(method, path, body, out);
+        }
+        // Custom Layouts (cluster renderer); unrelated to the multi-app Layouts above.
+        if ((path.startsWith(com.overdrive.app.customlayouts.daemon.DashboardApi.LOCAL)
+                || path.startsWith(com.overdrive.app.customlayouts.daemon.DashboardApi.COMMUNITY))
+                && com.overdrive.app.customlayouts.daemon.DashboardApi.handle(method, path, body, out)) {
+            return true;
+        }
+        if (path.startsWith("/api/custom-layouts/")) {
+            return com.overdrive.app.customlayouts.daemon.CustomLayoutsApiHandler
+                    .handle(method, path, body, out);
         }
         if (path.startsWith("/api/cluster/guidance")) {
             return ClusterGuidanceApiHandler.handle(method, path, body, out);
@@ -1940,6 +2125,12 @@ public class HttpServer {
             // is temporarily unreadable during a cross-process replacement.
             status.put("screenshotPrivacyMode", false);
         }
+        try {
+            status.put("personalizedRangeFirst",
+                    com.overdrive.app.config.UnifiedConfigManager.isPersonalizedRangeFirst());
+        } catch (Exception ignored) {
+            status.put("personalizedRangeFirst", true);
+        }
         status.put("genAiDashboardEnabled",
                 GenAiConfig.isDashboardPresentationEnabled());
 
@@ -2310,6 +2501,15 @@ public class HttpServer {
         } catch (Exception e) {
             // Pre-record stats are diagnostic; failure here mustn't block /status.
         }
+
+        // The phone keeps an offline copy only for a tunnel host that survives restarts.
+        // Unknown leaves offlineCopy out: the service worker purges only on an explicit false.
+        CallerContext linkCaller = CALLER.get();
+        JSONObject link = new JSONObject();
+        Boolean offlineCopy = linkCaller == null || !linkCaller.tunnelRelayed
+                ? Boolean.FALSE : DaemonsApiHandler.stablePublicHostState(linkCaller.publicHost);
+        if (offlineCopy != null) link.put("offlineCopy", offlineCopy.booleanValue());
+        status.put("link", link);
 
         // Status assembly below the charging block can be substantial. Revalidate immediately before
         // serialization so a stop or taper-close during that work cannot leak the earlier positive.
@@ -2814,7 +3014,7 @@ public class HttpServer {
             // into the AVM mosaic branch — the "DVR view shows the 4-pano mosaic" bug
             // described in the block below. For view 6 we leave the scaler on its
             // previous view until the bind lands, then set it in the routed branch.
-            if (savedViewMode > 0 && savedViewMode != 6) {
+            if (savedViewMode > 0 && savedViewMode != 6 && savedViewMode != 9) {
                 pipeline.setStreamViewMode(savedViewMode);
                 CameraDaemon.log("WS: View mode " + savedViewMode);
             }
@@ -2871,6 +3071,38 @@ public class HttpServer {
                 }
             }
             
+            // Combined view 9 keeps the pano encoder as the WebSocket source,
+            // but must rebind the OEM camera as the scaler's secondary texture
+            // after a fresh stream scaler is created on reconnect.
+            if (savedViewMode == 9
+                    && StreamingApiHandler.getLastDesiredViewMode() == 9) {
+                try {
+                    org.json.JSONObject cameraCfg =
+                        com.overdrive.app.config.UnifiedConfigManager.loadConfig()
+                            .optJSONObject("camera");
+                    com.overdrive.app.camera.OemDashcamPipeline oem =
+                        CameraDaemon.getOemDashcamPipeline();
+                    boolean supported = cameraCfg != null
+                        && cameraCfg.optInt("concurrentAvmSupported", -1) == 1;
+                    boolean rebound = supported && oem != null
+                        && oem.isRouteReady()
+                        && pipeline.activateCombinedViewIfDesired(oem);
+                    if (rebound) {
+                        CameraDaemon.log("WS: Restored combined AVM + DVR view");
+                    } else {
+                        // Preserve the latest selection. In particular, never
+                        // replace a concurrent 9 -> 6 request with view 0.
+                        // As view 6: let the lifecycle worker start and rebind the DVR.
+                        CameraDaemon.log("WS: Combined view not yet available; preserving view intent");
+                        if (supported) {
+                            com.overdrive.app.server.OemDashcamApiHandler.scheduleLifecycleRecalc();
+                        }
+                    }
+                } catch (Throwable t) {
+                    CameraDaemon.log("WS: Combined view restore failed (intent preserved): " + t.getMessage());
+                }
+            }
+
             // Stream callback with congestion control
             final java.util.concurrent.atomic.AtomicBoolean headersReceived =
                 new java.util.concurrent.atomic.AtomicBoolean(false);

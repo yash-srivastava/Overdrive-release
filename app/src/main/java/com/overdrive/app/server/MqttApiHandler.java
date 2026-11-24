@@ -40,6 +40,7 @@ public class MqttApiHandler {
 
         // POST /api/mqtt/connections — add new
         if (path.equals("/api/mqtt/connections") && method.equals("POST")) {
+            if (!StepUpGate.requireBundle("config", "Change MQTT connections", out)) return true;
             handleAddConnection(out, body);
             return true;
         }
@@ -51,6 +52,7 @@ public class MqttApiHandler {
                 HttpResponse.sendJsonError(out, Messages.get("errors.mqtt_invalid_connection_id"));
                 return true;
             }
+            if (!StepUpGate.requireBundle("config", "Change MQTT connections", out)) return true;
             handleUpdateConnection(out, id, body);
             return true;
         }

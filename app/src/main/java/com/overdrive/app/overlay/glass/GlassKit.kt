@@ -90,6 +90,7 @@ class GlassEnv {
 /** Distances, speeds, consumption and heights in the unit picked for trips: the data stays metric underneath. */
 object GlassUnits {
     private const val KM_PER_MI = 1.609344f
+    fun usesMiles(config: org.json.JSONObject) = config.optJSONObject("tripAnalytics")?.optString("distanceUnit") == "mi"
     fun dist(km: Float, miles: Boolean) = if (miles) km / KM_PER_MI else km
     fun distUnit(miles: Boolean) = if (miles) "mi" else "km"
     fun speed(kmh: Float, miles: Boolean) = if (miles) kmh / KM_PER_MI else kmh
@@ -98,6 +99,7 @@ object GlassUnits {
     fun consumption(whPerKm: Int, miles: Boolean): String =
         String.format(java.util.Locale.US, "%.1f %s", consumptionValue(whPerKm, miles), consumptionUnit(miles))
     fun consumptionValue(whPerKm: Int, miles: Boolean) = if (miles) whPerKm * KM_PER_MI / 10f else whPerKm / 10f
+    fun consumptionValue(kwhPer100Km: Float, miles: Boolean) = if (miles) kwhPer100Km * KM_PER_MI else kwhPer100Km
     fun consumptionUnit(miles: Boolean) = if (miles) "kWh/100 mi" else "kWh/100 km"
     /** A short way ahead (RoadSense's countdown): metres, or yards. */
     fun near(m: Float, miles: Boolean) = if (miles) m * 1.0936133f else m

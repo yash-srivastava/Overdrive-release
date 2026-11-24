@@ -16,13 +16,13 @@ public final class CpuFrameSource {
         this.image = image;
     }
 
-    /** Camera thread, per frame handed to the recording thread. */
-    void retain() {
+    /** Camera thread, per frame handed to the recording thread (or the Custom Layouts road model). */
+    public void retain() {
         readers.incrementAndGet();
     }
 
-    /** Recording thread, once per {@link #retain()}, when that frame no longer reads the image. */
-    void release() {
+    /** Reader thread, once per {@link #retain()}, when that frame no longer reads the image. */
+    public void release() {
         readers.decrementAndGet();
     }
 

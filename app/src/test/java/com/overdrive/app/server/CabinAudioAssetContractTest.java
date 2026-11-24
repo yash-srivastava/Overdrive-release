@@ -34,7 +34,7 @@ public class CabinAudioAssetContractTest {
                 "current.recordForMuxing == recordingDemand"));
         assertTrue(capture.contains("LISTENER_CAPTURE_RATE = 8000"));
         assertTrue(capture.contains(
-                "listenerDemand && listenerDiPlusCompatibility"));
+                "listenerDemand && listenerNavRoutingCompatibility"));
         assertTrue(capture.contains(
                 "current.captureSampleRate == desiredCaptureRate"));
         assertTrue(capture.contains("normalizePcmRate(pcmBuf, n)"));

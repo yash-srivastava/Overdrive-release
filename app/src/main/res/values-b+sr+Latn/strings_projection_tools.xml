@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="projection_app_density">DPI aplikacije</string>
+    <string name="projection_app_keyboard">Tastatura</string>
+    <string name="projection_app_guidance">Alatke aplikacije</string>
+    <string name="projection_tools_select_app">Prvo izaberite projektovanu aplikaciju.</string>
+    <string name="projection_tools_daemon_unavailable">Pozadinski servis instrument table nije dostupan. Pokušajte ponovo kada se poveže.</string>
+    <string name="projection_tools_save">Sačuvajte</string>
+    <string name="projection_tools_save_failed">Nije moguće sačuvati podešavanje. Pokušajte ponovo.</string>
+    <string name="projection_density_description">Gustina za %1$s pri sledećoj projekciji. Koristite 0 da zadržite gustinu ekrana ili 96–480 DPI.\n\nGustina utiče na svaku mapu i sloj na tom ekranu tokom projekcije. Posle zaustavljanja, prethodno prilagođavanje se vraća kada je ekran bezbedno dostupan.</string>
+    <string name="projection_density_range">Unesite 0 ili ceo broj od 96 do 480.</string>
+    <string name="projection_density_saved">Sačuvano. Zaustavite i ponovo projektujte aplikaciju da primenite njenu gustinu.</string>
+    <string name="projection_density_not_applied">Poslednja projekcija nije mogla da primeni ovu gustinu: %1$s</string>
+    <string name="projection_guidance_di3">DI3 traka instrument table i uputstva na vetrobranskom staklu (potrebna je provera u vozilu)</string>
+    <string name="projection_guidance_di5">Eksperimentalna DI5 traka instrument table</string>
+    <string name="projection_guidance_notifications">Pristup obaveštenjima mape</string>
+    <string name="projection_guidance_setup">Sačuvajte, pa pokrenite navigaciju u RoadSense-u. Google Maps ili Waze takođe zahtevaju pristup obaveštenjima mape.\n\nOstavite DI3 HUD uključen i zaustavite ugrađenu navigaciju. Ako vozilo ima HUD podešavanje za navigacioni sadržaj, uključite ga; nema ga svaki model. Ovaj prekidač ne uključuje HUD, a prikaz strelica i dalje zahteva proveru u vozilu.</string>
+    <string name="projection_guidance_setup_di5">Sačuvajte, pa pokrenite navigaciju u RoadSense-u. Google Maps ili Waze takođe zahtevaju pristup obaveštenjima mape.\n\nDI5 traka instrument table je eksperimentalna. Zaustavite projekciju preko cele instrument table ili mapu pre testiranja. Uputstva na vetrobranskom staklu nisu dostupna na DI5.</string>
+    <string name="projection_keyboard_auto">Automatski otvarajte DI5 tastaturu za tekstualna polja na instrument tabli</string>
+    <string name="projection_guidance_saved">Sačuvano. Uputstva na vetrobranskom staklu dostupna su samo na DI3; prikaz DI5 trake i dalje zahteva proveru u vozilu.</string>
+    <string name="projection_tools_title">Alatke</string>
+    <string name="projection_tools_dialog_title">Alatke za projekciju</string>
+    <string name="projection_tools_description">Podesite navigaciju, veličinu aplikacije i unos teksta za instrument tablu.</string>
+    <string name="projection_tools_navigation">Navigaciona uputstva</string>
+    <string name="projection_tools_navigation_description">Izaberite gde se prikazuju uputstva iz RoadSense-a ili obaveštenja mape.</string>
+    <string name="projection_tools_density">Veličina prikaza aplikacije</string>
+    <string name="projection_tools_density_description">Podesite gustinu prikaza izabrane aplikacije za sledeću projekciju.</string>
+    <string name="projection_tools_keyboard_description">Unosite tekst u projektovanu aplikaciju i upravljajte automatskim upitima. Samo DI5.</string>
+    <string name="projection_tools_density_value">Gustina ekrana (DPI)</string>
+    <string name="projection_tools_density_default">0 zadržava gustinu ekrana · 96–480 postavlja prilagođenu veličinu</string>
+    <string name="projection_tools_di3_title">DI3 HUD i instrument tabla</string>
+    <string name="projection_tools_di3_description">Šaljite uputstva na HUD na vetrobranskom staklu i traku instrument table. Potvrdite prikaz strelica u vozilu.</string>
+    <string name="projection_tools_di3_only">Dostupno u DI3 režimu.</string>
+    <string name="projection_tools_di5_title">DI5 traka instrument table</string>
+    <string name="projection_tools_di5_description">Eksperimentalna uputstva na traci instrument table. Uputstva na vetrobranskom staklu nisu dostupna u DI5.</string>
+    <string name="projection_tools_di5_only">Dostupno u DI5 režimu.</string>
+    <string name="projection_tools_setup">Prvi koraci</string>
+</resources>

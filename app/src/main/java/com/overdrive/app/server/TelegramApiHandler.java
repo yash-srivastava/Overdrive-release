@@ -171,6 +171,7 @@ public class TelegramApiHandler {
                 HttpResponse.sendJson(out, response.toString());
                 return;
             }
+            if (!StepUpGate.requireBundle("config", "Change Telegram", out)) return;
 
             GetMeResult gm = telegramGetMe(token);
             if (gm.result == null) {
@@ -238,6 +239,7 @@ public class TelegramApiHandler {
         JSONObject response = new JSONObject();
         try {
             JSONObject req = new JSONObject(body == null ? "{}" : body);
+            if (!StepUpGate.requireBundle("config", "Change Telegram", out)) return;
             String[][] map = new String[][]{
                 { "videoUploads",        UnifiedTelegramConfig.K_VIDEO_UPLOADS },
                 { "autoStartAccOff",     UnifiedTelegramConfig.K_AUTO_START },
@@ -290,6 +292,7 @@ public class TelegramApiHandler {
                 HttpResponse.sendJson(out, response.toString());
                 return;
             }
+            if (!StepUpGate.requireBundle("config", "Change Telegram", out)) return;
             // Generate a 6-digit zero-padded PIN.
             int n = PIN_RNG.nextInt(1_000_000);
             String pin = String.format(java.util.Locale.US, "%06d", n);
@@ -310,6 +313,7 @@ public class TelegramApiHandler {
 
     /** POST /api/telegram/owner/clear — unpair without losing the bot token. */
     private static void handleOwnerClear(OutputStream out) throws Exception {
+        if (!StepUpGate.requireBundle("config", "Change Telegram", out)) return;
         UnifiedTelegramConfig.clearOwner();
 
         JSONObject response = new JSONObject();
@@ -319,6 +323,7 @@ public class TelegramApiHandler {
 
     /** POST /api/telegram/clear — full wipe (token + bot info + owner). */
     private static void handleClear(OutputStream out) throws Exception {
+        if (!StepUpGate.requireBundle("config", "Change Telegram", out)) return;
         UnifiedTelegramConfig.clearAll();
 
         JSONObject response = new JSONObject();

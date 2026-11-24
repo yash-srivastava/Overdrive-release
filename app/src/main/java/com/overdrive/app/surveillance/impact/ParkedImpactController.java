@@ -188,8 +188,8 @@ public final class ParkedImpactController {
                     new com.overdrive.app.notifications.NotificationEvent(
                             "surveillance.impact",
                             com.overdrive.app.notifications.NotificationEvent.Severity.WARN,
-                            "Possible impact while parked",
-                            "The car registered a knock or bump",
+                            com.overdrive.app.server.Messages.get("notifications.impact_title"),
+                            com.overdrive.app.server.Messages.get("notifications.impact_body"),
                             "parked-impact",
                             "/events.html?filter=surveillance",
                             data));

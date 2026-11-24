@@ -14,7 +14,7 @@ data class DiLink5ProjectionConfig(
     val directScalePercent: Int
 ) {
     enum class Transport(val wire: String) {
-        AUTO("auto"), HOSTED("hosted"), DIRECT("direct");
+        AUTO("auto"), HOSTED("hosted"), DIRECT("direct"), FACTORY_MINI("factory_mini");
 
         companion object {
             fun parse(value: String?): Transport {

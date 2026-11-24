@@ -162,7 +162,8 @@ class DiLink5AdbResultTextTest {
         )
         Files.list(Paths.get("src/main/res")).use { directories ->
             directories
-                .filter { it.fileName.toString().startsWith("values") }
+                // Only the locales the APK ships; community-only catalogs fill in through the translation sheets.
+                .filter { it.fileName.toString() in setOf("values", "values-ar", "values-b+sr+Latn", "values-ca", "values-cs", "values-de", "values-es", "values-fr", "values-he", "values-hi", "values-it", "values-ja", "values-ko", "values-nb", "values-nl", "values-pt-rBR", "values-ru", "values-sr", "values-th", "values-tr", "values-vi", "values-zh-rCN", "values-zh-rTW") }
                 .map { it.resolve("strings.xml") }
                 .filter(Files::isRegularFile)
                 .forEach { catalog ->

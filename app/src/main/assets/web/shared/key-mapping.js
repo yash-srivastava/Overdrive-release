@@ -718,11 +718,39 @@ window.KM = (function () {
     var a11yRecheckPending = false;
     var a11yRechecksLeft = 0;
     var A11Y_RECHECK_BUDGET = 8;
+    // The bindings / quick controls on screen came from the car. A save sends the whole list, so until then
+    // nothing may change or save: it would replace the car's list with this empty one.
+    var configLoaded = false, qcLoaded = false;
+    // Reads of a list: a success applies unless a newer success did, a failure only if nothing newer applied.
+    var loadSeq = 0, loadOk = 0, loadLast = 0, qcSeq = 0, qcOk = 0, qcLast = 0;
+    // Bumped when a quick-control save starts and ends: a read begun before that never applies after it.
+    var qcSaveVersion = 0, qcSaves = 0;
+
+    function notLoadedToast(key, fallback) {
+        var text = tr(key);
+        toast(text && text !== key ? text : fallback, 'error');
+    }
+    function blocked() {
+        if (configLoaded) return false;
+        notLoadedToast('keymap.not_loaded', 'Could not read the saved key mappings — reload the page before changing them.');
+        return true;
+    }
+    function qcBlocked() {
+        if (qcLoaded) return false;
+        notLoadedToast('keymap.qc_not_loaded', 'Could not read the saved quick controls — reload the page before changing them.');
+        return true;
+    }
 
     function load() {
+        var seq = ++loadSeq;
         fetch('/api/keymap/config', { cache: 'no-store' })
             .then(function (r) { return r.json(); })
             .then(function (s) {
+                // An error reply is not the car's list; it must not replace the one on screen.
+                if (!s || s.success !== true) throw new Error('keymap read failed');
+                if (seq < loadOk) return;
+                loadOk = seq;
+                if (seq > loadLast) loadLast = seq;
                 state.enabled = !!s.enabled;
                 state.allowAdvanced = !!s.allowAdvanced;
                 if (typeof s.doubleTapWindowMs === 'number') state.doubleTapWindowMs = s.doubleTapWindowMs;
@@ -737,15 +765,20 @@ window.KM = (function () {
                 }
                 state.restartRequired = !!s.restartRequired;
                 paint();
+                configLoaded = true;
                 // Fresh foreground load — refill the recheck budget so the
                 // heal-window poll runs, but stays bounded (see scheduleA11yRecheck).
                 a11yRechecksLeft = A11Y_RECHECK_BUDGET;
                 scheduleA11yRecheck();
             })
-            .catch(function () { toast(tr('keymap.load_failed'), 'error'); });
+            .catch(function () {
+                if (seq < loadLast) return;
+                loadLast = seq;
+                toast(tr('keymap.load_failed'), 'error');
+            });
         // Independent section, independent fetch: a quick-control list failure must not
         // stop the key bindings from painting (and vice-versa).
-        loadQuickControls();
+        if (!qcSaves) loadQuickControls();
     }
 
     // Client-side half of the daemon's load-time self-heal
@@ -960,6 +993,7 @@ window.KM = (function () {
 
     function toggleBinding(index, enabled) {
         if (index < 0 || index >= state.bindings.length) return;
+        if (blocked()) { renderList(); return; }
         // Capture the binding OBJECT, not the integer index: persist() is async, and
         // the user can delete/replace another binding (removeBinding's doDelete splices,
         // addBinding's dedup splices) while this POST is in flight — reindexing the
@@ -1108,6 +1142,7 @@ window.KM = (function () {
     // ───────────────────────── Config toggles ─────────────────────────
 
     function saveConfig() {
+        if (blocked()) { paint(); return; }
         state.enabled = $('kmEnable').checked;
         state.allowAdvanced = $('kmAllowAdvanced').checked;
         persist(function (ok, d) {
@@ -1155,11 +1190,13 @@ window.KM = (function () {
     function onDoubleTapWindowInput() {
         var r = $('kmDoubleTapWindow');
         if (!r) return;
+        if (!configLoaded) { r.value = state.doubleTapWindowMs; return; }
         state.doubleTapWindowMs = parseInt(r.value, 10) || 450;
         var dtVal = $('kmDoubleTapWindowVal');
         if (dtVal) dtVal.textContent = (state.doubleTapWindowMs / 1000).toFixed(1) + BYD.units.secondSuffix(true);
     }
     function onDoubleTapWindowChange() {
+        if (blocked()) { paint(); return; }
         onDoubleTapWindowInput();
         persist(function (ok) {
             if (!ok) toast(tr('keymap.save_failed'), 'error');
@@ -1167,6 +1204,7 @@ window.KM = (function () {
     }
 
     function persist(cb) {
+        if (!configLoaded) { if (cb) cb(false, null); return; }
         fetch('/api/keymap/config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1874,10 +1912,26 @@ window.KM = (function () {
     var qcButtons = [];
 
     function loadQuickControls() {
-        fetch('/api/quick-controls').then(function (r) { return r.json(); }).then(function (j) {
-            qcButtons = (j && j.success && j.buttons) ? j.buttons : [];
+        var seq = ++qcSeq, saves = qcSaveVersion, copied = false;
+        fetch('/api/quick-controls').then(function (r) {
+            copied = !!(r && r.headers && typeof r.headers.get === 'function' && r.headers.get('X-OverDrive-Offline') !== null);
+            return r.json();
+        }).then(function (j) {
+            if (!j || !j.success) throw new Error('quick controls read failed');
+            // The phone's saved copy shows only until the car answered; it never replaces the car's list.
+            if (copied && qcLoaded) return;
+            if (seq < qcOk || saves !== qcSaveVersion) return;
+            qcOk = seq;
+            if (seq > qcLast) qcLast = seq;
+            qcButtons = j.buttons || [];
+            // Saving over a copy waits for a read from the car (on reconnect).
+            if (!copied) qcLoaded = true;
             renderQuickControls();
-        }).catch(function () { renderQuickControls(); });
+        }).catch(function () {
+            if (seq < qcLast || saves !== qcSaveVersion) return;
+            qcLast = seq;
+            renderQuickControls();
+        });
     }
 
     function renderQuickControls() {
@@ -1914,6 +1968,7 @@ window.KM = (function () {
     // Save the composed action as a dashboard button. Uses the in-progress sequence when
     // one exists (same precedence addBinding uses), else the current single selection.
     function saveQuickControl() {
+        if (qcBlocked()) return;
         var labelEl = $('kmQcLabel');
         var label = labelEl ? labelEl.value.trim() : '';
         if (!label) { toast(tr('keymap.qc_need_label'), 'error'); return; }
@@ -1980,7 +2035,7 @@ window.KM = (function () {
     }
 
     function removeQuickControl(id) {
-        if (!id) return;
+        if (!id || qcBlocked()) return;
         var index = -1;
         for (var i = 0; i < qcButtons.length; i++) {
             if (qcButtons[i] && qcButtons[i].id === id) { index = i; break; }
@@ -2018,11 +2073,22 @@ window.KM = (function () {
     // disappear rather than linger from a key-merge. Re-render from the daemon's echo so
     // the list always shows what was really persisted (labels are clamped server-side).
     function persistQuickControls(onOk) {
+        if (qcBlocked()) return;
+        qcSaveVersion++;
+        qcSaves++;
+        var done = false;
+        function settled() {
+            if (done) return;
+            done = true;
+            qcSaves--;
+            qcSaveVersion++;
+        }
         fetch('/api/quick-controls', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ buttons: qcButtons })
         }).then(function (r) { return r.json(); }).then(function (j) {
+            settled();
             if (!j || !j.success) {
                 toast((j && j.error) || tr('keymap.qc_save_failed'), 'error');
                 loadQuickControls();
@@ -2033,6 +2099,7 @@ window.KM = (function () {
             toast(tr('keymap.qc_saved'), 'success');
             if (onOk) onOk();
         }).catch(function () {
+            settled();
             toast(tr('keymap.qc_save_failed'), 'error');
             loadQuickControls();
         });
@@ -2108,6 +2175,7 @@ window.KM = (function () {
     }
 
     function addBinding() {
+        if (blocked()) return;
         var keycode = parseInt($('kmManualKeycode').value, 10);
         if (!keycode && captured) keycode = captured;
         if (!keycode || keycode <= 0) { toast(tr('keymap.need_keycode'), 'error'); return; }
@@ -2473,6 +2541,7 @@ window.KM = (function () {
     }
 
     function removeBinding(index) {
+        if (blocked()) return;
         // Do the actual delete once confirmed.
         function doDelete() {
             state.bindings.splice(index, 1);
@@ -2617,6 +2686,28 @@ window.KM = (function () {
         // effect of programmatic setup; the form is pristine at rest, so clear it.
         formDirty = false;
         load();
+        if (window.BYD && BYD.offline && typeof BYD.offline.onReconnect === 'function') {
+            BYD.offline.onReconnect(onReconnect);
+        }
+    }
+
+    // A loaded binding list is the user's working copy; only one that never loaded is read again. Quick
+    // controls read again unless a save is on its way. While hidden: on the next return to the page, once.
+    var reconnectDeferred = false;
+    function onReconnect() {
+        if (document.hidden) {
+            if (reconnectDeferred) return;
+            reconnectDeferred = true;
+            document.addEventListener('visibilitychange', function shown() {
+                if (document.hidden) return;
+                document.removeEventListener('visibilitychange', shown);
+                reconnectDeferred = false;
+                onReconnect();
+            });
+            return;
+        }
+        if (!configLoaded) load();
+        else if (!qcSaves) loadQuickControls();
     }
 
     // Flag the form dirty on any user edit of the given input.

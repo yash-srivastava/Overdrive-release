@@ -200,6 +200,21 @@ public final class DrivingSafetyGuard {
         return AccMonitor.isAccStateAuthoritative() && !AccMonitor.isAccOn();
     }
 
+    /** True only when the same ACC inputs say the car is on (DiLink 5: freshly). Unknown is false. */
+    public static boolean isAccConfirmedOn() {
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            if (VehicleActuatorBridge.hasDiLink5RequestScope()) {
+                return Boolean.TRUE.equals(VehicleActuatorBridge.currentDiLink5RequestAccOn())
+                        && !VehicleActuatorBridge.isDiLink5RequestExpired();
+            }
+            AccMonitor.confirmDiLink5StateForSafety();
+            return AccMonitor.isAccStateAuthoritative()
+                    && AccMonitor.isAccStateFreshForSafety()
+                    && AccMonitor.isAccOn();
+        }
+        return AccMonitor.isAccStateAuthoritative() && AccMonitor.isAccOn();
+    }
+
     /** DiLink 5 only: ACC freshly confirmed ON with a live Park + stationary read; ignores user guard switches. */
     public static boolean isDiLink5AccOnAndParked() {
         if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) return false;

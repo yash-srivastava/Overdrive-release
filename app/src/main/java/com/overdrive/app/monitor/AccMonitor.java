@@ -332,6 +332,12 @@ public class AccMonitor {
             } catch (Throwable t) {
                 CameraDaemon.log("notifyAccEdge ACC-off stop failed: " + t.getMessage());
             }
+            // ACC-OFF: Custom Layouts releases its hold synchronously, like the map above.
+            try {
+                com.overdrive.app.customlayouts.daemon.CustomLayoutsController.onAccEdge(false);
+            } catch (Throwable t) {
+                CameraDaemon.log("notifyAccEdge ACC-off Custom Layouts release failed: " + t.getMessage());
+            }
             // ACC-OFF: reconcile any driver-cluster APP CAST (move-app-to-cluster). Its
             // "castapp" sustained hold is dropped by the forceClose below (which clears
             // all holders + restores the gauges), but ClusterCast keeps its own active
@@ -394,6 +400,12 @@ public class AccMonitor {
         } catch (Throwable t) {
             CameraDaemon.log("notifyAccEdge panel wake dispatch failed: " + t.getMessage());
         }
+        // Non-blocking; a no-op outside the camera daemon (never initialised there).
+        try {
+            com.overdrive.app.customlayouts.daemon.CustomLayoutsController.onAccEdge(true);
+        } catch (Throwable t) {
+            CameraDaemon.log("notifyAccEdge Custom Layouts start failed: " + t.getMessage());
+        }
         maybeAutoStartClusterProjection("ACC-on edge");
     }
 
@@ -404,6 +416,10 @@ public class AccMonitor {
      */
     public static void retryClusterAutoProjectionAfterRecovery() {
         if (!isAccStateAuthoritative() || !isAccOn()) return;
+        try {
+            com.overdrive.app.customlayouts.daemon.CustomLayoutsController.onClusterRecoverySettled();
+        } catch (Throwable ignored) {
+        }
         try {
             if (com.overdrive.app.navmap.ClusterMapProjector.isActive()
                     || com.overdrive.app.launcher.ClusterCast.isActive()) {
@@ -435,24 +451,32 @@ public class AccMonitor {
                         + "enabled — map wins");
                 projAuto = false;
             }
-            // Legacy projection commands are owned by the camera daemon; a second process would
-            // race its opcodes on the shared cluster.
+            // Custom Layouts, when enabled, is the cluster owner; an auto-start would be read
+            // as the user choosing another owner. Checked from config so every process agrees.
+            org.json.JSONObject custom = cfg.optJSONObject(
+                    com.overdrive.app.customlayouts.CustomLayoutsConfig.SECTION);
+            if ((mapAuto || projAuto) && custom != null && custom.optBoolean(
+                    com.overdrive.app.customlayouts.CustomLayoutsConfig.ENABLED, false)) {
+                CameraDaemon.log(reason + ": Custom Layouts owns the cluster; auto-start skipped");
+                return;
+            }
+            // The camera daemon owns both transports' admission state. Another ACC observer
+            // cannot see a newly claimed display or cancel that daemon's queued start.
             if ((mapAuto || (projAuto && projPkg != null && !projPkg.isEmpty()))
-                    && !clusterRecoveryOwner
-                    && !com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) {
+                    && !clusterRecoveryOwner) {
                 CameraDaemon.log(reason + ": cluster auto-start left to the camera daemon");
                 return;
             }
             if (mapAuto) {
                 CameraDaemon.log(reason
                         + ": auto-projecting map to cluster");
-                com.overdrive.app.navmap.ClusterMapProjector.startWhenSettled();
+                com.overdrive.app.navmap.ClusterMapProjector.startAutomaticallyWhenSettled();
             } else if (projAuto
                     && projPkg != null
                     && !projPkg.isEmpty()) {
                 CameraDaemon.log(reason
                         + ": auto-casting projection app " + projPkg);
-                com.overdrive.app.launcher.ClusterCast.startWhenSettled(projPkg);
+                com.overdrive.app.launcher.ClusterCast.startAutomaticallyWhenSettled(projPkg);
             }
         } catch (Throwable t) {
             CameraDaemon.log(reason

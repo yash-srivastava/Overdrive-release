@@ -1,5 +1,7 @@
 package com.overdrive.app.server;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.config.UnifiedConfigManager;
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.parking.ParkingConfig;
@@ -256,7 +258,7 @@ public final class ParkingApiHandler {
             boolean any = false;
             for (String side : new String[] {"front", "right", "rear", "left", "mosaic"}) {
                 File f = new File(dir, prefix + "_" + side + ".jpg");
-                if (f.isFile()) {
+                if (RemovableStorageFs.isFile(f)) {
                     set.put(side, "/parking/asset/" + s.sessionId + "/" + f.getName());
                     any = true;
                 }
@@ -306,7 +308,7 @@ public final class ParkingApiHandler {
         }
         File base = new File(PARKING_DIR).getCanonicalFile();
         File f = new File(new File(base, sid), name).getCanonicalFile();
-        if (!f.getPath().startsWith(base.getPath() + File.separator) || !f.isFile()) {
+        if (!f.getPath().startsWith(base.getPath() + File.separator) || !RemovableStorageFs.isFile(f)) {
             HttpResponse.sendError(out, 404, "Not found");
             return true;
         }
@@ -332,7 +334,7 @@ public final class ParkingApiHandler {
         }
         // Feature off: read the history from a transient store — but never CREATE
         // the database from a GET. No file ⇒ there is no history to show.
-        if (!new File(ParkingStore.DEFAULT_DB_PATH + ".mv.db").isFile()) return null;
+        if (!RemovableStorageFs.isFile(new File(ParkingStore.DEFAULT_DB_PATH + ".mv.db"))) return null;
         ParkingStore tmp = new ParkingStore();
         try {
             if (!tmp.open()) return null;

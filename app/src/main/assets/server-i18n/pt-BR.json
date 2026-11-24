@@ -206,6 +206,8 @@
     },
     "proximity_alert": "Tempo de alerta de proximidade: {0} Trigger: {1} ({2}) A gravação começou...",
     "proximity": {
+      "distance_red": "0-0,5m",
+      "distance_yellow": "0-0,8m",
       "trigger": {
         "red": "Vermelho",
         "yellow": "Amarelo"

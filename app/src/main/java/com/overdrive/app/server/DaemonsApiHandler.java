@@ -21,9 +21,13 @@ import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -77,6 +81,17 @@ public final class DaemonsApiHandler {
     private static final UrlCache CLOUDFLARED_URL = new UrlCache();
     private static final UrlCache ZROK_URL = new UrlCache();
     private static final UrlCache TAILSCALE_URL = new UrlCache();
+
+    // Tunnel sets change rarely; a slower refresh keeps parked polling from forking ps every 30 s.
+    private static final long STABLE_HOSTS_TTL_MS = 5L * 60_000L;
+    private static final long RECENT_STABLE_MS = 30L * 60_000L;
+    private static final long BOOT_GRACE_MS = 10L * 60_000L;
+    private static final long STARTED_MS = monotonicMs();
+    private static final java.util.concurrent.ConcurrentHashMap<String, Long> RECENT_STABLE =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final AtomicBoolean STABLE_HOSTS_REFRESHING = new AtomicBoolean();
+    /** Null until the first background read completes. */
+    private static volatile StableHosts stableHosts;
 
     private DaemonsApiHandler() {}
 
@@ -406,6 +421,124 @@ public final class DaemonsApiHandler {
             if (v6 == null && IPV6.matcher(a).matches()) v6 = a;
         }
         return v6 == null ? null : "http://[" + v6 + "]:" + DASHBOARD_PORT;
+    }
+
+    // ---- stable public hosts -------------------------------------------------------------
+
+    public static boolean isStablePublicHost(String host) {
+        return Boolean.TRUE.equals(stablePublicHostState(host));
+    }
+
+    /**
+     * TRUE when host is the fixed public host of a running tunnel (zrok reserved share, Cloudflare
+     * named tunnel, Tailscale HTTPS), FALSE when it is not, null while that is not known. Never
+     * blocks: answers from a cache refreshed in the background.
+     */
+    public static Boolean stablePublicHostState(String host) {
+        try {
+            String h = bareHost(host);
+            if (h == null) return Boolean.FALSE;
+            StableHosts cached = stableHosts;
+            if (cached == null || monotonicMs() - cached.atMs >= STABLE_HOSTS_TTL_MS) refreshStableHosts();
+            if (cached == null || cached.hosts == null) return null;
+            if (cached.hosts.contains(h)) return Boolean.TRUE;
+            if (cached.uncertain) return null;
+            // A stable tunnel missing from one scan (e.g. restarting) is unknown, not "not stable".
+            Long seen = RECENT_STABLE.get(h);
+            if (seen != null && monotonicMs() - seen < RECENT_STABLE_MS) return null;
+            // Just after the daemon starts, tunnels may still be coming up.
+            return monotonicMs() - STARTED_MS < BOOT_GRACE_MS ? null : Boolean.FALSE;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** Lower-case host without port; null when empty. */
+    static String bareHost(String host) {
+        if (host == null) return null;
+        String h = host.trim().toLowerCase(Locale.ROOT);
+        int cut = h.startsWith("[") ? h.indexOf(']') + 1 : h.indexOf(':');
+        if (cut >= 0 && cut < h.length()) h = h.substring(0, cut);
+        return h.isEmpty() ? null : h;
+    }
+
+    private static final class StableHosts {
+        /** Null until the process table has been read. */
+        final Set<String> hosts;
+        /** A tunnel that can have a stable host did not resolve one, so other hosts stay unknown. */
+        final boolean uncertain;
+        final long atMs;
+
+        StableHosts(Set<String> hosts, boolean uncertain, long atMs) {
+            this.hosts = hosts;
+            this.uncertain = uncertain;
+            this.atMs = atMs;
+        }
+    }
+
+    private static void refreshStableHosts() {
+        if (!STABLE_HOSTS_REFRESHING.compareAndSet(false, true)) return;
+        try {
+            Thread t = new Thread(() -> {
+                try {
+                    StableHosts fresh = null;
+                    try {
+                        fresh = readStableHosts();
+                    } catch (Throwable ignored) { }
+                    if (fresh == null) {
+                        // An unreadable process table keeps the previous answer.
+                        StableHosts previous = stableHosts;
+                        fresh = previous == null
+                                ? new StableHosts(null, true, monotonicMs())
+                                : new StableHosts(previous.hosts, previous.uncertain, monotonicMs());
+                    }
+                    stableHosts = fresh;
+                } finally {
+                    STABLE_HOSTS_REFRESHING.set(false);
+                }
+            }, "daemons-api-hosts");
+            t.setDaemon(true);
+            t.start();
+        } catch (Throwable e) {
+            STABLE_HOSTS_REFRESHING.set(false);
+        }
+    }
+
+    /** Null when the process table could not be read. */
+    private static StableHosts readStableHosts() {
+        List<Proc> procs = processSnapshot();
+        if (procs == null) return null;
+        Set<String> hosts = new HashSet<>();
+        boolean uncertain = false;
+        Proc zrok = findMain(procs, DaemonType.ZROK_TUNNEL);
+        Proc cloudflared = findMain(procs, DaemonType.CLOUDFLARED_TUNNEL);
+        Proc tailscaled = findMain(procs, DaemonType.TAILSCALE_TUNNEL);
+        synchronized (URL_LOCK) {
+            if (zrok != null && zrok.argv.length > 3 && "reserved".equals(zrok.argv[2])) {
+                if (!addHttpsHost(hosts, zrokUrl(zrok))) uncertain = true;
+            }
+            if (cloudflared != null && Arrays.asList(cloudflared.argv).contains("--token")) {
+                if (!addHttpsHost(hosts, cloudflaredUrl(cloudflared))) uncertain = true;
+            }
+            if (tailscaled != null) {
+                // http:// is a resolved Serve without HTTPS; null is a failed or pending read.
+                String url = tailscaleUrl(tailscaled);
+                if (url == null) uncertain = true;
+                addHttpsHost(hosts, url);
+            }
+        }
+        long now = monotonicMs();
+        for (String h : hosts) RECENT_STABLE.put(h, now);
+        return new StableHosts(Collections.unmodifiableSet(hosts), uncertain, now);
+    }
+
+    /** False when url has no https host. */
+    private static boolean addHttpsHost(Set<String> hosts, String url) {
+        if (url == null || !url.startsWith("https://")) return false;
+        String h = bareHost(url.substring("https://".length()));
+        if (h == null) return false;
+        hosts.add(h);
+        return true;
     }
 
     // ---- helpers -------------------------------------------------------------------------

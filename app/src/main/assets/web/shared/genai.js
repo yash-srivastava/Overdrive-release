@@ -90,6 +90,35 @@
             this.loadStatus().then(function () {
                 self.openInitialTab();
             });
+            if (window.BYD && BYD.offline && typeof BYD.offline.onReconnect === 'function') {
+                BYD.offline.onReconnect(function () { self.refreshAfterReconnect(); });
+            }
+        },
+
+        /** Back online: a status that never arrived, the routines and the evidence packs read again.
+         *  A provider field being edited, a routine write in flight and a staged routine switch stay.
+         *  While hidden: on the next return to the page, once. */
+        refreshAfterReconnect: function () {
+            var self = this;
+            if (document.hidden) {
+                if (this.reconnectDeferred) return;
+                this.reconnectDeferred = true;
+                document.addEventListener('visibilitychange', function shown() {
+                    if (document.hidden) return;
+                    document.removeEventListener('visibilitychange', shown);
+                    self.reconnectDeferred = false;
+                    self.refreshAfterReconnect();
+                });
+                return;
+            }
+            var focused = document.activeElement;
+            var editing = !!(focused && /^genAi/.test(focused.id || '') && focused.id !== 'genAiInput');
+            if (!this.status && !editing) this.loadStatus();
+            var toggle = document.getElementById('genAiRoutineLearningEnabled');
+            var staged = !!(toggle && this.status
+                && toggle.checked !== !!this.status.routineLearningEnabled);
+            if (!this.routineBusy && !staged) this.loadRoutineStatus();
+            this.loadIncidentPacks();
         },
 
         bind: function () {
@@ -267,11 +296,20 @@
 
         loadStatus: function () {
             var self = this;
+            // Overlapping reads: a success applies unless a newer success did, a failure only if nothing newer
+            // applied. A status set meanwhile by a save's reply (statusSaves) also wins over this read.
+            var seq = this.statusSeq = (this.statusSeq || 0) + 1;
+            var saves = this.statusSaves || 0;
             return this.request('/api/genai/status').then(function (status) {
+                if (seq < (self.statusOk || 0) || (self.statusSaves || 0) !== saves) return;
+                self.statusOk = seq;
+                if (seq > (self.statusLast || 0)) self.statusLast = seq;
                 self.status = status;
                 self.renderStatus();
                 self.populateConfig();
             }).catch(function (error) {
+                if (seq < (self.statusLast || 0) || (self.statusSaves || 0) !== saves) return;
+                self.statusLast = seq;
                 self.showState(t('genai.state_unavailable'), error.message, 'error');
                 self.toast(error.message, 'error');
             });
@@ -559,6 +597,7 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(this.configPayload())
             }).then(function (status) {
+                self.statusSaves = (self.statusSaves || 0) + 1;
                 self.status = status;
                 self.renderStatus();
                 self.populateConfig();
@@ -581,6 +620,7 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ enabled: false })
             }).then(function (status) {
+                self.statusSaves = (self.statusSaves || 0) + 1;
                 self.status = status;
                 self.renderStatus();
                 self.toast(t('genai.disabled_toast'), 'success');
@@ -614,6 +654,7 @@
             this.stopVoice('GenAI disabled', true);
             return this.request('/api/genai/config', { method: 'DELETE' })
                 .then(function (status) {
+                    self.statusSaves = (self.statusSaves || 0) + 1;
                     self.status = status;
                     self.messages = [];
                     self.renderMessages();
@@ -1272,6 +1313,7 @@
                         !!document.getElementById('genAiInsightNotifications').checked
                 })
             }).then(function (status) {
+                self.statusSaves = (self.statusSaves || 0) + 1;
                 self.status = status;
                 self.populateConfig();
                 self.renderStatus();
@@ -1307,7 +1349,12 @@
 
         loadRoutineStatus: function () {
             var self = this;
+            // Same reply rule as loadStatus.
+            var seq = this.routineSeq = (this.routineSeq || 0) + 1;
             return this.request('/api/genai/routines').then(function (status) {
+                if (seq < (self.routineOk || 0)) return;
+                self.routineOk = seq;
+                if (seq > (self.routineLast || 0)) self.routineLast = seq;
                 self.renderRoutineStatus(status || {});
                 var toggle =
                     document.getElementById('genAiRoutineLearningEnabled');
@@ -1315,6 +1362,8 @@
                     toggle.checked = !!status.enabled;
                 }
             }).catch(function (error) {
+                if (seq < (self.routineLast || 0)) return;
+                self.routineLast = seq;
                 var host =
                     document.getElementById('genAiRoutineSuggestions');
                 if (host) host.textContent =
@@ -1525,10 +1574,17 @@
 
         loadIncidentPacks: function () {
             var self = this;
+            // Same reply rule as loadStatus.
+            var seq = this.packsSeq = (this.packsSeq || 0) + 1;
             return this.request('/api/genai/incidents?limit=5')
                 .then(function (response) {
+                    if (seq < (self.packsOk || 0)) return;
+                    self.packsOk = seq;
+                    if (seq > (self.packsLast || 0)) self.packsLast = seq;
                     self.renderIncidentPacks(response.packs || []);
                 }).catch(function (error) {
+                    if (seq < (self.packsLast || 0)) return;
+                    self.packsLast = seq;
                     var host =
                         document.getElementById('genAiIncidentPacks');
                     if (host) host.textContent =

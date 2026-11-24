@@ -71,6 +71,17 @@ public class GpuDownscaler {
     
     // Shared context from main thread
     private EGLContext sharedContext;
+    private EGLConfig eglConfig;
+
+    // Custom Layouts road view (front camera, perspective): on request only, render thread only.
+    private ImageReader roadReader;
+    private EGLSurface roadSurface = EGL14.EGL_NO_SURFACE;
+    private int roadProgram;
+    private int roadW;
+    private int roadH;
+    private int roadFence = -1;  // -1 unknown, 1 GLES3 fences, 0 glFinish
+    private final java.util.concurrent.atomic.AtomicBoolean roadBusy =
+        new java.util.concurrent.atomic.AtomicBoolean();
 
     // Per-quadrant strip offsets and the runtime-baked fragment shader.
     // Default mirrors legacy Seal/Atto layout. Pass quadrant offsets from
@@ -340,7 +351,8 @@ public class GpuDownscaler {
             EGLConfig[] configs = new EGLConfig[1];
             int[] numConfigs = new int[1];
             EGL14.eglChooseConfig(eglDisplay, configAttribs, 0, configs, 0, 1, numConfigs, 0);
-            
+            eglConfig = configs[0];
+
             // Create context with sharing (can read main thread's textures)
             int[] contextAttribs = {
                 EGL14.EGL_CONTEXT_CLIENT_VERSION, 2,
@@ -524,7 +536,190 @@ public class GpuDownscaler {
         // Swap to ImageReader (DMA transfer)
         EGL14.eglSwapBuffers(eglDisplay, eglSurface);
     }
-    
+
+    /** Receives one road view on the render thread: RGBA rows, top first. Copy before returning. */
+    public interface RoadFrameSink {
+        void onRoadFrame(ByteBuffer rgba, int width, int height, int rowStride);
+    }
+
+    /**
+     * Custom Layouts road model: renders the front camera's perspective road view (spec from RoadView.gpuSpec)
+     * on this thread and hands it to the sink. Non-blocking; false when busy, down, or not the legacy strip.
+     */
+    public boolean postRoadFrame(int textureId, com.overdrive.app.camera.AiLaneGl.CameraState camera,
+            float[] spec, RoadFrameSink sink) {
+        Handler h = renderHandler;
+        if (!initialized || h == null || textureId <= 0 || camera == null || sink == null
+                || spec == null || spec.length < 9 || cameraLayout != 0 || !isIdentity(currentTexMatrix)) {
+            return false;
+        }
+        if (!roadBusy.compareAndSet(false, true)) return false;
+        boolean posted = h.post(() -> {
+            try {
+                drawRoadFrame(textureId, camera, spec, sink);
+            } finally {
+                roadBusy.set(false);
+            }
+        });
+        if (!posted) roadBusy.set(false);
+        return posted;
+    }
+
+    private void drawRoadFrame(int textureId, com.overdrive.app.camera.AiLaneGl.CameraState camera,
+            float[] spec, RoadFrameSink sink) {
+        if (!initialized) return;
+        int w = (int) spec[0];
+        int h = (int) spec[1];
+        boolean drawn = false;
+        try {
+            if (!ensureRoadTarget(w, h)) return;
+            if (!EGL14.eglMakeCurrent(eglDisplay, roadSurface, roadSurface, eglContext)) return;
+            // Same discipline as the AI lane: hold the camera texture only while our sample is in flight.
+            synchronized (camera.cameraTextureLock()) {
+                if (camera.isCameraTextureValid()) {
+                    GLES20.glViewport(0, 0, w, h);
+                    GLES20.glUseProgram(roadProgram);
+                    GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
+                    GLES20.glBindTexture(isTexture2D ? GLES20.GL_TEXTURE_2D
+                        : GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId);
+                    GLES20.glUniform1i(GLES20.glGetUniformLocation(roadProgram, "uCameraTex"), 0);
+                    GLES20.glUniform2f(GLES20.glGetUniformLocation(roadProgram, "uSize"), w, h);
+                    GLES20.glUniform1f(GLES20.glGetUniformLocation(roadProgram, "uFocal"), spec[2]);
+                    GLES20.glUniform2f(GLES20.glGetUniformLocation(roadProgram, "uRot"), spec[3], spec[4]);
+                    GLES20.glUniform4f(GLES20.glGetUniformLocation(roadProgram, "uLens"),
+                        spec[5], spec[6], spec[7], spec[8]);
+                    GLES20.glUniform2f(GLES20.glGetUniformLocation(roadProgram, "uStrip"),
+                        quadrantStripOffsetX[0], 0.25f);
+                    int aPos = GLES20.glGetAttribLocation(roadProgram, "aPosition");
+                    int aTex = GLES20.glGetAttribLocation(roadProgram, "aTexCoord");
+                    GLES20.glEnableVertexAttribArray(aPos);
+                    GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer);
+                    GLES20.glEnableVertexAttribArray(aTex);
+                    GLES20.glVertexAttribPointer(aTex, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer);
+                    GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
+                    GLES20.glDisableVertexAttribArray(aPos);
+                    GLES20.glDisableVertexAttribArray(aTex);
+                    roadSampleBarrier();
+                    drawn = true;
+                }
+            }
+            if (!drawn) return;
+            EGL14.eglSwapBuffers(eglDisplay, roadSurface);
+            Image img = null;
+            for (int i = 0; i < 10 && img == null; i++) {
+                img = roadReader.acquireLatestImage();
+                if (img == null) Thread.sleep(2);
+            }
+            if (img == null) return;
+            try {
+                Image.Plane p = img.getPlanes()[0];
+                sink.onRoadFrame(p.getBuffer(), w, h, p.getRowStride());
+            } finally {
+                img.close();
+            }
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+        } catch (Throwable t) {
+            logger.warn("road view failed: " + t.getMessage());
+        } finally {
+            if (eglDisplay != null && eglSurface != null && eglSurface != EGL14.EGL_NO_SURFACE) {
+                EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext);
+            }
+        }
+    }
+
+    /** Road reader, surface and program, built on first use (render thread). */
+    private boolean ensureRoadTarget(int w, int h) {
+        if (roadReader != null && (roadW != w || roadH != h)) releaseRoadTarget();
+        if (roadReader == null) {
+            roadReader = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 2);
+            roadSurface = EGL14.eglCreateWindowSurface(eglDisplay, eglConfig, roadReader.getSurface(),
+                new int[] { EGL14.EGL_NONE }, 0);
+            if (roadSurface == null || roadSurface == EGL14.EGL_NO_SURFACE) {
+                roadSurface = EGL14.EGL_NO_SURFACE;
+                roadReader.close();
+                roadReader = null;
+                return false;
+            }
+            roadW = w;
+            roadH = h;
+        }
+        if (roadProgram == 0) {
+            roadProgram = GlUtil.createProgram(ROAD_VERTEX_SHADER, buildRoadFragmentShader(isTexture2D));
+            if (roadProgram == 0) return false;
+        }
+        if (roadFence < 0) {
+            String v = GLES20.glGetString(GLES20.GL_VERSION);
+            roadFence = v != null && v.contains("OpenGL ES 3") ? 1 : 0;
+        }
+        return true;
+    }
+
+    /** Our camera sample must finish before the camera thread may recycle the buffer (see AiLaneGl). */
+    private void roadSampleBarrier() {
+        if (roadFence == 1) {
+            long fence = GLES30.glFenceSync(GLES30.GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+            if (fence != 0) {
+                int r = GLES30.glClientWaitSync(fence, GLES30.GL_SYNC_FLUSH_COMMANDS_BIT, 50_000_000L);
+                GLES30.glDeleteSync(fence);
+                if (r != GLES30.GL_TIMEOUT_EXPIRED && r != GLES30.GL_WAIT_FAILED) return;
+            }
+        }
+        GLES20.glFinish();
+    }
+
+    /** Render thread: frees the road surface + reader (the program goes with the context). */
+    private void releaseRoadTarget() {
+        if (roadSurface != null && roadSurface != EGL14.EGL_NO_SURFACE && eglDisplay != null) {
+            EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext);
+            EGL14.eglDestroySurface(eglDisplay, roadSurface);
+        }
+        roadSurface = EGL14.EGL_NO_SURFACE;
+        if (roadReader != null) {
+            try { roadReader.close(); } catch (Throwable ignored) {}
+            roadReader = null;
+        }
+    }
+
+    private static boolean isIdentity(float[] m) {
+        for (int i = 0; i < 16; i++) {
+            if (m[i] != ((i % 5 == 0) ? 1f : 0f)) return false;
+        }
+        return true;
+    }
+
+    private static final String ROAD_VERTEX_SHADER =
+        "attribute vec4 aPosition;\n" +
+        "attribute vec2 aTexCoord;\n" +
+        "varying vec2 vPos;\n" +
+        "void main() {\n" +
+        "    gl_Position = aPosition;\n" +
+        "    vPos = vec2(aTexCoord.x, 1.0 - aTexCoord.y);\n" +
+        "}\n";
+
+    /** Pinhole view ray → rotation onto the lens axis → equidistant fisheye → front tile of the strip. */
+    private static String buildRoadFragmentShader(boolean isTexture2D) {
+        return "#extension GL_OES_EGL_image_external : " + (isTexture2D ? "enable\n" : "require\n") +
+            "precision highp float;\n" +
+            (isTexture2D ? "uniform sampler2D uCameraTex;\n" : "uniform samplerExternalOES uCameraTex;\n") +
+            "uniform vec2 uSize;\n" +
+            "uniform float uFocal;\n" +
+            "uniform vec2 uRot;\n" +
+            "uniform vec4 uLens;\n" +
+            "uniform vec2 uStrip;\n" +
+            "varying vec2 vPos;\n" +
+            "void main() {\n" +
+            "    vec2 p = (vPos * uSize - 0.5 * uSize) / uFocal;\n" +
+            "    float y2 = p.y * uRot.x - uRot.y;\n" +
+            "    float z2 = p.y * uRot.y + uRot.x;\n" +
+            "    float rr = length(vec2(p.x, y2));\n" +
+            "    float th = atan(rr, z2);\n" +
+            "    vec2 d = rr > 1e-6 ? vec2(p.x, y2) / rr : vec2(0.0);\n" +
+            "    vec2 t = clamp(vec2(uLens.x + uLens.z * th * d.x, uLens.y + uLens.z * th * d.y / uLens.w), 0.0, 1.0);\n" +
+            "    gl_FragColor = texture2D(uCameraTex, vec2(uStrip.x + t.x * uStrip.y, t.y));\n" +
+            "}\n";
+    }
+
     /**
      * Synchronous downscale + readback. Draws the camera texture on the downscaler
      * thread, waits for completion, then reads the result.
@@ -1378,12 +1573,20 @@ public class GpuDownscaler {
                         GLES20.glDeleteProgram(programId);
                         programId = 0;
                     }
+                    if (roadProgram != 0) {
+                        GLES20.glDeleteProgram(roadProgram);
+                        roadProgram = 0;
+                    }
                     // 2. Unbind. This is what lets the deferred destruction of
                     //    the context/surface actually complete — destroying a
                     //    CURRENT context only marks it for deletion.
                     if (eglDisplay != null && eglDisplay != EGL14.EGL_NO_DISPLAY) {
                         EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE,
                             EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT);
+                        if (roadSurface != null && roadSurface != EGL14.EGL_NO_SURFACE) {
+                            EGL14.eglDestroySurface(eglDisplay, roadSurface);
+                            roadSurface = EGL14.EGL_NO_SURFACE;
+                        }
                         if (eglSurface != null && eglSurface != EGL14.EGL_NO_SURFACE) {
                             EGL14.eglDestroySurface(eglDisplay, eglSurface);
                             eglSurface = EGL14.EGL_NO_SURFACE;
@@ -1464,6 +1667,10 @@ public class GpuDownscaler {
                     try { imageReader.close(); } catch (Throwable ignored) {}
                     imageReader = null;
                 }
+                if (roadReader != null) {
+                    try { roadReader.close(); } catch (Throwable ignored) {}
+                    roadReader = null;
+                }
                 logger.warn("AsyncGpuDownscaler release INCOMPLETE (process recovery requested)");
                 return;
             }
@@ -1472,6 +1679,10 @@ public class GpuDownscaler {
         if (imageReader != null) {
             imageReader.close();
             imageReader = null;
+        }
+        if (roadReader != null) {
+            try { roadReader.close(); } catch (Throwable ignored) {}
+            roadReader = null;
         }
 
         logger.info("AsyncGpuDownscaler released");

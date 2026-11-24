@@ -914,6 +914,19 @@ public final class BydDeviceHelper {
         return null;
     }
 
+    /** Reads through the SDK's public, per-device feature allowlist and permission checks. */
+    static int readPublicIntFeature(Object device, int featureId) {
+        if (device == null) return Integer.MIN_VALUE;
+        Method method = lookupPublicMethodCached(device.getClass(), "get",
+                publicFeatureMethodCache, PUBLIC_FEATURE_PARAMS);
+        if (method == null) return Integer.MIN_VALUE;
+        try {
+            return getIntValue(method.invoke(device, new int[]{featureId}, Integer.TYPE));
+        } catch (ReflectiveOperationException | SecurityException unavailable) {
+            return Integer.MIN_VALUE;
+        }
+    }
+
     /** DiLink 5 feature reads whose {@code Class} token must be BYDAutoEventValue itself. */
     public static Object callGetEventValue(Object device, int featureId) {
         if (device == null) return null;
@@ -1842,6 +1855,10 @@ public final class BydDeviceHelper {
             android.hardware.bydauto.charging.AbsBYDAutoChargingListener listener =
                 new android.hardware.bydauto.charging.AbsBYDAutoChargingListener() {
                     @Override
+                    public void onChargePreheatStateChanged(int state) {
+                        invokeCallback(callback, "onChargePreheatStateChanged", new Object[]{state});
+                    }
+                    @Override
                     public void onBatteryManagementDeviceStateChanged(int state) {
                         invokeCallback(callback, "onBatteryManagementDeviceStateChanged", new Object[]{state});
                     }
@@ -2374,6 +2391,16 @@ public final class BydDeviceHelper {
      * The field form is kept only as a fallback for trims whose SDK lacks the int[] constructor.
      */
     public static int sendSetCommandGroupedRaw(Object device, int[] ids, int[] values) {
+        return sendSetCommandGroupedRaw(device, ids, values, true);
+    }
+
+    /**
+     * {@link #sendSetCommandGroupedRaw(Object, int[], int[])} with the event form chosen by the
+     * caller. {@code preferIntArrayCtor=false} uses the field form (no-arg constructor, then
+     * {@code intArrayValue}), which the AC vent-direction write needs.
+     */
+    public static int sendSetCommandGroupedRaw(Object device, int[] ids, int[] values,
+            boolean preferIntArrayCtor) {
         if (device == null || ids == null || values == null || ids.length != values.length
                 || VehicleActuatorBridge.isDiLink5RequestExpired()) {
             return Integer.MIN_VALUE;
@@ -2385,6 +2412,7 @@ public final class BydDeviceHelper {
             Class<?> eventValueClass = Class.forName("android.hardware.bydauto.BYDAutoEventValue");
             Object eventValue;
             try {
+                if (!preferIntArrayCtor) throw new NoSuchMethodException("field form requested");
                 eventValue = eventValueClass.getConstructor(int[].class).newInstance((Object) values);
             } catch (ReflectiveOperationException noUsableIntArrayCtor) {
                 // Any SDK where that ctor is missing or unusable: fall back to the field form.
@@ -2619,6 +2647,9 @@ public final class BydDeviceHelper {
     private static final Class<?>[] INT3_PARAMS = new Class<?>[]{int.class, int.class, int.class};
     private static final Class<?>[] INT4_PARAMS = new Class<?>[]{int.class, int.class, int.class, int.class};
     private static final Class<?>[] INT_ARRAY_PARAMS = new Class<?>[]{int[].class};
+    private static final Class<?>[] PUBLIC_FEATURE_PARAMS = {int[].class, Class.class};
+    private static final java.util.concurrent.ConcurrentMap<Class<?>, java.util.concurrent.ConcurrentMap<String, Method>>
+            publicFeatureMethodCache = new java.util.concurrent.ConcurrentHashMap<>();
 
     private static final java.util.concurrent.ConcurrentMap<Class<?>, java.util.concurrent.ConcurrentMap<String, Method>>
             publicNoArgMethodCache = new java.util.concurrent.ConcurrentHashMap<>();

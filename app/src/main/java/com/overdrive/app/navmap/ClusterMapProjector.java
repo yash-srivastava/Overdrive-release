@@ -93,6 +93,7 @@ public final class ClusterMapProjector {
     // stopped (ACC-off / disable / web stop), so it can never fight a teardown.
     private static final int KEEPALIVE_POLL_MS = 2500;
     private static final int KEEPALIVE_MISS_THRESHOLD = 2;  // consecutive misses before relaunch
+    private static final long BEAT_HOLD_MS = 4_000L;
 
     // UCM coordination flag (navMap.clusterMapActive) the launched cluster Activity
     // polls to self-finish. The daemon (uid 2000) can't call finish() on a uid-1000
@@ -123,9 +124,17 @@ public final class ClusterMapProjector {
 
     /** Non-blocking start; a cast stop or gauge restore still running is waited out on its own thread. */
     public static void startWhenSettled() {
-        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()
+        startWhenSettled(true);
+    }
+
+    public static void startAutomaticallyWhenSettled() {
+        startWhenSettled(false);
+    }
+
+    private static void startWhenSettled(boolean explicitSelection) {
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()
                 || !legacyStartSettling()) {
-            start();
+            start(explicitSelection);
             return;
         }
         final long intent = intentEpoch;
@@ -149,13 +158,13 @@ public final class ClusterMapProjector {
                     logger.info("queued cluster map start dropped (superseded)");
                     return;
                 }
-                start();
+                start(explicitSelection);
             }, "ClusterMapQueued");
             queued.setDaemon(true);
             queued.start();
             logger.info("cluster map projection queued behind the running stop/restore");
         } catch (Throwable t) {
-            start();
+            start(explicitSelection);
         }
     }
 
@@ -184,7 +193,7 @@ public final class ClusterMapProjector {
 
     /** True while the map is (being) projected onto the cluster. */
     public static boolean isActive() {
-        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) {
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()) {
             return active && com.overdrive.app.launcher.DiLink5ClusterCast.isMapActive();
         }
         return active;
@@ -195,7 +204,27 @@ public final class ClusterMapProjector {
      * sustained projection hold, waits for the fission display, then launches the
      * map Activity onto it. Runs the wait+launch off the caller's thread.
      */
-    public static synchronized void start() {
+    public static void start() {
+        start(true);
+    }
+
+    /** Cast teardown may finish on another thread after the driver has selected Custom Layouts. */
+    public static void restoreAfterLegacyCastStop() {
+        if (!com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()) start(false);
+    }
+
+    private static synchronized void start(boolean explicitSelection) {
+        // A side effect of Custom Layouts taking the cluster (a cast stop's map restore).
+        if (com.overdrive.app.customlayouts.daemon.CustomLayoutsController.vetoesClusterStart()) {
+            logger.info("cluster map: Custom Layouts is taking the cluster; start skipped");
+            return;
+        }
+        if (!explicitSelection) {
+            if (com.overdrive.app.customlayouts.daemon.CustomLayoutsController.claimsAutomaticProjection()) {
+                logger.info("automatic cluster map skipped while Custom Layouts owns projection");
+                return;
+            }
+        }
         com.overdrive.app.launcher.layout.LayoutModeGate.StandardStart admission =
                 com.overdrive.app.launcher.layout.LayoutModeGate.enterStandard();
         if (admission == null) {
@@ -203,15 +232,15 @@ public final class ClusterMapProjector {
             return;
         }
         try {
-            startAdmitted();
+            startAdmitted(explicitSelection);
         } finally {
             admission.close();
         }
     }
 
-    private static void startAdmitted() {
+    private static void startAdmitted(boolean explicitSelection) {
         if (active) {
-            if (!com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()
+            if (!com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()
                     || com.overdrive.app.launcher.DiLink5ClusterCast.isMapActive()) {
                 return;
             }
@@ -224,8 +253,10 @@ public final class ClusterMapProjector {
         // Mark active BEFORE launch so the Activity's first poll sees true and
         // doesn't immediately self-finish on a fast startup.
         publishActiveFlag(true);
-        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) {
-            if (!com.overdrive.app.launcher.DiLink5ClusterCast.startMap()) {
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()) {
+            boolean started = explicitSelection ? com.overdrive.app.launcher.DiLink5ClusterCast.startMap()
+                    : com.overdrive.app.launcher.DiLink5ClusterCast.startMap(false);
+            if (!started) {
                 active = false;
                 publishActiveFlag(false);
                 logger.warn("DI5 cluster map projection was not accepted");
@@ -234,8 +265,10 @@ public final class ClusterMapProjector {
         }
         boolean acquired = false;
         try {
-            acquired = ClusterProjectionController.getInstance()
-                    .acquireSustained();
+            ClusterProjectionController controller = ClusterProjectionController.getInstance();
+            acquired = explicitSelection
+                    ? controller.acquireSustained()
+                    : controller.acquireAutomaticMapHold();
         } catch (Throwable t) {
             logger.warn("acquireSustained failed: " + t.getMessage());
             // acquireSustained adds the token before work that can throw; never leave it held.
@@ -270,13 +303,14 @@ public final class ClusterMapProjector {
      *  open — the "map shows on the cluster even when disabled" bug. */
     public static synchronized boolean stop() {
         intentEpoch++;
+        com.overdrive.app.customlayouts.daemon.projection.ClusterBeat.release(com.overdrive.app.customlayouts.daemon.projection.ClusterBeat.MAP);
         if (!active) return true;
         active = false;
         logger.info("cluster map projection: stop");
         // Tell the cluster Activity to finish (it polls navMap.clusterMapActive).
         // Done first so the Activity is dismissed even if releaseSustained throws.
         publishActiveFlag(false);
-        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) {
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()) {
             return com.overdrive.app.launcher.DiLink5ClusterCast.stopMap();
         }
         try {
@@ -288,8 +322,13 @@ public final class ClusterMapProjector {
         return true;
     }
 
+    /** A selection that arrived while the takeover worker waited for this monitor wins. */
+    public static synchronized boolean stopForCustomLayouts(java.util.function.BooleanSupplier stillAcquiring) {
+        return !stillAcquiring.getAsBoolean() || stop();
+    }
+
     public static void onDiLink5ProjectionFailed() {
-        if (!com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) return;
+        if (!com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()) return;
         synchronized (ClusterMapProjector.class) {
             if (!active
                     || com.overdrive.app.launcher.DiLink5ClusterCast.isMapActive()) {
@@ -308,13 +347,14 @@ public final class ClusterMapProjector {
      * keep-alive identity before the fission display is retired.
      */
     public static void onLegacyProjectionForceClosed() {
-        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) return;
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()) return;
         boolean wasActive;
         synchronized (ClusterMapProjector.class) {
             wasActive = active || launchThread != null;
             active = false;
             launchThread = null;
         }
+        com.overdrive.app.customlayouts.daemon.projection.ClusterBeat.release(com.overdrive.app.customlayouts.daemon.projection.ClusterBeat.MAP);
         if (wasActive) {
             publishActiveFlag(false);
         }
@@ -480,6 +520,7 @@ public final class ClusterMapProjector {
                 if (isMapResumedOnDisplay(displayId)) {
                     logger.info("cluster map RESUMED on displayId " + displayId
                             + " (attempt " + attempt + ")");
+                    holdBeat();
                     // Initial launch confirmed — hand off to the keep-alive watchdog so a
                     // later swipe-away / process death is auto-recovered for the rest of
                     // the session (the daemon outlives the app, so it must self-heal the map).
@@ -520,6 +561,21 @@ public final class ClusterMapProjector {
      * path ({@link #launchMapOnDisplay}-style {@link #issueLaunch} + poll) inline.
      */
     private static void keepAliveLoop(int displayId) {
+        final Thread self = Thread.currentThread();
+        try {
+            keepAliveLoopBody(displayId);
+        } finally {
+            Thread current = launchThread;
+            if (current == null || current == self || !active) com.overdrive.app.customlayouts.daemon.projection.ClusterBeat.release(com.overdrive.app.customlayouts.daemon.projection.ClusterBeat.MAP);
+        }
+    }
+
+    /** The full-cluster beat: the map is the resumed window on the fission display (keep-alive polls 2.5 s). */
+    private static void holdBeat() {
+        com.overdrive.app.customlayouts.daemon.projection.ClusterBeat.hold(com.overdrive.app.customlayouts.daemon.projection.ClusterBeat.MAP, BEAT_HOLD_MS);
+    }
+
+    private static void keepAliveLoopBody(int displayId) {
         logger.info("cluster map keep-alive watchdog: armed on displayId " + displayId);
         final Thread self = Thread.currentThread();
         int consecutiveMisses = 0;
@@ -535,6 +591,7 @@ public final class ClusterMapProjector {
             if (liveId > 0) displayId = liveId;
             if (isMapResumedOnDisplay(displayId)) {
                 consecutiveMisses = 0;
+                if (active && launchThread == self) holdBeat();
                 continue;
             }
             // Our Activity is NOT the resumed window. Could be a transient blink (AMS
@@ -777,7 +834,7 @@ public final class ClusterMapProjector {
                             || com.overdrive.app.launcher.ClusterLayouts.isBusy()) return;
                     if (resolveFissionDisplayId() <= 0) continue;
                     logger.info("cluster display appeared late — retrying the cluster map");
-                    startWhenSettled();
+                    startWhenSettled(false);
                     return;
                 }
             }, "ClusterMapLateDisplay");

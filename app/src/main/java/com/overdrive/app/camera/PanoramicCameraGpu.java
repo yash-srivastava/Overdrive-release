@@ -94,7 +94,7 @@ public class PanoramicCameraGpu {
     // output, 1-4=individual viewpoints.
     private int cameraSurfaceMode = 0;
 
-    // Frame-ingestion path selector. Three modes, persisted in unified
+    // Frame-ingestion path selector, persisted in unified
     // config under camera.cameraMode:
     //   "default" → legacy ImageReader + 4-strip → 2x2 rearrangement.
     //   "dilink4" → oem SurfaceTexture (addTexture + setTexture +
@@ -103,6 +103,8 @@ public class PanoramicCameraGpu {
     //               preview port 0 unchanged.
     //   "dilink5" → fast_cam_capture DMA-BUFs composited into a persistent
     //               GL_TEXTURE_2D, with a CPU upload fallback.
+    //   "surfacetexture" → opt-in Surface(SurfaceTexture) preview consumer,
+    //                      with the existing legacy strip layout and mapping.
     //
     // Resolved at construction. 0=legacy strip, 1=full-frame passthrough,
     // 3=DiLink 4 remapped 2x2 mosaic.
@@ -112,10 +114,14 @@ public class PanoramicCameraGpu {
     // session on the AVM super-frame camera instead of AVMCamera.
     private final boolean USE_CAMERA2_AVM_PATH =
         com.overdrive.app.camera.camera2.Camera2Platform.isSelected();
+    private final boolean USE_AVM_SURFACE_TEXTURE_PATH =
+        AvmSurfaceTexturePlatform.isSelected();
     private final int CAMERA_LAYOUT_MODE = resolveCameraLayoutModeFromConfig();
     private final boolean USE_OEM_SURFACE_TEXTURE_PATH = CAMERA_LAYOUT_MODE != 0;
     private final boolean USE_DILINK4_AVM_PATH =
         USE_OEM_SURFACE_TEXTURE_PATH && !USE_DILINK5_QCARCAM_PATH;
+    private final boolean USE_SURFACE_TEXTURE_CONSUMER =
+        USE_OEM_SURFACE_TEXTURE_PATH || USE_AVM_SURFACE_TEXTURE_PATH;
     // Legacy strip path only: Camera2 paces at acquisition and DiLink 4/5 own their rate.
     private final boolean PACE_LEGACY_RECORDER =
         !USE_DILINK5_QCARCAM_PATH && !USE_CAMERA2_AVM_PATH && !USE_OEM_SURFACE_TEXTURE_PATH;
@@ -148,6 +154,7 @@ public class PanoramicCameraGpu {
         !USE_OEM_SURFACE_TEXTURE_PATH
         && !USE_DILINK5_QCARCAM_PATH
         && !USE_CAMERA2_AVM_PATH
+        && !USE_AVM_SURFACE_TEXTURE_PATH
         // The CPU recording engine never waits on the encoder: no lane needed.
         && !com.overdrive.app.surveillance.RecordingEngine.isCpuEngineEnabled()
         && resolveDecoupledEncoderLaneFromConfig();
@@ -189,7 +196,7 @@ public class PanoramicCameraGpu {
 
     /** Why this instance's camera path can't feed the CPU engine (RecordingEngine.WHY_*), or null. */
     public String cpuFrameBlocker() {
-        if (USE_DILINK5_QCARCAM_PATH || USE_OEM_SURFACE_TEXTURE_PATH) {
+        if (USE_DILINK5_QCARCAM_PATH || USE_SURFACE_TEXTURE_CONSUMER) {
             return com.overdrive.app.surveillance.RecordingEngine.WHY_CAMERA_MODE;
         }
         if (USE_DECOUPLED_ENCODER_LANE) {
@@ -204,6 +211,7 @@ public class PanoramicCameraGpu {
             return !com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
                 && resolveCameraLayoutModeFromConfig() == 0
                 && !com.overdrive.app.camera.camera2.Camera2Platform.isSelected()
+                && !AvmSurfaceTexturePlatform.isSelected()
                 && resolveDecoupledEncoderLaneFromConfig();
         } catch (Throwable t) {
             return false;
@@ -214,7 +222,8 @@ public class PanoramicCameraGpu {
     public static String cpuRecordingFrameBlocker() {
         try {
             if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
-                    || resolveCameraLayoutModeFromConfig() != 0) {
+                    || resolveCameraLayoutModeFromConfig() != 0
+                    || AvmSurfaceTexturePlatform.isSelected()) {
                 return com.overdrive.app.surveillance.RecordingEngine.WHY_CAMERA_MODE;
             }
             return null;
@@ -334,6 +343,10 @@ public class PanoramicCameraGpu {
     // by createCameraSurfaceTexture(), freed by releaseCameraConsumer().
     // Bound directly to cameraTextureId — no separate gralloc handoff.
     private volatile SurfaceTexture cameraSurfaceTexture;
+    // Only the opt-in mode populates this map. Each adapter retains its exact
+    // Surface binding so a late close cannot detach a replacement consumer.
+    private final java.util.Map<Object, AvmSurfaceTextureBackend> surfaceTextureBackends =
+        new java.util.IdentityHashMap<>();
 
     // DiLink 4 SurfaceTexture callbacks MUST NOT run on glHandler. The render
     // runnable blocks that looper in frameSync.wait(), so a callback posted to
@@ -1393,6 +1406,10 @@ public class PanoramicCameraGpu {
     private long stageWorstAcquireNs = 0;
     private long stageWorstMosaicNs = 0;
     private int stageWindowFrames = 0;
+    // Worst per window on their own (not of the worst-total frame): texture bind
+    // incl. lock wait, and capture-to-pickup lag (capture clock only).
+    private long stageWorstBindNs = 0;
+    private long stageWorstLagNs = 0;
 
     // AI readback throttle — frame-counter modulo, NOT wall-clock.
     // Wall-clock throttling is fragile when readback duration approaches the
@@ -1755,6 +1772,7 @@ public class PanoramicCameraGpu {
         logger.info("Camera ingestion mode: "
             + (USE_DILINK5_QCARCAM_PATH ? "DiLink 5 (fast_cam_capture DMA bridge)"
                 : USE_DILINK4_AVM_PATH ? "DiLink 4 (SurfaceTexture passthrough)"
+                : USE_AVM_SURFACE_TEXTURE_PATH ? "SurfaceTexture (vendor preview Surface)"
                 : "Default (ImageReader + 2x2 rearrangement)"));
         if (USE_CAMERA2_AVM_PATH) {
             logger.info("Camera source: Camera2 360 super-frame (NDK camera2, no AVMCamera)");
@@ -1931,7 +1949,8 @@ public class PanoramicCameraGpu {
                         || diLink5SafetyDisabled
                         || diLink5CloseInProgress
                         || cameraObj == null
-                        || restartInProgress.get());
+                        || restartInProgress.get()
+                        || (gpuBindOptional && cameraTextureDetached));
             }
             @Override public Object cameraTextureLock() { return cameraTextureLock; }
         };
@@ -2305,16 +2324,12 @@ public class PanoramicCameraGpu {
             }
         }
 
-        // Build the camera consumer. Default = oem-style SurfaceTexture
-        // path (addTexture/setTexture/rmTexture + previewIndex). Falls back
-        // to the ImageReader path only when USE_OEM_SURFACE_TEXTURE_PATH is
-        // disabled — kept around for FPS-ceiling investigations on Seal
-        // (verified ~26 fps by AvmImageReaderFpsProbe vs SurfaceFlinger's
-        // ~8.5 fps clamp on legacy SurfaceTexture wiring).
+        // Choose the consumer independently of geometry. The opt-in
+        // SurfaceTexture mode retains the default strip layout.
         if (USE_DILINK5_QCARCAM_PATH) {
             cameraSurfaceTexture = null;
             cameraSurface = null;
-        } else if (USE_OEM_SURFACE_TEXTURE_PATH) {
+        } else if (USE_SURFACE_TEXTURE_CONSUMER) {
             createCameraSurfaceTexture();
         } else {
             createCameraImageReader();
@@ -2462,7 +2477,8 @@ public class PanoramicCameraGpu {
             // GL thread. Allocating its FBOs + shader on the encoder thread
             // would serialize readback against encoder eglSwapBuffers.
             foveatedCropper = new FoveatedCropper(width, height,
-                quadrantStripOffsetX, quadrantCornerOffsetsXY, isTexture2D());
+                quadrantStripOffsetX, quadrantCornerOffsetsXY, isTexture2D(),
+                USE_AVM_SURFACE_TEXTURE_PATH);
             foveatedCropper.setCameraLayout(getCameraLayoutMode());
 
             // DiLink 4: override the canonical corner map with the known
@@ -2617,10 +2633,10 @@ public class PanoramicCameraGpu {
      */
     private void recreateCameraSurface() {
         logger.info("Recreating "
-            + (USE_OEM_SURFACE_TEXTURE_PATH ? "SurfaceTexture" : "ImageReader")
+            + (USE_SURFACE_TEXTURE_CONSUMER ? "SurfaceTexture" : "ImageReader")
             + " consumer for camera switch...");
         releaseCameraConsumer();
-        if (USE_OEM_SURFACE_TEXTURE_PATH) {
+        if (USE_SURFACE_TEXTURE_CONSUMER) {
             createCameraSurfaceTexture();
         } else {
             createCameraImageReader();
@@ -2628,7 +2644,7 @@ public class PanoramicCameraGpu {
         logger.info("Camera consumer recreated for camera switch");
     }
 
-    /** Build a SurfaceTexture-backed consumer (oem path).
+    /** Build a SurfaceTexture-backed consumer.
      *  Frame handling:
      *    HAL → SurfaceTexture producer (BufferQueue)
      *      → setOnFrameAvailableListener fires on diLink4FrameCallbackHandler
@@ -2657,6 +2673,7 @@ public class PanoramicCameraGpu {
         }
         Handler callbackHandler = ensureDiLink4FrameCallbackHandler();
         SurfaceTexture created = new SurfaceTexture(cameraTextureId);
+        Surface createdSurface = null;
         final int consumerEpoch;
         synchronized (diLink4SurfaceTextureStateLock) {
             consumerEpoch = ++diLink4SurfaceTextureEpoch;
@@ -2666,6 +2683,10 @@ public class PanoramicCameraGpu {
             stLastConsumedArrivalSeq = 0L;
         }
         try {
+            if (USE_AVM_SURFACE_TEXTURE_PATH) {
+                created.setDefaultBufferSize(width, height);
+                createdSurface = new Surface(created);
+            }
             created.setOnFrameAvailableListener(
                 st -> onDiLink4SurfaceTextureFrameAvailable(st, consumerEpoch),
                 callbackHandler);
@@ -2677,17 +2698,20 @@ public class PanoramicCameraGpu {
                     cameraSurfaceTexture = null;
                 }
             }
+            if (createdSurface != null) {
+                try { createdSurface.release(); } catch (Throwable ignored) {}
+            }
             try { created.release(); } catch (Throwable ignored) {}
             throw registrationFailure;
         }
-        cameraSurface = null;
+        cameraSurface = createdSurface;
     }
 
     /** Create the DI4 callback looper lazily and retain it across soft rebinds. */
     private Handler ensureDiLink4FrameCallbackHandler() {
-        if (!USE_DILINK4_AVM_PATH) {
+        if (!USE_DILINK4_AVM_PATH && !USE_AVM_SURFACE_TEXTURE_PATH) {
             throw new IllegalStateException(
-                "SurfaceTexture callback thread requested outside DiLink 4");
+                "SurfaceTexture callback thread requested outside a SurfaceTexture mode");
         }
         HandlerThread currentThread = diLink4FrameCallbackThread;
         Handler currentHandler = diLink4FrameCallbackHandler;
@@ -2698,7 +2722,9 @@ public class PanoramicCameraGpu {
         if (currentThread != null) {
             try { currentThread.quit(); } catch (Throwable ignored) {}
         }
-        HandlerThread replacement = new HandlerThread("Di4-FrameCallback");
+        HandlerThread replacement = USE_AVM_SURFACE_TEXTURE_PATH
+            ? new HandlerThread("AvmST-FrameCallback")
+            : new HandlerThread("Di4-FrameCallback");
         replacement.start();
         Handler replacementHandler = new Handler(replacement.getLooper());
         if (glHandler != null
@@ -2714,7 +2740,7 @@ public class PanoramicCameraGpu {
 
     /** Full-pipeline teardown only; soft SurfaceTexture rebinds reuse the looper. */
     private void shutdownDiLink4FrameCallbackThread() {
-        if (USE_DILINK4_AVM_PATH) {
+        if (USE_DILINK4_AVM_PATH || USE_AVM_SURFACE_TEXTURE_PATH) {
             // Fence callbacks even if the preceding consumer teardown was
             // partial or threw before it could retire the active identity.
             // cameraTornDown is normally already true, but the epoch is the
@@ -2766,10 +2792,10 @@ public class PanoramicCameraGpu {
      */
     private void onDiLink4SurfaceTextureFrameAvailable(
             SurfaceTexture callbackSurface, int callbackEpoch) {
-        boolean softRecoverySucceeded;
-        boolean deferredReopenCancelled;
-        int recoveryCycles;
-        String demandReason;
+        boolean softRecoverySucceeded = false;
+        boolean deferredReopenCancelled = false;
+        int recoveryCycles = 0;
+        String demandReason = null;
         synchronized (diLink4SurfaceTextureStateLock) {
             if (!shouldAcceptDiLink4SurfaceTextureCallback(
                     callbackEpoch,
@@ -2778,20 +2804,22 @@ public class PanoramicCameraGpu {
                     cameraTornDown)) {
                 return;
             }
-            dilink4LastGenuineFrameArrivalMs = System.currentTimeMillis();
-            softRecoverySucceeded =
-                dilink4SoftRecoveryInFlight.getAndSet(false);
-            if (softRecoverySucceeded) {
-                dilink4SoftRecoveryEpoch.incrementAndGet();
+            if (USE_DILINK4_AVM_PATH) {
+                dilink4LastGenuineFrameArrivalMs = System.currentTimeMillis();
+                softRecoverySucceeded =
+                    dilink4SoftRecoveryInFlight.getAndSet(false);
+                if (softRecoverySucceeded) {
+                    dilink4SoftRecoveryEpoch.incrementAndGet();
+                }
+                deferredReopenCancelled =
+                    dilink4DeferredReopenPending.getAndSet(false);
+                if (deferredReopenCancelled) {
+                    dilink4DeferredReopenEpoch.incrementAndGet();
+                }
+                recoveryCycles = dilink4SoftRecoveryCycles;
+                demandReason = dilink4FrameDemandReason;
+                dilink4SoftRecoveryCycles = 0;
             }
-            deferredReopenCancelled =
-                dilink4DeferredReopenPending.getAndSet(false);
-            if (deferredReopenCancelled) {
-                dilink4DeferredReopenEpoch.incrementAndGet();
-            }
-            recoveryCycles = dilink4SoftRecoveryCycles;
-            demandReason = dilink4FrameDemandReason;
-            dilink4SoftRecoveryCycles = 0;
 
             // stFrameArrivalSeq is the ONLY genuine "the HAL queued a new
             // buffer" signal on this path. Publish it before notifying the GL
@@ -4768,6 +4796,30 @@ public class PanoramicCameraGpu {
             }
             return clean;
         }
+        if (USE_AVM_SURFACE_TEXTURE_PATH) {
+            AvmSurfaceTextureBackend backend;
+            synchronized (surfaceTextureBackends) {
+                backend = surfaceTextureBackends.get(cam);
+            }
+            // All handles in this mode are registered before publication.
+            // An absent handle was already retired by an earlier close.
+            if (backend == null) return true;
+            if (cameraCoordinator != null) {
+                cameraCoordinator.retireSurfaceTextureEventCallback(cam);
+            }
+            boolean clean = backend.close();
+            if (clean) {
+                synchronized (surfaceTextureBackends) {
+                    surfaceTextureBackends.remove(cam);
+                }
+            } else {
+                stopVerdictWedged = true;
+                logger.error("SurfaceTexture vendor camera did not close cleanly");
+                CameraDaemon.requestUrgentCameraReleaseRestart(
+                    "SurfaceTexture camera ownership release incomplete");
+            }
+            return clean;
+        }
         if (USE_DILINK4_AVM_PATH) {
             // Step 1 — release our viewpoint token. Mirrors oem C5920a.m26747m
             // (gl/C5920a.java:323 — C6498a.f26622a.m28933k(this)). Observer-set
@@ -4920,10 +4972,12 @@ public class PanoramicCameraGpu {
             // CPU recording engine: one linear YUV buffer the GPU samples and
             // the CPU copies into the encoder (no extra copy for either).
             try {
+                // The CPU recording thread holds up to CPU_LANE_DEPTH + 1 frames (the
+                // old one-slot lane held 2), so the pool grows by the difference.
                 cameraImageReader = ImageReader.newInstance(
                     width, height,
                     ImageFormat.YUV_420_888,
-                    poolSize,
+                    poolSize + com.overdrive.app.surveillance.GpuMosaicRecorder.CPU_LANE_DEPTH - 1,
                     HardwareBuffer.USAGE_CPU_READ_OFTEN
                         | HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE);
                 cpuReader = true;
@@ -4936,6 +4990,11 @@ public class PanoramicCameraGpu {
             }
         }
         cpuFrameReaderActive = cpuReader;
+        // Every DiLink 3 reader: the clock checks each stamp and keeps pickup time
+        // for a reader whose stamps aren't capture times.
+        captureClockEligible = com.overdrive.app.surveillance.RecordingEngine.defaultIsCpu();
+        captureClockResetPending = true;
+        gpuBindOptional = cpuReader && captureClockEligible && !USE_CAMERA2_AVM_PATH;
         if (!cpuReader) {
             try {
                 long usage = HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE;
@@ -5078,12 +5137,13 @@ public class PanoramicCameraGpu {
         }
         windshieldImageReader = null;
         if (cpuFrameReaderActive) {
-            // CPU recording engine draws the dashcam top band from this frame too.
+            // CPU recording engine draws the dashcam top band from this frame too;
+            // sized like the camera reader for the CPU recording queue.
             try {
                 windshieldImageReader = ImageReader.newInstance(
                     1920, 1080,
                     ImageFormat.YUV_420_888,
-                    4,
+                    4 + com.overdrive.app.surveillance.GpuMosaicRecorder.CPU_LANE_DEPTH - 1,
                     HardwareBuffer.USAGE_CPU_READ_OFTEN
                         | HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE);
             } catch (Throwable t) {
@@ -5713,36 +5773,69 @@ public class PanoramicCameraGpu {
     }
 
     /**
-     * BYD100F DiLink 100: opens the pano_h AVMCamera without the static factory's BmmCameraInfo id
-     * check (see {@link DiLink100Platform}), using {@code new AVMCamera(id, camDevType=0)} plus the
-     * instance {@code open()}, which is what the factory does after that check.
+     * BYD100F DiLink 100: opens the 360 (pano_h) AVMCamera without the static factory's
+     * BmmCameraInfo id check (see {@link DiLink100Platform}), using
+     * {@code new AVMCamera(id, camDevType=0)} plus the instance {@code open()}, which is what the
+     * factory does after that check.
      *
-     * @return the open AVMCamera, or null when bmmcameraserver refused it
+     * <p>The pano id differs per car (New E2: pano_h:0; Atto 3 EVO: oms:0, dms:1, pano_h:2), so the
+     * first open in a process tries ids 0..5 and keeps the first one that opens with a 360
+     * super-frame strip; later opens in that process reopen only the id found. Anything else, such
+     * as the 1920x1080 cabin camera, is closed right after open(), before any preview is started,
+     * so no frames are ever taken from it.
+     *
+     * @return the open 360 AVMCamera, or null when none was found
      */
     private Object openDiLink100Camera(Class<?> avmClass) {
-        final int id = DiLink100Platform.PANO_CAMERA_ID;
-        Object candidate = null;
-        try {
-            Constructor<?> constructor = avmClass.getDeclaredConstructor(int.class, int.class);
-            constructor.setAccessible(true);
-            candidate = constructor.newInstance(id, 0);
-            Method mOpen = avmClass.getDeclaredMethod("open");
-            mOpen.setAccessible(true);
-            if ((boolean) mOpen.invoke(candidate)) {
-                logger.info("DiLink 100 camera opened via AVMCamera(int,int) + open() (id=" + id + ")");
-                return candidate;
-            }
-            logger.warn("DiLink 100 AVMCamera(" + id + ", 0).open() returned false");
-        } catch (Throwable t) {
-            logger.warn("DiLink 100 AVMCamera(int,int) open failed: " + t);
+        java.util.LinkedHashSet<Integer> ids = new java.util.LinkedHashSet<>();
+        int known = DiLink100Platform.resolvedPanoCameraId();
+        if (known >= 0) {
+            // Found earlier in this process: reopen only that id, so an ACC ON or recovery reopen
+            // never opens the cabin or driver-monitoring cameras.
+            ids.add(known);
+        } else {
+            for (int id = 0; id <= DiLink100Platform.MAX_PANO_SEARCH_ID; id++) ids.add(id);
         }
-        if (candidate != null) {
+
+        for (int id : ids) {
+            Object candidate = null;
+            boolean keep = false;
             try {
-                avmClass.getMethod("close").invoke(candidate);
-            } catch (Throwable ignored) {
-                // Never opened; nothing more to release.
+                Constructor<?> constructor = avmClass.getDeclaredConstructor(int.class, int.class);
+                constructor.setAccessible(true);
+                candidate = constructor.newInstance(id, 0);
+                Method mOpen = avmClass.getDeclaredMethod("open");
+                mOpen.setAccessible(true);
+                if (!(boolean) mOpen.invoke(candidate)) {
+                    logger.info("DiLink 100 AVMCamera(" + id + ", 0).open() returned false");
+                    continue;
+                }
+                int width = (Integer) avmClass.getMethod("getPreviewWidth").invoke(candidate);
+                int height = (Integer) avmClass.getMethod("getPreviewHeight").invoke(candidate);
+                if (!DiLink100Platform.isPanoSuperFrame(width, height)) {
+                    logger.info("DiLink 100 AVMCamera id=" + id + " is " + width + "x" + height
+                            + ", not the 360 super-frame; closing it");
+                    continue;
+                }
+                keep = true;
+                DiLink100Platform.setResolvedPanoCameraId(id);
+                logger.info("DiLink 100 camera opened via AVMCamera(int,int) + open() (id="
+                        + id + ", " + width + "x" + height + ")");
+                return candidate;
+            } catch (Throwable t) {
+                logger.warn("DiLink 100 AVMCamera(" + id + ", 0) open failed: " + t);
+            } finally {
+                if (!keep && candidate != null) {
+                    try {
+                        avmClass.getMethod("close").invoke(candidate);
+                    } catch (Throwable ignored) {
+                        // Never opened or already closed; nothing more to release.
+                    }
+                }
             }
         }
+        logger.warn("DiLink 100: no AVMCamera id 0-" + DiLink100Platform.MAX_PANO_SEARCH_ID
+                + " delivered a 360 super-frame");
         return null;
     }
 
@@ -5869,6 +5962,10 @@ public class PanoramicCameraGpu {
             openCamera2Source(cameraId);
             return;
         }
+        if (USE_AVM_SURFACE_TEXTURE_PATH) {
+            startCameraViaSurfaceTexture(cameraId);
+            return;
+        }
 
         Class<?> avmClass = Class.forName("android.hardware.AVMCamera");
 
@@ -5944,13 +6041,15 @@ public class PanoramicCameraGpu {
                             }
                         }
                     }
-                    if (cameraObj == null && cameraId == DiLink100Platform.PANO_CAMERA_ID
+                    if (cameraObj == null && (cameraId == DiLink100Platform.PANO_CAMERA_ID
+                                    || cameraId == DiLink100Platform.resolvedPanoCameraId())
                             && isLegacyAvmPath() && DiLink100Platform.isAvmPathActive()) {
                         // === ATTEMPT 3 (BYD100F DiLink 100): AVMCamera(int,int) + open() ===
-                        // Only the requested pano_h id 0; unvalidated ids are never probed.
+                        // Searches ids 0..5 for the 360 super-frame (pano_h is 0 on the New E2,
+                        // 2 on the Atto 3 EVO); other cameras are closed before any preview.
                         cameraObj = openDiLink100Camera(avmClass);
                         if (cameraObj != null) {
-                            cameraIdOverride = DiLink100Platform.PANO_CAMERA_ID;
+                            cameraIdOverride = DiLink100Platform.resolvedPanoCameraId();
                         }
                     }
                     if (cameraObj == null) {
@@ -6003,6 +6102,44 @@ public class PanoramicCameraGpu {
             mStart.setAccessible(true);
             mStart.invoke(cameraObj);
             logger.info("Camera started (id=" + cameraId + ", targetFps=" + targetFps + ")");
+        }
+    }
+
+    /** The opt-in transport keeps default geometry and camera-sharing policy. */
+    private void startCameraViaSurfaceTexture(int cameraId) throws Exception {
+        Surface surface = cameraSurface;
+        if (surface == null || !surface.isValid() || cameraSurfaceTexture == null) {
+            throw new IllegalStateException("SurfaceTexture preview consumer is unavailable");
+        }
+        synchronized (surfaceTextureBackends) {
+            if (!surfaceTextureBackends.isEmpty()) {
+                throw new IllegalStateException("Previous SurfaceTexture camera is still owned");
+            }
+        }
+        AvmSurfaceTextureBackend backend = AvmSurfaceTextureBackend.open(cameraId);
+        Object opened = backend.getCamera();
+        synchronized (surfaceTextureBackends) {
+            surfaceTextureBackends.put(opened, backend);
+        }
+        cameraObj = opened;
+        if (backend.getCameraId() != cameraId) cameraIdOverride = backend.getCameraId();
+        try {
+            requireCurrentStartEpoch(activeStartEpoch, "SurfaceTexture camera acquired");
+            logger.info("SurfaceTexture vendor camera: " + backend.describe());
+            logger.info("SurfaceTexture preview setup: "
+                + backend.configurePreview(targetFps, width, height));
+            if (cameraCoordinator != null) {
+                cameraCoordinator.setupEventCallback(opened);
+            }
+            requireCurrentStartEpoch(activeStartEpoch, "SurfaceTexture preview attach");
+            backend.attachAndStart(surface, Surface.class, cameraSurfaceMode);
+            requireCurrentStartEpoch(activeStartEpoch, "SurfaceTexture preview started");
+            logger.info("SurfaceTexture preview accepted; awaiting a genuine frame");
+        } catch (Exception | Error failure) {
+            if (cameraObj == opened) cameraObj = null;
+            closeCameraForPath(opened);
+            if (cameraCoordinator != null) cameraCoordinator.resetEventCallbackState();
+            throw failure;
         }
     }
     
@@ -6089,6 +6226,25 @@ public class PanoramicCameraGpu {
     // MediaCodec's strictly-increasing PTS contract within that one domain.
     private long currentFrameTimestampNs = 0;     // @GuardedBy(GL thread)
     private long lastAcceptedPtsNs = 0;           // @GuardedBy(GL thread)
+    // DiLink 3 CPU-readable reader: a frame no GPU consumer samples is not imported
+    // into cameraTextureId, and the texture is parked on a placeholder meanwhile, so
+    // the HAL never writes a buffer the GPU still holds.
+    private volatile boolean gpuBindOptional;            // set with the reader
+    private volatile boolean cameraTextureDetached;      // texture holds the placeholder
+    private boolean gpuSkipBroken;                       // GL thread: placeholder failed, bind every frame
+    private boolean frameGpuBound = true;                // GL thread: this iteration's frame is in the texture
+    private volatile long gpuFrameDemandUntilMs;         // uptime; on-demand samplers keep frames bound
+    private volatile long lastGpuBindUptimeMs;
+    private int stageWindowGpuBinds;                     // GL thread
+    private static final int GPU_WARMUP_FRAMES = 64;
+    private static final long GPU_DEMAND_HOLD_MS = 3000L;
+    private static final long GPU_DEMAND_WAIT_MS = 600L;
+    private static final long GPU_BIND_FRESH_MS = 150L;
+    // DiLink 3 camera readers: PTS from the camera's capture stamps.
+    private final CaptureClock captureClock = new CaptureClock();  // GL thread
+    private volatile boolean captureClockEligible;   // set with the reader
+    private volatile boolean captureClockResetPending;
+    private int captureClockLoggedState = -1;        // GL thread
     private int  ptsDomain = PTS_DOMAIN_NONE;     // @GuardedBy(GL thread)
     private boolean ptsSourceLogged = false;      // @GuardedBy(GL thread)
     private static final int PTS_DOMAIN_NONE = 0;
@@ -6108,6 +6264,7 @@ public class PanoramicCameraGpu {
                 return false;
             }
             irAcquireOkCount++;
+            final long pickupNs = System.nanoTime();
             if (cpuFrameReaderActive) cpuReaderFramesSeen = true;
             // SOTA cross-vehicle sanity: log once per session if HAL-emitted
             // dims differ from the configured strip. Mosaic offsets, foveated
@@ -6135,6 +6292,13 @@ public class PanoramicCameraGpu {
                 }
                 emittedDimsLogged = true;
             }
+            if (gpuBindOptional && !gpuSkipBroken && !gpuFrameWanted() && keepFrameUnbound(image)) {
+                frameGpuBound = false;
+                currentFrameTimestampNs = nextFrameTimestampNs(image, pickupNs);
+                transferredOwnership = true;
+                return true;
+            }
+            frameGpuBound = true;
             hwBuffer = image.getHardwareBuffer();
             if (hwBuffer == null) {
                 logger.warn("Image.getHardwareBuffer() returned null — dropping frame");
@@ -6152,6 +6316,7 @@ public class PanoramicCameraGpu {
             final int bindTargetTexture = USE_DECOUPLED_ENCODER_LANE
                 ? cameraOesTextureId
                 : cameraTextureId;
+            final long bindStartNs = System.nanoTime();
             synchronized (cameraTextureLock) {
                 boolean bound = HardwareBufferTextureBinder
                     .bindHardwareBufferToTextureNative(hwBuffer, bindTargetTexture);
@@ -6160,6 +6325,7 @@ public class PanoramicCameraGpu {
                     irBindFailCount++;
                     return false;
                 }
+                cameraTextureDetached = false;
                 // Bind succeeded. NOW it's safe to release the previous image —
                 // the texture is no longer pointing at it.
                 releasePreviousBoundImage();
@@ -6167,12 +6333,16 @@ public class PanoramicCameraGpu {
                 currentBoundImage = image;
                 currentBoundHwBuffer = hwBuffer;
             }
-            // Resolve the per-frame PTS. The BYD DiLink HAL on the PRIVATE
-            // ImageReader path returns a stuck, different-epoch value for
-            // Image.getTimestamp(), so nextFrameTimestampNs() ignores it and
-            // stamps System.nanoTime() from frame 0 (single clock domain) —
-            // see that method for the full rationale.
-            currentFrameTimestampNs = nextFrameTimestampNs(image);
+            final long bindNs = System.nanoTime() - bindStartNs;
+            if (bindNs > stageWorstBindNs) stageWorstBindNs = bindNs;
+            if (gpuBindOptional) {
+                stageWindowGpuBinds++;
+                lastGpuBindUptimeMs = android.os.SystemClock.uptimeMillis();
+            }
+            // Resolve the per-frame PTS: the camera's capture stamp on the DiLink 3
+            // CPU reader, else System.nanoTime() (the PRIVATE-reader HAL stamp is
+            // stuck / different-epoch) — see nextFrameTimestampNs().
+            currentFrameTimestampNs = nextFrameTimestampNs(image, pickupNs);
             transferredOwnership = true;
             // Bump the per-bind seq counter so the AI-lane GL thread can
             // detect a fresh frame is ready. Bumped AFTER the bind succeeds
@@ -6343,19 +6513,31 @@ public class PanoramicCameraGpu {
             currentTexMatrix[9]  = -currentTexMatrix[9];
             currentTexMatrix[13] =  1.0f - currentTexMatrix[13];
         }
+        // Layout-0 consumers flip Y before applying the matrix (and the cropper/sampler pass
+        // top-origin UVs), so the strip transport needs M·FlipY, which samples like the ImageReader.
+        if (USE_AVM_SURFACE_TEXTURE_PATH) {
+            for (int i = 4; i < 8; i++) {
+                currentTexMatrix[i + 8] += currentTexMatrix[i];
+                currentTexMatrix[i] = -currentTexMatrix[i];
+            }
+        }
         // Publish to the downscaler too. The probe shader runs on a
         // separate thread (AI-lane GL or probe GL), but the downscaler
         // instance is shared and copies the matrix internally.
-        if (USE_OEM_SURFACE_TEXTURE_PATH) {
+        if (USE_SURFACE_TEXTURE_CONSUMER) {
             GpuDownscaler ds = downscaler;
             if (ds != null) ds.setTextureMatrix(currentTexMatrix);
-            // FoveatedCropper does not consume the matrix — its samples are
-            // already in producer-space UV via the role's corner+flip remap.
+            // DiLink 4 foveated crops stay in producer-space UV. Only the new
+            // strip transport opts into the SurfaceTexture matrix.
             // HighResPreviewSampler is lazy-allocated; only push when present.
             // The dialog endpoint is rare so freshness within a few frames
             // is fine, but per-frame upload is cheap (memcpy under lock).
             HighResPreviewSampler hr = highResSampler;
             if (hr != null) hr.setTextureMatrix(currentTexMatrix);
+            if (USE_AVM_SURFACE_TEXTURE_PATH) {
+                FoveatedCropper cropper = foveatedCropper;
+                if (cropper != null) cropper.setTextureMatrix(currentTexMatrix);
+            }
         }
         // Record what we consumed and short-circuit when no genuine buffer
         // arrived. Everything below (PTS mint, cameraFrameSeq bump, probe)
@@ -6757,9 +6939,15 @@ public class PanoramicCameraGpu {
      * The {@code image} argument is used only for a one-shot diagnostic log of
      * the (unused) HAL timestamp on the first frame.
      *
+     * Exception, DiLink 3 readers: the CPU reader's stamps are capture times on this
+     * same clock, so {@link CaptureClock} keeps them (pickup delays no longer shift
+     * frames). It checks every stamp and only emits values within 2 s of pickup time,
+     * so the domain stays single; a reader whose stamps don't fit keeps pickup time.
+     *
      * MUST be called from the GL thread (renderLoop).
      */
-    private long nextFrameTimestampNs(Image image) {
+    private long nextFrameTimestampNs(Image image, long pickupNs) {
+        if (captureClockEligible) return captureFrameTimestampNs(image, pickupNs);
         // SINGLE CLOCK DOMAIN — System.nanoTime() from frame 0, unconditionally.
         //
         // History: this path used to trust Image.getTimestamp() (HW sensor
@@ -6806,6 +6994,111 @@ public class PanoramicCameraGpu {
         return candidate;
     }
 
+    /** DiLink 3 CPU reader: capture-time PTS, pickup time for a stamp that doesn't fit. GL thread. */
+    private long captureFrameTimestampNs(Image image, long pickupNs) {
+        if (captureClockResetPending) {
+            captureClockResetPending = false;
+            captureClock.reset();
+            captureClockLoggedState = -1;
+        }
+        long raw = 0;
+        try { raw = image.getTimestamp(); } catch (Throwable ignored) {}
+        if (!ptsSourceLogged) {
+            logger.info("PTS source: camera capture stamps (DiLink 3 " + (cpuFrameReaderActive ? "CPU" : "GPU")
+                + " reader), pickup time as fallback."
+                + " First stamp=" + raw);
+            ptsSourceLogged = true;
+            ptsDomain = PTS_DOMAIN_NANO;
+        }
+        long candidate = captureClock.frameTimeNs(raw, pickupNs);
+        long lagNs = pickupNs - candidate;
+        if (lagNs > stageWorstLagNs) stageWorstLagNs = lagNs;
+        int state = captureClock.state();
+        if (state != captureClockLoggedState && state != CaptureClock.UNDECIDED) {
+            captureClockLoggedState = state;
+            if (state == CaptureClock.ON) {
+                logger.info("Capture clock on: camera stamps in " + unitName(captureClock.unitNs())
+                    + ", lag " + (lagNs / 1_000_000) + " ms");
+            } else {
+                logger.warn("Capture clock off: camera stamps don't fit pickup time (fitted="
+                    + captureClock.fitted() + " missed=" + captureClock.missed()
+                    + ", stamp=" + raw + ") — frames use pickup time");
+            }
+        }
+        if (candidate <= lastAcceptedPtsNs) {
+            candidate = lastAcceptedPtsNs + 1_000L;
+        }
+        lastAcceptedPtsNs = candidate;
+        return candidate;
+    }
+
+    private static String unitName(long unitNs) {
+        return unitNs == 1_000_000L ? "ms" : unitNs == 1_000L ? "us" : "ns";
+    }
+
+    /** GL thread, before the bind: true when a GPU consumer samples this frame. */
+    private boolean gpuFrameWanted() {
+        if (USE_DECOUPLED_ENCODER_LANE || !probeComplete || autoProbeCameras
+                || deadSlotWalkActive || frameCounter < GPU_WARMUP_FRAMES) {
+            return true;
+        }
+        GpuMosaicRecorder rec = recorder;
+        if (rec != null && !rec.isCpuEngine() && (recorderLaneEnabled || rec.isRecording())) return true;
+        if (streamScaler != null && streamEncoder != null && streamClientProbe.getAsBoolean()) return true;
+        if (bsStreamScaler != null && bsLayerVisible) return true;
+        SurveillanceEngineGpu s = sentry;
+        if (aiLaneGl != null || (s != null && s.isActive() && !s.isContinuousMode())) return true;
+        return android.os.SystemClock.uptimeMillis() < gpuFrameDemandUntilMs;
+    }
+
+    /**
+     * GL thread: makes {@code image} the current frame without importing it into
+     * cameraTextureId. False when the texture can't be parked; the caller binds instead.
+     */
+    private boolean keepFrameUnbound(Image image) {
+        synchronized (cameraTextureLock) {
+            if (!cameraTextureDetached) {
+                boolean parked;
+                try {
+                    parked = HardwareBufferTextureBinder.bindPlaceholderNative(cameraTextureId);
+                } catch (Throwable t) {
+                    parked = false;
+                }
+                if (!parked) {
+                    gpuSkipBroken = true;
+                    logger.warn("Camera texture placeholder unavailable — binding every frame");
+                    return false;
+                }
+                cameraTextureDetached = true;
+            }
+            releasePreviousBoundImage();
+            currentBoundImage = image;
+        }
+        return true;
+    }
+
+    /**
+     * On-demand samplers on the DiLink 3 CPU reader: keeps frames bound for a few
+     * seconds and waits for one. False when no camera frame is in the texture.
+     */
+    private boolean awaitGpuFrameForSample() {
+        if (!gpuBindOptional) return true;
+        long now = android.os.SystemClock.uptimeMillis();
+        gpuFrameDemandUntilMs = now + GPU_DEMAND_HOLD_MS;
+        if (!cameraTextureDetached && now - lastGpuBindUptimeMs < GPU_BIND_FRESH_MS) return true;
+        long seq = cameraFrameSeq.get();
+        long deadline = now + GPU_DEMAND_WAIT_MS;
+        while (cameraFrameSeq.get() == seq && android.os.SystemClock.uptimeMillis() < deadline) {
+            try {
+                Thread.sleep(10L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        return !cameraTextureDetached;
+    }
+
     private void releasePreviousBoundImage() {
         if (currentBoundHwBuffer != null) {
             try { currentBoundHwBuffer.close(); } catch (Throwable ignored) {}
@@ -6831,6 +7124,34 @@ public class PanoramicCameraGpu {
             currentBoundCpuSource = new com.overdrive.app.surveillance.CpuFrameSource(currentBoundImage);
         }
         return currentBoundCpuSource;
+    }
+
+    /**
+     * Custom Layouts road model, GL thread: answers its frame request. A CPU-readable frame is lent like the
+     * CPU recorder's (no GPU work); otherwise the downscaler renders the road view on its own thread.
+     */
+    private void offerRoadFrame() {
+        if (!com.overdrive.app.customlayouts.daemon.road.RoadFrameTap.wanted()) return;
+        if (CAMERA_LAYOUT_MODE != 0) {
+            com.overdrive.app.customlayouts.daemon.road.RoadFrameTap.noteUnsupported();
+            return;
+        }
+        float frontX0 = quadrantStripOffsetX != null ? quadrantStripOffsetX[0] : 0.75f;
+        if (cpuFrameReaderActive && currentBoundImage != null) {
+            com.overdrive.app.surveillance.CpuFrameSource source = boundCpuFrame();
+            if (source != null) {
+                com.overdrive.app.customlayouts.daemon.road.RoadFrameTap.offerCpuFrame(source, frontX0, width, height);
+            }
+            return;
+        }
+        GpuDownscaler ds = downscaler;
+        AiLaneGl.CameraState cs = aiCameraStateRef;
+        float[] spec = com.overdrive.app.customlayouts.daemon.road.RoadFrameTap.gpuSpec();
+        if (ds == null || !ds.isInitialized() || cs == null || spec == null || cameraTextureId <= 0) return;
+        if (!com.overdrive.app.customlayouts.daemon.road.RoadFrameTap.claim()) return;
+        android.opengl.GLES20.glFlush();
+        ds.postRoadFrame(cameraTextureId, cs, spec,
+            com.overdrive.app.customlayouts.daemon.road.RoadFrameTap.INSTANCE);
     }
 
     /** The bound windshield frame, lent to the CPU recording thread. */
@@ -7293,7 +7614,7 @@ public class PanoramicCameraGpu {
                 if (!consumeDiLink5Frame()) {
                     return;
                 }
-            } else if (USE_OEM_SURFACE_TEXTURE_PATH) {
+            } else if (USE_SURFACE_TEXTURE_CONSUMER) {
                 if (cameraSurfaceTexture == null) {
                     return;
                 }
@@ -7314,6 +7635,12 @@ public class PanoramicCameraGpu {
             long stageAfterAcquireNs = System.nanoTime();
             frameCounter++;
             lastFrameTime = System.currentTimeMillis();
+            if (USE_AVM_SURFACE_TEXTURE_PATH && !firstFrameReceived) {
+                logger.info("SurfaceTexture: first genuine preview frame consumed"
+                    + " (id=" + (cameraIdOverride >= 0
+                        ? cameraIdOverride : PHYSICAL_CAMERA_ID)
+                    + ", layout=" + CAMERA_LAYOUT_MODE + ")");
+            }
             firstFrameReceived = true;
             consecutiveContentionStalls = 0;  // Frames flowing — clear stall counter
             consecutiveZeroFrameRestarts = 0; // Real frame arrived — reopen succeeded; clear escalation counter
@@ -7549,7 +7876,7 @@ public class PanoramicCameraGpu {
                 // Publish per-frame transform matrix to recorder before draw.
                 // Cheap (16-float arraycopy); matches oem's per-frame
                 // getTransformMatrix → uTexMatrix flow.
-                if (USE_OEM_SURFACE_TEXTURE_PATH) {
+                if (USE_SURFACE_TEXTURE_CONSUMER) {
                     localRecorder.setTextureMatrix(currentTexMatrix);
                 }
                 // Pass the HAL-provided sensor timestamp straight through to
@@ -7632,7 +7959,7 @@ public class PanoramicCameraGpu {
                         // Handed to the CPU recording thread after the stream and blind-spot
                         // views are queued on the GPU (below).
                         deferredCpuRecorder = localRecorder;
-                    } else {
+                    } else if (frameGpuBound) {
                         localRecorder.drawFrame(cameraTextureId, windshieldTextureId,
                             windshieldStarted && windshieldFrameReady, currentFrameTimestampNs);
                     }
@@ -7726,7 +8053,7 @@ public class PanoramicCameraGpu {
             // Capture local refs to avoid NPE from concurrent pipeline shutdown
             com.overdrive.app.streaming.GpuStreamScaler localStreamScaler = streamScaler;
             HardwareEventRecorderGpu localStreamEncoder = streamEncoder;
-            if (localStreamScaler != null && localStreamEncoder != null) {
+            if (localStreamScaler != null && localStreamEncoder != null && frameGpuBound) {
                 // Client-presence gate: with no viewer connected the encoded bytes
                 // are dropped downstream, so skip the raster + encode entirely.
                 boolean streamActive = streamClientProbe.getAsBoolean();
@@ -7746,9 +8073,9 @@ public class PanoramicCameraGpu {
                     boolean drawStreamFrame = sStride <= 1 || (streamStrideCounter % sStride) == 0;
                     streamStrideCounter++;
                     if (drawStreamFrame) {
-                        if (USE_OEM_SURFACE_TEXTURE_PATH) {
+                        if (USE_SURFACE_TEXTURE_CONSUMER) {
                             localStreamScaler.setTextureMatrix(currentTexMatrix);
-                            // Stamp the presentation time on dilink4 ONLY.
+                            // Stamp presentation time on SurfaceTexture modes.
                             //
                             // This HAL emits at its own fixed rate (~4.5 fps
                             // observed) and refuses setCameraFps outright — it
@@ -7799,8 +8126,8 @@ public class PanoramicCameraGpu {
             // the turn trigger sets bsLayerVisible=true picks up rendering (~66ms
             // worst-case latency, imperceptible).
             com.overdrive.app.streaming.GpuStreamScaler localBsScaler = bsStreamScaler;
-            if (localBsScaler != null && bsLayerVisible) {
-                if (USE_OEM_SURFACE_TEXTURE_PATH && localBsScaler == bsStreamScaler) {
+            if (localBsScaler != null && bsLayerVisible && frameGpuBound) {
+                if (USE_SURFACE_TEXTURE_CONSUMER && localBsScaler == bsStreamScaler) {
                     localBsScaler.setTextureMatrix(currentTexMatrix);
                 }
                 localBsScaler.drawFrame(cameraTextureId);
@@ -7895,9 +8222,15 @@ public class PanoramicCameraGpu {
                 releaseAiLaneOnGlThread();
             }
             AiLaneGl localAiLane = aiLaneGl;
-            if (localAiLane != null && localAiLane.isRunning() && aiLaneNeeded) {
+            if (localAiLane != null && localAiLane.isRunning() && aiLaneNeeded && frameGpuBound) {
                 android.opengl.GLES20.glFlush();
                 localAiLane.notifyFrame(cameraFrameSeq.get());
+            }
+
+            // Custom Layouts road model: one front frame on request (~4 s). Before the CPU
+            // recorder so this thread creates the image's planes first.
+            if (com.overdrive.app.customlayouts.daemon.road.RoadFrameTap.active) {
+                offerRoadFrame();
             }
 
             // CPU recording, last: the frame goes to the CPU recording thread, which
@@ -7916,6 +8249,10 @@ public class PanoramicCameraGpu {
             long stageTotalNs   = stageEndNs - stageT0;
             long stageAcquireNs = stageAfterAcquireNs - stageT0;
             long stageMosaicNs  = stageEndNs - stageBeforeMosaicNs;
+            if (com.overdrive.app.customlayouts.daemon.road.RoadFrameTap.active) {
+                com.overdrive.app.customlayouts.daemon.road.RoadFrameTap.noteFrame(stageTotalNs,
+                    localRecorder != null ? localRecorder.cpuPressureTotal() : 0L, aiLaneNeeded);
+            }
             stageWindowFrames++;
             if (stageTotalNs > stageWorstTotalNs) {
                 stageWorstTotalNs   = stageTotalNs;
@@ -7926,16 +8263,29 @@ public class PanoramicCameraGpu {
             if (stageTimingWindowStartMs == 0) {
                 stageTimingWindowStartMs = nowMs;
             } else if (nowMs - stageTimingWindowStartMs >= STAGE_TIMING_LOG_INTERVAL_MS) {
-                logger.info(String.format(
+                String stageLine = String.format(
                         "Stage(worst/30s, encoder-thread): total=%dms acq=%dms mosaic+swap=%dms (frames=%d)",
                         stageWorstTotalNs / 1_000_000,
                         stageWorstAcquireNs / 1_000_000,
                         stageWorstMosaicNs / 1_000_000,
-                        stageWindowFrames));
+                        stageWindowFrames);
+                if (captureClockEligible) {
+                    stageLine += String.format(" bind=%dms lag=%dms clock=%s",
+                        stageWorstBindNs / 1_000_000, stageWorstLagNs / 1_000_000,
+                        captureClock.state() == CaptureClock.ON ? "capture" : "pickup");
+                    if (gpuBindOptional) {
+                        stageLine += " gpuBinds=" + stageWindowGpuBinds + "/" + stageWindowFrames
+                            + (gpuSkipBroken ? " skip=off" : "");
+                    }
+                }
+                logger.info(stageLine);
                 stageWorstTotalNs = 0;
                 stageWorstAcquireNs = 0;
                 stageWorstMosaicNs = 0;
                 stageWindowFrames = 0;
+                stageWorstBindNs = 0;
+                stageWorstLagNs = 0;
+                stageWindowGpuBinds = 0;
                 stageTimingWindowStartMs = nowMs;
             }
 
@@ -11627,6 +11977,10 @@ public class PanoramicCameraGpu {
             logger.warn("sampleFullResMosaicJpeg: no fresh frame after the idle reopen");
             return null;
         }
+        if (!awaitGpuFrameForSample()) {
+            logger.warn("sampleFullResMosaicJpeg: no camera frame bound for sampling");
+            return null;
+        }
         int textureId = cameraTextureId;
         if (!isPreviewTextureAvailableForSampling(textureId)) {
             logger.warn("sampleFullResMosaicJpeg unavailable during camera "
@@ -11696,6 +12050,10 @@ public class PanoramicCameraGpu {
             logger.warn("samplePerQuadrantJpeg: no fresh frame after the idle reopen");
             return null;
         }
+        if (!awaitGpuFrameForSample()) {
+            logger.warn("samplePerQuadrantJpeg: no camera frame bound for sampling");
+            return null;
+        }
         int textureId = cameraTextureId;
         if (!isPreviewTextureAvailableForSampling(textureId)) {
             logger.warn("samplePerQuadrantJpeg unavailable during camera "
@@ -11738,6 +12096,7 @@ public class PanoramicCameraGpu {
         if (expectedTextureId <= 0 || cameraTextureId != expectedTextureId) {
             return false;
         }
+        if (gpuBindOptional && cameraTextureDetached) return false;
         return !USE_DILINK5_QCARCAM_PATH
                 || (running
                         && !isDiLink5SystemAvmHandoffActive()
@@ -11790,6 +12149,8 @@ public class PanoramicCameraGpu {
                 } catch (Throwable t) {
                     logger.warn("Sampler red-mask flag read failed: " + t.getMessage());
                 }
+            } else if (USE_AVM_SURFACE_TEXTURE_PATH) {
+                highResSampler.setTextureMatrix(currentTexMatrix);
             }
             return highResSampler;
         } catch (Throwable t) {

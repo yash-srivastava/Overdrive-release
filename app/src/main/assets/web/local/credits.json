@@ -115,11 +115,19 @@
   ],
   "supporters": [
     {
+      "name": "Timothy Ngui",
+      "tier": "hallOfFame"
+    },
+    {
       "name": "choyr",
       "tier": "diamond"
     },
     {
       "name": "Huijuan Xie",
+      "tier": "diamond"
+    },
+    {
+      "name": "Hoai Son Nguyen",
       "tier": "diamond"
     },
     {
@@ -133,6 +141,10 @@
     },
     {
       "name": "Cedric Carre",
+      "tier": "platinum"
+    },
+    {
+      "name": "Daniel Tabuica",
       "tier": "platinum"
     },
     {
@@ -244,6 +256,14 @@
     },
     {
       "name": "Oson Oh",
+      "tier": "silver"
+    },
+    {
+      "name": "Jung Jang",
+      "tier": "silver"
+    },
+    {
+      "name": "Mohammed Sadik Parappady",
       "tier": "silver"
     },
     {
@@ -412,6 +432,14 @@
     },
     {
       "name": "Benjamin Monlina Blanco",
+      "tier": "bronze"
+    },
+    {
+      "name": "Jon Slattery",
+      "tier": "bronze"
+    },
+    {
+      "name": "Muhammad Azham",
       "tier": "bronze"
     }
   ]

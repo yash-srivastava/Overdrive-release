@@ -55,6 +55,8 @@ public class BydEvent {
     // source converges through) so a trigger can fire "when the car locks" and a
     // condition can gate "only while locked". NOT read from the dead BYDAutoDoorLockDevice.
     public static final EventData LOCK = new EventData("lock");
+    /** Trusted-phone proximity presence, independent of the vehicle lock actuator. */
+    public static final EventData PROXIMITY_PRESENCE = new EventData("proximityPresence");
     // "fob" for 2 minutes after a key-fob unlock press, and for the rest of a drive started in that
     // time; otherwise "none". DiLink 3 only (BydDataCollector key fob channel).
     public static final EventData UNLOCK_SOURCE = new EventData("unlockSource");
@@ -248,11 +250,12 @@ public class BydEvent {
     // Seat occupancy (someone sitting). The PASSENGER seat has a real occupancy sensor
     // (getPassengerStatus area 1) and publishes both occupied and empty.
     public static final EventData OCCUPANT_PASSENGER = new EventData("occupant", Map.of("seat", "passenger"));
-    // The DRIVER seat has NO occupancy sensor, so its presence is INFERRED from the
-    // seatbelt-reminder mask (bit 0) and the driver belt — see
-    // BydDataCollector.readDriverOccupancyNow. POSITIVE-ONLY: publishes "occupied" and never
-    // "empty", because an unbuckled-but-present driver is indistinguishable from an empty seat.
+    // The DRIVER seat has no occupancy sensor. A reminder or buckle proves presence, but an
+    // unbuckled driver cannot be distinguished from an empty seat. Publish "occupied" only;
+    // a door + lost evidence can invalidate the old state without inventing "empty".
     public static final EventData OCCUPANT_DRIVER = new EventData("occupant", Map.of("seat", "driver"));
+    private static final Object DRIVER_OCCUPANCY_LOCK = new Object();
+    private static final DriverOccupancySession driverOccupancySession = new DriverOccupancySession();
     // User variables / flags (see SetVariableAction + VariableCondition). Not a vehicle
     // signal — a named marker the user sets and reads to coordinate automations (mutex,
     // mode flags). The state key is EventData("variable", {name}); this is just the
@@ -898,15 +901,11 @@ public class BydEvent {
         if (occ != null && occ.length > 0 && !ownedByFastPoll(OCCUPANT_PASSENGER)) {
             publishOccupant(OCCUPANT_PASSENGER, occ[0]);
         }
-        // Inferred DRIVER presence from the snapshot's already-sanitized driver belt (slot 0):
-        // buckled ⇒ someone is there. Deliberately NO HAL read here — this runs inside every
-        // build(), so the reminder-mask tier stays on the fast poller (pollDriverOccupant).
-        // That asymmetry is safe BECAUSE the event is positive-only and monotonic: both paths
-        // can only ever publish "occupied", so a subset of tiers here can never contradict the
-        // poller — it only means presence may be established a tick later on this path.
+        // Unreachable while OCCUPANT_DRIVER is FAST_POLL_OWNED; kept behind the door gate if
+        // that ownership ever changes.
         int[] belts = data.seatbeltStatus;
         if (belts != null && belts.length > 0 && belts[0] == 1 && !ownedByFastPoll(OCCUPANT_DRIVER)) {
-            publishOccupant(OCCUPANT_DRIVER, 1);
+            publishDriverOccupancy(1);
         }
         // Drive mode on the config axis (1=normal..4=snow); only publish an in-band value.
         // The collector normalizes the setting-device and energy-device getter encodings.
@@ -1173,19 +1172,27 @@ public class BydEvent {
         publishOccupant(OCCUPANT_PASSENGER, occupancy);
     }
 
+    /** Driver door (area 1 on LHD and RHD) for the occupancy session; never publishes "empty". */
+    public static void observeDriverDoorState(int doorState) {
+        synchronized (DRIVER_OCCUPANCY_LOCK) {
+            driverOccupancySession.observeDoor(doorState);
+        }
+    }
+
+    /** Positive-only driver presence from the snapshot and DiLink 5 relay; also counts as evidence. */
+    public static void publishDriverOccupancy(int occupancy) {
+        if (occupancy != 1) return;
+        synchronized (DRIVER_OCCUPANCY_LOCK) {
+            driverOccupancySession.observeRelayPositive(System.nanoTime() / 1_000_000L);
+            if (driverOccupancySession.canPublishPositive()) {
+                publishOccupant(OCCUPANT_DRIVER, 1);
+            }
+        }
+    }
+
     /**
-     * Sample + publish inferred DRIVER presence now (called by the fast {@link SeatbeltEvent}
-     * poll, separately gated so a driver rule doesn't pay for the passenger reads or vice versa).
-     *
-     * <p>Publishes ONLY "occupied" — {@link com.overdrive.app.byd.BydDataCollector#readDriverOccupancyNow}
-     * returns UNAVAILABLE rather than 0 when there is no positive evidence, and
-     * {@link #publishOccupant} skips UNAVAILABLE. So this event goes {@code unseeded → occupied}
-     * and then stays there for the rest of the process; it never reports "empty".
-     *
-     * <p><b>Consequence, by design:</b> a rule triggered on {@code occupant{seat:driver}} fires
-     * once when presence is first established, not on every entry/exit. Use
-     * {@code seatbelt{seat:driver}} for buckle/unbuckle edges. Withholding the "empty" edge is
-     * deliberate — see readDriverOccupancyNow for why a 0 would be a fabricated reading.
+     * Live reminder/belt sample. Sustained loss of evidence after a closed→open driver door edge
+     * clears "occupied" to a silent, expired "unknown" so the next confirmed presence fires again.
      */
     public static void pollDriverOccupant() {
         if (Automations.isDisabled() && !Automations.editorSeedActive()) return;
@@ -1193,9 +1200,20 @@ public class BydEvent {
         try {
             occ = com.overdrive.app.byd.BydDataCollector.getInstance().readDriverOccupancyNow();
         } catch (Throwable t) {
-            return; // instrument/safety-belt device unreachable this tick — leave the event untouched
+            return; // instrument/safety-belt device unreachable this tick
         }
-        publishOccupant(OCCUPANT_DRIVER, occ);
+        synchronized (DRIVER_OCCUPANCY_LOCK) {
+            DriverOccupancySession.Sample observation =
+                    driverOccupancySession.observePresence(occ, System.nanoTime() / 1_000_000L);
+            if (observation == DriverOccupancySession.Sample.INVALIDATE) {
+                // Silent store, then hide it: conditions read null and the next "occupied" is
+                // a real transition.
+                Automations.runSilentSeed(() -> Automations.update(OCCUPANT_DRIVER, "unknown", true));
+                Automations.expireState(OCCUPANT_DRIVER);
+            } else if (observation == DriverOccupancySession.Sample.OCCUPIED) {
+                publishOccupant(OCCUPANT_DRIVER, 1);
+            }
+        }
     }
 
     /**
@@ -1219,15 +1237,18 @@ public class BydEvent {
      * was previously sampled on (via {@code bydEvent}'s collectEnergy path). Reads the same
      * config axis ({@link com.overdrive.app.byd.BydDataCollector#getDriveConfigMode()}) and
      * publishes through the same {@link #DRIVE_MODE} + {@link #driveModeToString} path, so the
-     * edge/dedup semantics are identical — just sampled faster. Only an in-band 1..4 reading
-     * publishes; -1/unset is skipped so a trim without the getter never manufactures a
-     * spurious edge (Automations.update is transition-gated, so a repeat is a no-op).
+     * edge/dedup semantics are identical. An unavailable reading hides the previous mode
+     * from conditions until the collector can identify it again.
      */
     public static void pollDriveMode() {
         if (Automations.isDisabled() && !Automations.editorSeedActive()) return;
         int mode = com.overdrive.app.byd.BydDataCollector.getInstance().getDriveConfigMode();
         String word = driveModeToString(mode);
-        if (word != null) Automations.update(DRIVE_MODE, word);
+        if (word == null) {
+            Automations.expireState(DRIVE_MODE);
+        } else {
+            Automations.update(DRIVE_MODE, word);
+        }
     }
 
     /**

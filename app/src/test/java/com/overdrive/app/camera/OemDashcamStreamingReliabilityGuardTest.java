@@ -38,8 +38,8 @@ public class OemDashcamStreamingReliabilityGuardTest {
         assertTrue(shared.contains("if (!res.ok) throw new Error('view route failed: ' + res.status);"));
         assertTrue(shared.contains("if (!res.ok) throw new Error('view status failed: ' + res.status);"));
         assertTrue(shared.contains("async _pollViewUntilSettled(mode, initialResponse, selectionToken)"));
-        assertTrue(shared.contains("data = mode === 6"));
-        assertTrue(shared.contains("? await this._requestViewStatus(mode, selectionToken)"));
+        assertTrue(shared.contains("data = routeStillNeeded"));
+        assertTrue(shared.contains(": await this._requestViewStatus(mode, selectionToken)"));
         assertTrue(shared.contains("this._viewSelectionToken = (this._viewSelectionToken || 0) + 1;"));
     }
 

@@ -50,6 +50,7 @@ internal class TimelineGlRenderer(private val host: Host) {
         val uK = GLES20.glGetUniformLocation(id, "uK")
         val uAspect = GLES20.glGetUniformLocation(id, "uAspect")
         val uHalfTexel = GLES20.glGetUniformLocation(id, "uHalfTexel")
+        val uStrip = GLES20.glGetUniformLocation(id, "uStrip")
         val uClamp = GLES20.glGetUniformLocation(id, "uClamp")
     }
 
@@ -589,6 +590,7 @@ internal class TimelineGlRenderer(private val host: Host) {
             GLES20.glUniform2f(prog.uK, k[0], k[1])
             GLES20.glUniform1f(prog.uAspect, l.aspect)
             GLES20.glUniform2f(prog.uHalfTexel, 0.5f / l.frameWidth, 0.5f / l.frameHeight)
+            GLES20.glUniform1f(prog.uStrip, l.stripFrac)
         } else {
             setClamp(prog, r)
         }
@@ -1000,6 +1002,7 @@ uniform mat4 uStMatrix;
 uniform vec2 uK;
 uniform float uAspect;
 uniform vec2 uHalfTexel;
+uniform float uStrip;
 uniform float uAlpha;
 varying vec2 vTex;
 vec2 rectifyTile(vec2 t) {
@@ -1014,9 +1017,14 @@ vec2 rectifyTile(vec2 t) {
     return clamp(camUV, vec2(0.0), vec2(1.0));
 }
 void main() {
+    if (vTex.y > 1.0 - uStrip) {
+        gl_FragColor = texture2D(uTex, (uStMatrix * vec4(vTex, 0.0, 1.0)).xy) * uAlpha;
+        return;
+    }
     vec2 tile = step(vec2(0.5), vTex) * 0.5;
     vec2 cam = rectifyTile((vTex - tile) * 2.0);
     vec2 src = clamp(tile + cam * 0.5, tile + uHalfTexel, tile + 0.5 - uHalfTexel);
+    src.y = min(src.y, 1.0 - uStrip - uHalfTexel.y);
     gl_FragColor = texture2D(uTex, (uStMatrix * vec4(src, 0.0, 1.0)).xy) * uAlpha;
 }
 """

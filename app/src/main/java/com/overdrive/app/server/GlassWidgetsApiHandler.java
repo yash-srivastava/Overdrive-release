@@ -7,6 +7,7 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.config.ServiceModeFeatureGate;
 
 import org.json.JSONObject;
 
@@ -55,7 +56,7 @@ public final class GlassWidgetsApiHandler {
             return true;
         }
         if (p.equals("/api/widgets/live") && method.equals("GET")) {
-            HttpResponse.sendJson(out, live(path.contains("dyn=1")).toString());
+            HttpResponse.sendJson(out, live(path.contains("dyn=1"), path.contains("drive=1")).toString());
             return true;
         }
         if (p.equals("/api/widgets/automations") && method.equals("GET")) {
@@ -75,13 +76,15 @@ public final class GlassWidgetsApiHandler {
     /**
      * One reading for the live widgets while they show, once a second (live drive) to four times
      * ([dynamics]: also the pedals and motor speeds). The blind-spot zones ride along, so they light
-     * without waiting for the summary.
+     * without waiting for the summary. [drive]: a custom widget reads power, so a DiLink 3/4 plug-in
+     * hybrid's drive power is read too.
      */
-    private static JSONObject live(boolean dynamics) throws Exception {
+    private static JSONObject live(boolean dynamics, boolean drive) throws Exception {
         JSONObject o = new JSONObject();
         o.put("ts", System.currentTimeMillis());
         Object kmh = JSONObject.NULL;
         Object kw = JSONObject.NULL;
+        Object driveKw = JSONObject.NULL;
         try {
             com.overdrive.app.byd.BydDataCollector c = com.overdrive.app.byd.BydDataCollector.getInstance();
             com.overdrive.app.byd.BydVehicleData vd = c.getData();
@@ -94,6 +97,8 @@ public final class GlassWidgetsApiHandler {
             if (!Double.isNaN(speed) && speed >= 0) kmh = Math.round(speed * 10.0) / 10.0;
             double power = c.readDrivePowerNowKw();
             if (!Double.isNaN(power)) kw = Math.round(power * 10.0) / 10.0;
+            double hybrid = drive ? c.readHybridDrivePowerNowKw() : Double.NaN;
+            if (!Double.isNaN(hybrid)) driveKw = Math.round(hybrid * 10.0) / 10.0;
             if (dynamics) {
                 o.put("accelPct", pedal(fresh ? fd.accelPercent : c.readAccelNow()));
                 o.put("brakePct", pedal(fresh ? fd.brakePercent : c.readBrakeNow()));
@@ -107,6 +112,7 @@ public final class GlassWidgetsApiHandler {
         }
         o.put("speedKmh", kmh);
         o.put("packKw", kw);
+        o.put("driveKw", driveKw);
         try {
             JSONObject bs = new JSONObject();
             bs.put("left", com.overdrive.app.automation.condition.BlindSpotEvent.widgetLevel(true));
@@ -126,7 +132,8 @@ public final class GlassWidgetsApiHandler {
         Boolean enabled = null;
         try {
             JSONObject cfg = com.overdrive.app.config.UnifiedConfigManager.loadConfig().optJSONObject(SECTION);
-            enabled = cfg != null && cfg.optBoolean("enabled", false);
+            enabled = cfg != null && cfg.optBoolean("enabled", false)
+                    && !ServiceModeFeatureGate.isPaused("widgets");
         } catch (Throwable t) {
             logger.warn("config unavailable: " + t.getMessage());
         }
@@ -139,7 +146,8 @@ public final class GlassWidgetsApiHandler {
         boolean enabled = false;
         try {
             JSONObject cfg = com.overdrive.app.config.UnifiedConfigManager.loadConfig().optJSONObject(SECTION);
-            enabled = cfg != null && cfg.optBoolean("enabled", false);
+            enabled = cfg != null && cfg.optBoolean("enabled", false)
+                    && !ServiceModeFeatureGate.isPaused("widgets");
         } catch (Throwable t) {
             logger.warn("config unavailable: " + t.getMessage());
         }

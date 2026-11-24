@@ -63,14 +63,17 @@ public class AutomationSafetySettingsAssetTest {
                 "BydDataCollector.getInstance().readCurrentSpeedKmh();"));
         assertTrue(guard.contains(
                 "SystemClock.elapsedRealtime() - gm.getLastUpdateTime()"));
-        assertTrue(gearMonitor.contains("private volatile long lastUpdateTime"));
-        assertTrue(gearMonitor.contains(
-                "gearObservedAtElapsedRealtimeMs =\n"
-                        + "                                    snap.gearReadElapsedRealtimeMs;"));
-        assertTrue(gearMonitor.contains(
-                "currentGear = gear;\n"
-                        + "                        lastUpdateTime =\n"
-                        + "                                gearObservedAtElapsedRealtimeMs;"));
+        // The guard's freshness clock must come from the same published observation as the gear.
+        assertTrue(gearMonitor.contains("private volatile GearSample observation"));
+        assertTrue(gearMonitor.contains("public final int gear;"));
+        assertTrue(gearMonitor.contains("public final long observedAtElapsedMs;"));
+        assertTrue(Pattern.compile("gearObservedAtElapsedRealtimeMs\\s*=\\s*snap\\.gearReadElapsedRealtimeMs;")
+                .matcher(gearMonitor).find());
+        assertTrue(Pattern.compile("observation\\s*=\\s*new GearSample\\(gear,\\s*"
+                        + "gearObservedAtElapsedRealtimeMs,\\s*CACHED_GEAR_MAX_AGE_MS\\)")
+                .matcher(gearMonitor).find());
+        assertTrue(Pattern.compile("long getLastUpdateTime\\(\\)\\s*\\{\\s*return observation\\.observedAtElapsedMs;")
+                .matcher(gearMonitor).find());
         assertTrue(script.contains("saveSafetySetting(el)"));
         assertTrue(script.contains("data.success !== true"));
         assertTrue(script.contains("controls.hidden = true"));

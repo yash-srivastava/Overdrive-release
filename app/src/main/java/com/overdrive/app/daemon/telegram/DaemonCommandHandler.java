@@ -1,5 +1,7 @@
 package com.overdrive.app.daemon.telegram;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -1267,8 +1269,8 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
             Properties props = new Properties();
             
             // Load existing state
-            if (stateFile.exists()) {
-                try (FileInputStream fis = new FileInputStream(stateFile)) {
+            if (RemovableStorageFs.exists(stateFile)) {
+                try (FileInputStream fis = RemovableStorageFs.openInput(stateFile)) {
                     props.load(fis);
                 }
             }
@@ -1279,7 +1281,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
             props.setProperty(daemonName + "_timestamp", String.valueOf(System.currentTimeMillis()));
             
             // Save state
-            try (FileOutputStream fos = new FileOutputStream(stateFile)) {
+            try (FileOutputStream fos = RemovableStorageFs.openOutput(stateFile)) {
                 props.store(fos, "Daemon state from Telegram commands - DO NOT EDIT");
             }
             
@@ -1299,10 +1301,10 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
     public static boolean isDaemonStoppedViaTelegram(String daemonName) {
         try {
             File stateFile = new File(STATE_FILE);
-            if (!stateFile.exists()) return false;
+            if (!RemovableStorageFs.exists(stateFile)) return false;
             
             Properties props = new Properties();
-            try (FileInputStream fis = new FileInputStream(stateFile)) {
+            try (FileInputStream fis = RemovableStorageFs.openInput(stateFile)) {
                 props.load(fis);
             }
             
@@ -1321,17 +1323,17 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
     public static void clearDaemonStoppedState(String daemonName) {
         try {
             File stateFile = new File(STATE_FILE);
-            if (!stateFile.exists()) return;
+            if (!RemovableStorageFs.exists(stateFile)) return;
             
             Properties props = new Properties();
-            try (FileInputStream fis = new FileInputStream(stateFile)) {
+            try (FileInputStream fis = RemovableStorageFs.openInput(stateFile)) {
                 props.load(fis);
             }
             
             props.remove(daemonName);
             props.remove(daemonName + "_timestamp");
             
-            try (FileOutputStream fos = new FileOutputStream(stateFile)) {
+            try (FileOutputStream fos = RemovableStorageFs.openOutput(stateFile)) {
                 props.store(fos, "Daemon state from Telegram commands - DO NOT EDIT");
             }
         } catch (Exception e) {

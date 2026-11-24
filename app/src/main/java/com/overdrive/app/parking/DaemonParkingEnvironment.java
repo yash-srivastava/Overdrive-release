@@ -1,5 +1,7 @@
 package com.overdrive.app.parking;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import android.content.Context;
 import android.content.res.AssetManager;
 import android.graphics.Bitmap;
@@ -318,13 +320,13 @@ public final class DaemonParkingEnvironment implements ParkingEnvironment {
     @Override
     public File parkingBaseDir() {
         File d = new File(PARKING_DIR);
-        if (!d.isDirectory() && d.mkdirs()) {
+        if (!RemovableStorageFs.isDirectory(d) && RemovableStorageFs.mkdirs(d)) {
             // Other UIDs (Telegram bot daemon) read the stills: keep the tree traversable.
-            try { d.setReadable(true, false); d.setExecutable(true, false); } catch (Throwable ignored) {}
+            try { RemovableStorageFs.setReadable(d, true, false); RemovableStorageFs.setExecutable(d, true, false); } catch (Throwable ignored) {}
         }
         File nomedia = new File(d, ".nomedia");
-        if (!nomedia.exists()) {
-            try { nomedia.createNewFile(); } catch (Throwable ignored) {}
+        if (!RemovableStorageFs.exists(nomedia)) {
+            try { RemovableStorageFs.createNewFile(nomedia); } catch (Throwable ignored) {}
         }
         return d;
     }
@@ -433,7 +435,7 @@ public final class DaemonParkingEnvironment implements ParkingEnvironment {
                 String path = row.optString("path", null);
                 if (path == null) continue;
                 File file = new File(path);
-                if (!file.isFile() || file.length() == 0) continue;
+                if (!RemovableStorageFs.isFile(file) || RemovableStorageFs.length(file) == 0) continue;
                 // A fresh fix in the newest clip = open sky after any older clip: no garage approach.
                 return recordedUnderSky(sidecarOf(file)) ? null : file;
             }
@@ -444,11 +446,11 @@ public final class DaemonParkingEnvironment implements ParkingEnvironment {
     @Override
     public List<byte[]> extractTailFrames(File mp4, int count, long tailMs) {
         List<byte[]> out = new ArrayList<>();
-        if (mp4 == null || !mp4.isFile() || count <= 0) return out;
+        if (mp4 == null || !RemovableStorageFs.isFile(mp4) || count <= 0) return out;
         boolean grid = isCameraGrid(mp4);
         MediaMetadataRetriever mmr = new MediaMetadataRetriever();
         try {
-            mmr.setDataSource(mp4.getAbsolutePath());
+            RemovableStorageFs.setDataSource(mmr, mp4);
             String durStr = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
             long durationMs = durStr == null ? 0 : Long.parseLong(durStr);
             if (durationMs <= 0) return out;
@@ -521,9 +523,9 @@ public final class DaemonParkingEnvironment implements ParkingEnvironment {
     static JSONObject sidecarOf(File mp4) {
         try {
             File sidecar = new File(mp4.getParentFile(), mp4.getName().replace(".mp4", ".json"));
-            if (!sidecar.isFile() || sidecar.length() >= 512_000L) return null;
+            if (!RemovableStorageFs.isFile(sidecar) || RemovableStorageFs.length(sidecar) >= 512_000L) return null;
             return new JSONObject(new String(
-                    java.nio.file.Files.readAllBytes(sidecar.toPath()), java.nio.charset.StandardCharsets.UTF_8));
+                    RemovableStorageFs.readAllBytes(sidecar), java.nio.charset.StandardCharsets.UTF_8));
         } catch (Throwable t) {
             return null;
         }

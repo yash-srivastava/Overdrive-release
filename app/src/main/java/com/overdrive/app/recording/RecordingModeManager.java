@@ -67,6 +67,10 @@ public class RecordingModeManager {
     // probe, but there was no prior IPC, so reporting "wasOn=true" is misleading.
     private volatile boolean accIpcSeen = false;
 
+    // Bumped under the manager monitor by every ACC IPC. A boot HW read that
+    // overlapped one must not overwrite it; the boot worker re-reads once instead.
+    private long accIpcRevision = 0L;
+
     // True if the current mode's pipeline/recording state is actually live.
     // Used to distinguish "ACC is on AND mode is running" from "ACC was set to
     // on but activation failed silently (pipeline init threw, etc.)".
@@ -238,44 +242,58 @@ public class RecordingModeManager {
             // past BOOT_AUTO_ACTIVATE_HARD_CAP_MS. On timeout, fall through
             // to the existing accIsOn (which carries the AccMonitor IPC
             // value or constructor probe).
-            boolean hwAccPostLatch;
-            java.util.concurrent.ExecutorService probeExec =
-                java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
-                    Thread th = new Thread(r, "BootAutoActivate-HwProbe");
-                    th.setDaemon(true);
-                    return th;
-                });
-            try {
-                java.util.concurrent.Future<Boolean> probeFut =
-                    probeExec.submit(() -> queryAccStateFromHardware());
+            // Definite-assignment defaults; every loop exit re-snapshots under the monitor.
+            Mode targetMode = currentMode;
+            int gearNow = currentGear;
+            boolean accNow = accIsOn;
+            long probeStartRevision;
+            synchronized (RecordingModeManager.this) {
+                probeStartRevision = accIpcRevision;
+            }
+            for (int attempt = 0; attempt < 2; attempt++) {
+                java.util.concurrent.FutureTask<Boolean> probeTask =
+                    new java.util.concurrent.FutureTask<>(this::queryAccStateFromHardware);
+                Thread probeThread = new Thread(probeTask, "BootAutoActivate-HwProbe");
+                probeThread.setDaemon(true);
+                probeThread.start();
+                boolean probeCompleted = false;
+                boolean hwAccPostLatch = false;
                 try {
-                    hwAccPostLatch = probeFut.get(1500L,
+                    hwAccPostLatch = probeTask.get(1500L,
                         java.util.concurrent.TimeUnit.MILLISECONDS);
+                    probeCompleted = true;
                 } catch (java.util.concurrent.TimeoutException te) {
-                    probeFut.cancel(true);
+                    probeTask.cancel(true);
                     logger.warn("Boot auto-activate HW probe timed out (>1.5s) — "
-                        + "falling back to accIsOn=" + accIsOn);
-                    hwAccPostLatch = accIsOn;
+                        + "falling back to latest accIsOn");
+                } catch (InterruptedException ie) {
+                    probeTask.cancel(true);
+                    Thread.currentThread().interrupt();
+                    return;
                 } catch (Exception e) {
                     logger.warn("Boot auto-activate HW probe failed: " + e.getMessage()
-                        + " — falling back to accIsOn=" + accIsOn);
-                    hwAccPostLatch = accIsOn;
+                        + " — falling back to latest accIsOn");
                 }
-            } finally {
-                probeExec.shutdownNow();
-            }
-            Mode targetMode;
-            int gearNow;
-            boolean accNow;
-            synchronized (RecordingModeManager.this) {
-                if (hwAccPostLatch != accIsOn) {
-                    logger.info("Boot auto-activate: HW probe corrects accIsOn "
-                        + accIsOn + " -> " + hwAccPostLatch);
-                    accIsOn = hwAccPostLatch;
+                synchronized (RecordingModeManager.this) {
+                    if (accIpcRevision != probeStartRevision) {
+                        if (probeCompleted && attempt == 0 && !shuttingDown) {
+                            logger.info("Boot auto-activate: newer ACC IPC arrived during HW "
+                                + "probe — repeating post-IPC read");
+                            probeStartRevision = accIpcRevision;
+                            continue;
+                        }
+                        logger.info("Boot auto-activate: newer ACC IPC supersedes HW probe "
+                            + "— keeping accIsOn=" + accIsOn);
+                    } else if (probeCompleted && hwAccPostLatch != accIsOn) {
+                        logger.info("Boot auto-activate: HW probe corrects accIsOn "
+                            + accIsOn + " -> " + hwAccPostLatch);
+                        accIsOn = hwAccPostLatch;
+                    }
+                    targetMode = currentMode;
+                    gearNow = currentGear;
+                    accNow = accIsOn;
                 }
-                targetMode = currentMode;
-                gearNow = currentGear;
-                accNow = accIsOn;
+                break;
             }
             if (!accNow) {
                 logger.info("Boot auto-activate skipped — ACC OFF (signalled="
@@ -1938,6 +1956,7 @@ public class RecordingModeManager {
                 + ", modeActive=" + modeActive + ")");
 
             accIsOn = isOn;
+            accIpcRevision++;
             // DiLink 5: a source released while parked reopens before any ACC-on consumer.
             if (isOn && diLink5CameraEnabled()) {
                 pipeline.resumeIdleCameraSource("ACC on");

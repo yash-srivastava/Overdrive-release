@@ -46,6 +46,54 @@ public final class RemoteAccessApiHandler {
     private static JSONObject config = RemoteAccessSettings.read();
     private static JSONObject effectiveConfig = RemoteAccessSettings.effective(config);
     private static final LinkedHashMap<String, PhoneState> PHONES = new LinkedHashMap<>();
+    // Protected by STATE. Queue publications to keep concurrent HTTP workers in evidence order;
+    // drain outside STATE to avoid nesting the automation queue lock under the proximity lock.
+    private static final com.overdrive.app.remoteaccess.ProximityAutomationState PROXIMITY_AUTOMATION =
+            new com.overdrive.app.remoteaccess.ProximityAutomationState();
+    private static final ArrayDeque<String> PROXIMITY_AUTOMATION_EVENTS = new ArrayDeque<>();
+    private static final Object AUTOMATION_PUBLICATION = new Object();
+    // Per-phone automation evidence is deliberately separate from the pinned PhoneState and
+    // its vehicle-off actuator evaluator. All these fields are protected by STATE.
+    private static final Map<PhoneState, AutomationPhoneEvidence> AUTOMATION_PHONES =
+            new java.util.WeakHashMap<>();
+    private static final LinkedHashMap<String, PhoneState> AUTOMATION_ROSTER = new LinkedHashMap<>();
+    private static volatile AutomationMotion AUTOMATION_MOTION = AutomationMotion.unavailable();
+    // Guarded by STATE. A post-drive requalification window avoids publishing
+    // Unknown followed by an unchanged Near every time the car stops in Park.
+    private static long lastAutomationMovementAt = -1;
+    private static long automationUnconfirmedSince = -1;
+
+    private static final class AutomationPhoneEvidence {
+        final ProximityEvaluator evaluator;
+        JSONObject signal;
+        long lastNearEvidenceElapsedMs = -1;
+        long lastAcceptedElapsedMs = -1;
+        AutomationPhoneEvidence(PhoneState phone) throws Exception {
+            evaluator = new ProximityEvaluator(RemoteAccessSettings.evaluatorConfig(effectiveConfig, phone.profile));
+            signal = emptySignal("waiting_for_phone");
+        }
+        void discard(String reason) throws Exception {
+            evaluator.reset();
+            signal = emptySignal(reason);
+            lastAcceptedElapsedMs = -1;
+            lastNearEvidenceElapsedMs = -1;
+        }
+    }
+
+    /** Timestamp and live driving readings are collected outside STATE, never by automation actions. */
+    private static final class AutomationMotion {
+        final long observed;
+        final int power;
+        final String movementBlockReason;
+        AutomationMotion(long observed, int power, String movementBlockReason) {
+            this.observed = observed;
+            this.power = power;
+            this.movementBlockReason = movementBlockReason;
+        }
+        static AutomationMotion unavailable() {
+            return new AutomationMotion(-1, BydVehicleData.UNAVAILABLE, "state_unknown");
+        }
+    }
     private static JSONObject runtime = new JSONObject();
     private static JSONObject lastAction = new JSONObject();
     private static JSONArray pairedDevices = new JSONArray();
@@ -76,7 +124,17 @@ public final class RemoteAccessApiHandler {
     private static long nextCollectorDiagnosticAt;
     // Envelope time of the latest accepted phone observation and the vehicle power read with it.
     private static long lastObservationElapsed = -1;
-    private static int lastObservedPower = BydVehicleData.UNAVAILABLE;
+    private static volatile int lastObservedPower = BydVehicleData.UNAVAILABLE;
+    // The camera daemon alone owns this latch: it is set only after a phone walk-away
+    // lock is confirmed and is cleared by power-on, a door edge, or a settings reset.
+    private static volatile boolean parkedBluetoothLockConfirmed;
+    private static volatile long parkedBluetoothLockConfirmedAtElapsedMs = -1;
+    // Settings and mode the walk-away lock was confirmed under; any change voids it as reset() did.
+    private static volatile String parkedBluetoothLockConfirmedScope;
+    private static volatile boolean parkedBluetoothSafeZoneDisableDirective;
+    private static volatile long parkedBluetoothSafeZoneDirectiveAtElapsedMs = -1;
+    // Explicit Bluetooth-ON intent wins until the next genuine phone departure episode.
+    private static volatile boolean parkedBluetoothExplicitOnOverride;
     // B4: the last bodywork "open" edge seen by this daemon; releases the post-unlock relock grace early.
     private static volatile long lastDoorOpenedElapsed = -1;
     // Written under ACTION (the SDK dispatch) or by the confirm job (a cloud leg); the two never run
@@ -300,6 +358,7 @@ public final class RemoteAccessApiHandler {
             JSONObject patch = new JSONObject(body);
             JSONObject current = RemoteAccessSettings.read();
             JSONObject next = RemoteAccessSettings.merge(current, patch);
+            if (!StepUpGate.requireBundle("config", "Change proximity settings", out)) return;
             if (patch.length() == 1 && patch.has("keepBluetoothOn")) {
                 boolean keepBluetoothOn = next.getBoolean("keepBluetoothOn");
                 synchronized (ACTION) {
@@ -322,6 +381,7 @@ public final class RemoteAccessApiHandler {
                             .put("collectorApply", collectorOutcome);
                     HttpResponse.sendJson(out, response.toString());
                 }
+                publishProximityAutomation();
                 return;
             }
             next.put("revision", current.optLong("revision") + 1);
@@ -357,6 +417,7 @@ public final class RemoteAccessApiHandler {
                 event("settings", next.optBoolean("enabled") ? "Proximity monitoring enabled" : "Master switch off");
             }
             synchronized (STATE) { HttpResponse.sendJson(out, status().toString()); }
+            publishProximityAutomation();
         }
     }
 
@@ -402,11 +463,23 @@ public final class RemoteAccessApiHandler {
             return;
         }
         if ("remoteAccessKeyFobObservation".equals(sample.optString("command"))) {
+            if (com.overdrive.app.config.ServiceModeFeatureGate.isPaused("proximity")) {
+                synchronized (STATE) { rememberNonce(authenticated.nonce, authenticated.timestampMs); }
+                HttpResponse.sendJson(out, new JSONObject().put("success", false).put("revoked", true)
+                        .put("reason", "service_mode").toString());
+                return;
+            }
             relayKeyFob(authenticated, out);
             return;
         }
         if (!"remoteAccessObservation".equals(sample.optString("command")))
             throw new SecurityException("Invalid signal envelope");
+        if (com.overdrive.app.config.ServiceModeFeatureGate.isPaused("proximity")) {
+            synchronized (STATE) { rememberNonce(authenticated.nonce, authenticated.timestampMs); }
+            HttpResponse.sendJson(out, new JSONObject().put("success", false).put("revoked", true)
+                    .put("reason", "service_mode").toString());
+            return;
+        }
         Integer observedPower = null;
         boolean nonceRemembered = false;
         boolean readSwitchOffClosures = !DiLink5Platform.isSelected()
@@ -436,11 +509,15 @@ public final class RemoteAccessApiHandler {
             if (readSwitchOffClosures && observedPower == 0)
                 switchOffDoorsClosed = readSwitchOffClosures(sample, closureStaleMs);
         }
+        // The movement gate is read outside STATE; the automation reuses the actuator's power reading.
+        long motionObserved = SystemClock.elapsedRealtime();
+        String movementBlockReason = readMovementBlockReason();
         ProximityEvaluator.Snapshot evaluated;
         JSONObject settings;
         long actionObserved;
         String actionModeGeneration;
         boolean actionSatisfied;
+        int relayPower;
         synchronized (STATE) {
             if (!nonceRemembered) rememberNonce(authenticated.nonce, authenticated.timestampMs);
             refreshSettings();
@@ -489,6 +566,22 @@ public final class RemoteAccessApiHandler {
             }
             String instance = sample.getString("instanceId");
             long serial = sample.getLong("observationSequence");
+            // Reset ONLY the independent automation evidence when a new source cannot
+            // use the existing one-shot adoption window. Leave the frozen actuator
+            // adoption block below byte-identical for the multi-phone contract.
+            if (!instance.equals(phone.sourceInstance)
+                    && !(phone.adoptInstanceUntilElapsedMs >= 0
+                            && now <= phone.adoptInstanceUntilElapsedMs && !phone.sourceInstance.isEmpty())) {
+                AutomationPhoneEvidence automation = AUTOMATION_PHONES.get(phone);
+                if (automation != null) automation.discard("source_changed");
+                if (com.overdrive.app.remoteaccess.ProximityAutomationState.moving(movementBlockReason)) {
+                    PROXIMITY_AUTOMATION.holdWhileMoving();
+                } else {
+                    // Requalify like a stop after driving; a restart must not publish Unknown then Near.
+                    PROXIMITY_AUTOMATION.forgetVisit();
+                    lastAutomationMovementAt = now;
+                }
+            }
             if (!instance.equals(phone.sourceInstance)) {
                 if (!adoptSourceInstance(phone, now)) {
                     phone.evaluator.reset();
@@ -509,6 +602,7 @@ public final class RemoteAccessApiHandler {
             }
             // Only a fresh, confirmed OFF observation can arm either platform.
             int power = observedPower == null ? readVehiclePowerNow() : observedPower;
+            AutomationMotion motion = new AutomationMotion(motionObserved, power, movementBlockReason);
             boolean eligible = power == 0
                     && !UnifiedConfigManager.isVehicleOnOnlyMode()
                     && UnifiedConfigManager.isBluetoothKeepAliveEnabled();
@@ -522,6 +616,8 @@ public final class RemoteAccessApiHandler {
                         switchOffDoorsClosed);
                 if (switchOff.takeHistoryRevocation()) {
                     phone.evaluator.reset();
+                    // Switch-off carry revocation only affects the actuator; the Bluetooth
+                    // automation evaluator has an independent accepted-observation lease.
                     phone.calibration.clear();
                     phone.satisfiedEpisodeId = 0;
                 }
@@ -538,6 +634,17 @@ public final class RemoteAccessApiHandler {
                     ? phone.evaluator.observe(phone.profile.getString("address"), raw, observed,
                             connected, eligible, healthyNativeProof ? proof : null)
                     : phone.evaluator.observe(phone.profile.getString("address"), raw, observed, connected, eligible);
+            AutomationPhoneEvidence automation = automationPhoneLocked(phone);
+            if (automation.lastAcceptedElapsedMs >= 0 && !BluetoothProximityDecisionGuard.fresh(
+                    automation.lastAcceptedElapsedMs, now, settings.optLong("staleMs"))) {
+                automation.discard("stale");
+                PROXIMITY_AUTOMATION.forgetVisit();
+            }
+            ProximityEvaluator.Snapshot automationReading = nativeProof
+                    ? automation.evaluator.observe(phone.profile.getString("address"), raw, observed,
+                            connected, true, healthyNativeProof ? proof : null)
+                    : automation.evaluator.observe(phone.profile.getString("address"), raw, observed,
+                            connected, true);
             if (switchOff != null) {
                 switchOff.evaluated(evaluated.event == ProximityEvaluator.Event.DEPARTURE, evaluated.reason);
                 logSwitchOff(phone, switchOff, sample, observed);
@@ -563,7 +670,21 @@ public final class RemoteAccessApiHandler {
                     .put("ageMs", signalObserved < 0 ? JSONObject.NULL : now - signalObserved)
                     .put("actionSatisfied", actionSatisfied)
                     .put("deviceName", phone.profile.getString("name"));
+            // The actuator snapshot is ineligible with power on and cannot supply an
+            // absence timestamp for this independent read-only evaluation.
+            long automationObserved = nativeProof && automationReading.rawRssi == null
+                    ? automationReading.freshnessMs < 0 ? -1 : observed - automationReading.freshnessMs
+                    : automationReading.rawRssi == null ? -1 : observed;
+            automation.signal = snapshotJson(automationReading)
+                    .put("connected", connected).put("observedAtElapsedMs", automationObserved);
+            automation.lastAcceptedElapsedMs = observed;
             if (nativeProof) {
+                automation.signal.put("connectionReadKnown", proof.connectionReadKnown)
+                        .put("connectionState", proof.state.name().toLowerCase(java.util.Locale.US))
+                        .put("radioReadKnown", proof.radioReadKnown)
+                        .put("connectionObservedAtElapsedMs", proof.observedAtElapsedMs)
+                        .put("connectionModeGeneration", proof.modeGeneration)
+                        .put("modeGeneration", modeGeneration == null ? JSONObject.NULL : modeGeneration);
                 phone.signal.put("connectionReadKnown", proof.connectionReadKnown)
                         .put("connectionState", proof.state.name().toLowerCase(java.util.Locale.US))
                         .put("radioReadKnown", proof.radioReadKnown)
@@ -594,13 +715,37 @@ public final class RemoteAccessApiHandler {
             runtime = reportedRuntime == null ? new JSONObject() : new JSONObject(reportedRuntime.toString());
             lastObservationElapsed = observed;
             lastObservedPower = power;
+            relayPower = power;
             notePhoneObservation(phone, sample, observed, proof, healthyNativeProof, evaluated);
+            if (connected && !(automationReading.state == ProximityEvaluator.State.AWAY
+                    && automationReading.departureEligible))
+                automation.lastNearEvidenceElapsedMs = observed;
+            AUTOMATION_MOTION = motion;
+            updateProximityAutomationLocked(now);
             logPhoneDiagnostic(phone, sample, evaluated, eligible, power, now);
             changed();
         }
+        publishProximityAutomation();
+        // The safe-zone decision is computed in this camera-daemon process, which
+        // owns the loaded geometry and the confirmed-lock latch. AccSentryDaemon's
+        // watchdog must never infer it from its own process-local static state.
+        // Only the opted-in option, or latch state still to clear, computes a directive;
+        // everyone else gets the unchanged reply.
+        boolean safeZoneReply = settings.optBoolean("parkedBluetoothSafeZoneEnabled")
+                || parkedBluetoothLockConfirmed || parkedBluetoothSafeZoneDisableDirective
+                || parkedBluetoothExplicitOnOverride;
+        boolean safeZoneBluetoothDisable = safeZoneReply && computeParkedBluetoothSafeZoneDisable(relayPower);
+        long safeZoneBluetoothDirectiveAtElapsedMs = SystemClock.elapsedRealtime();
+        if (safeZoneReply) synchronized (STATE) {
+            parkedBluetoothSafeZoneDisableDirective = safeZoneBluetoothDisable;
+            parkedBluetoothSafeZoneDirectiveAtElapsedMs = safeZoneBluetoothDirectiveAtElapsedMs;
+        }
         // Release the collector before readback. Confirmation must not delay
         // sampling beyond its freshness window. Reuse this existing HTTP worker.
-        HttpResponse.sendJson(out, new JSONObject().put("success", true).toString());
+        if (!safeZoneReply) HttpResponse.sendJson(out, new JSONObject().put("success", true).toString());
+        else HttpResponse.sendJson(out, new JSONObject().put("success", true)
+                .put("safeZoneBluetoothDisable", safeZoneBluetoothDisable)
+                .put("safeZoneBluetoothDirectiveAtElapsedMs", safeZoneBluetoothDirectiveAtElapsedMs).toString());
         if (!actionSatisfied && (evaluated.arrivalCandidate || evaluated.lockCandidate
                 || evaluated.event != ProximityEvaluator.Event.NONE)) {
             try {
@@ -690,6 +835,7 @@ public final class RemoteAccessApiHandler {
                     && scope.locallyCurrent() && pending.decision.validForDelayedActuation()
                     && (!carsvcScope || DiLink5GateActuationPolicy.carsvcEvidenceAllowsWrite(
                             carsvcEvidence, scope, SystemClock.elapsedRealtime()));
+            if (com.overdrive.app.config.ServiceModeFeatureGate.isPaused("proximity")) allowed = false;
         }
         JSONObject response = scope.toJson().put("command", "remoteAccessActuationResponse")
                 .put("requestId", requestId).put("allowed", allowed)
@@ -918,6 +1064,11 @@ public final class RemoteAccessApiHandler {
                                 String instance, long serial, String generation) throws Exception {
         JSONObject phone = RemoteAccessSettings.phone(settings, reading.address);
         boolean arriving = reading.arrivalCandidate || reading.event == ProximityEvaluator.Event.ARRIVAL;
+        if (!arriving && settings.optBoolean("parkedBluetoothSafeZoneEnabled")) {
+            synchronized (STATE) { parkedBluetoothExplicitOnOverride = false; }
+            try { registerDoorOpenObserver(BydDataCollector.getInstance()); }
+            catch (Throwable ignored) { /* Door-edge observation is fail-safe; lock confirmation still proceeds. */ }
+        }
         performDecision(new ActionDecision(
                 arriving ? "unlock" : "lock",
                 "bluetooth_proximity", phone == null ? "Trusted phone" : phone.optString("name", "Trusted phone"),
@@ -947,10 +1098,26 @@ public final class RemoteAccessApiHandler {
                 synchronized (STATE) {
                     refreshSettings();
                     PhoneState current = PHONES.get(reading.address);
-                    if (capturedEpisodeCurrent(current) && current.satisfiedEpisodeId != reading.episodeId) {
-                        current.satisfiedEpisodeId = reading.episodeId;
-                        current.signal.put("actionSatisfied", true);
-                        changed();
+                    if (capturedEpisodeCurrent(current)) {
+                        if ("lock".equals(action) && config.optBoolean("lockEnabled")
+                                && config.optBoolean("parkedBluetoothSafeZoneEnabled")
+                                && !parkedBluetoothExplicitOnOverride && lastObservedPower == 0) {
+                            parkedBluetoothLockConfirmed = true;
+                            parkedBluetoothLockConfirmedAtElapsedMs = SystemClock.elapsedRealtime();
+                            parkedBluetoothLockConfirmedScope = config + "|" + presenceModeGeneration;
+                            parkedBluetoothSafeZoneDisableDirective = false;
+                            parkedBluetoothSafeZoneDirectiveAtElapsedMs = -1;
+                        } else {
+                            parkedBluetoothLockConfirmed = false;
+                            parkedBluetoothLockConfirmedAtElapsedMs = -1;
+                            parkedBluetoothSafeZoneDisableDirective = false;
+                            parkedBluetoothSafeZoneDirectiveAtElapsedMs = -1;
+                        }
+                        if (current.satisfiedEpisodeId != reading.episodeId) {
+                            current.satisfiedEpisodeId = reading.episodeId;
+                            current.signal.put("actionSatisfied", true);
+                            changed();
+                        }
                     }
                 }
             }
@@ -995,6 +1162,15 @@ public final class RemoteAccessApiHandler {
                              && (!locking || config.optBoolean("keyFobLockEnabled"))
                              && keyFob.decisionStillCurrent(reading, SystemClock.elapsedRealtime(), event)
                              && (!locking || lockConsensus(false, SystemClock.elapsedRealtime()));
+                }
+            }
+            @Override void satisfied() {
+                if (locking) return; // Key-fob locks do not arm the phone-walk-away latch.
+                synchronized (STATE) {
+                    parkedBluetoothLockConfirmed = false;
+                    parkedBluetoothLockConfirmedAtElapsedMs = -1;
+                    parkedBluetoothSafeZoneDisableDirective = false;
+                    parkedBluetoothSafeZoneDirectiveAtElapsedMs = -1;
                 }
             }
         }, settings);
@@ -1053,6 +1229,7 @@ public final class RemoteAccessApiHandler {
                     // The gate keeps its previous rail set; the decision proceeds on it.
                 }
             }
+            if (com.overdrive.app.config.ServiceModeFeatureGate.isPaused("proximity")) return;
             if (!live.optBoolean("enabled") || live.optLong("revision") != settings.optLong("revision")) return;
             // Cloud fallback actuator (17 Oct): read once from the live settings that just passed the
             // revision check. The gate below runs exactly as today whatever its value.
@@ -1299,6 +1476,7 @@ public final class RemoteAccessApiHandler {
             VehicleCommandRouter.CommandResult result, BydDataCollector.DiLink5LockEvidence finalEvidence,
             DiLink5LockRail actuationRail, BydDataCollector.DiLink5LockEvidence typedEvidence, int target,
             boolean cloudFallback, boolean legacyDispatch, long dispatchedAtElapsed) throws Exception {
+        if (com.overdrive.app.config.ServiceModeFeatureGate.isPaused("proximity")) return;
         String action = decision.action;
         CloudLeg cloudLeg = null;                                  // at most ONE cloud attempt per decision
         try {
@@ -1376,6 +1554,16 @@ public final class RemoteAccessApiHandler {
                     if (cloudLeg.worthASecondWindow())
                         confirmation = confirmLocallyAfterCloud(collector, finalEvidence != null, actuationRail,
                                 target, dispatchedAtElapsed);
+                } else if (confirmation == DiLink5GateActuationPolicy.Confirmation.UNCONFIRMED
+                        && cloudLeg.worthASecondWindow()) {
+                    // Di5 immediate rule: the leg went out before the first window, so its command
+                    // gets one more LOCAL window inside the decision budget, as rule (c) does.
+                    DiLink5GateActuationPolicy.Confirmation afterImmediate =
+                            confirmLocallyAfterCloud(collector, finalEvidence != null, actuationRail, target,
+                                    dispatchedAtElapsed);
+                    if (afterImmediate == DiLink5GateActuationPolicy.Confirmation.CONFIRMED) {
+                        confirmation = afterImmediate;
+                    }
                 }
                 recordCloudFallbackOutcome(decision, settings, confirmation, cloudLeg, actuationRail, true, null, false);
                 return;
@@ -1449,6 +1637,24 @@ public final class RemoteAccessApiHandler {
         for (int i = 0; i < 6; i++) if (doors[i] != 0) return false;
         return BluetoothProximityDecisionGuard.fresh(decision.observed, SystemClock.elapsedRealtime(),
                 decision.freshnessMs) && decision.valid();
+    }
+
+    /** Reconcile the app-process monitors when Service Mode starts or ends. */
+    public static void onServiceModeChanged() {
+        Thread sync = new Thread(() -> {
+            try {
+                if (com.overdrive.app.config.ServiceModeFeatureGate.isPaused("proximity")) {
+                    ConfirmJob pending = pendingConfirmJob;
+                    if (pending != null) pending.interrupt();
+                }
+                bridge(com.overdrive.app.config.ServiceModeFeatureGate.isPaused("proximity") ? "stop" : "apply");
+            } catch (Throwable error) {
+                com.overdrive.app.daemon.CameraDaemon.log(
+                        "Proximity Service Mode reconcile unavailable: " + error.getMessage());
+            }
+        }, "service-mode-proximity");
+        sync.setDaemon(true);
+        sync.start();
     }
 
     private static JSONObject bridge(String operation) throws Exception {
@@ -1532,6 +1738,13 @@ public final class RemoteAccessApiHandler {
             com.overdrive.app.daemon.CameraDaemon.log("Proximity: cloudFallback action=" + action
                     + " trigger=" + trigger + " skipped=" + skipped);
             return new CloudLeg(null, skipped, DiLink5GateActuationPolicy.PATH_SDK);
+        }
+        String transportSkip = VehicleCommandRouter.getInstance()
+                .proximityCloudFallbackTransportSkipReason(command);
+        if (transportSkip != null) {
+            com.overdrive.app.daemon.CameraDaemon.log("Proximity: cloudFallback action=" + action
+                    + " trigger=" + trigger + " skipped=" + transportSkip);
+            return new CloudLeg(null, transportSkip, DiLink5GateActuationPolicy.PATH_SDK);
         }
         String path = sdkAccepted ? DiLink5GateActuationPolicy.PATH_SDK_THEN_CLOUD : DiLink5GateActuationPolicy.PATH_CLOUD;
         VehicleCommandRouter.CommandResult result = runCloudLegBounded(command, cloudTimeoutMs);
@@ -1928,6 +2141,7 @@ public final class RemoteAccessApiHandler {
         if (!disk.toString().equals(config.toString())
                 || !java.util.Objects.equals(presenceModeGeneration, DiLink5Platform.currentActiveModeGeneration()))
             reset(disk);
+        syncAutomationRosterLocked();
         // DI5 gate rails: the settings file was read above; the collector call takes
         // diLink5IngressLock after STATE (never the reverse) and must not fail a refresh.
         if (DiLink5Platform.isSelected()) {
@@ -2095,6 +2309,43 @@ public final class RemoteAccessApiHandler {
         }
     }
 
+    /** Existing daemon maintenance tick: stale/disabled phone evidence publishes Unknown without a relay. */
+    public static void refreshAutomationPresence() {
+        try {
+            // Most installations leave Proximity off. Do not read settings, vehicle power,
+            // or driving sensors from the 5 s daemon tick in that case.
+            synchronized (STATE) {
+                if (!config.optBoolean("enabled")) return;
+            }
+            AutomationMotion motion = readAutomationMotion(readVehiclePowerNow());
+            synchronized (STATE) {
+                if (!config.optBoolean("enabled")) return;
+                refreshSettings();
+                AUTOMATION_MOTION = motion;
+                updateProximityAutomationLocked(SystemClock.elapsedRealtime());
+            }
+            publishProximityAutomation();
+        } catch (Throwable unavailable) {
+            com.overdrive.app.daemon.CameraDaemon.log("Proximity: automation maintenance unavailable: "
+                    + unavailable.getClass().getSimpleName());
+        }
+    }
+
+    private static AutomationMotion readAutomationMotion(int power) {
+        long now = SystemClock.elapsedRealtime();
+        return new AutomationMotion(now, power, readMovementBlockReason());
+    }
+
+    private static String readMovementBlockReason() {
+        try {
+            // The shared guard uses GPS as a fallback on trims with no hardware speed
+            // unit, and already classifies uncertain ACC/gear/speed as unconfirmed.
+            return com.overdrive.app.byd.routing.DrivingSafetyGuard.getMovementBlockReason();
+        } catch (Throwable unavailable) {
+            return "state_unknown";
+        }
+    }
+
     private static JSONObject status() throws Exception {
         refreshSettings();
         JSONArray signals = new JSONArray();
@@ -2110,6 +2361,8 @@ public final class RemoteAccessApiHandler {
             signals.put(snapshot);
             if (phone.profile.getString("address").equals(config.optString("deviceAddress"))) value = snapshot;
         }
+        // A status poll is read-only: only new relay evidence, settings saves and
+        // the maintenance tick may advance automation publications.
         // A paused or revoked signal carries no timestamp; the collector is alive while its deliveries are.
         if (lastObservationElapsed <= now) latestObservation = Math.max(latestObservation, lastObservationElapsed);
         JSONArray events = new JSONArray();
@@ -2124,6 +2377,15 @@ public final class RemoteAccessApiHandler {
                     .put("reason", !config.optBoolean("enabled") ? "disabled"
                             : latestObservation < 0 ? "waiting_for_collector" : "collector_stale");
         }
+        ProximitySafeZonePolicy.Result safeZones = safeZoneSnapshot(effectiveConfig);
+        boolean safeZoneBluetoothDisable = cachedParkedBluetoothSafeZoneDisable(lastObservedPower);
+        boolean walkAwayLockConfirmed;
+        synchronized (STATE) {
+            walkAwayLockConfirmed = parkedBluetoothLockConfirmed
+                    && parkedBluetoothLockConfirmedAtElapsedMs > 0
+                    && lastDoorOpenedElapsed < parkedBluetoothLockConfirmedAtElapsedMs
+                    && lastObservedPower == 0;
+        }
         return new JSONObject().put("success", true).put("sequence", sequence).put("sessionId", SESSION_ID)
                 .put("config", new JSONObject(effectiveConfig.toString()))
                 .put("savedConfig", new JSONObject(config.toString())).put("signal", value).put("signals", signals)
@@ -2134,7 +2396,13 @@ public final class RemoteAccessApiHandler {
                         .put("keyInsideLocked", RemoteAccessSettings.lockWithKeyInside(effectiveConfig)
                                 && KEY_INSIDE.latched()))
                 .put("bluetooth", BluetoothRadioStatusReader.cached())
-                .put("safeZones", safeZoneSnapshot(effectiveConfig).toJson())
+                .put("safeZones", safeZones.toJson())
+                .put("parkedBluetooth", new JSONObject()
+                        .put("safeZoneFeatureEnabled", effectiveConfig.optBoolean("lockEnabled")
+                                && effectiveConfig.optBoolean("keepBluetoothOn")
+                                && effectiveConfig.optBoolean("parkedBluetoothSafeZoneEnabled"))
+                        .put("walkAwayLockConfirmed", walkAwayLockConfirmed)
+                        .put("safeZoneDisableRequested", safeZoneBluetoothDisable))
                 .put("devices", pairedDevices == null ? new JSONArray() : pairedDevices)
                 .put("events", events).put("lastAction", lastAction)
                 .put("allPhonesAway", allPhonesAway(now))
@@ -2191,7 +2459,8 @@ public final class RemoteAccessApiHandler {
             boolean arriving = reading.arrivalCandidate || reading.event == ProximityEvaluator.Event.ARRIVAL;
             if (!reading.arrivalCandidate && !reading.lockCandidate
                     && reading.event == ProximityEvaluator.Event.NONE) return false;
-            return config.optBoolean("enabled") && config.optLong("revision") == settings.optLong("revision")
+            return !com.overdrive.app.config.ServiceModeFeatureGate.isPaused("proximity")
+                    && config.optBoolean("enabled") && config.optLong("revision") == settings.optLong("revision")
                     && BluetoothProximityDecisionGuard.allows(arriving ? "unlock" : "lock",
                         originalObserved, reading.episodeId, instance, serial, originalModeGeneration,
                         signal, phone.sourceInstance, phone.sourceSequence, activeModeGeneration(),
@@ -2221,7 +2490,8 @@ public final class RemoteAccessApiHandler {
             boolean arriving = reading.arrivalCandidate || reading.event == ProximityEvaluator.Event.ARRIVAL;
             if (!reading.arrivalCandidate && !reading.lockCandidate
                     && reading.event == ProximityEvaluator.Event.NONE) return false;
-            return config.optBoolean("enabled") && config.optLong("revision") == settings.optLong("revision")
+            return !com.overdrive.app.config.ServiceModeFeatureGate.isPaused("proximity")
+                    && config.optBoolean("enabled") && config.optLong("revision") == settings.optLong("revision")
                     && BluetoothProximityDecisionGuard.allowsIgnoringObservationAge(arriving ? "unlock" : "lock",
                         reading.episodeId, instance, serial, originalModeGeneration,
                         signal, phone.sourceInstance, phone.sourceSequence, activeModeGeneration(),
@@ -2374,6 +2644,170 @@ public final class RemoteAccessApiHandler {
                     phone.lastNearEvidenceElapsedMs));
         }
         return states;
+    }
+
+    /** Reconcile against the entire identity roster, preserving Near across unrelated saves. */
+    private static void syncAutomationRosterLocked() throws Exception {
+        if (AUTOMATION_ROSTER.equals(PHONES)) return;
+        // Invalidate the old roster's departure episode but keep the published edge.
+        // A save that evaluates back to Near must not emit Unknown followed by Near.
+        PROXIMITY_AUTOMATION.forgetVisit();
+        AUTOMATION_ROSTER.clear();
+        AUTOMATION_ROSTER.putAll(PHONES);
+        // Weak keys allow replaced/removed PhoneState objects and their evidence to be collected.
+        for (PhoneState phone : PHONES.values()) automationPhoneLocked(phone);
+    }
+
+    private static AutomationPhoneEvidence automationPhoneLocked(PhoneState phone) throws Exception {
+        AutomationPhoneEvidence evidence = AUTOMATION_PHONES.get(phone);
+        if (evidence == null) {
+            evidence = new AutomationPhoneEvidence(phone);
+            AUTOMATION_PHONES.put(phone, evidence);
+        }
+        return evidence;
+    }
+
+    /** Build a SEPARATE roster without touching byte-pinned phoneDepartureStates(). */
+    private static java.util.List<MultiPhoneProximityPolicy.Observation> automationPhoneDepartureStates(long now)
+            throws Exception {
+        java.util.List<MultiPhoneProximityPolicy.Observation> states = new java.util.ArrayList<>();
+        long staleMs = effectiveConfig.optLong("staleMs");
+        String generation = activeModeGeneration();
+        for (PhoneState phone : PHONES.values()) {
+            AutomationPhoneEvidence evidence = automationPhoneLocked(phone);
+            // An action/status vehicle_ineligible revocation does NOT revoke automation evidence.
+            // Only the automation channel's own accepted timestamps and native proofs expire it.
+            if (evidence.lastAcceptedElapsedMs >= 0 && !BluetoothProximityDecisionGuard.fresh(
+                    evidence.lastAcceptedElapsedMs, now, staleMs)) evidence.discard("stale");
+            JSONObject signal = evidence.signal;
+            ProximityEvaluator.State state;
+            try { state = ProximityEvaluator.State.valueOf(signal.optString("state", "UNKNOWN")); }
+            catch (IllegalArgumentException unknown) { state = ProximityEvaluator.State.UNKNOWN; }
+            boolean confirmedDisconnection = BluetoothProximityDecisionGuard.confirmedDisconnection(
+                    signal, now, staleMs, generation);
+            boolean nativeProof = BluetoothConnectionEvidence.hasAny(signal);
+            if (state == ProximityEvaluator.State.AWAY && !confirmedDisconnection
+                    && (!signal.optBoolean("departureEligible")
+                    || !"UNKNOWN".equals(signal.optString("candidate", "UNKNOWN"))
+                    || !signal.optBoolean("connected") || signal.isNull("rawRssi")
+                    || signal.optDouble("rawRssi", Double.POSITIVE_INFINITY)
+                        > phone.profile.optInt("awayThreshold", -24)
+                    || signal.isNull("departureFilteredRssi")
+                    || signal.optDouble("departureFilteredRssi", Double.POSITIVE_INFINITY)
+                        > phone.profile.optInt("awayThreshold", -24)
+                    || nativeProof && !BluetoothProximityDecisionGuard.nativeProofHealthy(
+                        signal, now, staleMs, generation)))
+                state = ProximityEvaluator.State.TRANSITION;
+            BluetoothConnectionEvidence proof = phone.lastProof;
+            boolean proofFresh = proof != null && generation != null && generation.equals(proof.modeGeneration)
+                    && BluetoothProximityDecisionGuard.fresh(phone.lastProofElapsedMs, now, staleMs);
+            boolean connectionKnown = proofFresh && phone.lastProofHealthy && proof.healthyAt(now, staleMs)
+                    && (proof.state == BluetoothConnectionEvidence.State.CONNECTED) == signal.optBoolean("connected");
+            boolean radioOn = proofFresh && proof.radioReadKnown && proof.radioOn;
+            states.add(new MultiPhoneProximityPolicy.Observation(
+                    phone.profile.optBoolean("enabled") && config.optBoolean("keepBluetoothOn"),
+                    signal.optBoolean("connected"), !signal.isNull("rawRssi"), state,
+                    signal.optLong("observedAtElapsedMs", -1), confirmedDisconnection,
+                    connectionKnown, radioOn, phone.firstConnectedElapsedMs < 0,
+                    phone.generationStartedElapsedMs, proofFresh ? phone.lastProofElapsedMs : -1,
+                    evidence.lastNearEvidenceElapsedMs));
+        }
+        return states;
+    }
+
+    /** Caller holds STATE; signal only, never an actuator or a vehicle power command. */
+    private static void updateProximityAutomationLocked(long now) throws Exception {
+        syncAutomationRosterLocked();
+        AutomationMotion motion = AUTOMATION_MOTION;
+        boolean motionFresh = BluetoothProximityDecisionGuard.fresh(motion.observed, now, 10_000);
+        // No published transition during movement. Throw away the old visit AND the
+        // accumulated Bluetooth evidence so stopping in P cannot replay a driving-time
+        // Near (or turn a dead phone into an Away). New parked samples must requalify.
+        if (motionFresh && com.overdrive.app.remoteaccess.ProximityAutomationState.moving(
+                motion.movementBlockReason)) {
+            PROXIMITY_AUTOMATION.holdWhileMoving();
+            lastAutomationMovementAt = now;
+            automationUnconfirmedSince = -1;
+            for (PhoneState phone : PHONES.values())
+                automationPhoneLocked(phone).discard("moving");
+            return;
+        }
+        boolean safe = motionFresh && com.overdrive.app.remoteaccess.ProximityAutomationState.safeForPresence(
+                motion.power, motion.movementBlockReason);
+        boolean enabled = effectiveConfig.optBoolean("enabled") && effectiveConfig.optBoolean("keepBluetoothOn");
+        // An unconfirmed gate read (legacy gear freshness race, GPS gap) is no evidence either
+        // way: hold the published state and the visit until it outlasts one evidence lease.
+        if (enabled && !safe) {
+            if (automationUnconfirmedSince < 0) automationUnconfirmedSince = now;
+            if (now - automationUnconfirmedSince < effectiveConfig.optLong("staleMs")) return;
+        } else {
+            automationUnconfirmedSince = -1;
+        }
+        boolean near = false, away = false;
+        if (enabled && safe) {
+            java.util.List<MultiPhoneProximityPolicy.Observation> phones = automationPhoneDepartureStates(now);
+            long staleMs = effectiveConfig.optLong("staleMs");
+            // An expired collector/phone lease invalidates the earlier visit even if
+            // a future source generation reports all phones Away after the restart.
+            for (PhoneState phone : PHONES.values()) {
+                if (phone.profile.optBoolean("enabled") && !BluetoothProximityDecisionGuard.fresh(
+                        automationPhoneLocked(phone).lastAcceptedElapsedMs, now, staleMs)) {
+                    PROXIMITY_AUTOMATION.forgetVisit();
+                    break;
+                }
+            }
+            near = MultiPhoneProximityPolicy.anyConfirmedNear(phones, now, staleMs);
+            away = MultiPhoneProximityPolicy.allAway(phones, now, staleMs);
+            if (away) {
+                boolean fobDetection = config.optBoolean("keyFobEnabled") && KeyFobAccessMonitor.platformSupported();
+                boolean fobConfigured = fobDetection && config.optBoolean("keyFobLockEnabled");
+                boolean fobDetected = fobDetection && (hasFreshKeyFobApproach(now) || hasFreshKeyFobPresence(now));
+                // allowsLock requires power=0. While on, omit ONLY the optional absence
+                // wait for the read-only signal; a detected physical key still vetoes.
+                boolean waitForKey = motion.power == 0 && effectiveConfig.optBoolean(
+                        RemoteAccessSettings.LOCK_WAITS_FOR_KEY_ABSENCE_KEY,
+                        RemoteAccessSettings.LOCK_WAITS_FOR_KEY_ABSENCE_DEFAULT);
+                away = MultiPhoneProximityPolicy.consensus(true, fobDetected,
+                        RemoteAccessSettings.lockWithKeyInside(effectiveConfig),
+                        RemoteAccessSettings.phonePriority(effectiveConfig), fobConfigured,
+                        waitForKey, fobConfigured && keyFobPresence.allowsLock(now), phones, now, staleMs);
+            }
+        }
+        // After driving, phones requalify Near: hold the published state for one evidence lease
+        // instead of Near -> Unknown -> Near at every stop in Park.
+        if (lastAutomationMovementAt >= 0) {
+            if (enabled && safe && near) {
+                lastAutomationMovementAt = -1;
+            } else if (enabled && safe && now - lastAutomationMovementAt < effectiveConfig.optLong("staleMs")) {
+                return;
+            } else {
+                lastAutomationMovementAt = -1;
+            }
+        }
+        // Disabled or uncertain motion also invalidates the prior visit. A stale
+        // collector must not leave a departure latched indefinitely.
+        if (!enabled || !safe) PROXIMITY_AUTOMATION.forgetVisit();
+        String next = PROXIMITY_AUTOMATION.observe(near, away);
+        if (next != null) PROXIMITY_AUTOMATION_EVENTS.addLast(next);
+    }
+
+    /** Drain in evidence order; never hold STATE while entering the automation engine. */
+    private static void publishProximityAutomation() {
+        synchronized (AUTOMATION_PUBLICATION) {
+            while (true) {
+                String next;
+                synchronized (STATE) { next = PROXIMITY_AUTOMATION_EVENTS.pollFirst(); }
+                if (next == null) return;
+                try {
+                    com.overdrive.app.automation.Automations.update(
+                            com.overdrive.app.automation.condition.BydEvent.PROXIMITY_PRESENCE, next, true);
+                } catch (Throwable unavailable) {
+                    com.overdrive.app.daemon.CameraDaemon.log(
+                            "Proximity: automation publication unavailable: "
+                                    + unavailable.getClass().getSimpleName());
+                }
+            }
+        }
     }
 
     private static boolean lockConsensus(boolean phoneDeparture, long now) {
@@ -2572,11 +3006,154 @@ public final class RemoteAccessApiHandler {
         }
     }
 
+    /** Register door edges for the optional parked-radio latch without marking an unlock dispatch. */
+    private static void registerDoorOpenObserver(BydDataCollector collector) {
+        if (DiLink5Platform.isSelected() || doorOpenObserverRegistered) return;
+        try {
+            collector.addDoorStateListener(DOOR_OPEN_OBSERVER);
+            doorOpenObserverRegistered = true;
+        } catch (Throwable ignored) {
+            // Without door edges the safe-zone override remains unavailable.
+        }
+    }
+
+    /** An explicit user/automation Bluetooth-ON command supersedes the parked safe-zone latch. */
+    public static void noteBluetoothExplicitlyEnabled() {
+        synchronized (STATE) {
+            parkedBluetoothLockConfirmed = false;
+            parkedBluetoothLockConfirmedAtElapsedMs = -1;
+            parkedBluetoothSafeZoneDisableDirective = false;
+            parkedBluetoothSafeZoneDirectiveAtElapsedMs = -1;
+            parkedBluetoothExplicitOnOverride = true;
+        }
+    }
+
+    /**
+     * Only this process may authorize parked Bluetooth suppression: it owns the
+     * confirmed phone-lock latch, selected zone geometry and GPS snapshots.
+     * Unknown power/location/door/lock state always returns the normal keep-alive path.
+     */
+    private static boolean computeParkedBluetoothSafeZoneDisable(int power) {
+        if (power != 0) {
+            synchronized (STATE) {
+                parkedBluetoothLockConfirmed = false;
+                parkedBluetoothLockConfirmedAtElapsedMs = -1;
+                parkedBluetoothSafeZoneDisableDirective = false;
+                parkedBluetoothSafeZoneDirectiveAtElapsedMs = -1;
+                parkedBluetoothExplicitOnOverride = false;
+            }
+            return false;
+        }
+        final JSONObject settingsSnapshot;
+        final long lockConfirmedAt;
+        synchronized (STATE) {
+            try {
+                refreshSettings();
+                if (!config.optBoolean("enabled") || !config.optBoolean("lockEnabled")
+                        || !config.optBoolean("keepBluetoothOn")
+                        || !config.optBoolean("parkedBluetoothSafeZoneEnabled")) {
+                    // reset() stays frozen: the option or a prerequisite switched off forgets the latch here.
+                    parkedBluetoothLockConfirmed = false;
+                    parkedBluetoothLockConfirmedAtElapsedMs = -1;
+                    parkedBluetoothExplicitOnOverride = false;
+                    return false;
+                }
+                if (parkedBluetoothLockConfirmed
+                        && !(config + "|" + presenceModeGeneration).equals(parkedBluetoothLockConfirmedScope)) {
+                    // Any settings or mode change since the walk-away lock voids it (the old reset() hook).
+                    parkedBluetoothLockConfirmed = false;
+                    parkedBluetoothLockConfirmedAtElapsedMs = -1;
+                    return false;
+                }
+                // #715: with the key left inside, the phone is the only automatic way back in.
+                if (parkedBluetoothExplicitOnOverride
+                        || UnifiedConfigManager.isVehicleOnOnlyMode()
+                        || !parkedBluetoothLockConfirmed || lastObservedPower != 0
+                        || parkedBluetoothLockConfirmedAtElapsedMs <= 0
+                        || RemoteAccessSettings.lockWithKeyInside(config) && KEY_INSIDE.latched())
+                    return false;
+                lockConfirmedAt = parkedBluetoothLockConfirmedAtElapsedMs;
+                if (lastDoorOpenedElapsed >= lockConfirmedAt) {
+                    parkedBluetoothLockConfirmed = false;
+                    parkedBluetoothLockConfirmedAtElapsedMs = -1;
+                    return false;
+                }
+                settingsSnapshot = new JSONObject(effectiveConfig.toString());
+            } catch (Throwable unavailable) {
+                return false;
+            }
+        }
+        if (!DiLink5Platform.isSelected() && !doorOpenObserverRegistered) return false;
+        // Verify the live vehicle before consulting GPS so an unlock/door-open cycle
+        // outside the selected zones also invalidates the old walk-away confirmation.
+        if (!parkedVehicleStillLocked()) {
+            synchronized (STATE) {
+                parkedBluetoothLockConfirmed = false;
+                parkedBluetoothLockConfirmedAtElapsedMs = -1;
+            }
+            return false;
+        }
+        ProximitySafeZonePolicy.Result safeZones = safeZoneSnapshot(settingsSnapshot);
+        if (!safeZones.shouldDisableBluetooth()) return false;
+        synchronized (STATE) {
+            try {
+                refreshSettings();
+                if (!parkedBluetoothLockConfirmed || lastObservedPower != 0
+                        || parkedBluetoothLockConfirmedAtElapsedMs != lockConfirmedAt
+                        || config.optLong("revision") != settingsSnapshot.optLong("revision")) return false;
+                if (lastDoorOpenedElapsed >= lockConfirmedAt) {
+                    parkedBluetoothLockConfirmed = false;
+                    parkedBluetoothLockConfirmedAtElapsedMs = -1;
+                    return false;
+                }
+                return safeZones.shouldDisableBluetooth();
+            } catch (Throwable unavailable) {
+                return false;
+            }
+        }
+    }
+
+    /** Read live lock and all bodywork closures outside STATE; unavailable data fails open. */
+    private static boolean parkedVehicleStillLocked() {
+        try {
+            BydDataCollector collector = BydDataCollector.getInstance();
+            int lockState = DiLink5Platform.isSelected()
+                    ? collector.readDiLink5GateDoorLockEvidence().state
+                    : collector.readDoorLockState();
+            if (lockState != BydDataCollector.DOOR_STATE_LOCK) return false;
+            int[] doors = collector.readAllDoorOpenStates();
+            return doors != null && doors.length >= 6
+                    && DiLink5GateActuationPolicy.doorBlockReason(doors) == null;
+        } catch (Throwable unavailable) {
+            return false;
+        }
+    }
+
+    /** Status is a short-lived snapshot of the last camera-daemon relay decision. */
+    private static boolean cachedParkedBluetoothSafeZoneDisable(int power) {
+        if (power != 0) return false;
+        synchronized (STATE) {
+            long age = SystemClock.elapsedRealtime() - parkedBluetoothSafeZoneDirectiveAtElapsedMs;
+            return parkedBluetoothSafeZoneDisableDirective
+                    && parkedBluetoothSafeZoneDirectiveAtElapsedMs >= 0
+                    && age >= 0 && age <= 15_000L
+                    && config.optBoolean("enabled") && config.optBoolean("lockEnabled")
+                    && config.optBoolean("keepBluetoothOn")
+                    && config.optBoolean("parkedBluetoothSafeZoneEnabled")
+                    && !UnifiedConfigManager.isVehicleOnOnlyMode()
+                    && parkedBluetoothLockConfirmed
+                    && parkedBluetoothLockConfirmedAtElapsedMs > 0
+                    && lastObservedPower == 0
+                    && lastDoorOpenedElapsed < parkedBluetoothLockConfirmedAtElapsedMs;
+        }
+    }
+
     /** Existing in-memory geometry and GPS only; never starts a GPS service or observer. */
     private static ProximitySafeZonePolicy.Result safeZoneSnapshot(JSONObject settings) {
         boolean master = settings.optBoolean("enabled");
         boolean lock = settings.optBoolean("restrictLockToOutsideSafeZones");
         boolean unlock = settings.optBoolean("restrictUnlockToOutsideSafeZones");
+        boolean bluetooth = settings.optBoolean("parkedBluetoothSafeZoneEnabled");
         java.util.List<String> ids = new java.util.ArrayList<>();
         JSONArray selected = settings.optJSONArray("proximitySafeZoneIds");
         if (selected != null) for (int i = 0; i < selected.length(); i++)
@@ -2591,7 +3168,7 @@ public final class RemoteAccessApiHandler {
                 zones.add(new ProximitySafeZonePolicy.Zone(zone.id, zone.name,
                         zone.latitude, zone.longitude, zone.radiusMeters, zone.geometryValid));
             }
-            if (master && (lock || unlock)) {
+            if (master && (lock || unlock || bluetooth)) {
                 com.overdrive.app.monitor.GpsMonitor.GpsFixSnapshot fix =
                         com.overdrive.app.monitor.GpsMonitor.getInstance().getFixSnapshot();
                 if (fix != null && fix.hasLocation())
@@ -2611,7 +3188,7 @@ public final class RemoteAccessApiHandler {
             parked = null;
             zones.clear();
         }
-        return ProximitySafeZonePolicy.evaluate(master, lock, unlock, ids, zones, position, parked);
+        return ProximitySafeZonePolicy.evaluate(master, lock, unlock, bluetooth, ids, zones, position, parked);
     }
 
     private static String safeZoneMessage(String reason) {

@@ -19,7 +19,8 @@ public class BydDriveModeEncodingTest {
     public void rawEnergyGetterMapsBackToConfigModes() {
         assertEquals(2, BydDataCollector.driveModeFromEnergyAxis(1, 1, 1));
         assertEquals(1, BydDataCollector.driveModeFromEnergyAxis(1, 1, 3));
-        assertEquals(2, BydDataCollector.driveModeFromEnergyAxis(1, -1, -1));
+        assertEquals(-1, BydDataCollector.driveModeFromEnergyAxis(1, -1, -1));
+        assertEquals(-1, BydDataCollector.driveModeFromEnergyAxis(1, 1, 5));
         assertEquals(4, BydDataCollector.driveModeFromEnergyAxis(1, 2, 1));
         assertEquals(3, BydDataCollector.driveModeFromEnergyAxis(2, 1, 2));
         assertEquals(4, BydDataCollector.driveModeFromEnergyAxis(2, 2, 2));
@@ -54,14 +55,18 @@ public class BydDriveModeEncodingTest {
         assertEquals(2, BydDataCollector.driveModeFromEnergyAxis(1, 65535, -1, 1));
         assertEquals(3, BydDataCollector.driveModeFromEnergyAxis(2, 65535, -1, 3));
         assertEquals(4, BydDataCollector.driveModeFromEnergyAxis(1, 2, -1, 3));
+        assertEquals(-1, BydDataCollector.driveModeFromEnergyAxis(1, 1, 1, 3));
+        assertEquals(-1, BydDataCollector.driveModeFromEnergyAxis(1, 1, 3, 1));
+        assertEquals(4, BydDataCollector.driveModeFromEnergyAxis(1, 2, 1, 3));
     }
 
     @Test
     public void publicSetterValuesMatchTheLiveGetterAxis() {
         assertEquals(true, BydDataCollector.operationModeMatchesSetter(1, 1, 1, 1));
+        assertEquals(false, BydDataCollector.operationModeMatchesSetter(1, 1, 1, -1));
         assertEquals(true, BydDataCollector.operationModeMatchesSetter(2, 2, 1, 2));
         assertEquals(true, BydDataCollector.operationModeMatchesSetter(3, 1, 1, 3));
-        assertEquals(true, BydDataCollector.operationModeMatchesSetter(3, 1, 1, -1));
+        assertEquals(false, BydDataCollector.operationModeMatchesSetter(3, 1, 1, -1));
         assertEquals(true, BydDataCollector.operationModeMatchesSetter(4, 4, 1, 4));
         assertEquals(true, BydDataCollector.operationModeMatchesSetter(4, 2, 2, 2));
         assertEquals(false, BydDataCollector.operationModeMatchesSetter(2, 2, 2, 2));
@@ -84,16 +89,39 @@ public class BydDriveModeEncodingTest {
                 new OperationModeDevice(2, 2), new TargetModeDevice(2), 4));
         assertEquals(false, BydModeCommand.driveModeMatches(
                 new OperationModeDevice(1, 1), new TargetModeDevice(-1), 1));
-        assertEquals(true, BydModeCommand.driveModeMatchesAfterWrite(
+        assertEquals(false, BydModeCommand.driveModeMatchesAfterWrite(
                 new OperationModeDevice(1, 1), new TargetModeDevice(-1), 1));
+        assertEquals(false, BydModeCommand.driveModeMatchesAfterWrite(
+                new OperationModeDevice(1, 1), new TargetModeDevice(-1), 2));
     }
 
     @Test
-    public void confirmedNormalCommandDisambiguatesOnlyTheSharedBaseAxis() {
-        assertEquals(1, BydDataCollector.driveModeFromEnergyAxis(1, 1, -1, -1, 1));
-        assertEquals(2, BydDataCollector.driveModeFromEnergyAxis(1, 1, -1, -1, 2));
-        assertEquals(3, BydDataCollector.driveModeFromEnergyAxis(2, 1, -1, -1, 1));
-        assertEquals(4, BydDataCollector.driveModeFromEnergyAxis(1, 2, -1, -1, 1));
+    public void latestBaseReportHasPriorityExceptForConfirmedSnow() {
+        assertEquals(1, BydDataCollector.resolveDriveMode(2, 1, 2));
+        assertEquals(2, BydDataCollector.resolveDriveMode(1, 2, 3));
+        assertEquals(3, BydDataCollector.resolveDriveMode(-1, 3, 1));
+        assertEquals(4, BydDataCollector.resolveDriveMode(4, 1, -1));
+        assertEquals(3, BydDataCollector.resolveDriveMode(3, -1, 1));
+        assertEquals(-1, BydDataCollector.resolveDriveMode(-1, -1, -1));
+    }
+
+    @Test
+    public void driveReportChecksAllSelectorsAndUsesOnlyTheUpperPayloadNibble() {
+        byte[] frame = {0, 0, 3, 0x42, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+        int[] modes = {-1, 2, 3, 1, 1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+        for (int value = 0; value < 256; value++) {
+            frame[8] = (byte) value;
+            assertEquals(modes[value >>> 4], DriveModeReport.decode(frame));
+        }
+        for (int offset = 0; offset < 6; offset++) {
+            byte[] unrelated = frame.clone();
+            unrelated[offset] ^= 1;
+            assertEquals(DriveModeReport.UNRELATED, DriveModeReport.decode(unrelated));
+        }
+        for (int length = 0; length < frame.length; length++) {
+            assertEquals(length < 6 ? DriveModeReport.UNRELATED : DriveModeReport.UNKNOWN,
+                    DriveModeReport.decode(java.util.Arrays.copyOf(frame, length)));
+        }
     }
 
     @Test

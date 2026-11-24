@@ -117,20 +117,8 @@ public abstract class BaseDeviceMonitor<T> {
      * Mark this monitor as unavailable and schedule retry.
      */
     protected void markUnavailable() {
-        markUnavailable(true);
-    }
-
-    /**
-     * Mark this monitor as unavailable, optionally scheduling a retry.
-     */
-    protected void markUnavailable(boolean retry) {
         isAvailable.set(false);
-        if (retry) {
-            scheduleRetry();
-        } else {
-            cancelRetries();
-            log("Unavailable (retry disabled for permanent failure condition)");
-        }
+        scheduleRetry();
     }
     
     /**

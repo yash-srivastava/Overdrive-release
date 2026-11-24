@@ -140,4 +140,36 @@ public class BsNativeLayerSizeParseTest {
         assertEquals(3, display.displayId);
         assertEquals(3, display.layerStack);
     }
+
+    @Test
+    public void aaosMirrorUsesTheActiveExternalPortAndItsReportedStack() {
+        String port = "mBaseDisplayInfo=DisplayInfo{\"HDMI 屏幕\", displayId 1, FLAG_PRESENTATION, "
+                + "real 1920 x 720, state ON, type EXTERNAL, uniqueId \"local:3\", layerStack 7}";
+        String builtIn = port.replace("displayId 1", "displayId 0").replace("EXTERNAL", "INTERNAL");
+        BsNativeLayer.FissionDisplay target = BsNativeLayer.parseAaosHdmiMirrorDisplay(builtIn + "\n" + port, 1);
+        assertEquals(1, target.displayId);
+        assertEquals(7, target.layerStack);
+        assertEquals(1920, target.width);
+        assertEquals(720, target.height);
+        assertEquals(-1, BsNativeLayer.parseAaosHdmiMirrorDisplay(port.replace("local:3", "local:5"), 1).displayId);
+        assertEquals(-1, BsNativeLayer.parseAaosHdmiMirrorDisplay(port.replace("EXTERNAL", "INTERNAL"), 1).displayId);
+        assertEquals(-1, BsNativeLayer.parseAaosHdmiMirrorDisplay(port, 0).displayId);
+        assertEquals(-1, BsNativeLayer.parseAaosHdmiMirrorDisplay(port + "\n"
+                + port.replace("mBase", "mOverride").replace("state ON", "state OFF"), 1).displayId);
+    }
+
+    @Test
+    public void factoryMiniMapPreviewUsesOnlyTheSelectedSharedMap() {
+        String mini = "mBaseDisplayInfo=DisplayInfo{\"shared_fission_bg_XDJAScreenProjection_1\", "
+                + "displayId 4, real 1920 x 720, layerStack 5, state ON}";
+        String override = mini.replace("mBase", "mOverride").replace("x 720", "x 660");
+        String plain = mini.replace("shared_fission_bg_XDJAScreenProjection_1", "fission_bg_XDJAScreenProjection")
+                .replace("displayId 4", "displayId 2");
+        String dump = plain + "\n" + mini + "\n" + override;
+        BsNativeLayer.FissionDisplay target = BsNativeLayer.parseDiLink5MirrorDisplay(dump, 4, true);
+        assertEquals(5, target.layerStack);
+        assertEquals(660, target.height);
+        assertEquals(-1, BsNativeLayer.parseDiLink5MirrorDisplay(dump, 2, true).displayId);
+        assertEquals(-1, BsNativeLayer.parseDiLink5MirrorDisplay(dump.replace("x 660", "x 1"), 4, true).displayId);
+    }
 }

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="trip_briefing_greeting_morning">Добро јутро.</string>
+    <string name="trip_briefing_greeting_afternoon">Добар дан.</string>
+    <string name="trip_briefing_greeting_evening">Добро вече.</string>
+    <string name="trip_briefing_heading_home">Идете кући?</string>
+    <string name="trip_briefing_heading_work">Идете на посао?</string>
+    <string name="trip_briefing_heading_place">Идете до %1$s?</string>
+    <string name="trip_briefing_extra_range">Домет је на граници: преостало је %1$s за вожњу од %2$s.</string>
+    <string name="trip_briefing_extra_rain">Киша је вероватна око %1$s.</string>
+    <string name="trip_briefing_question">Желите упутства за пут?</string>
+    <string name="trip_briefing_distance_km">%1$d km</string>
+    <string name="trip_briefing_distance_mi">%1$d mi</string>
+    <string name="trip_briefing_said_home">кућа</string>
+    <string name="trip_briefing_said_work">посао</string>
+    <string name="trip_briefing_title_home">Кућа</string>
+    <string name="trip_briefing_title_work">Посао</string>
+    <string name="trip_briefing_title_unnamed">Ваше уобичајено стајалиште</string>
+    <string name="trip_briefing_name_place">Дајте назив овом месту</string>
+    <string name="trip_briefing_no">Не</string>
+    <string name="trip_briefing_go_failed">Навигација није покренута. Отворите мапу да покренете навигацију.</string>
+    <string name="trip_briefing_app_car">Навигација возила</string>
+    <plurals name="trip_briefing_duration">
+        <item quantity="one">Приближно %1$d минут.</item>
+        <item quantity="few">Приближно %1$d минута.</item>
+        <item quantity="other">Приближно %1$d минута.</item>
+    </plurals>
+    <plurals name="trip_briefing_extra_hazards">
+        <item quantity="one">%1$d нова опасност на путу.</item>
+        <item quantity="few">%1$d нове опасности на путу.</item>
+        <item quantity="other">%1$d нових опасности на путу.</item>
+    </plurals>
+</resources>

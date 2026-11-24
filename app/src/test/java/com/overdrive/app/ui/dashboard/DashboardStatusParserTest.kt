@@ -54,6 +54,18 @@ class DashboardStatusParserTest {
     }
 
     @Test
+    fun parsesSharedRangePriorityAndDefaultsToPersonalized() {
+        val base = """{"status":"ok","soc":{"percent":70},"range":{"totalRangeKm":378}}"""
+        val default = DashboardStatusParser.parse(base) as DashboardStatusResult.Available
+        assertTrue(default.snapshot.personalizedRangeFirst)
+        val vehicleFirst = DashboardStatusParser.parse(
+            """{"status":"ok","soc":{"percent":70},"range":{"totalRangeKm":378},"personalizedRangeFirst":false}"""
+        ) as DashboardStatusResult.Available
+        assertFalse(vehicleFirst.snapshot.personalizedRangeFirst)
+        assertEquals(378, vehicleFirst.snapshot.range?.value)
+    }
+
+    @Test
     fun personalizedRangeHeadlinesWhenTheEstimatorHasData() {
         val result = DashboardStatusParser.parse(
             """

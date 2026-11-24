@@ -68,6 +68,7 @@ public final class VehicleCloudSnapshot {
 
     /** Traction-battery preconditioning: 0=off, >0=heating, SENTINEL when not reported. */
     public final int batteryHeatState;
+    public final long batteryHeatObservedAtMs;
 
     // ── Temperature (mergeable) ─────────────────────────────────────────
     public final double insideTempC;         // tempInCar
@@ -120,6 +121,7 @@ public final class VehicleCloudSnapshot {
         this.copilotSeatVentilationState = b.copilotSeatVentilationState;
         this.steeringWheelHeatState = b.steeringWheelHeatState;
         this.batteryHeatState = b.batteryHeatState;
+        this.batteryHeatObservedAtMs = b.batteryHeatObservedAtMs;
         this.insideTempC = b.insideTempC;
         this.outsideTempC = b.outsideTempC;
         this.pm25Inside = b.pm25Inside;
@@ -371,7 +373,6 @@ public final class VehicleCloudSnapshot {
         // Absent must NOT collapse onto -1 here — that is this field's "on".
         b.steeringWheelHeatState = cloudStatusIntOrDefault(WHEEL_HEAT_UNKNOWN, vi, hvac,
                 "steeringWheelHeatState", "stearingWheelHeatState");
-        b.batteryHeatState = cloudStatusInt(vi, hvac, "batteryHeatState");
 
         // Temperature — from vehicleInfo or HVAC
         b.insideTempC = vi.optDouble("tempInCar", SENTINEL_TEMP);
@@ -419,11 +420,28 @@ public final class VehicleCloudSnapshot {
         b.receivedAt = System.currentTimeMillis();
         b.vehicleInfoTimestamp = normalizeSourceTimestampMs(
                 vi.optLong("time", 0L), b.receivedAt);
+        readBatteryHeat(b, vi, true);
+        readBatteryHeat(b, hvac, false);
         b.insideTempObservedAt = b.vehicleInfoTimestamp > 0L
                 ? Math.min(b.vehicleInfoTimestamp, b.receivedAt)
                 : b.receivedAt;
 
         return b;
+    }
+
+    private static void readBatteryHeat(Builder b, JSONObject payload, boolean primary) {
+        if (payload == null) return;
+        long sourceTime = normalizeSourceTimestampMs(payload.optLong("time", 0L), b.receivedAt);
+        // A companion with no timestamp can be cached. Only the incoming vehicle report
+        // can use receipt time when its source omitted the time altogether.
+        if (sourceTime == 0L && (!primary || payload.has("time") && !payload.isNull("time"))) return;
+        int heat = cloudStatusInt(payload, null, "batteryHeatState");
+        if (heat < 0) return;
+        long observedAt = sourceTime > 0L ? sourceTime : b.receivedAt;
+        if (observedAt > b.batteryHeatObservedAtMs) {
+            b.batteryHeatState = heat;
+            b.batteryHeatObservedAtMs = observedAt;
+        }
     }
 
     private static long normalizeSourceTimestampMs(long rawTimestamp, long receivedAtMs) {
@@ -499,6 +517,7 @@ public final class VehicleCloudSnapshot {
         int copilotSeatVentilationState = SENTINEL_INT;
         int steeringWheelHeatState = WHEEL_HEAT_UNKNOWN;
         int batteryHeatState = SENTINEL_INT;
+        long batteryHeatObservedAtMs;
 
         double insideTempC = SENTINEL_TEMP;
         double outsideTempC = Double.NaN;

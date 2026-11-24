@@ -13,6 +13,7 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.IntSupplier;
 
 /**
  * Universal BYD Data Collector — singleton that initializes ALL BYD device types,
@@ -43,6 +44,9 @@ public class BydDataCollector {
     private static final Object lock = new Object();
 
     private final AtomicReference<BydVehicleData> snapshot = new AtomicReference<>();
+    private final ClusterWarningMonitor clusterWarnings =
+            new ClusterWarningMonitor(this::readClusterWarnings, SystemClock::elapsedRealtime);
+    private volatile boolean clusterWarningFirmwareUnsupported;
     /**
      * Serializes BMS/gun callback publication against a poll's final snapshot write. The version
      * lets a poll preserve a newer edge instead of overwriting FINISHED/DISCONNECTED with the state
@@ -91,6 +95,10 @@ public class BydDataCollector {
             new java.util.concurrent.atomic.AtomicLong();
     private final ChargingObservationOrder chargingObservationOrder =
             new ChargingObservationOrder();
+    // Written under chargingEdgePublishLock. A callback may land between a poll read and publication.
+    private int batteryPreheatState = BydVehicleData.UNAVAILABLE;
+    private long batteryPreheatObservedAtMs;
+    private long batteryPreheatSequence;
     /** Guarded by {@link #chargingEdgePublishLock}. */
     private long lastPublishedChargingPollGeneration = 0L;
     private Context context;
@@ -1639,9 +1647,8 @@ public class BydDataCollector {
                 return true;
             case "occupantDriver":
                 if (value != 1) return false;
-                com.overdrive.app.automation.Automations.update(
-                        com.overdrive.app.automation.condition.BydEvent.OCCUPANT_DRIVER,
-                        "occupied");
+                com.overdrive.app.automation.condition.BydEvent
+                        .publishDriverOccupancy(value);
                 return true;
             case com.overdrive.app.byd.dilink5.Dilink5RadarBridge.EVENT:
                 return com.overdrive.app.byd.dilink5.Dilink5RadarBridge.accept(
@@ -2651,8 +2658,14 @@ public class BydDataCollector {
             if (pollGeneration < lastPublishedChargingPollGeneration) {
                 return snapshot.get(); // a newer concurrent poll already won
             }
-            collected = withSettlingReadingLight(collected);
+            collected = withCurrentDriveMode(withSettlingReadingLight(collected));
             BydVehicleData previous = snapshot.get();
+            if (collected.batteryPreheatState != batteryPreheatState
+                    || collected.batteryPreheatObservedAtMs != batteryPreheatObservedAtMs) {
+                collected = collected.toBuilder()
+                        .batteryPreheat(batteryPreheatState, batteryPreheatObservedAtMs)
+                        .buildPreservingTimestamp();
+            }
             BydVehicleData merged = preserveNewerChargingEdges(
                     collected, previous,
                     observed.bmsObservation, chargingObservationOrder.latestBms(),
@@ -2757,7 +2770,7 @@ public class BydDataCollector {
         if (candidate == null) return null;
         if (isDiLink5DaemonProcess()) return snapshot.get();
         synchronized (chargingEdgePublishLock) {
-            candidate = withSettlingReadingLight(candidate);
+            candidate = withCurrentDriveMode(withSettlingReadingLight(candidate));
             BydVehicleData latest = snapshot.get();
             if (latest == null) {
                 snapshot.set(candidate);
@@ -2768,6 +2781,7 @@ public class BydDataCollector {
             // the current snapshot; comparing only the primary power fields allowed a stale callback
             // candidate to roll back mode, percent, remaining time, or charger/wireless state.
             candidate = candidate.toBuilder()
+                    .batteryPreheat(batteryPreheatState, batteryPreheatObservedAtMs)
                     .chargingState(latest.chargingState)
                     .chargingStateAtMs(latest.chargingStateAtMs)
                     .chargingGunState(latest.chargingGunState)
@@ -2885,6 +2899,8 @@ public class BydDataCollector {
         diLink5BridgeConsumer = bridgeConsumer;
         diLink5ProducerActive = isDiLink5ProducerProcess();
         this.context = context;
+        closeDriveModeMonitor();
+        if (!isDiLink5Vehicle()) driveModeReportMonitor = new DriveModeReportMonitor(context);
         if (bridgeConsumer) startDiLink5CarSvcChargingPoll();
         if (isDiLink5Vehicle()) {
             resetDiLink5TyreFreshness();
@@ -2996,7 +3012,6 @@ public class BydDataCollector {
             lastEnergyModeEvent = -1;
             lastEnergyOperationModeEvent = -1;
             lastEnergyRoadSurfaceEvent = -1;
-            lastNormalEcoDriveMode = -1;
             lastModeDiagnosticState = null;
         }
         Object previousRadarDevice = radarDevice;
@@ -3169,6 +3184,15 @@ public class BydDataCollector {
             synchronized (chargingEdgePublishLock) {
                 synchronized (passengerOccupancyPublishLock) {
                     initialized = false;
+                    batteryPreheatState = BydVehicleData.UNAVAILABLE;
+                    batteryPreheatObservedAtMs = 0L;
+                    BydVehicleData current = snapshot.get();
+                    if (current != null && current.batteryPreheatState != BydVehicleData.UNAVAILABLE) {
+                        snapshot.set(current.toBuilder().batteryPreheat(BydVehicleData.UNAVAILABLE, 0L)
+                                .buildPreservingTimestamp());
+                    }
+                    clusterWarnings.reset();
+                    clearClusterCrossTraffic();
                     callbackLifecycleGeneration.incrementAndGet();
                     chargingObservationOrder.discardCounterCallbacks();
                     clearDevicePowerCallbackOriginLocked();
@@ -3962,6 +3986,7 @@ public class BydDataCollector {
     public static final int RCTA_RIGHT_BIT = 0x8;
     public static final int DOW_LEFT_BIT = 0x10;
     public static final int DOW_RIGHT_BIT = 0x20;
+    public static final int FORWARD_COLLISION_BIT = 0x400;
     /** A vehicle in a blind spot, side not reported: the BSD state alone (DiLink 3.0, where the side alarms read unavailable). */
     public static final int BS_ANY_BIT = 0x40;
 
@@ -4272,6 +4297,22 @@ public class BydDataCollector {
         }
         Object dev = engineDevice;
         if (dev == null || !accIsOn || isPhevPublic()) return Double.NaN;
+        return readEnginePowerNowKw(dev);
+    }
+
+    /** A DiLink 3/4 plug-in hybrid: its ENGINE_POWER is signed drive power (+ drawing, − regen), as on a BEV. */
+    public boolean isLegacyHybridPublic() {
+        return !isDiLink5Vehicle() && isPhevPublic();
+    }
+
+    /** {@link #isLegacyHybridPublic() A DiLink 3/4 plug-in hybrid}'s ENGINE_POWER read live, kW, or NaN. */
+    public double readHybridDrivePowerNowKw() {
+        Object dev = engineDevice;
+        if (dev == null || !accIsOn || !isLegacyHybridPublic()) return Double.NaN;
+        return readEnginePowerNowKw(dev);
+    }
+
+    private double readEnginePowerNowKw(Object dev) {
         try {
             if (drivePowerPath != 2) {
                 Object val = BydDeviceHelper.callGet(dev, BydFeatureIds.ENGINE_POWER, Double.class);
@@ -4316,7 +4357,10 @@ public class BydDataCollector {
             // reports those, so polling them is pure duplicate HAL traffic. Per id,
             // so an id that never fires an event keeps being polled.
             if (bsEventProvenIds.contains(id)) continue;
+            java.util.concurrent.atomic.AtomicLong sideLevel = clusterCrossLevelFor(id);
+            long sampledAt = sideLevel != null ? SystemClock.elapsedRealtime() : 0;
             int raw = readAdasAlertRaw(device, id);
+            if (sideLevel != null) observeClusterCrossTraffic(sideLevel, raw, sampledAt);
             // Unreadable or a sentinel this tick — leave the baseline alone. Feeding a sentinel in
             // would either fake an increment or park the baseline at a value no real count reaches.
             if (raw == BydVehicleData.UNAVAILABLE) continue;
@@ -4795,6 +4839,290 @@ public class BydDataCollector {
                 ? value : BydVehicleData.UNAVAILABLE;
     }
 
+    // ── Custom Layouts cluster reads ─────────────────────────────────────────
+    // Called only by CustomLayoutsFeed while it runs. The legacy getters below read UNAVAILABLE
+    // on DiLink 5, which has no equivalent; values outside each documented domain are sentinels.
+
+    /** Front ({@code rear=false}) or rear fog lamp: 1 on, 0 off, or UNAVAILABLE. Same read as collectLight. */
+    public int readFogNow(boolean rear) {
+        int knownBit = rear
+                ? BydVehicleData.LIGHT_KNOWN_REAR_FOG
+                : BydVehicleData.LIGHT_KNOWN_FRONT_FOG;
+        if (!isDiLink5BridgeConsumer() && lightDevice != null) {
+            try {
+                int state = getLightStatus(rear ? LIGHT_TYPE_REAR_FOG : LIGHT_TYPE_FRONT_FOG);
+                if (state != BydVehicleData.UNAVAILABLE) return state;
+            } catch (Throwable t) { logger.debug("readFogNow error: " + t.getMessage()); }
+        }
+        BydVehicleData bridge = diLink5AutomationFallback();
+        if (!bridgeHasDevice(bridge, "Light") || !bridge.isLightKnown(knownBit)) {
+            return BydVehicleData.UNAVAILABLE;
+        }
+        return (rear ? bridge.rearFog : bridge.frontFog) ? 1 : 0;
+    }
+
+    /** Raw stop-lamp state, or UNAVAILABLE. DiLink 3 reads 3 with the lamp off; the lit value is unverified. */
+    public int readStopLightRawNow() {
+        return readLegacyInt(lightDevice, "getStopLightState", 0, 15);
+    }
+
+    /** Reversing lamp: 1 lit, 0 off (raw 1 on / 2 off, like the sibling lamp getters), or UNAVAILABLE. */
+    public int readReverseLightNow() {
+        int raw = readLegacyInt(lightDevice, "getReversingLightState", 0, 15);
+        return raw == 1 ? 1 : raw == 2 ? 0 : BydVehicleData.UNAVAILABLE;
+    }
+
+    /** Light sensor level per the SDK: 1 brightest (over 230 lux) … 5 darkest (under 80 lux), or UNAVAILABLE. */
+    public int readLightIntensityNow() {
+        return readLegacyInt(sensorDevice, "getLightIntensity", 1, 5);
+    }
+
+    /** ACC set-speed register (km/h), or UNAVAILABLE. Answers on DiLink 3; its live meaning is unverified. */
+    public int readAccSetSpeedNow() {
+        return readLegacyInt(instrumentDevice, "getAccCruisingSpeedValue", 0, 250);
+    }
+
+    /** ACC following-distance register, or UNAVAILABLE. Answers on DiLink 3; its live meaning is unverified. */
+    public int readAccGapNow() {
+        return readLegacyInt(instrumentDevice, "get2in1AccDistance", 0, 15);
+    }
+
+    /** Selected following interval as used by the installed cluster, or zero without a valid selection. */
+    public int readClusterAccGapLevelNow() {
+        if (!accIsOn || isDiLink5Vehicle() || isDiLink5BridgeConsumer()) return 0;
+        return ClusterAdasFirmware.readGap(clusterAdasDevice(), bodyworkDevice, instrumentDevice,
+                this::readPowerLevelNow);
+    }
+
+    /** ACC cluster lamp: 1 lit, 0 off, or UNAVAILABLE. */
+    public int readAccLampNow() {
+        return normalizeInstrumentLamp(readLegacyInt(instrumentDevice, "getACCIndicateLightState", 0, 15));
+    }
+
+    /** Electric parking brake lamp: 1 lit, 0 off, or UNAVAILABLE (DiLink 3 reads 1 while applied). */
+    public int readEpbLampNow() {
+        return normalizeInstrumentLamp(readLegacyInt(instrumentDevice, "getELECParkingState", 0, 15));
+    }
+
+    /** OK / READY lamp: 1 lit, 0 off, or UNAVAILABLE. */
+    public int readOkLampNow() {
+        return normalizeInstrumentLamp(readLegacyInt(instrumentDevice, "getOKIndicatorState", 0, 15));
+    }
+
+    /** Raw Auto Hold state, or UNAVAILABLE. DiLink 3 reads 0 in P; the other values are unverified. */
+    public int readAvhStateRawNow() {
+        if (isDiLink5Vehicle() || isDiLink5BridgeConsumer()) return BydVehicleData.UNAVAILABLE;
+        return readLegacyInt(clusterAdasDevice(), "getAVHState", 0, 15);
+    }
+
+    /** {@link #getLaneAssistMode} (0 off … 3) for a periodic caller, or -1; legacy cars only. */
+    public int readLaneAssistModeNow() {
+        if (isDiLink5Vehicle() || isDiLink5BridgeConsumer() || clusterAdasDevice() == null) return -1;
+        return getLaneAssistMode();
+    }
+
+    private volatile long clusterAdasRetryAtMs;
+    // The existing warning poll and registered callback already deliver these two per-side
+    // inputs. The display observes the latest exact level without a second SDK registration/read.
+    private static final class ClusterCrossLevels {
+        final java.util.concurrent.atomic.AtomicLong left = new java.util.concurrent.atomic.AtomicLong();
+        final java.util.concurrent.atomic.AtomicLong right = new java.util.concurrent.atomic.AtomicLong();
+    }
+    private volatile ClusterCrossLevels clusterCrossLevels = new ClusterCrossLevels();
+    private volatile boolean clusterReverseRequested;
+
+    private void clearClusterCrossTraffic() {
+        // An in-flight SDK read retains its old sample slots across stop, ignition and gear changes.
+        clusterCrossLevels = new ClusterCrossLevels();
+    }
+
+    private java.util.concurrent.atomic.AtomicLong clusterCrossLevelFor(int id) {
+        ClusterCrossLevels levels = clusterCrossLevels;
+        if (id == BydFeatureIds.ADAS_RCTA_WARNING_LEFT) return levels.left;
+        if (id == BydFeatureIds.ADAS_RCTA_WARNING_RIGHT) return levels.right;
+        return null;
+    }
+
+    private static void observeClusterCrossTraffic(java.util.concurrent.atomic.AtomicLong side, int raw, long sampledAt) {
+        if (sampledAt == 0) return;
+        // A clear at the same millisecond wins a tie with a positive.
+        long observed = (sampledAt << 1) | (raw == 1 ? 0 : 1);
+        side.accumulateAndGet(observed, Math::max);
+    }
+
+    private int latestClusterCrossTraffic(int id) {
+        long observed = clusterCrossLevelFor(id).get();
+        return observed != 0 && (observed & 1) == 0 && SystemClock.elapsedRealtime() - (observed >>> 1) < 450 ? 1 : 0;
+    }
+
+    /** The Seal's matched directional display uses its fresh side levels. Resolve the hash off-thread. */
+    public boolean shouldUseLegacyClusterBlindSpotEvents() {
+        return isDiLink5Vehicle() || ClusterAdasFirmware.isKnownNonmatch();
+    }
+
+    /** Positive factory warning bits for the current gear and standstill state. No I/O on the caller. */
+    public int readClusterWarningLevelsNow(boolean forward, boolean reverse, boolean stopped) {
+        int eligibility = 0;
+        if (initialized && !clusterWarningFirmwareUnsupported && !isDiLink5Vehicle()) {
+            if (accIsOn && forward) eligibility |= ClusterWarningMonitor.FORWARD;
+            if (accIsOn && reverse) eligibility |= ClusterWarningMonitor.REVERSE;
+            if (stopped) eligibility |= ClusterWarningMonitor.STOPPED;
+        }
+        boolean reversing = (eligibility & ClusterWarningMonitor.REVERSE) != 0;
+        if (reversing != clusterReverseRequested) {
+            clearClusterCrossTraffic();
+            clusterReverseRequested = reversing;
+        }
+        int warnings = clusterWarnings.current(eligibility);
+        // An expired observation or a clear arriving after the worker's last read wins immediately.
+        if ((warnings & RCTA_LEFT_BIT) != 0 && latestClusterCrossTraffic(BydFeatureIds.ADAS_RCTA_WARNING_LEFT) == 0) {
+            warnings &= ~RCTA_LEFT_BIT;
+        }
+        if ((warnings & RCTA_RIGHT_BIT) != 0 && latestClusterCrossTraffic(BydFeatureIds.ADAS_RCTA_WARNING_RIGHT) == 0) {
+            warnings &= ~RCTA_RIGHT_BIT;
+        }
+        return warnings;
+    }
+
+    private int readClusterWarnings(int eligibility) {
+        if (!initialized) return 0;
+        if (!ClusterAdasFirmware.matchesInstalledRenderer()) {
+            clusterWarningFirmwareUnsupported = true;
+            return 0;
+        }
+        Object device = clusterAdasDevice();
+        if (device == null) return 0;
+        int flags = 0;
+        if (accIsOn && (eligibility & ClusterWarningMonitor.FORWARD) != 0) {
+            flags = ClusterAdasFirmware.readForwardWarning(device);
+        }
+        boolean reverse = accIsOn && (eligibility & ClusterWarningMonitor.REVERSE) != 0;
+        boolean stopped = (eligibility & ClusterWarningMonitor.STOPPED) != 0;
+        return flags | ClusterAdasFirmware.readSideWarnings(device, reverse, stopped,
+                this::readPowerLevelNow, this::latestClusterCrossTraffic);
+    }
+
+    /** The ADAS handle, re-acquired at most every 30 s: ensureAdasDevice warns on every miss. */
+    private Object clusterAdasDevice() {
+        Object device = adasDevice;
+        if (device != null) return device;
+        long now = SystemClock.elapsedRealtime();
+        if (now < clusterAdasRetryAtMs) return null;
+        clusterAdasRetryAtMs = now + 30_000L;
+        return ensureAdasDevice();
+    }
+
+    /** Front wiper speed: 0 stopped, 2 slow, 3 fast (Setting 1/2/3); 2 when only "active" is known. */
+    public int readWiperSpeedNow() {
+        int settingSpeed = BydVehicleData.UNAVAILABLE;
+        int wiperLevel = BydVehicleData.UNAVAILABLE;
+        if (!isDiLink5BridgeConsumer()) {
+            if (settingDevice != null) {
+                try {
+                    settingSpeed = BydDeviceHelper.getIntValue(BydDeviceHelper.callGet(
+                            settingDevice, BydFeatureIds.SETTING_RAIN_WIPER_SPEED, Integer.class));
+                } catch (Throwable t) { logger.debug("readWiperSpeedNow setting error: " + t.getMessage()); }
+            }
+            if (settingSpeed == 2 || settingSpeed == 3) return settingSpeed;
+            if (wiperDevice != null) {
+                try {
+                    wiperLevel = BydDeviceHelper.getIntValue(BydDeviceHelper.callGet(
+                            wiperDevice, BydFeatureIds.WIPER_FRONT_LEVEL, Integer.class));
+                } catch (Throwable t) { logger.debug("readWiperSpeedNow wiper error: " + t.getMessage()); }
+            }
+            if (wiperLevel == 8 || wiperLevel == 9) return 2;
+            if (settingSpeed == 1 || (wiperLevel >= 0 && wiperLevel <= 9)) return 0;
+        }
+        BydVehicleData bridge = diLink5AutomationFallback();
+        int value = bridge != null ? bridge.wiperState : BydVehicleData.UNAVAILABLE;
+        return value == 1 ? 2 : value == 0 ? 0 : BydVehicleData.UNAVAILABLE;
+    }
+
+    /** Both directional radar registers answered. Individual registers can be unavailable on some trims. */
+    public static final int BS_SIDES_KNOWN_BIT = 0x80;
+    public static final int BS_LEFT_KNOWN_BIT = 0x100;
+    public static final int BS_RIGHT_KNOWN_BIT = 0x200;
+    public static final int BS_AGGREGATE_KNOWN_BIT = 0x800;
+
+    // Only the feed's fast thread reads blind-spot levels.
+    private int clusterSideAlarmMisses;
+    private long clusterSideAlarmsRetryAtMs;
+
+    /**
+     * Blind-spot LEVEL registers only, packed like {@link #readAdasWarningsNow}, or -1 unavailable. Never touches the
+     * counter baselines, so it cannot consume an alert another poller is waiting for. Side alarms first, else the
+     * BSD state (DiLink 3: 2 = a vehicle in a blind spot, side unknown).
+     */
+    public int readBlindSpotLevelsNow() {
+        if (isDiLink5Vehicle() || isDiLink5BridgeConsumer() || !accIsOn) return -1;
+        Object device = clusterAdasDevice();
+        if (device == null) return -1;
+        try {
+            // Side alarms that keep answering sentinels (DiLink 3) are retried once a minute, not every read.
+            long nowMs = SystemClock.elapsedRealtime();
+            int left = BydVehicleData.UNAVAILABLE;
+            int right = BydVehicleData.UNAVAILABLE;
+            if (nowMs >= clusterSideAlarmsRetryAtMs) {
+                left = readAdasAlertRaw(device, BydFeatureIds.ADAS_FL_BLIND_SPOT_ALARM);
+                right = readAdasAlertRaw(device, BydFeatureIds.ADAS_FR_BLIND_SPOT_ALARM);
+                if (left != BydVehicleData.UNAVAILABLE || right != BydVehicleData.UNAVAILABLE) {
+                    clusterSideAlarmMisses = 0;
+                } else if (++clusterSideAlarmMisses >= 20) {
+                    clusterSideAlarmMisses = 0;
+                    clusterSideAlarmsRetryAtMs = nowMs + 60_000L;
+                }
+            }
+            return packClusterBlindSpotLevels(left, right, () -> readAdasAlertRaw(device, BydFeatureIds.ADAS_BSD_STATE));
+        } catch (Throwable t) {
+            logger.debug("readBlindSpotLevelsNow error: " + t.getMessage());
+            return -1;
+        }
+    }
+
+    static int packClusterBlindSpotLevels(int left, int right, IntSupplier aggregate) {
+        int packed = 0;
+        if (left != BydVehicleData.UNAVAILABLE) packed |= BS_LEFT_KNOWN_BIT;
+        if (right != BydVehicleData.UNAVAILABLE) packed |= BS_RIGHT_KNOWN_BIT;
+        if (left > 0) packed |= BS_LEFT_BIT;
+        if (right > 0) packed |= BS_RIGHT_BIT;
+        if (left != BydVehicleData.UNAVAILABLE && right != BydVehicleData.UNAVAILABLE) return packed | BS_SIDES_KNOWN_BIT;
+        if ((packed & (BS_LEFT_BIT | BS_RIGHT_BIT)) != 0) return packed;
+
+        // An idle side cannot rule out an aggregate alert. Keep the other side unknown even if BSD is active.
+        switch (aggregate.getAsInt()) {
+            case 0: // Off
+            case 1: // Enabled, idle
+                return packed | BS_AGGREGATE_KNOWN_BIT;
+            case 2:
+                return packed | BS_AGGREGATE_KNOWN_BIT | BS_ANY_BIT;
+            default:
+                return packed == 0 ? -1 : packed;
+        }
+    }
+
+    /** Instrument lamp registers read 1 lit, 2 off and 0 when not shown (DiLink 3 dump, 2026-11-17). */
+    static int normalizeInstrumentLamp(int raw) {
+        if (raw == 1) return 1;
+        if (raw == 0 || raw == 2) return 0;
+        return BydVehicleData.UNAVAILABLE;
+    }
+
+    private int readLegacyInt(Object device, String getter, int min, int max) {
+        if (device == null || isDiLink5Vehicle() || isDiLink5BridgeConsumer()) {
+            return BydVehicleData.UNAVAILABLE;
+        }
+        try {
+            Object value = BydDeviceHelper.callGetter(device, getter);
+            if (value instanceof Number) {
+                int raw = ((Number) value).intValue();
+                if (raw >= min && raw <= max) return raw;
+            }
+        } catch (Throwable t) {
+            logger.debug(getter + " error: " + t.getMessage());
+        }
+        return BydVehicleData.UNAVAILABLE;
+    }
+
     static int normalizeDrlState(int raw) {
         if (raw == 1) return 1;
         if (raw == 2) return 0;
@@ -4861,6 +5189,7 @@ public class BydDataCollector {
         deactivateCallbackPublication();
         diLink5ProducerActive = false;
         diLink5BridgeConsumer = false;
+        closeDriveModeMonitor();
         if (resetDiLink5State) {
             diLink5BridgeReceivedAtElapsedMs = 0L;
             diLink5DynamicsObservedAtElapsedMs = 0L;
@@ -5327,6 +5656,10 @@ public class BydDataCollector {
         this.accIsOn = isOn;
 
         if (wasOn != isOn) {
+            clearDriveModeReadings();
+            updateDriveModeMonitorPower();
+            clusterWarnings.reset();
+            clearClusterCrossTraffic();
             if (isDiLink5ProducerActive()) {
                 // Radar states never carry across an ignition cycle.
                 com.overdrive.app.byd.dilink5.Dilink5RadarBridge.resetProducer();
@@ -5348,9 +5681,10 @@ public class BydDataCollector {
                                     !Double.isNaN(current.enginePowerKw);
                             BydVehicleData published = isDiLink5ProducerActive()
                                     ? clearStaleDiLink5DrivingFields(current) : current;
-                            if (engineInvalidated) {
+                            if (engineInvalidated || published.operationMode != BydVehicleData.UNAVAILABLE) {
                                 published = published.toBuilder()
-                                        .enginePowerKw(Double.NaN).build();
+                                        .enginePowerKw(Double.NaN)
+                                        .operationMode(BydVehicleData.UNAVAILABLE).build();
                             }
                             if (published != current) {
                                 snapshot.set(published);
@@ -5642,12 +5976,15 @@ public class BydDataCollector {
                           com.overdrive.app.automation.condition.BydEvent.OCCUPANT_DRIVER)) {
             collectSafetyBelt(b);
         }
-        // Drive mode + powertrain (EV/HEV) — energy/drive-config device.
+        updateDriveModeMonitorPower();
+        // Mode feeds dashboards and MQTT even when no automation references it.
         if (!(diLink5FastRefresh && accIsOn)
                 && (isDiLink5ProducerActive()
                     || anyReferenced(com.overdrive.app.automation.condition.BydEvent.DRIVE_MODE,
                           com.overdrive.app.automation.condition.BydEvent.POWERTRAIN_MODE))) {
             collectEnergy(b);
+        } else if (accIsOn && !diLink5FastRefresh) {
+            getDriveConfigMode();
         }
         // Lights (hazard / high-beam / low-beam) + auto-lights — light device. The light
         // callback refreshes only DRL, so these need the poll. (DRL stays callback-fed.)
@@ -5815,6 +6152,7 @@ public class BydDataCollector {
         collectTyre(b);
         collectDoorLock(b);
         collectSensor(b);
+        updateDriveModeMonitorPower();
         collectEnergy(b);
         collectRadar(b);
 
@@ -5916,6 +6254,7 @@ public class BydDataCollector {
                 connectionObserved, typeObserved,
                 bmsObserved, observed.observedBmsState,
                 powerObserved, observed.powerIsCharging);
+        updateGunOutFlowOverrideLocked(built, bmsObserved, observed.observedBmsState);
 
         // Feed the ring-buffer power estimator (FALLBACK power source for models
         // that report no direct/external charging power). It accumulates ONLY
@@ -8319,6 +8658,10 @@ public class BydDataCollector {
             // seed. Callbacks cannot interleave until both hardware observations are complete.
             BydVehicleData latest = snapshot.get();
             refreshChargingLifecycleContext(b, latest);
+            long observation = chargingObservationOrder.begin();
+            long readStartedAtMs = System.currentTimeMillis();
+            updateBatteryPreheatLocked(readBatteryPreheatState(), readStartedAtMs, observation);
+            b.batteryPreheat(batteryPreheatState, batteryPreheatObservedAtMs);
             ChargingPollEvidence pollEvidence = collectCharging(b);
             boolean terminalRateBarrier = publishTerminalPollFence(b, pollEvidence);
             return new ChargingObservationVersions(
@@ -8509,6 +8852,51 @@ public class BydDataCollector {
         }
     }
 
+    private int readBatteryPreheatState() {
+        if (chargingDevice == null) return BydVehicleData.UNAVAILABLE;
+        if (isDiLink5Vehicle()) {
+            // This adapter calls the body service directly and returns an error on disconnect.
+            // The device facade can return the same zero for disconnected and genuinely off.
+            Object adapter = BydDeviceHelper.acquireDiLink5CarAdapter(
+                    context, chargingDevice, "getChargingAdapterManager", "charging");
+            if (adapter != null) {
+                return BydDeviceHelper.getIntValue(
+                        BydDeviceHelper.callGetter(adapter, "getChargePreheatState"));
+            }
+            int state = BydDeviceHelper.getIntValue(
+                    BydDeviceHelper.callGetter(chargingDevice, "getChargePreheatState"));
+            return state == 1 || state == 2 ? state : BydVehicleData.UNAVAILABLE;
+        }
+        int statusId = BydFeatureIds.CHARGING_PREHEAT_STATUS;
+        if (!BydFeatureIds.isResolved(statusId)) return BydVehicleData.UNAVAILABLE;
+        int state = readPreheatFeature(chargingDevice, statusId);
+        if (state == 0) {
+            // A zero can also be the default on cars without the feature. The stock settings
+            // screen checks both the online report and the feature configuration on this path.
+            if (readPreheatFeature(bodyworkDevice, BydFeatureIds.BODYWORK_PREHEAT_REPORT_ONLINE) != 1
+                    || readPreheatFeature(chargingDevice,
+                            BydFeatureIds.CHARGING_PREHEAT_FUNCTION_CONFIG) != 0) {
+                return BydVehicleData.UNAVAILABLE;
+            }
+        }
+        return state;
+    }
+
+    private int readPreheatFeature(Object device, int featureId) {
+        if (device == null || !BydFeatureIds.isResolved(featureId)) return BydVehicleData.UNAVAILABLE;
+        int value = BydManagerChannel.getInt(context, device, featureId);
+        return BydVehicleData.isBatteryPreheatState(value)
+                ? value : BydDeviceHelper.readPublicIntFeature(device, featureId);
+    }
+
+    private void updateBatteryPreheatLocked(int state, long readAtMs, long sequence) {
+        if (sequence <= batteryPreheatSequence) return;
+        batteryPreheatSequence = sequence;
+        batteryPreheatState = BydVehicleData.isBatteryPreheatState(state)
+                ? state : BydVehicleData.UNAVAILABLE;
+        batteryPreheatObservedAtMs = batteryPreheatState == BydVehicleData.UNAVAILABLE ? 0L : readAtMs;
+    }
+
     private ChargingPollEvidence collectCharging(BydVehicleData.Builder b) {
         ChargingPollEvidence evidence = new ChargingPollEvidence();
         int observedChargingState = BydVehicleData.UNAVAILABLE;
@@ -8542,12 +8930,20 @@ public class BydDataCollector {
             if (gunState instanceof Number) {
                 int observedGun = ((Number) gunState).intValue();
                 if (isDiLink5Vehicle()) observedGun = diLink5GunStateFromSdk(observedGun);
-                if (observedGun >= 1 && observedGun <= 5) {
+                if (gunOutFlowOverride && observedGun >= 2 && observedGun <= 5) {
+                    endGunOutFlowOverrideLocked("gun read " + observedGun);
+                }
+                if (observedGun >= 1 && observedGun <= 5
+                        && !(observedGun == 1 && gunOutFlowOverride)) {
                     chargingObservationOrder.recordGunPoll(gunObservation);
                     b.chargingGunState(observedGun);
                     evidence.connectionObserved = true;
                     evidence.gunObservation = gunObservation;
                 }
+            }
+            // While pack inflow is proven, a gun-out level is published as unknown, not unplugged.
+            if (gunOutFlowOverride && b.chargingGunState == 1) {
+                b.chargingGunState(BydVehicleData.UNAVAILABLE);
             }
 
             Object charger = BydDeviceHelper.callGetter(
@@ -8982,16 +9378,6 @@ public class BydDataCollector {
             }
 
             if (instrumentDevice == null) return;
-            if (dilink5) {
-                Object sportMode =
-                        BydDeviceHelper.callGetter(instrumentDevice, "getSportModeState");
-                if (sportMode instanceof Number) {
-                    int mode = normalizeDiLink5DriveMode(
-                            ((Number) sportMode).intValue());
-                    if (mode != BydVehicleData.UNAVAILABLE) b.operationMode(mode);
-                }
-            }
-
             // External charging power. STORED RAW — no scaling, on either the listener or the polled
             // path. The old "above 50 means hectowatts, divide" heuristic is deleted: it rested on
             // asserted captures (221.7 for ~1.9 kW, 189.5 for ~1.8 kW) that exist nowhere in this repo
@@ -11240,7 +11626,8 @@ public class BydDataCollector {
 
     static int normalizeDiLink5DriveMode(int raw) {
         switch (raw) {
-            case 1: return 2; // Eco
+            // A binary Sport indicator and a four-mode indicator both use raw 1.
+            // Only their remaining values identify a particular mode unambiguously.
             case 2: return 3; // Sport
             case 3: return 1; // Normal
             case 4: return 4; // Snow
@@ -12484,6 +12871,16 @@ public class BydDataCollector {
     private final Object doorDriveSideLock = new Object();
     private volatile long doorDriveSideCachedAtMs;
     private volatile boolean doorDriveSideRhd = true;
+    // vehicle.frontDoorIds: "area" when the manager's LEFT_HAND_FRONT id reads event area 1 (the driver),
+    // "crossed" when it reads area 2. Learned from two matching looks while one front door is open.
+    static final String FRONT_DOOR_IDS_KEY = "frontDoorIds";
+    private volatile Boolean frontDoorIdsStored;
+    private volatile Boolean frontDoorIdsLearned;
+    private volatile long frontDoorObserveAtMs;
+    private final Object frontDoorVoteLock = new Object();
+    private int frontDoorVotes;
+    private boolean frontDoorVoteCrossed;
+    private long frontDoorVoteAtMs;
 
     /**
      * POLL-based door open/close fallback. The bodywork HAL delivers {@code onDoorStateChanged}
@@ -12518,7 +12915,11 @@ public class BydDataCollector {
         if (!isDiLink5ProducerActive()
                 && !com.overdrive.app.automation.condition.DoorEvent.shouldPoll()) return;
         boolean rightHandDrive = isRightHandDriveForDoorMapping();
-        for (int area = 1; area <= 7; area++) {
+        // When only driver occupancy needs the door lifecycle, sample just area 1. DiLink 5
+        // producer must still fill all seven bridge areas, regardless of automation rules.
+        int lastArea = diLink5 || com.overdrive.app.automation.condition.DoorEvent.hasDoorReferences()
+                ? 7 : BodyworkConstants.AREA_FRONT_DRIVER;
+        for (int area = 1; area <= lastArea; area++) {
             // Stamp before the getter so a slow Binder call cannot hide the read's age.
             long readAt = diLink5 ? SystemClock.elapsedRealtime() : 0L;
             try {
@@ -12555,17 +12956,17 @@ public class BydDataCollector {
     }
 
     /**
-     * Manager ids are physical left/right, while event areas 1 and 2 are driver/passenger.
-     * On RHD area 1 is physical RF and area 2 LF; on LHD they are LF and RF respectively.
+     * Event areas 1/2 are driver/passenger. A 2026-11 RHD DiLink 3 read its driver's door on the
+     * LEFT_HAND_FRONT id, so the front ids follow the areas unless {@code crossedFront}.
      */
-    static int doorFeatureForArea(int area, boolean rightHandDrive) {
+    static int doorFeatureForArea(int area, boolean crossedFront) {
         switch (area) {
             case BodyworkConstants.AREA_FRONT_DRIVER:
-                return rightHandDrive
+                return crossedFront
                         ? BydFeatureIds.BODYWORK_DOOR_RF
                         : BydFeatureIds.BODYWORK_DOOR_LF;
             case BodyworkConstants.AREA_FRONT_PASSENGER:
-                return rightHandDrive
+                return crossedFront
                         ? BydFeatureIds.BODYWORK_DOOR_LF
                         : BydFeatureIds.BODYWORK_DOOR_RF;
             case BodyworkConstants.AREA_REAR_LEFT: return BydFeatureIds.BODYWORK_DOOR_LR;
@@ -12595,9 +12996,11 @@ public class BydDataCollector {
             }
             try {
                 com.overdrive.app.config.UnifiedConfigManager.forceReload();
-                String side = com.overdrive.app.config.UnifiedConfigManager
-                        .getVehicle().optString("driveSide", "rhd");
-                doorDriveSideRhd = !"lhd".equalsIgnoreCase(side);
+                org.json.JSONObject vehicle = com.overdrive.app.config.UnifiedConfigManager.getVehicle();
+                doorDriveSideRhd = !"lhd".equalsIgnoreCase(vehicle.optString("driveSide", "rhd"));
+                String ids = vehicle.optString(FRONT_DOOR_IDS_KEY, "");
+                frontDoorIdsStored = "crossed".equals(ids) ? Boolean.TRUE
+                        : "area".equals(ids) ? Boolean.FALSE : null;
             } catch (Throwable t) {
                 logger.debug("door drive-side refresh failed; retaining "
                         + (doorDriveSideRhd ? "RHD" : "LHD") + ": " + t.getMessage());
@@ -12614,16 +13017,87 @@ public class BydDataCollector {
     private int readDoorOpenState(int area, boolean rightHandDrive) {
         if (bodyworkDevice == null) return Integer.MIN_VALUE;
 
-        int featureId = doorFeatureForArea(area, rightHandDrive);
+        int featureId = doorFeatureForArea(area, frontDoorIdsCrossed(rightHandDrive));
         if (BydFeatureIds.isResolved(featureId)) {
             int managerState = BydManagerChannel.getInt(context, bodyworkDevice, featureId);
             if (isValidDoorOpenState(managerState)) return managerState;
         }
+        return legacyDoorState(area);
+    }
 
+    private int legacyDoorState(int area) {
         Object legacy = BydDeviceHelper.callMethod(bodyworkDevice, "getDoorState", area);
         if (!(legacy instanceof Number)) return Integer.MIN_VALUE;
         int legacyState = ((Number) legacy).intValue();
         return isValidDoorOpenState(legacyState) ? legacyState : Integer.MIN_VALUE;
+    }
+
+    /** Learned orientation, else the platform default: DI5 keeps the earlier physical reading on RHD. */
+    private boolean frontDoorIdsCrossed(boolean rightHandDrive) {
+        Boolean known = frontDoorIdsLearned;
+        if (known == null) known = frontDoorIdsStored;
+        if (known != null) return known;
+        return rightHandDrive && isDiLink5ProducerActive();
+    }
+
+    private boolean frontDoorIdsKnown() {
+        return frontDoorIdsLearned != null || frontDoorIdsStored != null;
+    }
+
+    /** With exactly one front door open, compare the manager ids with the legacy areas. At most once a second. */
+    private void observeFrontDoorIds() {
+        if (frontDoorIdsKnown() || bodyworkDevice == null) return;
+        long now = SystemClock.elapsedRealtime();
+        if (now < frontDoorObserveAtMs) return;
+        frontDoorObserveAtMs = now + 1_000L;
+        int lf = BydManagerChannel.getInt(context, bodyworkDevice, BydFeatureIds.BODYWORK_DOOR_LF);
+        int rf = BydManagerChannel.getInt(context, bodyworkDevice, BydFeatureIds.BODYWORK_DOOR_RF);
+        if (!isValidDoorOpenState(lf) || !isValidDoorOpenState(rf) || lf == rf) return;
+        int driver = legacyDoorState(BodyworkConstants.AREA_FRONT_DRIVER);
+        int passenger = legacyDoorState(BodyworkConstants.AREA_FRONT_PASSENGER);
+        if (!isValidDoorOpenState(driver) || !isValidDoorOpenState(passenger) || driver == passenger) return;
+        voteFrontDoorIds(lf != driver, "getter", now);
+    }
+
+    /** A typed open event names its area; the one manager front id reading open must be that area. */
+    private void observeFrontDoorEvent(int area) {
+        if (frontDoorIdsKnown() || bodyworkDevice == null) return;
+        int lf = BydManagerChannel.getInt(context, bodyworkDevice, BydFeatureIds.BODYWORK_DOOR_LF);
+        int rf = BydManagerChannel.getInt(context, bodyworkDevice, BydFeatureIds.BODYWORK_DOOR_RF);
+        if (!isValidDoorOpenState(lf) || !isValidDoorOpenState(rf) || lf == rf) return;
+        boolean lfOpen = lf == BodyworkConstants.STATE_OPEN;
+        voteFrontDoorIds(lfOpen != (area == BodyworkConstants.AREA_FRONT_DRIVER), "event",
+                SystemClock.elapsedRealtime());
+    }
+
+    /** Two matching looks at least a second apart decide; a contradiction starts over. */
+    private void voteFrontDoorIds(boolean crossed, String source, long now) {
+        synchronized (frontDoorVoteLock) {
+            if (frontDoorIdsLearned != null) return;
+            if (frontDoorVotes > 0 && frontDoorVoteCrossed != crossed) {
+                logger.info("front door ids: " + source + " look contradicts the previous one; starting over");
+                frontDoorVotes = 0;
+            } else if (frontDoorVotes > 0 && now - frontDoorVoteAtMs < 1_000L) {
+                return;
+            }
+            frontDoorVoteCrossed = crossed;
+            frontDoorVoteAtMs = now;
+            if (++frontDoorVotes < 2) return;
+            frontDoorIdsLearned = crossed;
+        }
+        String value = crossed ? "crossed" : "area";
+        logger.info("front door ids learned: " + value + " (LEFT_HAND_FRONT reads the "
+                + (crossed ? "passenger" : "driver") + "'s door; last look from " + source + ")");
+        Thread save = new Thread(() -> {
+            try {
+                com.overdrive.app.config.UnifiedConfigManager.updateSection("vehicle",
+                        new org.json.JSONObject().put(FRONT_DOOR_IDS_KEY, value));
+            } catch (Throwable t) {
+                logger.debug("front door ids save failed: " + t.getMessage());
+            }
+        }, "FrontDoorIdsSave");
+        save.setDaemon(true);
+        save.start();
     }
 
     /**
@@ -12637,12 +13111,12 @@ public class BydDataCollector {
     public int[] readAllDoorOpenStates() {
         boolean rhd = isRightHandDriveForDoorMapping();
         if (isDiLink5BridgeConsumer()) return bridgedDoorOpenStates(rhd);
-        // The front axis is by seat; doorFeatureForArea maps driver/passenger to the physical
-        // L/R feature by drive side, so pick the seat-area that yields each physical door.
+        // The front axis is by seat: the driver's area is the physical right door on RHD.
         int lf = normalizeDoorOpen(readDoorOpenState(
                 rhd ? BodyworkConstants.AREA_FRONT_PASSENGER : BodyworkConstants.AREA_FRONT_DRIVER, rhd));
         int rf = normalizeDoorOpen(readDoorOpenState(
                 rhd ? BodyworkConstants.AREA_FRONT_DRIVER : BodyworkConstants.AREA_FRONT_PASSENGER, rhd));
+        if ((lf == 1) != (rf == 1)) observeFrontDoorIds();
         int lr = normalizeDoorOpen(readDoorOpenState(BodyworkConstants.AREA_REAR_LEFT, rhd));
         int rr = normalizeDoorOpen(readDoorOpenState(BodyworkConstants.AREA_REAR_RIGHT, rhd));
         int hood = normalizeDoorOpen(readDoorOpenState(BodyworkConstants.AREA_HOOD, rhd));
@@ -12722,6 +13196,7 @@ public class BydDataCollector {
     }
 
     private void collectEnergy(BydVehicleData.Builder b) {
+        getDriveConfigMode();
         if (isDiLink5Vehicle()) {
             b.driftModeKnown(false);
         }
@@ -12740,13 +13215,6 @@ public class BydDataCollector {
                     logger.info("getEnergyMode raw=" + em + " (" + energyModeName(em) + ")");
                 }
             }
-            // Drive mode is normalized from operation + road-surface readback; the
-            // setting-device drive-config getter is only a last fallback.
-            int driveConfig = getDriveConfigMode();
-            if (driveConfig >= 1 && driveConfig <= 4) {
-                b.operationMode(driveConfig);
-            }
-
             if (isDiLink5Vehicle()) {
                 Object rawItac = BydDeviceHelper.callGetter(energyDevice, "getiTacMode");
                 if (rawItac instanceof Number) {
@@ -14023,6 +14491,10 @@ public class BydDataCollector {
             int area = (args[0] instanceof Integer) ? (Integer) args[0] : -1;
             int state = (args[1] instanceof Integer) ? (Integer) args[1] : -1;
             notifyDoorStateListeners(area, state);
+            if (state == BodyworkConstants.STATE_OPEN && (area == BodyworkConstants.AREA_FRONT_DRIVER
+                    || area == BodyworkConstants.AREA_FRONT_PASSENGER)) {
+                try { observeFrontDoorEvent(area); } catch (Throwable ignored) { }
+            }
         }
         notifyLockSnapshotListeners(updated);
     }
@@ -14300,6 +14772,7 @@ public class BydDataCollector {
     }
 
     private void onEnergyCallback(Object sourceDevice, String method, Object[] args) {
+        long driveSession = driveModeSession;
         if (!initialized || isDiLink5DaemonProcess()) return;
         if (sourceDevice != energyDevice || method == null) return;
         noteDiLink5ListenerEvent();
@@ -14341,10 +14814,16 @@ public class BydDataCollector {
                             current.toBuilder().energyMode(mode).build());
                 }
             }
-        } else if ("onOperationModeChanged".equals(method) && mode >= 1 && mode <= 4) {
-            lastEnergyOperationModeEvent = mode;
-        } else if ("onRoadSurfaceChanged".equals(method) && mode >= 0 && mode <= 4) {
-            lastEnergyRoadSurfaceEvent = mode;
+        } else if ("onOperationModeChanged".equals(method) || "onRoadSurfaceChanged".equals(method)) {
+            synchronized (driveModeEventLock) {
+                if (driveSession != driveModeSession || !accIsOn || driveModePowerLevel == 0
+                        || !initialized || sourceDevice != energyDevice) return;
+                if ("onOperationModeChanged".equals(method)) {
+                    lastEnergyOperationModeEvent = mode >= 1 && mode <= 4 ? mode : -1;
+                } else {
+                    lastEnergyRoadSurfaceEvent = mode == 1 || mode == 2 ? mode : -1;
+                }
+            }
         } else if (isDiLink5Vehicle() && "oniTACModeChanged".equals(method)) {
             Boolean drift = decodeDiLink5ItacMode(mode);
             if (drift != null) {
@@ -14705,6 +15184,7 @@ public class BydDataCollector {
             }
             if (sourceDevice == null
                     && !isCallbackLifecycleCurrent(lifecycleGeneration)) return;
+            if (gunState == 1 && gunOutFlowOverride) return;
             // A synchronous poll may have read a reconnect while this older callback waited for
             // the publication lock. Order by observation start, not lock acquisition.
             if (!chargingObservationOrder.claimGunCallback(observation)) return;
@@ -14762,6 +15242,115 @@ public class BydDataCollector {
                 publishAutomationSnapshot(published);
             }
         }
+    }
+
+    // Legacy BEV trims whose gun getter reads 1 through a DC charge. Entry needs BMS CHARGING, park,
+    // fresh pack inflow and two SoC rises with no contradicting poll; guarded by chargingEdgePublishLock.
+    private static final double GUN_OUT_FLOW_ENTRY_KW = 5.0;
+    private static final double GUN_OUT_FLOW_EXIT_KW = 0.3;
+    private static final int GUN_OUT_FLOW_SOC_RISES = 2;
+    private static final int GUN_OUT_FLOW_MAX_UNKNOWN_POLLS = 3;
+    private static final long GUN_OUT_FLOW_SOC_STALL_MS = 20 * 60_000L;
+    private volatile boolean gunOutFlowOverride;
+    private int gunOutFlowSocRises;
+    private double gunOutFlowLastSoc = Double.NaN;
+    private int gunOutFlowUnknownPolls;
+    private long gunOutFlowSocRoseAtMs;
+
+    private void updateGunOutFlowOverrideLocked(BydVehicleData vd, boolean bmsObserved,
+                                                int observedBmsState) {
+        if (vd == null || isDiLink5Vehicle() || chargingDevice == null || isPhev(vd)) {
+            if (gunOutFlowOverride) endGunOutFlowOverrideLocked("not a legacy BEV poll");
+            resetGunOutFlowEntryLocked();
+            return;
+        }
+        long now = System.currentTimeMillis();
+        boolean export = vd.vtolCharging || vd.chargingGunState == 5 || vd.chargingType == 3;
+        boolean engineFresh = Double.isFinite(vd.enginePowerKw) && vd.enginePowerAtMs > 0
+                && now - vd.enginePowerAtMs < ENGINE_POWER_LIVE_TTL_MS;
+        Boolean parked;
+        if (!accIsOn) {
+            parked = Boolean.TRUE;
+        } else {
+            int gear = BydVehicleData.UNAVAILABLE;
+            try {
+                gear = com.overdrive.app.monitor.GearMonitor.getInstance().getCurrentGearIfFresh();
+            } catch (Throwable ignored) {}
+            parked = gear == BydVehicleData.UNAVAILABLE ? null
+                    : gear == com.overdrive.app.monitor.GearMonitor.GEAR_P;
+        }
+        double soc = vd.socPercent;
+        boolean socValid = soc >= 0 && soc <= 100;
+
+        if (gunOutFlowOverride) {
+            String reason = null;
+            if (export) reason = "export";
+            else if (bmsObserved && observedBmsState != 1) reason = "bms " + observedBmsState;
+            else if (engineFresh && vd.enginePowerKw > -GUN_OUT_FLOW_EXIT_KW) reason = "no inflow";
+            else if (Boolean.FALSE.equals(parked)) reason = "left park";
+            if (reason == null && socValid && soc > gunOutFlowLastSoc) {
+                gunOutFlowLastSoc = soc;
+                gunOutFlowSocRoseAtMs = now;
+            }
+            if (reason == null && now - gunOutFlowSocRoseAtMs > GUN_OUT_FLOW_SOC_STALL_MS) {
+                reason = "soc stalled";
+            }
+            if (reason == null) {
+                boolean confirmed = bmsObserved && engineFresh && parked != null;
+                gunOutFlowUnknownPolls = confirmed ? 0 : gunOutFlowUnknownPolls + 1;
+                if (gunOutFlowUnknownPolls > GUN_OUT_FLOW_MAX_UNKNOWN_POLLS) reason = "evidence lost";
+            }
+            if (reason != null) endGunOutFlowOverrideLocked(reason);
+            return;
+        }
+
+        boolean contradicted = vd.chargingGunState != 1 || export
+                || (bmsObserved && observedBmsState != 1)
+                || (engineFresh && vd.enginePowerKw >= -GUN_OUT_FLOW_ENTRY_KW)
+                || Boolean.FALSE.equals(parked)
+                || !socValid;
+        if (contradicted) {
+            resetGunOutFlowEntryLocked();
+            return;
+        }
+        if (!bmsObserved || !engineFresh || parked == null) {
+            if (++gunOutFlowUnknownPolls > GUN_OUT_FLOW_MAX_UNKNOWN_POLLS) {
+                resetGunOutFlowEntryLocked();
+            }
+            return;
+        }
+        gunOutFlowUnknownPolls = 0;
+        if (Double.isNaN(gunOutFlowLastSoc) || soc < gunOutFlowLastSoc) {
+            gunOutFlowLastSoc = soc;
+            gunOutFlowSocRises = 0;
+            return;
+        }
+        if (soc > gunOutFlowLastSoc) {
+            gunOutFlowLastSoc = soc;
+            gunOutFlowSocRises++;
+        }
+        if (gunOutFlowSocRises < GUN_OUT_FLOW_SOC_RISES) return;
+
+        gunOutFlowOverride = true;
+        gunOutFlowSocRoseAtMs = now;
+        gunOutFlowUnknownPolls = 0;
+        logger.info(String.format(java.util.Locale.US,
+                "Gun-out overridden: BMS charging, pack %.1f kW, SoC %.1f%% after %d rises",
+                vd.enginePowerKw, soc, gunOutFlowSocRises));
+        com.overdrive.app.monitor.ChargingDetector.getInstance()
+                .releaseGunOutForProvenPackFlow();
+    }
+
+    private void endGunOutFlowOverrideLocked(String reason) {
+        gunOutFlowOverride = false;
+        resetGunOutFlowEntryLocked();
+        logger.info("Gun-out override ended: " + reason);
+    }
+
+    private void resetGunOutFlowEntryLocked() {
+        gunOutFlowSocRises = 0;
+        gunOutFlowLastSoc = Double.NaN;
+        gunOutFlowUnknownPolls = 0;
     }
 
     // The HAL emits a transient gun=1 (then gun=2) each time a parked, plugged car's network wakes.
@@ -14838,6 +15427,29 @@ public class BydDataCollector {
         if (!isActiveChargingListener(
                 sourceDevice, generation, lifecycleGeneration)) return;
         noteDiLink5ListenerEvent();
+        if ("onChargePreheatStateChanged".equals(method)) {
+            long observation = chargingObservationOrder.begin();
+            long readAtMs = System.currentTimeMillis();
+            int state = args != null && args.length > 0 && args[0] instanceof Integer
+                    ? (Integer) args[0] : BydVehicleData.UNAVAILABLE;
+            synchronized (chargingEdgePublishLock) {
+                if (!isActiveChargingListener(sourceDevice, generation, lifecycleGeneration)
+                        || observation <= batteryPreheatSequence) return;
+                if (state == 0 && isDiLink5Vehicle() && readBatteryPreheatState() != 0) {
+                    // A disconnect or a contradictory read invalidates previous heating feedback.
+                    state = BydVehicleData.UNAVAILABLE;
+                }
+                updateBatteryPreheatLocked(state, readAtMs, observation);
+                BydVehicleData current = snapshot.get();
+                if (current != null) {
+                    BydVehicleData published = current.toBuilder()
+                            .batteryPreheat(batteryPreheatState, batteryPreheatObservedAtMs).build();
+                    snapshot.set(published);
+                    publishAutomationSnapshot(published);
+                }
+            }
+            return;
+        }
         CounterCallbackReservation capacityReservation = null;
         if ("onChargingCapacityChanged".equals(method)
                 && args != null && args.length > 0 && args[0] instanceof Number) {
@@ -15121,6 +15733,7 @@ public class BydDataCollector {
 
     private void onInstrumentCallback(Object sourceDevice, long generation,
                                       String method, Object[] args) {
+        long driveSession = driveModeSession;
         long lifecycleGeneration = callbackLifecycleGeneration.get();
         if (!isActiveInstrumentListener(
                 sourceDevice, generation, lifecycleGeneration)) return;
@@ -15164,13 +15777,11 @@ public class BydDataCollector {
             }
         }
         if ("onSportModeStateChanged".equals(method)
-                && args != null && args.length > 0) {
-            int mode = normalizeDiLink5DriveMode(((Number) args[0]).intValue());
-            if (mode != BydVehicleData.UNAVAILABLE) {
-                BydVehicleData current = snapshot.get();
-                if (current != null) {
-                    publishNonChargingSnapshot(
-                            current.toBuilder().operationMode(mode).build());
+                && args != null && args.length > 0 && args[0] instanceof Number) {
+            synchronized (driveModeEventLock) {
+                if (driveSession == driveModeSession && accIsOn
+                        && isActiveInstrumentListener(sourceDevice, generation, lifecycleGeneration)) {
+                    lastInstrumentDriveMode = normalizeDiLink5DriveMode(((Number) args[0]).intValue());
                 }
             }
             return;
@@ -15437,6 +16048,8 @@ public class BydDataCollector {
         // Currently unreachable (every constant here resolves to a real literal), kept so adding an
         // UNRESOLVED_ID fallback later cannot silently attribute an unrelated event to a side.
         if (!BydFeatureIds.isResolved(eventId) || warningBit == 0) return;
+        java.util.concurrent.atomic.AtomicLong sideLevel = clusterCrossLevelFor(eventId);
+        if (sideLevel != null) observeClusterCrossTraffic(sideLevel, value, SystemClock.elapsedRealtime());
         // Sanitize FIRST, exactly as the poll does. This is the instant path with no confirmation
         // hold, and it writes the SAME bsCounterBaseline map: an event carrying a positive 16-bit
         // rail (65535/65534) would otherwise fire an immediate alert AND park the baseline there,
@@ -16392,6 +17005,118 @@ public class BydDataCollector {
             logger.debug("setAcWindMode failed: " + e.getMessage());
             return false;
         }
+    }
+
+    /** Airflow modes the car offers (AC_WIND_MODE_NUM: 5 or 7), or UNAVAILABLE. */
+    public int readAcWindModeCountNow() {
+        if (acDevice == null || isDiLink5Vehicle()
+                || !BydFeatureIds.isResolved(BydFeatureIds.AC_WIND_MODE_NUM)) {
+            return BydVehicleData.UNAVAILABLE;
+        }
+        int count = acVentHal().get(BydFeatureIds.AC_WIND_MODE_NUM);
+        return count == 5 || count == 7 ? count : BydVehicleData.UNAVAILABLE;
+    }
+
+    /**
+     * HAL adapter for {@link AcVentControl} over the AC device. The OEM's invalid-value
+     * sentinels read as "no answer", so a sleeping HAL is never taken for a flag that is off.
+     */
+    private AcVentControl.Hal acVentHal() {
+        final Object device = acDevice;
+        return new AcVentControl.Hal() {
+            @Override public int get(int featureId) {
+                Object value = BydDeviceHelper.callGet(device, featureId, Integer.class);
+                int raw = BydDeviceHelper.getIntValue(value);
+                return raw == BydFeatureIds.INVALID_VALUE || raw == BydFeatureIds.INVALID_VALUE_2
+                        ? Integer.MIN_VALUE : raw;
+            }
+            @Override public int set(int featureId, int value) {
+                return BydDeviceHelper.sendSetCommandRaw(device, featureId, value);
+            }
+            @Override public int setPair(int[] featureIds, int[] values) {
+                // Vent direction takes the field-form event.
+                return BydDeviceHelper.sendSetCommandGroupedRaw(device, featureIds, values, false);
+            }
+        };
+    }
+
+    /** Select a front vent mode on one side (AcVentControl.MODE_*). Not on DiLink 5 (unverified). */
+    public boolean setAcVentMode(int side, String mode) {
+        if (acDevice == null || isDiLink5Vehicle()) return false;
+        try {
+            AcVentControl.Hal hal = acVentHal();
+            if (Boolean.FALSE.equals(AcVentControl.supportState(hal))) {
+                logger.info("setAcVentMode: no electric vents on this car");
+                return false;
+            }
+            boolean ok = AcVentControl.setMode(hal, side, mode);
+            logger.info("setAcVentMode(side=" + side + ", " + mode + ") " + (ok ? "accepted" : "refused"));
+            return ok;
+        } catch (Exception e) {
+            logger.debug("setAcVentMode failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Point one front vent (AcVentControl vent index), degrees clamped to that vent's range.
+     * Returns the {h, v} actually sent, or null when refused. Not on DiLink 5 (unverified).
+     */
+    public int[] setAcVentDirection(int vent, int hDegrees, int vDegrees, boolean rightHandDrive) {
+        if (acDevice == null || isDiLink5Vehicle()) return null;
+        try {
+            AcVentControl.Hal hal = acVentHal();
+            if (Boolean.FALSE.equals(AcVentControl.supportState(hal))) {
+                logger.info("setAcVentDirection: no electric vents on this car");
+                return null;
+            }
+            int[] sent = AcVentControl.setDirection(hal, vent, hDegrees, vDegrees, rightHandDrive);
+            logger.info("setAcVentDirection(vent=" + vent + ", h=" + hDegrees + ", v=" + vDegrees
+                    + ") " + (sent != null ? "accepted h=" + sent[0] + " v=" + sent[1] : "refused"));
+            return sent;
+        } catch (Exception e) {
+            logger.debug("setAcVentDirection failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /** Front vent readback for the vehicle state; null on DiLink 5 or without an AC device. */
+    public org.json.JSONObject readAcVentStateNow(boolean rightHandDrive) {
+        if (acDevice == null || isDiLink5Vehicle()) return null;
+        try {
+            return AcVentControl.readState(acVentHal(), rightHandDrive);
+        } catch (Exception e) {
+            logger.debug("readAcVentStateNow failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /** Named-getter int read on the AC device, or UNAVAILABLE. */
+    private int readAcGetterNow(String method, Integer arg) {
+        if (acDevice == null || isDiLink5Vehicle()) return BydVehicleData.UNAVAILABLE;
+        Object value = arg == null
+                ? BydDeviceHelper.callGetter(acDevice, method)
+                : BydDeviceHelper.callGetter(acDevice, method, arg.intValue());
+        return value instanceof Number ? ((Number) value).intValue() : BydVehicleData.UNAVAILABLE;
+    }
+
+    /** SYNC: true when the zones are linked (AC_TEMPCTRL_SEPARATE_OFF 0), null when unknown. */
+    public Boolean readAcTemperatureSyncNow() {
+        int mode = readAcGetterNow("getAcTemperatureControlMode", null);
+        return mode == 0 ? Boolean.TRUE : mode == 1 ? Boolean.FALSE : null;
+    }
+
+    /** AUTO: true for AC_CTRLMODE_AUTO 0, false for MANUAL 1, null when unknown. */
+    public Boolean readAcAutoModeNow() {
+        int mode = readAcGetterNow("getAcControlMode", null);
+        return mode == AC_CTRLMODE_AUTO ? Boolean.TRUE
+                : mode == AC_CTRLMODE_MANUAL ? Boolean.FALSE : null;
+    }
+
+    /** Defrost by area (1 front, 2 rear): AC_DEFROST_STATE_ON 1 / OFF 0, null when unknown. */
+    public Boolean readAcDefrostNow(int area) {
+        int state = readAcGetterNow("getAcDefrostState", Integer.valueOf(area));
+        return state == 1 ? Boolean.TRUE : state == 0 ? Boolean.FALSE : null;
     }
 
     public boolean setFrontDefrost(boolean on) {
@@ -24397,28 +25122,12 @@ public class BydDataCollector {
         boolean diLink5 = com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();
         long deadline = started + (diLink5
                 ? DILINK5_OPERATION_MODE_TIMEOUT_MS : DRIVE_MODE_APPLY_TIMEOUT_MS);
-        boolean answered = false;
-        int raw = -1;
-        int surface = -1;
-        int target = -1;
+        int expected = diLink5 ? mode : legacyInputModeToConfig(mode);
+        int observed = -1;
         do {
-            Object value = BydDeviceHelper.callGetter(energyDevice, "getOperationMode");
-            if (value instanceof Number) {
-                answered = true;
-                raw = ((Number) value).intValue();
-                surface = readRoadSurfaceMode(energyDevice);
-                target = raw == 1 && surface != 2
-                        ? readTargetDrivingMode(settingDevice) : -1;
-                if (operationModeMatchesSetter(mode, raw, surface, target)) {
-                    if (mode == 3 && raw == 1 && surface != 2 && target < 1) {
-                        logger.info("setOperationMode(3) accepted on shared Normal/Eco readback");
-                    }
-                    if (diLink5) {
-                        logger.info("setOperationMode(" + mode + ") confirmed after "
-                                + (SystemClock.elapsedRealtime() - started) + " ms");
-                    }
-                    return true;
-                }
+            observed = readObservedDriveMode();
+            if (observed >= 1 && observed == expected) {
+                return true;
             }
             long remaining = deadline - SystemClock.elapsedRealtime();
             if (remaining <= 0L) break;
@@ -24430,13 +25139,8 @@ public class BydDataCollector {
             }
         } while (SystemClock.elapsedRealtime() < deadline);
 
-        if (!answered) {
-            logger.warn("setOperationMode(" + mode
-                    + ") accepted but operation readback is unavailable");
-            return false;
-        }
-        logger.warn("setOperationMode(" + mode + ") accepted but readback stayed operation="
-                + raw + " surface=" + surface + " target=" + target);
+        logger.warn("setOperationMode(" + mode + ") accepted but expected config mode="
+                + expected + ", observed=" + observed);
         return false;
     }
 
@@ -24452,27 +25156,20 @@ public class BydDataCollector {
             int rawOperationMode,
             int roadSurfaceMode,
             int targetDrivingMode) {
-        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
-            return rawOperationMode == setterMode;
-        }
-        // This head unit reports the same live operation value for Normal and Eco. A successful
-        // Normal setter followed by that shared value is the strongest acknowledgement available.
-        if (setterMode == 3
-                && rawOperationMode == 1
-                && roadSurfaceMode != 2
-                && targetDrivingMode < 1) {
-            return true;
-        }
-        int expectedConfigMode;
-        switch (setterMode) {
-            case 1: expectedConfigMode = 2; break; // ECO
-            case 2: expectedConfigMode = 3; break; // SPORT
-            case 3: expectedConfigMode = 1; break; // NORMAL
-            case 4: expectedConfigMode = 4; break; // SNOW
-            default: return false;
-        }
-        return driveModeFromEnergyAxis(
+        int expectedConfigMode = com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                ? setterMode : legacyInputModeToConfig(setterMode);
+        return expectedConfigMode >= 1 && expectedConfigMode <= 4 && driveModeFromEnergyAxis(
                 rawOperationMode, roadSurfaceMode, targetDrivingMode) == expectedConfigMode;
+    }
+
+    private static int legacyInputModeToConfig(int mode) {
+        switch (mode) {
+            case 1: return 2; // Eco
+            case 2: return 3; // Sport
+            case 3: return 1; // Normal
+            case 4: return 4; // Snow
+            default: return -1;
+        }
     }
 
     /**
@@ -24502,11 +25199,6 @@ public class BydDataCollector {
         if (ok) {
             lastCommandedDriveMode = configMode;
             lastCommandedDriveModeAtMs = SystemClock.elapsedRealtime();
-            if (configMode == 1 || configMode == 2) {
-                lastNormalEcoDriveMode = configMode;
-            } else if (configMode == 3) {
-                lastNormalEcoDriveMode = -1;
-            }
         }
         return ok;
     }
@@ -24516,9 +25208,13 @@ public class BydDataCollector {
     private static final long DRIVE_MODE_COMMAND_ECHO_MS = 3000L;
     private volatile int lastCommandedDriveMode = -1;
     private volatile long lastCommandedDriveModeAtMs = 0L;
-    // The live Energy axis collapses Normal and Eco to operation=1. Keep the last successfully
-    // commanded base mode while that axis remains ambiguous; Sport clears it, Snow is an overlay.
-    private volatile int lastNormalEcoDriveMode = -1;
+    private volatile DriveModeReportMonitor driveModeReportMonitor;
+    private volatile int driveModePowerLevel = BydVehicleData.UNAVAILABLE;
+    private volatile int lastSdkDriveMode = -1;
+    private volatile int lastInstrumentDriveMode = -1;
+    private final Object driveModeReadLock = new Object();
+    private final Object driveModeEventLock = new Object();
+    private volatile long driveModeSession;
     private volatile int lastEnergyModeEvent = -1;
     private volatile int lastEnergyOperationModeEvent = -1;
     private volatile int lastEnergyRoadSurfaceEvent = -1;
@@ -24529,9 +25225,73 @@ public class BydDataCollector {
     static final int DIAG_ENERGY_OPERATION_MODE_SECONDARY = 0x3420001c;
     static final int DIAG_ENERGY_OPERATION_MODE_EV = 0x3420001e;
     static final int DIAG_SETTING_TARGET_DRIVING_MODE_LEGACY = 0x000ae2ac;
+    // INSTRUMENT_2IN1_FAULT_{ECO,NORMAL,SPORT}_INDICATOR: CanFD/Toyota id, then the default one.
+    static final int DIAG_ECO_LAMP_CANFD = 0x2b000026;
+    static final int DIAG_ECO_LAMP_DEFAULT = 0x000b33c2;
+    static final int DIAG_NORMAL_LAMP_CANFD = 0x2b000032;
+    static final int DIAG_NORMAL_LAMP_DEFAULT = 0x000c00f5;
+    static final int DIAG_SPORT_LAMP_CANFD = 0x2b00002c;
+    static final int DIAG_SPORT_LAMP_DEFAULT = 0x0004763a;
     private final Object driveModeDiagnosticProbeLock = new Object();
     private long lastDriveModeDiagnosticProbeAtMs;
     private String lastDriveModeDiagnosticProbeState = "not-sampled";
+
+    private void closeDriveModeMonitor() {
+        DriveModeReportMonitor monitor = driveModeReportMonitor;
+        driveModeReportMonitor = null;
+        driveModePowerLevel = BydVehicleData.UNAVAILABLE;
+        if (monitor != null) monitor.close();
+        clearDriveModeReadings();
+    }
+
+    private void clearDriveModeReadings() {
+        synchronized (driveModeReadLock) {
+            lastSdkDriveMode = -1;
+            synchronized (driveModeEventLock) {
+                driveModeSession++;
+                lastInstrumentDriveMode = -1;
+                lastEnergyOperationModeEvent = -1;
+                lastEnergyRoadSurfaceEvent = -1;
+            }
+            lastCommandedDriveMode = -1;
+            lastCommandedDriveModeAtMs = 0L;
+        }
+    }
+
+    private void updateDriveModeMonitorPower() {
+        DriveModeReportMonitor monitor = driveModeReportMonitor;
+        if (monitor == null) return;
+        int level = accIsOn ? readPowerLevelNow() : 0;
+        int previous = driveModePowerLevel;
+        driveModePowerLevel = level;
+        monitor.setAccOn(level > 0);
+        if (level == 0 && previous != 0) clearDriveModeReadings();
+    }
+
+    private BydVehicleData withCurrentDriveMode(BydVehicleData candidate) {
+        int mode = currentLocalDriveMode();
+        int value = mode >= 1 ? mode : BydVehicleData.UNAVAILABLE;
+        return candidate.operationMode == value ? candidate
+                : candidate.toBuilder().operationMode(value).buildPreservingTimestamp();
+    }
+
+    private int currentLocalDriveMode() {
+        if (!accIsOn || driveModePowerLevel == 0) return -1;
+        DriveModeReportMonitor monitor = driveModeReportMonitor;
+        int report = monitor == null ? -1 : monitor.currentMode();
+        int command = lastCommandedDriveMode;
+        if (command >= 1 && command <= 4) {
+            command = recentDriveModeCommand(command, lastCommandedDriveModeAtMs,
+                    SystemClock.elapsedRealtime());
+        }
+        return resolveDriveMode(lastSdkDriveMode, report, command);
+    }
+
+    static int resolveDriveMode(int sdk, int report, int command) {
+        if (sdk == 4) return 4; // Snow is a road-surface overlay on the reported base mode.
+        if (report >= 1 && report <= 3) return report;
+        return chooseDriveModeReadback(sdk, command, -1);
+    }
 
     static int recentDriveModeCommand(int mode, long commandedAtMs, long nowMs) {
         long age = nowMs - commandedAtMs;
@@ -24662,13 +25422,7 @@ public class BydDataCollector {
     private boolean awaitDriveMode(int configMode) {
         long deadline = SystemClock.elapsedRealtime() + DRIVE_MODE_APPLY_TIMEOUT_MS;
         do {
-            int energyMode = readEnergyAxisDriveMode();
-            int settingMode = readDriveConfigRaw();
-            if (energyMode == configMode
-                    || configMode == 1 && settingMode == 1
-                    || energyMode < 0 && settingMode == configMode) {
-                return true;
-            }
+            if (readObservedDriveMode() == configMode) return true;
             long remaining = deadline - SystemClock.elapsedRealtime();
             if (remaining <= 0L) break;
             try {
@@ -24722,10 +25476,8 @@ public class BydDataCollector {
      * Read the drive mode on OverDrive's config axis
      * (1=normal/2=eco/3=sport/4=snow).
      *
-     * <p>The live ENERGY axis is authoritative. This trim reports both Normal and Eco as
-     * operation 1, so the typed operation callback disambiguates those two; the target-driving-mode
-     * property remains the startup fallback. Snow/rain is a road-surface overlay and therefore
-     * takes precedence over every base operation mode.
+     * A received base-mode report disambiguates legacy units where the Energy getter
+     * reports operation 1 for both Normal and Eco. Snow is a road-surface overlay.
      */
     public int getDriveConfigMode() {
         if (isDiLink5BridgeConsumer()) {
@@ -24734,29 +25486,25 @@ public class BydDataCollector {
                     && bridge.operationMode <= 4
                     ? bridge.operationMode : -1;
         }
-        int energyMode = readEnergyAxisDriveMode();
-        int cached = recentDriveModeCommand(
-                lastCommandedDriveMode,
-                lastCommandedDriveModeAtMs,
-                SystemClock.elapsedRealtime());
-        int preferred = chooseDriveModeReadback(energyMode, cached, -1);
-        if (preferred >= 1) return preferred;
+        readObservedDriveMode();
+        return currentLocalDriveMode();
+    }
 
-        int settingRaw = readDriveConfigRaw();
-        int settingMode = settingRaw == Integer.MIN_VALUE ? -1 : settingRaw;
-        if (settingRaw != Integer.MIN_VALUE) {
-            long now = System.currentTimeMillis();
-            if (now - lastDriveConfigLogMs > 60000) {
-                lastDriveConfigLogMs = now;
-                logger.info("drive setting-state raw=" + settingRaw
-                        + " (1=normal/2=eco/3=sport/4=snow), commandEcho=" + cached);
+    /** Sample the SDK for both polling paths. Command echoes cannot confirm a setter. */
+    private int readObservedDriveMode() {
+        synchronized (driveModeReadLock) {
+            if (!accIsOn || driveModePowerLevel == 0) return -1;
+            int sdk = readEnergyAxisDriveMode();
+            if (sdk < 1 && isDiLink5Vehicle()) {
+                Object raw = BydDeviceHelper.callGetter(instrumentDevice, "getSportModeState");
+                sdk = raw instanceof Number
+                        ? normalizeDiLink5DriveMode(((Number) raw).intValue())
+                        : lastInstrumentDriveMode;
             }
+            lastSdkDriveMode = sdk;
+            DriveModeReportMonitor monitor = driveModeReportMonitor;
+            return resolveDriveMode(sdk, monitor == null ? -1 : monitor.currentMode(), -1);
         }
-        int selected = chooseDriveModeReadback(energyMode, cached, settingMode);
-        if (selected >= 1) return selected;
-        BydVehicleData bridge = diLink5AutomationFallback();
-        return bridge != null && bridge.operationMode >= 1 && bridge.operationMode <= 4
-                ? bridge.operationMode : -1;
     }
 
     /** Select a config-axis mode without allowing stale setting data to override live energy. */
@@ -24779,32 +25527,27 @@ public class BydDataCollector {
         if (energyDevice == null) return -1;
         try {
             Object opMode = BydDeviceHelper.callGetter(energyDevice, "getOperationMode");
-            if (!(opMode instanceof Number)) return -1;
-            int op = ((Number) opMode).intValue();
+            int op = opMode instanceof Number ? ((Number) opMode).intValue() : -1;
             int surface = readRoadSurfaceMode(energyDevice);
+            if (surface != 1 && surface != 2) surface = lastEnergyRoadSurfaceEvent;
             int target = op == 1 && surface != 2
                     ? readTargetDrivingMode(settingDevice) : -1;
             int operationEvent = lastEnergyOperationModeEvent;
-            int normalized = driveModeFromEnergyAxis(
-                    op, surface, target, operationEvent, lastNormalEcoDriveMode);
-            if (normalized == 3) lastNormalEcoDriveMode = -1;
+            int normalized = driveModeFromEnergyAxis(op, surface, target, operationEvent);
             String directProbes = op == 1 && surface != 2
                     ? readDriveModeDiagnosticProbes()
                     : "skipped-unambiguous";
             Object rawEnergyValue = BydDeviceHelper.callGetter(energyDevice, "getEnergyMode");
             int rawEnergy = rawEnergyValue instanceof Number
                     ? ((Number) rawEnergyValue).intValue() : Integer.MIN_VALUE;
-            int settingRaw = readDriveConfigRaw();
             String diagnosticState = "energy=" + diagnosticValue(rawEnergy)
                     + (rawEnergy == Integer.MIN_VALUE ? "" : "(" + energyModeName(rawEnergy) + ")")
                     + " operation=" + op
                     + " surface=" + surface
-                    + " driveConfig=" + diagnosticValue(settingRaw)
                     + " target=" + target
                     + " callbacks={energy=" + lastEnergyModeEvent
                     + ",operation=" + operationEvent
                     + ",surface=" + lastEnergyRoadSurfaceEvent + "}"
-                    + " normalEcoHint=" + lastNormalEcoDriveMode
                     + " direct={" + directProbes + "}"
                     + " normalized=" + normalized;
             long now = System.currentTimeMillis();
@@ -24861,11 +25604,47 @@ public class BydDataCollector {
                     < DRIVE_MODE_DIAGNOSTIC_PROBE_INTERVAL_MS) {
                 return lastDriveModeDiagnosticProbeState;
             }
-            lastDriveModeDiagnosticProbeState =
-                    driveModeDiagnosticProbeState(energyDevice, settingDevice);
+            String state = driveModeDiagnosticProbeState(energyDevice, settingDevice);
+            // DI5 reads Normal as operation 1 directly, so only legacy needs the candidates.
+            if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+                state += "," + normalEcoCandidateProbeState(
+                        energyDevice, settingDevice, instrumentDevice);
+            }
+            lastDriveModeDiagnosticProbeState = state;
             lastDriveModeDiagnosticProbeAtMs = now;
             return lastDriveModeDiagnosticProbeState;
         }
+    }
+
+    /**
+     * Normal/Eco discriminator candidates for legacy trims, where none of the existing probes
+     * changes between the two: the cluster's mode lamps, the Energy mode-set ids, and the mode
+     * button.
+     */
+    static String normalEcoCandidateProbeState(Object energy, Object setting, Object instrument) {
+        return modeLampFeature("instrument.ecoLamp", instrument,
+                        BydFeatureIds.INSTRUMENT_ECO_MODE_LAMP,
+                        DIAG_ECO_LAMP_CANFD, DIAG_ECO_LAMP_DEFAULT)
+                + "," + modeLampFeature("instrument.normalLamp", instrument,
+                        BydFeatureIds.INSTRUMENT_NORMAL_MODE_LAMP,
+                        DIAG_NORMAL_LAMP_CANFD, DIAG_NORMAL_LAMP_DEFAULT)
+                + "," + modeLampFeature("instrument.sportLamp", instrument,
+                        BydFeatureIds.INSTRUMENT_SPORT_MODE_LAMP,
+                        DIAG_SPORT_LAMP_CANFD, DIAG_SPORT_LAMP_DEFAULT)
+                + "," + diagnosticFeature(
+                        "energy.operationSet", energy, BydFeatureIds.ENERGY_OPERATION_MODE_SET)
+                + "," + diagnosticFeature(
+                        "energy.operationSet2", energy, BydFeatureIds.ENERGY_OPERATION_MODE2_SET)
+                + "," + diagnosticFeature(
+                        "setting.modeButton", setting, BydFeatureIds.SET_MODE_BUTTON);
+    }
+
+    /** Lamp ids differ by CAN protocol; read both when this framework doesn't name the lamp. */
+    private static String modeLampFeature(
+            String name, Object device, int resolvedId, int canFdId, int defaultId) {
+        if (resolvedId != 0) return diagnosticFeature(name, device, resolvedId);
+        return diagnosticFeature(name, device, canFdId)
+                + "," + diagnosticFeature(name, device, defaultId);
     }
 
     static String driveModeDiagnosticProbeState(Object energy, Object setting) {
@@ -24907,7 +25686,10 @@ public class BydDataCollector {
             }
         }
         switch (rawOperationMode) {
-            case 1: return targetDrivingMode == 3 ? 1 : 2; // NORMAL or ECO
+            case 1:
+                if (targetDrivingMode == 3) return 1; // Normal
+                if (targetDrivingMode == 1) return 2; // Eco
+                return -1;
             case 2: return 3; // SPORT
             case 3: return 1; // NORMAL
             default: return -1;
@@ -24923,54 +25705,22 @@ public class BydDataCollector {
             int targetDrivingMode,
             int operationModeEvent) {
         if (rawOperationMode == 1
+                && !com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
                 && (operationModeEvent == 1 || operationModeEvent == 3)) {
+            if (roadSurfaceMode != 2 && (targetDrivingMode == 1 || targetDrivingMode == 3)
+                    && operationModeEvent != targetDrivingMode) {
+                return -1;
+            }
             targetDrivingMode = operationModeEvent;
         }
         return driveModeFromEnergyAxis(rawOperationMode, roadSurfaceMode, targetDrivingMode);
     }
 
-    /** Apply the last confirmed base-mode command only when every live Normal/Eco signal is mute. */
-    static int driveModeFromEnergyAxis(
-            int rawOperationMode,
-            int roadSurfaceMode,
-            int targetDrivingMode,
-            int operationModeEvent,
-            int normalEcoHint) {
-        int mode = driveModeFromEnergyAxis(
-                rawOperationMode, roadSurfaceMode, targetDrivingMode, operationModeEvent);
-        return mode == 2
-                && rawOperationMode == 1
-                && roadSurfaceMode != 2
-                && targetDrivingMode < 1
-                && operationModeEvent < 1
-                && normalEcoHint == 1 ? 1 : mode;
-    }
-
-    /**
-     * Uncached raw read of the setting-device drive-config axis, for the post-write diagnostic.
-     * Returns the value VERBATIM (no 1..4 filtering) so the log can distinguish an out-of-range
-     * answer from an absent getter; {@link Integer#MIN_VALUE} means "no answer at all".
-     *
-     * <p>Must NOT consult {@code lastCommandedDriveMode} the way {@link #getDriveConfigMode()}
-     * does — reading our own cache back would confirm every write unconditionally.
-     */
-    private int readDriveConfigRaw() {
-        if (settingDevice == null) return Integer.MIN_VALUE;
-        try {
-            Object r = BydDeviceHelper.callGetter(settingDevice, "getDriveConfig");
-            if (r instanceof Number) return ((Number) r).intValue();
-        } catch (Exception e) {
-            logger.debug("readDriveConfigRaw failed: " + e.getMessage());
-        }
-        return Integer.MIN_VALUE;
-    }
-
-    /** Throttle for the getDriveConfig diagnostic (1/min). */
+    /** Throttle for the [mode-diag] snapshot heartbeat (1/min). */
     // volatile: read/written from both the slow BydDataPoll thread and the DriveModeEvent
-    // fast-poll thread (getDriveConfigMode is now called from both). Only guards a 1/min
+    // fast-poll thread (getDriveConfigMode is called from both). Only guards a 1/min
     // diagnostic log, so a torn read is cosmetic, but volatile keeps it consistent (same
     // rationale as lockUnlockStreak).
-    private volatile long lastDriveConfigLogMs = 0;
     private volatile long lastEnergyDriveModeLogMs = 0;
 
       /** Throttle for the getEnergyMode diagnostic (1/min). Same rationale as above. */

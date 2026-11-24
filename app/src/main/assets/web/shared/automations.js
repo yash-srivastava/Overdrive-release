@@ -179,10 +179,54 @@ BYD.automations = {
                 if (id === 'groups') { this.hideGroupForm(); this.loadGroups(); }
             } catch (_) {}
         });
+        if (window.BYD && BYD.offline && typeof BYD.offline.onReconnect === 'function') {
+            BYD.offline.onReconnect(() => this._refreshAfterReconnect());
+        }
+    },
+
+    /** Back online: what failed to load, or is still on its way, loads now; loaded lists and an open form stay.
+     *  While hidden: on the next return to the page, once. */
+    _refreshAfterReconnect() {
+        if (document.hidden) {
+            if (this._reconnectDeferred) return;
+            this._reconnectDeferred = true;
+            const shown = () => {
+                if (document.hidden) return;
+                document.removeEventListener('visibilitychange', shown);
+                this._reconnectDeferred = false;
+                this._refreshAfterReconnect();
+            };
+            document.addEventListener('visibilitychange', shown);
+            return;
+        }
+        // The page's lists didn't load from the car, so the sounds list (a sibling read) likely didn't either.
+        const outage = !!(this._listFailed || this._listPending || this._groupsFailed || this._groupsPending);
+        // Read again on the next form open: an outage fails open to "configured".
+        this._cloudConfigured = null;
+        if (this._appList && !this._appList.length) {
+            this._appList = null;
+            this._appListPromise = null;
+        }
+        if (this._positionListFailed) {
+            this._positionList = null;
+            this._positionListPromise = null;
+            this.loadPositionList();
+        }
+        if (this._listFailed || this._listPending) this.loadAutomations();
+        if (this._groupsFailed || this._groupsPending) this.loadGroups();
+        if (!this.schemaSections().length) this.loadAutomationSchema();
+        // Safety settings still loading or unavailable read again.
+        const box = document.getElementById('safetySettingsStatus');
+        const safety = document.getElementById('safetySettingsStatusText');
+        const shownKey = box && !box.hidden && safety ? safety.getAttribute('data-i18n') : null;
+        if (shownKey === 'automation.safety_unavailable' || shownKey === 'automation.safety_loading') this.loadSettings();
+        if (outage && window.AudioLibrary && typeof AudioLibrary.refresh === 'function') AudioLibrary.refresh();
     },
 
     // Automation-wide settings. Kept separate from the per-automation CRUD above.
     async loadSettings() {
+        // Overlapping reads: a success applies unless a newer success did, a failure only if nothing newer applied.
+        const seq = this._settingsSeq = (this._settingsSeq || 0) + 1;
         const controls = document.getElementById('safetySettingsControls');
         const status = document.getElementById('safetySettingsStatus');
         const statusText = document.getElementById('safetySettingsStatusText');
@@ -214,6 +258,9 @@ BYD.automations = {
                     || typeof data.drivingSafety !== 'object') {
                 throw new Error('invalid safety settings response');
             }
+            if (seq < (this._settingsOk || 0)) return;
+            this._settingsOk = seq;
+            if (seq > (this._settingsLast || 0)) this._settingsLast = seq;
             const el = document.getElementById('autoAllowShell');
             if (el) el.checked = !!data.allowShell;
             const safety = data.drivingSafety;
@@ -231,6 +278,8 @@ BYD.automations = {
             if (controls) controls.hidden = false;
             if (status) status.hidden = true;
         } catch (e) {
+            if (seq < (this._settingsLast || 0)) return;
+            this._settingsLast = seq;
             if (controls) controls.hidden = true;
             if (status) {
                 status.hidden = false;
@@ -411,18 +460,24 @@ BYD.automations = {
     },
 
     async loadAutomations() {
+        // Overlapping reads: a success applies unless a newer success did, a failure only if nothing newer
+        // applied. Failed (an error reply carries success:false) and pending feed the reconnect handler.
+        const seq = this._listSeq = (this._listSeq || 0) + 1;
+        this._listPending = true;
+        let data = null;
         try {
             const resp = await fetch('/api/automations/list');
-            const data = await resp.json();
-            if (data) {
-                this.automations = data;
-            } else {
-                this.automations = {};
-            }
+            data = await resp.json();
         } catch (e) {
             console.warn('[Automations] Failed to load automations:', e);
-            this.automations = {};
         }
+        const ok = !!data && data.success !== false;
+        if (ok ? seq < (this._listOk || 0) : seq < (this._listLast || 0)) return;
+        if (ok) this._listOk = seq;
+        if (seq > (this._listLast || 0)) this._listLast = seq;
+        if (seq === this._listSeq) this._listPending = false;
+        this._listFailed = !ok;
+        this.automations = ok ? data : {};
         this.render();
     },
 
@@ -3825,6 +3880,7 @@ BYD.automations = {
             .then(r => r.json())
             .then(j => {
                 this._positionList = (j && Array.isArray(j.positions)) ? j.positions : [];
+                this._positionListFailed = !(j && Array.isArray(j.positions));
                 // Re-render the automation list now the cache is fresh, or a card summary
                 // would show the raw position id until the next full reload. loadPositions
                 // and loadAutomations race on init. Cheap no-op when the list is empty.
@@ -3833,7 +3889,7 @@ BYD.automations = {
                 } catch (_) {}
                 return this._positionList;
             })
-            .catch(() => { this._positionList = []; return this._positionList; });
+            .catch(() => { this._positionList = []; this._positionListFailed = true; return this._positionList; });
         return this._positionListPromise;
     },
 
@@ -4043,17 +4099,25 @@ BYD.automations = {
 
     // Load + render the saved groups into #groupList (called on init + after any change).
     async loadGroups() {
+        // Same reply rule and failed/pending flags as loadAutomations.
+        const seq = this._groupsSeq = (this._groupsSeq || 0) + 1;
+        this._groupsPending = true;
+        let map = null;
         try {
             const resp = await fetch('/api/action-groups', { cache: 'no-store' });
-            const map = await resp.json();
-            // Shape: { id: {name, actions:[...]} }. Flatten to an array for the list.
-            this._groups = Object.keys(map || {}).map(id => ({
-                id, name: (map[id] && map[id].name) || id,
-                actions: (map[id] && map[id].actions) || []
-            }));
-        } catch (e) {
-            this._groups = [];
-        }
+            map = await resp.json();
+        } catch (e) { /* counted as a failed read below */ }
+        const ok = !!map && map.success !== false;
+        if (ok ? seq < (this._groupsOk || 0) : seq < (this._groupsLast || 0)) return;
+        if (ok) this._groupsOk = seq;
+        if (seq > (this._groupsLast || 0)) this._groupsLast = seq;
+        if (seq === this._groupsSeq) this._groupsPending = false;
+        this._groupsFailed = !ok;
+        // Shape: { id: {name, actions:[...]} }. Flatten to an array for the list.
+        this._groups = ok ? Object.keys(map).map(id => ({
+            id, name: (map[id] && map[id].name) || id,
+            actions: (map[id] && map[id].actions) || []
+        })) : [];
         this._groupsLoaded = true;
         this.renderGroupList();
         // The saved-automation cards resolve an "Action Group" action's stored UUID to

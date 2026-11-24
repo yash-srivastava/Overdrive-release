@@ -244,6 +244,36 @@ html[dir="rtl"].tlv-on .events-top-bar > .tlv-barend { margin: 0 auto 8px 8px; }
 .tlv-root .tlv-spd.tlv-on { color: #5DDBB6; background: rgba(93, 219, 182, 0.16); }
 .tlv-port .tlv-b2 { width: 40px; height: 40px; }
 .tlv-port .tlv-ctl { bottom: 10px; }
+.tlv-ctl .tlv-fsico { width: 18px; height: 18px; }
+
+/* Fullscreen: the whole player (multi-cam grid + controls). One rule per selector: older
+   WebViews drop a whole selector list over an unknown pseudo-class. */
+.tlv-player.is-fullscreen {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 10050;
+    width: 100% !important;
+    height: 100% !important;
+    max-width: none;
+    border-radius: 0;
+}
+.tlv-player:fullscreen { width: 100% !important; height: 100% !important; max-width: none; border-radius: 0; }
+.tlv-player:-webkit-full-screen { width: 100% !important; height: 100% !important; max-width: none; border-radius: 0; }
+.tlv-root.tlv-fs-on .tlv-panel,
+.tlv-root.tlv-fs-on .tlv-list,
+.tlv-root.tlv-fs-on .tlv-vfeed,
+.tlv-root.tlv-fs-on .tlv-appbar,
+html.tlv-fs-on .events-top-bar {
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+.tlv-root.tlv-fs-on .tlv-stage {
+    flex: 1 1 auto;
+    min-height: 0;
+}
 
 .tlv-state {
     position: absolute;

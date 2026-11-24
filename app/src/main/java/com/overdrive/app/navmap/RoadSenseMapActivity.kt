@@ -28,6 +28,8 @@ import com.google.android.material.chip.ChipGroup
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.snackbar.Snackbar
 import com.overdrive.app.R
+import com.overdrive.app.navmap.glass.MapGlassBasemap
+import com.overdrive.app.navmap.motion.NavCameraRig
 import com.overdrive.app.telenav.TelenavActions
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraUpdateFactory
@@ -38,7 +40,6 @@ import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.layers.CircleLayer
-import org.maplibre.android.style.layers.FillExtrusionLayer
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory
@@ -171,6 +172,11 @@ open class RoadSenseMapActivity : AppCompatActivity() {
     private val guidance = NavGuidanceEngine()
     private var navVoice: NavVoice? = null
     @Volatile private var navigating = false
+        set(value) {
+            if (field == value) return
+            field = value
+            mainHandler.post { applyGuidanceLook() }
+        }
 
     // --- Search autocomplete ---
     // Tap a result → route there; long-press → place sheet (save Home/Work/fav)
@@ -1762,6 +1768,7 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         // Vector basemap set up for navigation (labels, night colours, buildings, light).
         if (!googleStyleActive()) {
             com.overdrive.app.navmap.glass.MapGlassBasemap.apply(style, night, com.overdrive.app.navmap.nav.MapNetworking.lang)
+            com.overdrive.app.navmap.glass.MapGlassBasemap.setGuiding(style, navigating)
         }
 
         // Hazards: clustered so dense corridors collapse into a count at low zoom; the glass layers draw them.
@@ -2281,49 +2288,10 @@ open class RoadSenseMapActivity : AppCompatActivity() {
     // 2D / 3D buildings
     // ---------------------------------------------------------------------
 
-    /**
-     * Wire 2D/3D buildings and apply the persisted choice.
-     *
-     * IMPORTANT: the light (liberty) style ALREADY SHIPS its own `building-3d`
-     * fill-extrusion layer ([LIBERTY_3D_LAYER_ID]), so in 2D mode we must HIDE
-     * that native layer — otherwise 3D always showed in light theme regardless of
-     * the toggle. The dark style has NO extrusion layer, so for it (and any style
-     * lacking one) we ADD our own [MAP_3D_LAYER_ID] over the shared openmaptiles
-     * source. [applyMap3dVisibility] then drives BOTH (whichever exist) so the
-     * toggle is authoritative on every theme.
-     */
     private fun setup3dBuildings(style: Style) {
         map3dEnabled = getSharedPreferences(PREFS_NAVMAP, MODE_PRIVATE)
             .getBoolean(KEY_MAP_3D, true)
-        // Only ADD our own extrusion layer when the style doesn't already provide
-        // one (i.e. dark). If a native building-3d exists (liberty), we just toggle
-        // ITS visibility — no second layer needed. Idempotent across style reloads.
-        val hasNative = style.getLayer(LIBERTY_3D_LAYER_ID) != null
-        if (!hasNative && style.getLayer(MAP_3D_LAYER_ID) == null) {
-            val color = if (isNightTheme()) MAP_3D_COLOR_DARK else MAP_3D_COLOR_LIGHT
-            val ext = FillExtrusionLayer(MAP_3D_LAYER_ID, MAP_3D_SOURCE).apply {
-                sourceLayer = MAP_3D_SOURCE_LAYER
-                minZoom = MAP_3D_MIN_ZOOM
-                setProperties(
-                    PropertyFactory.fillExtrusionColor(color),
-                    PropertyFactory.fillExtrusionHeight(
-                        Expression.get("render_height")),
-                    PropertyFactory.fillExtrusionBase(
-                        Expression.get("render_min_height")),
-                    PropertyFactory.fillExtrusionOpacity(0.8f),
-                    PropertyFactory.visibility(
-                        if (map3dEnabled) Property.VISIBLE else Property.NONE)
-                )
-            }
-            // Over the 2D footprints and under the labels; the route ribbon is added above it later.
-            try {
-                style.addLayerAbove(ext, MAP_2D_BUILDING_LAYER_ID)
-            } catch (_: Throwable) {
-                style.addLayer(ext)
-            }
-        }
-        // Drive visibility of whatever 3D layer(s) exist (native and/or ours).
-        applyMap3dVisibility(style)
+        MapGlassBasemap.installBuildings(style, isNightTheme(), map3dEnabled)
         updateMap3dFab()
     }
 
@@ -2437,19 +2405,17 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         map3dEnabled = !map3dEnabled
         getSharedPreferences(PREFS_NAVMAP, MODE_PRIVATE).edit()
             .putBoolean(KEY_MAP_3D, map3dEnabled).apply()
-        map?.style?.let { applyMap3dVisibility(it) }
+        map?.style?.let { MapGlassBasemap.setBuildingsVisible(it, map3dEnabled) }
         updateMap3dFab()
         showSnackbar(getString(
             if (map3dEnabled) R.string.roadsense_map_3d_on else R.string.roadsense_map_3d_off))
     }
 
-    /** Set visibility on EVERY 3D building layer present — the style's native
-     *  `building-3d` (liberty) AND our added `roadsense-building-3d` (dark) — so the
-     *  toggle is authoritative regardless of which the active basemap carries. */
-    private fun applyMap3dVisibility(style: Style) {
-        val vis = if (map3dEnabled) Property.VISIBLE else Property.NONE
-        style.getLayer(LIBERTY_3D_LAYER_ID)?.setProperties(PropertyFactory.visibility(vis))
-        style.getLayer(MAP_3D_LAYER_ID)?.setProperties(PropertyFactory.visibility(vis))
+    /** Guiding: the vector basemap's land-use fades and suburb names hide; restored when guidance ends. */
+    private fun applyGuidanceLook() {
+        if (isFinishing || isDestroyed || googleStyleActive()) return
+        val style = map?.style?.takeIf { it.isFullyLoaded } ?: return
+        com.overdrive.app.navmap.glass.MapGlassBasemap.setGuiding(style, navigating)
     }
 
     /** Tint the 3D FAB to reflect the active mode (accent when 3D is on). */
@@ -7128,18 +7094,8 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         const val CLUSTER_SPEED_BADGE_LEFT_PX = 56    // mirrors ClusterSpeedOverlay.LEFT_MARGIN_PX
 
         // Immersive driving view: 3D tilt, close zoom, heading-up follow.
-        const val IMMERSIVE_TILT = 55.0
-
-        // Resting (idle/browse) camera pitch — a gentle perspective that gives the
-        // static map depth (3D buildings + road casings) at street zoom, WITHOUT the
-        // steep heading-up framing of active guidance. Deliberately NOT an independent
-        // magic number: it is DERIVED as a fraction of our own [IMMERSIVE_TILT] so the
-        // resting view always reads as a calmer, shallower cousin of the driving
-        // framing and the two stay in proportion if either is ever retuned. ~0.62× of
-        // the driving pitch → a shallow lean. Applied by recenter() at FOLLOW_ZOOM;
-        // suppressed on the cluster + during nav.
-        const val RESTING_TILT_FRACTION = 0.62
-        const val RESTING_TILT = IMMERSIVE_TILT * RESTING_TILT_FRACTION
+        const val IMMERSIVE_TILT = NavCameraRig.GUIDANCE_TILT
+        const val RESTING_TILT = NavCameraRig.RESTING_TILT
         const val IMMERSIVE_ZOOM = 17.5
         const val IMMERSIVE_MIN_SPEED_MPS = 1.5 // below this, GPS bearing is noise → hold last
 
@@ -7212,23 +7168,6 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         const val PREFS_NAVMAP = "navmap_ui"
         const val KEY_HAZARD_FILTER = "hazard_filter_mode"
 
-        // 2D/3D buildings. The 3D layer is a runtime-added fill-extrusion over the
-        // openmaptiles vector source (present in BOTH the light=liberty and the
-        // dark style — only liberty ships the extrusion layer, so we add our own
-        // in either case + toggle visibility). minzoom matches liberty's building-3d
-        // so the volumes only appear when zoomed in (and never load tiles below it).
-        const val MAP_3D_LAYER_ID = "roadsense-building-3d"
-        // The liberty (light) basemap ships its OWN fill-extrusion layer with this
-        // id — we toggle ITS visibility for 2D/3D rather than adding a duplicate.
-        const val LIBERTY_3D_LAYER_ID = "building-3d"
-        const val MAP_2D_BUILDING_LAYER_ID = "building"
-        const val MAP_3D_SOURCE = "openmaptiles"
-        const val MAP_3D_SOURCE_LAYER = "building"
-        const val MAP_3D_MIN_ZOOM = 14f
-        // Fixed extrusion hues (NOT theme attrs — these tint 3D building volumes on
-        // the basemap, so they track the BASEMAP theme, not the app M3 palette).
-        const val MAP_3D_COLOR_LIGHT = "hsl(35,8%,85%)" // liberty's own building tint
-        const val MAP_3D_COLOR_DARK = "#2b2d36"          // muted slate for night
         const val KEY_MAP_3D = "map_3d_enabled" // persisted 2D/3D choice (default 3D)
 
         // Per-map day/night override (independent of the app theme). AUTO follows

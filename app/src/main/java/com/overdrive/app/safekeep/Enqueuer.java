@@ -1,5 +1,7 @@
 package com.overdrive.app.safekeep;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.server.RecordingsIndex;
 import com.overdrive.app.storage.StorageManager;
@@ -53,7 +55,7 @@ final class Enqueuer {
             // Protect it from rotation right away; the rows follow once its sidecars are sealed.
             for (SafeKeepConfig.Route r : e.cfg.routesFor(SafeKeepConfig.Lane.EVIDENCE)) {
                 if (r.includeSentry) {
-                    e.retention.pin(f.getAbsolutePath(), f.length(), System.currentTimeMillis());
+                    e.retention.pin(f.getAbsolutePath(), RemovableStorageFs.length(f), System.currentTimeMillis());
                     break;
                 }
             }
@@ -86,7 +88,7 @@ final class Enqueuer {
      */
     int enqueueMedia(File anchor, Naming.Kind kind, boolean manual, boolean mobileOk, boolean locked,
                      java.util.Set<String> onlyDests) {
-        if (anchor == null || !anchor.isFile() || anchor.length() == 0) return 0;
+        if (anchor == null || !RemovableStorageFs.isFile(anchor) || RemovableStorageFs.length(anchor) == 0) return 0;
         SafeKeepConfig c = e.cfg;
         SafeKeepConfig.Lane lane;
         String label;
@@ -143,7 +145,7 @@ final class Enqueuer {
         boolean sidecarMissing = false;
         for (String ext : CLIP_SIDECARS) {
             File s = new File(dir, stem + ext);
-            if (s.isFile() && s.length() > 0) sidecars.add(s);
+            if (RemovableStorageFs.isFile(s) && RemovableStorageFs.length(s) > 0) sidecars.add(s);
             else sidecarMissing = true;
         }
         JSONObject info = evidence ? eventInfo(new File(dir, stem + ".json")) : new JSONObject();
@@ -185,8 +187,8 @@ final class Enqueuer {
                     it.generation = 0;
                     it.groupKey = stem;
                     it.localPath = f.getAbsolutePath();
-                    it.sizeBytes = f.length();
-                    it.mtime = f.lastModified();
+                    it.sizeBytes = RemovableStorageFs.length(f);
+                    it.mtime = RemovableStorageFs.lastModified(f);
                     it.remotePath = Naming.mediaPath(c, d, k, f.getName(), ts, folder, enc);
                     it.pclass = priority ? (isAnchor ? 1 : 0) : 2;
                     it.pscore = score(priority, ts, severity, isLocked);
@@ -254,9 +256,9 @@ final class Enqueuer {
     /** Top class / camera / severity from the event timeline sidecar (tolerates absence). */
     static JSONObject eventInfo(File json) {
         JSONObject out = new JSONObject();
-        if (json == null || !json.isFile() || json.length() > 4 * 1024 * 1024) return out;
+        if (json == null || !RemovableStorageFs.isFile(json) || RemovableStorageFs.length(json) > 4 * 1024 * 1024) return out;
         try {
-            JSONObject root = new JSONObject(new String(java.nio.file.Files.readAllBytes(json.toPath()),
+            JSONObject root = new JSONObject(new String(RemovableStorageFs.readAllBytes(json),
                     StandardCharsets.UTF_8));
             JSONObject stats = root.optJSONObject("stats");
             String sev = stats == null ? "" : stats.optString("peakSeverity", "");
@@ -329,7 +331,7 @@ final class Enqueuer {
         if (f == null) return "not_found";
         String path = f.getAbsolutePath();
         if (!lock) return e.retention.removeLock(path) ? null : "save_failed";
-        long size = f.length();
+        long size = RemovableStorageFs.length(f);
         if (!e.retention.addLock(path, size, categoryLimitBytes(f.getName()))) return "lock_quota";
         Naming.Kind k = Naming.classify(f.getName());
         if (k != null && k != Naming.Kind.EVENT_SIDECAR && k != Naming.Kind.CLIP_SIDECAR) {
@@ -365,7 +367,7 @@ final class Enqueuer {
             List<JSONObject> rows = idx.queryRecordings(flt, 1, 0);
             if (rows.isEmpty()) return;
             File f = new File(rows.get(0).optString("path", ""));
-            if (f.isFile()) enqueueMedia(f, Naming.Kind.EVENT_CLIP, true, false, false);
+            if (RemovableStorageFs.isFile(f)) enqueueMedia(f, Naming.Kind.EVENT_CLIP, true, false, false);
         } catch (Throwable t) {
             logger.warn("uploadLatestEvent failed: " + t.getMessage());
         }
@@ -377,7 +379,7 @@ final class Enqueuer {
             RecordingsIndex.RecordingRef ref = RecordingsIndex.getInstance().resolveByFilename(fileName);
             if (ref != null && ref.absolutePath != null) {
                 File f = new File(ref.absolutePath);
-                if (f.isFile()) return f;
+                if (RemovableStorageFs.isFile(f)) return f;
             }
         } catch (Throwable ignored) {
         }
@@ -386,7 +388,7 @@ final class Enqueuer {
             for (File dir : new File[]{sm.getSurveillanceDir(), sm.getRecordingsDir(), sm.getProximityDir()}) {
                 if (dir == null) continue;
                 File f = new File(dir, fileName);
-                if (f.isFile()) return f;
+                if (RemovableStorageFs.isFile(f)) return f;
             }
         } catch (Throwable ignored) {
         }
@@ -457,12 +459,12 @@ final class Enqueuer {
                     e.ledger.supersedeOlder(destId, key, gen);
                 }
                 File tel = t.telemetryFilePath == null ? null : new File(t.telemetryFilePath);
-                if (tel != null && tel.isFile()) {
+                if (tel != null && RemovableStorageFs.isFile(tel)) {
                     Ledger.Item ti = base(destId, SafeKeepConfig.Lane.TRIPS, Naming.Kind.TRIP_TELEMETRY,
                             Naming.telemetryKey(t.startTime), 0, now);
                     ti.localPath = tel.getAbsolutePath();
-                    ti.sizeBytes = tel.length();
-                    ti.mtime = tel.lastModified();
+                    ti.sizeBytes = RemovableStorageFs.length(tel);
+                    ti.mtime = RemovableStorageFs.lastModified(tel);
                     ti.remotePath = Naming.telemetryPath(c, d, t.startTime, enc);
                     ti.pclass = 0;
                     ti.pscore = t.startTime / 1000L - 1;

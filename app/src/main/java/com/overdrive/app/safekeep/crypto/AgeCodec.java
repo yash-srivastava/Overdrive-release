@@ -2,6 +2,7 @@ package com.overdrive.app.safekeep.crypto;
 
 import com.google.crypto.tink.subtle.Hkdf;
 import com.google.crypto.tink.subtle.X25519;
+import com.overdrive.app.storage.removable.SeekableFileReader;
 
 import org.json.JSONObject;
 
@@ -9,7 +10,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
@@ -146,7 +146,7 @@ public final class AgeCodec {
 
     private static final class CipherStream extends InputStream {
         private final byte[] prefix;
-        private final RandomAccessFile raf;
+        private final SeekableFileReader raf;
         private final long plainLen;
         private final long chunks;
         private final byte[] payloadKey;
@@ -163,7 +163,7 @@ public final class AgeCodec {
             this.payloadKey = Hkdf.computeHkdf("HMACSHA256", m.fileKey, m.nonce,
                     "payload".getBytes(StandardCharsets.US_ASCII), 32);
             this.total = m.ciphertextLength(plainLen);
-            this.raf = new RandomAccessFile(plain, "r");
+            this.raf = new SeekableFileReader(plain);
             if (raf.length() != plainLen) {
                 raf.close();
                 throw new IOException("Source changed size since it was queued");
@@ -206,7 +206,7 @@ public final class AgeCodec {
             int n = (int) Math.min(CHUNK, plainLen - start);
             byte[] p = new byte[Math.max(0, n)];
             raf.seek(start);
-            raf.readFully(p);
+            raf.readFully(p, 0, p.length);
             try {
                 return chacha(true, payloadKey, streamNonce(index, index == chunks - 1), p);
             } catch (GeneralSecurityException e) {

@@ -1,5 +1,7 @@
 package com.overdrive.app.daemon.telegram;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
@@ -177,8 +179,8 @@ public class SystemCommandHandler implements TelegramCommandHandler {
             // Last-resort fallback: if nothing resolved from logs, try the saved URL file.
             if (resolved == 0) {
                 File urlFile = new File(com.overdrive.app.util.ScratchRoot.path("tunnel_url.txt"));
-                if (urlFile.exists()) {
-                    BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(urlFile)));
+                if (RemovableStorageFs.exists(urlFile)) {
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(RemovableStorageFs.openInput(urlFile)));
                     String saved = reader.readLine();
                     reader.close();
                     if (saved != null && !saved.isEmpty()) {

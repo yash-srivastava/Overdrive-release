@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notif_channel_roadsense_overlay">RoadSense приказ преко апликација</string>
+    <string name="notif_roadsense_overlay_text">Приказ опасности преко апликација је активан</string>
+    <string name="notif_channel_roadsense_imu">RoadSense IMU</string>
+    <string name="notif_roadsense_imu_text">Праћење пута је активно</string>
+    <string name="notif_channel_onscreen_messages">Поруке на екрану</string>
+    <string name="notif_onscreen_message_title">Порука на екрану</string>
+    <string name="notif_channel_parked_impact">Праћење удараца при паркирању</string>
+    <string name="notif_parked_impact_title">Режим надзора</string>
+    <string name="notif_parked_impact_text">Праћење удараца док је возило паркирано</string>
+    <string name="notif_network_hotspot">Мрежа и приступна тачка</string>
+    <string name="notif_channel_media_playback">Репродукција медија</string>
+    <string name="notif_roadsense_chime_title">RoadSense упозорење</string>
+    <string name="notif_roadsense_chime_text">Репродукција безбедносног звучног сигнала</string>
+    <string name="notif_channel_location">Локацијски сервис</string>
+    <string name="notif_channel_location_desc">GPS праћење за надзор</string>
+    <string name="notif_location_title">Локација је активна</string>
+    <string name="notif_location_text">GPS праћење ради</string>
+    <string name="notif_vehicle_control">Управљање возилом</string>
+    <string name="notif_media_title">Репродукција звука</string>
+    <string name="notif_media_text">OverDrive аутоматизација</string>
+    <string name="notif_channel_keepalive">Одржавање позадинских сервиса активним</string>
+    <string name="notif_channel_keepalive_desc">Одржава позадинске сервисе активним у позадини</string>
+    <string name="notif_channel_summary">Overdrive статус</string>
+    <string name="notif_channel_summary_desc">Обједињени ред статуса за Overdrive позадинске сервисе</string>
+    <string name="notif_channel_remote_voice">Удаљени глас</string>
+    <string name="notif_channel_status_overlay">Приказ статуса преко апликација</string>
+    <string name="notif_channel_status_overlay_desc">Приказ статуса снимања и вожње преко апликација</string>
+</resources>

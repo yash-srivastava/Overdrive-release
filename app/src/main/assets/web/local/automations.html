@@ -6,7 +6,7 @@
     <title data-i18n="app.automations_title">Automations - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
     <script src="../shared/theme.js?v=12"></script>
-    <script src="../shared/app-shell.js?v=23"></script>
+    <script src="../shared/app-shell.js?v=26"></script>
     <!--
       Bottom-tab manifest for Automations — five task-based tabs:
         Automations — automation list (or empty-state with a CTA that switches to Add)
@@ -16,7 +16,7 @@
         Community   — shared automation browser
       No tab-bar action button: the form lives on its own tab so the Apply
       pill stays clean. List item Edit switches to Add tab with the form
-      prefilled (handled in shared/automations.js?v=av75).
+      prefilled (handled in shared/automations.js?v=av78).
     -->
     <script>
         window.OT_TABS = [
@@ -45,7 +45,7 @@
 <body>
     <div class="app-layout">
         <!-- Sidebar -->
-        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=23) -->
+        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=24) -->
         <div id="app-shell-mount"></div>
         <!-- Main Content -->
         <main class="main-content">
@@ -442,13 +442,13 @@
     <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
     <div id="toastContainer" class="toast-container"></div>
 
-    <script src="../shared/auth.js"></script>
-    <script src="../shared/core.js?v=27"></script>
-    <script src="../shared/update-flow.js?v=3"></script>
-    <script src="../shared/automations.js?v=av75"></script>
+    <script src="../shared/auth.js?v=18"></script>
+    <script src="../shared/core.js?v=31"></script>
+    <script src="../shared/update-flow.js?v=6"></script>
+    <script src="../shared/automations.js?v=av78"></script>
     <script src="../shared/audio-library.js?v=3"></script>
     <script src="../shared/community-automations.js?v=7"></script>
-    <script src="../shared/cluster-projection.js?v=1"></script>
+    <script src="../shared/cluster-projection.js?v=3"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');

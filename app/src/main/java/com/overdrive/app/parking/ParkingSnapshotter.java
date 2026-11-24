@@ -1,5 +1,7 @@
 package com.overdrive.app.parking;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import java.io.File;
 import java.io.FileOutputStream;
 
@@ -129,7 +131,7 @@ public final class ParkingSnapshotter {
                 for (int q = 0; q < 4 && composite == null; q++) {
                     if (tiles[q] == null) continue;
                     File f = new File(sessionDir, prefix + "_" + ParkingNeighbour.sideName(q) + ".jpg");
-                    if (f.isFile()) composite = f;
+                    if (RemovableStorageFs.isFile(f)) composite = f;
                 }
             }
         }
@@ -142,12 +144,12 @@ public final class ParkingSnapshotter {
      */
     static boolean ensureDir(File dir) {
         if (dir == null) return false;
-        if (dir.isDirectory()) return true;
-        if (!dir.mkdirs() && !dir.isDirectory()) return false;
-        try { dir.setReadable(true, false); dir.setExecutable(true, false); } catch (Throwable ignored) {}
+        if (RemovableStorageFs.isDirectory(dir)) return true;
+        if (!RemovableStorageFs.mkdirs(dir) && !RemovableStorageFs.isDirectory(dir)) return false;
+        try { RemovableStorageFs.setReadable(dir, true, false); RemovableStorageFs.setExecutable(dir, true, false); } catch (Throwable ignored) {}
         File nomedia = new File(dir, ".nomedia");
-        if (!nomedia.exists()) {
-            try { nomedia.createNewFile(); } catch (Throwable ignored) {}
+        if (!RemovableStorageFs.exists(nomedia)) {
+            try { RemovableStorageFs.createNewFile(nomedia); } catch (Throwable ignored) {}
         }
         return true;
     }
@@ -155,27 +157,27 @@ public final class ParkingSnapshotter {
     /** Atomic write (tmp + rename), world-readable so the Telegram daemon (other UID) can read it. */
     static boolean writeAtomic(File target, byte[] bytes) {
         File tmp = new File(target.getAbsolutePath() + ".tmp");
-        try (FileOutputStream fos = new FileOutputStream(tmp)) {
+        try (FileOutputStream fos = RemovableStorageFs.openOutput(tmp)) {
             fos.write(bytes);
             try { fos.getFD().sync(); } catch (Throwable ignored) {}
         } catch (Throwable t) {
-            tmp.delete();
+            RemovableStorageFs.delete(tmp);
             return false;
         }
-        try { tmp.setReadable(true, false); } catch (Throwable ignored) {}
+        try { RemovableStorageFs.setReadable(tmp, true, false); } catch (Throwable ignored) {}
         // Replace in place: an existing good file is never deleted before the
         // new one is guaranteed to land.
         try {
-            java.nio.file.Files.move(tmp.toPath(), target.toPath(),
+            RemovableStorageFs.move(tmp, target,
                     java.nio.file.StandardCopyOption.REPLACE_EXISTING,
                     java.nio.file.StandardCopyOption.ATOMIC_MOVE);
             return true;
         } catch (Throwable ignored) {
             // Filesystem without atomic replace (some FUSE mounts): fall back.
         }
-        if (!tmp.renameTo(target)) {
-            target.delete();
-            if (!tmp.renameTo(target)) { tmp.delete(); return false; }
+        if (!RemovableStorageFs.renameTo(tmp, target)) {
+            RemovableStorageFs.delete(target);
+            if (!RemovableStorageFs.renameTo(tmp, target)) { RemovableStorageFs.delete(tmp); return false; }
         }
         return true;
     }

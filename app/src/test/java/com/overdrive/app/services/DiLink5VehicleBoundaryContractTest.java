@@ -132,7 +132,7 @@ public class DiLink5VehicleBoundaryContractTest {
                 "shared_fission_bg_XDJAScreenProjection_0"));
         assertTrue(cast.contains(
                 "shared_fission_bg_XDJAScreenProjection_1"));
-        assertTrue(cast.contains("SessionKind { APP, MAP }"));
+        assertTrue(cast.contains("SessionKind { APP, MAP, CUSTOM }"));
         assertTrue(cast.contains("fun startMap(): Boolean"));
         assertTrue(cast.contains("fun stopMap(): Boolean"));
         assertTrue(cast.contains(

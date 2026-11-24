@@ -975,6 +975,7 @@ class VideoPlayerFragment : Fragment() {
                 stats.optInt("person", 0).takeIf { it > 0 }?.let { parts.add("$it person") }
                 stats.optInt("car", 0).takeIf { it > 0 }?.let { parts.add("$it car") }
                 stats.optInt("bike", 0).takeIf { it > 0 }?.let { parts.add("$it bike") }
+                stats.optInt("animal", 0).takeIf { it > 0 }?.let { parts.add("$it animal") }
                 stats.optInt("motion", 0).takeIf { it > 0 }?.let { parts.add("$it motion") }
                 append(parts.joinToString(" · "))
             }

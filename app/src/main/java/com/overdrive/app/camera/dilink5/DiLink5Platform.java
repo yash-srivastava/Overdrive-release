@@ -20,6 +20,8 @@ public final class DiLink5Platform {
     private static final String MODE_DILINK4 = "dilink4";
     // Camera-only mode: every non-camera decision behaves exactly like "default".
     private static final String MODE_CAMERA2 = "camera2";
+    private static final String MODE_SURFACE_TEXTURE =
+            com.overdrive.app.camera.AvmSurfaceTexturePlatform.MODE;
     private static final String ACTIVE_MODE_PATH =
             com.overdrive.app.util.ScratchRoot.path("overdrive_active_vehicle_mode");
     private static final String PENDING_MODE_PATH =
@@ -272,7 +274,7 @@ public final class DiLink5Platform {
 
         public boolean supportsLegacyVehicleApi() {
             return MODE_DEFAULT.equals(mode) || MODE_DILINK4.equals(mode)
-                    || MODE_CAMERA2.equals(mode);
+                    || MODE_CAMERA2.equals(mode) || MODE_SURFACE_TEXTURE.equals(mode);
         }
 
         public boolean matches(ActiveModeSnapshot other) {
@@ -554,7 +556,8 @@ public final class DiLink5Platform {
     private static String normalizeMode(String mode) {
         if (mode == null) return null;
         String normalized = mode.trim().toLowerCase(java.util.Locale.US);
-        if (MODE_CAMERA2.equals(normalized)) return normalized;
+        if (MODE_CAMERA2.equals(normalized)
+                || MODE_SURFACE_TEXTURE.equals(normalized)) return normalized;
         if (MODE_DEFAULT.equals(normalized)
                 || MODE_DILINK4.equals(normalized)
                 || MODE_DILINK5.equals(normalized)) {

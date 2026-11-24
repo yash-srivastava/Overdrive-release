@@ -40,6 +40,19 @@ class GravityFrame(
     private var gz = 0f
     private var seeded = false
 
+    // Effective per-sample EMA weights; equal to the 100 Hz constants unless [setSamplePeriodMs] rescaled them.
+    private var gravityAlpha = alpha
+    private var longAxisAlpha = LONG_AXIS_ALPHA
+
+    /** Rescale the EMA weights so their time constants match the 100 Hz tuning; null restores them. */
+    fun setSamplePeriodMs(periodMs: Float?) {
+        gravityAlpha = if (periodMs == null) alpha else rescaleAlpha(alpha, periodMs)
+        longAxisAlpha = if (periodMs == null) LONG_AXIS_ALPHA else rescaleAlpha(LONG_AXIS_ALPHA, periodMs)
+    }
+
+    val profileSummary: String
+        get() = String.format(java.util.Locale.ROOT, "gAlpha=%.4f lAlpha=%.4f", gravityAlpha, longAxisAlpha)
+
     /**
      * Horizontal-residual magnitude (m/s²) of the most recent [update] sample —
      * the component of acceleration ORTHOGONAL to gravity. Gravity lives entirely
@@ -120,9 +133,9 @@ class GravityFrame(
             seeded = true
             return 0f
         }
-        gx += alpha * (ax - gx)
-        gy += alpha * (ay - gy)
-        gz += alpha * (az - gz)
+        gx += gravityAlpha * (ax - gx)
+        gy += gravityAlpha * (ay - gy)
+        gz += gravityAlpha * (az - gz)
 
         val mag = sqrt(gx * gx + gy * gy + gz * gz)
         if (mag < 1e-3f) {
@@ -149,9 +162,9 @@ class GravityFrame(
         val hy = ay - dot * uy
         val hz = az - dot * uz
         // Slow EMA of that horizontal vector → the persistent longitudinal axis.
-        hax += LONG_AXIS_ALPHA * (hx - hax)
-        hay += LONG_AXIS_ALPHA * (hy - hay)
-        haz += LONG_AXIS_ALPHA * (hz - haz)
+        hax += longAxisAlpha * (hx - hax)
+        hay += longAxisAlpha * (hy - hay)
+        haz += longAxisAlpha * (hz - haz)
         val laMag = sqrt(hax * hax + hay * hay + haz * haz)
         if (laMag < 1e-3f) {
             // No established fore-aft bias yet → treat the whole kick as lateral.
@@ -295,5 +308,12 @@ class GravityFrame(
          *  (rigid mount ⇒ fore-aft is constant) so the pitch vote survives coasting to
          *  the breaker. ~0.6 m/s² ≈ a light-but-deliberate deceleration. PROVISIONAL. */
         const val LONG_AXIS_LATCH_MAG = 0.6f
+
+        /** Sample period the per-sample constants were tuned at (F-005: 99.9 Hz). */
+        const val NOMINAL_PERIOD_MS = 10f
+
+        /** Per-sample EMA weight giving the same time constant at [periodMs] as [alpha] at 100 Hz. */
+        fun rescaleAlpha(alpha: Float, periodMs: Float): Float =
+            (1.0 - Math.pow(1.0 - alpha, (periodMs / NOMINAL_PERIOD_MS).toDouble())).toFloat()
     }
 }

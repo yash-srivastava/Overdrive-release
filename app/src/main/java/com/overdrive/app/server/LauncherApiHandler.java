@@ -794,6 +794,10 @@ public final class LauncherApiHandler {
                     ? JSONObject.NULL : (Object) vd.rearMotorSpeed);
             o.put("engineKw", engineFresh && !Double.isNaN(vd.enginePowerKw)
                     ? (Object) round1(vd.enginePowerKw) : JSONObject.NULL);
+            // a DiLink 3/4 plug-in hybrid's drive power, for custom widgets; packKw and the engine flow stay as they are
+            o.put("driveKw", engineFresh && !Double.isNaN(vd.enginePowerKw)
+                    && com.overdrive.app.byd.BydDataCollector.getInstance().isLegacyHybridPublic()
+                    ? (Object) round1(vd.enginePowerKw) : JSONObject.NULL);
             return o;
         } catch (Throwable t) {
             return JSONObject.NULL;
@@ -1196,6 +1200,8 @@ public final class LauncherApiHandler {
                 reason = core.optString("message",
                          core.optString("reason",
                          core.optString("error", "")));
+                String error = core.optString("error", "");
+                if (!ok && error.startsWith("step_up_")) reason = error;
             } else {
                 reason = "no response from vehicle handler";
             }

@@ -550,7 +550,7 @@ public final class ClusterInputRelay {
                     || w != mapping.panelW || h != mapping.panelH) return null;
             return new int[] { id, w, h };
         }
-        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) {
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()) {
             int targetId = com.overdrive.app.launcher.DiLink5ClusterCast
                     .currentTargetDisplayId();
             int w = com.overdrive.app.launcher.DiLink5ClusterCast

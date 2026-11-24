@@ -43,6 +43,23 @@ import java.util.concurrent.atomic.AtomicReference;
 public class BydDataCollectorChargingPublicationTest {
 
     @Test
+    public void preheatCompletionSurvivesAnOlderPollAndRetiredChargingListener() throws Exception {
+        Object device = new CallbackOnlyChargingDevice();
+        BydVehicleData initial = new BydVehicleData.Builder().build();
+        BydDataCollector collector = newActiveCollector(device, initial);
+        BydVehicleData.Builder poll = initial.toBuilder();
+        Object observed = invokeCollectChargingOrdered(collector, poll);
+        invokeChargingCallback(collector, device, "onChargePreheatStateChanged", 2);
+        invokePublishCollectedSnapshot(collector, poll.build(), observed, 1L);
+        invokeChargingCallback(collector, new Object(), "onChargePreheatStateChanged", 1);
+        assertEquals(2, collector.getData().batteryPreheatState);
+        assertTrue(collector.getData().batteryPreheatObservedAtMs > 0L);
+        invokeChargingCallback(collector, device, "onChargePreheatStateChanged", 65535);
+        assertEquals(BydVehicleData.UNAVAILABLE, collector.getData().batteryPreheatState);
+        assertEquals(0L, collector.getData().batteryPreheatObservedAtMs);
+    }
+
+    @Test
     public void bmsFallbackRejectsUnavailableAndOutOfRangeValues() {
         assertTrue(BydDataCollector.isValidChargingBmsState(0));
         assertTrue(BydDataCollector.isValidChargingBmsState(15));

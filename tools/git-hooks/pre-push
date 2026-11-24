@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Install: git config core.hooksPath tools/git-hooks
+# Blocks pushes of experimental branches to the public remote and runs the private-path guard.
+remote_url="$2"
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_url" in
+    *Overdrive-release*)
+      case "$local_ref" in refs/heads/exp/*|refs/heads/private/*)
+        echo "pre-push: $local_ref is experimental; push it to the private remote, not $remote_url"; exit 1;;
+      esac;;
+  esac
+done
+exec tools/ci/check-private-paths.sh

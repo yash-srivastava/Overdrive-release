@@ -1,5 +1,7 @@
 package com.overdrive.app.server;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.storage.StorageManager;
 
@@ -822,7 +824,7 @@ public final class RecordingsIndex {
         for (String sfx : suffixes) {
             try {
                 File f = new File(DB_PATH + sfx);
-                if (f.exists() && f.delete()) {
+                if (RemovableStorageFs.exists(f) && RemovableStorageFs.delete(f)) {
                     logger.warn("Wiped corrupt index artifact: " + f.getName());
                 }
             } catch (Exception e) {
@@ -834,14 +836,14 @@ public final class RecordingsIndex {
     private void cleanupStaleLocks() {
         try {
             File lock = new File(DB_PATH + ".lock.db");
-            if (lock.exists()) {
-                long age = System.currentTimeMillis() - lock.lastModified();
-                if (age > 5 * 60 * 1000L && lock.delete()) {
+            if (RemovableStorageFs.exists(lock)) {
+                long age = System.currentTimeMillis() - RemovableStorageFs.lastModified(lock);
+                if (age > 5 * 60 * 1000L && RemovableStorageFs.delete(lock)) {
                     logger.info("Deleted stale lock file (age " + (age / 1000) + "s)");
                 }
             }
             File trace = new File(DB_PATH + ".trace.db");
-            if (trace.exists()) trace.delete();
+            if (RemovableStorageFs.exists(trace)) RemovableStorageFs.delete(trace);
         } catch (Exception e) {
             logger.debug("Lock cleanup failed: " + e.getMessage());
         }
@@ -926,8 +928,9 @@ public final class RecordingsIndex {
      *         when the file was removed while we were parsing.
      */
     public boolean upsert(File mp4) {
-        if (mp4 == null || !mp4.isFile() || !mp4.canRead()) return false;
+        if (mp4 == null || !RemovableStorageFs.isFile(mp4) || !RemovableStorageFs.canRead(mp4)) return false;
         if (!mp4.getName().endsWith(".mp4")) return false;
+        if (StorageManager.hasPublishedSurveillanceMarker(mp4)) return false;
 
         // Sample BEFORE parsing so any remove() landing during the parse is
         // detected by upsertRow and the stale MERGE is refused.
@@ -976,10 +979,10 @@ public final class RecordingsIndex {
                 + " person_count, vehicle_count, bike_count, animal_count, hero_thumb,"
                 + " actor_classes, place_short, place_medium, place_display, place_country,"
                 + " place_source, start_lat, start_lng, ymd, storage,"
-                + " parking_session_id, event_cameras, peak_confidence, deterrent_flags)"
-                + " KEY(recording_id) VALUES ("
+                + " parking_session_id, event_cameras, peak_confidence, deterrent_flags,"
+                + " cloud_deterrent_actions) KEY(recording_id) VALUES ("
                 + "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-                + " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                + " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
             try (PreparedStatement ps = connection.prepareStatement(sql)) {
                 ps.setString(1, r.recordingId);
                 ps.setString(2, r.filename);
@@ -1017,6 +1020,7 @@ public final class RecordingsIndex {
                 setNullableString(ps, 34, r.eventCameras);
                 setNullableDouble(ps, 35, r.peakConfidence);
                 setNullableInt(ps, 36, r.deterrentFlags);
+                setNullableString(ps, 37, r.cloudDeterrentActions);
                 ps.executeUpdate();
                 invalidateQueryMemos();   // row counts/bytes changed
                 try { com.overdrive.app.server.timeline.TimelineEnricher.kick(r.recordingId); } catch (Throwable ignored) { }
@@ -1581,7 +1585,8 @@ public final class RecordingsIndex {
             // SD-card .mp4).
             File[] files = sm.listMp4Files(dir);
             for (File f : files) {
-                if (!f.isFile() || f.length() <= 0 || !f.canRead()) continue;
+                if (!RemovableStorageFs.isFile(f) || RemovableStorageFs.length(f) <= 0 || !RemovableStorageFs.canRead(f)) continue;
+                if (StorageManager.hasPublishedSurveillanceMarker(f)) continue;
                 out.add(new DirEntry(f, forceType));
             }
         }
@@ -1768,9 +1773,12 @@ public final class RecordingsIndex {
             RootScan scan = new RootScan(
                     RecordingIdentity.rootIdFor(root), rank, listing.available, listing.complete);
             for (File file : listing.files) {
+                // Omitting its ID also drops pre-existing internal rows in
+                // reconcile phase 2, not just new additions in phase 3.
+                if (StorageManager.hasPublishedSurveillanceMarker(file)) continue;
                 RecordingIdentity identity = RecordingIdentity.fromFile(file);
                 scan.observedIds.add(identity.recordingId);
-                if (!file.isFile()) continue;
+                if (!RemovableStorageFs.isFile(file)) continue;
                 RecordingFileFingerprint fingerprint = RecordingFileFingerprint.from(file);
                 if (fingerprint.sizeBytes > 0) {
                     scan.files.put(fingerprint.recordingId, fingerprint);
@@ -1824,7 +1832,8 @@ public final class RecordingsIndex {
             // shell ls when listFiles() returns null on SD-card mounts.
             File[] files = sm.listMp4Files(dir);
             for (File f : files) {
-                if (f.isFile() && f.length() > 0) {
+                if (RemovableStorageFs.isFile(f) && RemovableStorageFs.length(f) > 0
+                        && !StorageManager.hasPublishedSurveillanceMarker(f)) {
                     out.add(RecordingIdentity.fromFile(f).recordingId);
                 }
             }
@@ -1907,7 +1916,7 @@ public final class RecordingsIndex {
     }
 
     /**
-     * Page through the index with the given filter, sorted by ts_ms DESC.
+     * Page through the index with the given filter, newest first.
      * Returns JSON rows in the same shape as the legacy
      * RecordingsApiHandler.parseRecordingUncached output so existing
      * clients don't break.
@@ -1925,7 +1934,7 @@ public final class RecordingsIndex {
                 + " AND w.mp4_mtime = recordings.mp4_mtime) AS watched"
                 + fromRecordings(f)
                 + (where.length() > 0 ? " WHERE " + where : "")
-                + " ORDER BY ts_ms DESC, root_rank ASC"
+                + " ORDER BY ts_ms DESC, root_rank ASC, recording_id ASC"
                 + " LIMIT ? OFFSET ?";
 
         // The result list is built INSIDE the body so a reconnect-retry
@@ -1944,6 +1953,139 @@ public final class RecordingsIndex {
             }
             return out;
         });
+    }
+
+    /** Stable status from the adjacent query; never confuse database errors with an end. */
+    public static final class AdjacentResult {
+        public enum Status { FOUND, END, MISSING_ANCHOR, ERROR }
+        public final Status status;
+        public final JSONObject recording;
+        private AdjacentResult(Status status, JSONObject recording) {
+            this.status = status;
+            this.recording = recording;
+        }
+        private static AdjacentResult of(Status status) {
+            return new AdjacentResult(status, null);
+        }
+    }
+
+    /**
+     * Find the next clip under the exact filtered list ordering. step -1 seeks
+     * newer, +1 older. The anchor is deliberately looked up unfiltered, so a
+     * metadata edit does not break navigation. The timestamp bound is explicit
+     * for H2's index range scan: OR branches alone force a table-wide scan.
+     */
+    public synchronized AdjacentResult queryAdjacentRecording(Filter f, String recordingId,
+                                                               int step) {
+        if (recordingId == null || !recordingId.matches("[0-9a-f]{32}")
+                || (step != -1 && step != 1)) {
+            return AdjacentResult.of(AdjacentResult.Status.MISSING_ANCHOR);
+        }
+        StringBuilder where = new StringBuilder();
+        List<Object> args = new ArrayList<>();
+        buildWhere(f, where, args);
+        final boolean newer = step < 0;
+        appendAnd(where, newer
+                ? "ts_ms >= ? AND (ts_ms > ? OR (ts_ms = ? AND root_rank < ?)"
+                        + " OR (ts_ms = ? AND root_rank = ? AND recording_id < ?))"
+                : "ts_ms <= ? AND (ts_ms < ? OR (ts_ms = ? AND root_rank > ?)"
+                        + " OR (ts_ms = ? AND root_rank = ? AND recording_id > ?))");
+        String from = sortIndexAvailable
+                ? " FROM recordings USE INDEX ("
+                        + (newer ? RecordingsIndexSchema.NEWER_INDEX
+                                 : RecordingsIndexSchema.SORT_INDEX) + ")"
+                : " FROM recordings";
+        String sql = "SELECT recordings.*, EXISTS (SELECT 1 FROM recordings_watched w"
+                + " WHERE w.recording_id = recordings.recording_id"
+                + " AND w.size_bytes = recordings.size_bytes"
+                + " AND w.mp4_mtime = recordings.mp4_mtime) AS watched"
+                + from + " WHERE " + where
+                + (newer ? " ORDER BY ts_ms ASC, root_rank DESC, recording_id DESC"
+                         : " ORDER BY ts_ms DESC, root_rank ASC, recording_id ASC")
+                + " LIMIT 1";
+
+        return withRetry("queryAdjacentRecording",
+                AdjacentResult.of(AdjacentResult.Status.ERROR), () -> {
+            long timestamp;
+            int rank;
+            try (PreparedStatement anchor = connection.prepareStatement(
+                    "SELECT ts_ms, root_rank FROM recordings"
+                            + " WHERE recording_id = ? AND is_available = TRUE")) {
+                anchor.setString(1, recordingId);
+                try (ResultSet rs = anchor.executeQuery()) {
+                    if (!rs.next()) {
+                        return AdjacentResult.of(AdjacentResult.Status.MISSING_ANCHOR);
+                    }
+                    timestamp = rs.getLong(1);
+                    rank = rs.getInt(2);
+                }
+            }
+            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                int p = 1;
+                for (Object arg : args) bind(ps, p++, arg);
+                // A single indexed timestamp range plus lexicographic ties.
+                ps.setLong(p++, timestamp);
+                ps.setLong(p++, timestamp);
+                ps.setLong(p++, timestamp);
+                ps.setInt(p++, rank);
+                ps.setLong(p++, timestamp);
+                ps.setInt(p++, rank);
+                ps.setString(p, recordingId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    return rs.next()
+                            ? new AdjacentResult(AdjacentResult.Status.FOUND, rowToJson(rs))
+                            : AdjacentResult.of(AdjacentResult.Status.END);
+                }
+            }
+        });
+    }
+
+    /**
+     * Zero-based rank of the destination under the same filtered list order.
+     * Only needed on page crossings; ordinary in-page steps remain local.
+     * -1 means the destination fell out of the filtered list before this read.
+     */
+    public synchronized int positionOfRecording(Filter f, JSONObject recording) {
+        if (recording == null) return -1;
+        String id = recording.optString("id", "");
+        if (!id.matches("[0-9a-f]{32}")) return -1;
+        StringBuilder where = new StringBuilder();
+        List<Object> args = new ArrayList<>();
+        buildWhere(f, where, args);
+        // The destination is already known to match. Count all entries before
+        // it; the bound prevents a table-wide search on historical footage.
+        appendAnd(where, "ts_ms >= ? AND (ts_ms > ? OR (ts_ms = ? AND root_rank < ?)"
+                + " OR (ts_ms = ? AND root_rank = ? AND recording_id < ?))");
+        String sql = "SELECT COUNT(*)" + fromRecordings(f) + " WHERE " + where;
+        Integer count = withRetry("positionOfRecording", null, () -> {
+            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                int p = 1;
+                for (Object arg : args) bind(ps, p++, arg);
+                long timestamp;
+                int rank;
+                try (PreparedStatement anchor = connection.prepareStatement(
+                        "SELECT ts_ms, root_rank FROM recordings"
+                                + " WHERE recording_id = ? AND is_available = TRUE")) {
+                    anchor.setString(1, id);
+                    try (ResultSet row = anchor.executeQuery()) {
+                        if (!row.next()) return null;
+                        timestamp = row.getLong(1);
+                        rank = row.getInt(2);
+                    }
+                }
+                ps.setLong(p++, timestamp);
+                ps.setLong(p++, timestamp);
+                ps.setLong(p++, timestamp);
+                ps.setInt(p++, rank);
+                ps.setLong(p++, timestamp);
+                ps.setInt(p++, rank);
+                ps.setString(p, id);
+                try (ResultSet rs = ps.executeQuery()) {
+                    return rs.next() ? rs.getInt(1) : null;
+                }
+            }
+        });
+        return count == null ? -1 : count;
     }
 
     /**
@@ -2373,6 +2515,7 @@ public final class RecordingsIndex {
      * we don't own).
      */
     private static Row parse(File mp4) {
+        if (StorageManager.hasPublishedSurveillanceMarker(mp4)) return null;
         String name = mp4.getName();
         Row r = new Row();
         RecordingIdentity identity = RecordingIdentity.fromFile(mp4);
@@ -2383,8 +2526,8 @@ public final class RecordingsIndex {
         r.rootRank = 100;
         r.filename = name;
         r.absPath = mp4.getAbsolutePath();
-        r.sizeBytes = mp4.length();
-        r.mp4Mtime = mp4.lastModified();
+        r.sizeBytes = RemovableStorageFs.length(mp4);
+        r.mp4Mtime = RemovableStorageFs.lastModified(mp4);
         // Physical volume the clip lives on, classified from its path. Stored
         // as an indexed column so the recordings library can filter by volume
         // (INTERNAL / SD_CARD / USB). Best-effort — a classifier/singleton
@@ -2434,10 +2577,10 @@ public final class RecordingsIndex {
                 // Unknown filename grammar — fall back to mtime, tag as
                 // "normal" so it surfaces somewhere instead of vanishing.
                 r.type = "normal";
-                r.tsMs = mp4.lastModified();
+                r.tsMs = RemovableStorageFs.lastModified(mp4);
             }
         } catch (Exception e) {
-            r.tsMs = mp4.lastModified();
+            r.tsMs = RemovableStorageFs.lastModified(mp4);
             if (r.type == null) r.type = "normal";
         }
 
@@ -2453,13 +2596,13 @@ public final class RecordingsIndex {
         // RecordingsApiHandler.parseRecordingUncached, kept close to
         // identical so existing callers don't notice the swap.
         File sidecar = RecordingFileFingerprint.sidecarFor(mp4);
-        if (sidecar.exists() && sidecar.canRead()) {
-            r.sidecarMtime = sidecar.lastModified();
+        if (RemovableStorageFs.exists(sidecar) && RemovableStorageFs.canRead(sidecar)) {
+            r.sidecarMtime = RemovableStorageFs.lastModified(sidecar);
             try {
-                int cap = (int) Math.min(sidecar.length(), 65536L);
+                int cap = (int) Math.min(RemovableStorageFs.length(sidecar), 65536L);
                 StringBuilder sb = new StringBuilder(cap);
                 try (java.io.BufferedReader br = new java.io.BufferedReader(
-                        new java.io.FileReader(sidecar))) {
+                        new java.io.InputStreamReader(RemovableStorageFs.openInput(sidecar), java.nio.charset.StandardCharsets.UTF_8))) {
                     char[] buf = new char[4096];
                     int n;
                     while ((n = br.read(buf)) > 0) {
@@ -2562,16 +2705,26 @@ public final class RecordingsIndex {
                 JSONArray deterrentMarks = side.optJSONArray("deterrents");
                 if (deterrentMarks != null) {
                     int flags = 0;
+                    JSONObject cloudActions = new JSONObject();
                     for (int k = 0; k < deterrentMarks.length(); k++) {
                         JSONObject mark = deterrentMarks.optJSONObject(k);
                         String kind = mark != null ? mark.optString("type", "") : "";
                         if (com.overdrive.app.surveillance.EventTimelineCollector.DETERRENT_CLOUD.equals(kind)) {
                             flags |= DETERRENT_FLAG_CLOUD;
+                            // Store only known action identifiers; legacy marks
+                            // without an action (and future unknown actions) still
+                            // contribute to the generic cloud count.
+                            String action = mark.optString("action", "");
+                            if (!"flash_lights".equals(action) && !"find_car".equals(action)) {
+                                action = "other";
+                            }
+                            cloudActions.put(action, cloudActions.optInt(action, 0) + 1);
                         } else if (com.overdrive.app.surveillance.EventTimelineCollector.DETERRENT_SCREEN.equals(kind)) {
                             flags |= DETERRENT_FLAG_SCREEN;
                         }
                     }
                     if (flags != 0) r.deterrentFlags = flags;
+                    if (cloudActions.length() > 0) r.cloudDeterrentActions = cloudActions.toString();
                 }
 
                 JSONObject geo = side.optJSONObject("geo");
@@ -2748,6 +2901,12 @@ public final class RecordingsIndex {
         if (!rs.wasNull()) rec.put("peakConfidence", Math.round(pconf * 100) / 100.0);
         int deterrentFlags = rs.getInt("deterrent_flags");
         if (!rs.wasNull() && deterrentFlags != 0) rec.put("deterrentFlags", deterrentFlags);
+        String cloudActions = rs.getString("cloud_deterrent_actions");
+        if (cloudActions != null) {
+            // One unparseable cell must not empty the whole page.
+            try { rec.put("cloudDeterrentActions", new JSONObject(cloudActions)); }
+            catch (org.json.JSONException ignored) { }
+        }
 
         // bucketLabel — used by the native fragment for sticky time-of-day
         // headers without needing the full list. Format: "Today", "Yesterday",
@@ -2860,6 +3019,7 @@ public final class RecordingsIndex {
         String eventCameras;      // CSV of quadrant names for non-static actors
         Double peakConfidence;    // max peakConfidence over non-static actors
         Integer deterrentFlags;   // DETERRENT_FLAG_* bits; null when none fired
+        String cloudDeterrentActions; // JSON counts for flash_lights, find_car, other
     }
 
     private static final class DirEntry {

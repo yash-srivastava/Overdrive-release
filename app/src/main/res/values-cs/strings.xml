@@ -1179,7 +1179,7 @@
     <string name="settings_remote_listener_title">Povolit poslech kabiny</string>
     <string name="settings_remote_listener_subtitle">Umožní ověřeným relacím Živého náhledu a Komunikace slyšet mikrofon kabiny, dokud je auto zapnuté.</string>
     <string name="settings_remote_audio_channel_title">Kompatibilita hlasu</string>
-    <string name="settings_remote_audio_channel_subtitle">Média zachovávají stávající cesty reproduktoru a mikrofonu. Navigace odpovídá směrování Di+ a záznamu mikrofonu 8 kHz.</string>
+    <string name="settings_remote_audio_channel_subtitle">Média zachovávají stávající cesty reproduktoru a mikrofonu. Navigace odpovídá směrování BYD a záznamu mikrofonu 8 kHz.</string>
     <string name="settings_remote_audio_channel_media">Média</string>
     <string name="settings_remote_audio_channel_navigation">Navigace</string>
     <string name="settings_remote_output_override_title">Použít vlastní úroveň hlasu</string>
@@ -1249,6 +1249,7 @@
     <string name="settings_about_license_url">https://github.com/yash-srivastava/Overdrive-release/blob/main/LICENSE</string>
     <string name="settings_about_source_url">https://github.com/yash-srivastava/Overdrive-release</string>
     <string name="settings_about_star_url">https://github.com/yash-srivastava/Overdrive-release</string>
+    <string name="settings_about_tier_hall_of_fame">Síň slávy</string>
     <string name="settings_about_tier_diamond">Diamant</string>
     <string name="settings_about_tier_platinum">Platina</string>
     <string name="settings_about_tier_gold">Zlato</string>

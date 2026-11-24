@@ -28,6 +28,6 @@ public class TripGpsPipelineContractTest {
     if (!Files.isRegularFile(p)) {
       p = Paths.get("..", relative);
     }
-    return Files.readString(p, StandardCharsets.UTF_8);
+    return new String(Files.readAllBytes(p), StandardCharsets.UTF_8);
   }
 }

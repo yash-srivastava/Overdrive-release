@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title data-i18n="app.service_mode_title">Service Mode - OverDrive</title>
+    <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
+    <script src="../shared/theme.js?v=12"></script>
+    <script src="../shared/app-shell.js?v=26"></script>
+    <link rel="stylesheet" href="../shared/styles.css?v=38">
+    <link rel="stylesheet" href="../shared/revamp.css?v=2">
+    <style>
+        .sm-page [hidden] { display: none !important; }
+        .sm-path { word-break: break-all; }
+        .sm-note { padding: 12px 0 4px; }
+        .sm-hero .r-hero-sub:empty { display: none; }
+        #smActiveDetails .setting-row:first-child { padding-top: 4px; }
+        #smRestoreError, #smRecoveryHint { margin-top: 12px; }
+        /* iOS Safari sizes a native date field from its own chrome and ignores width:100%, so it
+           ran past the card's clipped right edge. iOS-only (-webkit-touch-callout) so Chrome and
+           the head-unit WebView keep their native picker styling. */
+        @supports (-webkit-touch-callout: none) {
+            #smEndDate { display: block; min-width: 0; max-width: 100%; -webkit-appearance: none; appearance: none; }
+            #smEndDate::-webkit-date-and-time-value { margin: 0; text-align: start; }
+        }
+
+        /* Start bar: room under the last card, bar surface, toasts above it. */
+        .sm-page .page-body { padding-bottom: 128px; }
+        .sm-page .footer-bar { border-top-color: var(--hairline); background-color: var(--bar); box-shadow: none; }
+        [dir="rtl"] .sm-page .footer-bar { left: 0; right: var(--sidebar-width); }
+        .sm-page .toast-container { bottom: 104px; }
+        :root[data-android-embed="1"] .sm-page .footer-bar .btn { min-height: 56px; }
+        /* The in-app WebView forces .page-body to 24px and toasts to 24px, under the 80px bar. */
+        :root[data-android-embed="1"] .sm-page .page-body { padding-bottom: 104px !important; }
+        :root[data-android-embed="1"] .sm-page .toast-container { bottom: 96px !important; }
+        @media (max-width: 768px) {
+            [dir="rtl"] .sm-page .footer-bar { right: 0; }
+            html.has-bottom-nav body.sm-page .toast-container { bottom: 164px; }
+        }
+    </style>
+</head>
+<body class="r-settings sm-page">
+    <div class="app-layout">
+        <div id="app-shell-mount"></div>
+        <main class="main-content">
+            <div class="mobile-header">
+                <button class="menu-toggle" onclick="toggleSidebar()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
+                </button>
+                <span style="font-weight:600;" data-i18n="service_mode.page_title">Service Mode</span>
+                <div style="width:40px;"></div>
+            </div>
+            <header class="page-header">
+                <h1 class="page-title" data-i18n="service_mode.page_title">Service Mode</h1>
+            </header>
+
+            <div class="r-hero sm-hero is-off" id="smHero" aria-live="polite">
+                <div class="r-hero-text">
+                    <div class="r-hero-title card-title"><span id="smStatusTitle"><span data-i18n="service_mode.checking">Checking Service Mode…</span></span></div>
+                    <div class="r-hero-sub" id="smStatusMeta"><span data-i18n="service_mode.reading">Reading the current device state.</span></div>
+                </div>
+                <span class="status-badge inactive r-hero-ctl" id="smStatusBadge"><span data-i18n="status.off">OFF</span></span>
+                <span class="r-hero-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                </span>
+                <div class="r-hero-stats" id="smStats" hidden>
+                    <div class="r-hero-stat">
+                        <span class="r-hero-stat-label" data-i18n="service_mode.stat_apps">Hidden apps</span>
+                        <span class="r-hero-stat-value num" id="smStatApps">0</span>
+                    </div>
+                    <div class="r-hero-stat">
+                        <span class="r-hero-stat-label" data-i18n="service_mode.stat_features">Paused features</span>
+                        <span class="r-hero-stat-value" id="smStatFeatures"><span data-i18n="common.none">None</span></span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="page-body">
+                <div class="card" id="smActiveCard" hidden>
+                    <div class="card-header">
+                        <div class="card-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4M12 16h4M8 11h.01M8 16h.01"/></svg>
+                            <span data-i18n="service_mode.visit_title">This visit</span>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="smActiveDetails"></div>
+                        <div class="info-box-warning" id="smRestoreError" role="note" hidden>
+                            <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                            <div class="info-note"></div>
+                        </div>
+                        <div class="info-box-note" id="smRecoveryHint" role="note" hidden>
+                            <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                            <div class="info-note">If OverDrive is uninstalled before restoration, use a trusted ADB shell to run <bdi class="sm-path">sh /data/local/tmp/overdrive-service-mode-rescue.sh</bdi>. Do not execute the editable Downloads copy.</div>
+                        </div>
+                        <div class="setting-row" id="smEndActions" hidden>
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="service_mode.end_title">End Service Mode</div>
+                                <div class="setting-desc" data-i18n="service_mode.end_desc">Shows the hidden apps again and resumes paused features.</div>
+                            </div>
+                            <div class="setting-control">
+                                <button class="btn btn-primary" id="smEndButton" type="button" data-i18n="service_mode.end_restore">End now and restore</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="smSetup">
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-title">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+                                <span data-i18n="service_mode.schedule_title">Schedule automatic restoration</span>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="setting-row">
+                                <div class="setting-info">
+                                    <div class="setting-name" data-i18n="service_mode.end_date">End date</div>
+                                    <div class="setting-desc" data-i18n="service_mode.schedule_desc">Service Mode starts immediately. The selected apps and features are restored at 23:59:59 on the chosen date in the head unit's local time zone, or sooner when you end it manually.</div>
+                                </div>
+                                <div class="setting-control">
+                                    <input class="text-input" id="smEndDate" type="date" required>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-title">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
+                                <span data-i18n="service_mode.apps_title">Third-party apps</span>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="setting-desc" data-i18n="service_mode.apps_desc">Choose installed user apps to hide temporarily. Android and BYD system apps, home launchers, enabled keyboards and OverDrive are excluded.</div>
+                            <div id="smApps" aria-live="polite">
+                                <div class="setting-desc sm-note" data-i18n="service_mode.loading_apps">Loading installed apps…</div>
+                            </div>
+                            <div class="setting-row">
+                                <div class="setting-info">
+                                    <div class="setting-desc" data-i18n="service_mode.apps_only">Only eligible launchable apps are listed.</div>
+                                </div>
+                                <div class="setting-control">
+                                    <button class="btn btn-secondary" id="smRefreshApps" type="button" data-i18n="common.refresh">Refresh</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-title">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M10 15V9M14 15V9"/></svg>
+                                <span data-i18n="service_mode.features_title">Pause OverDrive features</span>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="setting-desc" data-i18n="service_mode.features_desc">These runtime gates do not delete or modify your saved rules, bindings or configuration.</div>
+                            <div class="setting-row">
+                                <div class="setting-info">
+                                    <div class="setting-name" data-i18n="service_mode.automations">Automations</div>
+                                    <div class="setting-desc" data-i18n="service_mode.automations_desc">Pause automatic and manual automation runs, including direct action-group runs.</div>
+                                </div>
+                                <div class="setting-control">
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="smPauseAutomations">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="setting-row">
+                                <div class="setting-info">
+                                    <div class="setting-name" data-i18n="service_mode.keymap">Key Mapping</div>
+                                    <div class="setting-desc" data-i18n="service_mode.keymap_desc">Stop physical-key bindings from dispatching configured actions.</div>
+                                </div>
+                                <div class="setting-control">
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="smPauseKeymap">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="setting-row">
+                                <div class="setting-info">
+                                    <div class="setting-name" data-i18n="service_mode.proximity">Proximity</div>
+                                    <div class="setting-desc" data-i18n="service_mode.proximity_desc">Pause automatic proximity lock and unlock without changing trusted devices.</div>
+                                </div>
+                                <div class="setting-control">
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="smPauseProximity">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="setting-row">
+                                <div class="setting-info">
+                                    <div class="setting-name" data-i18n="service_mode.roadsense">RoadSense</div>
+                                    <div class="setting-desc" data-i18n="service_mode.roadsense_desc">Pause road hazard detection and warnings without changing its settings.</div>
+                                </div>
+                                <div class="setting-control">
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="smPauseRoadSense">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="setting-row">
+                                <div class="setting-info">
+                                    <div class="setting-name" data-i18n="service_mode.widgets">Widgets</div>
+                                    <div class="setting-desc" data-i18n="service_mode.widgets_desc">Hide the OverDrive widgets overlay until Service Mode ends.</div>
+                                </div>
+                                <div class="setting-control">
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="smPauseWidgets">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="setting-row">
+                                <div class="setting-info">
+                                    <div class="setting-name" data-i18n="service_mode.seat_positions">Seat Positions</div>
+                                    <div class="setting-desc" data-i18n="service_mode.seat_positions_desc">Pause saved position capture, editing and seat or mirror movement from OverDrive.</div>
+                                </div>
+                                <div class="setting-control">
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="smPauseSeatPositions">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="info-box-warning" role="note">
+                        <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                        <div class="info-note" data-i18n="service_mode.warning">Only select apps you are comfortable disabling temporarily. Do not select apps required for vehicle controls or diagnostics. Apps that were already disabled before Service Mode are not enabled when Service Mode ends. If a package is reclassified as a system app while the mode is active, it will not be disabled again during reconciliation.</div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <div class="footer-bar" id="smStartBar" hidden>
+            <button class="btn btn-primary" id="smStartButton" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                <span data-i18n="service_mode.start">Start Service Mode</span>
+            </button>
+        </div>
+    </div>
+
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+    <div id="toastContainer" class="toast-container"></div>
+
+    <script src="../shared/auth.js?v=18"></script>
+    <script src="../shared/core.js?v=31"></script>
+    <script src="../shared/update-flow.js?v=6"></script>
+    <script src="../shared/service-mode.js?v=4"></script>
+    <script>
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('open');
+            document.getElementById('sidebarOverlay').classList.toggle('show');
+        }
+        document.addEventListener('DOMContentLoaded', function () {
+            BYD.i18n.init().then(function () {
+                BYD.core.init();
+            });
+        });
+    </script>
+</body>
+</html>

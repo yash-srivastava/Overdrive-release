@@ -162,6 +162,8 @@
     <string name="camera_mode_current_dilink5">Current: DiLink 5</string>
     <string name="camera_mode_option_camera2">Camera2 360 — DiLink 100</string>
     <string name="camera_mode_current_camera2">Current: Camera2 360</string>
+    <string name="camera_mode_option_surfacetexture">SurfaceTexture — Atto 2 DM-i</string>
+    <string name="camera_mode_current_surfacetexture">Current: SurfaceTexture</string>
     <string name="camera_mode_save">Apply &amp; restart</string>
     <string name="camera_mode_hint">Changing the mode restarts the camera daemon. If video looks wrong (squished, missing quadrants, red overlay), try the other mode.</string>
 
@@ -326,6 +328,8 @@
     <string name="setup_autostart_enabling">Enabling autostart…</string>
     <string name="setup_autostart_enabled">Autostart enabled ✓</string>
     <string name="setup_autostart_failed">Couldn\'t enable autostart automatically — opening BYD Auto-Start so you can do it by hand.</string>
+    <string name="setup_autostart_reapply">Redo this automatically after updates</string>
+    <string name="setup_autostart_reapply_hint">After each update, BYD Auto-Start opens for a moment and OverDrive unchecks itself. Only while parked with the screen on.</string>
     <string name="setup_overlay_title">Allow Display Over Other Apps</string>
     <string name="setup_overlay_body">Enable this to show a floating status indicator for recording and trip tracking on top of other apps.</string>
     <string name="setup_overlay_button">Open Overlay Settings</string>
@@ -749,6 +753,9 @@
 
     <!-- Update channel selector (Settings → About) -->
     <string name="settings_update_channel_title">Update channel</string>
+    <string name="settings_auto_update_title">Install updates automatically</string>
+    <string name="settings_auto_update_desc">Off by default; Braveheart only. Checks at startup, then about every 6 hours (30 minutes while an update is pending) while the daemon runs. Requires Wi-Fi confirmed unmetered by Android (including your network Metered setting; refuses if that setting cannot be read), ACC off for 30 minutes, Sentry off and no recording. Vehicle-ON-only mode cannot install automatically because its daemon stops at ACC off. Requires a newer release label and versionCode, with the same APK signing key; custom builds with older labels may still be replaced. OverDrive restarts after installation.</string>
+    <string name="settings_auto_update_save_failed">Could not save automatic update preference</string>
     <string name="settings_update_channel_alpha">Alpha</string>
     <string name="settings_update_channel_braveheart">Braveheart</string>
     <string name="settings_update_channel_alpha_desc">The stable release. Every published version is kept — pick any to install (downgrades allowed). Recommended for everyday use.</string>
@@ -960,6 +967,27 @@
     <string name="logs_send_upload_desc">Sends the log to us and gives you a short code. Easiest for support.</string>
     <string name="logs_send_share">Share file…</string>
     <string name="logs_send_share_desc">Save or send the log yourself via the share sheet.</string>
+    <string name="logs_section_hint">Choose the log that best matches the issue. If you\'re unsure, send Camera first; for remote-access problems, also send the tunnel you use.</string>
+    <string name="logs_when_to_send_prefix">"Send this log when: "</string>
+    <!-- Daemon log triage (default locale). Keep aligned with DaemonLogPaths.java; Hebrew in values-he. -->
+    <string name="logs_desc_camera_component">Core OverDrive service — WebUI, HTTP/API, camera feeds and streaming, plus shared vehicle/app integrations.</string>
+    <string name="logs_desc_camera_send_when">the WebUI or API fails, camera/video feeds fail, vehicle data is missing, or no other daemon clearly matches.</string>
+    <string name="logs_desc_accsentry_component">Vehicle ACC and power-state monitor — ignition transitions, parked state, Sentry-mode coordination, screen/backlight and MCU wake.</string>
+    <string name="logs_desc_accsentry_send_when">ACC/ignition detection, park/wake transitions, screen/backlight control or Sentry-mode activation behaves incorrectly.</string>
+    <string name="logs_desc_sentry_component">System keep-awake service — ACC lock, wake lock, and app/network allowlisting.</string>
+    <string name="logs_desc_sentry_send_when">the head unit sleeps unexpectedly, OverDrive is suspended while parked, or background/network access is lost.</string>
+    <string name="logs_desc_telegram_component">Telegram bot service — command polling, command execution and bot replies/notifications.</string>
+    <string name="logs_desc_telegram_send_when">the bot does not respond, commands fail, or Telegram notifications are missing.</string>
+    <string name="logs_desc_cloudflared_component">Cloudflare remote-access tunnel.</string>
+    <string name="logs_desc_cloudflared_send_when">the Cloudflare tunnel will not start, its URL is unavailable, or remote access through Cloudflare fails.</string>
+    <string name="logs_desc_zrok_component">zrok remote-sharing tunnel — reserved/public share and proxy startup.</string>
+    <string name="logs_desc_zrok_send_when">a zrok share or URL fails to start, cannot be reached, or disconnects.</string>
+    <string name="logs_desc_tailscale_component">Tailscale VPN/tailnet service — device connectivity, tunnel and optional proxy/ADB endpoints.</string>
+    <string name="logs_desc_tailscale_send_when">the vehicle disappears from your tailnet, Tailscale connectivity fails, or its configured endpoint/proxy is unreachable.</string>
+    <string name="logs_desc_wireguard_component">WireGuard tunnel (wgproxy) — WireGuard interface and tunnel traffic.</string>
+    <string name="logs_desc_wireguard_send_when">the WireGuard tunnel fails to start, handshake/connectivity fails, or traffic does not pass through it.</string>
+    <string name="logs_desc_singbox_component">sing-box proxy service — local proxy process and configured outbound routing.</string>
+    <string name="logs_desc_singbox_send_when">the proxy will not start, proxy routing is incorrect, or apps cannot reach the network through the proxy.</string>
     <string name="logs_uploading_title">Uploading log…</string>
     <string name="logs_uploading_subtitle">Redacting secrets and sending securely</string>
     <string name="logs_uploaded_title">Log uploaded</string>
@@ -1070,6 +1098,7 @@
     <string name="settings_section_recording">Recording</string>
     <string name="settings_section_surveillance">Surveillance</string>
     <string name="settings_section_daemons">Daemons</string>
+    <string name="settings_section_service_mode">Service Mode</string>
     <string name="settings_section_privacy">Privacy &amp; data</string>
     <string name="settings_section_overlay">Status overlay</string>
     <string name="settings_section_security">Security</string>
@@ -1099,7 +1128,7 @@
     <string name="settings_remote_listener_title" tools:ignore="MissingTranslation">Enable cabin listener</string>
     <string name="settings_remote_listener_subtitle" tools:ignore="MissingTranslation">Allow authenticated Live View and Communicate sessions to hear the cabin microphone while the car is on.</string>
     <string name="settings_remote_audio_channel_title" tools:ignore="MissingTranslation">Voice compatibility</string>
-    <string name="settings_remote_audio_channel_subtitle" tools:ignore="MissingTranslation">Media keeps the existing speaker and microphone paths. Navigation matches Di+ routing and 8 kHz microphone capture.</string>
+    <string name="settings_remote_audio_channel_subtitle" tools:ignore="MissingTranslation">Media keeps the existing speaker and microphone paths. Navigation matches BYD routing and 8 kHz microphone capture.</string>
     <string name="settings_remote_audio_channel_media" tools:ignore="MissingTranslation">Media</string>
     <string name="settings_remote_audio_channel_navigation" tools:ignore="MissingTranslation">Navigation</string>
     <string name="settings_remote_output_override_title">Use custom voice level</string>
@@ -1219,6 +1248,7 @@
     <string name="settings_about_contributors_title">Contributors</string>
     <string name="settings_about_supporters_title">Supporters</string>
     <string name="settings_about_thanks_empty">List populates as people pitch in.</string>
+    <string name="settings_about_tier_hall_of_fame">Hall of Fame</string>
     <string name="settings_about_tier_diamond">Diamond</string>
     <string name="settings_about_tier_platinum">Platinum</string>
     <string name="settings_about_tier_gold">Gold</string>
@@ -1589,6 +1619,7 @@
     <string name="settings_section_surveillance_subtitle">Detection zones, schedule, motion sensitivity.</string>
     <string name="settings_section_storage_subtitle">Where recordings go, space limits, BYD dashcam cleanup.</string>
     <string name="settings_section_daemons_subtitle">Cloudflared, Zrok, Telegram, MQTT runners.</string>
+    <string name="settings_section_service_mode_subtitle">Temporarily hide apps and restore them after a dealer visit.</string>
 
     <!-- About / data row subtitles -->
     <string name="settings_about_row_title">About OverDrive</string>
@@ -2325,6 +2356,32 @@
     <string name="projection_path_auto">Auto</string>
     <string name="projection_path_hosted">Hosted</string>
     <string name="projection_path_direct">Direct</string>
+    <string name="projection_path_factory_mini">Factory mini-map</string>
+    <string name="aaos_map_area_button">Check cluster map area</string>
+    <string name="aaos_map_cast_idle">Open the factory map on the cluster. Confirm the map area in both layouts before casting.</string>
+    <string name="aaos_map_cast_active">The app is running in the fixed cluster map area. Check the instrument cluster to see its output.</string>
+    <string name="aaos_map_area_permission">In Android Settings, open Apps → Special app access → Display over other apps and allow OverDrive. Then return here to run the check.</string>
+    <string name="aaos_map_area_choose">Shift into Park. Open the factory map on the cluster and choose the layout you see. A yellow outline will appear for five seconds. If any edge is clipped or outside the map, leave it unconfirmed and try the other area. Projection uses one area that you confirm in both layouts.\n\nTest area · %3$s\nFull map · %1$s\nSmall map · %2$s</string>
+    <string name="aaos_map_area_change">Change test area</string>
+    <string name="aaos_map_area_center">Center (640 × 280)</string>
+    <string name="aaos_map_area_right">Right (400 × 256)</string>
+    <string name="aaos_map_area_full">Full map</string>
+    <string name="aaos_map_area_small">Small map</string>
+    <string name="aaos_map_area_checked">Confirmed</string>
+    <string name="aaos_map_area_unchecked">Unconfirmed</string>
+    <string name="aaos_map_area_label">OverDrive map area check</string>
+    <string name="aaos_map_area_park">The gear changed or the Park signal was lost. Stop the vehicle, select Park and start a new check.</string>
+    <string name="aaos_map_area_manual_title">Confirm the vehicle is parked</string>
+    <string name="aaos_map_area_manual_message">OverDrive cannot read the selected gear. Check that the instrument cluster shows P and that the parking brake is engaged. Your confirmation applies only to this five-second outline.</string>
+    <string name="aaos_map_area_manual_confirm">P and parking brake confirmed</string>
+    <string name="aaos_map_area_map_required">OverDrive could not verify that the factory map is on the cluster. Open the factory map, keep it visible, and try the check again.</string>
+    <string name="aaos_map_area_unavailable">OverDrive could not show the full test outline on the cluster display. Reopen the factory map and try again.</string>
+    <string name="aaos_map_area_result">What did you see on the instrument cluster?</string>
+    <string name="aaos_map_area_edges">I saw all four edges of the yellow outline entirely inside the factory map.</string>
+    <string name="aaos_map_area_gauges">The whole rectangle was clear of gauges and warning indicators. The speed and warning areas stayed visible.</string>
+    <string name="aaos_map_area_unconfirmed">Leave unconfirmed</string>
+    <string name="aaos_map_area_confirm">Confirm layout</string>
+    <string name="projection_path_factory_mini_hint">Select the factory mini-map on the cluster first. After casting, use Resize to fit the app inside the map window.</string>
     <string name="projection_target_standard">Standard panel</string>
     <string name="projection_target_full">Full panel</string>
     <string name="projection_path_active">Active path: %1$s · panel %2$d · content %3$d. Resource and task success does not verify visible panel output.</string>

@@ -98,6 +98,8 @@ public class AudioApiHandler {
         }
         // Preview an uploaded sound from the web UI (plays on the head unit).
         if (cleanPath.equals("/api/audio/library/play") && method.equals("POST")) {
+            if (VehicleControlApiHandler.isRemoteCaller()
+                    && !StepUpGate.requireBundle("cabinAudio", "Play sound in the car", out)) return true;
             handleAudioLibraryPlay(out, body);
             return true;
         }

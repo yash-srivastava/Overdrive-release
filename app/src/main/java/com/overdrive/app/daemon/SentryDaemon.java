@@ -679,20 +679,80 @@ public class SentryDaemon {
     }
     
     // ==================== SHELL EXECUTION ====================
-    
+
+    private static final long EXEC_SHELL_TIMEOUT_MS = 15_000L;
+
+    interface ProcessStarter {
+        Process start(String[] command) throws java.io.IOException;
+    }
+
+    private static final ProcessStarter DEFAULT_PROCESS_STARTER =
+            command -> new ProcessBuilder(command).redirectErrorStream(true).start();
+
     private static String execShell(String cmd) {
+        return execShell(DEFAULT_PROCESS_STARTER, cmd, EXEC_SHELL_TIMEOUT_MS);
+    }
+
+    static String execShell(ProcessStarter starter, String cmd, long timeoutMs) {
+        if (starter == null || cmd == null) return "ERROR: invalid command";
+        Process process = null;
+        Thread drain = null;
         try {
-            Process process = Runtime.getRuntime().exec(new String[]{"sh", "-c", com.overdrive.app.util.ScratchRoot.remap(cmd)});
-            process.waitFor();
-            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-            StringBuilder output = new StringBuilder();
+            process = starter.start(
+                    new String[]{"sh", "-c", com.overdrive.app.util.ScratchRoot.remap(cmd)});
+            if (process == null) return "ERROR: failed to start process";
+            try {
+                java.io.OutputStream stdin = process.getOutputStream();
+                if (stdin != null) stdin.close();
+            } catch (Exception ignored) {}
+            final Process proc = process;
+            final StringBuilder output = new StringBuilder();
+            // Drain stdout/stderr concurrently while waiting so neither a full pipe buffer
+            // nor a wedged system_server Binder call can block this daemon indefinitely.
+            drain = new Thread(() -> {
+                readStreamInto(proc.getInputStream(), output);
+                readStreamInto(proc.getErrorStream(), output);
+            }, "SentryExecDrain");
+            drain.setDaemon(true);
+            drain.start();
+
+            boolean finished = process.waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+            if (!finished) {
+                log("execShell timed out after " + timeoutMs + "ms — killing child: " + cmd);
+                process.destroyForcibly();
+                try { process.waitFor(500, java.util.concurrent.TimeUnit.MILLISECONDS); }
+                catch (InterruptedException ignored) {}
+                try { drain.join(250); } catch (InterruptedException ignored) {}
+                return "ERROR: command timed out after " + timeoutMs + "ms";
+            }
+            try { drain.join(1_000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+            synchronized (output) {
+                return output.toString().trim();
+            }
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            if (process != null) {
+                try { process.destroyForcibly(); } catch (Exception ignored) {}
+            }
+            return "ERROR: interrupted";
+        } catch (Exception e) {
+            if (process != null) {
+                try { process.destroyForcibly(); } catch (Exception ignored) {}
+            }
+            return "ERROR: " + e.getMessage();
+        }
+    }
+
+    private static void readStreamInto(java.io.InputStream stream, StringBuilder target) {
+        if (stream == null) return;
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream))) {
             String line;
             while ((line = reader.readLine()) != null) {
-                output.append(line).append("\n");
+                synchronized (target) {
+                    target.append(line).append("\n");
+                }
             }
-            return output.toString().trim();
-        } catch (Exception e) {
-            return "ERROR: " + e.getMessage();
+        } catch (Exception ignored) {
         }
     }
     
@@ -951,20 +1011,20 @@ public class SentryDaemon {
         log("Setting up Location permissions...");
         
         // Grant runtime permissions via pm grant (requires shell/root)
-        execShell("pm grant " + APP_PKG() + " android.permission.ACCESS_FINE_LOCATION");
-        execShell("pm grant " + APP_PKG() + " android.permission.ACCESS_COARSE_LOCATION");
-        execShell("pm grant " + APP_PKG() + " android.permission.ACCESS_BACKGROUND_LOCATION");
+        execShell("pm grant " + com.overdrive.app.util.ShellUser.flag() + " " + APP_PKG() + " android.permission.ACCESS_FINE_LOCATION");
+        execShell("pm grant " + com.overdrive.app.util.ShellUser.flag() + " " + APP_PKG() + " android.permission.ACCESS_COARSE_LOCATION");
+        execShell("pm grant " + com.overdrive.app.util.ShellUser.flag() + " " + APP_PKG() + " android.permission.ACCESS_BACKGROUND_LOCATION");
         
         // Allow background location via appops (DiLink 5: appops rejects these names, skip them).
         if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
-            execShell("appops set " + APP_PKG() + " ACCESS_FINE_LOCATION allow");
-            execShell("appops set " + APP_PKG() + " ACCESS_COARSE_LOCATION allow");
-            execShell("appops set " + APP_PKG() + " ACCESS_BACKGROUND_LOCATION allow");
+            execShell("appops set " + com.overdrive.app.util.ShellUser.flag() + " " + APP_PKG() + " ACCESS_FINE_LOCATION allow");
+            execShell("appops set " + com.overdrive.app.util.ShellUser.flag() + " " + APP_PKG() + " ACCESS_COARSE_LOCATION allow");
+            execShell("appops set " + com.overdrive.app.util.ShellUser.flag() + " " + APP_PKG() + " ACCESS_BACKGROUND_LOCATION allow");
         }
         
         // Allow background operation
-        execShell("appops set " + APP_PKG() + " RUN_IN_BACKGROUND allow");
-        execShell("appops set " + APP_PKG() + " RUN_ANY_IN_BACKGROUND allow");
+        execShell("appops set " + com.overdrive.app.util.ShellUser.flag() + " " + APP_PKG() + " RUN_IN_BACKGROUND allow");
+        execShell("appops set " + com.overdrive.app.util.ShellUser.flag() + " " + APP_PKG() + " RUN_ANY_IN_BACKGROUND allow");
         
         // Whitelist from battery optimization
         execShell("dumpsys deviceidle whitelist +" + APP_PKG());
@@ -992,28 +1052,59 @@ public class SentryDaemon {
         // (The old code's second flag was 0x00080000, which is CLEAR_WHEN_TASK_RESET, not
         // EXCLUDE_FROM_RECENTS — an easy digit slip. Recents exclusion is also declared on the
         // activity in the manifest, so this flag is belt-and-braces.)
+        // Fallback step: try primary launchers first, check between steps, and only
+        // send the BOOT_COMPLETED broadcast if starting directly did not bring up
+        // the service. Avoid stacking multiple 15s timeouts if system_server is wedged.
         String result = execShell("am start -n " + APP_PKG() + "/.ui.LocationStarterActivity " +
             "-a " + APP_PKG() + ".START_LOCATION_SILENT " +
             "-f 0x10800000 " +
             "2>&1");
         log("Location restart (silent activity): " + result);
-        
+        if (isExecTimeout(result)) {
+            log("Location Monitor: skipping fallback launches because system_server timed out");
+            return;
+        }
+
+        try { Thread.sleep(1000); } catch (Exception e) {}
+        if (isLocationServiceRunning()) {
+            log("Location Monitor: Location service restarted successfully!");
+            return;
+        }
+
         // Method 2: Start foreground service directly (backup)
-        execShell("am start-foreground-service -n " + APP_PKG() + "/.services.LocationSidecarService 2>&1");
-        
-        // Method 3: Send broadcast to boot receiver (backup)
+        String fgResult = execShell("am start-foreground-service -n " + APP_PKG() + "/.services.LocationSidecarService 2>&1");
+        if (isExecTimeout(fgResult)) {
+            log("Location Monitor: skipping broadcast fallback because foreground start timed out");
+            return;
+        }
+
+        try { Thread.sleep(1000); } catch (Exception e) {}
+        if (isLocationServiceRunning()) {
+            log("Location Monitor: Location service restarted successfully!");
+            return;
+        }
+
+        // Method 3: Send broadcast to boot receiver (last-resort backup)
         execShell("am broadcast -a android.intent.action.BOOT_COMPLETED " +
             "-n " + APP_PKG() + "/.receiver.LocationBootReceiver 2>&1");
-        
+
         // Wait and verify
-        try { Thread.sleep(3000); } catch (Exception e) {}
-        
-        String verify = execShell("dumpsys activity services " + LOCATION_SERVICE_NAME + " 2>/dev/null");
-        if (verify.contains("ServiceRecord") && !verify.contains("app=null")) {
+        try { Thread.sleep(1500); } catch (Exception e) {}
+
+        if (isLocationServiceRunning()) {
             log("Location Monitor: Location service restarted successfully!");
         } else {
             log("Location Monitor: Location service restart pending");
         }
+    }
+
+    private static boolean isLocationServiceRunning() {
+        String verify = execShell("dumpsys activity services " + LOCATION_SERVICE_NAME + " 2>/dev/null");
+        return verify.contains("ServiceRecord") && !verify.contains("app=null");
+    }
+
+    static boolean isExecTimeout(String output) {
+        return output != null && output.startsWith("ERROR: command timed out");
     }
     
     /**

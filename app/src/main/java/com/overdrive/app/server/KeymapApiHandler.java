@@ -521,6 +521,7 @@ public final class KeymapApiHandler {
                 HttpResponse.sendJson(out, resp.toString());
                 return;
             }
+            if (!StepUpGate.requireBundle("keyInject", "Send a key to the car screen", out)) return;
             // Fire-and-forget shell, exactly like the UI-nav keyevents in
             // VehicleControlApiHandler.handleSystem. The int is range-checked above.
             Runtime.getRuntime().exec(new String[]{"sh", "-c", com.overdrive.app.util.ScratchRoot.remap("input keyevent " + keycode)});
@@ -703,6 +704,7 @@ public final class KeymapApiHandler {
         // above (and again at fire time) because a malformed action would still
         // consume its physical key while doing nothing.
         section.put("bindings", bindings);
+        if (!StepUpGate.requireBundle("config", "Change key mapping", out)) return;
 
         boolean ok = com.overdrive.app.config.UnifiedConfigManager.setKeymap(section);
         boolean restartRequired = false;
@@ -1154,6 +1156,7 @@ public final class KeymapApiHandler {
             // Anything else is a single action. The advanced-shell
             // 403 is signalled by a runStep result with httpStatus=403 so the
             // gate behaves the same whether shell is a lone binding or a step.
+            if (!stepUpForAction(req, "a key mapping", out)) return;
             JSONObject r = runBoundAction(req);
             int status = r.optInt("httpStatus", 200);
             r.remove("httpStatus");
@@ -1191,6 +1194,153 @@ public final class KeymapApiHandler {
             return r;
         }
         return "sequence".equals(req.optString("kind", "")) ? runSequence(req) : runStep(req);
+    }
+
+    private static final String STEP_UP_RUN = "run";
+    /** Nesting ceiling for the step-up scan; deeper payloads fail closed. */
+    private static final int STEP_UP_MAX_DEPTH = 8;
+    /** Api prefixes that can reach a gated action or change what keys and buttons run. */
+    private static final String[] STEP_UP_API_PREFIXES = {
+        "/api/vehicle", "/api/keymap", "/api/quick-controls", "/api/automations",
+        "/api/action-groups", "/api/dev-view", "/api/debug", "/api/launcher",
+    };
+
+    /**
+     * Step-up for a key or quick-control fire, asked on the request thread (automation and
+     * group runs hop to workers that carry no caller). False = the 428/403 reply was written.
+     */
+    static boolean stepUpForAction(JSONObject action, String name, OutputStream out) throws Exception {
+        if (!StepUpGate.anyGated() || StepUpGate.callerExempt()) return true;
+        String gate = stepUpNeed(action, STEP_UP_MAX_DEPTH);
+        if (gate == null) return true;
+        return STEP_UP_RUN.equals(gate)
+                ? StepUpGate.requireBundle(STEP_UP_RUN, "Run " + name, out)
+                : StepUpGate.require(gate, out);
+    }
+
+    /** The gated action a lone vehicle step runs, STEP_UP_RUN when the payload may reach one, else null. */
+    private static String stepUpNeed(JSONObject action, int depthLeft) {
+        if (action == null) return null;
+        if (depthLeft <= 0) return STEP_UP_RUN;
+        switch (action.optString("kind", "")) {
+            case "vehicle": {
+                String name = action.optString("action", "");
+                if ("unlock".equals(name)) {
+                    return StepUpGate.isGated(StepUpGate.UNLOCK) ? StepUpGate.UNLOCK : null;
+                }
+                return "lock".equals(name) || "flash".equals(name) || "find_car".equals(name)
+                        ? null : STEP_UP_RUN;
+            }
+            case "catalog":
+                return catalogMayReachGated(action) ? STEP_UP_RUN : null;
+            case "api": {
+                String path = action.optString("path", "").trim().toLowerCase(java.util.Locale.ROOT);
+                if (path.contains("${")) return STEP_UP_RUN;
+                if (path.startsWith("/api/vehicle/")) {
+                    return vehicleApiStepUp(path, action.optString("body", ""));
+                }
+                for (String prefix : STEP_UP_API_PREFIXES) {
+                    if (path.startsWith(prefix)) return STEP_UP_RUN;
+                }
+                return null;
+            }
+            case "sequence": {
+                org.json.JSONArray steps = action.optJSONArray("steps");
+                for (int i = 0; steps != null && i < steps.length(); i++) {
+                    if (stepUpNeed(steps.optJSONObject(i), depthLeft - 1) != null) return STEP_UP_RUN;
+                }
+                return null;
+            }
+            case "radio":
+            case "manualClip":
+            case "openApp":
+            case "voice_assistant":
+                return null;
+            default: // shell, automation, actionGroup and unknown kinds
+                return STEP_UP_RUN;
+        }
+    }
+
+    /** Only the /api/vehicle routes that unlock, open the trunk, or switch the car on/off ask. */
+    private static String vehicleApiStepUp(String path, String body) {
+        int q = path.indexOf('?');
+        String route = (q >= 0 ? path.substring(0, q) : path).substring("/api/vehicle/".length());
+        while (route.endsWith("/")) route = route.substring(0, route.length() - 1);
+        String sub = vehicleApiBodyAction(body);
+        String gate;
+        switch (route) {
+            case "unlock": gate = StepUpGate.UNLOCK; break;
+            case "power-on": gate = StepUpGate.POWER_ON; break;
+            case "power-off": gate = StepUpGate.POWER_OFF; break;
+            case "trunk": gate = sub == null || "open".equals(sub) ? StepUpGate.TRUNK_OPEN : null; break;
+            case "climate": gate = sub == null || "power_on".equals(sub) || "set_temp".equals(sub)
+                    ? StepUpGate.POWER_ON : null; break;
+            case "climate-schedule": gate = "delete".equals(sub) ? null : StepUpGate.POWER_ON; break;
+            case "cluster-cast":
+            case "cluster-touch": return STEP_UP_RUN;
+            default: return null;
+        }
+        return gate != null && StepUpGate.isGated(gate) ? gate : null;
+    }
+
+    /** The body's "action" field, or null when it can't be read (treated as the risky case). */
+    private static String vehicleApiBodyAction(String body) {
+        if (body == null || body.trim().isEmpty()) return "";
+        if (body.contains("${")) return null;
+        try {
+            return new JSONObject(body).optString("action", "").trim().toLowerCase(java.util.Locale.ROOT);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static final String[] CATALOG_PAYLOAD_PROBES = {
+        "ON", "OFF", "OPEN", "CLOSE", "STOP", "TOGGLE", "PRESS", "LOCK", "UNLOCK",
+    };
+
+    /**
+     * True when the control could resolve to a gated command for ANY state or payload: toggles
+     * resolve against live data at run time, which can differ from the state seen now.
+     */
+    private static boolean catalogMayReachGated(JSONObject req) {
+        String key = req.optString("key", null);
+        VehicleControlCatalog.ControlEntity entity =
+                key == null || key.isBlank() ? null : VehicleControlCatalog.get(key);
+        if (entity == null) return false;
+        String sub = req.has("sub") && !req.isNull("sub") ? req.optString("sub", null) : null;
+        BydDataCollector collector = BydDataCollector.getInstance();
+        com.overdrive.app.byd.BydVehicleData live = collector.isInitialized() ? collector.getData() : null;
+        java.util.List<String> payloads = new java.util.ArrayList<>();
+        payloads.add(req.optString("payload", ""));
+        java.util.Collections.addAll(payloads, CATALOG_PAYLOAD_PROBES);
+        for (String payload : payloads) {
+            for (int pass = 0; pass < 2; pass++) {
+                String gated;
+                try {
+                    gated = catalogStepUpAction(entity, sub, payload, pass == 0 ? live : null);
+                } catch (Throwable t) {
+                    gated = null;
+                }
+                if (gated != null && StepUpGate.isGated(gated)) return true;
+            }
+        }
+        return false;
+    }
+
+    /** The step-up action one catalog resolution maps to (same resolution as runCatalog), or null. */
+    private static String catalogStepUpAction(VehicleControlCatalog.ControlEntity entity, String sub,
+                                              String payload, com.overdrive.app.byd.BydVehicleData data) {
+        VehicleControlCatalog.ControlAction resolved = entity.toAction(sub, payload, data);
+        VehicleCommandRouter.VehicleCommand cmd = resolved == null ? null : resolved.command;
+        if (cmd == null) return null;
+        if (cmd instanceof VehicleCommandRouter.UnlockCommand) return StepUpGate.UNLOCK;
+        if (cmd instanceof VehicleCommandRouter.TrunkOpenCommand
+                || cmd instanceof VehicleCommandRouter.TrunkOpenSdkCommand) return StepUpGate.TRUNK_OPEN;
+        if (cmd instanceof VehicleCommandRouter.VehiclePowerOffCommand) return StepUpGate.POWER_OFF;
+        if (cmd instanceof VehicleCommandRouter.VehiclePowerOnCommand
+                || cmd instanceof VehicleCommandRouter.ClimateOnCommand
+                || cmd.wakeVehicleIfOff()) return StepUpGate.POWER_ON;
+        return null;
     }
 
     /**
@@ -1528,6 +1678,11 @@ public final class KeymapApiHandler {
             response.put("error", "Missing automation id");
             return response;
         }
+        if (com.overdrive.app.automation.Automations.isServiceModeDisabled()) {
+            response.put("success", false);
+            response.put("error", "Automation execution is paused by Service Mode.");
+            return response;
+        }
         if (!com.overdrive.app.automation.Automations.automationExists(id)) {
             response.put("success", false);
             response.put("error", "Unknown automation: " + id);
@@ -1567,6 +1722,11 @@ public final class KeymapApiHandler {
             response.put("error", "Missing action group id");
             return response;
         }
+        if (com.overdrive.app.automation.Automations.isServiceModeDisabled()) {
+            response.put("success", false);
+            response.put("error", "Action-group execution is paused by Service Mode.");
+            return response;
+        }
         if (!com.overdrive.app.automation.ActionGroups.exists(id)) {
             response.put("success", false);
             response.put("error", "Unknown action group: " + id);
@@ -1581,7 +1741,7 @@ public final class KeymapApiHandler {
         if (!GROUPS_IN_FLIGHT.add(id)) {
             logger.info("Keymap action group " + id + " already running — ignoring repeat press");
             response.put("success", true);
-            response.put("message", "Already running");
+            response.put("message", Messages.get("errors.keymap_already_running"));
             return response;
         }
         Thread t = new Thread(() -> {

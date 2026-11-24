@@ -101,6 +101,10 @@ public final class RemoteAccessMessageCodes {
         exact("Automatic action paused because GPS accuracy is insufficient", "gps_accuracy_poor");
         exact("Proximity is disabled", "proximity_disabled");
         exact("Automatic action paused until a fresh, reliable GPS position is available", "gps_unavailable");
+        // A GPS pause with ParkedPosition's reason appended (RemoteAccessApiHandler.withoutParkedPosition).
+        rule("(.+); no parked position \\(car has driven (\\S+) km since its last GPS fix\\)",
+                "no_parked_position_driven", "message", "km");
+        rule("(.+); no parked position \\((.+)\\)", "no_parked_position", "message", "reason");
         exact("Driver door is already locked; the key fob search is paused while locked", "keyfob_search_paused_locked");
         exact("Every active Bluetooth phone must confirm Away; a nearby key prevents locking", "phones_must_confirm_away");
         exact("Fresh confirmed keyfob departure is required", "keyfob_departure_required");
@@ -194,6 +198,10 @@ public final class RemoteAccessMessageCodes {
         PHRASES.put("cloud leg not available for this command", "phrase_cloud_not_available");
         PHRASES.put("blocked: vehicle not confirmed parked", "phrase_not_parked");
         PHRASES.put("vehicle not confirmed parked", "phrase_not_parked");
+        PHRASES.put("no GPS fix recorded since OverDrive started", "phrase_parked_no_fix");
+        PHRASES.put("no odometer reading before the last GPS fix", "phrase_parked_no_odometer");
+        PHRASES.put("odometer unavailable", "phrase_parked_odometer_unavailable");
+        PHRASES.put("odometer reads lower than at the last GPS fix", "phrase_parked_odometer_lower");
         PHRASES.put("acknowledged", "phrase_acknowledged");
         PHRASES.put("timeout", "phrase_timeout");
         PHRASES.put("car offline in BYD cloud", "phrase_car_offline");

@@ -302,7 +302,10 @@ class HazardClassifier {
         // (+1) ⇒ breaker, down-then-up (−1) ⇒ pothole.
         if (coupletUsed) potholeVote += if (coupletSign < 0) PITCH_TYPE_VOTE else -PITCH_TYPE_VOTE
         // Rise time (proven discriminator on the label set: potholes sharp <50 ms, breakers ramped).
-        potholeVote += if (c.riseTimeMs in 0 until POTHOLE_RISE_MS) RISE_VOTE else -RISE_VOTE
+        // Abstains when the stream is too coarse to resolve it (e.g. 10 Hz DiLink 5).
+        if (c.riseResolved) {
+            potholeVote += if (c.riseTimeMs in 0 until POTHOLE_RISE_MS) RISE_VOTE else -RISE_VOTE
+        }
         // dip-leading (supporting, noisier on a single tilt-corrected channel).
         potholeVote += if (c.dipLeading) DIP_VOTE else -DIP_VOTE
         // axle-pair ⇒ full-width transverse feature ⇒ breaker (strong, geometric).

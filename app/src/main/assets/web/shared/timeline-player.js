@@ -2191,10 +2191,10 @@
             };
             this.dewarp = d;
         }
-        const key = spec.k1 + ',' + spec.k2 + ',' + spec.aspect;
+        const key = spec.k1 + ',' + spec.k2 + ',' + spec.aspect + ',' + (spec.strip || 0);
         if (key !== this.lensKey) {
             let ok = false;
-            try { ok = this.dewarp.attach(this.video, { k1: spec.k1, k2: spec.k2, aspect: spec.aspect }); } catch (e) { ok = false; }
+            try { ok = this.dewarp.attach(this.video, { k1: spec.k1, k2: spec.k2, aspect: spec.aspect, strip: spec.strip || 0 }); } catch (e) { ok = false; }
             if (!ok) { this._lensOff(); return; }
             this.lensKey = key;
         }

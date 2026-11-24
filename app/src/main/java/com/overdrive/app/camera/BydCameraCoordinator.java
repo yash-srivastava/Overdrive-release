@@ -29,6 +29,8 @@ public class BydCameraCoordinator {
 
     // Event callback state (AVMCamera.IEventCallback — separate from IBYDCameraUser)
     private boolean eventCallbackSet = false;
+    private volatile Object surfaceTextureEventOwner;
+    private Object surfaceTextureEventProxy;
     // DI4 only: append the HAL's arg1/arg2 so field logs can tell event causes apart.
     private volatile boolean logEventArgs = false;
 
@@ -288,6 +290,10 @@ public class BydCameraCoordinator {
         if (cameraObj == null) return;
         if (cameraObj instanceof com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend) return;
         if (cameraObj instanceof com.overdrive.app.camera.camera2.Camera2AvmBackend) return;
+        if (AvmSurfaceTexturePlatform.isSelected()) {
+            setupSurfaceTextureEventCallback(cameraObj);
+            return;
+        }
         if (eventCallbackSet) return;  // already wired; resetEventCallbackState clears
 
         try {
@@ -340,6 +346,69 @@ public class BydCameraCoordinator {
         } catch (Exception e) {
             logger.warn("Event callback setup failed: " + e.getMessage());
         }
+    }
+
+    /** The opt-in factory may return NormalCamera or an inherited camera API. */
+    void setupSurfaceTextureEventCallback(Object camera) {
+        if (surfaceTextureEventOwner == camera && eventCallbackSet) return;
+        resetEventCallbackState();
+        try {
+            Method setter = null;
+            for (Method[] methods : new Method[][]{
+                    camera.getClass().getMethods(), camera.getClass().getDeclaredMethods()}) {
+                for (Method candidate : methods) {
+                    if ("setEventCallback".equals(candidate.getName())
+                            && candidate.getParameterTypes().length == 1
+                            && candidate.getParameterTypes()[0].isInterface()) {
+                        setter = candidate;
+                        break;
+                    }
+                }
+                if (setter != null) break;
+            }
+            if (setter == null) {
+                logger.info("SurfaceTexture vendor camera has no event callback API");
+                return;
+            }
+            Class<?> callbackClass = setter.getParameterTypes()[0];
+            Object proxy = Proxy.newProxyInstance(
+                callbackClass.getClassLoader(), new Class<?>[]{callbackClass},
+                (callback, method, args) -> {
+                    if (method.getDeclaringClass() == Object.class) {
+                        switch (method.getName()) {
+                            case "hashCode": return System.identityHashCode(callback);
+                            case "equals": return args != null && args.length == 1
+                                && callback == args[0];
+                            case "toString": return "SurfaceTexture camera event callback";
+                        }
+                    }
+                    if (surfaceTextureEventOwner != camera) return null;
+                    if (method.getName().startsWith("on")
+                            && args != null && args.length >= 2
+                            && args[1] instanceof Integer) {
+                        handleCameraEvent((Integer) args[1], "");
+                    }
+                    return null;
+                });
+            surfaceTextureEventProxy = proxy;
+            surfaceTextureEventOwner = camera;
+            setter.setAccessible(true);
+            Object accepted = setter.invoke(camera, proxy);
+            if (setter.getReturnType() != void.class && !Boolean.TRUE.equals(accepted)) {
+                throw new IllegalStateException("setEventCallback returned " + accepted);
+            }
+            if (surfaceTextureEventOwner == camera) {
+                eventCallbackSet = true;
+                logger.info("SurfaceTexture vendor camera event callback registered");
+            }
+        } catch (Exception | LinkageError failure) {
+            retireSurfaceTextureEventCallback(camera);
+            logger.warn("SurfaceTexture event callback unavailable: " + failure.getMessage());
+        }
+    }
+
+    void retireSurfaceTextureEventCallback(Object camera) {
+        if (surfaceTextureEventOwner == camera) resetEventCallbackState();
     }
 
     private void handleCameraEvent(int eventType, String argSuffix) {
@@ -449,7 +518,11 @@ public class BydCameraCoordinator {
     public boolean isYielded() { return isCameraYielded(); }
     public boolean isRegistered() { return serviceAvailable; }
     public boolean isEventCallbackActive() { return eventCallbackSet; }
-    public void resetEventCallbackState() { eventCallbackSet = false; }
+    public void resetEventCallbackState() {
+        surfaceTextureEventOwner = null;
+        surfaceTextureEventProxy = null;
+        eventCallbackSet = false;
+    }
 
     /**
      * audit avc-yield (round 3, finding 9): clear sticky yielded /

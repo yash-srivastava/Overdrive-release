@@ -13,6 +13,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InterruptedIOException;
 import java.util.Iterator;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 
@@ -42,6 +44,15 @@ public final class BydCloudClient {
     public static final String DRIVING_SAFETY_BLOCKED_CODE =
             "OVERDRIVE_BLOCKED_DRIVING";
     private static final AtomicLong smartChargeRequestOrder = new AtomicLong();
+
+    // Overseas realtime and remote-control requests from an account the car is shared with must
+    // carry a signed outer userType=1; the cloud refuses a wrong declaration before the car hears it.
+    private static final String USER_TYPE_SHARED = "1";
+    private static final String CODE_SHARED_NOT_DECLARED = "1001";
+    private static final String CODE_NOT_SHARED = "8003";
+    /** "userId|vin" → whether that account reaches the car as a shared user. */
+    private static final ConcurrentMap<String, Boolean> SHARED_ACCOUNT_VINS =
+            new ConcurrentHashMap<>();
 
     public BydCloudClient(BydCloudConfig config) {
         this.config = config;
@@ -259,7 +270,105 @@ public final class BydCloudClient {
             throw new IOException("No vehicles found on account");
         }
 
+        seedSharedVins(s, list);
         return list;
+    }
+
+    /** First guess per VIN; never overrides what the cloud's answers already corrected. */
+    private void seedSharedVins(BydCloudSession s, JSONArray list) {
+        if (config.isChinaRegion()) return;
+        for (int i = 0; i < list.length(); i++) {
+            JSONObject vehicle = list.optJSONObject(i);
+            String vin = vehicle == null ? "" : vehicle.optString("vin", "");
+            if (vin.isEmpty()) continue;
+            boolean shared = isSharedVehicle(vehicle);
+            if (SHARED_ACCOUNT_VINS.putIfAbsent(sharedKey(s, vin), shared) == null && shared) {
+                logger.info("BYD cloud: VIN ***" + vin.substring(Math.max(0, vin.length() - 4))
+                        + " is shared with this account; declaring userType=1");
+            }
+        }
+    }
+
+    /** A non-zero empowerId or a negative empowerType marks a car shared with the account. */
+    static boolean isSharedVehicle(JSONObject vehicle) {
+        Double empowerId = numberOf(vehicle.opt("empowerId"));
+        Double empowerType = numberOf(vehicle.opt("empowerType"));
+        return (empowerId != null && empowerId != 0d) || (empowerType != null && empowerType < 0d);
+    }
+
+    private static Double numberOf(Object value) {
+        double n;
+        if (value instanceof Number) {
+            n = ((Number) value).doubleValue();
+        } else if (value instanceof String) {
+            try {
+                n = Double.parseDouble(((String) value).trim());
+            } catch (NumberFormatException notANumber) {
+                return null;
+            }
+        } else {
+            return null;
+        }
+        return Double.isNaN(n) ? null : n;
+    }
+
+    private static String sharedKey(BydCloudSession s, String vin) {
+        return s.userId + "|" + vin;
+    }
+
+    private String userTypeFor(BydCloudSession s, String vin) {
+        if (config.isChinaRegion() || vin == null || vin.isEmpty()) return null;
+        return Boolean.TRUE.equals(SHARED_ACCOUNT_VINS.get(sharedKey(s, vin)))
+                ? USER_TYPE_SHARED : null;
+    }
+
+    /** Whether {@code first} is the cloud's refusal of the userType it was sent with. */
+    private boolean needsOtherUserType(String endpoint, BydCloudSession s, String vin,
+                                       String sentUserType, JSONObject first) {
+        if (config.isChinaRegion() || vin == null || vin.isEmpty() || first == null) return false;
+        String wrongUserType = sentUserType != null ? CODE_NOT_SHARED : CODE_SHARED_NOT_DECLARED;
+        return wrongUserType.equals(first.optString("code", ""))
+                && !s.userTypeSettled.contains(vin + "|" + endpoint);
+    }
+
+    /**
+     * Resends a refused request once with the other userType (fresh random and timeStamp) and
+     * remembers what worked. Refused both ways, the first answer stands for the rest of the login.
+     */
+    private JSONObject withUserTypeCorrected(String endpoint, BydCloudSession s, String vin,
+                                             JSONObject inner, String sentUserType,
+                                             JSONObject first, long callTimeoutMs,
+                                             BooleanSupplier authority) throws IOException {
+        if (!needsOtherUserType(endpoint, s, vin, sentUserType, first)) return first;
+        boolean shared = sentUserType != null;
+        long retryMs = System.currentTimeMillis();
+        JSONObject retryInner = new JSONObject();
+        try {
+            for (Iterator<String> it = inner.keys(); it.hasNext(); ) {
+                String key = it.next();
+                retryInner.put(key, inner.opt(key));
+            }
+            retryInner.put("random", BydCryptoUtils.randomHex16());
+            retryInner.put("timeStamp", String.valueOf(retryMs));
+        } catch (Exception e) {
+            return first;
+        }
+        TokenEnvelope retry = buildTokenOuterEnvelope(
+                retryMs, s, retryInner, shared ? null : USER_TYPE_SHARED);
+        JSONObject second = transport.postSecure(endpoint, retry.outer, callTimeoutMs, authority);
+        String refusedBothWays = shared ? CODE_SHARED_NOT_DECLARED : CODE_NOT_SHARED;
+        if (refusedBothWays.equals(second.optString("code", ""))) {
+            if (s.userTypeSettled.add(vin + "|" + endpoint)) {
+                logger.info("BYD cloud " + endpoint + " refused with and without userType: code="
+                        + first.optString("code", "") + "/" + refusedBothWays);
+            }
+            return first;
+        }
+        SHARED_ACCOUNT_VINS.put(sharedKey(s, vin), !shared);
+        logger.info("BYD cloud: VIN ***" + vin.substring(Math.max(0, vin.length() - 4))
+                + (shared ? " answers as the owner; userType dropped"
+                          : " is shared with this account; declaring userType=1"));
+        return second;
     }
 
     /** Return cached capability data when it still belongs to {@code vin}. */
@@ -1205,7 +1314,8 @@ public final class BydCloudClient {
             throw new IOException("Failed to build command request", e);
         }
 
-        TokenEnvelope env = buildTokenOuterEnvelope(nowMs, s, inner);
+        String userType = userTypeFor(s, vin);
+        TokenEnvelope env = buildTokenOuterEnvelope(nowMs, s, inner, userType);
         String guardKey = drivingSafetyGuardForRemoteCommand(commandType);
         if (guardKey != null) {
             boolean blocked;
@@ -1226,6 +1336,15 @@ public final class BydCloudClient {
         }
         JSONObject response = transport.postSecure(
                 "/control/remoteControl", env.outer, 0L, authority);
+        if (needsOtherUserType("/control/remoteControl", s, vin, userType, response)
+                && isRemoteCommandBlocked(guardKey)) {
+            logger.warn("Blocked cloud command " + commandType
+                    + " at transport boundary");
+            return new CloudCommandResult(
+                    false, DRIVING_SAFETY_BLOCKED_CODE, "blocked while driving");
+        }
+        response = withUserTypeCorrected("/control/remoteControl", s, vin, inner, userType,
+                response, 0L, authority);
         if (Thread.currentThread().isInterrupted()) {
             throw new IOException("remote command cancelled");
         }
@@ -1269,6 +1388,15 @@ public final class BydCloudClient {
 
         logger.info("Remote command " + commandType + " dispatched (fire-and-forget)");
         return new CloudCommandResult(true, "0", "");
+    }
+
+    private static boolean isRemoteCommandBlocked(String guardKey) {
+        if (guardKey == null) return false;
+        try {
+            return DrivingSafetyGuard.isActionBlocked(guardKey);
+        } catch (Throwable unavailable) {
+            return true;
+        }
     }
 
     private static String drivingSafetyGuardForRemoteCommand(String commandType) {
@@ -1329,9 +1457,12 @@ public final class BydCloudClient {
                 continue;
             }
 
-            TokenEnvelope env = buildTokenOuterEnvelope(nowMs, s, inner);
+            String userType = userTypeFor(s, vin);
+            TokenEnvelope env = buildTokenOuterEnvelope(nowMs, s, inner, userType);
             try {
                 JSONObject response = transport.postSecure("/control/remoteControlResult", env.outer);
+                response = withUserTypeCorrected("/control/remoteControlResult", s, vin, inner,
+                        userType, response, 0L, null);
                 String code = response.optString("code", "");
                 
                 if (!"0".equals(code)) continue;
@@ -1402,11 +1533,14 @@ public final class BydCloudClient {
             throw new IOException("Failed to build realtime request", e);
         }
 
-        TokenEnvelope env = buildTokenOuterEnvelope(nowMs, s, inner);
+        String userType = userTypeFor(s, vin);
+        TokenEnvelope env = buildTokenOuterEnvelope(nowMs, s, inner, userType);
         JSONObject response = postRealtimeSecure(
                 "/vehicleInfo/vehicle/vehicleRealTimeRequest",
                 env.outer,
                 callTimeoutMs);
+        response = withUserTypeCorrected("/vehicleInfo/vehicle/vehicleRealTimeRequest", s, vin,
+                inner, userType, response, callTimeoutMs, null);
 
         String code = response.optString("code", "");
         if (!"0".equals(code)) {
@@ -1441,12 +1575,15 @@ public final class BydCloudClient {
                 pollInner.put("requestSerial", requestSerial);
             } catch (Exception e) { continue; }
 
-            TokenEnvelope pollEnv = buildTokenOuterEnvelope(nowMs, s, pollInner);
+            String pollUserType = userTypeFor(s, vin);
+            TokenEnvelope pollEnv = buildTokenOuterEnvelope(nowMs, s, pollInner, pollUserType);
             try {
                 JSONObject pollResp = postRealtimeSecure(
                         "/vehicleInfo/vehicle/vehicleRealTimeResult",
                         pollEnv.outer,
                         callTimeoutMs);
+                pollResp = withUserTypeCorrected("/vehicleInfo/vehicle/vehicleRealTimeResult", s,
+                        vin, pollInner, pollUserType, pollResp, callTimeoutMs, null);
                 if (!"0".equals(pollResp.optString("code", ""))) continue;
 
                 String pollData = pollResp.optString("respondData", "");
@@ -1808,6 +1945,12 @@ public final class BydCloudClient {
     }
 
     private TokenEnvelope buildTokenOuterEnvelope(long nowMs, BydCloudSession s, JSONObject inner) {
+        return buildTokenOuterEnvelope(nowMs, s, inner, null);
+    }
+
+    /** A non-null overseas {@code userType} is sent and signed; the cloud answers 1007 to an unsigned one. */
+    private TokenEnvelope buildTokenOuterEnvelope(long nowMs, BydCloudSession s, JSONObject inner,
+                                                  String userType) {
         if (config.isChinaRegion()) {
             return buildCnTokenOuterEnvelope(nowMs, s, inner);
         }
@@ -1825,6 +1968,7 @@ public final class BydCloudClient {
             signFields.put("imeiMD5", config.imeiMd5);
             signFields.put("language", config.language);
             signFields.put("reqTimestamp", reqTimestamp);
+            if (userType != null) signFields.put("userType", userType);
 
             String sign = BydCryptoUtils.sha1Mixed(
                     BydCryptoUtils.buildSignString(signFields, signKey));
@@ -1845,6 +1989,7 @@ public final class BydCloudClient {
             outer.put("sdk", "35");
             outer.put("mod", "Xiaomi");
             outer.put("serviceTime", String.valueOf(System.currentTimeMillis()));
+            if (userType != null) outer.put("userType", userType);
 
             outer.put("checkcode", BydCryptoUtils.computeCheckcode(outer));
 

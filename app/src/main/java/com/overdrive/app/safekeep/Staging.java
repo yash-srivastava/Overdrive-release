@@ -1,5 +1,7 @@
 package com.overdrive.app.safekeep;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.config.ConfigBackupService;
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.trips.TripAnalyticsManager;
@@ -39,7 +41,7 @@ public final class Staging {
     /** Returns the staged file for an item, creating it on first use. Null if the source is gone. */
     static File materialize(Ledger.Item it) throws Exception {
         File f = new File(DIR, it.id + "-" + it.generation + ext(it));
-        if (f.isFile() && f.length() > 0) return f;
+        if (RemovableStorageFs.isFile(f) && RemovableStorageFs.length(f) > 0) return f;
         byte[] data;
         Naming.Kind kind = Naming.Kind.parse(it.kind);
         JSONObject meta = it.meta();
@@ -72,26 +74,26 @@ public final class Staging {
 
     static void discard(Ledger.Item it) {
         File f = new File(DIR, it.id + "-" + it.generation + ext(it));
-        if (f.exists() && !f.delete()) f.deleteOnExit();
+        if (RemovableStorageFs.exists(f) && !RemovableStorageFs.delete(f)) f.deleteOnExit();
     }
 
     /** Removes staging files not referenced by a live item id (boot hygiene). */
     static void sweep(java.util.Set<Long> liveIds) {
-        File[] files = DIR.listFiles();
+        File[] files = RemovableStorageFs.listFiles(DIR);
         if (files == null) return;
         for (File f : files) {
             String n = f.getName();
             int dash = n.indexOf('-');
             if (dash <= 0) {
-                if (!f.delete()) f.deleteOnExit();
+                if (!RemovableStorageFs.delete(f)) f.deleteOnExit();
                 continue;
             }
             try {
                 if (!liveIds.contains(Long.parseLong(n.substring(0, dash)))) {
-                    if (!f.delete()) f.deleteOnExit();
+                    if (!RemovableStorageFs.delete(f)) f.deleteOnExit();
                 }
             } catch (NumberFormatException e) {
-                if (!f.delete()) f.deleteOnExit();
+                if (!RemovableStorageFs.delete(f)) f.deleteOnExit();
             }
         }
     }
@@ -210,16 +212,16 @@ public final class Staging {
 
     static void writeAtomic(File f, byte[] data) throws Exception {
         File dir = f.getParentFile();
-        if (dir != null && !dir.isDirectory() && !dir.mkdirs() && !dir.isDirectory()) {
+        if (dir != null && !RemovableStorageFs.isDirectory(dir) && !RemovableStorageFs.mkdirs(dir) && !RemovableStorageFs.isDirectory(dir)) {
             throw new java.io.IOException("Cannot create " + dir);
         }
         File tmp = new File(dir, f.getName() + ".tmp");
-        try (FileOutputStream fos = new FileOutputStream(tmp)) {
+        try (FileOutputStream fos = RemovableStorageFs.openOutput(tmp)) {
             OutputStream os = fos;
             os.write(data);
             os.flush();
             fos.getFD().sync();
         }
-        Files.move(tmp.toPath(), f.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        RemovableStorageFs.move(tmp, f, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
     }
 }

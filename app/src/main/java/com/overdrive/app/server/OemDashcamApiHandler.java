@@ -115,6 +115,24 @@ public class OemDashcamApiHandler {
         }
     }
 
+    /**
+     * Queue one fresh lifecycle pass after the current one without cancelling it.
+     * For callers whose intent leaves the recording/streaming demand unchanged,
+     * cancelling a start in progress would only restart the camera open.
+     */
+    public static void scheduleLifecycleRecalcAfterCurrent() {
+        lifecyclePending.set(true);
+        if (lifecycleInFlight.compareAndSet(false, true)) {
+            try {
+                LIFECYCLE_EXEC.execute(LIFECYCLE_RUN);
+            } catch (Throwable t) {
+                lifecycleInFlight.set(false);
+                logger.warn("scheduleLifecycleRecalcAfterCurrent: executor rejected: "
+                    + t.getMessage());
+            }
+        }
+    }
+
     /** Single shared Runnable used by both the primary submission and the
      *  race-recovery path, so the do-while body lives in exactly one place. */
     private static final Runnable LIFECYCLE_RUN = new Runnable() {
@@ -124,6 +142,7 @@ public class OemDashcamApiHandler {
                     lifecyclePending.set(false);
                     try {
                         applyTriggerLifecycleFromUcm();
+                        rebindCombinedViewAfterOemLifecycle();
                     } catch (Throwable t) {
                         com.overdrive.app.daemon.CameraDaemon.log(
                             "scheduleLifecycleRecalc body threw: " + t.getMessage());
@@ -138,6 +157,21 @@ public class OemDashcamApiHandler {
             }
         }
     };
+
+    /** After a DVR restart the old external OES texture is invalid even if
+     * view 9 remains selected. Rebind its replacement on the lifecycle worker,
+     * not from the 5-second read-only browser availability poll. No frame-age
+     * gate: the band stays black until the new source's first frame. */
+    private static void rebindCombinedViewAfterOemLifecycle() {
+        if (com.overdrive.app.server.StreamingApiHandler.getLastDesiredViewMode() != 9) return;
+        com.overdrive.app.surveillance.GpuSurveillancePipeline pano =
+            com.overdrive.app.daemon.CameraDaemon.getGpuPipeline();
+        com.overdrive.app.camera.OemDashcamPipeline oem =
+            com.overdrive.app.daemon.CameraDaemon.getOemDashcamPipeline();
+        if (pano == null || !pano.isRunning() || !pano.isStreamingEnabled()
+                || oem == null || !oem.isRouteReady()) return;
+        pano.activateCombinedViewIfDesired(oem);
+    }
 
     // ==================== PERIODIC SELF-HEAL TICKER ====================
     //
@@ -266,10 +300,11 @@ public class OemDashcamApiHandler {
                 // this branch, a watchdog-stop in streaming-only mode stays
                 // down forever because no recording trigger is armed.
                 try {
+                    // A tick repairs drift; it must not cancel a transition in progress.
                     if (com.overdrive.app.config.UnifiedConfigManager
                             .isAnyOemDashcamTriggerEnabled()
                             || isAnyStreamingViewerActive()) {
-                        scheduleLifecycleRecalc();
+                        scheduleLifecycleRecalcAfterCurrent();
                     }
                 } catch (Throwable t) {
                     com.overdrive.app.daemon.CameraDaemon.log(
@@ -677,7 +712,7 @@ public class OemDashcamApiHandler {
      *  <p>Two signals are accepted, and BOTH are needed:
      *  <ul>
      *    <li>the live scaler view-mode (6) — the steady state once the route landed;</li>
-     *    <li>the persisted DESIRED view-mode (6) — the user's pick during the OEM
+     *    <li>the persisted DESIRED view-mode (6 or 9) — the user's pick during the OEM
      *        warmup window. The scaler is deliberately NOT switched to 6 until the
      *        OEM bind succeeds (a view-6 scaler with uOemActive=0 falls through the
      *        shader's OEM gate and paints the 4-cam AVM mosaic). Without this second
@@ -690,8 +725,11 @@ public class OemDashcamApiHandler {
             com.overdrive.app.surveillance.GpuSurveillancePipeline pano =
                 com.overdrive.app.daemon.CameraDaemon.getGpuPipeline();
             if (pano == null || !pano.isStreamingEnabled()) return false;
-            if (pano.getStreamViewMode() == 6) return true;
-            return com.overdrive.app.server.StreamingApiHandler.getLastDesiredViewMode() == 6;
+            int desired = com.overdrive.app.server.StreamingApiHandler.getLastDesiredViewMode();
+            // During 9 -> 6 the scaler may still be in combined mode while
+            // the OEM route is warming up. The desired selection is a viewer
+            // even before the scaler catches up.
+            return pano.getStreamViewMode() == 6 || desired == 6 || desired == 9;
         } catch (Throwable t) {
             return false;
         }
@@ -888,6 +926,16 @@ public class OemDashcamApiHandler {
                 cameraStartEpoch,
                 () -> isLifecycleRevisionCurrent(expectedRevision));
         } catch (Throwable t) {
+            // A start retired by a newer lifecycle pass is a cancellation; only a
+            // current start's failure becomes the terminal lastStartError.
+            if (!isLifecycleRevisionCurrent(expectedRevision)
+                    || !com.overdrive.app.daemon.CameraDaemon
+                        .isCameraStartEpochCurrent(cameraStartEpoch)
+                    || com.overdrive.app.daemon.CameraDaemon.isProcessRestartPending()) {
+                com.overdrive.app.daemon.CameraDaemon.log(
+                    "OemDashcam: pipeline.start cancelled: " + t.getMessage());
+                return null;
+            }
             com.overdrive.app.daemon.CameraDaemon.log(
                 "OemDashcam: pipeline.start failed: " + t.getMessage());
             try {
@@ -1139,14 +1187,14 @@ public class OemDashcamApiHandler {
             // these accept explicit OEM-only overrides from the future
             // dedicated picker.
             if (req.has("recordingQuality")) {
-                String t = req.optString("recordingQuality", "").toUpperCase();
+                String t = req.optString("recordingQuality", "").toUpperCase(java.util.Locale.ROOT);
                 if (t.equals("ECONOMY") || t.equals("STANDARD") || t.equals("HIGH")
                         || t.equals("PREMIUM") || t.equals("MAX")) {
                     delta.put("recordingQuality", t);
                 }
             }
             if (req.has("codec")) {
-                String c = req.optString("codec", "").toUpperCase();
+                String c = req.optString("codec", "").toUpperCase(java.util.Locale.ROOT);
                 if ("H264".equals(c) || "H265".equals(c)) delta.put("codec", c);
             }
             if (req.has("fps")) {

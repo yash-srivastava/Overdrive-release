@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.22.1)
 project("surveillance")
 
+# Strip the checkout location from __FILE__ and debug paths so native libraries are the same
+# wherever they are built (local folder, private overlay or CI) and carry no machine paths.
+get_filename_component(OD_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../.." ABSOLUTE)
+add_compile_options("-ffile-prefix-map=${OD_REPO_ROOT}/=")
+
 set(CMAKE_CXX_STANDARD 17)
 
 # NOTE: Secrets library removed - encryption now uses pure Java (Safe.java)
@@ -87,6 +92,8 @@ if(OPENCV_AVAILABLE)
         else()
             # Fallback: link against static omp from NDK
             list(APPEND SURVEILLANCE_LIBS ${OPENCV_LIBS} -fopenmp -static-openmp z)
+            # OpenMP is static here; drop the build machine's toolchain dir clang adds as RUNPATH.
+            list(APPEND SURVEILLANCE_LIBS -fno-openmp-implicit-rpath)
         endif()
     endif()
     
@@ -224,8 +231,17 @@ set_target_properties(od PROPERTIES
 
 # Optional private transport. Public builds package its verified prebuilt;
 # source builds must not also supply a jniLibs copy of the same library.
+set(OD_PRIVATE_PARKED "${CMAKE_CURRENT_SOURCE_DIR}/../../../../private/app/src/main/cpp/parked")
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/parked/CMakeLists.txt")
     add_subdirectory(parked)
+elseif(EXISTS "${OD_PRIVATE_PARKED}/CMakeLists.txt")
+    # Official build: the private overlay supplies the source; the public prebuilt
+    # (src/oss/jniLibs) is not on this build's jniLibs path and must not be in main.
+    file(GLOB OD_MAIN_PARKED_COPIES "${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/*/libodpark.so")
+    if(OD_MAIN_PARKED_COPIES)
+        message(FATAL_ERROR "Remove libodpark.so from src/main/jniLibs: ${OD_MAIN_PARKED_COPIES}")
+    endif()
+    add_subdirectory("${OD_PRIVATE_PARKED}" parked)
 endif()
 
 # ==================== NEON SIMD Optimization ====================

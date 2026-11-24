@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
+        <!-- Empty, themed host for instrumented dialog tests. -->
+        <activity
+            android:name="android.app.Activity"
+            android:exported="false"
+            android:theme="@style/Theme.Overdrive.M3" />
         <receiver
             android:name="com.overdrive.app.voice.VoiceOverlayDemoReceiver"
             android:exported="true"

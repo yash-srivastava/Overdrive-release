@@ -68,6 +68,23 @@ public class ScratchRootAlternateModeTest {
         // Look-alike prefixes are left alone.
         assertEquals("mount /data/local/tmpfs", ScratchRoot.remap("mount /data/local/tmpfs"));
         assertEquals("x /data/local/tmp_old y", ScratchRoot.remap("x /data/local/tmp_old y"));
+        // A path containing the legacy string is not the legacy directory.
+        assertEquals("cp /mnt/data/local/tmp/video.mp4 " + ALT + "/video.mp4",
+                ScratchRoot.remap("cp /mnt/data/local/tmp/video.mp4 /data/local/tmp/video.mp4"));
+        assertEquals("echo prefix/data/local/tmp && cd " + ALT,
+                ScratchRoot.remap("echo prefix/data/local/tmp && cd /data/local/tmp"));
+        assertEquals("ls /mnt//data/local/tmp/x",
+                ScratchRoot.remap("ls /mnt//data/local/tmp/x"));
+        // Extra slashes and glued options still name the legacy root itself.
+        assertEquals("echo /" + ALT + " && cd " + ALT,
+                ScratchRoot.remap("echo //data/local/tmp && cd /data/local/tmp"));
+        assertEquals("am start -d file://" + ALT + "/a.apk",
+                ScratchRoot.remap("am start -d file:///data/local/tmp/a.apk"));
+        assertEquals("D=${OVERDRIVE_SCRATCH:-" + ALT + "}; tar -xf a.tar -C" + ALT,
+                ScratchRoot.remap("D=${OVERDRIVE_SCRATCH:-/data/local/tmp}; tar -xf a.tar -C/data/local/tmp"));
+        // Rewrite only the outer root, not a same-named nested subdirectory.
+        assertEquals("cat " + ALT + "/data/local/tmp/cache",
+                ScratchRoot.remap("cat /data/local/tmp/data/local/tmp/cache"));
         assertEquals("", ScratchRoot.remap(""));
         assertEquals(null, ScratchRoot.remap(null));
     }

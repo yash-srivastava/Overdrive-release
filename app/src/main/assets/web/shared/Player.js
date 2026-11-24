@@ -7,6 +7,8 @@ p = new Player({
   useWorker: <bool>,
   workerFile: <defaults to "Decoder.js"> // give path to Decoder.js
   webgl: true | false | "auto" // defaults to "auto"
+  reusePlaneTextures: true | false // experimental; defaults to false
+  benchmarkPlaneTextures: true | false // diagnostic draw + readPixels timing; defaults to false
 });
 
 // canvas property represents the canvas node
@@ -46,6 +48,10 @@ p.decode(<binary>);
   var Player = function(parOptions){
     var self = this;
     this._config = parOptions || {};
+    // A single RGBA pixel buffer for benchmark-only GPU readback; never
+    // allocate it per frame or use it on normal playback paths.
+    this._planeReadbackPixel = this._config.benchmarkPlaneTextures === true
+        ? new Uint8Array(4) : null;
 
     this.render = true;
     if (this._config.render === false){
@@ -274,12 +280,15 @@ p.decode(<binary>);
       var width = options.width || canvasObj.canvas.width;
       var height = options.height || canvasObj.canvas.height;
 
-      if (canvasObj.canvas.width !== width || canvasObj.canvas.height !== height || !canvasObj.webGLCanvas){
+      var newCanvas = canvasObj.canvas.width !== width ||
+          canvasObj.canvas.height !== height || !canvasObj.webGLCanvas;
+      if (newCanvas){
         canvasObj.canvas.width = width;
         canvasObj.canvas.height = height;
         canvasObj.webGLCanvas = new WebGLCanvas({
           canvas: canvasObj.canvas,
           contextOptions: canvasObj.contextOptions,
+          reusePlaneTextures: this._config.reusePlaneTextures === true,
           width: width,
           height: height
         });
@@ -288,15 +297,91 @@ p.decode(<binary>);
       var ylen = width * height;
       var uvlen = (width / 2) * (height / 2);
 
+      // CPU submit time vs draw + 1x1 readback (WebGL finish() is only a flush in
+      // Chrome). The readback stalls the WebView: benchmark mode only.
+      var benchmark = this._config.benchmarkPlaneTextures === true &&
+          typeof performance !== 'undefined' && typeof performance.now === 'function';
+      var startedAt = benchmark ? performance.now() : 0;
       canvasObj.webGLCanvas.drawNextOutputPicture({
         yData: options.data.subarray(0, ylen),
         uData: options.data.subarray(ylen, ylen + uvlen),
         vData: options.data.subarray(ylen + uvlen, ylen + uvlen + uvlen)
       });
+      if (benchmark) {
+        var cpuMs = performance.now() - startedAt;
+        var gl = canvasObj.webGLCanvas.contextGL;
+        var readbackMs = null;
+        if (gl && typeof gl.readPixels === 'function') {
+          try {
+            gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE,
+                this._planeReadbackPixel);
+            readbackMs = performance.now() - startedAt;
+          } catch (e) {
+            // Diagnostics must not interrupt video if readback is unavailable.
+          }
+        }
+        this.recordPlaneUploadMs(cpuMs, readbackMs, newCanvas);
+      }
 
       var self = this;
       self.recycleMemory(options.data);
 
+    },
+    // 300 steady frames per window, bucketed against the 30-upload refresh
+    // positions. First decoded picture following a resize is separate.
+    recordPlaneUploadMs: function(cpuMs, readbackMs, firstAfterResize) {
+      var stats = this._planeUploadStats;
+      if (!stats) {
+        stats = { frames: 0, regular: [], refresh: [], first: [] };
+        this._planeUploadStats = stats;
+      }
+      if (firstAfterResize) {
+        stats.frames = 0;
+        stats.regular = [];
+        stats.refresh = [];
+        stats.first = [];
+      }
+      stats.frames++;
+      // Allocation on frame 1, then refreshes at 31, 61, 91, ...
+      var bucket = firstAfterResize ? stats.first :
+          ((stats.frames - 1) % 30 === 0 ? stats.refresh : stats.regular);
+      bucket.push({ cpu: cpuMs, readback: readbackMs });
+      if (stats.regular.length + stats.refresh.length < 300) return;
+
+      function summarize(samples, key) {
+        var values = [];
+        for (var j = 0; j < samples.length; j++) {
+          if (samples[j][key] !== null) values.push(samples[j][key]);
+        }
+        if (!values.length) return { count: 0 };
+        values.sort(function(a, b) { return a - b; });
+        var total = 0;
+        for (var i = 0; i < values.length; i++) total += values[i];
+        return {
+          count: values.length,
+          meanMs: +(total / values.length).toFixed(3),
+          p50Ms: +values[Math.floor((values.length - 1) * 0.50)].toFixed(3),
+          p95Ms: +values[Math.floor((values.length - 1) * 0.95)].toFixed(3)
+        };
+      }
+      function summary(samples) {
+        return { count: samples.length, cpu: summarize(samples, 'cpu'),
+            drawAndReadback: summarize(samples, 'readback') };
+      }
+      var result = {
+        decoder: 'broadway',
+        reusePlaneTextures: this._config.reusePlaneTextures === true,
+        normal: summary(stats.regular),
+        every30th: summary(stats.refresh),
+        firstAfterResize: summary(stats.first)
+      };
+      console.log('[Broadway A/B] ' + JSON.stringify(result));
+      if (typeof this.onPlaneUploadSummary === 'function') {
+        this.onPlaneUploadSummary(result);
+      }
+      stats.regular = [];
+      stats.refresh = [];
+      stats.first = [];
     },
     renderFrameRGB: function(options){
       var canvasObj = options.canvasObj;

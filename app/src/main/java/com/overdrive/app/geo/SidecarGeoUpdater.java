@@ -1,5 +1,7 @@
 package com.overdrive.app.geo;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.logging.DaemonLogger;
 
 import org.json.JSONObject;
@@ -44,7 +46,7 @@ public final class SidecarGeoUpdater {
      */
     public static void mergePlace(File sidecarFile, PlaceResult place) {
         if (sidecarFile == null || place == null) return;
-        if (!sidecarFile.exists() || !sidecarFile.canRead()) return;
+        if (!RemovableStorageFs.exists(sidecarFile) || !RemovableStorageFs.canRead(sidecarFile)) return;
         synchronized (WRITE_LOCK) {   // mutually exclusive with markPlaceUnresolved
             try {
                 JSONObject root = readSidecar(sidecarFile);
@@ -77,7 +79,7 @@ public final class SidecarGeoUpdater {
      * No-op when the sidecar has no {@code geo} block (nothing to mark).
      */
     public static void markPlaceUnresolved(File sidecarFile, long whenMs) {
-        if (sidecarFile == null || !sidecarFile.exists() || !sidecarFile.canRead()) return;
+        if (sidecarFile == null || !RemovableStorageFs.exists(sidecarFile) || !RemovableStorageFs.canRead(sidecarFile)) return;
         synchronized (WRITE_LOCK) {   // mutually exclusive with mergePlace
             try {
                 JSONObject root = readSidecar(sidecarFile);
@@ -128,8 +130,8 @@ public final class SidecarGeoUpdater {
     }
 
     private static JSONObject readSidecar(File f) {
-        try (FileReader r = new FileReader(f)) {
-            long len = Math.min(f.length(), MAX_BYTES);
+        try (java.io.Reader r = new java.io.InputStreamReader(RemovableStorageFs.openInput(f), java.nio.charset.StandardCharsets.UTF_8)) {
+            long len = Math.min(RemovableStorageFs.length(f), MAX_BYTES);
             char[] buf = new char[8192];
             StringBuilder sb = new StringBuilder((int) len);
             int total = 0;
@@ -165,14 +167,14 @@ public final class SidecarGeoUpdater {
         File tmp = new File(f.getAbsolutePath() + ".geo."
                 + Thread.currentThread().getId() + "." + System.nanoTime() + ".json.tmp");
         try {
-            try (FileWriter w = new FileWriter(tmp)) {
+            try (java.io.Writer w = new java.io.OutputStreamWriter(RemovableStorageFs.openOutput(tmp), java.nio.charset.StandardCharsets.UTF_8)) {
                 w.write(root.toString());
             }
-            try { tmp.setReadable(true, false); } catch (Throwable ignored) {}
-            if (!tmp.renameTo(f)) {
+            try { RemovableStorageFs.setReadable(tmp, true, false); } catch (Throwable ignored) {}
+            if (!RemovableStorageFs.renameTo(tmp, f)) {
                 // Fall back to a direct rewrite if rename is denied (shouldn't
                 // happen for a same-directory rename, but guard anyway).
-                try (FileWriter w = new FileWriter(f)) {
+                try (java.io.Writer w = new java.io.OutputStreamWriter(RemovableStorageFs.openOutput(f), java.nio.charset.StandardCharsets.UTF_8)) {
                     w.write(root.toString());
                 }
             }
@@ -186,8 +188,8 @@ public final class SidecarGeoUpdater {
             // orphan reaper doesn't match the `.geo.<n>.tmp` suffix). Deleting
             // here bounds it to zero. (A successful renameTo already consumed tmp,
             // so this exists() check is a safe no-op in the happy path.)
-            if (tmp.exists()) {
-                try { tmp.delete(); } catch (Throwable ignored) {}
+            if (RemovableStorageFs.exists(tmp)) {
+                try { RemovableStorageFs.delete(tmp); } catch (Throwable ignored) {}
             }
         }
         // Idle cleanup gate: this sidecar landed AFTER the mp4's save hook

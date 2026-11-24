@@ -59,8 +59,14 @@ class WebViewFragment : Fragment() {
         private const val PREF_WEB_CACHE_STAMP = "webview_cache_install_stamp"
         @Volatile private var webCacheChecked = false
 
-        // Last path segment of every daemon path that serves the widget builder page (the daemon also collapses "//").
-        private val WIDGET_BUILDER_PAGES = setOf("widget-builder", "widget-builder.html")
+        // The daemon accepts short routes, HTML files and /local/ aliases.
+        @JvmStatic
+        @androidx.annotation.StringRes
+        fun browserBuilderMessage(path: String?): Int? =
+            when (path.orEmpty().trimEnd('/').substringAfterLast('/')) {
+                "widget-builder", "widget-builder.html" -> R.string.widget_builder_open_elsewhere
+                else -> null
+            }
 
         // APK-bundled catalogs can't change while the process lives.
         private val i18nCatalogCache = java.util.concurrent.ConcurrentHashMap<String, String>()
@@ -103,6 +109,7 @@ class WebViewFragment : Fragment() {
         // tags the standalone HTML dashboard with that attribute, and it must
         // keep its nav.
         private const val EMBED_ATTR = "data-android-embed"
+        private const val EMBED_MARKER = "setAttribute('$EMBED_ATTR','1')"
         private const val FETCH_BRIDGE_JS = """
 (function() {
     if (!window.AndroidBridge || window._fetchPatched) return;
@@ -198,7 +205,10 @@ class WebViewFragment : Fragment() {
          *  `<html>` and then the document start. */
         @JvmStatic
         fun spliceEmbedChrome(html: String): String {
-            if (html.contains(EMBED_ATTR)) return html
+            // Key on the injected setAttribute, not the bare attribute name:
+            // pages style themselves with :root[data-android-embed="1"], and
+            // matching that skipped the splice, so the flag was never set.
+            if (html.contains(EMBED_MARKER)) return html
             var out = EMBED_CHROME + html
             for (tag in arrayOf("<head", "<html")) {
                 val open = html.indexOf(tag, ignoreCase = true)
@@ -724,6 +734,18 @@ class WebViewFragment : Fragment() {
                     val isLocalServer = isDaemonUrl(url)
 
                     if (isLocalServer) {
+                        // App-initiated loads and restored pages bypass shouldOverrideUrlLoading.
+                        // Serve the same guidance locally without loading a builder or its scripts.
+                        browserBuilderMessage(request.url.path)?.let { message ->
+                            val ctx = view?.context ?: return noNavigation()
+                            val text = android.text.TextUtils.htmlEncode(ctx.getString(message))
+                            val html = spliceEmbedChrome(
+                                """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>:root{color-scheme:light dark}body{font:18px/1.5 sans-serif;margin:1.5rem}</style></head><body><main><p>$text</p></main></body></html>"""
+                            )
+                            return WebResourceResponse("text/html", "utf-8", html.byteInputStream()).apply {
+                                responseHeaders = mapOf("Cache-Control" to "no-store")
+                            }
+                        }
                         interceptI18nCatalog(url)?.let { return it }
                         // Versioned static assets (?v=…, bumped on every edit): let the WebView
                         // fetch them itself so they are cached (and their compiled JS kept) across
@@ -1232,16 +1254,13 @@ class WebViewFragment : Fragment() {
                     val url = request?.url?.toString() ?: return false
                     val isLocalServer = isDaemonUrl(url)
                     
-                    // The widget builder is a phone/computer page; the car never opens it.
-                    if (isLocalServer &&
-                        request?.url?.path.orEmpty().trimEnd('/').substringAfterLast('/') in WIDGET_BUILDER_PAGES
-                    ) {
-                        context?.let {
-                            android.widget.Toast.makeText(it,
-                                it.getString(com.overdrive.app.R.string.widget_builder_open_elsewhere),
-                                android.widget.Toast.LENGTH_LONG).show()
+                    if (isLocalServer) {
+                        browserBuilderMessage(request.url.path)?.let { message ->
+                            context?.let {
+                                android.widget.Toast.makeText(it, message, android.widget.Toast.LENGTH_LONG).show()
+                            }
+                            return true
                         }
-                        return true
                     }
 
                     // Intercept events page links — use native RecordingLibraryFragment
@@ -1659,6 +1678,7 @@ class WebViewFragment : Fragment() {
             val destinationId = when (dest) {
                 "bydCloud" -> R.id.bydCloudFragment
                 "remoteAccess" -> R.id.remoteAccessFragment
+                "daemons" -> R.id.daemonsFragment
                 else -> return "unknown_destination"
             }
             return try {

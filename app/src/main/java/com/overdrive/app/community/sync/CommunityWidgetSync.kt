@@ -13,26 +13,30 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /**
- * Transport for the community Worker's `/widgets` routes (community-edge/src/worker.ts).
- * Same client rules as [CommunitySyncProvider]: one proxy route per request, no redirects,
- * never throws. Validation lives in CommunityWidgetsApiHandler and the Worker.
+ * Transport for the community Worker's declarative widget and dashboard catalogs.
+ * Same client rules as [CommunitySyncProvider]: one proxy route per request and no redirects.
+ * Validation lives in each document handler and the Worker.
  */
 internal class CommunityWidgetSync(
     private val workerUrlSupplier: () -> String?,
     private val clientFactory: () -> OkHttpClient = { proxiedClient() },
+    private val catalog: String = "widgets",
 ) {
-
-    /** GET /widgets?{query} → `{items, nextCursor}`; anonymous, so the Worker's edge cache can serve it. */
-    fun list(query: String): Result {
-        val base = baseUrl() ?: return noUrl()
-        val url = if (query.isEmpty()) "$base/widgets" else "$base/widgets?$query"
-        return call(url, "GET", null, null)
+    init {
+        require(catalog == "widgets" || catalog == "dashboards")
     }
 
-    /** GET /widgets/{id} → `{item}`, the row including its widget doc; anonymous like [list]. */
-    fun get(id: String): Result {
+    /** Omitting viewerId enables the Worker's anonymous edge cache. */
+    fun list(query: String, viewerId: String? = null): Result {
         val base = baseUrl() ?: return noUrl()
-        return call("$base/widgets/${enc(id)}", "GET", null, null)
+        val url = if (query.isEmpty()) "$base/$catalog" else "$base/$catalog?$query"
+        return call(url, "GET", viewerId, null)
+    }
+
+    /** Returns the item and its validated recipe. A viewerId requests its per-publisher ownership flag. */
+    fun get(id: String, viewerId: String? = null): Result {
+        val base = baseUrl() ?: return noUrl()
+        return call("$base/$catalog/${enc(id)}", "GET", viewerId, null)
     }
 
     /**
@@ -41,25 +45,25 @@ internal class CommunityWidgetSync(
      */
     fun publish(deviceId: String, clientKey: String, fields: JSONObject): Result {
         val base = baseUrl() ?: return noUrl()
-        return call("$base/widgets", "POST", deviceId, withDevice(fields, deviceId).put("clientKey", clientKey))
+        return call("$base/$catalog", "POST", deviceId, withDevice(fields, deviceId).put("clientKey", clientKey))
     }
 
     /** PUT /widgets/{id} — partial update of a row this publisher owns; [fields] holds only what changes. */
     fun update(id: String, deviceId: String, fields: JSONObject): Result {
         val base = baseUrl() ?: return noUrl()
-        return call("$base/widgets/${enc(id)}", "PUT", deviceId, withDevice(fields, deviceId))
+        return call("$base/$catalog/${enc(id)}", "PUT", deviceId, withDevice(fields, deviceId))
     }
 
     /** DELETE /widgets/{id} — publisher-match delete. */
     fun delete(id: String, deviceId: String): Result {
         val base = baseUrl() ?: return noUrl()
-        return call("$base/widgets/${enc(id)}", "DELETE", deviceId, JSONObject().put("deviceId", deviceId))
+        return call("$base/$catalog/${enc(id)}", "DELETE", deviceId, JSONObject().put("deviceId", deviceId))
     }
 
     /** POST /widgets/{id}/rate — one vote per device, 1..5. */
     fun rate(id: String, deviceId: String, stars: Int): Result {
         val base = baseUrl() ?: return noUrl()
-        return call("$base/widgets/${enc(id)}/rate", "POST", deviceId,
+        return call("$base/$catalog/${enc(id)}/rate", "POST", deviceId,
             JSONObject().put("deviceId", deviceId).put("stars", stars))
     }
 
@@ -68,13 +72,13 @@ internal class CommunityWidgetSync(
         val base = baseUrl() ?: return noUrl()
         val body = JSONObject().put("deviceId", deviceId)
         if (!reason.isNullOrEmpty()) body.put("reason", reason)
-        return call("$base/widgets/${enc(id)}/report", "POST", deviceId, body)
+        return call("$base/$catalog/${enc(id)}/report", "POST", deviceId, body)
     }
 
     /** POST /widgets/{id}/install — best-effort download counter, given at most [INSTALL_TIMEOUT_S]. */
     fun install(id: String): Result {
         val base = baseUrl() ?: return noUrl()
-        return call("$base/widgets/${enc(id)}/install", "POST", null, JSONObject(), INSTALL_TIMEOUT_S)
+        return call("$base/$catalog/${enc(id)}/install", "POST", null, JSONObject(), INSTALL_TIMEOUT_S)
     }
 
     private fun withDevice(fields: JSONObject, deviceId: String): JSONObject =
@@ -123,7 +127,7 @@ internal class CommunityWidgetSync(
     private fun noUrl(): Result = fail("no community worker URL configured")
 
     private fun fail(msg: String): Result {
-        logger.warn("community widgets call failed: $msg")
+        logger.warn("community $catalog call failed: $msg")
         return Result(false, null, msg, 0)
     }
 

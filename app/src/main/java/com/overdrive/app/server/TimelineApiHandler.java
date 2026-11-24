@@ -1,5 +1,7 @@
 package com.overdrive.app.server;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.server.hls.Fmp4Writer;
 import com.overdrive.app.server.hls.HlsPlaylists;
@@ -14,7 +16,7 @@ import org.json.JSONObject;
 import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.io.RandomAccessFile;
+import com.overdrive.app.storage.removable.SeekableFileReader;
 import java.net.Socket;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
@@ -367,9 +369,9 @@ public final class TimelineApiHandler {
             throw new Reject(500, "hls");
         }
         if (length <= 0) throw new Reject(500, "hls");
-        RandomAccessFile source;
+        SeekableFileReader source;
         try {
-            source = new RandomAccessFile(file, "r");
+            source = new SeekableFileReader(file);
         } catch (IOException gone) {
             throw new Reject(410, "gone");
         }
@@ -517,9 +519,9 @@ public final class TimelineApiHandler {
         }
         File file = new File(clip.absPath);
         if (!RecordingsApiHandler.indexPathAllowed(file)) throw new Reject(404, "not_found");
-        if (!file.isFile() || !file.canRead()) throw new Reject(410, "gone");
+        if (!RemovableStorageFs.isFile(file) || !RemovableStorageFs.canRead(file)) throw new Reject(410, "gone");
         // URLs carry the fingerprint and are cached for a day: bytes must match it.
-        if (file.length() != clip.sizeBytes || file.lastModified() != clip.mp4Mtime) {
+        if (RemovableStorageFs.length(file) != clip.sizeBytes || RemovableStorageFs.lastModified(file) != clip.mp4Mtime) {
             throw new Reject(409, "stale");
         }
         return file;

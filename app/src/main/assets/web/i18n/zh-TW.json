@@ -57,6 +57,7 @@
     "key_mapping": "按鍵對應"
   },
   "road_sense": {
+    "cluster_size_not_loaded": "無法讀取已儲存的儀表板尺寸——變更前請重新載入頁面。",
     "page_title": "RoadSense 設定",
     "tab_general": "一般",
     "tab_map": "地圖",
@@ -650,7 +651,8 @@
       "storage_limit": "存储限制",
       "storage_limit_desc": "在限制到达時,自動删除最古老的",
       "rate_from_charge": "行程計費依最近一次充電：{rate}/kWh 計算",
-      "rate_from_charge_named": "行程計費依最近一次充電：{rate}/kWh 計算 ({label})"
+      "rate_from_charge_named": "行程計費依最近一次充電：{rate}/kWh 計算 ({label})",
+      "not_loaded": "無法讀取已儲存的行程設定——變更前請重新載入頁面。"
     },
     "cdr": {
       "delete_confirm": "如何將舊的 BYD Dashcam 檔案移除?",
@@ -1233,7 +1235,8 @@
     "clip_duration_desc": "每段錄影的長度。同時套用於行車（ACC 開啟）與停車監控（ACC 關閉）錄影，並於下次片段輪替時生效。",
     "clip_5min": "5 分鐘",
     "clip_10min": "10 分鐘",
-    "clip_duration": "影片片段長度"
+    "clip_duration": "影片片段長度",
+    "settings_not_loaded": "無法讀取已儲存的錄影設定——變更前請重新載入頁面。"
   },
   "events": {
     "select_date": "選擇日期",
@@ -2320,6 +2323,8 @@
     "cpd_failed": "兒童滯留偵測設定失敗"
   },
   "roi": {
+    "zones_not_loaded": "無法讀取已儲存的區域——變更前請重新載入頁面。",
+    "schedule_not_loaded": "無法讀取已儲存的排程——變更前請重新載入頁面。",
     "editing": "編輯",
     "window_n": "窗戶{n}",
     "remove": "移除",
@@ -2574,7 +2579,7 @@
     "daemon_title": "這樣的惡魔",
     "auto_start_acc_off": "自動啟動車輛停電時",
     "auto_start_acc_off_desc": "自動啟動 Telegram 機器人妖怪, 當車輛進入 ACC 關閉時,",
-    "daemon_start_pointer": "這種方式可以在本地應用程式中的 Daemons 頁面上使用.",
+    "daemon_start_pointer": "這種方式可以在本地應用程式中的 {daemons} 頁面上使用.",
     "delivery_pointer": "在通知 → Telegram 標籤上,",
     "tyre_alerts": "胎壓警示",
     "tyre_alerts_desc": "當輪胎氣壓超出您設定的範圍，或胎壓偵測系統回報漏氣時，發送 Telegram 訊息。系統將採用「胎壓限值」所設定的範圍。"
@@ -3205,7 +3210,9 @@
     "no_apps": "找不到應用程式",
     "app_missing": "（已遺失）",
     "display_head_unit": "主機",
-    "display_cluster": "駕駛儀表"
+    "display_cluster": "駕駛儀表",
+    "not_loaded": "無法讀取已儲存的按鍵對應——變更前請重新載入頁面。",
+    "qc_not_loaded": "無法讀取已儲存的快速控制——變更前請重新載入頁面。"
   },
   "community": {
     "tab_community": "社群",
@@ -3473,5 +3480,78 @@
     "forget_confirm_body": "行程簡報會忘記地點名稱、已隱藏的固定行程、應用程式選擇和你的回答。你的行程會保留，因此它可以重新學習。",
     "forgot": "已忘記習慣。你的行程已保留。",
     "save_failed": "無法儲存。請再試一次。"
+  },
+  "offline": {
+    "banner": "無法透過此連結連線到車輛 · 顯示的是 {time} 的資料",
+    "banner_old": "無法透過此連結連線到車輛 · 顯示的是 {days} 天前的資料。如果你變更或重設了隧道，此連結可能已失效。",
+    "car_unreachable": "無法連線到車輛。指令可能未送達。",
+    "back_online": "已重新連線。輕觸即可重新整理。",
+    "connecting": "正在連線到車輛 · 顯示的是 {time} 的資料",
+    "not_sent": "車輛離線，因此未送出。請在車輛恢復連線後再試一次。"
+  },
+  "stepup": {
+    "title": "Face ID 或指紋保護",
+    "desc": "在車外的任何人解鎖車輛、開啟後車廂或開關車輛電源前，要求 Face ID 或指紋驗證。車機螢幕、自動化和靠近解鎖從不要求驗證。保護開啟期間，語音指令無法執行這些操作。",
+    "enable": "需要 Face ID 或指紋",
+    "enable_needs_phone": "請先新增手機。",
+    "actions_title": "以下操作前詢問",
+    "action_unlock": "解鎖車門",
+    "action_trunk_open": "開啟後車廂",
+    "action_power_off": "關閉車輛電源",
+    "action_power_on": "開啟車輛電源",
+    "action_power_on_desc": "遠端開啟空調前也會詢問，因為這可能會開啟車輛電源。",
+    "phones_title": "手機",
+    "phones_empty": "尚未新增手機。",
+    "phone_added": "新增於 {date}",
+    "phone_last_used": "上次使用於 {date}",
+    "phone_remove": "移除",
+    "phone_remove_confirm": "要移除這支手機嗎？它將無法再核准遠端操作。",
+    "remove_last_confirm": "這是最後一支手機。移除後將關閉保護。要繼續嗎？",
+    "add_phone_car": "新增手機",
+    "pair_presence": "踩下煞車踏板，或打開再關上一扇前門。",
+    "pair_code": "在手機上開啟 車輛控制 → 安全，然後輸入此驗證碼：",
+    "pair_expires": "驗證碼將在 {seconds} 秒後過期",
+    "pair_expired": "驗證碼已過期。請重新開始。",
+    "pair_blocked_remote_view": "請先停止遠端螢幕控制。",
+    "add_this_phone": "新增這支手機",
+    "start_on_car": "請先在車機螢幕上操作：車輛控制 → 安全 → 新增手機。然後在此輸入驗證碼。",
+    "code_label": "車機螢幕上的驗證碼",
+    "phone_name_label": "手機名稱",
+    "added_ok": "這支手機現在可以核准遠端操作了。",
+    "need_secure_link": "若要新增這支手機，請透過你的安全連結開啟 OverDrive：zrok、你的 Cloudflare 網域或 Tailscale HTTPS。",
+    "not_supported": "此瀏覽器無法在這裡使用 Face ID 或指紋。",
+    "prompt_failed": "無法確認是你本人。操作未送出。",
+    "cancelled": "已取消。操作未送出。",
+    "needs_secure_link_action": "此操作需要 Face ID 或指紋。請使用你的安全連結或車機螢幕。",
+    "car_only": "Face ID 或指紋保護開啟期間，此功能只能在車機螢幕上使用。",
+    "remote_adb_warning": "已開啟透過 Tailscale 的遠端 ADB。任何擁有 ADB 存取權的人都可以繞過此保護。",
+    "remote_view_warning": "遠端螢幕控制進行中。結束前，車機螢幕也會要求驗證。",
+    "wrong_code": "驗證碼無效。請檢查後再試一次。",
+    "error_generic": "無法儲存。請再試一次。",
+    "add": "新增",
+    "cancel": "取消",
+    "confirm_unlock": "要解鎖車輛嗎？",
+    "confirm_trunkOpen": "要開啟後車廂嗎？",
+    "confirm_powerOff": "要關閉車輛電源嗎？",
+    "confirm_powerOn": "要開啟車輛電源嗎？",
+    "confirm_run": "要執行此操作嗎？",
+    "confirm_config": "要儲存此變更嗎？",
+    "confirm_settings": "要變更保護設定嗎？",
+    "confirm_screenControl": "要控制車機螢幕嗎？",
+    "confirm_keyInject": "要傳送按鍵到車機螢幕嗎？",
+    "confirm_generic": "要確認此操作嗎？",
+    "confirm_button": "使用 Face ID 或指紋確認",
+    "waiting": "正在等待 Face ID 或指紋…",
+    "too_many_codes": "錯誤的驗證碼次數過多。請在車機螢幕上重新開始。",
+    "already_added": "這支手機已新增。",
+    "setup_cancelled": "已取消。未新增任何項目。",
+    "create_passkey": "建立通行密鑰",
+    "try_again": "再試一次",
+    "phone_added_car": "已新增手機。",
+    "remote_view_action": "請先停止遠端螢幕控制。",
+    "store_unreadable": "無法讀取保護設定。在此關閉保護即可將其重設。",
+    "too_many_phones": "已新增的手機數量已達上限。請先移除一支。",
+    "unknown_phone": "這支手機已被移除。",
+    "link_checking": "正在檢查安全連結。請幾秒後再試一次。"
   }
 }

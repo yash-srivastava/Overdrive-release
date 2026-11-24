@@ -11,7 +11,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#00876C">
     <script src="../shared/theme.js?v=12"></script>
-    <script src="../shared/app-shell.js?v=23"></script>
+    <script src="../shared/app-shell.js?v=26"></script>
     <!--
       Bottom-tab manifest. Three task-based tabs:
         Bot          — token + connect / test
@@ -307,7 +307,7 @@
                         </div>
                         <div class="info-box-note" style="margin-top:14px;">
                             <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                            <div data-i18n="telegram.daemon_start_pointer">Manual start / stop of the daemon lives on the <a href="about.html#daemons" style="color:var(--brand-primary);text-decoration:underline;">Daemons</a> page in the native app.</div>
+                            <div id="tgDaemonStartPointer">Manual start / stop of the daemon lives on the <a href="daemons.html" onclick="return TG.openDaemons(event);" style="color:var(--brand-primary);text-decoration:underline;">Daemons</a> page in the native app.</div>
                         </div>
                     </div>
                 </div>
@@ -318,10 +318,10 @@
     <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
     <div id="toastContainer" class="toast-container"></div>
 
-    <script src="../shared/auth.js"></script>
+    <script src="../shared/auth.js?v=18"></script>
     <script src="../shared/pwa-init.js?v=index1"></script>
-    <script src="../shared/core.js?v=27"></script>
-    <script src="../shared/update-flow.js?v=3"></script>
+    <script src="../shared/core.js?v=31"></script>
+    <script src="../shared/update-flow.js?v=6"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
@@ -340,6 +340,67 @@
             }
             function tr(key, vars) {
                 return (window.BYD && BYD.i18n) ? (BYD.i18n.t(key, vars) || key) : key;
+            }
+            function esc(s) {
+                if (window.BYD && BYD.core && typeof BYD.core._esc === 'function') {
+                    return BYD.core._esc(s);
+                }
+                return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            }
+
+            /** Native Daemons screen in the WebView; daemons.html in browser/tunnel. */
+            function openDaemons(e) {
+                if (e && e.preventDefault) e.preventDefault();
+                if (typeof window.AndroidBridge !== 'undefined'
+                        && typeof AndroidBridge.navigate === 'function') {
+                    try {
+                        if (AndroidBridge.navigate('daemons') === 'ok') return false;
+                    } catch (err) { /* fall through to web route */ }
+                }
+                window.location.href = 'daemons.html';
+                return false;
+            }
+
+            /**
+             * i18n hydrate cannot keep an inline link inside a sentence, so paint
+             * the note with a {daemons} placeholder or a fallback match on the
+             * nav label / product name.
+             */
+            function paintDaemonStartPointer() {
+                var el = $('tgDaemonStartPointer');
+                if (!el || !window.BYD || !BYD.i18n) return;
+                var msg = BYD.i18n.t('telegram.daemon_start_pointer');
+                if (msg == null || msg === 'telegram.daemon_start_pointer') return;
+                var label = BYD.i18n.t('nav.daemons') || 'Daemons';
+                var style = 'color:var(--brand-primary);text-decoration:underline;';
+                var anchor = '<a href="daemons.html" onclick="return TG.openDaemons(event);" style="'
+                    + style + '">' + esc(label) + '</a>';
+                var html;
+                var parts;
+                var i;
+                var idx;
+                var needle;
+                if (msg.indexOf('{daemons}') >= 0) {
+                    parts = msg.split('{daemons}');
+                    html = '';
+                    for (i = 0; i < parts.length; i++) {
+                        if (i > 0) html += anchor;
+                        html += esc(parts[i]);
+                    }
+                } else {
+                    idx = msg.indexOf(label);
+                    needle = label;
+                    if (idx < 0) {
+                        idx = msg.indexOf('Daemons');
+                        needle = 'Daemons';
+                    }
+                    if (idx >= 0) {
+                        html = esc(msg.slice(0, idx)) + anchor + esc(msg.slice(idx + needle.length));
+                    } else {
+                        html = esc(msg) + ' ' + anchor;
+                    }
+                }
+                el.innerHTML = html;
             }
             function setStatus(el, kind, text) {
                 if (!el) return;
@@ -570,12 +631,16 @@
                 toggleTokenVisibility: toggleTokenVisibility,
                 generatePin: generatePin,
                 unpair: unpair,
-                savePrefs: savePrefs
+                savePrefs: savePrefs,
+                openDaemons: openDaemons,
+                paintDaemonStartPointer: paintDaemonStartPointer
             };
         }());
 
         document.addEventListener('DOMContentLoaded', function () {
             BYD.i18n.init().then(function () {
+                TG.paintDaemonStartPointer();
+                BYD.i18n.onChange(TG.paintDaemonStartPointer);
                 BYD.core.init();
                 TG.load();
             });

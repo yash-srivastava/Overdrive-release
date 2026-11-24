@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="cluster_text_title">仪表盘文本输入</string>
+    <string name="cluster_text_service_label">OverDrive 仪表盘文本输入</string>
+    <string name="cluster_text_service_description">允许你在车机上向 DiLink 5 仪表盘投屏应用中获得焦点的文本框输入文字。不包括密码框。仅当你希望仪表盘文本框获得焦点时自动弹出键盘对话框，才启用自动提示。</string>
+    <string name="cluster_text_hint">发送到仪表盘应用的文本</string>
+    <string name="cluster_text_auto_prompt">仪表盘文本框获得焦点时自动打开</string>
+    <string name="cluster_text_send">发送文本</string>
+    <string name="cluster_text_send_submit">发送文本并回车</string>
+    <string name="cluster_text_retry">检查焦点文本框</string>
+    <string name="cluster_text_enable_service">无障碍设置</string>
+    <string name="cluster_text_enable_hint">请在无障碍设置中启用“OverDrive 仪表盘文本输入”，然后在投屏应用中聚焦一个文本框并再次检查。</string>
+    <string name="cluster_text_checking">正在检查仪表盘文本框…</string>
+    <string name="cluster_text_target">%1$s 中的文本框</string>
+    <string name="cluster_text_requires_android11">仪表盘文本输入需要 Android 11 或更高版本的 DiLink 5，并能访问仪表盘的无障碍窗口。此固件无法验证文本框属于哪个显示屏。</string>
+    <string name="cluster_text_requires_cast">输入文本前请先启动 DiLink 5 应用投屏。</string>
+    <string name="cluster_text_no_field">在仪表盘上未找到可访问且已获得焦点的文本框。请在投屏应用中聚焦一个文本框并再次检查。不包括密码框。</string>
+    <string name="cluster_text_field_changed">投屏会话或焦点文本框已改变。发送前请再次检查文本框。</string>
+    <string name="cluster_text_unavailable">无法验证仪表盘文本框。请检查投屏和无障碍连接，然后重试。</string>
+    <string name="cluster_text_rejected">应用未确认收到文本。请检查仪表盘文本框后再试。</string>
+    <string name="cluster_text_submit_rejected">文本已发送，但应用不接受回车。请在仪表盘应用中提交。</string>
+</resources>

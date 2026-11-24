@@ -183,6 +183,12 @@
             this.bind();
             this.render();
             this.onVisibilityChanged();
+            var self = this;
+            // Only a card that never loaded (a loaded one polls while shown). A read in flight makes refresh()
+            // queue one more after it, so a late failure can't be the last word. Hidden: the card reads on return.
+            if (window.BYD && BYD.offline && typeof BYD.offline.onReconnect === 'function') {
+                BYD.offline.onReconnect(function () { if (!self.status && !document.hidden) self.refresh(); });
+            }
         },
 
         bind: function () {

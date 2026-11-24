@@ -46,6 +46,38 @@ public class WebViewEmbedChromeAssetTest {
     }
 
     @Test
+    public void browserBuilderGuidanceCoversAppInitiatedRequestsAndTappedLinks() throws IOException {
+        String fragment = readRepositoryFile(FRAGMENT);
+        int intercept = fragment.indexOf("override fun shouldInterceptRequest(");
+        int override = fragment.indexOf("override fun shouldOverrideUrlLoading(", intercept);
+        assertTrue(intercept >= 0 && override > intercept);
+        String directLoad = fragment.substring(intercept, override);
+        assertTrue(directLoad.indexOf("browserBuilderMessage(request.url.path)") >= 0);
+        assertTrue(directLoad.indexOf("browserBuilderMessage(request.url.path)") < directLoad.indexOf("openDaemon(url"));
+        assertTrue(fragment.indexOf("browserBuilderMessage(request.url.path)", override) > override);
+    }
+
+    @Test
+    public void restoringThePreviousBuilderDestinationOpensTheNativeLayoutPicker() throws Exception {
+        String graph = readRepositoryFile("app/src/main/res/navigation/nav_graph.xml");
+        javax.xml.parsers.DocumentBuilderFactory factory = javax.xml.parsers.DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+        org.w3c.dom.NodeList fragments = factory.newDocumentBuilder().parse(
+                new org.xml.sax.InputSource(new java.io.StringReader(graph))).getElementsByTagName("fragment");
+        String android = "http://schemas.android.com/apk/res/android";
+        for (int i = 0; i < fragments.getLength(); i++) {
+            org.w3c.dom.Element screen = (org.w3c.dom.Element) fragments.item(i);
+            if ("@+id/dashboardBuilderFragment".equals(screen.getAttributeNS(android, "id"))) {
+                assertEquals("com.overdrive.app.customlayouts.ui.CustomLayoutsFragment",
+                        screen.getAttributeNS(android, "name"));
+                assertEquals(0, screen.getElementsByTagName("argument").getLength());
+                return;
+            }
+        }
+        throw new AssertionError("Missing restored dashboard builder destination");
+    }
+
+    @Test
     public void writeFetchBridgeIsInstalledBeforePageScripts() throws IOException {
         String fragment = readRepositoryFile(FRAGMENT);
 

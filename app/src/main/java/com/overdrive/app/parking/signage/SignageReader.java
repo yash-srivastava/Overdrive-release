@@ -1,5 +1,7 @@
 package com.overdrive.app.parking.signage;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.parking.ParkingEnvironment;
 import com.overdrive.app.parking.ParkingSession;
 
@@ -137,7 +139,7 @@ public final class SignageReader {
     /** The arrived / returned stills already on disk (no decode needed). */
     List<byte[]> collectStills(File sessionDir) {
         List<byte[]> out = new ArrayList<>();
-        if (sessionDir == null || !sessionDir.isDirectory()) return out;
+        if (sessionDir == null || !RemovableStorageFs.isDirectory(sessionDir)) return out;
         for (String prefix : new String[] {"arrived", "returned"}) {
             for (String side : new String[] {"front", "right", "rear", "left"}) {
                 File f = new File(sessionDir, prefix + "_" + side + ".jpg");
@@ -155,7 +157,7 @@ public final class SignageReader {
         if (s == null || budget <= 0) return out;
         File clip = null;
         try { clip = env.recentDriveClip(s.startedMs); } catch (Throwable ignored) {}
-        if (clip == null || !clip.isFile()) return out;
+        if (clip == null || !RemovableStorageFs.isFile(clip)) return out;
         List<byte[]> tail = null;
         try { tail = env.extractTailFrames(clip, Math.min(DRIVE_TAIL_FRAMES, budget), DRIVE_TAIL_MS); }
         catch (Throwable t) { env.log("Signage drive-tail extract failed: " + t.getMessage()); }
@@ -169,7 +171,7 @@ public final class SignageReader {
     }
 
     private static byte[] readQuietly(File f) {
-        if (f == null || !f.isFile() || f.length() == 0 || f.length() > 8_000_000L) return null;
-        try { return Files.readAllBytes(f.toPath()); } catch (Throwable t) { return null; }
+        if (f == null || !RemovableStorageFs.isFile(f) || RemovableStorageFs.length(f) == 0 || RemovableStorageFs.length(f) > 8_000_000L) return null;
+        try { return RemovableStorageFs.readAllBytes(f); } catch (Throwable t) { return null; }
     }
 }

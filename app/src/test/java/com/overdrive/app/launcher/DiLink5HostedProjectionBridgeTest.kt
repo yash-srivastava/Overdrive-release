@@ -3,6 +3,7 @@ package com.overdrive.app.launcher
 import com.overdrive.app.launcher.dilink5.cluster.DiLink5HostedProjectionBridge
 import com.overdrive.app.launcher.dilink5.cluster.DiLink5ProjectionConfig
 import com.overdrive.app.launcher.dilink5.cluster.HostedProjectionBoundary
+import com.overdrive.app.launcher.dilink5.cluster.HostedProjectionGeometry
 import com.overdrive.app.launcher.dilink5.cluster.RetriableHostedResources
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -16,6 +17,18 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 class DiLink5HostedProjectionBridgeTest {
+    @Test
+    fun confirmedProbeReturnsTheSelectedCoordinatesAndRejectsIncompleteOrOffPanelFrames() {
+        fun decode(vararg coordinates: Int) = HostedProjectionBoundary.mapBoundsFromProbe(coordinates, 1920, 720)
+        assertEquals(HostedProjectionGeometry.Bounds(640, 220, 1280, 500), decode(640, 220, 1280, 500))
+        assertEquals(HostedProjectionGeometry.Bounds(1440, 232, 1840, 488), decode(1440, 232, 1840, 488))
+        assertNull(decode())
+        assertNull(decode(640, 220, 1280))
+        assertNull(decode(-1, 220, 639, 500))
+        assertNull(decode(1500, 220, 2140, 500))
+        assertNull(decode(640, 220, 1280, 220))
+    }
+
     @Test
     fun transportParserDefaultsFreshConfigToHostedAndKeepsExplicitChoices() {
         assertEquals(
