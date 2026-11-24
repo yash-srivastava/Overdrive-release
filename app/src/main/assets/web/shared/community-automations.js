@@ -43,6 +43,7 @@ BYD.communityAutomations = {
     mineOnly: false,   // true = show only automations THIS install published
     _searchTimer: null,
     _loading: false,
+    _listRequestId: 0,
     // {localAutomationId: communityRowId} from the daemon — which local automation owns
     // which published row. Populated by _loadPublishedIds; {} until then.
     _publishedIds: {},
@@ -258,6 +259,7 @@ BYD.communityAutomations = {
     // search box out from under an active cursor — so those paths don't set it.
     loadPage: function (page, scrollTop) {
         var self = this;
+        var requestId = ++this._listRequestId;
         this.currentPage = page < 1 ? 1 : page;
         this._loading = true;
         this._scrollAfterRender = !!scrollTop;
@@ -278,6 +280,8 @@ BYD.communityAutomations = {
         fetch('/api/community/list?' + qs, { cache: 'no-store' })
             .then(function (r) { return r.json(); })
             .then(function (data) {
+                // A newer browse request owns the list, pagination and loading state.
+                if (requestId !== self._listRequestId) return;
                 self._loading = false;
                 if (!data || data.error || !Array.isArray(data.items)) {
                     self._renderState('error', data && data.error);
@@ -289,6 +293,7 @@ BYD.communityAutomations = {
                 self.renderList(data.items);
             })
             .catch(function () {
+                if (requestId !== self._listRequestId) return;
                 self._loading = false;
                 self._renderState('error');
             });
