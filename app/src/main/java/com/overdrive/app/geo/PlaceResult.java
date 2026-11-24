@@ -2,6 +2,8 @@ package com.overdrive.app.geo;
 
 import org.json.JSONObject;
 
+import java.util.Locale;
+
 /**
  * Resolved place name + administrative components for a (lat, lng).
  *
@@ -93,7 +95,7 @@ public final class PlaceResult {
             if (!country.isEmpty())     o.put("country", country);
             if (!countryCode.isEmpty()) o.put("countryCode", countryCode);
             if (!locale.isEmpty())      o.put("locale", locale);
-            if (source != null)         o.put("source", source.name().toLowerCase().replace('_', '-'));
+            if (source != null)         o.put("source", source.name().toLowerCase(Locale.ROOT).replace('_', '-'));
             if (resolvedAtMs > 0)       o.put("resolvedAtMs", resolvedAtMs);
         } catch (Throwable ignored) {}
         return o;
@@ -113,7 +115,7 @@ public final class PlaceResult {
         }
         Source src = Source.CACHE;
         try {
-            String s = o.optString("source", "cache").toUpperCase().replace('-', '_');
+            String s = o.optString("source", "cache").toUpperCase(Locale.ROOT).replace('-', '_');
             src = Source.valueOf(s);
         } catch (Throwable ignored) {}
         long resolvedAt = o.optLong("resolvedAtMs", 0L);
