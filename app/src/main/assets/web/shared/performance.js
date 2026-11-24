@@ -53,6 +53,7 @@ BYD.performance = {
 
     // Data-usage state
     dataUsageRange: 30, // days
+    _dataUsageRequestGeneration: 0,
     dataUsageData: { days: [], enabled: false, available: true },
     
     // Interactive tooltip state
@@ -1692,21 +1693,26 @@ BYD.performance = {
     },
 
     /** Fetch usage + reflect the enabled/disabled state into the card UI.
-     *  EVERY exit path calls applyDataUsageState() so the card can never sit
-     *  blank: on a non-2xx status, a JSON-parse throw, or a rejected/stalled
+     *  Every exit path of the latest request calls applyDataUsageState() so the
+     *  card can never sit blank: on a non-2xx status, a JSON-parse throw, or a rejected
      *  fetch we fall back to painting the current (default-or-last-known) state
      *  — the hint at minimum — instead of returning early and leaving both the
-     *  hint and content divs at their HTML display:none. */
+     *  hint and content divs at their HTML display:none. Superseded requests
+     *  must not repaint a newer range or refresh. */
     async fetchDataUsage() {
+        var generation = ++this._dataUsageRequestGeneration;
         try {
             var res = await fetch('/api/performance/data-usage?days=' + this.dataUsageRange);
+            if (generation !== this._dataUsageRequestGeneration) return;
             if (!res.ok) { this.applyDataUsageState(); return; }
             var data = await res.json();
+            if (generation !== this._dataUsageRequestGeneration) return;
             this.dataUsageData = data || { days: [], enabled: false, available: true };
             this.applyDataUsageState();
             this.updateDataUsageStats();
             this.renderDataUsageChart();
         } catch (e) {
+            if (generation !== this._dataUsageRequestGeneration) return;
             console.error('[Performance] data-usage fetch error:', e);
             try { this.applyDataUsageState(); } catch (e2) {}
         }
