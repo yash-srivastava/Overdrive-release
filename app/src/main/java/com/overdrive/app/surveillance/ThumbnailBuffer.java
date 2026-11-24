@@ -36,9 +36,11 @@ import java.util.Map;
  * of the ACTOR, not of the captured frame, so it is refreshed on every observation
  * independently of whether the pixels are re-captured. See {@link #observe}.
  *
- * Memory bound: one slot per active actorId, one 640×640 RGB byte[] each
- * (~1.2 MB). Worst case at MAX_TRACKS=32 ≈ 38 MB; in practice 1–4 actors so
- * ~5 MB during a recording. All slots are dropped when the recording closes.
+ * Memory bound: one slot per actorId, at most one 640×640 RGB array per slot
+ * (~1.2 MB). Slots captured by the same observe call share a single array,
+ * and a fully replaced shared array can be reused for the next observation.
+ * The worst case is still about 38 MB for 32 distinct peak frames. All slots
+ * and the spare are released from the live buffer when the recording closes.
  */
 public final class ThumbnailBuffer {
 
@@ -52,6 +54,8 @@ public final class ThumbnailBuffer {
      *  {@link #writePerActorJpeg}) can iterate a snapshot of slots after
      *  the buffer has been cleared synchronously. */
     static final class Slot {
+        // May be shared with other slots from the same observation. Read-only
+        // outside observe; never overwrite while another slot references it.
         byte[] rgb;
         int srcW;
         int srcH;
@@ -82,6 +86,10 @@ public final class ThumbnailBuffer {
     }
 
     private final Map<Long, Slot> slots = new HashMap<>();
+    // One detached array for consecutive shared-frame refreshes. Retain only
+    // when at least two live slots share the replacement of the same size,
+    // so the spare does not consume more memory than the copies it saves.
+    private byte[] spareRgb;
 
     /**
      * Consecutive observations on which an actor's bbox showed ZERO confirmed
@@ -126,8 +134,9 @@ public final class ThumbnailBuffer {
 
     /**
      * Hard cap on {@link #slots}. Unlike {@link #ZERO_MOTION_MAP_CAP} this one is
-     * about BYTES, not entries: each Slot owns a {@code byte[w*h*3]} crop, which is
-     * 640×640×3 = 1.2 MB on the foveated path. 32 slots ≈ 39 MB worst case.
+     * about BYTES, not entries: each Slot references a {@code byte[w*h*3]} crop,
+     * which is 640×640×3 = 1.2 MB on the foveated path. 32 distinct frames
+     * cost about 39 MB worst case; slots from the same capture share pixels.
      *
      * <p>Why a cap is needed at all. Slots are only released at
      * {@link #drainSnapshotForAsync()} (segment rotation / recording stop) or
@@ -279,8 +288,9 @@ public final class ThumbnailBuffer {
      * Observe a frame: examine each Actor in the snapshot and update its slot
      * iff the new tuple beats the existing one.
      *
-     * The {@code rgb} buffer is COPIED into the slot — the caller is free to
-     * recycle their own buffer immediately.
+     * The {@code rgb} buffer is copied at most once for all slots capturing
+     * this observation — the caller is free to recycle their own buffer
+     * immediately.
      *
      * @param actors  Snapshot from {@link ActorTracker#update(java.util.List, int, int, int, long, long)}
      * @param rgb     RGB byte[] (length = w*h*3) of the YOLO crop the actors were detected in
@@ -320,6 +330,11 @@ public final class ThumbnailBuffer {
                                      float mapAx, float mapBx, float mapAy, float mapBy) {
         if (actors == null || actors.isEmpty() || rgb == null || w <= 0 || h <= 0) return;
         long now = System.currentTimeMillis();
+        // One borrowed crop per call. Capture lazily, only after the existing
+        // score/geometry/coherence gates accept at least one actor. Do not
+        // deduplicate across calls: the producer can reuse its input array.
+        byte[] capturedRgb = null;
+        byte[] replacedShared = null;
         for (Actor a : actors) {
             // Only consider actors that hit at least NOTICE in this frame's quadrant
             if (a.peakCamera != camera) continue;
@@ -729,12 +744,23 @@ public final class ThumbnailBuffer {
             }
 
             Slot s = existing != null ? existing : new Slot();
-            // Re-allocate only if size changed (or first capture) — avoids per-frame churn
-            int needBytes = w * h * 3;
-            if (s.rgb == null || s.rgb.length != needBytes) {
-                s.rgb = new byte[needBytes];
+            if (capturedRgb == null) {
+                int needBytes = w * h * 3;
+                // Preserve allocation-free refresh for an exclusively owned
+                // array. A shared old frame must survive for actors that do
+                // not recapture on this tick (copy-on-write).
+                capturedRgb = reusablePixels(s, needBytes);
+                if (capturedRgb == null) {
+                    if (s.rgb != null && s.rgb.length == needBytes) {
+                        replacedShared = s.rgb;
+                    }
+                    capturedRgb = spareRgb != null && spareRgb.length == needBytes
+                            ? spareRgb : new byte[needBytes];
+                }
+                spareRgb = null;
+                System.arraycopy(rgb, 0, capturedRgb, 0, needBytes);
             }
-            System.arraycopy(rgb, 0, s.rgb, 0, needBytes);
+            s.rgb = capturedRgb;
             s.srcW = w;
             s.srcH = h;
             s.bboxX = a.peakBboxX;
@@ -752,6 +778,34 @@ public final class ThumbnailBuffer {
             s.staticNonThreat = staticNonThreat;
             slots.put(a.actorId, s);
         }
+        // If every owner recaptured (or was evicted), the old shared frame
+        // is detached. Alternate it with the new one on subsequent ticks
+        // instead of allocating a full crop for every shared refresh.
+        if (replacedShared != null && countOwners(replacedShared) == 0
+                && countOwners(capturedRgb) >= 2) {
+            spareRgb = replacedShared;
+        }
+    }
+
+    private int countOwners(byte[] pixels) {
+        int count = 0;
+        for (Slot slot : slots.values()) {
+            if (slot.rgb == pixels) count++;
+        }
+        return count;
+    }
+
+    /** Called under the observe lock, before publishing the first capture of a tick. */
+    private byte[] reusablePixels(Slot owner, int needBytes) {
+        byte[] pixels = owner.rgb;
+        if (pixels == null || pixels.length != needBytes) return null;
+        // The map is capped at MAX_SLOTS. Drained snapshots are not in this
+        // map and no new slot borrows from them, so they cannot alias an
+        // array owned exclusively by an active slot.
+        for (Slot other : slots.values()) {
+            if (other != owner && other.rgb == pixels) return null;
+        }
+        return pixels;
     }
 
     /**
@@ -863,9 +917,10 @@ public final class ThumbnailBuffer {
      * clean slate even if per-actor writes are still pending.
      *
      * <p>The returned slots reference the SAME {@code byte[] rgb} arrays the
-     * buffer was holding — caller must NOT mutate them. After this call the
-     * buffer no longer holds them, so they're safe to use until the
-     * background executor finishes JPEG compression.
+     * buffer was holding (possibly shared by several slots) — caller must NOT
+     * mutate them. After this call the buffer no longer holds them, so
+     * they're safe to use until the background executor finishes JPEG
+     * compression.
      *
      * @return list of slots (empty if nothing captured). Never null.
      */
@@ -894,6 +949,7 @@ public final class ThumbnailBuffer {
         // slotted (all captures blocked by the crop-coherence gates) can't leak
         // an entry and grow this map without bound.
         zeroMotionObs.clear();
+        spareRgb = null;
         if (slots.isEmpty()) return java.util.Collections.emptyList();
         List<Slot> snap = new ArrayList<>(slots.values());
         slots.clear();
@@ -943,6 +999,7 @@ public final class ThumbnailBuffer {
 
     /** Drop everything (e.g. when recording aborted). */
     public synchronized void clear() {
+        spareRgb = null;
         slots.clear();
         zeroMotionObs.clear();
         lastStaticActorIds.clear();
