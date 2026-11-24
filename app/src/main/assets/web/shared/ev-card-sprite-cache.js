@@ -83,6 +83,7 @@
             var req;
             try { req = indexedDB.open(DB_NAME, DB_VERSION); }
             catch (e) { reject(e); return; }
+            var blocked = false;
             req.onupgradeneeded = function () {
                 var db = req.result;
                 if (!db.objectStoreNames.contains(STORE)) {
@@ -90,9 +91,22 @@
                     store.createIndex('ts', 'ts');
                 }
             };
-            req.onsuccess = function () { resolve(req.result); };
-            req.onerror   = function () { dbPromise = null; reject(req.error); };
-            req.onblocked = function () { dbPromise = null; reject(new Error('blocked')); };
+            req.onsuccess = function () {
+                // A blocked request can still open later. Its callers have
+                // already fallen back, so do not leave an unused connection.
+                if (blocked) { req.result.close(); return; }
+                resolve(req.result);
+            };
+            req.onerror = function () { reject(req.error); };
+            req.onblocked = function () {
+                blocked = true;
+                reject(new Error('blocked'));
+            };
+        }).catch(function (err) {
+            // Also handles synchronous failures, after dbPromise is assigned.
+            // Late events from a rejected open cannot clear a newer promise.
+            dbPromise = null;
+            throw err;
         });
         return dbPromise;
     }
