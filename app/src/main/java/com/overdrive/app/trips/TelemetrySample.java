@@ -189,7 +189,7 @@ public class TelemetrySample {
      * Mirrors the trip-detail map filter in trips.js (0,0 = no fix; reject OOB).
      */
     public static boolean hasGpsFix(double lat, double lon) {
-        if (lat == 0.0 || lon == 0.0) return false;
+        if (lat == 0.0 && lon == 0.0) return false;
         if (!Double.isFinite(lat) || !Double.isFinite(lon)) return false;
         if (Math.abs(lat) > 90.0 || Math.abs(lon) > 180.0) return false;
         return true;
@@ -235,6 +235,13 @@ public class TelemetrySample {
      * Deserialize from compact JSON.
      */
     public static TelemetrySample fromJson(JSONObject json) {
+        // Missing coordinates must not masquerade as valid zero-degree coordinates.
+        double lat = json.optDouble("la", Double.NaN);
+        double lon = json.optDouble("lo", Double.NaN);
+        if (!hasGpsFix(lat, lon)) {
+            lat = 0.0;
+            lon = 0.0;
+        }
         return new TelemetrySample(
                 json.optLong("t", 0),
                 json.optInt("s", 0),
@@ -242,8 +249,8 @@ public class TelemetrySample {
                 json.optInt("b", 0),
                 json.optBoolean("bp", false),
                 json.optInt("g", 1),
-                json.optDouble("la", 0.0),
-                json.optDouble("lo", 0.0),
+                lat,
+                lon,
                 json.optDouble("al", 0.0),
                 json.optDouble("va", 0.0),
                 json.optBoolean("am", false),
