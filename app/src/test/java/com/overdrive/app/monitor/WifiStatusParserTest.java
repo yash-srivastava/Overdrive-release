@@ -93,6 +93,52 @@ public class WifiStatusParserTest {
     }
 
     @Test
+    public void meteredHintComesFromFrameworkFieldsNotNetworkName() {
+        WifiStatusParser.Parsed metered = WifiStatusParser.parse(
+                connected("\"Cafe, Metered hint: false,\"", true));
+        assertEquals("Cafe, Metered hint: false,", metered.ssid);
+        assertEquals(Boolean.TRUE, metered.meteredHint);
+
+        WifiStatusParser.Parsed unmetered = WifiStatusParser.parse(
+                connected("\"Cafe, Metered hint: true,\"", false));
+        assertEquals("Cafe, Metered hint: true,", unmetered.ssid);
+        assertEquals(Boolean.FALSE, unmetered.meteredHint);
+    }
+
+    @Test
+    public void wifiInfoAlonePreservesNameContainingBssidFieldText() {
+        WifiStatusParser.Parsed p = WifiStatusParser.parse(
+                INFO_PREFIX + "\"Cafe, BSSID: Guest\"" + INFO_MIDDLE + "true, score: 10");
+        assertTrue(p.connected);
+        assertEquals("Cafe, BSSID: Guest", p.ssid);
+        assertEquals(Boolean.TRUE, p.meteredHint);
+    }
+
+    @Test
+    public void nameDoesNotSupplyAnAbsentMeteredHint() {
+        WifiStatusParser.Parsed p = WifiStatusParser.parse(
+                INFO_PREFIX + "\"Cafe, Metered hint: false,\", BSSID: aa:bb:cc:dd:ee:ff, RSSI: -55");
+        assertTrue(p.connected);
+        assertEquals("Cafe, Metered hint: false,", p.ssid);
+        assertNull(p.meteredHint);
+    }
+
+    @Test
+    public void incompleteWifiInfoDoesNotSupplyMeteredHint() {
+        WifiStatusParser.Parsed p = WifiStatusParser.parse(
+                "Wifi is connected to \"Cafe\"\n" + INFO_PREFIX + "\"Cafe, Metered hint: false,\"");
+        assertTrue(p.connected);
+        assertEquals("Cafe", p.ssid);
+        assertNull(p.meteredHint);
+
+        WifiStatusParser.Parsed truncated = WifiStatusParser.parse(
+                INFO_PREFIX + "\"Cafe, BSSID: Guest, Metered hint: false,");
+        assertTrue(truncated.connected);
+        assertNull(truncated.ssid);
+        assertNull(truncated.meteredHint);
+    }
+
+    @Test
     public void connectedLineWithoutWifiInfoLeavesHintUnknown() {
         WifiStatusParser.Parsed p = WifiStatusParser.parse(
                 "Wifi is enabled\r\nWifi is connected to \"CRLF Net\"\r\n");
