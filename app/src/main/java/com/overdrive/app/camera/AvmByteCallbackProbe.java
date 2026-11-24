@@ -4,6 +4,7 @@ import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaCodecList;
 import android.media.MediaFormat;
+import android.os.Build;
 import android.media.MediaMuxer;
 
 import com.overdrive.app.logging.DaemonLogger;
@@ -427,6 +428,91 @@ public final class AvmByteCallbackProbe {
         }
     }
 
+    static final class EncoderCandidate {
+        final String codecName;
+        final int[] colorFormats;
+        final boolean hardwareAccelerated;
+
+        EncoderCandidate(String codecName, int[] colorFormats, boolean hardwareAccelerated) {
+            this.codecName = codecName;
+            this.colorFormats = colorFormats != null ? colorFormats.clone() : new int[0];
+            this.hardwareAccelerated = hardwareAccelerated;
+        }
+    }
+
+    static final class EncoderChoice {
+        final String codecName;
+        final int colorFormat;
+
+        EncoderChoice(String codecName, int colorFormat) {
+            this.codecName = codecName;
+            this.colorFormat = colorFormat;
+        }
+    }
+
+    /** Keep the selected color format paired with the codec that advertises it. */
+    static EncoderChoice chooseEncoder(List<EncoderCandidate> candidates) {
+        if (candidates == null) return null;
+        int[] preferredFormats = {
+            MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar,
+            MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible
+        };
+        for (int preferred : preferredFormats) {
+            for (int pass = 0; pass < 2; pass++) {
+                for (EncoderCandidate candidate : candidates) {
+                    if (candidate == null || candidate.codecName == null
+                            || candidate.codecName.isEmpty()
+                            || (pass == 0 && !candidate.hardwareAccelerated)) {
+                        continue;
+                    }
+                    for (int supported : candidate.colorFormats) {
+                        if (supported == preferred) {
+                            return new EncoderChoice(candidate.codecName, supported);
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private static EncoderChoice findSupportedEncoder(String mime) {
+        try {
+            MediaCodecList list = new MediaCodecList(MediaCodecList.REGULAR_CODECS);
+            List<EncoderCandidate> candidates = new ArrayList<>();
+            for (MediaCodecInfo info : list.getCodecInfos()) {
+                if (!info.isEncoder()) continue;
+                boolean handlesMime = false;
+                for (String type : info.getSupportedTypes()) {
+                    if (type.equalsIgnoreCase(mime)) {
+                        handlesMime = true;
+                        break;
+                    }
+                }
+                if (!handlesMime) continue;
+                try {
+                    MediaCodecInfo.CodecCapabilities caps = info.getCapabilitiesForType(mime);
+                    boolean hardwareAccelerated = Build.VERSION.SDK_INT >= 29
+                            && info.isHardwareAccelerated();
+                    candidates.add(new EncoderCandidate(
+                            info.getName(), caps.colorFormats, hardwareAccelerated));
+                } catch (Throwable t) {
+                    logger.warn("Codec capabilities unavailable for " + info.getName()
+                        + ": " + t.getMessage());
+                }
+            }
+            EncoderChoice choice = chooseEncoder(candidates);
+            if (choice != null) {
+                logger.info("Selected probe encoder " + choice.codecName + " color=0x"
+                    + Integer.toHexString(choice.colorFormat));
+            }
+            return choice;
+        } catch (Throwable t) {
+            logger.warn("Codec capabilities probe failed: " + t.getMessage());
+            return null;
+        }
+    }
+
     /**
      * Frame collector — receives byte[] frames via dynamic-proxy IPreviewCallback,
      * enqueues them, and a single worker thread drains the queue into either
@@ -672,12 +758,13 @@ public final class AvmByteCallbackProbe {
                     + " — dims " + width + "x" + height + " not 16-aligned, raw dump only");
                 return false;
             }
-            String mime = "video/avc";
-            int colorFormat = pickSupportedColorFormat(mime);
-            if (colorFormat < 0) {
+            String mime = MediaFormat.MIMETYPE_VIDEO_AVC;
+            EncoderChoice choice = findSupportedEncoder(mime);
+            if (choice == null) {
                 logger.warn("No NV12-class color format supported for " + mime + " — raw dump only");
                 return false;
             }
+            int colorFormat = choice.colorFormat;
             try {
                 MediaFormat fmt = MediaFormat.createVideoFormat(mime, width, height);
                 fmt.setInteger(MediaFormat.KEY_COLOR_FORMAT, colorFormat);
@@ -686,7 +773,7 @@ public final class AvmByteCallbackProbe {
                 fmt.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, ENCODER_IFRAME_INTERVAL);
                 fmt.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, width * height * 3 / 2);
 
-                encoder = MediaCodec.createEncoderByType(mime);
+                encoder = MediaCodec.createByCodecName(choice.codecName);
                 encoder.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
                 encoder.start();
 
@@ -704,41 +791,19 @@ public final class AvmByteCallbackProbe {
                 outputPath = mp4Final.getAbsolutePath();
                 encoderUsed = true;
                 logger.info("Encoder ready cam=" + cameraId + " view=" + viewIndex
-                    + " mime=" + mime + " color=0x" + Integer.toHexString(colorFormat)
+                    + " mime=" + mime + " codec=" + choice.codecName
+                    + " color=0x" + Integer.toHexString(colorFormat)
                     + " dims=" + width + "x" + height
                     + " → " + mp4Final.getName());
                 return true;
             } catch (Throwable t) {
                 logger.warn("Encoder init failed cam=" + cameraId + " view=" + viewIndex
-                    + " mime=" + mime + " color=" + colorFormat + " dims=" + width + "x" + height
+                    + " mime=" + mime + " codec=" + choice.codecName
+                    + " color=" + colorFormat + " dims=" + width + "x" + height
                     + ": " + t.getMessage());
                 closeEncoderFailFast();
                 return false;
             }
-        }
-
-        private static int pickSupportedColorFormat(String mime) {
-            try {
-                MediaCodecList list = new MediaCodecList(MediaCodecList.REGULAR_CODECS);
-                for (MediaCodecInfo info : list.getCodecInfos()) {
-                    if (!info.isEncoder()) continue;
-                    boolean handles = false;
-                    for (String t : info.getSupportedTypes()) {
-                        if (t.equalsIgnoreCase(mime)) { handles = true; break; }
-                    }
-                    if (!handles) continue;
-                    MediaCodecInfo.CodecCapabilities caps = info.getCapabilitiesForType(mime);
-                    for (int cf : caps.colorFormats) {
-                        if (cf == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar) return cf;
-                    }
-                    for (int cf : caps.colorFormats) {
-                        if (cf == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible) return cf;
-                    }
-                }
-            } catch (Throwable t) {
-                logger.warn("Codec capabilities probe failed: " + t.getMessage());
-            }
-            return -1;
         }
 
         private void closeEncoderFailFast() {
