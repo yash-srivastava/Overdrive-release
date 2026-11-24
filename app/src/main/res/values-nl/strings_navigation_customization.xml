@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_navigation_title">Navigatie</string>
+    <string name="settings_navigation_subtitle">Kies welke optionele onderdelen vastgezet blijven in het navigatiemenu aan de linkerkant.</string>
+    <string name="settings_navigation_fixed_hint">Dashboard, Instellingen en Over blijven altijd beschikbaar.</string>
+    <string name="settings_navigation_reset">Standaardinstellingen herstellen</string>
+    <string name="settings_navigation_reset_done">Navigatiemenu hersteld</string>
+    <string name="settings_navigation_shown">zichtbaar</string>
+    <string name="settings_navigation_hidden">verborgen</string>
+    <string name="settings_navigation_option_state">%1$s, %2$s in het navigatiemenu</string>
+</resources>

@@ -14,6 +14,8 @@ import com.overdrive.app.util.DaemonHttpClient;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.OutputStream;
+import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
 import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
@@ -63,7 +65,8 @@ public final class BluetoothAccessMonitor {
 
     /** One startup read; a disabled feature never schedules a config poll. */
     public static void resumeIfEnabled(Context context) {
-        if (RemoteAccessSettings.read().optBoolean("enabled")) {
+        if (RemoteAccessSettings.read().optBoolean("enabled")
+                && !com.overdrive.app.config.ServiceModeFeatureGate.isPausedInConfig("proximity")) {
             try {
                 JSONObject result = command(context, new JSONObject().put("operation", "apply"));
                 if (!result.optBoolean("success"))
@@ -79,6 +82,15 @@ public final class BluetoothAccessMonitor {
         if ("devices".equals(operation))
             return new JSONObject().put("success", true).put("devices", devices());
         if ("apply".equals(operation)) {
+            // Service Mode stops both app-process collectors without touching the
+            // user's saved trusted phones, keyfobs or master toggle.
+            if (com.overdrive.app.config.ServiceModeFeatureGate.isPausedInConfig("proximity")) {
+                stop();
+                KeyFobAccessMonitor.stop();
+                return new JSONObject().put("success", true).put("paused", true)
+                        .put("runtime", runtime(context))
+                        .put("keyFobRuntime", KeyFobAccessMonitor.runtime());
+            }
             JSONObject settings = RemoteAccessSettings.read();
             KeyFobAccessMonitor.apply(context, settings);
             JSONArray phones = settings.getJSONArray("phones");
@@ -213,7 +225,8 @@ public final class BluetoothAccessMonitor {
         try {
             UnifiedConfigManager.forceReload();
             JSONObject persisted = RemoteAccessSettings.read();
-            if (!running || !persisted.optBoolean("enabled")) return "master_off";
+            if (!running || !persisted.optBoolean("enabled")
+                    || com.overdrive.app.config.ServiceModeFeatureGate.isPausedInConfig("proximity")) return "master_off";
             if (!sameMonitorConfig(persisted, config)) return "settings_changed";
             if (!persisted.optBoolean("keepBluetoothOn")) return "shared_bluetooth_off";
             if (UnifiedConfigManager.isVehicleOnOnlyMode()) return "vehicle_on_only";
@@ -239,7 +252,8 @@ public final class BluetoothAccessMonitor {
         try {
             UnifiedConfigManager.forceReload();
             JSONObject persisted = RemoteAccessSettings.read();
-            return running && persisted.optBoolean("enabled")
+            return running && !com.overdrive.app.config.ServiceModeFeatureGate.isPausedInConfig("proximity")
+                    && persisted.optBoolean("enabled")
                     && persisted.optBoolean("keepBluetoothOn")
                     && sameMonitorConfig(persisted, config);
         } catch (Exception | LinkageError unavailable) { return false; }
@@ -253,6 +267,9 @@ public final class BluetoothAccessMonitor {
         private long observationSequence;
         private long nextDiagnosticAt;
         private String lastDiagnostic;
+        // This worker's latest camera-daemon safe-zone directive; never shared with another phone's worker.
+        private boolean safeZoneBluetoothDisable;
+        private long safeZoneBluetoothDirectiveAtElapsedMs = -1L;
 
         PhoneWorker(String address) {
             this.address = address;
@@ -266,7 +283,8 @@ public final class BluetoothAccessMonitor {
                 long cycleStartedMs = SystemClock.elapsedRealtime();
                 // Restores/imports also revoke monitoring without relying on a web client.
                 JSONObject persisted = RemoteAccessSettings.read();
-                if (!persisted.optBoolean("enabled") || !persisted.optBoolean("keepBluetoothOn")
+                if (com.overdrive.app.config.ServiceModeFeatureGate.isPausedInConfig("proximity")
+                        || !persisted.optBoolean("enabled") || !persisted.optBoolean("keepBluetoothOn")
                         || !sameMonitorConfig(persisted, config)) {
                     Log.i(TAG, "Phone worker stopping: " + (persisted.optBoolean("enabled")
                             ? "settings changed" : "master off"));
@@ -278,12 +296,18 @@ public final class BluetoothAccessMonitor {
                 BluetoothConnectionStateReader.Snapshot connectionProof =
                         BluetoothConnectionStateReader.Snapshot.unknown("connection_state_unavailable");
                 BluetoothAdapter observedAdapter = null;
+                // The post-relay safe-zone reconcile reuses this sample's power read and lease state.
+                Integer radioPower = null;
+                JSONObject radioAfter = null;
                 try {
                     JSONObject radio = SharedBluetoothKeepAliveController.runtime(context);
                     if (radio.optBoolean("enabled") || radio.optBoolean("radioOwned")
-                            || radio.optBoolean("cleanupPending")) {
+                            || radio.optBoolean("cleanupPending") || radio.optBoolean("safeZoneDisabled")) {
                         int power = VehiclePowerReader.readNow(context);
-                        SharedBluetoothKeepAliveController.reconcile(context, power == 0, power > 0, false);
+                        radioAfter = SharedBluetoothKeepAliveController.reconcile(context, power == 0, power > 0, false);
+                        radioPower = power;
+                        if (radio.optBoolean("safeZoneDisabled") && !radioAfter.optBoolean("safeZoneDisabled"))
+                            reconnect.radioRestored();
                     }
                     observedAdapter = BluetoothAdapter.getDefaultAdapter();
                     connectionProof = BluetoothConnectionStateReader.read(
@@ -346,7 +370,25 @@ public final class BluetoothAccessMonitor {
                 catch (Throwable unavailable) { reconnect.stopAfterUnexpectedFailure(unavailable); }
                 if (!running || Thread.currentThread().isInterrupted()) break;
                 reportDiagnostic(reason);
-                publish(raw, connected, reason, observedAtElapsedMs, connectionProof);
+                boolean directiveReceived = publish(raw, connected, reason, observedAtElapsedMs, connectionProof);
+                // A successful authenticated relay response refreshes the camera-daemon
+                // decision. Watchdog reconciles carry no decision and cannot overwrite it.
+                // Only a live directive or suppression lease needs this second reconcile,
+                // and it reuses the power read taken before sampling.
+                try {
+                    if (directiveReceived && (safeZoneBluetoothDisable || radioAfter != null
+                            && (radioAfter.optBoolean("safeZoneDisabled")
+                                    || radioAfter.optBoolean("safeZoneDirectiveActive")))) {
+                        int power = radioPower != null ? radioPower : VehiclePowerReader.readNow(context);
+                        JSONObject after = SharedBluetoothKeepAliveController.reconcile(
+                                context, power == 0, power > 0, false, true, safeZoneBluetoothDisable,
+                                safeZoneBluetoothDirectiveAtElapsedMs);
+                        if (radioAfter != null && radioAfter.optBoolean("safeZoneDisabled")
+                                && !after.optBoolean("safeZoneDisabled")) reconnect.radioRestored();
+                    }
+                } catch (Throwable unavailable) {
+                    // The watchdog and next phone tick retry; stale directives expire in the shared lease.
+                }
                 // Include native checks and reporting in both sample budgets.
                 // Connected phones need fresh samples for approach confirmation;
                 // disconnected recovery retains its shared three-second spacing.
@@ -381,7 +423,7 @@ public final class BluetoothAccessMonitor {
         }
     }
 
-    private void publish(Integer raw, boolean connected, String reason, long observedAtElapsedMs,
+    private boolean publish(Integer raw, boolean connected, String reason, long observedAtElapsedMs,
             BluetoothConnectionStateReader.Snapshot connectionProof) {
         HttpURLConnection connection = null;
         try {
@@ -407,14 +449,29 @@ public final class BluetoothAccessMonitor {
             byte[] bytes = RemoteDevViewBridgeAuth.sign(observation).getBytes(StandardCharsets.UTF_8);
             connection = DaemonHttpClient.open("/api/remote-access/relay", "POST", 1500, 7000);
             relay = connection;
-            if (!running) return;
+            if (!running) return false;
             connection.setDoOutput(true);
             connection.setRequestProperty("Content-Type", "application/json");
             connection.setFixedLengthStreamingMode(bytes.length);
             try (OutputStream out = connection.getOutputStream()) { out.write(bytes); }
-            connection.getResponseCode();
+            int status = connection.getResponseCode();
+            InputStream input = status >= 200 && status < 400
+                    ? connection.getInputStream() : connection.getErrorStream();
+            if (input == null) return false;
+            JSONObject response;
+            try (InputStream in = input; ByteArrayOutputStream bytesOut = new ByteArrayOutputStream()) {
+                byte[] buffer = new byte[1024];
+                int count;
+                while ((count = in.read(buffer)) != -1) bytesOut.write(buffer, 0, count);
+                response = new JSONObject(new String(bytesOut.toByteArray(), StandardCharsets.UTF_8));
+            }
+            if (!response.optBoolean("success")) return false;
+            safeZoneBluetoothDisable = response.optBoolean("safeZoneBluetoothDisable", false);
+            safeZoneBluetoothDirectiveAtElapsedMs = response.optLong("safeZoneBluetoothDirectiveAtElapsedMs", -1L);
+            return safeZoneBluetoothDirectiveAtElapsedMs >= 0;
         } catch (Exception ignored) {
             // Daemon loss is unknown, never a departure. Only enabled ticks retry.
+            return false;
         } finally {
             relay = null;
             if (connection != null) connection.disconnect();

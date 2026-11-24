@@ -80,6 +80,37 @@ public final class BsNativeLayer {
     // scale stays uniform (no stretch of the baked rounded corners).
     private volatile int bufferRotation = 0;
 
+    // Custom Layouts slot placement; null (the default) = callers place the layer, as before.
+    private volatile SlotPlacement slotPlacement;
+    // Slot the last geometry transaction used, and the stack really set on the SurfaceControl.
+    private Slot appliedSlot;
+    private int appliedStack = 0;
+
+    /** Supplies a slot for this layer; consulted by every geometry call while installed. */
+    public interface SlotPlacement {
+        /** The slot to use now, or null to keep the caller's rect. Called under the layer
+         *  monitor: pure math on cached state, no I/O, no locks. */
+        Slot slotFor(BsNativeLayer layer, boolean showEdge);
+        /** A transaction just placed the layer; {@code slot} is null for a caller rect. */
+        void onPlaced(BsNativeLayer layer, Slot slot, boolean showEdge);
+        /** The slot-placed layer was hidden. */
+        void onHidden(BsNativeLayer layer);
+    }
+
+    /** Slot placement: target layerStack, buffer source crop and on-screen dest rect. */
+    public static class Slot {
+        public final int layerStack;
+        public final int srcX, srcY, srcW, srcH;
+        public final int dstX, dstY, dstW, dstH;
+
+        public Slot(int layerStack, int srcX, int srcY, int srcW, int srcH,
+                    int dstX, int dstY, int dstW, int dstH) {
+            this.layerStack = layerStack;
+            this.srcX = srcX; this.srcY = srcY; this.srcW = srcW; this.srcH = srcH;
+            this.dstX = dstX; this.dstY = dstY; this.dstW = dstW; this.dstH = dstH;
+        }
+    }
+
     public BsNativeLayer(int bufferW, int bufferH) {
         this(bufferW, bufferH, "BlindSpot", Z_ORDER);
     }
@@ -114,10 +145,12 @@ public final class BsNativeLayer {
         }
         if (stack == this.layerStack) return;
         this.layerStack = stack;
-        if (surfaceControl != null) {
+        // While a slot owns the placement, remember the request; the next caller rect applies it.
+        if (surfaceControl != null && appliedSlot == null) {
             // Re-assert stack on the live handle. Re-uses applyGeometry's transaction
             // path with the current visibility so we don't flash or move the card.
             applyLayerStack(surfaceControl, stack);
+            appliedStack = stack;
         }
     }
 
@@ -178,6 +211,8 @@ public final class BsNativeLayer {
     /** Create the buffer layer (does NOT show it yet). Returns false on failure. */
     public synchronized boolean create() {
         if (surfaceControl != null) return true;
+        appliedSlot = null;
+        appliedStack = 0;   // a new SurfaceControl starts on layerStack 0
         surfaceControl = createBufferLayer(layerName, bufferW, bufferH);
         if (surfaceControl == null) {
             logger.warn("create: SurfaceControl buffer layer creation failed");
@@ -208,8 +243,8 @@ public final class BsNativeLayer {
      */
     public synchronized void setGeometry(int x, int y, int w, int h) {
         if (surfaceControl == null) return;
-        applyGeometry(surfaceControl, 0, 0, bufferW, bufferH, x, y, w, h, zOrder, true,
-                bufferW, bufferH, layerStack, bufferRotation);
+        if (applySlot(true)) return;
+        placeCaller(0, 0, bufferW, bufferH, x, y, w, h, true);
         shown = true;
     }
 
@@ -223,9 +258,9 @@ public final class BsNativeLayer {
      */
     public synchronized void setGeometry(Rect src, int x, int y, int w, int h) {
         if (surfaceControl == null) return;
+        if (applySlot(true)) return;
         Rect s = clampSrc(src);
-        applyGeometry(surfaceControl, s.left, s.top, s.width(), s.height(), x, y, w, h,
-                zOrder, true, bufferW, bufferH, layerStack, bufferRotation);
+        placeCaller(s.left, s.top, s.width(), s.height(), x, y, w, h, true);
         shown = true;
     }
 
@@ -234,8 +269,8 @@ public final class BsNativeLayer {
      *  a show-then-hide one-frame flash of an unrendered layer. */
     public synchronized void setGeometryHidden(int x, int y, int w, int h) {
         if (surfaceControl == null) return;
-        applyGeometry(surfaceControl, 0, 0, bufferW, bufferH, x, y, w, h, zOrder, false,
-                bufferW, bufferH, layerStack, bufferRotation);
+        if (applySlot(false)) return;
+        placeCaller(0, 0, bufferW, bufferH, x, y, w, h, false);
         // shown stays false
     }
 
@@ -243,11 +278,70 @@ public final class BsNativeLayer {
      *  arm (avoids an empty-layer flash). See {@link #setGeometry(Rect,int,int,int,int)}. */
     public synchronized void setGeometryHidden(Rect src, int x, int y, int w, int h) {
         if (surfaceControl == null) return;
+        if (applySlot(false)) return;
         Rect s = clampSrc(src);
-        applyGeometry(surfaceControl, s.left, s.top, s.width(), s.height(), x, y, w, h,
-                zOrder, false, bufferW, bufferH, layerStack, bufferRotation);
+        placeCaller(s.left, s.top, s.width(), s.height(), x, y, w, h, false);
         // shown stays false
     }
+
+    /** Caller-rect transaction exactly as before; the stack is re-asserted only after a slot moved it. */
+    private void placeCaller(int sx, int sy, int sw, int sh, int x, int y, int w, int h,
+                             boolean show) {
+        boolean forceStack = appliedStack != layerStack;
+        applyGeometry(surfaceControl, sx, sy, sw, sh, x, y, w, h, zOrder, show,
+                bufferW, bufferH, layerStack, bufferRotation, forceStack, false);
+        if (layerStack != 0 || forceStack) appliedStack = layerStack;
+        if (appliedSlot != null) {
+            appliedSlot = null;
+            SlotPlacement p = slotPlacement;
+            if (p != null) {
+                try { p.onPlaced(this, null, false); } catch (Throwable ignored) {}
+            }
+        }
+    }
+
+    /** Place from the installed slot placement; false leaves the caller's rect in charge. */
+    private boolean applySlot(boolean show) {
+        SlotPlacement p = slotPlacement;
+        if (p == null) return false;
+        boolean edge = show && !shown;
+        Slot s;
+        try {
+            s = p.slotFor(this, edge);
+        } catch (Throwable t) {
+            s = null;
+        }
+        if (s == null || s.layerStack <= 0 || s.dstW <= 0 || s.dstH <= 0) return false;
+        int sl = Math.max(0, Math.min(s.srcX, bufferW - 1));
+        int st = Math.max(0, Math.min(s.srcY, bufferH - 1));
+        int sw = Math.max(1, Math.min(s.srcW, bufferW - sl));
+        int sh = Math.max(1, Math.min(s.srcH, bufferH - st));
+        applyGeometry(surfaceControl, sl, st, sw, sh, s.dstX, s.dstY, s.dstW, s.dstH, zOrder,
+                show, bufferW, bufferH, s.layerStack, 0, true, true);
+        appliedStack = s.layerStack;
+        appliedSlot = s;
+        if (show) shown = true;
+        try { p.onPlaced(this, s, edge); } catch (Throwable ignored) {}
+        return true;
+    }
+
+    /** Install (or remove, with null) the Custom Layouts slot placement. */
+    public synchronized void setSlotPlacement(SlotPlacement placement) { this.slotPlacement = placement; }
+
+    /** True when the last geometry transaction put the layer in a slot. */
+    public synchronized boolean isSlotApplied() { return appliedSlot != null; }
+
+    /** The slot the last transaction used, or null. */
+    public synchronized Slot getAppliedSlot() { return appliedSlot; }
+
+    /** Re-place a SHOWN layer from its slot placement; never shows a hidden layer. */
+    public synchronized boolean reapplySlot() {
+        if (surfaceControl == null || !shown) return false;
+        return applySlot(false);
+    }
+
+    public int getBufferWidth() { return bufferW; }
+    public int getBufferHeight() { return bufferH; }
 
     /** Clamp a requested source crop to a valid, non-empty sub-rect of the buffer so a
      *  degenerate crop (zero/negative/oversized) can never reach SurfaceFlinger (which
@@ -266,6 +360,10 @@ public final class BsNativeLayer {
         if (surfaceControl == null || !shown) return;
         applyVisibility(surfaceControl, false);
         shown = false;
+        SlotPlacement p = slotPlacement;
+        if (appliedSlot != null && p != null) {
+            try { p.onHidden(this); } catch (Throwable ignored) {}
+        }
     }
 
     /** Re-show at the last geometry (cheap transaction). */
@@ -286,6 +384,8 @@ public final class BsNativeLayer {
             surfaceControl = null;
         }
         shown = false;
+        appliedSlot = null;
+        appliedStack = 0;
     }
 
     private void releaseScOnly() {
@@ -340,16 +440,44 @@ public final class BsNativeLayer {
 
     private static void applyGeometry(Object sc, int srcX, int srcY, int srcW, int srcH,
                                       int x, int y, int w, int h, int z, boolean show,
-                                      int bufW, int bufH, int layerStack, int rotationDeg) {
+                                      int bufW, int bufH, int layerStack, int rotationDeg,
+                                      boolean forceStack, boolean layoutSlot) {
         try {
             Class<?> scCls = Class.forName("android.view.SurfaceControl");
             Class<?> txCls = Class.forName("android.view.SurfaceControl$Transaction");
             Object tx = txCls.getDeclaredConstructor().newInstance();
+            boolean geom = false;
+            if (layoutSlot && rotationDeg == 0 && (srcX != 0 || srcY != 0)) {
+                // BYD Android 10 adds the scaled crop origin to the position supplied
+                // by setGeometry. Position the full buffer so its visible crop lands in the slot.
+                try {
+                    java.lang.reflect.Method crop;
+                    try {
+                        crop = txCls.getMethod("setWindowCrop", scCls, Rect.class);
+                    } catch (NoSuchMethodException missing) {
+                        crop = txCls.getMethod("setCrop", scCls, Rect.class);
+                    }
+                    java.lang.reflect.Method matrix = txCls.getMethod("setMatrix", scCls,
+                            float.class, float.class, float.class, float.class);
+                    java.lang.reflect.Method position = txCls.getMethod("setPosition", scCls, float.class, float.class);
+                    float sx = (float) w / srcW;
+                    float sy = (float) h / srcH;
+                    crop.invoke(tx, sc, new Rect(srcX, srcY, srcX + srcW, srcY + srcH));
+                    matrix.invoke(tx, sc, sx, 0f, 0f, sy);
+                    position.invoke(tx, sc, x - srcX * sx, y - srcY * sy);
+                    geom = true;
+                } catch (ReflectiveOperationException | SecurityException unavailable) {
+                    // Discard any partially queued changes before using the ordinary geometry API.
+                    try { txCls.getMethod("close").invoke(tx); } catch (Throwable ignored) {}
+                    tx = txCls.getDeclaredConstructor().newInstance();
+                }
+            }
             try { txCls.getMethod("setLayer", scCls, int.class).invoke(tx, sc, z); } catch (Throwable ignored) {}
             // Retarget to the cluster's layerStack ONLY when non-zero. When 0 (head-unit
             // default) we emit nothing here, so the transaction is byte-for-byte the
             // pre-feature head-unit path. setLayerStack(SurfaceControl,int) proven live.
-            if (layerStack != 0) {
+            // forceStack: a slot moved the layer, so 0 must be re-asserted too.
+            if (layerStack != 0 || forceStack) {
                 try { txCls.getMethod("setLayerStack", scCls, int.class).invoke(tx, sc, layerStack); } catch (Throwable ignored) {}
             }
             try { txCls.getMethod("setAlpha", scCls, float.class).invoke(tx, sc, 1.0f); } catch (Throwable ignored) {}
@@ -358,12 +486,9 @@ public final class BsNativeLayer {
             // dest rect, rotating it by `orientation` (a NATIVE_WINDOW_TRANSFORM_* /
             // HAL transform code from rotationConst — NOT a Surface.ROTATION_* ordinal;
             // see rotationConst's javadoc for why that distinction is load-bearing).
-            // The source crop is the FULL buffer for every caller except the cluster
-            // mirror's ZOOM mode; the caller supplies a dest rect already sized for the
-            // rotated buffer (w/h swapped for 90/270), so the scale stays uniform.
+            // The cluster mirror and layout camera slots can both select a sub-rectangle of the buffer.
             int orientation = rotationConst(rotationDeg);
-            boolean geom = false;
-            try {
+            if (!geom) try {
                 Rect src = new Rect(srcX, srcY, srcX + srcW, srcY + srcH);
                 Rect dst = new Rect(x, y, x + w, y + h);
                 txCls.getMethod("setGeometry", scCls, Rect.class, Rect.class, int.class)
@@ -371,30 +496,24 @@ public final class BsNativeLayer {
                 geom = true;
             } catch (Throwable ignored) {}
             if (!geom) {
-                // Fallback: position + scale via setPosition + setMatrix. setMatrix is a
-                // 2×2 (dsdx,dtdx,dsdy,dtdy); compose the rotation into it so a device
-                // lacking the 4-arg setGeometry still honours the rotation option.
-                // The dest rect is now ALWAYS the source's 4:3 aspect (the caller no
-                // longer swaps to 3:4 for quarter turns — see the primary path's note),
-                // and the buffer is itself 4:3, so a SINGLE uniform scale s = w/bufW
-                // (== h/bufH) keeps square pixels for every angle; only the rotation
-                // signs differ. This matches the native setGeometry scale (which also
-                // scales by dstW/srcW and rotates after), so a device on the fallback
-                // rotates the same direction as one on the primary path.
-                // NOTE: setMatrix rotates about the buffer ORIGIN and cannot express a
-                // pivot offset, so on a device that lacks the 4-arg setGeometry the
-                // rotated card is placed best-effort (may be offset from the exact dest
-                // corner) — never stretched or mirrored. The primary setGeometry path is
-                // the one used on this firmware (validated present on API 29).
+                // Layout slots use orientation zero. On releases with separate crop and
+                // matrix setters, position the buffer origin so its crop begins at (x,y).
+                int d = ((rotationDeg % 360) + 360) % 360;
+                float sx = (float) w / Math.max(1, srcW);
+                float sy = (float) h / Math.max(1, srcH);
+                Rect crop = new Rect(srcX, srcY, srcX + srcW, srcY + srcH);
+                try {
+                    txCls.getMethod("setWindowCrop", scCls, Rect.class).invoke(tx, sc, crop);
+                } catch (NoSuchMethodException missing) {
+                    try { txCls.getMethod("setCrop", scCls, Rect.class).invoke(tx, sc, crop); } catch (Throwable ignored) {}
+                } catch (Throwable ignored) {}
                 try {
                     txCls.getMethod("setPosition", scCls, float.class, float.class)
-                            .invoke(tx, sc, (float) x, (float) y);
+                            .invoke(tx, sc, d == 0 ? x - srcX * sx : (float) x, d == 0 ? y - srcY * sy : (float) y);
                 } catch (Throwable ignored) {}
                 try {
                     java.lang.reflect.Method setMatrix = txCls.getMethod("setMatrix",
                             scCls, float.class, float.class, float.class, float.class);
-                    int d = ((rotationDeg % 360) + 360) % 360;
-                    // Uniform scale (dst is 4:3 like the buffer, so both axes agree).
                     float s = (float) w / (float) Math.max(1, bufW);
                     if (d == 90) {
                         setMatrix.invoke(tx, sc, 0f, s, -s, 0f);
@@ -403,7 +522,7 @@ public final class BsNativeLayer {
                     } else if (d == 270) {
                         setMatrix.invoke(tx, sc, 0f, -s, s, 0f);
                     } else {
-                        setMatrix.invoke(tx, sc, s, 0f, 0f, s);
+                        setMatrix.invoke(tx, sc, sx, 0f, 0f, sy);
                     }
                 } catch (Throwable ignored) {}
             }
@@ -893,8 +1012,13 @@ public final class BsNativeLayer {
                         : failure.get().getMessage()));
                 return new FissionDisplay(-1, -1);
             }
-            FissionDisplay resolved =
-                    parseDiLink5MirrorDisplay(dump.get(), targetDisplayId);
+            FissionDisplay resolved;
+            if (com.overdrive.app.camera.dilink5.ClusterTransport.isAaosHdmi()) {
+                resolved = parseAaosHdmiMirrorDisplay(dump.get(), targetDisplayId);
+            } else {
+                resolved = parseDiLink5MirrorDisplay(dump.get(), targetDisplayId,
+                        com.overdrive.app.launcher.DiLink5ClusterCast.isFactoryMiniMapActive());
+            }
             logger.info("resolveDiLink5MirrorDisplay result: targetId="
                     + targetDisplayId + " displayId=" + resolved.displayId
                     + " layerStack=" + resolved.layerStack + " real="
@@ -910,7 +1034,49 @@ public final class BsNativeLayer {
 
     static FissionDisplay parseDiLink5MirrorDisplay(
             String dump, int targetDisplayId) {
+        return parseDiLink5MirrorDisplay(dump, targetDisplayId, false);
+    }
+
+    static FissionDisplay parseAaosHdmiMirrorDisplay(String dump, int targetDisplayId) {
+        String line = logicalMirrorDisplayLine(dump, targetDisplayId);
+        if (line == null || !line.contains("uniqueId \"local:3\"")
+                || !line.contains("type EXTERNAL") || !line.contains("FLAG_PRESENTATION")) {
+            return new FissionDisplay(-1, -1);
+        }
+        FissionDisplay target = activeMirrorDisplay(line, targetDisplayId);
+        return target.width == 1920 && target.height == 720 ? target : new FissionDisplay(-1, -1);
+    }
+
+    private static String logicalMirrorDisplayLine(String dump, int targetDisplayId) {
+        if (dump == null || targetDisplayId <= 0) return null;
+        String base = null;
+        for (String line : dump.split("\\r?\\n")) {
+            if (!line.contains("DisplayInfo{\"") || extractDisplayIdOnLine(line) != targetDisplayId) continue;
+            if (line.contains("mOverrideDisplayInfo=") || line.contains("mDisplayInfo=")) return line;
+            if (base == null) base = line;
+        }
+        return base;
+    }
+
+    private static FissionDisplay activeMirrorDisplay(String line, int id) {
+        int[] size = parseSizeFromDumpsysLine(line);
+        java.util.regex.Matcher stack = LAYER_STACK.matcher(line);
+        if (line.contains("state ON") && size != null && size[0] > 1 && size[1] > 1 && stack.find()) {
+            int layerStack = parseIntSafe(stack.group(1));
+            if (layerStack > 0) return new FissionDisplay(id, layerStack, size[0], size[1]);
+        }
+        return new FissionDisplay(-1, -1);
+    }
+
+    static FissionDisplay parseDiLink5MirrorDisplay(
+            String dump, int targetDisplayId, boolean factoryMiniMap) {
         if (dump == null || dump.isEmpty()) return new FissionDisplay(-1, -1);
+        if (factoryMiniMap) {
+            String line = logicalMirrorDisplayLine(dump, targetDisplayId);
+            if (line == null || !"shared_fission_bg_XDJAScreenProjection_1"
+                    .equalsIgnoreCase(extractDisplayNameOnLine(line))) return new FissionDisplay(-1, -1);
+            return activeMirrorDisplay(line, targetDisplayId);
+        }
         FissionDisplay plain = null;
         FissionDisplay target = null;
         boolean targetIsSharedShadow = false;

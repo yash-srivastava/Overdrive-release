@@ -164,9 +164,15 @@ public final class GenAiVoiceWebSocket {
     /** {@code brief} (far-field only) makes it a Trip Briefing session: one question, one tool. */
     public static void handle(
             Socket client, String websocketKey, String language, String mic, String brief) {
+        handle(client, websocketKey, language, mic, brief, true);
+    }
+
+    /** {@code stepUpExempt} false: a remote session, so step-up gated commands are refused. */
+    public static void handle(Socket client, String websocketKey, String language, String mic,
+                              String brief, boolean stepUpExempt) {
         boolean farField = "far".equals(mic);
         Session session = new Session(client, language, farField,
-                farField ? com.overdrive.app.genai.GenAiTripBriefing.parse(brief) : null);
+                farField ? com.overdrive.app.genai.GenAiTripBriefing.parse(brief) : null, stepUpExempt);
         try {
             session.handshake(websocketKey);
             if (!ACTIVE.compareAndSet(null, session)) {
@@ -508,6 +514,8 @@ public final class GenAiVoiceWebSocket {
         private final boolean farField;
         // A Trip Briefing session (GenAiTripBriefing), or null.
         private final com.overdrive.app.genai.GenAiTripBriefing briefing;
+        // Commands run off the request thread, so they carry the caller's exemption explicitly.
+        private final boolean stepUpExempt;
         // Binds daemon-minted proposal tokens to this session; they die with it.
         final String sessionId = UUID.randomUUID().toString();
         // Typed commands run here, one at a time and never on the OkHttp reader thread.
@@ -570,11 +578,12 @@ public final class GenAiVoiceWebSocket {
         private WebSocket providerSocket;
 
         Session(Socket socket, String language, boolean farField,
-                com.overdrive.app.genai.GenAiTripBriefing briefing) {
+                com.overdrive.app.genai.GenAiTripBriefing briefing, boolean stepUpExempt) {
             this.socket = socket;
             this.language = language;
             this.farField = farField;
             this.briefing = briefing;
+            this.stepUpExempt = stepUpExempt;
         }
 
         String summary() {
@@ -1034,7 +1043,8 @@ public final class GenAiVoiceWebSocket {
             }
             Future<JSONObject> result;
             try {
-                result = commands.submit(() -> VoiceIntentExecutor.execute(request));
+                result = commands.submit(() -> StepUpGate.callWithExemption(
+                        stepUpExempt, () -> VoiceIntentExecutor.execute(request)));
             } catch (RejectedExecutionException closed) {
                 return;
             }

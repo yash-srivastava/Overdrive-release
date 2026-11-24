@@ -134,13 +134,13 @@ class GlassWidgetsOverlayService : Service() {
             private const val MAX_CUSTOM = 40
 
             /** [units] is the app-wide tyre pressure display unit, not a widget setting. */
-            fun from(o: JSONObject?, units: String, miles: Boolean = false): Settings {
+            fun from(o: JSONObject?, units: String, miles: Boolean = false, paused: Boolean = false): Settings {
                 val list = o?.optJSONArray("widgets")
                 val widgets = if (list == null) listOf("battery", "charging", "trip", "power")
                 else (0 until list.length()).map { list.optString(it) }.filter { it in ALL }.distinct()
                 val custom = custom(o?.optJSONArray("custom"))
                 return Settings(
-                    enabled = o?.optBoolean("enabled", false) ?: false,
+                    enabled = (o?.optBoolean("enabled", false) ?: false) && !paused,
                     mode = if (o?.optString("mode") == "global") "global" else "home",
                     widgets = widgets,
                     position = o?.optString("position")?.takeIf { it in POSITIONS } ?: "bottom-left",
@@ -326,6 +326,8 @@ class GlassWidgetsOverlayService : Service() {
     @Volatile private var feedHidden = false
     // a shown custom widget reads the pedals (the live poll asks for them), or RoadSense (read like the widget's)
     @Volatile private var livePedals = false
+    // a shown custom widget reads power: the live poll asks for a plug-in hybrid's drive power too
+    @Volatile private var livePower = false
     @Volatile private var customRoad = false
     // the custom widgets' docs as last read (io thread)
     private var docsVersion = 0
@@ -458,14 +460,15 @@ class GlassWidgetsOverlayService : Service() {
         val cfg = UnifiedConfigManager.loadConfig()
         val section = cfg.optJSONObject(SECTION)
         // tyre pressures show in the unit picked under Notifications, like everywhere else in the app
-        val units = UnifiedConfigManager.getTyrePressureUnit()
+        val units = UnifiedConfigManager.getTyrePressureUnit(cfg)
         // distances and speeds in the unit picked for trips
-        val miles = cfg.optJSONObject("tripAnalytics")?.optString("distanceUnit") == "mi"
-        val raw = "$units|$miles|$section"
+        val miles = com.overdrive.app.overlay.glass.GlassUnits.usesMiles(cfg)
+        val paused = com.overdrive.app.config.ServiceModeFeatureGate.isPausedInConfig("widgets")
+        val raw = "$units|$miles|$section|serviceModePaused=$paused"
         // read on the io thread and, at start, on main: the text and what it parsed to stay one pair
         synchronized(settingsLock) {
             if (!force && raw == lastSettings) readSettings
-            else Settings.from(section, units, miles).also { lastSettings = raw; readSettings = it }
+            else Settings.from(section, units, miles, paused).also { lastSettings = raw; readSettings = it }
         }
     } catch (t: Throwable) {
         Log.w(TAG, "config unavailable: ${t.message}")
@@ -1061,6 +1064,7 @@ class GlassWidgetsOverlayService : Service() {
         // custom widgets that read live signals get it once a second (or with whichever runs faster)
         liveDynamics = "dynamics" in ids
         livePedals = (need and NEED_PEDALS) != 0
+        livePower = (need and NEED_POWER) != 0
         customRoad = (need and NEED_ROAD) != 0
         val liveCustom = (need and NEED_LIVE) != 0
         liveMs = if (liveDynamics) LIVE_DYNAMICS_MS else if ("drive" in ids || (liveCustom && !("power" in ids && s.showBs))) LIVE_MS else LIVE_BS_MS
@@ -1093,6 +1097,7 @@ class GlassWidgetsOverlayService : Service() {
             if (d.needsLive) need = need or NEED_LIVE
             for (k in d.signals) need = need or when {
                 k in PEDAL_KEYS -> NEED_LIVE or NEED_PEDALS
+                k == "power" -> NEED_LIVE or NEED_POWER
                 k.startsWith("hazard_") -> NEED_ROAD
                 k == "calibrated_range_km" -> NEED_RANGE
                 else -> 0
@@ -1321,7 +1326,9 @@ class GlassWidgetsOverlayService : Service() {
 
     private fun pollLive() {
         // a fixed-rate read: a slow core mustn't stretch the gaps between samples
-        val path = if (liveDynamics || livePedals) "/api/widgets/live?dyn=1" else "/api/widgets/live"
+        val path = if (liveDynamics || livePedals) {
+            if (livePower) "/api/widgets/live?dyn=1&drive=1" else "/api/widgets/live?dyn=1"
+        } else if (livePower) "/api/widgets/live?drive=1" else "/api/widgets/live"
         val (code, text) = http("GET", path, "", readTimeoutMs = LIVE_TIMEOUT_MS)
         if (code != 200) return
         val v = try { GlassWidgetsFeed.live(JSONObject(text)) } catch (_: Throwable) { return }
@@ -2376,6 +2383,7 @@ class GlassWidgetsOverlayService : Service() {
         private const val NEED_PEDALS = 2
         private const val NEED_ROAD = 4
         private const val NEED_RANGE = 8
+        private const val NEED_POWER = 16
         /** Signals the live poll carries only when it asks for the pedals too. */
         private val PEDAL_KEYS = setOf("accel_pct", "brake_pct", "motor_front_rpm", "motor_rear_rpm")
         /** The seats list is read this often while it shows parked, and again on showing if older than [SEATS_SHOW_MS]. */
@@ -2415,7 +2423,9 @@ class GlassWidgetsOverlayService : Service() {
         /** App-side reconcile with the saved master toggle (boot / keepalive path). */
         fun syncWithConfig(context: Context): Boolean {
             val enabled = try {
-                UnifiedConfigManager.loadConfig().optJSONObject(SECTION)?.optBoolean("enabled", false) ?: false
+                val config = UnifiedConfigManager.loadConfig()
+                (config.optJSONObject(SECTION)?.optBoolean("enabled", false) ?: false) &&
+                    !com.overdrive.app.config.ServiceModeFeatureGate.isPausedInConfig("widgets")
             } catch (t: Throwable) {
                 false
             }

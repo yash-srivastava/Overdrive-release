@@ -1,5 +1,7 @@
 package com.overdrive.app.safekeep;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import java.io.File;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -77,7 +79,7 @@ public final class Naming {
             } catch (Exception ignored) {
             }
         }
-        return f.lastModified();
+        return RemovableStorageFs.lastModified(f);
     }
 
     /** Base name without extension; strips the sidecar suffixes too. */

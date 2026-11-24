@@ -57,8 +57,14 @@ public final class WifiStatusParser {
         String ssid = null;
         Boolean metered = null;
         boolean connected = false;
-        for (String raw : output.split("\\r?\\n")) {
-            String line = raw.trim();
+        int lineStart = 0;
+        while (lineStart < output.length()) {
+            int lineEnd = output.indexOf('\n', lineStart);
+            if (lineEnd < 0) {
+                lineEnd = output.length();
+            }
+            String line = output.substring(lineStart, lineEnd).trim();
+            lineStart = lineEnd + 1;
             if (line.isEmpty()) {
                 continue;
             }

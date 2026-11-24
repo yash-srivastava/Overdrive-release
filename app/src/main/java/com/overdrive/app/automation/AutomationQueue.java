@@ -315,11 +315,15 @@ public class AutomationQueue {
         final long enabledStateGeneration;
         final int automationConfigGeneration;
         final boolean retainedReplay;
+        final boolean serviceModePausedAtStart;
+        final long serviceModePauseGeneration;
 
         LatestStatePublication(
                 LatestStateStream key, long generation, long sequence,
                 long enabledStateGeneration, int automationConfigGeneration,
                 boolean retainedReplay) {
+            this.serviceModePausedAtStart = Automations.isServiceModeDisabled();
+            this.serviceModePauseGeneration = Automations.serviceModePauseGeneration();
             this.key = key;
             this.generation = generation;
             this.sequence = sequence;
@@ -658,7 +662,13 @@ public class AutomationQueue {
                 boolean configChanged =
                         current.automationConfigGeneration
                                 != Automations.configGeneration();
-                if (Automations.isDisabled() || enabledStateChanged || configChanged) {
+                // An event observed during or across Service Mode must not be
+                // retained for post-End replay, even if End raced this callback.
+                boolean crossedServiceMode = current.serviceModePausedAtStart
+                        || current.serviceModePauseGeneration
+                                != Automations.serviceModePauseGeneration();
+                if (!crossedServiceMode
+                        && (Automations.isDisabled() || enabledStateChanged || configChanged)) {
                     retainDisabledLatestStateReconciliationLocked(
                             current.key, publication,
                             current.generation, current.sequence);
@@ -854,6 +864,7 @@ public class AutomationQueue {
     private static void retainDisabledLatestStateReconciliationLocked(
             LatestStateStream publicationKey, Runnable publication,
             long generation, long sequence) {
+        if (Automations.isServiceModeDisabled()) return;
         LatestStateReconciliation retained =
                 disabledLatestStateReconciliations.get(publicationKey);
         if (retained != null) {
@@ -899,6 +910,7 @@ public class AutomationQueue {
 
     /** Preserve a tagged item before disabled-state teardown drops or isolates its owner. */
     private static void retainLatestStateReconciliationLocked(DelayedAutomation item) {
+        if (Automations.isServiceModeDisabled()) return;
         if (item == null || item.latestStatePublicationGenerations.isEmpty()) return;
         for (java.util.Map.Entry<LatestStateStream, LatestStateTag> entry :
                 item.latestStatePublicationGenerations.entrySet()) {
@@ -1197,18 +1209,53 @@ public class AutomationQueue {
         return found;
     }
 
+    /** Drop deferred edges when a temporary Service Mode pause begins.
+     * Unlike disabled-all, this pause must never replay events after End. */
+    static void discardServiceModeReplay() {
+        synchronized (lock) {
+            disabledLatestStateReconciliations.clear();
+            enableReconciliationPending = false;
+        }
+    }
+
     /**
-     * Check whether the worker should currently be running
-     * If there are no running automations, then there is no need for a worker to be running
-     * Synchronized on {@link #lock} so two concurrent HTTP threads cannot both observe a null worker
-     * and start two threads (which would double-fire actions), and so a disable-all cannot orphan a
-     * live worker while another thread is mid-start.
+     * Reconcile queue workers with the current enabled state.
+     * All worker lifecycle decisions are serialized on the queue lock.
      */
     public static void checkWorkerState() {
         Thread disabledWorker = null;
         java.util.List<String> replay = java.util.Collections.emptyList();
         synchronized (lock) {
-            if (Automations.isDisabled()) {
+            if (Automations.isServiceModeDisabled()) {
+                // Like disable-all, but nothing is retained for replay after End.
+                disabledWorker = automationWorker;
+                if (disabledWorker != null) {
+                    if (disabledWorker.isAlive()) {
+                        CancellationBarrier isolation = new CancellationBarrier(
+                                new ShutdownDrainGeneration(), disabledWorker);
+                        isolation.finished = true;
+                        isolateExecutorLocked(disabledWorker, isolation);
+                        inFlightActions.remove(disabledWorker);
+                    }
+                    if (automationWorker == disabledWorker) {
+                        automationWorker = null;
+                    }
+                    disabledWorker.interrupt();
+                }
+                if (workerRetryThread != null) {
+                    workerRetryThread.interrupt();
+                }
+                automationQueue.clear();
+                urgentReadyQueue.clear();
+                queueItems.clear();
+                if (shutdownDrainGeneration != null) {
+                    shutdownDrainGeneration.pending.clear();
+                }
+                disabledLatestStateReconciliations.clear();
+                enableReconciliationPending = false;
+                workerRetryAttempt = 0;
+                lock.notifyAll();
+            } else if (Automations.isDisabled()) {
                 retainLatestStateReconciliationsLocked();
                 disabledWorker = automationWorker;
                 if (disabledWorker != null) {
@@ -1256,7 +1303,7 @@ public class AutomationQueue {
                 logger.warn("Automation disable exceeded " + WORKER_DISABLE_JOIN_MS
                         + "ms; isolated stale worker generation");
             }
-            if (!Automations.isDisabled()) {
+            if (!Automations.isDisabled() && !Automations.isServiceModeDisabled()) {
                 forceDisabledLatestStateReconciliationsLocked();
                 replay = enqueueReadyReplacementReplaysLocked();
                 ensureWorker();
@@ -1270,10 +1317,14 @@ public class AutomationQueue {
     }
 
     private static boolean executeItem(DelayedAutomation item) {
+        // Compensations bypass normal triggerActions checks; do not execute a
+        // saved setter while the runtime gate is closed. The claim is requeued.
+        if (Automations.isServiceModeDisabled()) return false;
         executingItem.set(item);
         try {
             while (item.nextCompensation < item.compensations.size()) {
-                if (Thread.currentThread().isInterrupted()) return false;
+                if (Thread.currentThread().isInterrupted()
+                        || Automations.isServiceModeDisabled()) return false;
                 StatefulCompensation compensation =
                         item.compensations.get(item.nextCompensation);
                 if (!compensation.isStillOwned()) {
@@ -1282,6 +1333,7 @@ public class AutomationQueue {
                     }
                     continue;
                 }
+                if (Automations.isServiceModeDisabled()) return false;
                 boolean successful = false;
                 try {
                     successful = compensation.command.run();
@@ -1334,7 +1386,8 @@ public class AutomationQueue {
         // the worker down while an addToQueue is blocked on the lock, then the add re-spawns an orphan
         // worker that outlives the disable. (A queued item under isDisabled would be a no-op anyway: the
         // triggerActions isDisabled guard drops it.)
-        if (Automations.isDisabled() || !hasWorkerWorkLocked()
+        if (Automations.isDisabled() || Automations.isServiceModeDisabled()
+                || !hasWorkerWorkLocked()
                 || shutdownDrainGeneration != null || workerRestartSuspensions != 0) {
             return;
         }
@@ -1346,6 +1399,7 @@ public class AutomationQueue {
                         synchronized (lock) {
                             while (true) {
                                 if (shutdownDrainGeneration != null || Automations.isDisabled()
+                                        || Automations.isServiceModeDisabled()
                                         || workerRestartSuspensions != 0
                                         || automationWorker != Thread.currentThread()) {
                                     return;
@@ -1468,6 +1522,7 @@ public class AutomationQueue {
     private static void scheduleWorkerRetryLocked() {
         if ((workerRetryThread != null && workerRetryThread.isAlive())
                 || !hasWorkerWorkLocked() || Automations.isDisabled()
+                || Automations.isServiceModeDisabled()
                 || shutdownDrainGeneration != null || workerRestartSuspensions != 0) {
             return;
         }
@@ -1479,6 +1534,7 @@ public class AutomationQueue {
                         final long delayMs;
                         synchronized (lock) {
                             if (!hasWorkerWorkLocked() || Automations.isDisabled()
+                                    || Automations.isServiceModeDisabled()
                                     || shutdownDrainGeneration != null
                                     || workerRestartSuspensions != 0
                                     || automationWorker != null) {
@@ -1751,6 +1807,18 @@ public class AutomationQueue {
      * @return drain status and the number of automations completed within the budget
      */
     public static ShutdownDrainResult drainDueNowResult(long budgetMs) {
+        if (Automations.isServiceModeDisabled()) {
+            synchronized (lock) {
+                automationQueue.clear();
+                urgentReadyQueue.clear();
+                queueItems.clear();
+                if (shutdownDrainGeneration != null) {
+                    shutdownDrainGeneration.pending.clear();
+                }
+                lock.notifyAll();
+            }
+            return new ShutdownDrainResult(ShutdownDrainStatus.DISABLED, 0);
+        }
         if (Automations.isDisabled()) {
             synchronized (lock) {
                 retainLatestStateReconciliationsLocked();
@@ -2399,7 +2467,10 @@ public class AutomationQueue {
 
     /** Caller holds {@link #lock}. */
     private static java.util.List<String> enqueueReadyReplacementReplaysLocked() {
-        if (pendingReplacementReplays.isEmpty()) {
+        // Keep barriers pending for End rather than enqueuing compensations
+        // behind a closed Service Mode gate.
+        if (Automations.isServiceModeDisabled()
+                || pendingReplacementReplays.isEmpty()) {
             return java.util.Collections.emptyList();
         }
         java.util.ArrayList<String> enqueued = new java.util.ArrayList<>();

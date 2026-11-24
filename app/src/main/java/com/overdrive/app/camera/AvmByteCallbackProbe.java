@@ -64,6 +64,8 @@ public final class AvmByteCallbackProbe {
     private static final long INTER_COMBO_SETTLE_MS = 2_500L;
     /** How long finish() waits for the worker to drain + flush. */
     private static final long WORKER_FINISH_JOIN_MS = 5_000L;
+    /** Do not strand a worker if a hardware codec never reports end-of-stream. */
+    private static final long ENCODER_EOS_DRAIN_TIMEOUT_MS = 2_000L;
     /** How long finishAndJoin waits to enqueue the EOS sentinel before giving up. */
     private static final long EOS_OFFER_TIMEOUT_MS = 1_000L;
 
@@ -823,7 +825,15 @@ public final class AvmByteCallbackProbe {
 
         private void drainEncoder(boolean endOfStream) {
             MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+            long deadlineNs = endOfStream
+                ? System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(ENCODER_EOS_DRAIN_TIMEOUT_MS)
+                : 0L;
             while (true) {
+                if (endOfStream && System.nanoTime() >= deadlineNs) {
+                    logger.warn("Encoder EOS drain timed out cam=" + cameraId
+                        + " view=" + viewIndex + " — finalizing available output");
+                    return;
+                }
                 int outIdx = encoder.dequeueOutputBuffer(info, endOfStream ? 50_000 : 0);
                 if (outIdx == MediaCodec.INFO_TRY_AGAIN_LATER) {
                     if (!endOfStream) return;
@@ -862,11 +872,15 @@ public final class AvmByteCallbackProbe {
             if (encoder != null) {
                 try {
                     int idx = encoder.dequeueInputBuffer(50_000);
+                    boolean eosQueued = false;
                     if (idx >= 0) {
                         encoder.queueInputBuffer(idx, 0, 0, 0,
                             MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                        eosQueued = true;
                     }
-                    drainEncoder(true);
+                    // A full input queue cannot accept EOS; drain only what is ready.
+                    // Even after EOS is queued, the codec may never signal completion.
+                    drainEncoder(eosQueued);
                 } catch (Throwable t) {
                     logger.warn("Encoder EOS drain failed cam=" + cameraId + " view="
                         + viewIndex + ": " + t.getMessage());

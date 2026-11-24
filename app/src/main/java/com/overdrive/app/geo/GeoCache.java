@@ -109,6 +109,7 @@ public final class GeoCache {
     }
 
     public PlaceResult get(double lat, double lng, String locale) {
+        if (!GeoCoordinates.isUsable(lat, lng)) return null;
         ensureLoaded();
         String hash = Geohash.encode(lat, lng);
         PlaceResult pr = entries.get(key(hash, locale));
@@ -144,7 +145,7 @@ public final class GeoCache {
      * (e.g. SafeLocation invalidation, daemon shutdown).
      */
     public synchronized void put(double lat, double lng, PlaceResult pr) {
-        if (pr == null) return;
+        if (pr == null || !GeoCoordinates.isUsable(lat, lng)) return;
         // A cache write can be the first operation after daemon startup.
         // Preserve entries already on disk instead of replacing them with a
         // new map containing only this first put.
@@ -210,21 +211,12 @@ public final class GeoCache {
     }
 
     /**
-     * Drop every entry whose centroid is within {@code radiusM} of
-     * {@code (lat, lng)}. Used when a SafeLocation is added/edited/removed
-     * so the cache can't keep returning the public address for a place the
-     * user has just renamed.
-     *
-     * <p>Approximate by hash centroid — fine for the SafeLocation use case
-     * (radii are 50–500 m and the precision-7 cell is ≈ 153 m, so we just
-     * sweep the cell containing (lat, lng) and its 8 neighbours by string
-     * comparison of the first 6 chars). This is intentionally over-sweepy:
-     * worse to keep one stale row than to evict a few extra; refetch is
-     * cheap.
+     * Drops every cached cell that may overlap the SafeLocation circle, in any
+     * geohash parent. Over-eviction is intentional; a refetch is cheap.
      */
     public synchronized void invalidateNear(double lat, double lng, double radiusM) {
+        if (!GeoCoordinates.isUsable(lat, lng)) return;
         ensureLoaded();
-        String prefix = Geohash.encode(lat, lng).substring(0, 6); // ≈ 1.2 km box
         boolean changed = false;
         Iterator<Map.Entry<String, PlaceResult>> it = entries.entrySet().iterator();
         while (it.hasNext()) {
@@ -232,7 +224,7 @@ public final class GeoCache {
             String k = e.getKey();
             int pipe = k.indexOf('|');
             String hash = pipe > 0 ? k.substring(0, pipe) : k;
-            if (hash.startsWith(prefix)) {
+            if (Geohash.mayOverlapRadius(hash, lat, lng, radiusM)) {
                 it.remove();
                 changed = true;
             }

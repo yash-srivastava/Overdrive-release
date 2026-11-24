@@ -1563,6 +1563,84 @@ button.vc-pill:active { -webkit-transform: scale(.95); transform: scale(.95); }
 /* A guard switched off is worth noticing, so the Safety tab's dot is amber. */
 .vc-tab[data-panel="panelSafety"] .tab-dot { background: var(--warning); }
 
+/* Face ID / fingerprint lock, the last section of the Safety panel. Chrome 58: no flex gap. */
+#panelSafety .vc-stepup {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--vc-border);
+}
+.vc-stepup-head { padding-bottom: 8px; }
+.vc-stepup-head .vc-safety-name { font-weight: 700; }
+.vc-stepup-sub {
+    padding: 14px 0 4px;
+    font-size: var(--fs-label);
+    font-weight: 600;
+    color: var(--vc-text-secondary);
+}
+.vc-stepup-empty { padding: 4px 0; }
+.vc-stepup-block { padding-top: 12px; }
+.vc-stepup-block > .vc-modal-btn,
+.vc-stepup-pair > .vc-modal-btn { margin-top: 8px; }
+.vc-stepup-pair { padding-top: 8px; }
+.vc-stepup .vc-modal-btn:disabled { opacity: .45; cursor: not-allowed; }
+.vc-stepup-phone > .vc-modal-btn {
+    -webkit-flex-shrink: 0; flex-shrink: 0;
+    margin-left: 16px;
+}
+[dir="rtl"] .vc-stepup-phone > .vc-modal-btn { margin-left: 0; margin-right: 16px; }
+.vc-stepup .vc-stepup-remove { color: var(--danger); }
+.vc-stepup-code {
+    padding: 8px 0 8px .2em;
+    font-family: var(--family-mono, monospace);
+    font-size: 44px;
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: .2em;
+    text-align: center;
+    color: var(--vc-text-strong);
+}
+.vc-stepup-countdown { text-align: center; }
+.vc-stepup-expired { color: var(--danger); }
+.vc-stepup-done { color: var(--status-success); font-weight: 600; }
+.vc-stepup-form { margin: 0; }
+.vc-stepup-result { padding-top: 8px; color: var(--vc-text-primary); }
+.vc-stepup-result.is-error { color: var(--danger); }
+/* Focus lands here only so the outcome is read out; it isn't a control. */
+.vc-stepup-result:focus { outline: none; }
+.vc-stepup-label { display: block; margin-top: 10px; }
+.vc-stepup-input {
+    display: block;
+    width: 100%;
+    -webkit-box-sizing: border-box; box-sizing: border-box;
+    min-height: 44px;
+    margin-top: 4px;
+    padding: 0 12px;
+    border: 1px solid var(--vc-border-subtle);
+    border-radius: 10px;
+    background: var(--vc-tile-bg);
+    color: var(--vc-text-primary);
+    /* 16px keeps iOS from zooming in on focus. */
+    font-size: 16px;
+}
+.vc-stepup-input--code {
+    font-family: var(--family-mono, monospace);
+    font-size: 22px;
+    letter-spacing: .3em;
+}
+.vc-stepup-buttons { padding-top: 10px; }
+.vc-stepup-buttons > .vc-modal-btn { margin: 0 8px 8px 0; }
+[dir="rtl"] .vc-stepup-buttons > .vc-modal-btn { margin: 0 0 8px 8px; }
+.vc-stepup-warn {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-radius: var(--radius-md);
+    background: var(--warning-soft);
+    font-size: var(--fs-label);
+    font-weight: 500;
+    line-height: 1.45;
+    color: var(--vc-text-primary);
+}
+
 /* ===== MOBILE RESPONSIVE ===== */
 @media (max-width: 768px) {
     .vc-nav-btn { display: -webkit-flex; display: flex; }

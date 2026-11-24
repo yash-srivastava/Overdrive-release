@@ -1,5 +1,7 @@
 package com.overdrive.app.safekeep;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.byd.cloud.crypto.CredentialCipher;
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.safekeep.crypto.AgeCodec;
@@ -135,12 +137,12 @@ final class Transfer implements Runnable {
             if (kind == Naming.Kind.TRIP_ROW || kind == Naming.Kind.SETTINGS) ledger.saveMeta(item.id, item.metaJson);
         } else {
             src = item.localPath == null ? null : new File(item.localPath);
-            if (src == null || !src.isFile()) {
+            if (src == null || !RemovableStorageFs.isFile(src)) {
                 handleMissing();
                 return;
             }
-            long len = src.length();
-            long mtime = src.lastModified();
+            long len = RemovableStorageFs.length(src);
+            long mtime = RemovableStorageFs.lastModified(src);
             if (len == 0) {
                 handleEmpty();
                 return;
@@ -158,7 +160,7 @@ final class Transfer implements Runnable {
         }
         final File file = src;
         sourceFile = src;
-        final long plainLen = file.length();
+        final long plainLen = RemovableStorageFs.length(file);
 
         AgeCodec.Material material = null;
         if (item.encrypted) {
@@ -341,7 +343,7 @@ final class Transfer implements Runnable {
     }
 
     private static InputStream openPlain(File f, long offset) throws IOException {
-        FileInputStream in = new FileInputStream(f);
+        FileInputStream in = RemovableStorageFs.openInput(f);
         try {
             if (offset > 0) in.getChannel().position(offset);
         } catch (IOException e) {
@@ -418,7 +420,7 @@ final class Transfer implements Runnable {
         long now = System.currentTimeMillis();
         File f = item.localPath == null ? null : new File(item.localPath);
         File dir = f == null ? null : f.getParentFile();
-        String[] listing = dir == null ? null : dir.list();
+        String[] listing = dir == null ? null : RemovableStorageFs.list(dir);
         boolean enumerable = listing != null && listing.length > 0;
         if (!enumerable) {
             // Unmounted or unreadable volume reads as "unknown", never as "deleted" (CS-8).

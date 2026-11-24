@@ -137,6 +137,9 @@ public final class SafeKeepApi {
                 case "restore/trips":
                     return post && restoreTrips(e, body, out);
                 case "restore/settings":
+                    if (post && restoreAppliesSettings(body)
+                            && !com.overdrive.app.server.StepUpGate.requireBundle(
+                                    "config", "Restore a backup", out)) return true;
                     return post && restoreSettings(e, body, out);
                 case "keys/check":
                     return post && checkKey(body, out);
@@ -786,5 +789,13 @@ public final class SafeKeepApi {
         HttpResponse.sendBinaryNoStore(out, "text/csv; charset=utf-8",
                 TripExporter.csv(all).getBytes(StandardCharsets.UTF_8), h);
         return true;
+    }
+
+    private static boolean restoreAppliesSettings(String body) {
+        try {
+            return body != null && new org.json.JSONObject(body).optBoolean("apply", false);
+        } catch (Exception e) {
+            return true;
+        }
     }
 }

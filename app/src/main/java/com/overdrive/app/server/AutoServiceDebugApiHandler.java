@@ -223,18 +223,22 @@ public final class AutoServiceDebugApiHandler {
             return handleKnown(out, backend, mode);
         }
         if (pathOnly.equals("/api/debug/autoservice/remote-control")) {
+            if (!StepUpGate.carOnly(out)) return true;
             return handleRemoteControl(out, q, backend, mode);
         }
         if (pathOnly.equals("/api/debug/autoservice/probe-methods")) {
             return handleProbeMethods(out, modeFence, directAccess);
         }
         if (pathOnly.equals("/api/debug/autoservice/sdk-remote-control")) {
+            if (!StepUpGate.carOnly(out)) return true;
             return handleSdkRemoteControl(out, q, modeFence, directAccess);
         }
         if (pathOnly.equals("/api/debug/autoservice/sdk-getter")) {
+            if (!StepUpGate.carOnly(out)) return true;
             return handleSdkGetter(out, q, modeFence, directAccess);
         }
         if (pathOnly.equals("/api/debug/autoservice/probe-getters")) {
+            if (!StepUpGate.carOnly(out)) return true;
             return handleProbeGetters(out, q, modeFence, directAccess);
         }
         if (pathOnly.equals("/api/debug/autoservice/list-setters")) {

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="projection_app_density">App-DPI</string>
+    <string name="projection_app_keyboard">Toetsenbord</string>
+    <string name="projection_app_guidance">App-hulpmiddelen</string>
+    <string name="projection_tools_select_app">Selecteer eerst een geprojecteerde app.</string>
+    <string name="projection_tools_daemon_unavailable">De daemon voor het instrumentenpaneel is niet beschikbaar. Probeer het opnieuw zodra de verbinding is hersteld.</string>
+    <string name="projection_tools_save">Opslaan</string>
+    <string name="projection_tools_save_failed">De instelling kon niet worden opgeslagen. Probeer het opnieuw.</string>
+    <string name="projection_density_description">Schermdichtheid voor %1$s bij de volgende projectie. Gebruik 0 om de schermdichtheid te behouden of kies 96–480 DPI.\n\nDe schermdichtheid geldt tijdens de projectie voor elke kaart en overlay op dat scherm. Na het stoppen wordt de vorige aangepaste instelling hersteld zodra het scherm veilig beschikbaar is.</string>
+    <string name="projection_density_range">Voer 0 of een geheel getal van 96 tot 480 in.</string>
+    <string name="projection_density_saved">Opgeslagen. Stop de projectie en projecteer de app opnieuw om de schermdichtheid toe te passen.</string>
+    <string name="projection_density_not_applied">Deze schermdichtheid kon bij de laatste projectie niet worden toegepast: %1$s</string>
+    <string name="projection_guidance_di3">DI3-informatiebalk op het instrumentenpaneel en navigatieaanwijzingen op de voorruit (controle in de auto nodig)</string>
+    <string name="projection_guidance_di5">Experimentele DI5-informatiebalk op het instrumentenpaneel</string>
+    <string name="projection_guidance_notifications">Toegang tot meldingen van kaartapps</string>
+    <string name="projection_guidance_setup">Sla de instellingen op en start daarna de navigatie in RoadSense. Voor Google Maps en Waze is ook toegang tot meldingen van kaartapps nodig.\n\nLaat de DI3-HUD ingeschakeld en stop de ingebouwde navigatie. Als je auto een HUD-instelling voor navigatie-inhoud heeft, schakel deze dan in; niet elk model heeft die instelling. Deze schakelaar zet de HUD niet aan of uit. De weergave van de pijlen moet nog in de auto worden gecontroleerd.</string>
+    <string name="projection_guidance_setup_di5">Sla de instellingen op en start daarna de navigatie in RoadSense. Voor Google Maps en Waze is ook toegang tot meldingen van kaartapps nodig.\n\nDe DI5-informatiebalk op het instrumentenpaneel is experimenteel. Stop vóór het testen elke projectie of kaart die het volledige instrumentenpaneel vult. Navigatieaanwijzingen op de voorruit zijn niet beschikbaar op DI5.</string>
+    <string name="projection_keyboard_auto">Het DI5-toetsenbord automatisch openen bij tekstvelden op het instrumentenpaneel</string>
+    <string name="projection_guidance_saved">Opgeslagen. Navigatieaanwijzingen op de voorruit zijn alleen beschikbaar op DI3; de weergave van de DI5-informatiebalk moet nog in de auto worden gecontroleerd.</string>
+    <string name="projection_tools_title">Hulpmiddelen</string>
+    <string name="projection_tools_dialog_title">Projectiehulpmiddelen</string>
+    <string name="projection_tools_description">Stel navigatie, appgrootte en tekstinvoer voor het instrumentenpaneel in.</string>
+    <string name="projection_tools_navigation">Navigatieaanwijzingen</string>
+    <string name="projection_tools_navigation_description">Kies waar routeaanwijzingen uit RoadSense of meldingen van kaartapps worden weergegeven.</string>
+    <string name="projection_tools_density">Weergavegrootte van de app</string>
+    <string name="projection_tools_density_description">Pas de schermdichtheid van de geselecteerde app aan voor de volgende projectie.</string>
+    <string name="projection_tools_keyboard_description">Voer tekst in een geprojecteerde app in en beheer automatische prompts. Alleen DI5.</string>
+    <string name="projection_tools_density_value">Schermdichtheid (DPI)</string>
+    <string name="projection_tools_density_default">0 behoudt de schermdichtheid · 96–480 stelt een aangepaste grootte in</string>
+    <string name="projection_tools_di3_title">DI3-HUD en instrumentenpaneel</string>
+    <string name="projection_tools_di3_description">Stuur routeaanwijzingen naar de HUD op de voorruit en de informatiebalk op het instrumentenpaneel. Controleer de weergave van de pijlen in de auto.</string>
+    <string name="projection_tools_di3_only">Beschikbaar in DI3-modus.</string>
+    <string name="projection_tools_di5_title">DI5-informatiebalk op het instrumentenpaneel</string>
+    <string name="projection_tools_di5_description">Experimentele routeaanwijzingen op de informatiebalk van het instrumentenpaneel. Navigatieaanwijzingen op de voorruit zijn niet beschikbaar in DI5.</string>
+    <string name="projection_tools_di5_only">Beschikbaar in DI5-modus.</string>
+    <string name="projection_tools_setup">Aan de slag</string>
+</resources>

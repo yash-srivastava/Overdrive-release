@@ -60,7 +60,8 @@ class SingboxController(
     
     override fun isRunning(callback: (Boolean) -> Unit) {
         adbLauncher.executeShellCommand(
-            "ps -A | grep sing-box | grep -v grep",
+            // pidof reports the process itself, never its `sh -c` probe wrapper.
+            "pidof sing-box 2>/dev/null || true",
             object : AdbDaemonLauncher.LaunchCallback {
                 override fun onLog(message: String) {
                     callback(message.trim().isNotEmpty())

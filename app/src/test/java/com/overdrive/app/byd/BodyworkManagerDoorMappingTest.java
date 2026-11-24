@@ -11,7 +11,7 @@ import org.junit.Test;
 public class BodyworkManagerDoorMappingTest {
 
     @Test
-    public void frontManagerIdsFollowConfiguredDriveSide() {
+    public void frontManagerIdsCrossOnlyWhenLearnedCrossed() {
         assertEquals(
                 BydFeatureIds.BODYWORK_DOOR_RF,
                 BydDataCollector.doorFeatureForArea(1, true));

@@ -135,6 +135,7 @@ public final class CarPropertyDebugApiHandler {
     }
 
     private static boolean handleSet(OutputStream out, Map<String, String> q) throws Exception {
+        if (!StepUpGate.carOnly(out)) return true;
         String key = q.get("key");
         Integer value = parseIntParam(q, "value");
         if (key == null || key.isEmpty()) {

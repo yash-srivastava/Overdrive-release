@@ -52,8 +52,7 @@ public final class VehicleSetupPlan {
             case SHARK_MODEL_ID:
             case "sealion7":
                 return VehicleSetupDetector.MODE_DILINK5;
-            case "atto3-evo":
-                return VehicleSetupDetector.MODE_CAMERA2;
+            // No Atto 3 EVO entry: its BYD100F head unit refuses Camera2 clients (#741).
             default:
                 return null;
         }

@@ -216,6 +216,7 @@ open class MainActivity : AppCompatActivity() {
                 NavigationRailCatalog.PROXIMITY,
                 NavigationRailCatalog.SEAT_POSITIONS,
                 NavigationRailCatalog.PROJECTION,
+                NavigationRailCatalog.CUSTOM_LAYOUTS,
                 NavigationRailCatalog.CHARGING,
             )
         ),
@@ -397,6 +398,9 @@ open class MainActivity : AppCompatActivity() {
         // Initialize daemon startup manager
         daemonStartupManager = DaemonStartupManager(this, daemonsViewModel)
         daemonsViewModel.setStartupManager(daemonStartupManager)
+        // A second restore path independent of CameraDaemon.start(): if the
+        // daemon is unavailable past the deadline, try authenticated app-side ADB.
+        com.overdrive.app.server.ServiceModeAppRecovery.tryRestore(applicationContext)
         
         // Setup ADB auth callback to re-initialize when auth is granted
         if (!remoteDevSession) setupAdbAuthCallback()
@@ -632,6 +636,7 @@ open class MainActivity : AppCompatActivity() {
             "charging" -> R.id.chargingFragment
             "roadsense" -> R.id.roadSenseFragment
             "widgets" -> R.id.widgetsFragment
+            "custom_layouts" -> R.id.customLayoutsFragment
             "recordings" -> R.id.recordingsFragment
             "parking" -> R.id.parkingFragment
             "live" -> R.id.liveViewFragment
@@ -1845,6 +1850,7 @@ open class MainActivity : AppCompatActivity() {
                 R.id.notificationsFragment,
                 R.id.seatPositionsFragment,
                 R.id.projectionFragment,
+                R.id.customLayoutsFragment,
                 R.id.tripsFragment,
                 R.id.chargingFragment,
                 R.id.automationsFragment,
@@ -1921,6 +1927,9 @@ open class MainActivity : AppCompatActivity() {
             RailItem(NavigationRailCatalog.PROJECTION, R.id.railDestProjection,
                 R.id.projectionFragment,
                 R.drawable.ic_projection, R.string.rail_projection),
+            RailItem(NavigationRailCatalog.CUSTOM_LAYOUTS, R.id.railDestCustomLayouts,
+                R.id.customLayoutsFragment,
+                R.drawable.ic_custom_layouts, R.string.rail_custom_layouts),
             RailItem(NavigationRailCatalog.CHARGING, R.id.railDestCharging,
                 R.id.chargingFragment,
                 R.drawable.ic_charging, R.string.rail_charging),
@@ -1969,6 +1978,7 @@ open class MainActivity : AppCompatActivity() {
                     R.id.daemonsFragment,
                     R.id.settingsAdbFragment,
                     R.id.settingsSecurityFragment,
+                    R.id.serviceModeFragment,
                 )),
             RailItem(RAIL_KEY_ABOUT, R.id.railDestAbout, R.id.settingsAboutFragment,
                 R.drawable.ic_update, R.string.settings_section_about)
@@ -3048,6 +3058,7 @@ open class MainActivity : AppCompatActivity() {
                 .lowercase(java.util.Locale.US)
                 .let { if (it == "dilink4" || it == "dilink5") it else "default" }
                 .let { if (com.overdrive.app.camera.camera2.Camera2Platform.isMode(config.optString("cameraMode", ""))) "camera2" else it }
+                .let { if (com.overdrive.app.camera.AvmSurfaceTexturePlatform.isMode(config.optString("cameraMode", ""))) com.overdrive.app.camera.AvmSurfaceTexturePlatform.MODE else it }
 
             // OEM Dashcam state lives in the same camera.* UCM section but is
             // not (yet) merged into /api/surveillance/config. Read it directly
@@ -3534,6 +3545,7 @@ open class MainActivity : AppCompatActivity() {
             "dilink4" -> R.id.rbCameraModeDilink4
             "dilink5" -> R.id.rbCameraModeDilink5
             "camera2" -> R.id.rbCameraModeCamera2
+            com.overdrive.app.camera.AvmSurfaceTexturePlatform.MODE -> R.id.rbCameraModeSurfaceTexture
             else -> R.id.rbCameraModeDefault
         }
         cameraModeGroup.check(initialModeRadioId)
@@ -3541,6 +3553,7 @@ open class MainActivity : AppCompatActivity() {
             "dilink4" -> getString(R.string.camera_mode_current_dilink4)
             "dilink5" -> getString(R.string.camera_mode_current_dilink5)
             "camera2" -> getString(R.string.camera_mode_current_camera2)
+            com.overdrive.app.camera.AvmSurfaceTexturePlatform.MODE -> getString(R.string.camera_mode_current_surfacetexture)
             else -> getString(R.string.camera_mode_current_default)
         }
 
@@ -3696,6 +3709,7 @@ open class MainActivity : AppCompatActivity() {
                 R.id.rbCameraModeDilink4 -> "dilink4"
                 R.id.rbCameraModeDilink5 -> "dilink5"
                 R.id.rbCameraModeCamera2 -> "camera2"
+                R.id.rbCameraModeSurfaceTexture -> com.overdrive.app.camera.AvmSurfaceTexturePlatform.MODE
                 else -> "default"
             }
             // No-op when the user re-applies the already-saved mode — saves a
@@ -3718,6 +3732,7 @@ open class MainActivity : AppCompatActivity() {
                         "dilink4" -> getString(R.string.camera_mode_current_dilink4)
                         "dilink5" -> getString(R.string.camera_mode_current_dilink5)
                         "camera2" -> getString(R.string.camera_mode_current_camera2)
+                        com.overdrive.app.camera.AvmSurfaceTexturePlatform.MODE -> getString(R.string.camera_mode_current_surfacetexture)
                         else -> getString(R.string.camera_mode_current_default)
                     }
                     Toast.makeText(
@@ -4500,7 +4515,9 @@ open class MainActivity : AppCompatActivity() {
                             // early triggers event 1002 on the new daemon's open.
                             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                                 if (!activityAlive()) return@postDelayed
-                                daemonStartupManager.initializeOnAppLaunch()
+                                // Reinitialization is intentionally idempotent after first
+                                // ADB auth. Restart this camera explicitly after HAL release.
+                                daemonStartupManager.restartCameraAfterSettingsChange()
                                 android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                                     if (!activityAlive()) return@postDelayed
                                     daemonStartupManager.checkAllDaemonStatuses()

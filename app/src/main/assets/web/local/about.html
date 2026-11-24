@@ -10,7 +10,7 @@
     <title data-i18n="about.page_title">About — OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
     <script src="../shared/theme.js?v=12"></script>
-    <script src="../shared/app-shell.js?v=23"></script>
+    <script src="../shared/app-shell.js?v=26"></script>
     <link rel="stylesheet" href="../shared/styles.css?v=38">
     <link rel="stylesheet" href="../shared/revamp.css?v=2">
     <link rel="manifest" href="/manifest.json">
@@ -153,6 +153,7 @@
            carries the edge. Every medal also ships its name as text, so the
            colour is never the only channel. */
         :root {
+            --medal-hof: #B79CFF;
             --medal-diamond: #7FE0F5;
             --medal-platinum: #D8E2EA;
             --medal-gold: #F0C043;
@@ -165,6 +166,7 @@
             --medal-bronze-rim: #B4602C;
         }
         :root[data-theme="light"] {
+            --medal-hof: #6D28D9;
             --medal-diamond: #0E8FB0;
             --medal-platinum: #5C6A78;
             --medal-gold: #E0A81F;
@@ -180,8 +182,32 @@
         /* The ring reads as a metal edge on the avatar. Two stacked shadows:
            a surface gap, then the metal — so it never looks like a border
            drawn on the photo. */
+        .credit-avatar.medal-hof {
+            box-shadow: 0 0 0 2px var(--bg-elevated), 0 0 0 3.5px var(--medal-hof);
+        }
         .credit-avatar.medal-diamond {
             box-shadow: 0 0 0 2px var(--bg-elevated), 0 0 0 3.5px var(--medal-diamond);
+        }
+        /* Hall of Fame star pinned over the ring; the surface-coloured stroke cuts it out. */
+        .credit-avatar-wrap {
+            position: relative;
+            display: inline-flex;
+            flex-shrink: 0;
+        }
+        /* Mirrors app-shell.css's `.credit-row > .credit-avatar` spacing, which the wrap hides. */
+        [data-app-shell="1"] .credit-row > .credit-avatar-wrap { margin-right: 4px; }
+        .credit-hof-star {
+            position: absolute; right: -6px; bottom: -6px;
+            width: 18px; height: 18px;
+            overflow: visible;
+            pointer-events: none;
+        }
+        .credit-hof-star path {
+            fill: var(--medal-hof);
+            stroke: var(--bg-elevated);
+            stroke-width: 5px;
+            stroke-linejoin: round;
+            paint-order: stroke;
         }
         .credit-avatar.medal-platinum {
             box-shadow: 0 0 0 2px var(--bg-elevated), 0 0 0 3.5px var(--medal-platinum);
@@ -219,6 +245,13 @@
            two tiers carry SHAPE as their primary channel — a rhombus and a
            hollow ring — while the three metals stay filled circles. Shape is
            the one channel CVD can't touch. */
+        .medal-hof .credit-medal-pip {
+            background-color: var(--medal-hof);
+            border-radius: 0;
+            clip-path: polygon(50% 2.5%, 64.05% 35.65%, 100% 38.7%, 72.7% 62.35%, 80.9% 97.5%,
+                50% 78.85%, 19.1% 97.5%, 27.3% 62.35%, 0% 38.7%, 35.95% 35.65%);
+            transform: scale(1.25);
+        }
         .medal-diamond .credit-medal-pip {
             background-color: var(--medal-diamond);
             box-shadow: inset 0 0 0 1px var(--medal-diamond-rim);
@@ -359,7 +392,7 @@
 </head>
 <body class="r-settings">
     <div class="app-layout">
-        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=23) -->
+        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=24) -->
         <div id="app-shell-mount"></div>
         <main class="main-content">
             <div class="mobile-header">
@@ -519,10 +552,10 @@
     <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
     <div id="toastContainer" class="toast-container"></div>
 
-    <script src="../shared/auth.js"></script>
+    <script src="../shared/auth.js?v=18"></script>
     <script src="../shared/pwa-init.js?v=index1"></script>
-    <script src="../shared/core.js?v=27"></script>
-    <script src="../shared/update-flow.js?v=3"></script>
+    <script src="../shared/core.js?v=31"></script>
+    <script src="../shared/update-flow.js?v=6"></script>
     <script src="../shared/backup-flow.js?v=4"></script>
     <script src="../shared/send-logs.js?v=5"></script>
     <script>
@@ -614,17 +647,26 @@
         // the avatar `error` handler programmatically).
         // Medal order is also the display order — credits.json ships sorted
         // gold → silver → bronze, so the list needs no client-side sort.
-        const MEDALS = ['diamond', 'platinum', 'gold', 'silver', 'bronze'];
+        const MEDALS = ['halloffame', 'diamond', 'platinum', 'gold', 'silver', 'bronze'];
         const TIER_CLASS = {
+            halloffame: 'medal-hof',
             diamond: 'medal-diamond', platinum: 'medal-platinum',
             gold: 'medal-gold', silver: 'medal-silver', bronze: 'medal-bronze'
         };
+        const HOF_STAR_SVG = '<svg class="credit-hof-star" viewBox="0 0 24 24" aria-hidden="true">'
+            + '<path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>';
+
+        // "hallOfFame", "hall_of_fame" and "Hall of Fame" all map to "halloffame".
+        function tierKey(tier) {
+            return String(tier || '').toLowerCase().replace(/[^a-z]/g, '');
+        }
 
         function buildRow(entry) {
             const name = (entry.name || '').toString();
             if (!name) return null;
             const gh = (entry.github || '').toString().trim();
-            const tierClass = TIER_CLASS[String(entry.tier || '').toLowerCase()] || '';
+            const tier = tierKey(entry.tier);
+            const tierClass = TIER_CLASS[tier] || '';
             // Guard against a malformed count: must be a finite integer > 1.
             const rawCount = Number(entry.count);
             const count = Number.isFinite(rawCount) && rawCount > 1
@@ -657,7 +699,16 @@
                 avatar = makeFallbackAvatar(name);
             }
             if (tierClass) avatar.classList.add(tierClass);
-            row.appendChild(avatar);
+            if (tier === 'halloffame') {
+                // The img error handler's replaceWith() swaps inside the wrap, keeping the star.
+                const wrap = document.createElement('span');
+                wrap.className = 'credit-avatar-wrap';
+                wrap.appendChild(avatar);
+                wrap.insertAdjacentHTML('beforeend', HOF_STAR_SVG);
+                row.appendChild(wrap);
+            } else {
+                row.appendChild(avatar);
+            }
 
             // Name + optional tier label share a column so the label sits
             // directly under the name rather than pushing the row wider.
@@ -713,12 +764,13 @@
         }
 
         const TIER_FALLBACK = {
+            halloffame: 'Hall of Fame',
             diamond: 'Diamond', platinum: 'Platinum',
             gold: 'Gold', silver: 'Silver', bronze: 'Bronze'
         };
 
         function tierLabel(tier) {
-            const k = String(tier || '').toLowerCase();
+            const k = tierKey(tier);
             if (!TIER_FALLBACK[k]) return '';
             return tSafe('about.tier_' + k, TIER_FALLBACK[k]);
         }
@@ -759,7 +811,7 @@
             host.replaceChildren();
             const hasCount = entries.some(e => Number(e.count) > 1);
             const present = MEDALS.filter(m =>
-                entries.some(e => String(e.tier || '').toLowerCase() === m));
+                entries.some(e => tierKey(e.tier) === m));
             if (!present.length && !hasCount) return;
 
             for (const m of present) {

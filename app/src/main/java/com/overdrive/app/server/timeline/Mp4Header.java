@@ -1,7 +1,8 @@
 package com.overdrive.app.server.timeline;
 
+import com.overdrive.app.storage.removable.SeekableFileReader;
+
 import java.io.File;
-import java.io.RandomAccessFile;
 
 /** MP4 duration from the moov header. Returns -1 on anything inconsistent; never throws. */
 public final class Mp4Header {
@@ -15,7 +16,7 @@ public final class Mp4Header {
 
     public static long durationMs(File file) {
         if (file == null) return -1L;
-        try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
+        try (SeekableFileReader raf = new SeekableFileReader(file)) {
             long length = raf.length();
             if (length < 16) return -1L;
             byte[] header = new byte[16];
@@ -43,7 +44,7 @@ public final class Mp4Header {
                     if (++reads > MAX_READS) return -1L;
                     byte[] moov = new byte[(int) payload];
                     raf.seek(pos + headerLength);
-                    raf.readFully(moov);
+                    raf.readFully(moov, 0, moov.length);
                     return moovDurationMs(moov);
                 }
                 pos += size;

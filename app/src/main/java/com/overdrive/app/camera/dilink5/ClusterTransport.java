@@ -1,5 +1,7 @@
 package com.overdrive.app.camera.dilink5;
 
+import android.os.Build;
+
 import com.overdrive.app.config.UnifiedConfigManager;
 
 import org.json.JSONObject;
@@ -9,7 +11,7 @@ import java.util.Locale;
 /**
  * Selects which OEM cluster-projection transport this process drives.
  *
- * <p>Two transports exist:
+ * <p>Supported transports:
  * <ul>
  *   <li>{@link #LEGACY}: the DiLink 3/4 {@code IAutoContainer} opcode protocol
  *       (size profile → 16 → 35 open, 18 → 0 → profile close) owned by
@@ -17,6 +19,8 @@ import java.util.Locale;
  *   <li>{@link #DILINK5}: the DiLink 5 container protocol (opcodes 0/16/18 via
  *       {@code service call}, XDJA container bootstrap, OEM shared projection
  *       display discovery) owned by {@code DiLink5ClusterCast}.</li>
+ *   <li>{@link #AAOS_HDMI}: the Android 11 DX_BYD_AUTO's existing factory navigation
+ *       presentation, using a hosted window on the external HDMI display.</li>
  * </ul>
  *
  * <p>Historically the transport followed the camera/vehicle mode selector
@@ -26,8 +30,8 @@ import java.util.Locale;
  * mode and were driven with the DiLink 3/4 protocol, which their AutoContainer
  * never accepts — every cast failed and the legacy boot recovery wedged.
  *
- * <p>Resolution order (non-{@code dilink5} camera modes only; the {@code dilink5}
- * camera mode ALWAYS uses the DI5 transport so that platform stays byte-identical):
+ * <p>The Android 11 DX_BYD_AUTO uses its HDMI transport. For other products the
+ * {@code dilink5} camera mode selects the DI5 transport. Remaining cases use:
  * <ol>
  *   <li>{@code projection.clusterTransport} in the unified config:
  *       {@code "legacy"} or {@code "dilink5"} force that transport.</li>
@@ -45,6 +49,8 @@ public final class ClusterTransport {
     public static final String AUTO = "auto";
     public static final String LEGACY = "legacy";
     public static final String DILINK5 = "dilink5";
+    /** The AAOS navigation presentation on the external HDMI display. */
+    public static final String AAOS_HDMI = "aaos_hdmi";
 
     /** Why the current transport was chosen (for logs / status endpoint). */
     public static final String SOURCE_MODE = "mode";
@@ -92,13 +98,23 @@ public final class ClusterTransport {
         return current().isDiLink5();
     }
 
-    /** {@link #LEGACY} or {@link #DILINK5}. */
+    public static boolean isAaosHdmi() {
+        return AAOS_HDMI.equals(current().transport);
+    }
+
+    /** Both non-legacy families use the same app/map session owner and cleanup journal. */
+    public static boolean usesHostedProjectionService() {
+        return !LEGACY.equals(current().transport);
+    }
+
+    /** {@link #LEGACY}, {@link #DILINK5}, or {@link #AAOS_HDMI}. */
     public static String currentTransport() {
         return current().transport;
     }
 
     public static Resolution current() {
-        if (DiLink5Platform.isSelected()) {
+        if (DiLink5Platform.isSelected() && !isAaosHdmiFirmware(
+                Build.PRODUCT, Build.VERSION.SDK_INT)) {
             // The dilink5 camera mode is the explicit opt-in for the whole DI5
             // runtime; it can never be re-routed onto the legacy opcode path.
             return new Resolution(DILINK5, SOURCE_MODE, "camera mode dilink5");
@@ -133,6 +149,7 @@ public final class ClusterTransport {
         return resolve(
                 configured,
                 false,
+                Build.VERSION.SDK_INT,
                 readBuildField("PRODUCT"),
                 readBuildField("DEVICE"),
                 readBuildField("FINGERPRINT"));
@@ -147,9 +164,13 @@ public final class ClusterTransport {
     static Resolution resolve(
             String configured,
             boolean diLink5ModeSelected,
+            int sdk,
             String product,
             String device,
             String fingerprint) {
+        if (isAaosHdmiFirmware(product, sdk)) {
+            return new Resolution(AAOS_HDMI, SOURCE_FIRMWARE, "Android 11 DX_BYD_AUTO");
+        }
         if (diLink5ModeSelected) {
             return new Resolution(DILINK5, SOURCE_MODE, "camera mode dilink5");
         }
@@ -169,6 +190,11 @@ public final class ClusterTransport {
         }
         return new Resolution(LEGACY, SOURCE_DEFAULT,
                 "no DiLink 5 firmware identity");
+    }
+
+    /** The display and factory navigation presentation are checked separately for every cast. */
+    public static boolean isAaosHdmiFirmware(String product, int sdk) {
+        return sdk == Build.VERSION_CODES.R && "DX_BYD_AUTO".equalsIgnoreCase(product);
     }
 
     /** True when the build identity belongs to the DiLink 5 firmware family. */

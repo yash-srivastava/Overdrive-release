@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_security_byd_tools_title">比亚迪服务菜单</string>
+    <string name="settings_security_byd_tools_description">打开车机内置的配置工具。</string>
+    <string name="settings_security_byd_adb_title">ADB / 开发者选项</string>
+    <string name="settings_security_byd_adb_hint">打开开发者选项并在其中启用 USB 调试。</string>
+    <string name="settings_security_byd_adb_unavailable">此固件不支持 ADB 设置。</string>
+    <string name="settings_security_country_code_title">国家/地区代码</string>
+    <string name="settings_security_country_code_warning">这会打开比亚迪国家/地区设置。更改国家/地区代码可能会影响区域服务，或需要重启车机。请仅在停车时继续。</string>
+    <string name="settings_security_country_code_open">打开设置</string>
+    <string name="settings_security_country_code_unavailable">此车机不支持国家/地区代码设置。</string>
+</resources>

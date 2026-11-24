@@ -1667,6 +1667,18 @@ public final class ChargingDetector {
         drainFusedTransitions();
     }
 
+    /** Collector-proven pack inflow contradicts a gun-out latch; treated as a physical reconnect. */
+    public boolean releaseGunOutForProvenPackFlow() {
+        synchronized (lock) {
+            if (!disconnectedLatched || v2lActive) return false;
+            logger.info("Plug state: gun-out latch released by proven pack inflow");
+            markConnectedLocked(System.currentTimeMillis(), monotonicNowMs());
+            enqueueTransitionLocked(recompute("pack-flow-override"));
+        }
+        drainFusedTransitions();
+        return true;
+    }
+
     /** Current versioned poll confirmation; unlike a callback, a positive state may clear OFF. */
     public void confirmConnectionState(int gunState, boolean vtol) {
         synchronized (lock) {

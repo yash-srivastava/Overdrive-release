@@ -1,5 +1,7 @@
 package com.overdrive.app.server;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.daemon.CameraDaemon;
 
 import org.json.JSONArray;
@@ -358,7 +360,7 @@ public class TcpCommandServer {
             
             case "setBitrate":
                 // Set recording bitrate: LOW (2Mbps), MEDIUM (3Mbps), HIGH (6Mbps)
-                String bitrateValue = cmd.optString("value", "").toUpperCase();
+                String bitrateValue = cmd.optString("value", "").toUpperCase(java.util.Locale.ROOT);
                 if (bitrateValue.equals("LOW") || bitrateValue.equals("MEDIUM") || bitrateValue.equals("HIGH")) {
                     CameraDaemon.setRecordingBitrate(bitrateValue);
                     HttpServer.setRecordingBitrate(bitrateValue);
@@ -373,7 +375,7 @@ public class TcpCommandServer {
 
             case "setCodec":
                 // Set recording codec: H264 or H265
-                String codecValue = cmd.optString("value", "").toUpperCase();
+                String codecValue = cmd.optString("value", "").toUpperCase(java.util.Locale.ROOT);
                 if (codecValue.equals("H264") || codecValue.equals("H265")) {
                     CameraDaemon.setRecordingCodec(codecValue);
                     HttpServer.setRecordingCodec(codecValue);
@@ -388,7 +390,7 @@ public class TcpCommandServer {
 
             case "setRecordingsStorageType":
                 // Set recordings storage type: INTERNAL, SD_CARD, or USB
-                String recStorageTypeValue = cmd.optString("value", "").toUpperCase();
+                String recStorageTypeValue = cmd.optString("value", "").toUpperCase(java.util.Locale.ROOT);
                 com.overdrive.app.storage.StorageManager.StorageType recType = null;
                 switch (recStorageTypeValue) {
                     case "INTERNAL": recType = com.overdrive.app.storage.StorageManager.StorageType.INTERNAL; break;
@@ -443,7 +445,7 @@ public class TcpCommandServer {
                 String codec = "H264";
                 try {
                     java.io.File unifiedFile = new java.io.File(com.overdrive.app.util.ScratchRoot.path("overdrive_config.json"));
-                    if (unifiedFile.exists()) {
+                    if (RemovableStorageFs.exists(unifiedFile)) {
                         java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.FileReader(unifiedFile));
                         StringBuilder sb = new StringBuilder();
                         String line;

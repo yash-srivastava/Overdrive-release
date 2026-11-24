@@ -1,5 +1,7 @@
 package com.overdrive.app.server.timeline;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.util.ScratchRoot;
 
 import java.io.File;
@@ -192,7 +194,7 @@ public final class TimelineJournal {
         try {
             long now = System.currentTimeMillis();
             File alive = aliveFile();
-            long last = alive.isFile() ? alive.lastModified() : 0L;
+            long last = RemovableStorageFs.isFile(alive) ? RemovableStorageFs.lastModified(alive) : 0L;
             if (last > 0 && last < now) note(last, KIND_DAEMON, "stopped", "daemon_stop", null);
             note(now, KIND_DAEMON, "on", "daemon_start", null);
             // The previous daemon's last heartbeat is the reference a boot-time clock is checked against.
@@ -311,8 +313,8 @@ public final class TimelineJournal {
     private static void touchAlive(long now) {
         try {
             File alive = aliveFile();
-            if (!alive.exists()) new FileOutputStream(alive, true).close();
-            alive.setLastModified(now);
+            if (!RemovableStorageFs.exists(alive)) RemovableStorageFs.openOutput(alive, true).close();
+            RemovableStorageFs.setLastModified(alive, now);
         } catch (Throwable ignored) {
             // Advisory.
         }
@@ -324,8 +326,8 @@ public final class TimelineJournal {
         synchronized (SPOOL_LOCK) {
             try {
                 File file = spoolFile();
-                if (file.length() + bytes.length > SPOOL_MAX_BYTES) return false;
-                try (FileOutputStream out = new FileOutputStream(file, true)) {
+                if (RemovableStorageFs.length(file) + bytes.length > SPOOL_MAX_BYTES) return false;
+                try (FileOutputStream out = RemovableStorageFs.openOutput(file, true)) {
                     FileChannel channel = out.getChannel();
                     FileLock lock = lock(channel);
                     if (lock == null) return false;
@@ -361,7 +363,7 @@ public final class TimelineJournal {
     private static byte[] readAndClearSpool() {
         synchronized (SPOOL_LOCK) {
             File file = spoolFile();
-            if (!file.isFile() || file.length() == 0) return null;
+            if (!RemovableStorageFs.isFile(file) || RemovableStorageFs.length(file) == 0) return null;
             try (RandomAccessFile raf = new RandomAccessFile(file, "rw")) {
                 FileChannel channel = raf.getChannel();
                 FileLock lock = lock(channel);

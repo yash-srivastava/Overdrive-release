@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="cluster_text_title">Tekstinvoer voor het instrumentenpaneel</string>
+    <string name="cluster_text_service_label">OverDrive-tekstinvoer voor het instrumentenpaneel</string>
+    <string name="cluster_text_service_description">Hiermee kun je op de head-unit tekst invoeren in het actieve tekstveld van een app die via DiLink 5 op het instrumentenpaneel wordt geprojecteerd. Wachtwoordvelden zijn uitgesloten. Schakel automatische prompts alleen in als je wilt dat het toetsenbordvenster wordt geopend zodra een tekstveld op het instrumentenpaneel actief wordt.</string>
+    <string name="cluster_text_hint">Tekst voor de app op het instrumentenpaneel</string>
+    <string name="cluster_text_auto_prompt">Automatisch openen voor tekstvelden op het instrumentenpaneel</string>
+    <string name="cluster_text_send">Tekst verzenden</string>
+    <string name="cluster_text_send_submit">Tekst verzenden en op Enter drukken</string>
+    <string name="cluster_text_retry">Actief tekstveld controleren</string>
+    <string name="cluster_text_enable_service">Toegankelijkheidsinstellingen</string>
+    <string name="cluster_text_enable_hint">Schakel \'OverDrive-tekstinvoer voor het instrumentenpaneel\' in bij de toegankelijkheidsinstellingen. Selecteer daarna een tekstveld in de geprojecteerde app en controleer het opnieuw.</string>
+    <string name="cluster_text_checking">Het tekstveld op het instrumentenpaneel controleren…</string>
+    <string name="cluster_text_target">Tekstveld in %1$s</string>
+    <string name="cluster_text_requires_android11">Tekstinvoer voor het instrumentenpaneel vereist DiLink 5 met Android 11 of nieuwer en toegang tot de toegankelijkheidsvensters van het instrumentenpaneel. Deze firmware kan niet vaststellen bij welk scherm een tekstveld hoort.</string>
+    <string name="cluster_text_requires_cast">Start een DiLink 5-app-projectie voordat je tekst invoert.</string>
+    <string name="cluster_text_no_field">Er is geen toegankelijk, actief tekstveld op het instrumentenpaneel gevonden. Selecteer een tekstveld in de geprojecteerde app en controleer het opnieuw. Wachtwoordvelden zijn uitgesloten.</string>
+    <string name="cluster_text_field_changed">De projectiesessie of het actieve tekstveld is gewijzigd. Controleer het veld opnieuw voordat je verzendt.</string>
+    <string name="cluster_text_unavailable">Het tekstveld op het instrumentenpaneel kon niet worden gecontroleerd. Controleer de projectie en de toegankelijkheidsverbinding en probeer het opnieuw.</string>
+    <string name="cluster_text_rejected">De app heeft de tekst niet bevestigd. Controleer het tekstveld op het instrumentenpaneel voordat je het opnieuw probeert.</string>
+    <string name="cluster_text_submit_rejected">De tekst is verzonden, maar de app accepteerde de Enter-toets niet. Verstuur de invoer vanuit de app op het instrumentenpaneel.</string>
+</resources>

@@ -186,6 +186,7 @@ public final class CameraPreviewHelper {
      * through the active profile like camera2. Null when the legacy fixed order applies.
      */
     private static java.util.EnumMap<CameraRole, CameraSourceRef> diLink100TileOrder() {
+        if (AvmSurfaceTexturePlatform.isSelected()) return AvmSurfaceTexturePlatform.byd100fTileOrder();
         if (!DiLink100Platform.isAvmPathActive()) return null;
         try {
             CameraProfile profile = CameraConfigResolver.resolve().getProfile();

@@ -11,6 +11,7 @@ public abstract class AbsBYDAutoChargingListener {
     public void onCarDischargeStateChanged(int state) {}
     public void onChargeStopCapacityStateChanged(int state) {}
     public void onChargeStopSwitchStateChanged(int state) {}
+    public void onChargePreheatStateChanged(int state) {}
     public void onChargeTempCtlStateChanged(int state) {}
     public void onChargerFaultStateChanged(int state) {}
     public void onChargerStateChanged(int state) {}

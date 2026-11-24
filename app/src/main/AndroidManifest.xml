@@ -1,5 +1,21 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.APP_MAPS" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="geo" />
+        </intent>
+        <!-- Some apps identify as maps only through their launcher's application category. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <permission
         android:name="com.overdrive.app.permission.NATIVE_VEHICLE_BINDER_HANDOFF"
         android:protectionLevel="signature" />
@@ -77,6 +93,7 @@
     <uses-permission android:name="android.permission.BYDAUTO_INSTRUMENT_SET" />
     <!-- DI5 OEM cluster communication service (turn-by-turn on the instrument cluster) -->
     <uses-permission android:name="android.car.permission.CAR_CLUSTER_COMMUNICATION" />
+    <uses-permission android:name="android.car.permission.CAR_POWERTRAIN" />
     <!-- Engine (speed, power, coolant, oil) -->
     <uses-permission android:name="android.permission.BYDAUTO_ENGINE_COMMON" />
     <uses-permission android:name="android.permission.BYDAUTO_ENGINE_GET" />
@@ -268,6 +285,8 @@
         android:localeConfig="@xml/locales_config"
         android:usesCleartextTraffic="true">
 
+        <uses-library android:name="android.car" android:required="false" />
+
         <!-- Persist AppCompat per-app language on API 28–32. API 33+ uses
              localeConfig + the platform LocaleManager. -->
         <service
@@ -399,6 +418,16 @@
             android:exported="true"
             android:permission="android.permission.DUMP"
             android:taskAffinity="com.overdrive.app.cluster"
+            android:launchMode="singleInstance"
+            android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|uiMode|density|fontScale"
+            android:theme="@style/Theme.Overdrive.M3" />
+
+        <activity
+            android:name="com.overdrive.app.customlayouts.cluster.CustomLayoutsClusterActivity"
+            android:exported="true"
+            android:permission="android.permission.DUMP"
+            android:taskAffinity="com.overdrive.app.cluster.customlayouts"
             android:launchMode="singleInstance"
             android:excludeFromRecents="true"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|uiMode|density|fontScale"
@@ -821,6 +850,11 @@
             android:name="com.overdrive.app.navmap.cluster.ClusterCommReceiver"
             android:enabled="true"
             android:exported="true"
+            android:permission="android.permission.DUMP" />
+
+        <!-- Bounded, read-only access to an existing map tile for the shell daemon's local road match. -->
+        <provider android:name=".navmap.SceneTileProvider"
+            android:authorities="${applicationId}.scene-tiles" android:exported="true"
             android:permission="android.permission.DUMP" />
 
         <!-- FileProvider for sharing video files -->

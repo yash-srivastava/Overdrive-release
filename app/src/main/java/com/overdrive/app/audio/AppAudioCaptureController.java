@@ -37,7 +37,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <h3>Pipeline</h3>
  * <pre>
- *   AudioRecord (48kHz, or Di+ compatible 8kHz while listening)
+ *   AudioRecord (48kHz, or navigation-routing compatible 8kHz while listening)
  *      ├→ MediaCodec AAC-LC encoder (recording demand only)
  *      └→ PCM listener frames (listener demand only)
  *      → DataOutputStream length-prefixed frames to AacIngestServer
@@ -73,7 +73,7 @@ public class AppAudioCaptureController {
     private static AppAudioCaptureController owner;
     private static boolean recordingDemand;
     private static boolean listenerDemand;
-    private static boolean listenerDiPlusCompatibility;
+    private static boolean listenerNavRoutingCompatibility;
     private static com.overdrive.app.voice.audio.PcmSink wakeSink;
     // Microphone input wanted for the shared AudioRecord (voice assistant setting, experimental).
     // Changing it restarts a wake-only capture at once; while recording or the remote listener
@@ -340,7 +340,7 @@ public class AppAudioCaptureController {
             boolean wanted, boolean diPlusCompatibility) {
         synchronized (OWNER_LOCK) {
             listenerDemand = wanted;
-            listenerDiPlusCompatibility =
+            listenerNavRoutingCompatibility =
                     wanted && diPlusCompatibility;
             return reconcileOwnerLocked();
         }
@@ -433,7 +433,7 @@ public class AppAudioCaptureController {
         boolean needsIngest = recordingDemand || listenerDemand;
         // A recording keeps its 48 kHz capture; the compatibility listener rate applies only without one.
         int desiredCaptureRate =
-                listenerDemand && listenerDiPlusCompatibility && !recordingDemand
+                listenerDemand && listenerNavRoutingCompatibility && !recordingDemand
                         ? LISTENER_CAPTURE_RATE
                         : (needsIngest ? SAMPLE_RATE : WAKE_CAPTURE_RATE);
         // The requested input, or plain MIC once the head unit refused it (failedAudioSource):

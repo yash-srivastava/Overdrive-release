@@ -9,12 +9,15 @@ import android.os.Build
 import android.view.Display
 import com.overdrive.app.camera.dilink5.ClusterTransport
 import com.overdrive.app.config.UnifiedConfigManager
+import com.overdrive.app.customlayouts.model.Panel
 import com.overdrive.app.daemon.CameraDaemon
 import com.overdrive.app.logging.DaemonLogger
 import com.overdrive.app.launcher.dilink5.cluster.DiLink5HostedProjectionBridge
 import com.overdrive.app.launcher.dilink5.cluster.DiLink5ProjectionConfig
 import com.overdrive.app.launcher.dilink5.cluster.DiLink5ProjectionOwnership
 import com.overdrive.app.launcher.dilink5.cluster.HostedProjectionGeometry
+import com.overdrive.app.launcher.dilink5.cluster.AaosNavigationPresentation
+import com.overdrive.app.ui.view.AaosMapAreaCheck
 import com.overdrive.app.surveillance.ClusterMirrorController
 import com.overdrive.app.surveillance.ClusterProjectionController
 import com.overdrive.app.surveillance.ClusterViewMirrorService
@@ -38,12 +41,13 @@ private const val DI5_MAP_PACKAGE = "com.overdrive.app"
 private const val DI5_MAP_COMPONENT =
     "com.overdrive.app/.navmap.RoadSenseClusterMapActivity"
 private const val DI5_DEBUG_DISPLAY = "fission_bg_XDJAScreenProjection"
+// Custom Layouts finishes itself on its next heartbeat reply (1 s cadence).
+private const val CUSTOM_FINISH_GRACE_MS = 1_500L
 
 /**
- * DI5 app projection through the OEM's own shared cluster display. On trinket,
- * the plain fission display is only a capturable debug target underneath the
- * physical panel's shared container, so success requires launching directly on
- * shared_fission_bg_XDJAScreenProjection_0/_1.
+ * DI5 app projection through the OEM's own cluster display. On the UK Seal the
+ * unnumbered fission display feeds a background behind the native instruments.
+ * A task on that display can render successfully while the instrument panel shows only arrows.
  */
 object DiLink5ClusterCast {
     private val logger = DaemonLogger.getInstance("DiLink5ClusterCast")
@@ -124,6 +128,7 @@ object DiLink5ClusterCast {
     @Volatile private var appMovedGeneration = 0L
     @Volatile private var cleanupUncertain = false
     @Volatile private var activeCleanup: CleanupTicket? = null
+    private var lastCustomCleanup: CleanupTicket? = null // stateLock, retained for a racing owner release
     @Volatile private var legacyProjectionRecoveryBlocked = false
     @Volatile private var legacyRecoveryResumeScheduled = false
     @Volatile private var recoveryRetryTicket = 0L
@@ -136,7 +141,18 @@ object DiLink5ClusterCast {
      *  last reclaimed its foreground from our session. Guarded by [stateLock]. */
     private val reclaimedDisplays = HashMap<String, Long>()
 
-    private enum class SessionKind { APP, MAP }
+    /** MAP and CUSTOM are OverDrive activities. APP may be re-homed to the head unit on stop. */
+    private enum class SessionKind { APP, MAP, CUSTOM }
+
+    /** Live Custom Layouts session; [displayId] is -1 until the start picked a display. */
+    data class CustomLayoutsTarget(
+        val generation: Long,
+        val displayId: Int,
+        val width: Int,
+        val height: Int,
+        val band: Boolean,
+        val active: Boolean,
+    )
     private enum class SessionPhase {
         IDLE, PREPARING, ACTIVE, STOPPING, RECOVERING, FAILED
     }
@@ -144,7 +160,10 @@ object DiLink5ClusterCast {
     private data class LaunchTarget(
         val pkg: String,
         val component: String,
-        val kind: SessionKind
+        val kind: SessionKind,
+        val customOwner: Long = 0L,
+        val previousCustomGeneration: Long = 0L,
+        val automatic: Boolean = false,
     )
 
     private data class StartTicket(
@@ -155,7 +174,8 @@ object DiLink5ClusterCast {
 
     private data class CleanupTicket(
         val completion: CountDownLatch = CountDownLatch(1),
-        val succeeded: AtomicBoolean = AtomicBoolean(false)
+        val succeeded: AtomicBoolean = AtomicBoolean(false),
+        val customGeneration: Long = 0L,
     )
 
     private data class CleanupResult(
@@ -217,7 +237,18 @@ object DiLink5ClusterCast {
         val projectionTransport: String = "direct",
         val hostedResourceGeneration: Long = 0L,
         val hostedGeometry: HostedProjectionGeometry? = null,
-    )
+        val factoryMiniMap: Boolean = false,
+        val aaosMapArea: Boolean = false,
+    ) {
+        val requestedCustomMiniMapBounds = if (factoryMiniMap && kind == SessionKind.CUSTOM) {
+            persistedBounds(pkg, displayWidth, displayHeight) ?: factoryMiniMapDefaultBounds(displayWidth, displayHeight)
+        } else null
+        @Volatile var miniMapBounds: DiLink5ProjectionBounds? = null
+
+        fun customLayoutsPanel() = diLink5CustomLayoutsPanel(
+            targetDisplayName, displayWidth, displayHeight, hostedGeometry, miniMapBounds ?: requestedCustomMiniMapBounds,
+        )
+    }
 
     private data class HostedSurfaceLoss(
         val resourceGeneration: Long,
@@ -237,6 +268,7 @@ object DiLink5ClusterCast {
         val hostedResourceGeneration: Long = 0L,
         val deferCompositorEnable: Boolean = false,
         val hostedGeometry: HostedProjectionGeometry? = null,
+        val aaosMapArea: Boolean = false,
     )
 
     private data class RecoveryMarker(
@@ -275,9 +307,10 @@ object DiLink5ClusterCast {
     )
 
     @JvmStatic
-    fun start(pkg: String?): Boolean {
+    @JvmOverloads
+    fun start(pkg: String?, explicitSelection: Boolean = true): Boolean {
         val target = resolveAppTarget(pkg) ?: return false
-        return startTarget(target) != null
+        return startTarget(target.copy(automatic = !explicitSelection), preempt = explicitSelection) != null
     }
 
     @JvmStatic
@@ -346,11 +379,15 @@ object DiLink5ClusterCast {
     }
 
     private fun resolveAppTarget(pkg: String?): LaunchTarget? {
-        if (!ClusterTransport.isDiLink5()) return null
+        if (!ClusterTransport.usesHostedProjectionService()) return null
         val normalized = pkg?.trim().orEmpty()
         if (!AppLauncher.isValidPackageName(normalized)) {
             logger.warn("DI5 cluster cast: missing or invalid package")
             lastFailureReason = "missing or invalid package"
+            return null
+        }
+        if (isFactoryMapProvider(normalized)) {
+            lastFailureReason = "Factory navigation must stay on the head unit"
             return null
         }
         if (normalized == DI5_MAP_PACKAGE) {
@@ -381,20 +418,49 @@ object DiLink5ClusterCast {
     }
 
     @JvmStatic
-    fun startMap(): Boolean {
-        if (!ClusterTransport.isDiLink5()) return false
+    fun startMap(): Boolean = startMap(explicitSelection = true)
+
+    @JvmStatic
+    fun startMap(explicitSelection: Boolean): Boolean {
+        if (!ClusterTransport.usesHostedProjectionService()) return false
         return startTarget(
-            LaunchTarget(DI5_MAP_PACKAGE, DI5_MAP_COMPONENT, SessionKind.MAP)
+            LaunchTarget(DI5_MAP_PACKAGE, DI5_MAP_COMPONENT, SessionKind.MAP, automatic = !explicitSelection),
+            preempt = explicitSelection,
         ) != null
     }
 
-    private fun startTarget(target: LaunchTarget): StartTicket? {
+    /** Custom Layouts session; returns its generation (the activity's launch token), 0 if refused. */
+    @JvmStatic
+    fun startCustomLayouts(owner: Long): Long {
+        if (!ClusterTransport.isDiLink5() || owner <= 0L) return 0L
+        return startTarget(
+            LaunchTarget(
+                DI5_MAP_PACKAGE,
+                com.overdrive.app.customlayouts.daemon.projection.ClusterActivityLauncher.COMPONENT,
+                SessionKind.CUSTOM,
+                customOwner = owner,
+            )
+        )?.generation ?: 0L
+    }
+
+    /** Automatic starts and guardian migrations cannot turn off the user's Custom Layouts selection. */
+    private fun startTarget(target: LaunchTarget, preempt: Boolean = true): StartTicket? {
         val admission = com.overdrive.app.launcher.layout.LayoutModeGate.enterStandard()
             ?: run {
                 lastFailureReason = "Stop Layouts before starting a single app or full cluster map"
                 return null
             }
         return try {
+            if (preempt && target.kind != SessionKind.CUSTOM) {
+                // A user-started map or app takes the cluster from Custom Layouts (and turns it off).
+                try {
+                    com.overdrive.app.customlayouts.daemon.CustomLayoutsController.onOtherOwnerStarted(
+                        if (target.kind == SessionKind.MAP) "map" else "castapp"
+                    )
+                } catch (t: Throwable) {
+                    logger.warn("DI5 cluster cast: Custom Layouts hand-off failed: ${t.message}")
+                }
+            }
             startTargetAdmitted(target)
         } finally {
             admission.close()
@@ -402,6 +468,7 @@ object DiLink5ClusterCast {
     }
 
     private fun startTargetAdmitted(target: LaunchTarget): StartTicket? {
+        if (!selectionStillAllows(target)) return null
         if (!prepareHostedOwnershipForAdmission()) return null
         synchronized(stateLock) {
             if (activeCleanup != null) {
@@ -469,11 +536,25 @@ object DiLink5ClusterCast {
                 return null
             }
         }
-        val previous = activePackage
-        if (previous == target.pkg && activeKind == target.kind && !stopping) {
+        val (previous, previousGeneration) = synchronized(stateLock) {
+            if (target.automatic && activeKind == SessionKind.CUSTOM) return null
+            activePackage to generation
+        }
+        // A migration only reclaims an empty transport. A user may have chosen a new projection
+        // during the asynchronous stop of the old surface.
+        if (target.previousCustomGeneration > 0 && previous != null) return null
+        if (target.kind != SessionKind.CUSTOM && previous == target.pkg && activeKind == target.kind && !stopping) {
             pendingStart?.takeIf { it.generation == generation }?.let { return it }
             if (phase == SessionPhase.ACTIVE) {
                 val live = session
+                if (live?.aaosMapArea == true) {
+                    val context = CameraDaemon.getAppContext()
+                    if (context == null || !aaosMapAreaReady(context, live)) {
+                        DiLink5HostedProjectionBridge.withdrawMapArea(live.hostedResourceGeneration)
+                        lastFailureReason = "The active cluster map area is no longer confirmed"
+                        return null
+                    }
+                }
                 if (live != null &&
                     live.generation == generation &&
                     ClusterCast.resumedPackageOnDisplay(live.targetDisplayId) == target.pkg
@@ -489,8 +570,9 @@ object DiLink5ClusterCast {
                 )
             }
         }
+        if (!selectionStillAllows(target)) return null
         if (previous != null &&
-            !stopInternal(0L, rehome = true, foreground = false, expectedKind = null)
+            !stopInternal(previousGeneration, rehome = true, foreground = false, expectedKind = null)
         ) {
             return null
         }
@@ -498,6 +580,7 @@ object DiLink5ClusterCast {
         val nextGeneration: Long
         val ticket: StartTicket
         synchronized(stateLock) {
+            if (target.automatic && !selectionStillAllows(target)) return null
             if (stopping ||
                 activePackage != null ||
                 activeCleanup != null ||
@@ -508,7 +591,17 @@ object DiLink5ClusterCast {
                     "DI5 projection state changed while start was being admitted"
                 return null
             }
-            nextGeneration = nextGenerationLocked()
+            nextGeneration = if (target.kind == SessionKind.CUSTOM) {
+                maxOf(nextGenerationLocked(), android.os.SystemClock.elapsedRealtime())
+            } else nextGenerationLocked()
+            // Reserve even a cancelled ticket's number. An old finish broadcast must never
+            // match the next logical session, including after a daemon restart on this boot.
+            generation = nextGeneration
+            if (target.kind == SessionKind.CUSTOM &&
+                !com.overdrive.app.customlayouts.daemon.CustomLayoutsController.claimDi5Generation(
+                    target.customOwner, target.previousCustomGeneration, nextGeneration,
+                )
+            ) return null
             if (!writeMarker(
                     pending = true,
                     powered = false,
@@ -520,10 +613,10 @@ object DiLink5ClusterCast {
             ) {
                 logger.warn("DI5 cluster cast: recovery marker could not be persisted")
                 lastFailureReason = "recovery marker could not be persisted"
+                if (target.kind == SessionKind.CUSTOM) notifyCustomLayoutsEnded(nextGeneration, lastFailureReason)
                 return null
             }
             ticket = StartTicket(nextGeneration)
-            generation = nextGeneration
             activePackage = target.pkg
             activeKind = target.kind
             phase = SessionPhase.PREPARING
@@ -540,6 +633,16 @@ object DiLink5ClusterCast {
             startSession(nextGeneration, target)
         }
         return ticket
+    }
+
+    private fun selectionStillAllows(target: LaunchTarget): Boolean = when {
+        target.automatic ->
+            !com.overdrive.app.customlayouts.daemon.CustomLayoutsController.claimsAutomaticProjection()
+        target.kind == SessionKind.CUSTOM ->
+            com.overdrive.app.customlayouts.daemon.CustomLayoutsController.wantsDi5Generation(
+                target.customOwner, target.previousCustomGeneration,
+            )
+        else -> true
     }
 
     @JvmStatic
@@ -579,6 +682,57 @@ object DiLink5ClusterCast {
         stopInternal(
             0L, rehome = false, foreground = false, expectedKind = SessionKind.MAP
         )
+
+    /** A late release may join its own guardian's cleanup, but cannot stop a successor. */
+    @JvmStatic
+    fun stopCustomLayouts(expectedGeneration: Long): Boolean {
+        if (expectedGeneration <= 0L) return true
+        return stopInternal(
+            expectedGeneration, rehome = false, foreground = false,
+            expectedKind = SessionKind.CUSTOM
+        )
+    }
+
+    /** Lock-free snapshot of a preparing or active Custom Layouts session, or null. */
+    @JvmStatic
+    fun customLayoutsTarget(): CustomLayoutsTarget? {
+        val gen = generation
+        val currentPhase = phase
+        if (activePackage == null || activeKind != SessionKind.CUSTOM || stopping ||
+            (currentPhase != SessionPhase.PREPARING && currentPhase != SessionPhase.ACTIVE)
+        ) return null
+        val live = session?.takeIf { it.generation == gen && it.kind == SessionKind.CUSTOM }
+        val panel = live?.customLayoutsPanel()
+        return CustomLayoutsTarget(
+            gen,
+            live?.targetDisplayId ?: -1,
+            panel?.w ?: 0,
+            panel?.h ?: 0,
+            panel?.band == true,
+            live != null && currentPhase == SessionPhase.ACTIVE && generation == gen
+        )
+    }
+
+    /** Watchdog relaunch inside the live Custom Layouts session; false when none is live. */
+    @JvmStatic
+    fun relaunchCustomLayouts(expectedGeneration: Long): Boolean {
+        val live = session?.takeIf { it.kind == SessionKind.CUSTOM && it.generation == expectedGeneration }
+            ?: return false
+        val target = LaunchTarget(live.pkg, live.component, live.kind)
+        return withLiveTaskMutation(live, false) {
+            launchTarget(target, live.targetDisplayId, live.generation)
+        }
+    }
+
+    private fun customLayoutsLaunchExtras(displayId: Int, launchGeneration: Long): List<String>? {
+        val live = session?.takeIf {
+            it.kind == SessionKind.CUSTOM && it.generation == launchGeneration && it.targetDisplayId == displayId
+        } ?: return null
+        val panel = live.customLayoutsPanel()
+        return com.overdrive.app.customlayouts.daemon.projection.ClusterActivityLauncher.extras(
+            panel.mode, panel.w, panel.h, launchGeneration,
+        )
+    }
 
     @JvmStatic
     fun isActive(): Boolean =
@@ -620,6 +774,11 @@ object DiLink5ClusterCast {
             }
             ?.physicalDisplayId
             ?: -1
+
+    @JvmStatic
+    fun isFactoryMiniMapActive(): Boolean = session?.let {
+        it.factoryMiniMap && it.generation == generation && phase == SessionPhase.ACTIVE && !stopping
+    } == true
 
     @JvmStatic
     fun currentContentDisplayId(): Int =
@@ -762,6 +921,14 @@ object DiLink5ClusterCast {
             .put("castPackage", appPackage)
             .put("castSessionGeneration", if (appPackage.isNotEmpty()) generation else 0L)
             .put("projectionPathActive", live?.projectionTransport ?: "none")
+            .put("panelW", live?.displayWidth ?: 0)
+            .put("panelH", live?.displayHeight ?: 0)
+            .put("factoryMiniMap", live?.factoryMiniMap == true)
+            .put("miniMapProjectionBounds", live?.takeIf { phase == SessionPhase.ACTIVE }
+                ?.miniMapBounds?.let {
+                    JSONObject().put("l", it.left).put("t", it.top)
+                        .put("r", it.right).put("b", it.bottom)
+                } ?: JSONObject.NULL)
             .put("hostedProjectionBounds", live?.takeIf {
                 it.projectionTransport == "hosted" && phase == SessionPhase.ACTIVE
             }?.hostedGeometry?.overlay?.let {
@@ -820,7 +987,7 @@ object DiLink5ClusterCast {
         left: Int, top: Int, right: Int, bottom: Int, commit: Boolean,
         expectedPackage: String? = null, expectedGeneration: Long = 0L,
     ): Boolean {
-        if (!ClusterTransport.isDiLink5()) return false
+        if (!ClusterTransport.usesHostedProjectionService()) return false
         val live = synchronized(taskMutationLock.lock) {
             synchronized(stateLock) {
                 session?.takeIf {
@@ -834,17 +1001,25 @@ object DiLink5ClusterCast {
         val bounds = clampDiLink5ProjectionBounds(
             left, top, right, bottom, live.displayWidth, live.displayHeight
         ) ?: return false
+        if (live.aaosMapArea) {
+            val context = CameraDaemon.getAppContext() ?: return false
+            if (!aaosMapAreaReady(context, live)) {
+                DiLink5HostedProjectionBridge.withdrawMapArea(live.hostedResourceGeneration)
+                return false
+            }
+            return commit && isLiveSession(live) &&
+                live.hostedGeometry?.overlay == HostedProjectionGeometry.Bounds(left, top, right, bottom)
+        }
         if (live.projectionTransport == "hosted") {
             return resizeHosted(live, bounds, commit)
         }
         val applied = synchronized(taskMutationLock.lock) {
             if (!isLiveSession(live)) return@synchronized false
-            val resized = ClusterFreeformWindow.applyBounds(
-                live.pkg,
-                Rect(bounds.left, bounds.top, bounds.right, bounds.bottom),
-                commit,
-                live.targetDisplayId
-            )
+            // Full clears the package override. Use the same factory default now and after restart.
+            val placement = if (live.factoryMiniMap && bounds.left == 0 && bounds.top == 0 &&
+                bounds.right == live.displayWidth && bounds.bottom == live.displayHeight
+            ) factoryMiniMapDefaultBounds(live.displayWidth, live.displayHeight) else bounds
+            val resized = applyDirectBounds(live, placement, commit)
             if (resized && commit && isLiveSession(live)) {
                 ClusterCast.saveWindowFractions(
                     live.pkg,
@@ -1334,7 +1509,7 @@ object DiLink5ClusterCast {
         reservedRetryTicket: Long?
     ) {
         recoverPersistedHostedOwnership()
-        if (!ClusterTransport.isDiLink5() && !allowInactiveCleanup) return
+        if (!ClusterTransport.usesHostedProjectionService() && !allowInactiveCleanup) return
         // `allowInactiveCleanup` is also the explicit cross-mode recovery
         // authority while DI5 itself is selected. A stale legacy marker was
         // already deferred by ClusterProjectionController; after DI5 ownership
@@ -1888,7 +2063,7 @@ object DiLink5ClusterCast {
 
     @JvmStatic
     fun shutdownIfActive(): Boolean {
-        if (!ClusterTransport.isDiLink5()) return true
+        if (!ClusterTransport.usesHostedProjectionService()) return true
         synchronized(stateLock) { activeCleanup }?.let {
             if (!awaitCleanupCompletion(it, "active projection cleanup")) {
                 return false
@@ -1954,20 +2129,17 @@ object DiLink5ClusterCast {
         val teardownMayStillComplete =
             markerTeardownMayStillComplete ||
                     teardownIndeterminateGeneration > 0L
-        val needsPowerDown =
-            mayOwnDiLink5ProjectionCompositor(
-                marker.pending,
-                marker.powered,
-                marker.enableIndeterminate,
-                marker.teardownIndeterminate
-            ) ||
-                    poweredGeneration > 0L ||
-                    enableIndeterminateGeneration > 0L ||
-                    teardownIndeterminateGeneration > 0L ||
-                    cleanupUncertain
+        val needsPowerDown = mayOwnDiLink5ProjectionCompositor(
+            marker.pending,
+            marker.powered || poweredGeneration > 0L,
+            marker.enableIndeterminate || enableIndeterminateGeneration > 0L,
+            marker.teardownIndeterminate || teardownIndeterminateGeneration > 0L,
+        )
         val taskMayBeMoved =
             marker.appMoved || appMovedGeneration > 0L || session != null
-        if (!needsPowerDown && !taskMayBeMoved) {
+        // A failed task/host cleanup still takes the serialized recovery path and clears
+        // FAILED on success. It cannot establish ownership of the driver's factory compositor.
+        if (!needsPowerDown && !taskMayBeMoved && !cleanupUncertain) {
             if (!marker.pending) return !hostedOwnershipUnresolved
             val cleared = writeMarker(
                 pending = false,
@@ -2217,8 +2389,11 @@ object DiLink5ClusterCast {
             val context = CameraDaemon.getAppContext()
                 ?: throw IllegalStateException("daemon context unavailable")
 
+            val config = readProjectionConfig()
+            val factoryMiniMap = !ClusterTransport.isAaosHdmi() &&
+                config.transport == DiLink5ProjectionConfig.Transport.FACTORY_MINI
             val projectionTarget = enableAndAwaitProjectionDisplay(
-                context, expectedGeneration, pkg
+                context, expectedGeneration, pkg, target.kind, config, factoryMiniMap
             )
             if (projectionTarget.width <= 1 || projectionTarget.height <= 1) {
                 throw IllegalStateException("invalid projection display size")
@@ -2256,10 +2431,13 @@ object DiLink5ClusterCast {
                 projectionTarget.transport,
                 projectionTarget.hostedResourceGeneration,
                 projectionTarget.hostedGeometry,
+                factoryMiniMap = factoryMiniMap,
+                aaosMapArea = projectionTarget.aaosMapArea,
             )
             session = live
+            if (live.aaosMapArea) watchAaosMapArea(context, live)
             ClusterFreeformWindow.invalidateTaskCache()
-            if (activeTarget.transport == "direct") {
+            if (activeTarget.transport == "direct" && !factoryMiniMap) {
                 ClusterFreeformWindow.beginDirectPlacementAttempt()
             }
 
@@ -2268,7 +2446,7 @@ object DiLink5ClusterCast {
             )
             if (shouldFallbackToHostedAfterDirectFailure(
                     activeTarget.transport,
-                    isAutoProjectionTransport(),
+                    config.transport == DiLink5ProjectionConfig.Transport.AUTO,
                     launch.succeeded,
                     launch.definiteFailure,
                 ) && isCurrent(expectedGeneration, pkg)
@@ -2278,6 +2456,7 @@ object DiLink5ClusterCast {
                         context,
                         activeTarget,
                         expectedGeneration,
+                        config,
                     )
                 } else {
                     null
@@ -2286,16 +2465,22 @@ object DiLink5ClusterCast {
                     activeTarget = hosted
                     live = live.copy(
                         targetDisplayId = hosted.contentDisplayId,
+                        displayWidth = hosted.width,
+                        displayHeight = hosted.height,
                         projectionTransport = "hosted",
                         hostedResourceGeneration = hosted.hostedResourceGeneration,
                         hostedGeometry = hosted.hostedGeometry,
                     )
-                    session = live
+                    synchronized(stateLock) {
+                        if (!isCurrent(expectedGeneration, pkg)) return
+                        session = live
+                    }
+                    if (!finishPreviousCustomPlacement(target, expectedGeneration)) return
                     ClusterFreeformWindow.invalidateTaskCache()
                     launch = launchAndVerify(target, hosted.contentDisplayId, expectedGeneration)
                 }
             }
-            if (!launch.succeeded && launch.foreignPackage != null &&
+            if (!factoryMiniMap && !launch.succeeded && launch.foreignPackage != null &&
                 activeTarget.transport == "direct"
             ) {
                 // An OEM cluster app keeps re-fronting itself on this shared
@@ -2308,7 +2493,7 @@ object DiLink5ClusterCast {
                     resolveAlternativeSharedDisplay(
                         context.getSystemService(Context.DISPLAY_SERVICE)
                             as DisplayManager,
-                        readPreferFullCluster(),
+                        config.target == DiLink5ProjectionConfig.Target.FULL,
                         activeTarget.name
                     )
                 } else {
@@ -2357,7 +2542,11 @@ object DiLink5ClusterCast {
                         hostedResourceGeneration = preparedAlternative.hostedResourceGeneration,
                         hostedGeometry = preparedAlternative.hostedGeometry,
                     )
-                    session = live
+                    synchronized(stateLock) {
+                        if (!isCurrent(expectedGeneration, pkg)) return
+                        session = live
+                    }
+                    if (!finishPreviousCustomPlacement(target, expectedGeneration)) return
                     ClusterFreeformWindow.invalidateTaskCache()
                     ClusterFreeformWindow.beginDirectPlacementAttempt()
                     launch = launchAndVerify(
@@ -2405,17 +2594,23 @@ object DiLink5ClusterCast {
                     throw IllegalStateException("hosted ownership commit could not be persisted")
                 }
             }
-            try {
+            if (!factoryMiniMap && !live.aaosMapArea) try {
                 rememberStableSharedDisplay(
                     context.getSystemService(Context.DISPLAY_SERVICE)
                         as DisplayManager,
-                    readPreferFullCluster(),
-                    activeTarget.name
+                    config.target == DiLink5ProjectionConfig.Target.FULL,
+                    activeTarget.name,
                 )
             } catch (_: Throwable) {
             }
-            if (target.kind == SessionKind.APP && live.projectionTransport != "hosted") {
-                applyPersistedBounds(live)
+            if (live.factoryMiniMap || (target.kind == SessionKind.APP && live.projectionTransport != "hosted")) {
+                val placed = synchronized(taskMutationLock.lock) {
+                    if (!isCurrent(expectedGeneration, pkg)) return
+                    applyInitialDirectBounds(live)
+                }
+                if (live.factoryMiniMap && !placed) {
+                    throw IllegalStateException("Could not verify the task's position in the factory mini-map window")
+                }
             }
             if (activeTarget.transport == "hosted") {
                 val owner = DiLink5ProjectionOwnership.load(
@@ -2489,6 +2684,15 @@ object DiLink5ClusterCast {
         }
     }
 
+    /** A singleInstance activity left behind on the previous display can absorb the new launch. */
+    private fun finishPreviousCustomPlacement(target: LaunchTarget, expectedGeneration: Long): Boolean {
+        if (target.kind == SessionKind.CUSTOM) {
+            com.overdrive.app.customlayouts.daemon.projection.ClusterActivityLauncher.requestFinish(expectedGeneration)
+            Thread.sleep(CUSTOM_FINISH_GRACE_MS)
+        }
+        return isCurrent(expectedGeneration, target.pkg)
+    }
+
     private fun launchAndVerify(
         target: LaunchTarget,
         displayId: Int,
@@ -2554,7 +2758,7 @@ object DiLink5ClusterCast {
             if (!isCurrent(expectedGeneration, target.pkg)) {
                 return LaunchVerification(false, "projection start superseded")
             }
-            if (!launchTarget(target, displayId)) launchCommandRejected = true
+            if (!launchTarget(target, displayId, expectedGeneration)) launchCommandRejected = true
             val verification = awaitStableTargetForeground(
                 target, displayId, expectedGeneration
             )
@@ -2604,7 +2808,7 @@ object DiLink5ClusterCast {
             AppLauncher.forceStopPackage(target.pkg)
         ) {
             Thread.sleep(CONTAINER_SETTLE_MS)
-            if (!launchTarget(target, displayId)) launchCommandRejected = true
+            if (!launchTarget(target, displayId, expectedGeneration)) launchCommandRejected = true
             val finalVerification = awaitStableTargetForeground(
                 target, displayId, expectedGeneration
             )
@@ -2802,21 +3006,30 @@ object DiLink5ClusterCast {
         }
     }
 
-    private fun launchTarget(target: LaunchTarget, displayId: Int): Boolean {
-        if (target.kind == SessionKind.APP) {
+    /** Android 12 can size a mini-map task that starts in freeform on the selected factory display. */
+    private fun launchTarget(target: LaunchTarget, displayId: Int, launchGeneration: Long = 0L): Boolean {
+        val factoryMiniMap = session?.let {
+            it.generation == launchGeneration && it.targetDisplayId == displayId && it.factoryMiniMap
+        } == true
+        if (target.kind == SessionKind.APP && !factoryMiniMap) {
             return AppLauncher.launchOnDisplay(target.pkg, displayId)
         }
         var process: Process? = null
         return try {
-            process = ProcessBuilder(
+            val command = arrayListOf(
                 "/system/bin/am", "start",
                 "--user", "0",
                 "--display", displayId.toString(),
-                "--windowingMode", "1",
+                "--windowingMode", if (factoryMiniMap) "5" else "1",
                 "-f", "0x10000000",
-                "--ez", "cluster", "true",
-                "-n", target.component
-            ).redirectErrorStream(true).start()
+            )
+            if (target.kind == SessionKind.CUSTOM) {
+                command += customLayoutsLaunchExtras(displayId, launchGeneration) ?: return false
+            } else if (target.kind == SessionKind.MAP) {
+                command += listOf("--ez", "cluster", "true")
+            }
+            command += listOf("-n", target.component)
+            process = ProcessBuilder(command).redirectErrorStream(true).start()
             process.waitFor(5, TimeUnit.SECONDS) && process.exitValue() == 0
         } catch (t: Throwable) {
             logger.warn("DI5 cluster map launch failed: ${t.message}")
@@ -3019,10 +3232,10 @@ object DiLink5ClusterCast {
                     ) {
                         relaunched = withLiveTaskMutation(live, false) {
                             val stopped = AppLauncher.forceStopPackage(live.pkg)
-                            if (stopped && live.projectionTransport == "direct") {
+                            if (stopped && live.projectionTransport == "direct" && !live.factoryMiniMap) {
                                 ClusterFreeformWindow.beginDirectPlacementAttempt()
                             }
-                            stopped && launchTarget(target, live.targetDisplayId)
+                            stopped && launchTarget(target, live.targetDisplayId, live.generation)
                         }
                         corrected = relaunched
                         consecutivePlacementFailures = 0
@@ -3031,10 +3244,10 @@ object DiLink5ClusterCast {
                             corrected = true
                         } else {
                             relaunched = withLiveTaskMutation(live, false) {
-                                if (live.projectionTransport == "direct") {
+                                if (live.projectionTransport == "direct" && !live.factoryMiniMap) {
                                     ClusterFreeformWindow.beginDirectPlacementAttempt()
                                 }
-                                launchTarget(target, live.targetDisplayId)
+                                launchTarget(target, live.targetDisplayId, live.generation)
                             }
                             corrected = relaunched
                         }
@@ -3043,12 +3256,16 @@ object DiLink5ClusterCast {
                         placedTaskId = 0
                     }
                     if (corrected &&
-                        live.kind == SessionKind.APP &&
+                        (live.kind == SessionKind.APP || live.factoryMiniMap) &&
                         live.projectionTransport != "hosted" &&
                         (moved || relaunched)
                     ) {
-                        withLiveTaskMutation(live, Unit) {
-                            applyPersistedBounds(live)
+                        val placed = withLiveTaskMutation(live, false) {
+                            applyInitialDirectBounds(live)
+                        }
+                        if (live.factoryMiniMap && !placed) {
+                            failGuardedSession(live, "The task did not return to the factory mini-map window", target = target)
+                            return@Thread
                         }
                     }
                     logger.info(
@@ -3118,6 +3335,35 @@ object DiLink5ClusterCast {
                 startLifecycleGuardian(live, target)
             }
         }, "DiLink5TaskGuardian-${live.generation}").apply {
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun aaosMapAreaReady(context: Context, live: Session): Boolean {
+        val area = live.hostedGeometry?.overlay ?: return false
+        return AaosNavigationPresentation.isOpen(context, live.physicalDisplayId) &&
+            DiLink5HostedProjectionBridge.probeAppDisplay(context, live.physicalDisplayId, aaosMapArea = true)
+                ?.confirmedMapBounds == area
+    }
+
+    private fun watchAaosMapArea(context: Context, live: Session) {
+        Thread({
+            while (isCurrent(live.generation, live.pkg) && session === live) {
+                if (!aaosMapAreaReady(context, live)) {
+                    if (isCurrent(live.generation, live.pkg) && session === live) {
+                        DiLink5HostedProjectionBridge.withdrawMapArea(live.hostedResourceGeneration)
+                    }
+                    return@Thread
+                }
+                try {
+                    Thread.sleep(TASK_GUARD_POLL_MS)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return@Thread
+                }
+            }
+        }, "AaosClusterMapArea-${live.generation}").apply {
             isDaemon = true
             start()
         }
@@ -3224,7 +3470,7 @@ object DiLink5ClusterCast {
         if (ClusterCast.resumedPackageOnDisplay(live.targetDisplayId) != live.pkg) {
             return false
         }
-        if (live.kind == SessionKind.MAP) return true
+        if (live.kind != SessionKind.APP) return true
         val location = ClusterFreeformWindow.findTaskLocation(
             live.pkg, live.targetDisplayId
         )
@@ -3251,7 +3497,7 @@ object DiLink5ClusterCast {
         // for RECLAIMED_DISPLAY_MEMORY_MS, which bounds this to one migration
         // per surface instead of an endless ping-pong.
         var migrateTo: ProjectionTarget? = null
-        if (!foreignPackage.isNullOrEmpty() && target != null) {
+        if (!live.factoryMiniMap && !live.aaosMapArea && !foreignPackage.isNullOrEmpty() && target != null) {
             markDisplayReclaimed(live.targetDisplayName)
             migrateTo = try {
                 val context = CameraDaemon.getAppContext()
@@ -3267,6 +3513,14 @@ object DiLink5ClusterCast {
                 }
             } catch (_: Throwable) {
                 null
+            }
+        }
+        if (live.kind == SessionKind.CUSTOM) {
+            // Its blind-spot card must be handed back before this projection goes.
+            try {
+                com.overdrive.app.customlayouts.daemon.CustomLayoutsController.onDi5SessionStopping(live.generation)
+            } catch (t: Throwable) {
+                logger.warn("DI5 cluster cast: Custom Layouts stop notice failed: ${t.message}")
             }
         }
         val stopped = stopInternal(
@@ -3298,7 +3552,10 @@ object DiLink5ClusterCast {
                         Thread.currentThread().interrupt()
                     }
                 }
-                if (startTarget(target) != null) return
+                val replacement = if (live.kind == SessionKind.CUSTOM) {
+                    target.copy(previousCustomGeneration = live.generation)
+                } else target.copy(automatic = true)
+                if (startTarget(replacement, preempt = false) != null) return
                 logger.warn("DI5 cluster cast: migration start was not admitted")
             }
         }
@@ -3314,6 +3571,16 @@ object DiLink5ClusterCast {
         if (live.kind == SessionKind.MAP) {
             com.overdrive.app.navmap.ClusterMapProjector
                 .onDiLink5ProjectionFailed()
+        } else if (live.kind == SessionKind.CUSTOM) {
+            notifyCustomLayoutsEnded(live.generation, if (stopped) reason else "$reason; cleanup incomplete")
+        }
+    }
+
+    private fun notifyCustomLayoutsEnded(generation: Long, reason: String) {
+        try {
+            com.overdrive.app.customlayouts.daemon.CustomLayoutsController.onDi5SessionEnded(generation, reason)
+        } catch (t: Throwable) {
+            logger.warn("DI5 cluster cast: Custom Layouts end notice failed: ${t.message}")
         }
     }
 
@@ -3323,10 +3590,12 @@ object DiLink5ClusterCast {
         val compositorPowered: Boolean
         val compositorEnableIndeterminate: Boolean
         val compositorTeardownIndeterminate: Boolean
-        val cleanupTicket = CleanupTicket()
+        val cleanupTicket: CleanupTicket
         synchronized(stateLock) {
             if (generation != expectedGeneration || activePackage != pkg) return
             failedKind = activeKind
+            cleanupTicket = CleanupTicket(customGeneration = if (failedKind == SessionKind.CUSTOM) expectedGeneration else 0L)
+            if (failedKind == SessionKind.CUSTOM) lastCustomCleanup = cleanupTicket
             appMayBeMoved = appMovedGeneration == expectedGeneration
             compositorPowered = poweredGeneration == expectedGeneration
             compositorEnableIndeterminate =
@@ -3362,6 +3631,7 @@ object DiLink5ClusterCast {
             }
             rehomed = !appMayBeMoved ||
                     failedKind == SessionKind.MAP ||
+                    failedKind == SessionKind.CUSTOM ||
                     rehomeTask(pkg, foreground = false)
             if (!rehomed && failedKind == SessionKind.APP) {
                 // Same last resort boot recovery already uses: the app was launched
@@ -3458,6 +3728,8 @@ object DiLink5ClusterCast {
                     com.overdrive.app.navmap.ClusterMapProjector
                         .onDiLink5ProjectionFailed()
                 }
+            } else if (failedKind == SessionKind.CUSTOM) {
+                notifyCustomLayoutsEnded(expectedGeneration, finalReason)
             }
         }
     }
@@ -3469,18 +3741,21 @@ object DiLink5ClusterCast {
         expectedKind: SessionKind?,
         hostedSurfaceLoss: HostedSurfaceLoss? = null,
     ): Boolean {
+        val scopedCustomStop = expectedKind == SessionKind.CUSTOM && expectedGeneration > 0L
         while (true) {
-            val inFlight = synchronized(stateLock) { activeCleanup }
-                ?: break
+            val inFlight = synchronized(stateLock) {
+                if (scopedCustomStop && (generation != expectedGeneration || activeKind != expectedKind)) {
+                    lastCustomCleanup?.takeIf { it.customGeneration == expectedGeneration } ?: return true
+                } else activeCleanup
+            } ?: break
             if (!awaitCleanupCompletion(
                     inFlight, "previous projection cleanup"
                 )
             ) {
                 return false
             }
-            if (!inFlight.succeeded.get()) {
-                return false
-            }
+            val success = inFlight.succeeded.get()
+            if (!success || (scopedCustomStop && inFlight.customGeneration == expectedGeneration)) return success
         }
         val persistedHostedCleanup = DiLink5ProjectionOwnership.loadAll()
             .any { it.transport == "hosted" }
@@ -3498,7 +3773,7 @@ object DiLink5ClusterCast {
                             persistedHostedCleanup ||
                             session != null)
         }
-        if (orphanedCleanup) {
+        if (orphanedCleanup && !scopedCustomStop) {
             return recoverOrphanedStateSynchronously()
         }
         val pkg: String
@@ -3510,7 +3785,7 @@ object DiLink5ClusterCast {
         val appMayBeMoved: Boolean
         val startTicket: StartTicket?
         val cleanupGeneration: Long
-        val cleanupTicket = CleanupTicket()
+        val cleanupTicket: CleanupTicket
         synchronized(taskMutationLock.lock) {
             synchronized(stateLock) {
                 if (activeCleanup != null) return false
@@ -3528,6 +3803,8 @@ object DiLink5ClusterCast {
             pkg = current
             stoppingGeneration = generation
             stoppingKind = activeKind
+            cleanupTicket = CleanupTicket(customGeneration = if (stoppingKind == SessionKind.CUSTOM) stoppingGeneration else 0L)
+            if (stoppingKind == SessionKind.CUSTOM) lastCustomCleanup = cleanupTicket
             compositorPowered = poweredGeneration == stoppingGeneration
             compositorEnableIndeterminate =
                 enableIndeterminateGeneration == stoppingGeneration
@@ -3570,9 +3847,12 @@ object DiLink5ClusterCast {
                         targetDisplayId = targetDisplayId
                     )
                 }
-                if (stoppingKind == SessionKind.MAP) {
+                if (stoppingKind == SessionKind.MAP || stoppingKind == SessionKind.CUSTOM) {
                     try {
-                        Thread.sleep(MAP_FINISH_GRACE_MS)
+                        Thread.sleep(
+                            if (stoppingKind == SessionKind.CUSTOM) CUSTOM_FINISH_GRACE_MS
+                            else MAP_FINISH_GRACE_MS
+                        )
                     } catch (interrupted: InterruptedException) {
                         Thread.currentThread().interrupt()
                         return@submit CleanupResult(
@@ -3622,6 +3902,7 @@ object DiLink5ClusterCast {
                 }
                 var rehomed = !appMayBeMoved ||
                         stoppingKind == SessionKind.MAP ||
+                        stoppingKind == SessionKind.CUSTOM ||
                         (rehome && rehomeTask(pkg, foreground))
                 if (!rehomed && rehome && stoppingKind == SessionKind.APP) {
                     // The deferred (ACC-off) recovery path already accepts a
@@ -4032,10 +4313,42 @@ object DiLink5ClusterCast {
     private fun enableAndAwaitProjectionDisplay(
         context: Context,
         expectedGeneration: Long,
-        pkg: String
+        pkg: String,
+        kind: SessionKind,
+        config: DiLink5ProjectionConfig,
+        factoryMiniMap: Boolean,
     ): ProjectionTarget {
         val manager = context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
-        val preferFull = readPreferFullCluster()
+        if (ClusterTransport.isAaosHdmi()) {
+            check(kind != SessionKind.CUSTOM) { "Custom Layouts cannot use the HDMI map area" }
+            val panel = manager.displays.singleOrNull { AaosMapAreaCheck.isTarget(context, it) }
+                ?: throw IllegalStateException("The supported HDMI cluster display is unavailable")
+            check(AaosNavigationPresentation.isOpen(context, panel.displayId)) {
+                "Open the factory navigation map on the instrument cluster"
+            }
+            val size = displaySize(panel)
+            val direct = ProjectionTarget(panel.displayId, panel.name, size.x, size.y, aaosMapArea = true)
+            return configureHostedProjectionTarget(context, direct, expectedGeneration, config)
+                ?: throw IllegalStateException("Could not create the hosted window on the confirmed cluster map area")
+        }
+        if (factoryMiniMap) {
+            // The native mini-map is already routed by the driver. Switching the
+            // container here can replace the widget that is consuming these pixels.
+            val displays = manager.displays.filter {
+                it.displayId > 0 && it.name.equals(DI5_SHARED_DISPLAY_STANDARD, ignoreCase = true) &&
+                    isUsableDiLink5ProjectionDisplay(it.isValid, it.state)
+            }
+            val target = displays.firstNotNullOfOrNull {
+                val size = displaySize(it)
+                if (size.x > 1 && size.y > 1) ProjectionTarget(it.displayId, it.name, size.x, size.y)
+                else null
+            } ?: resolveFactoryMiniMapDisplay(readAuthoritativeDisplayLines().orEmpty())?.let {
+                ProjectionTarget(it.displayId, it.name, it.width, it.height)
+            } ?: throw IllegalStateException("Open the factory mini-map on the cluster. Its shared display is unavailable.")
+            logger.info("DI5 factory mini-map: direct display ${target.displayId} (${target.name}), ${target.width}x${target.height}")
+            return target
+        }
+        val preferFull = config.target == DiLink5ProjectionConfig.Target.FULL
         val propertyProduct = readDiLink5SystemProperty("ro.product.name")
         val propertyDevice = readDiLink5SystemProperty("ro.product.device")
         val propertyFingerprint =
@@ -4164,6 +4477,13 @@ object DiLink5ClusterCast {
             ) ?: resolveAuthoritativeProjectionDisplay(manager, preferFull, false)
         }
         if (!canDispatchDiLink5ContainerEnable(preEnableCandidate?.displayId ?: -1)) {
+            if (topology == DiLink5ProjectionTopology.TRINKET_DEBUG_ONLY &&
+                Build.MODEL.orEmpty().startsWith("D50F_LC", ignoreCase = true)) {
+                throw IllegalStateException(
+                    "OverDrive found the cluster background. A visible app or map display is needed " +
+                        "to cast. For turn arrows, send a RoadSense destination to car navigation."
+                )
+            }
             throw IllegalStateException(
                 "DI5 projection target was not resolved before container enable"
             )
@@ -4179,7 +4499,7 @@ object DiLink5ClusterCast {
                     "deferring compositor enable until verified placement"
             )
             return configureProjectionTarget(
-                context, preEnableTarget, expectedGeneration, appDisplayVisible = false,
+                context, preEnableTarget, expectedGeneration, config, appDisplayVisible = false,
             ).copy(deferCompositorEnable = true)
         }
         val commandResult = synchronized(stateLock) {
@@ -4226,7 +4546,7 @@ object DiLink5ClusterCast {
                     "display ${preEnableTarget.displayId} (${preEnableTarget.name}); " +
                     "sendInfo16=$commandResult"
             )
-            return configureProjectionTarget(context, preEnableTarget, expectedGeneration)
+            return configureProjectionTarget(context, preEnableTarget, expectedGeneration, config)
         }
 
         if (commandResult ==
@@ -4262,64 +4582,57 @@ object DiLink5ClusterCast {
             )
         }
 
-        return configureProjectionTarget(context, preEnableTarget, expectedGeneration)
+        return configureProjectionTarget(context, preEnableTarget, expectedGeneration, config)
     }
 
-    private fun isAutoProjectionTransport(): Boolean = try {
+    private fun readProjectionConfig(): DiLink5ProjectionConfig = try {
         DiLink5ProjectionConfig.from(
             UnifiedConfigManager.loadConfig().optJSONObject("projection")
-        ).transport == DiLink5ProjectionConfig.Transport.AUTO
+        )
     } catch (_: Throwable) {
-        true
+        DiLink5ProjectionConfig.from(null)
     }
 
     private fun configureProjectionTarget(
         context: Context,
         direct: ProjectionTarget,
         expectedGeneration: Long,
+        config: DiLink5ProjectionConfig,
         appDisplayVisible: Boolean = true,
     ): ProjectionTarget {
-        val config = try {
-            DiLink5ProjectionConfig.from(
-                UnifiedConfigManager.loadConfig().optJSONObject("projection")
-            )
-        } catch (_: Throwable) {
-            DiLink5ProjectionConfig.from(null)
-        }
         if (config.initialTransport(appDisplayVisible) == DiLink5ProjectionConfig.Transport.DIRECT) {
             return direct
         }
         if (!ClusterFreeformWindow.prepareHostedFreeformState()) {
             throw IllegalStateException("hosted projection freeform restoration was not confirmed")
         }
-        return configureHostedProjectionTarget(context, direct, expectedGeneration)
+        return configureHostedProjectionTarget(context, direct, expectedGeneration, config)
             ?: throw IllegalStateException("hosted projection resources unavailable")
     }
 
     private fun configureHostedProjectionTarget(
         context: Context,
         direct: ProjectionTarget,
-        expectedGeneration: Long
+        expectedGeneration: Long,
+        config: DiLink5ProjectionConfig,
     ): ProjectionTarget? {
-        val config = try {
-            DiLink5ProjectionConfig.from(
-                UnifiedConfigManager.loadConfig().optJSONObject("projection")
-            )
-        } catch (_: Throwable) {
-            DiLink5ProjectionConfig.from(null)
-        }
         val appDisplay = DiLink5HostedProjectionBridge.probeAppDisplay(
             context,
             direct.displayId,
-        ) ?: return null
-        val nativeDensity = ClusterAppDensity.nativeDensityForDisplay(direct.displayId)
-            ?: return null
-        val geometry = HostedProjectionGeometry.calculate(
-            appDisplay.width,
-            appDisplay.height,
-            nativeDensity,
-            config,
-        ) ?: return null
+            aaosMapArea = direct.aaosMapArea,
+        ) ?: if (direct.aaosMapArea) {
+            throw IllegalStateException("Enable the overlay permission and confirm both parked map-area checks before projecting")
+        } else return null
+        val geometry = if (direct.aaosMapArea) {
+            val area = appDisplay.confirmedMapBounds ?: return null
+            HostedProjectionGeometry(
+                appDisplay.width, appDisplay.height, appDisplay.densityDpi,
+                area, area.width(), area.height(),
+            )
+        } else {
+            val nativeDensity = ClusterAppDensity.nativeDensityForDisplay(direct.displayId) ?: return null
+            HostedProjectionGeometry.calculate(appDisplay.width, appDisplay.height, nativeDensity, config) ?: return null
+        }
         val pendingOwner = projectionOwnership(
             generation = expectedGeneration,
             target = direct,
@@ -4343,6 +4656,7 @@ object DiLink5ClusterCast {
             start = {
                 DiLink5HostedProjectionBridge.start(
                     context, expectedGeneration, direct.displayId, direct.name, geometry,
+                    aaosMapArea = direct.aaosMapArea,
                 )
             },
             current = { isCurrent(expectedGeneration, activePackage.orEmpty()) },
@@ -4566,14 +4880,7 @@ object DiLink5ClusterCast {
     }
 
     private fun readPreferFullCluster(): Boolean =
-        try {
-            DiLink5ProjectionConfig.from(
-                UnifiedConfigManager.loadConfig().optJSONObject("projection")
-            ).target == DiLink5ProjectionConfig.Target.FULL
-        } catch (_: Throwable) {
-            // Fresh and unreadable configuration uses the standard target.
-            false
-        }
+        readProjectionConfig().target == DiLink5ProjectionConfig.Target.FULL
 
     private fun readSharedDisplayPreference(): String? =
         try {
@@ -4612,7 +4919,7 @@ object DiLink5ClusterCast {
     private fun rememberStableSharedDisplay(
         manager: DisplayManager,
         preferFull: Boolean,
-        chosenName: String
+        chosenName: String,
     ) {
         if (!isSharedDiLink5ProjectionDisplayName(chosenName)) return
         val defaultName = try {
@@ -4811,22 +5118,25 @@ object DiLink5ClusterCast {
         return point
     }
 
-    private fun applyPersistedBounds(live: Session) {
-        persistedBounds(
-            live.pkg, live.displayWidth, live.displayHeight
-        )?.let { bounds ->
-            ClusterFreeformWindow.applyBounds(
-                live.pkg,
-                Rect(
-                    bounds.left,
-                    bounds.top,
-                    bounds.right,
-                    bounds.bottom
-                ),
-                true,
-                live.targetDisplayId
-            )
+    private fun applyInitialDirectBounds(live: Session): Boolean {
+        val customWindow = if (live.kind == SessionKind.CUSTOM) live.miniMapBounds ?: live.requestedCustomMiniMapBounds else null
+        val bounds = customWindow ?: persistedBounds(live.pkg, live.displayWidth, live.displayHeight)
+            ?: if (live.factoryMiniMap) factoryMiniMapDefaultBounds(live.displayWidth, live.displayHeight) else return true
+        return applyDirectBounds(live, bounds, true)
+    }
+
+    private fun applyDirectBounds(live: Session, bounds: DiLink5ProjectionBounds, commit: Boolean): Boolean {
+        val requested = Rect(bounds.left, bounds.top, bounds.right, bounds.bottom)
+        if (!live.factoryMiniMap) {
+            return ClusterFreeformWindow.applyBounds(live.pkg, requested, commit, live.targetDisplayId)
         }
+        val actual = ClusterFreeformWindow.resizeFactoryMiniMapTask(
+            live.pkg, live.targetDisplayId, requested, commit
+        ) ?: return false
+        if (commit) {
+            live.miniMapBounds = DiLink5ProjectionBounds(actual.left, actual.top, actual.right, actual.bottom)
+        }
+        return true
     }
 
     private fun persistedBounds(
@@ -4864,7 +5174,7 @@ object DiLink5ClusterCast {
      * (TASK_LOOKUP_FAILED never passes for absence). Never touches our own map.
      */
     private fun forceStopAndConfirmAbsent(pkg: String): Boolean {
-        if (pkg == DI5_MAP_PACKAGE || !AppLauncher.isValidPackageName(pkg)) {
+        if (pkg == DI5_MAP_PACKAGE || isFactoryMapProvider(pkg) || !AppLauncher.isValidPackageName(pkg)) {
             return false
         }
         if (!AppLauncher.forceStopPackage(pkg)) return false
@@ -4876,9 +5186,15 @@ object DiLink5ClusterCast {
         return absent
     }
 
+    private fun isFactoryMapProvider(pkg: String): Boolean =
+        pkg == AaosNavigationPresentation.PACKAGE && ClusterTransport.isAaosHdmi()
+
     private fun rehomeTask(pkg: String, foreground: Boolean): Boolean =
         try {
-            if (AppLauncher.taskConfirmedAbsent(pkg)) {
+            if (isFactoryMapProvider(pkg)) {
+                // No legitimate AAOS session ever owns the factory task, even if a stale marker names it.
+                true
+            } else if (AppLauncher.taskConfirmedAbsent(pkg)) {
                 // No live task ⇒ nothing stranded; also skip the foreground
                 // launch — "move back to the head unit" must not cold-start a
                 // dead app. A FAILED lookup falls through to reparentToDisplay0,
@@ -4899,6 +5215,8 @@ object DiLink5ClusterCast {
         teardownMayStillComplete: Boolean = false,
         shouldContinue: (() -> Boolean)? = null
     ): Boolean {
+        // A legacy DI5 marker may survive a restore. This platform has no DI5 compositor.
+        if (ClusterTransport.isAaosHdmi()) return true
         if (!detachProjectionConsumersBeforeCompositorClose()) {
             logger.warn(
                 "DI5 cluster cast: refusing compositor close until every " +
@@ -5407,6 +5725,27 @@ internal data class DiLink5ProjectionDisplayRef(
     val height: Int = 0
 )
 
+/** Owner-tested right-hand window on the Sea Lion 07's current _1 display. */
+internal fun factoryMiniMapDefaultBounds(width: Int, height: Int): DiLink5ProjectionBounds {
+    val windowWidth = (width * 0.32).roundToInt().coerceIn(1, width)
+    return DiLink5ProjectionBounds(width - windowWidth, 0, width, height)
+}
+
+/** Activity-local pixels. Only a window spanning the factory's dedicated band gets its rail treatment. */
+internal fun diLink5CustomLayoutsPanel(
+    displayName: String,
+    width: Int,
+    height: Int,
+    hosted: HostedProjectionGeometry?,
+    miniMap: DiLink5ProjectionBounds?,
+): Panel {
+    if (miniMap != null) return Panel("full", miniMap.width(), miniMap.height())
+    val spansPanel = hosted == null || (hosted.overlay.width() == hosted.panelWidth &&
+        hosted.overlay.height() == hosted.panelHeight)
+    val mode = if (spansPanel && displayName.endsWith("_1", ignoreCase = true)) "band" else "full"
+    return Panel(mode, hosted?.bufferWidth ?: width, hosted?.bufferHeight ?: height)
+}
+
 internal enum class DiLink5ProjectionTopology {
     SHARED_FISSION,
     NUMBERED_FISSION,
@@ -5583,9 +5922,8 @@ private fun selectDefaultDiLink5ProjectionDisplayName(
         )
     }
 
-    // On trinket, only the OEM shared container feeds the physical panel.
-    // The plain fission display is FLAG_OWN_CONTENT_ONLY and capturable, but
-    // launching there reproduces the exact false-success/blank-panel failure.
+    // On trinket, a task on the unnumbered background can be captured even
+    // while the native instrument layout covers it. Require a known visible target.
     if (requireShared) return null
 
     // Older DI5.0 builds expose the production targets without the shared_
@@ -5841,6 +6179,16 @@ internal fun parseDiLink5ProjectionDisplays(
         }
     }
     return found.values.toList()
+}
+
+internal fun resolveFactoryMiniMapDisplay(lines: List<String>): DiLink5ProjectionDisplayRef? {
+    // WindowManager can override the 1920x720 panel to a 1920x660 logical map.
+    // Use that window space when sizing the app. Both records must name the actual mini-map.
+    val mapLines = lines.filter { it.contains(DI5_SHARED_DISPLAY_STANDARD, ignoreCase = true) }
+    val (overrides, others) = mapLines.partition { it.contains("mOverrideDisplayInfo=") }
+    return parseDiLink5ProjectionDisplays(overrides.ifEmpty { others }).firstOrNull {
+        it.name.equals(DI5_SHARED_DISPLAY_STANDARD, ignoreCase = true) && it.width > 1 && it.height > 1
+    }
 }
 
 private fun parseDiLink5ProjectionSize(line: String): Pair<Int, Int>? {

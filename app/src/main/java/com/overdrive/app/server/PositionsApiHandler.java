@@ -191,6 +191,13 @@ public final class PositionsApiHandler {
             HttpResponse.sendJson(out, cur.toString());
             return true;
         }
+        // Every endpoint below writes or moves, whatever the method.
+        if (com.overdrive.app.config.ServiceModeFeatureGate.isPaused("seat_positions")) {
+            HttpResponse.sendJson(out, 423, new JSONObject()
+                    .put("success", false)
+                    .put("error", "Seat Positions are paused by Service Mode.").toString());
+            return true;
+        }
         if (pathOnly.equals("/api/positions/capture")) return handleCapture(out, q);
         if (pathOnly.equals("/api/positions/apply"))   return handleApply(out, q, body);
         if (pathOnly.equals("/api/positions/delete"))  return handleDelete(out, q, body);

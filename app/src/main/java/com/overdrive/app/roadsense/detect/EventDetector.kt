@@ -123,6 +123,13 @@ class EventDetector(
     @Volatile private var thresholdScale: Float =
         initialThresholdScale.coerceIn(MIN_THRESHOLD_SCALE, MAX_THRESHOLD_SCALE)
 
+    // Sample-count constants in effect; the 100 Hz values unless [setSamplePeriodMs] adapted them.
+    // Written and read on the single IPC/sensor thread.
+    private var quietSamples = QUIET_SAMPLES
+    private var rearmQuietSamples = REARM_QUIET_SAMPLES
+    private var sampleGapMs = GAP_MS
+    private var riseResolvable = true
+
     // ---- Ring buffer (fixed-size, no allocation after construction) ----------
     // Parallel arrays: aVert[i] is the residual, tMs[i] its timestamp. We keep
     // raw samples so a completed event can report exact peaks and timings; the
@@ -206,7 +213,7 @@ class EventDetector(
         // large-gap timestamp makes durations go negative (MAX_EVENT_MS never trips,
         // event hangs) and produces garbage candidate timings. On a backward jump or
         // a gap, abandon the in-flight event/window so this sample starts clean.
-        if (lastTMs != 0L && (s.tMs < lastTMs || s.tMs - lastTMs > GAP_MS)) {
+        if (lastTMs != 0L && (s.tMs < lastTMs || s.tMs - lastTMs > sampleGapMs)) {
             resetEvent()
             armed = true
             rearmQuietRun = 0
@@ -258,7 +265,7 @@ class EventDetector(
         if (!armed) {
             if (settled) {
                 rearmQuietRun++
-                if (rearmQuietRun >= REARM_QUIET_SAMPLES) {
+                if (rearmQuietRun >= rearmQuietSamples) {
                     armed = true
                     rearmQuietRun = 0
                 }
@@ -304,7 +311,7 @@ class EventDetector(
 
         if (settled) {
             quietRun++
-            if (quietRun >= QUIET_SAMPLES) {
+            if (quietRun >= quietSamples) {
                 // Event complete. Build the candidate, reset, possibly emit.
                 return finishEvent(s.tMs)
             }
@@ -460,6 +467,7 @@ class EventDetector(
             axlePairGapMs = axlePairGapMs,
             lateralAsymmetry = asymmetry,
             asymmetryValid = asymmetryValid,
+            riseResolved = riseResolvable,
         )
 
         // Remember this pulse so the NEXT event (the rear axle) can pair against
@@ -562,6 +570,33 @@ class EventDetector(
 
     /** Current live detection-sensitivity multiplier (diagnostics / change-detection). */
     val currentThresholdScale: Float get() = thresholdScale
+
+    /** Open threshold on |a_vert| at [speedKmh] with the live sensitivity applied (diagnostics). */
+    fun thresholdAt(speedKmh: Float): Float =
+        (thresholdBase + thresholdSpeedSlope * speedKmh) * thresholdScale
+
+    /**
+     * Re-derive the sample-count constants for a stream that isn't ~100 Hz, keeping their
+     * time spans; null restores the 100 Hz tuning. Call on the sample thread.
+     */
+    fun setSamplePeriodMs(periodMs: Float?) {
+        if (periodMs == null) {
+            quietSamples = QUIET_SAMPLES
+            rearmQuietSamples = REARM_QUIET_SAMPLES
+            sampleGapMs = GAP_MS
+            riseResolvable = true
+            return
+        }
+        val perNominal = NOMINAL_PERIOD_MS / periodMs
+        quietSamples = maxOf(MIN_ADAPTED_QUIET_SAMPLES, Math.round(QUIET_SAMPLES * perNominal))
+        rearmQuietSamples = maxOf(quietSamples, Math.round(REARM_QUIET_SAMPLES * perNominal))
+        sampleGapMs = maxOf(GAP_MS, (periodMs * GAP_PERIODS).toLong())
+        riseResolvable = periodMs <= MAX_RISE_RESOLVABLE_PERIOD_MS
+    }
+
+    val profileSummary: String
+        get() = "quiet=$quietSamples rearm=$rearmQuietSamples gap=${sampleGapMs}ms " +
+            "riseVote=${if (riseResolvable) "on" else "off"}"
 
     /** Drop all state — call on a sensor restart / large time gap. */
     fun reset() {
@@ -730,5 +765,17 @@ class EventDetector(
          *  the next sample as a fresh start rather than spanning the gap. ~300 ms =
          *  30 missed samples at 100 Hz, well beyond normal jitter. */
         const val GAP_MS = 300L
+
+        /** Sample period the sample-count constants were tuned at (F-005: 99.9 Hz). */
+        const val NOMINAL_PERIOD_MS = 10f
+
+        /** Floor for adapted quiet/re-arm runs: a single quiet sample is too noise-prone. */
+        const val MIN_ADAPTED_QUIET_SAMPLES = 2
+
+        /** Rise time needs ≥2 samples inside POTHOLE_RISE_MS (50 ms) to vote. */
+        const val MAX_RISE_RESOLVABLE_PERIOD_MS = 25f
+
+        /** An adapted stream tolerates this many missing samples before the gap reset. */
+        const val GAP_PERIODS = 4
     }
 }

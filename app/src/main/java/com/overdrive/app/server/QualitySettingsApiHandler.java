@@ -1,5 +1,7 @@
 package com.overdrive.app.server;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.storage.StorageManager;
 
@@ -11,6 +13,7 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.OutputStream;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -29,7 +32,11 @@ public class QualitySettingsApiHandler {
     private static final int MAX_ROAD_SENSE_VOLUME_WRITERS = 512;
     private static final Map<String, Long> roadSenseVolumeSequences =
             new LinkedHashMap<>();
-    
+    // Generic-writer sections that can arm or reach a step-up gated vehicle action.
+    private static final java.util.Set<String> STEP_UP_SECTIONS = java.util.Set.of(
+            "keymap", "quickControls", "remoteAccess", "automation", "drivingSafety", "telegram",
+            "cloudflared", "updates", "adbRecovery");
+
     // Stored quality settings
     // Single user-facing recording quality tier (ECONOMY/STANDARD/HIGH/PREMIUM/MAX).
     // Persisted in UnifiedConfigManager under recording.recordingQuality.
@@ -123,6 +130,15 @@ public class QualitySettingsApiHandler {
             handleSurveillanceLayoutPost(out, body);
             return true;
         }
+        // Shared native/WebUI dashboard range headline choice.
+        if (path.equals("/api/settings/range-display") && method.equals("GET")) {
+            sendRangeDisplay(out);
+            return true;
+        }
+        if (path.equals("/api/settings/range-display") && method.equals("POST")) {
+            handleRangeDisplayPost(out, body);
+            return true;
+        }
         // Web-shell appearance (theme picker shipped on every page).
         // Same UnifiedConfigManager-backed pattern as the rest of /api/settings.
         if (path.equals("/api/settings/appearance") && method.equals("GET")) {
@@ -174,6 +190,38 @@ public class QualitySettingsApiHandler {
         // present AND owner paired). Surface as a single field so the UI
         // doesn\'t have to re-compute the same logic.
         response.put("enabled", configured && paired);
+        HttpResponse.sendJson(out, response.toString());
+    }
+
+    /** Both dashboards use the same persisted preference, not browser-local storage. */
+    private static void sendRangeDisplay(OutputStream out) throws Exception {
+        JSONObject response = new JSONObject();
+        response.put("success", true);
+        response.put("personalizedRangeFirst",
+                com.overdrive.app.config.UnifiedConfigManager.isPersonalizedRangeFirst());
+        HttpResponse.sendJson(out, response.toString());
+    }
+
+    private static void handleRangeDisplayPost(OutputStream out, String body) throws Exception {
+        JSONObject response = new JSONObject();
+        try {
+            JSONObject req = new JSONObject(body == null ? "{}" : body);
+            Object wanted = req.opt("personalizedRangeFirst");
+            if (!(wanted instanceof Boolean)) {
+                response.put("success", false);
+                response.put("error", "personalizedRangeFirst must be a boolean");
+            } else {
+                boolean enabled = (Boolean) wanted;
+                boolean saved = com.overdrive.app.config.UnifiedConfigManager
+                        .setPersonalizedRangeFirst(enabled);
+                response.put("success", saved);
+                if (saved) response.put("personalizedRangeFirst", enabled);
+                else response.put("error", "Could not save range display preference");
+            }
+        } catch (Exception e) {
+            response.put("success", false);
+            response.put("error", "Invalid range display preference");
+        }
         HttpResponse.sendJson(out, response.toString());
     }
 
@@ -362,7 +410,7 @@ public class QualitySettingsApiHandler {
      */
     private static StorageManager.StorageType parseStorageType(String s) {
         if (s == null) return StorageManager.StorageType.INTERNAL;
-        switch (s.toUpperCase()) {
+        switch (s.toUpperCase(Locale.ROOT)) {
             case "SD_CARD": return StorageManager.StorageType.SD_CARD;
             case "USB":     return StorageManager.StorageType.USB;
             default:        return StorageManager.StorageType.INTERNAL;
@@ -521,7 +569,7 @@ public class QualitySettingsApiHandler {
         
         try {
             File unifiedFile = new File(UNIFIED_CONFIG_FILE);
-            if (unifiedFile.exists()) {
+            if (RemovableStorageFs.exists(unifiedFile)) {
                 BufferedReader reader = new BufferedReader(new FileReader(unifiedFile));
                 StringBuilder sb = new StringBuilder();
                 String line;
@@ -535,7 +583,7 @@ public class QualitySettingsApiHandler {
                 JSONObject auth = config.optJSONObject("auth");
                 if (auth != null) auth.remove("deviceSecret");
                 response.put("config", config);
-                response.put("lastModified", unifiedFile.lastModified());
+                response.put("lastModified", RemovableStorageFs.lastModified(unifiedFile));
             } else {
                 // Return default config structure
                 JSONObject config = new JSONObject();
@@ -612,6 +660,20 @@ public class QualitySettingsApiHandler {
             // legitimate — no client has ever sent either.
             if (!section.matches("[A-Za-z][A-Za-z0-9_]{0,63}")) {
                 HttpResponse.sendJsonError(out, "Invalid config section");
+                return;
+            }
+            // Service Mode is device-local runtime state with its own authenticated
+            // API. Do not let the generic section writer mutate it or import a stale
+            // schedule through a broad settings payload.
+            if ("serviceMode".equals(section)) {
+                HttpResponse.sendJson(out, 403, new JSONObject()
+                        .put("success", false)
+                        .put("error", "Service Mode state must be changed through its dedicated API.")
+                        .toString());
+                return;
+            }
+            if (STEP_UP_SECTIONS.contains(section)
+                    && !StepUpGate.requireBundle("config", "Change settings", out)) {
                 return;
             }
             // Collect first: removing during keys() iteration would throw.
@@ -1079,8 +1141,8 @@ public class QualitySettingsApiHandler {
         
         try {
             File unifiedFile = new File(UNIFIED_CONFIG_FILE);
-            if (unifiedFile.exists()) {
-                lastModified = unifiedFile.lastModified();
+            if (RemovableStorageFs.exists(unifiedFile)) {
+                lastModified = RemovableStorageFs.lastModified(unifiedFile);
                 
                 BufferedReader reader = new BufferedReader(new FileReader(unifiedFile));
                 StringBuilder sb = new StringBuilder();
@@ -1110,7 +1172,7 @@ public class QualitySettingsApiHandler {
                         recordingQuality = fileTier;
                         recordingBitrate = fileTier;
                     } else if (recording.has("bitrate")) {
-                        String fileBitrate = recording.optString("bitrate", "").toUpperCase();
+                        String fileBitrate = recording.optString("bitrate", "").toUpperCase(Locale.ROOT);
                         String tier;
                         switch (fileBitrate) {
                             case "LOW":    tier = "ECONOMY"; break;
@@ -1324,6 +1386,11 @@ public class QualitySettingsApiHandler {
                 || (oemCfg.has("codec") && !oemC.equalsIgnoreCase(panoC))
                 || (oemCfg.has("fps") && oemF != panoF);
             oem.put("hasOwnQuality", diverged);
+            com.overdrive.app.camera.OemDashcamPipeline liveOem = CameraDaemon.getOemDashcamPipeline();
+            boolean combinedReady = oemId >= 0 && concurrent == 1
+                && liveOem != null && liveOem.getCameraId() == oemId
+                && liveOem.isRouteReady() && liveOem.hasRecentFrame(5000L);
+            oem.put("combinedViewAvailable", combinedReady);
             response.put("oemDashcam", oem);
         } catch (Exception ignored) {}
         
@@ -1366,7 +1433,7 @@ public class QualitySettingsApiHandler {
             // and skipped its restart.
             String pendingQuality = null;
             if (settings.has("recordingQuality")) {
-                String tier = settings.getString("recordingQuality").toUpperCase();
+                String tier = settings.getString("recordingQuality").toUpperCase(Locale.ROOT);
                 if (tier.equals("ECONOMY") || tier.equals("STANDARD")
                         || tier.equals("HIGH") || tier.equals("PREMIUM")
                         || tier.equals("MAX")) {
@@ -1386,7 +1453,7 @@ public class QualitySettingsApiHandler {
             // to the new tier system. UI should send `recordingQuality`
             // directly going forward; this branch only catches old clients.
             if (pendingQuality == null && settings.has("recordingBitrate")) {
-                String legacy = settings.getString("recordingBitrate").toUpperCase();
+                String legacy = settings.getString("recordingBitrate").toUpperCase(Locale.ROOT);
                 String tier;
                 switch (legacy) {
                     case "LOW":    tier = "ECONOMY"; break;
@@ -1401,7 +1468,7 @@ public class QualitySettingsApiHandler {
 
             String pendingCodec = null;
             if (settings.has("recordingCodec")) {
-                String codec = settings.getString("recordingCodec").toUpperCase();
+                String codec = settings.getString("recordingCodec").toUpperCase(Locale.ROOT);
                 if (codec.equals("H264") || codec.equals("H265")) {
                     pendingCodec = codec;
                     recordingCodec = codec;
@@ -1445,14 +1512,14 @@ public class QualitySettingsApiHandler {
             JSONObject oemBlock = settings.optJSONObject("oemDashcam");
             if (oemBlock != null) {
                 if (oemBlock.has("recordingQuality")) {
-                    String t = oemBlock.optString("recordingQuality", "").toUpperCase();
+                    String t = oemBlock.optString("recordingQuality", "").toUpperCase(Locale.ROOT);
                     if (t.equals("ECONOMY") || t.equals("STANDARD")
                             || t.equals("HIGH") || t.equals("PREMIUM") || t.equals("MAX")) {
                         oemDelta.put("recordingQuality", t);
                     }
                 }
                 if (oemBlock.has("codec")) {
-                    String c = oemBlock.optString("codec", "").toUpperCase();
+                    String c = oemBlock.optString("codec", "").toUpperCase(Locale.ROOT);
                     if (c.equals("H264") || c.equals("H265")) oemDelta.put("codec", c);
                 }
                 if (oemBlock.has("fps")) {
@@ -1528,7 +1595,7 @@ public class QualitySettingsApiHandler {
             // Streaming quality is a separate encoder; it doesn't share the
             // recording reinit cycle, so route it through its own setter.
             if (settings.has("streamingQuality")) {
-                String streamQuality = settings.getString("streamingQuality").toUpperCase();
+                String streamQuality = settings.getString("streamingQuality").toUpperCase(Locale.ROOT);
                 if (streamQuality.equals("ULTRA_LOW") || streamQuality.equals("LOW")
                         || streamQuality.equals("MEDIUM") || streamQuality.equals("HIGH")
                         || streamQuality.equals("ULTRA_HIGH") || streamQuality.equals("SMOOTH")
@@ -1584,7 +1651,7 @@ public class QualitySettingsApiHandler {
             // world until the user sends one of these keys.
             boolean surveillanceDirty = false;
             if (settings.has("surveillanceQuality")) {
-                String tier = settings.getString("surveillanceQuality").toUpperCase();
+                String tier = settings.getString("surveillanceQuality").toUpperCase(Locale.ROOT);
                 if (tier.equals("ECONOMY") || tier.equals("STANDARD")
                         || tier.equals("HIGH") || tier.equals("PREMIUM")
                         || tier.equals("MAX")) {
@@ -1707,7 +1774,7 @@ public class QualitySettingsApiHandler {
         // Try unified config first
         try {
             File unifiedFile = new File(UNIFIED_CONFIG_FILE);
-            if (unifiedFile.exists()) {
+            if (RemovableStorageFs.exists(unifiedFile)) {
                 BufferedReader reader = new BufferedReader(new FileReader(unifiedFile));
                 StringBuilder sb = new StringBuilder();
                 String line;
@@ -1729,7 +1796,7 @@ public class QualitySettingsApiHandler {
                         recordingBitrate = tier;  // mirror — keep in sync
                         CameraDaemon.log("Restored recording tier from unified: " + tier);
                     } else if (recording.has("bitrate")) {
-                        String legacyBitrate = recording.getString("bitrate").toUpperCase();
+                        String legacyBitrate = recording.getString("bitrate").toUpperCase(Locale.ROOT);
                         switch (legacyBitrate) {
                             case "LOW":    tier = "ECONOMY"; break;
                             case "MEDIUM": tier = "STANDARD"; break;
@@ -1773,8 +1840,8 @@ public class QualitySettingsApiHandler {
     private static void loadLegacySettings() {
         try {
             File file = new File(LEGACY_SETTINGS_FILE);
-            CameraDaemon.log("Loading settings from legacy: " + LEGACY_SETTINGS_FILE + " (exists=" + file.exists() + ")");
-            if (file.exists()) {
+            CameraDaemon.log("Loading settings from legacy: " + LEGACY_SETTINGS_FILE + " (exists=" + RemovableStorageFs.exists(file) + ")");
+            if (RemovableStorageFs.exists(file)) {
                 BufferedReader reader = new BufferedReader(new FileReader(file));
                 StringBuilder sb = new StringBuilder();
                 String line;
@@ -1787,13 +1854,13 @@ public class QualitySettingsApiHandler {
                 
                 // Canonical recordingQuality first; fall back to legacy bitrate.
                 if (settings.has("recordingQuality")) {
-                    String tier = settings.getString("recordingQuality").toUpperCase();
+                    String tier = settings.getString("recordingQuality").toUpperCase(Locale.ROOT);
                     if (isKnownTier(tier)) {
                         recordingQuality = tier;
                         recordingBitrate = tier;
                     }
                 } else if (settings.has("recordingBitrate")) {
-                    String bitrate = settings.getString("recordingBitrate").toUpperCase();
+                    String bitrate = settings.getString("recordingBitrate").toUpperCase(Locale.ROOT);
                     String tier;
                     switch (bitrate) {
                         case "LOW":    tier = "ECONOMY"; break;
@@ -1867,7 +1934,7 @@ public class QualitySettingsApiHandler {
         if (quality == null) return;
         String tier;
         if (isKnownTier(quality)) {
-            tier = quality.toUpperCase();
+            tier = quality.toUpperCase(Locale.ROOT);
         } else {
             // Legacy LOW/REDUCED/NORMAL → STANDARD.
             tier = "STANDARD";
@@ -1882,7 +1949,7 @@ public class QualitySettingsApiHandler {
     public static void setRecordingBitrate(String bitrate) {
         if (bitrate == null) return;
         String tier;
-        switch (bitrate.toUpperCase()) {
+        switch (bitrate.toUpperCase(Locale.ROOT)) {
             case "LOW":    tier = "ECONOMY"; break;
             case "MEDIUM": tier = "STANDARD"; break;
             case "HIGH":   tier = "HIGH"; break;
@@ -1896,7 +1963,7 @@ public class QualitySettingsApiHandler {
      *  is built — keep the check string-based and cheap). */
     private static boolean isKnownTier(String s) {
         if (s == null) return false;
-        switch (s.toUpperCase()) {
+        switch (s.toUpperCase(Locale.ROOT)) {
             case "ECONOMY":
             case "STANDARD":
             case "HIGH":
@@ -1920,7 +1987,7 @@ public class QualitySettingsApiHandler {
     // Accepts both canonical tier names (ECONOMY..MAX) and legacy LOW/MEDIUM/HIGH.
     public static void setRecordingBitrateStatic(String value) {
         if (value == null) return;
-        String v = value.toUpperCase();
+        String v = value.toUpperCase(Locale.ROOT);
         String tier;
         switch (v) {
             case "LOW":    tier = "ECONOMY"; break;

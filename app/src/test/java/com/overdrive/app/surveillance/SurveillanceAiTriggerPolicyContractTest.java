@@ -19,12 +19,22 @@ public class SurveillanceAiTriggerPolicyContractTest {
                 "app/src/main/java/com/overdrive/app/surveillance/SurveillanceEngineGpu.java");
 
         int salienceOverride = source.indexOf("Motion-salience override:");
-        int finalGate = source.indexOf("if (aiAvailable && !aiRecentlyConfirmed)");
+        int finalGate = source.indexOf(
+                "if (aiAvailable && !aiRecentlyConfirmed && !salienceExempts)");
         int triggerDecision = source.indexOf("if (shouldSuppress)", finalGate);
         assertTrue(salienceOverride >= 0);
         assertTrue(finalGate > salienceOverride);
         assertTrue(finalGate >= 0);
         assertTrue(triggerDecision > finalGate);
+        // The final gate has exactly one exemption: the opt-in salience channel,
+        // carried by salienceExempts with all of its brakes. No unconditional
+        // form of the gate may remain, and the timeout/proximity overrides must
+        // still not be able to bypass it.
+        assertTrue(source.indexOf("if (aiAvailable && !aiRecentlyConfirmed) {") < 0);
+        assertTrue(source.contains("boolean salienceExempts = salienceMayTrigger()\n"
+                + "                            && !brightnessEventSalienceScope\n"
+                + "                            && !deterrentActive\n"
+                + "                            && salientQuadrantStillCoherent(results);"));
         assertTrue(source.contains("triggerSpaceDets.add(baselineSpaceDets != null"));
         assertTrue(source.contains("if (triggerEvidenceFound)"));
         assertTrue(source.contains(

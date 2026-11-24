@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="projection_cluster_controls">Kontrole instrument table</string>
+    <string name="projection_cluster_back">Nazad</string>
+    <string name="projection_cluster_home">Kuća</string>
+    <string name="projection_cluster_volume_down">Jačina zvuka −</string>
+    <string name="projection_cluster_volume_up">Jačina zvuka +</string>
+    <string name="projection_cluster_control_unavailable">Upravljanje instrument tablom nije dostupno. Proverite aktivnu projekciju i ponovo pokrenite pozadinski servis posle ažuriranja.</string>
+</resources>

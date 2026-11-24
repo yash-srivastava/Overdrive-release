@@ -95,8 +95,9 @@ class MapGlassLayers {
         private const val CORE = 3
         private const val SPEC = 4
 
-        // Marker scale by zoom: the art is sized for the follow camera (z17.4, 56° tilt); zoomed out it shrinks.
-        private val GEM_ZOOM = doubleArrayOf(11.0, 0.36, 13.0, 0.44, 15.0, 0.56, 16.0, 0.66, 17.0, 0.88, 17.4, 1.0)
+        // Marker scale by zoom: the art is sized for the follow camera (z17.4, 56° tilt); it holds ≥0.83 down to the
+        // 130 km/h drive zoom (15.3) so hazards stay legible at speed, and only overview zooms shrink it.
+        private val GEM_ZOOM = doubleArrayOf(11.0, 0.36, 13.0, 0.5, 14.5, 0.72, 15.5, 0.86, 16.5, 0.95, 17.4, 1.0)
         private val PIN_ZOOM = doubleArrayOf(11.0, 0.5, 14.0, 0.62, 16.0, 0.76, 17.4, 1.0)
 
         /** interpolate(zoom) over [stops] (zoom, factor pairs), each factor times [base] when given. */
@@ -189,7 +190,8 @@ class MapGlassLayers {
      * fill-extrusion layer (`building-3d`); without one (Google raster) they go below the arrow/hazard/pin group,
      * which sits at the top of the style or below [topBelowLayerId] when that layer exists.
      */
-    fun install(style: Style, night: Boolean, lowTier: Boolean, topBelowLayerId: String? = null) {
+    @JvmOverloads
+    fun install(style: Style, night: Boolean, lowTier: Boolean, topBelowLayerId: String? = null, palette: MapGlassPalette = MapGlassPalette.of(night)) {
         handler.removeCallbacks(settleTask)
         pending = -1
         dropRefs()
@@ -197,7 +199,7 @@ class MapGlassLayers {
         this.night = night
         this.lowTier = lowTier
         topBelowId = topBelowLayerId
-        val pal = MapGlassPalette.of(night)
+        val pal = palette
         cacheColors(pal)
         try {
             removeOwn(style)

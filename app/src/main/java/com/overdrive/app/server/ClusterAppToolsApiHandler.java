@@ -55,7 +55,7 @@ public final class ClusterAppToolsApiHandler {
     }
 
     public static JSONObject sessionSnapshot() throws Exception {
-        boolean di5 = ClusterTransport.isDiLink5();
+        boolean di5 = ClusterTransport.usesHostedProjectionService();
         long generation = di5 ? DiLink5ClusterCast.currentSessionGeneration() : 0L;
         String pkg = di5 ? DiLink5ClusterCast.getCastPackage() : null;
         int id = di5 ? DiLink5ClusterCast.currentTargetDisplayId() : -1;

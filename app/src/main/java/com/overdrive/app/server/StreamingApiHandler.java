@@ -8,6 +8,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.OutputStream;
+import java.util.Locale;
 
 /**
  * Streaming API Handler - manages WebSocket streaming configuration and control.
@@ -18,7 +19,7 @@ import java.io.OutputStream;
  * - GET /api/stream/status - Get streaming status
  * - GET /api/stream/quality - Get available quality presets
  * - POST /api/stream/quality/{preset} - Set streaming quality
- * - POST /api/stream/view/{mode} - Set view mode (0=Mosaic, 1-4=AVM quadrant, 6=OEM Dashcam)
+ * - POST /api/stream/view/{mode} - Set view mode (0=Mosaic, 1-4=AVM quadrant, 6=OEM Dashcam, 9=AVM + DVR)
  * - GET /api/stream/view - Get current view mode
  */
 public class StreamingApiHandler {
@@ -38,18 +39,27 @@ public class StreamingApiHandler {
     // scaler defaults to view 0, even though the user is still on DVR view.
     // This static survives the teardown so HttpServer's WS-open path can
     // re-apply the correct view (and re-route OEM for view 6).
-    // -1 = never set; 0..6 valid mode values.
+    // -1 = never set; 0..6 and 9 are persistent live-view modes.
     //
-    // Blind-spot views 7/8 are INTENTIONALLY excluded (clamp stays <=6): they are
-    // session-only, owned by BlindSpotOverlayService which re-issues
+    // Blind-spot views 7/8 are INTENTIONALLY excluded: they are session-only,
+    // owned by BlindSpotOverlayService which re-issues
     // /api/stream/view/{7|8} on every reveal AND that path re-applies the saved
     // calibration (handleStreamViewMode). Persisting 7/8 here would restore a
     // blind-spot view on a bare WS reconnect WITHOUT re-applying calibration —
     // worse than reverting to a normal view, which self-heals on the next signal.
     private static volatile int lastDesiredViewMode = -1;
-    public static int getLastDesiredViewMode() { return lastDesiredViewMode; }
+    private static boolean isConcurrentAvmSupported() {
+        org.json.JSONObject cameraCfg = com.overdrive.app.config.UnifiedConfigManager
+            .loadConfig().optJSONObject("camera");
+        return cameraCfg != null && cameraCfg.optInt("concurrentAvmSupported", -1) == 1;
+    }
+    public static int getLastDesiredViewMode() {
+        return lastDesiredViewMode == 9 && !isConcurrentAvmSupported()
+            ? 0 : lastDesiredViewMode;
+    }
     public static void setLastDesiredViewMode(int mode) {
-        if (mode >= -1 && mode <= 6) lastDesiredViewMode = mode;
+        if (mode == 9 && !isConcurrentAvmSupported()) return;
+        if (mode >= -1 && (mode <= 6 || mode == 9)) lastDesiredViewMode = mode;
     }
 
     /*
@@ -669,8 +679,12 @@ public class StreamingApiHandler {
             return true;
         }
         if (path.startsWith("/api/stream/quality/") && method.equals("POST")) {
-            String quality = path.substring(20).toUpperCase();
+            String quality = path.substring(20).toUpperCase(Locale.ROOT);
             handleSetStreamQuality(out, quality);
+            return true;
+        }
+        if (path.equals("/api/stream/combined-availability") && method.equals("GET")) {
+            sendCombinedAvailability(out);
             return true;
         }
         if (path.startsWith("/api/stream/view-status/") && method.equals("GET")) {
@@ -2182,7 +2196,8 @@ public class StreamingApiHandler {
         
         if (pipeline != null && pipeline.isStreamingEnabled()) {
             response.put("viewMode", pipeline.getStreamViewMode());
-            String[] modeNames = {"Mosaic", "Front", "Right", "Rear", "Left", "Raw", "OEM Dashcam"};
+            String[] modeNames = {"Mosaic", "Front", "Right", "Rear", "Left", "Raw", "OEM Dashcam",
+                              "BlindSpot L", "BlindSpot R", "All Cameras + DVR"};
             int vm = pipeline.getStreamViewMode();
             response.put("viewName", vm >= 0 && vm < modeNames.length ? modeNames[vm] : "Unknown");
         }
@@ -2294,14 +2309,24 @@ public class StreamingApiHandler {
             int viewMode,
             ViewRequest request,
             boolean broadwayDecoder) throws Exception {
-        // Live-view stream accepts only modes 0-6. Blind-spot views 7/8 are
+        // Live-view stream accepts modes 0-6 and combined mode 9. Blind-spot views 7/8 are
         // NOT valid here — they belong to the dedicated BS pipeline on port
         // 8889 and must route through /api/bs/view/{mode} (validated at
         // handleBsView). Letting 7/8 through here would call
         // pipeline.setStreamViewMode() on the SHARED live-view scaler and
         // hijack the live-view stream.
-        if (viewMode < 0 || viewMode > 6) {
+        if (viewMode < 0 || (viewMode > 6 && viewMode != 9)) {
             HttpResponse.sendJsonError(out, Messages.get("errors.streaming_invalid_view_mode"));
+            return;
+        }
+        // An unsupported composition must not become persisted reconnect intent.
+        if (viewMode == 9 && !isConcurrentAvmSupported()) {
+            JSONObject rejected = new JSONObject();
+            rejected.put("success", false);
+            rejected.put("viewMode", 9);
+            rejected.put("errorCode", "combined_view_unsupported");
+            rejected.put("error", "Combined AVM and DVR streaming is not supported on this vehicle");
+            HttpResponse.sendJson(out, rejected.toString());
             return;
         }
         int previousDesiredView = getLastDesiredViewMode();
@@ -2328,7 +2353,11 @@ public class StreamingApiHandler {
         // oemDashcamCameraId, and (b) on single-AVM-client HALs starting
         // it would yield the pano pipeline.
         if (viewMode == 6) {
-            handleOemDashcamView(out, request);
+            handleOemDashcamView(out, request, previousDesiredView);
+            return;
+        }
+        if (viewMode == 9) {
+            handleCombinedOemAvmView(out, request, pipeline, previousDesiredView);
             return;
         }
 
@@ -2437,12 +2466,13 @@ public class StreamingApiHandler {
         // Switching from view 0 → view 1 doesn't change OEM's required
         // state (no streaming viewer either way) and used to spuriously
         // boot the pipeline when smart mode was armed.
-        if (prevView == 6 || previousDesiredView == 6 || viewMode == 6) {
+        if (prevView == 6 || previousDesiredView == 6 || viewMode == 6
+                || prevView == 9 || previousDesiredView == 9 || viewMode == 9) {
             com.overdrive.app.server.OemDashcamApiHandler.scheduleLifecycleRecalc();
         }
 
         String[] modeNames = {"Mosaic", "Front", "Right", "Rear", "Left", "Raw", "OEM Dashcam",
-                              "BlindSpot L", "BlindSpot R"};
+                              "BlindSpot L", "BlindSpot R", "All Cameras + DVR"};
         CameraDaemon.log("Stream view mode set to: " + (viewMode < modeNames.length ? modeNames[viewMode] : "Unknown"));
         
         JSONObject response = new JSONObject();
@@ -2456,13 +2486,111 @@ public class StreamingApiHandler {
         GpuSurveillancePipeline pipeline = CameraDaemon.getGpuPipeline();
 
         int viewMode = (pipeline != null) ? pipeline.getStreamViewMode() : -1;
-        String[] modeNames = {"Mosaic", "Front", "Right", "Rear", "Left", "Raw", "OEM Dashcam"};
+        String[] modeNames = {"Mosaic", "Front", "Right", "Rear", "Left", "Raw", "OEM Dashcam",
+                              "BlindSpot L", "BlindSpot R", "All Cameras + DVR"};
 
         JSONObject response = new JSONObject();
         response.put("success", true);
         response.put("viewMode", viewMode);
         response.put("viewName", viewMode >= 0 && viewMode < modeNames.length ? modeNames[viewMode] : "Unknown");
         HttpResponse.sendJson(out, response.toString());
+    }
+
+    private static void sendCombinedAvailability(OutputStream out) throws Exception {
+        org.json.JSONObject cameraCfg = com.overdrive.app.config.UnifiedConfigManager
+            .loadConfig().optJSONObject("camera");
+        com.overdrive.app.camera.OemDashcamPipeline oem = CameraDaemon.getOemDashcamPipeline();
+        boolean available = cameraCfg != null
+            && cameraCfg.optInt("concurrentAvmSupported", -1) == 1
+            && com.overdrive.app.config.UnifiedConfigManager.resolveOemDashcamId() >= 0
+            && oem != null && oem.getCameraId()
+                == com.overdrive.app.config.UnifiedConfigManager.resolveOemDashcamId()
+            && oem.isRouteReady() && oem.hasRecentFrame(5000L);
+        JSONObject response = new JSONObject();
+        response.put("available", available);
+        response.put("concurrentAvmSupported", cameraCfg != null
+            && cameraCfg.optInt("concurrentAvmSupported", -1) == 1);
+        HttpResponse.sendJson(out, response.toString());
+    }
+
+    /** Route the five-camera composition on vehicles proven to support simultaneous
+     * AVM + OEM capture. A cold DVR is started by the OEM lifecycle worker, whose
+     * post-start rebind activates the composition once the source is route-ready. */
+    private static void handleCombinedOemAvmView(
+            OutputStream out, ViewRequest request, GpuSurveillancePipeline pano,
+            int previousDesiredView) throws Exception {
+        org.json.JSONObject cameraCfg = com.overdrive.app.config.UnifiedConfigManager
+            .loadConfig().optJSONObject("camera");
+        int concurrent = cameraCfg == null ? -1 : cameraCfg.optInt("concurrentAvmSupported", -1);
+        int oemId = com.overdrive.app.config.UnifiedConfigManager.resolveOemDashcamId();
+        if (concurrent != 1 || oemId < 0) {
+            JSONObject err = new JSONObject();
+            err.put("success", false); err.put("viewMode", 9);
+            err.put("errorCode", "combined_view_unsupported");
+            err.put("error", "Combined AVM and DVR streaming is not supported on this vehicle");
+            HttpResponse.sendJson(out, err.toString());
+            return;
+        }
+        if (!ensurePanoStartedNonBlocking(pano)) {
+            armLiveViewOrphanWatchdog(pano);
+            JSONObject pending = new JSONObject();
+            pending.put("success", false); pending.put("viewMode", 9);
+            pending.put("starting", true); pending.put("errorCode", "pano_starting");
+            pending.put("error", "AVM pipeline starting");
+            HttpResponse.sendJson(out, pending.toString());
+            return;
+        }
+        if (!pano.isStreamingEnabled()) {
+            try {
+                GpuPipelineConfig.StreamingQuality q =
+                    GpuPipelineConfig.StreamingQuality.fromString(streamingQuality);
+                pano.enableStreaming(q.width, q.height, q.fps, q.bitrate);
+            } catch (Exception e) {
+                JSONObject err = new JSONObject();
+                err.put("success", false); err.put("viewMode", 9);
+                err.put("errorCode", "stream_starting"); err.put("error", e.getMessage());
+                HttpResponse.sendJson(out, err.toString());
+                return;
+            }
+        }
+        if (!ensureCurrentViewRequest(out, 9, request)) return;
+        if (pano.getStreamViewMode() == 6 || pano.isOemStreamSourceActive()) {
+            try { pano.reattachOwnStreamCallback(); } catch (Throwable ignored) {}
+        }
+        com.overdrive.app.camera.OemDashcamPipeline oem = CameraDaemon.getOemDashcamPipeline();
+        boolean sourceReady = oem != null && oem.getCameraId() == oemId && oem.isRouteReady();
+        if (sourceReady && pano.activateCombinedViewIfDesired(oem)) {
+            if (oem.hasRecentFrame(5000L)) {
+                JSONObject response = new JSONObject();
+                response.put("success", true); response.put("viewMode", 9);
+                response.put("viewName", "All Cameras + DVR");
+                HttpResponse.sendJson(out, response.toString());
+            } else {
+                sendDvrViewPending(out, 9, "oem_starting",
+                        "OEM Dashcam waiting for its first frame — try again in a few seconds");
+            }
+            return;
+        }
+        if (!ensureCurrentViewRequest(out, 9, request)) return;
+        if (sendOemTerminalErrorIfAny(out, 9)) return;
+        // The persisted view-9 intent is a streaming viewer, so the lifecycle
+        // worker brings the DVR up while the current feed stays on screen.
+        kickOemLifecycleForDvrView(previousDesiredView);
+        sendDvrViewPending(out, 9, "oem_starting",
+                "OEM Dashcam starting — try again in a few seconds");
+    }
+
+    /**
+     * Wake the OEM lifecycle for a DVR-backed view. Between DVR-backed views the
+     * OEM demand is unchanged, so a start in progress is kept and a fresh pass
+     * follows it instead of restarting the camera open.
+     */
+    private static void kickOemLifecycleForDvrView(int previousDesiredView) {
+        if (previousDesiredView == 6 || previousDesiredView == 9) {
+            com.overdrive.app.server.OemDashcamApiHandler.scheduleLifecycleRecalcAfterCurrent();
+        } else {
+            com.overdrive.app.server.OemDashcamApiHandler.scheduleLifecycleRecalc();
+        }
     }
 
     /**
@@ -2472,6 +2600,53 @@ public class StreamingApiHandler {
      */
     private static void handleStreamViewStatus(
             OutputStream out, int viewMode, ViewRequest request) throws Exception {
+        if (viewMode == 9) {
+            if (!request.isCurrent() || getLastDesiredViewMode() != 9) {
+                sendSupersededViewResponse(out, viewMode);
+                return;
+            }
+            GpuSurveillancePipeline pano = CameraDaemon.getGpuPipeline();
+            org.json.JSONObject cameraCfg = com.overdrive.app.config.UnifiedConfigManager
+                .loadConfig().optJSONObject("camera");
+            int oemId = com.overdrive.app.config.UnifiedConfigManager.resolveOemDashcamId();
+            if (cameraCfg == null || cameraCfg.optInt("concurrentAvmSupported", -1) != 1
+                    || oemId < 0) {
+                JSONObject err = new JSONObject();
+                err.put("success", false); err.put("viewMode", 9);
+                err.put("errorCode", "combined_view_unsupported");
+                err.put("error", "Combined AVM and DVR streaming is not supported on this vehicle");
+                HttpResponse.sendJson(out, err.toString());
+                return;
+            }
+            if (pano == null) {
+                HttpResponse.sendJsonError(out, Messages.get("errors.streaming_pipeline_not_available"));
+                return;
+            }
+            if (!pano.isRunning()) {
+                sendDvrViewPending(out, 9, "pano_starting",
+                        "Pipeline starting - try again in a few seconds");
+                return;
+            }
+            if (!pano.isStreamingEnabled()) {
+                sendDvrViewPending(out, 9, "stream_starting",
+                        "Streaming starting - try again in a few seconds");
+                return;
+            }
+            com.overdrive.app.camera.OemDashcamPipeline oem = CameraDaemon.getOemDashcamPipeline();
+            boolean dvrLive = oem != null && oem.getCameraId() == oemId
+                && oem.isRouteReady() && oem.hasRecentFrame(5000L);
+            if (dvrLive && pano.getStreamViewMode() == 9) {
+                JSONObject status = new JSONObject();
+                status.put("success", true); status.put("viewMode", 9);
+                status.put("viewName", "All Cameras + DVR");
+                HttpResponse.sendJson(out, status.toString());
+                return;
+            }
+            if (!dvrLive && sendOemTerminalErrorIfAny(out, 9)) return;
+            sendDvrViewPending(out, 9, "oem_starting",
+                    "OEM Dashcam starting - try again in a few seconds");
+            return;
+        }
         if (viewMode != 6) {
             HttpResponse.sendJsonError(out, Messages.get("errors.streaming_invalid_view_mode"));
             return;
@@ -2521,7 +2696,7 @@ public class StreamingApiHandler {
      * legacy raw debug passthrough.
      */
     private static void handleOemDashcamView(
-            OutputStream out, ViewRequest request) throws Exception {
+            OutputStream out, ViewRequest request, int previousDesiredView) throws Exception {
         GpuSurveillancePipeline pano = CameraDaemon.getGpuPipeline();
         // Async-warm pano if needed; return starting=true while it's coming up.
         if (!ensurePanoStartedNonBlocking(pano)) {
@@ -2620,7 +2795,7 @@ public class StreamingApiHandler {
             // than the scaler, so the lifecycle kick still sees view 6 while
             // the source warms.
             if (!ensureCurrentViewRequest(out, 6, request)) return;
-            com.overdrive.app.server.OemDashcamApiHandler.scheduleLifecycleRecalc();
+            kickOemLifecycleForDvrView(previousDesiredView);
             JSONObject pending = new JSONObject();
             pending.put("success", false);
             pending.put("viewMode", 6);
@@ -2684,9 +2859,14 @@ public class StreamingApiHandler {
 
     private static void sendOemViewPending(
             OutputStream out, String errorCode, String error) throws Exception {
+        sendDvrViewPending(out, 6, errorCode, error);
+    }
+
+    private static void sendDvrViewPending(
+            OutputStream out, int viewMode, String errorCode, String error) throws Exception {
         JSONObject pending = new JSONObject();
         pending.put("success", false);
-        pending.put("viewMode", 6);
+        pending.put("viewMode", viewMode);
         pending.put("starting", true);
         pending.put("errorCode", errorCode);
         pending.put("error", error);
@@ -2698,11 +2878,15 @@ public class StreamingApiHandler {
      * both the mutating selection and the read-only readiness endpoint.
      */
     private static boolean sendOemTerminalErrorIfAny(OutputStream out) throws Exception {
+        return sendOemTerminalErrorIfAny(out, 6);
+    }
+
+    private static boolean sendOemTerminalErrorIfAny(OutputStream out, int viewMode) throws Exception {
         int resolved = com.overdrive.app.config.UnifiedConfigManager.resolveOemDashcamId();
         if (resolved < 0) {
             JSONObject err = new JSONObject();
             err.put("success", false);
-            err.put("viewMode", 6);
+            err.put("viewMode", viewMode);
             err.put("errorCode", "oem_disabled");
             err.put("error", "OEM Dashcam disabled on this vehicle");
             HttpResponse.sendJson(out, err.toString());
@@ -2720,7 +2904,7 @@ public class StreamingApiHandler {
                 if (!reason.isEmpty() && lastAt > 0 && ageMs < 60_000L) {
                     JSONObject err = new JSONObject();
                     err.put("success", false);
-                    err.put("viewMode", 6);
+                    err.put("viewMode", viewMode);
                     err.put("errorCode", "oem_unsupported");
                     err.put("error", "OEM Dashcam unavailable: " + reason);
                     HttpResponse.sendJson(out, err.toString());
@@ -2736,7 +2920,7 @@ public class StreamingApiHandler {
     
     public static void setStreamingQuality(String quality) {
         if (quality == null) return;
-        String q = quality.toUpperCase();
+        String q = quality.toUpperCase(Locale.ROOT);
         // Mirror the StreamingQuality enum (GpuPipelineConfig). SMOOTH and MAX
         // are recent additions; the cold-start loader (QualitySettingsApiHandler.
         // loadPersistedSettings) calls this with whatever tag is on disk, so if

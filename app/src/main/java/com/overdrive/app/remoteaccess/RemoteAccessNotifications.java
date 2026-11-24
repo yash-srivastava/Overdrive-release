@@ -3,6 +3,7 @@ package com.overdrive.app.remoteaccess;
 import com.overdrive.app.config.UnifiedConfigManager;
 import com.overdrive.app.notifications.NotificationBus;
 import com.overdrive.app.notifications.NotificationEvent;
+import com.overdrive.app.server.Messages;
 
 import org.json.JSONObject;
 
@@ -81,23 +82,41 @@ public final class RemoteAccessNotifications {
         boolean telegram = allows(settings, data, "telegram");
         if (!push && !telegram) return null;
 
-        String verb = "lock".equals(action) ? "lock" : "unlock";
+        boolean lock = "lock".equals(action);
+        String verb = lock ? "lock" : "unlock";
         String title;
         String body;
         if ("confirmed".equals(outcome)) {
-            title = "Proximity " + ("lock".equals(action) ? "lock" : "unlock") + " confirmed";
-            body = "Driver-door lock state is " + ("lock".equals(action) ? "locked" : "unlocked") + ".";
+            title = text(lock ? "notifications.remote_access_lock_confirmed_title"
+                    : "notifications.remote_access_unlock_confirmed_title",
+                    "Proximity " + verb + " confirmed");
+            body = text(lock ? "notifications.remote_access_lock_confirmed_body"
+                    : "notifications.remote_access_unlock_confirmed_body",
+                    "Driver-door lock state is " + (lock ? "locked" : "unlocked") + ".");
         } else if ("unconfirmed".equals(outcome)) {
-            title = "Proximity " + verb + " unconfirmed";
-            body = "The " + verb + " command was accepted; the vehicle state was not confirmed.";
+            title = text(lock ? "notifications.remote_access_lock_unconfirmed_title"
+                    : "notifications.remote_access_unlock_unconfirmed_title",
+                    "Proximity " + verb + " unconfirmed");
+            body = text(lock ? "notifications.remote_access_lock_unconfirmed_body"
+                    : "notifications.remote_access_unlock_unconfirmed_body",
+                    "The " + verb + " command was accepted; the vehicle state was not confirmed.");
         } else {
-            title = "Proximity " + verb + " failed";
-            body = "The vehicle " + verb + " command failed.";
+            title = text(lock ? "notifications.remote_access_lock_failed_title"
+                    : "notifications.remote_access_unlock_failed_title",
+                    "Proximity " + verb + " failed");
+            body = text(lock ? "notifications.remote_access_lock_failed_body"
+                    : "notifications.remote_access_unlock_failed_body",
+                    "The vehicle " + verb + " command failed.");
         }
         String name = data.optString("deviceName", "");
         String detail = data.optString("reason", "");
-        if (!name.isEmpty()) body += (isKeyFobSource(source) ? " Key: " : " Phone: ") + name + ".";
-        if (!detail.isEmpty()) body += " " + detail;
+        if (!name.isEmpty()) {
+            boolean fob = isKeyFobSource(source);
+            body += " " + text(fob ? "notifications.remote_access_device_key_suffix"
+                    : "notifications.remote_access_device_phone_suffix",
+                    (fob ? "Key: " : "Phone: ") + name + ".", name);
+        }
+        if (!detail.isEmpty()) body += " " + RemoteAccessReasonText.localize(detail);
         NotificationEvent event = new NotificationEvent(CATEGORY,
                 NotificationEvent.Severity.CRITICAL, title, body,
                 "remote-access-" + action, "/remote-access.html", data);
@@ -124,6 +143,12 @@ public final class RemoteAccessNotifications {
         if ("push".equals(channel)) return settings.optBoolean("notifyPush", false);
         if ("telegram".equals(channel)) return settings.optBoolean("notifyTelegram", false);
         return false;
+    }
+
+    // Messages returns the key itself when no catalog is readable; keep the English text then.
+    private static String text(String key, String english, Object... args) {
+        String value = Messages.get(key, args);
+        return value == null || value.isEmpty() || value.equals(key) ? english : value;
     }
 
     private static boolean isKeyFobSource(String source) {

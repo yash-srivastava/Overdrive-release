@@ -90,7 +90,7 @@ object CustomWidgetsApiHandler {
         val snap = reply { LauncherApiHandler.handle("GET", "/api/launcher/v1/summary", null, it) }
             ?.let { s -> try { GlassWidgetsFeed.parse(s) } catch (t: Throwable) { null } }
         val live = if (snap?.driving == true && !snap.reversing) {
-            reply { GlassWidgetsApiHandler.handle("GET", "/api/widgets/live?dyn=1", null, it) }
+            reply { GlassWidgetsApiHandler.handle("GET", "/api/widgets/live?dyn=1&drive=1", null, it) }
                 ?.let { l -> try { GlassWidgetsFeed.live(l) } catch (t: Throwable) { null } }
         } else null
         val roadState = try {

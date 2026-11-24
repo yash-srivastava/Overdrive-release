@@ -3,6 +3,7 @@ package com.overdrive.app.server;
 import com.overdrive.app.byd.BydDataCollector;
 import com.overdrive.app.byd.BydVehicleData;
 import com.overdrive.app.byd.cloud.BydCloudConfig;
+import com.overdrive.app.byd.cloud.BydCloudDataProvider;
 import com.overdrive.app.byd.cloud.VehicleCloudSnapshot;
 import com.overdrive.app.byd.light.LightConstants;
 import com.overdrive.app.byd.routing.DrivingSafetyGuard;
@@ -41,6 +42,7 @@ import java.util.Map;
  *   POST /api/vehicle/power-on      — SDK_ONLY, blocked unless parked and stationary
  *   POST /api/vehicle/power-off     — SDK_ONLY, blocked unless parked and stationary
  *   POST /api/vehicle/climate       — power=SDK_FIRST with cloud fallback, set_temp/set_fan=SDK_ONLY
+ *                                     vent_mode/vent_direction=SDK_ONLY (DiLink 3)
  *   GET  /api/vehicle/climate-schedule — BOOKINGAIR booking list (cloud reported)
  *   POST /api/vehicle/climate-schedule — BOOKINGAIR create/update/delete, CLOUD_ONLY
  *   POST /api/vehicle/seat          — SDK_FIRST with guarded cloud fallback
@@ -324,6 +326,7 @@ public class VehicleControlApiHandler {
 
         // POST /api/vehicle/unlock
         if (cleanPath.equals("/api/vehicle/unlock") && method.equals("POST")) {
+            if (!StepUpGate.require(StepUpGate.UNLOCK, out)) return true;
             handleUnlock(out);
             return true;
         }
@@ -407,6 +410,9 @@ public class VehicleControlApiHandler {
         // Under the already-allowlisted /api/vehicle/ prefix so automation + keymap
         // reach it without widening the bypass surface.
         if (cleanPath.equals("/api/vehicle/play-audio") && method.equals("POST")) {
+            // Sound in the cabin could be heard by the car's own voice assistant.
+            if (isRemoteCaller()
+                    && !StepUpGate.requireBundle("cabinAudio", "Play sound in the car", out)) return true;
             handlePlayAudio(out, body);
             return true;
         }
@@ -421,6 +427,8 @@ public class VehicleControlApiHandler {
         // POST /api/vehicle/speak — speak text aloud via TextToSpeech (app-process,
         // same bridge as play-audio; the daemon can't run TTS). Body { text, channel? }.
         if (cleanPath.equals("/api/vehicle/speak") && method.equals("POST")) {
+            if (isRemoteCaller()
+                    && !StepUpGate.requireBundle("cabinAudio", "Speak in the car", out)) return true;
             handleSpeak(out, body);
             return true;
         }
@@ -451,6 +459,8 @@ public class VehicleControlApiHandler {
         // POST /api/vehicle/power-on | /api/vehicle/power-off
         if ((cleanPath.equals("/api/vehicle/power-on") || cleanPath.equals("/api/vehicle/power-off"))
                 && method.equals("POST")) {
+            if (!StepUpGate.require(cleanPath.endsWith("/power-on")
+                    ? StepUpGate.POWER_ON : StepUpGate.POWER_OFF, out)) return true;
             handleVehiclePower(out, cleanPath.endsWith("/power-on"));
             return true;
         }
@@ -509,6 +519,7 @@ public class VehicleControlApiHandler {
         }
         // POST /api/vehicle/cluster-cast — cast a package onto the cluster
         if (cleanPath.equals("/api/vehicle/cluster-cast") && method.equals("POST")) {
+            if (!StepUpGate.requireBundle("screenControl", "Show an app on the cluster screen", out)) return true;
             handleClusterCast(out, body);
             return true;
         }
@@ -538,6 +549,21 @@ public class VehicleControlApiHandler {
             handleClusterMirror(out, body);
             return true;
         }
+        if (cleanPath.equals("/api/vehicle/cluster-park-sample") && method.equals("GET")) {
+            JSONObject state = new JSONObject();
+            if ("1".equals(android.net.Uri.parse(path).getQueryParameter("map"))) {
+                state.put("factoryMapOpen", com.overdrive.app.launcher.dilink5.cluster.AaosNavigationPresentation
+                        .isOpenOnCluster(com.overdrive.app.daemon.CameraDaemon.getAppContext()));
+            }
+            com.overdrive.app.monitor.GearMonitor.GearSample sample =
+                    com.overdrive.app.monitor.GearMonitor.getInstance().getFreshSample();
+            boolean known = sample != null && com.overdrive.app.monitor.GearMonitor.isValidGearMode(sample.gear);
+            state.put("gearKnown", known)
+                    .put("parked", known && sample.gear == com.overdrive.app.monitor.GearMonitor.GEAR_P)
+                    .put("observedAtElapsedMs", known ? sample.observedAtElapsedMs : 0L);
+            HttpResponse.sendJson(out, state.toString());
+            return true;
+        }
         // GET /api/vehicle/cluster-mirror-status — current mirror mode + fission info
         if (cleanPath.equals("/api/vehicle/cluster-mirror-status") && method.equals("GET")) {
             handleClusterMirrorStatus(out);
@@ -565,6 +591,7 @@ public class VehicleControlApiHandler {
         // POST /api/vehicle/cluster-touch — { type: tap|swipe, sx,sy[,sx2,sy2,ms] } in
         // mirror-SURFACE px (NOT normalized); the relay inverts them to cluster px.
         if (cleanPath.equals("/api/vehicle/cluster-touch") && method.equals("POST")) {
+            if (!StepUpGate.requireBundle("screenControl", "Control the cluster screen", out)) return true;
             handleClusterTouch(out, body);
             return true;
         }
@@ -624,7 +651,7 @@ public class VehicleControlApiHandler {
             // firmware without the QCarCam library stays in "default" camera
             // mode but must still cast through the DI5 container protocol.
             boolean diLink5 =
-                    com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5();
+                    com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService();
             boolean diLink5Mode =
                     com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();
             boolean diLink5Hardware =
@@ -755,6 +782,7 @@ public class VehicleControlApiHandler {
             boolean busy = com.overdrive.app.launcher.ClusterCast.isActive()
                     || com.overdrive.app.launcher.layout.LayoutModeGate.layoutOwnsAdmission()
                     || com.overdrive.app.navmap.ClusterMapProjector.isActive()
+                    || com.overdrive.app.customlayouts.daemon.CustomLayoutsController.ownsCluster()
                     || !com.overdrive.app.surveillance.ClusterProjectionController
                             .isProjectionIdleStatic();
             com.overdrive.app.camera.dilink5.ClusterTransport.Resolution resolved;
@@ -960,7 +988,7 @@ public class VehicleControlApiHandler {
             } catch (Throwable ignored) {}
             response.put("clusterTransportConfigured", configuredTransport);
             JSONObject di5AppProjectionSnapshot = null;
-            if (transport.isDiLink5()) {
+            if (!com.overdrive.app.camera.dilink5.ClusterTransport.LEGACY.equals(transport.transport)) {
                 org.json.JSONObject projectionConfig = null;
                 try {
                     projectionConfig = com.overdrive.app.config.UnifiedConfigManager
@@ -986,6 +1014,8 @@ public class VehicleControlApiHandler {
                         di5AppProjectionSnapshot.get("castSessionGeneration"));
                 response.put("hostedProjectionBounds",
                         di5AppProjectionSnapshot.get("hostedProjectionBounds"));
+                response.put("factoryMiniMap", di5AppProjectionSnapshot.get("factoryMiniMap"));
+                response.put("miniMapProjectionBounds", di5AppProjectionSnapshot.get("miniMapProjectionBounds"));
                 response.put("physicalDisplayId",
                         com.overdrive.app.launcher.DiLink5ClusterCast
                                 .currentTargetDisplayId());
@@ -1022,16 +1052,18 @@ public class VehicleControlApiHandler {
                     ? di5AppProjectionSnapshot.optString("castPackage", "")
                     : com.overdrive.app.launcher.ClusterCast.getCastPackage();
             response.put("castPackage", castPkg != null ? castPkg : "");
-            // Real cluster panel size: prefer the live view-mirror's resolved value, else
-            // resolve it directly (so the box aspect-locks correctly even before the first
-            // mirror attach).
-            int pw = 0, ph = 0;
-            try {
-                com.overdrive.app.surveillance.ClusterViewMirrorService vm =
-                        com.overdrive.app.surveillance.ClusterViewMirrorService.getInstance();
-                pw = vm.currentClusterW();
-                ph = vm.currentClusterH();
-            } catch (Throwable ignored) {}
+            // Shared _0 and _1 can differ in height. The mirror can still hold the previous
+            // display's size while the new session is already accepting physical window bounds.
+            int pw = di5AppProjectionSnapshot != null ? di5AppProjectionSnapshot.optInt("panelW") : 0;
+            int ph = di5AppProjectionSnapshot != null ? di5AppProjectionSnapshot.optInt("panelH") : 0;
+            if (pw <= 1 || ph <= 1) {
+                try {
+                    com.overdrive.app.surveillance.ClusterViewMirrorService vm =
+                            com.overdrive.app.surveillance.ClusterViewMirrorService.getInstance();
+                    pw = vm.currentClusterW();
+                    ph = vm.currentClusterH();
+                } catch (Throwable ignored) {}
+            }
             if (pw <= 1 || ph <= 1) {
                 try {
                     android.content.Context ctx = com.overdrive.app.daemon.CameraDaemon.getAppContext();
@@ -1094,6 +1126,8 @@ public class VehicleControlApiHandler {
         response.put("iviRebootAvailable", true);
         BydDataCollector collector = BydDataCollector.getInstance();
         BydVehicleData data = collector.getData();
+        putBatteryHeatStatus(response, data, BydCloudDataProvider.getInstance().getSnapshot(),
+                System.currentTimeMillis());
 
         if (data == null) {
             response.put("success", false);
@@ -1486,20 +1520,6 @@ public class VehicleControlApiHandler {
         }
         response.put("seats", seats);
 
-        // Traction-battery preconditioning. Cloud-only in both directions — there is no
-        // SDK readback — so the key is omitted unless a fresh snapshot reported it. Without
-        // this the UI had no state at all: after a reload every tap re-sent "on", leaving
-        // no way to switch battery heat off.
-        try {
-            com.overdrive.app.byd.cloud.VehicleCloudSnapshot cs =
-                    com.overdrive.app.byd.cloud.BydCloudDataProvider.getInstance().getSnapshot();
-            if (cs != null && cs.isTelemetryFresh() && cs.hasBatteryHeatState()) {
-                response.put("batteryHeat", cs.batteryHeatState > 0);
-            }
-        } catch (Exception e) {
-            logger.debug("battery-heat cloud read failed: " + e.getMessage());
-        }
-
         // Legacy snapshots need the power-level gate to suppress stale AC state.
         // DiLink 5 refreshes these fields directly and may not expose powerLevel.
         JSONObject climate = new JSONObject();
@@ -1532,6 +1552,21 @@ public class VehicleControlApiHandler {
         Boolean remoteClimateActive = remoteClimateActive();
         if (remoteClimateActive != null) {
             climate.put("remoteClimateActive", remoteClimateActive.booleanValue());
+        }
+        // DiLink 3 only, while powered (same staleness rule as the setpoints above). A key is
+        // omitted when its read did not answer.
+        if (!diLink5 && vehiclePoweredOn) {
+            String windModeName = com.overdrive.app.byd.AcVentControl.windModeName(data.acWindMode);
+            if (windModeName != null) climate.put("windModeName", windModeName);
+            if (data.acCycleMode == 0 || data.acCycleMode == 1) {
+                climate.put("recirculation", data.acCycleMode == 1);
+            }
+            JSONObject live = climateLiveReadbacks(collector);
+            java.util.Iterator<String> keys = live.keys();
+            while (keys.hasNext()) {
+                String key = keys.next();
+                climate.put(key, live.get(key));
+            }
         }
         response.put("climate", climate);
 
@@ -1896,10 +1931,34 @@ public class VehicleControlApiHandler {
         }
     }
 
-    /**
-     * Battery preconditioning heat — cloud-only.
-     * Body: { "enabled": bool }
-     */
+    static void putBatteryHeatStatus(JSONObject response, BydVehicleData data,
+                                     VehicleCloudSnapshot cloud, long nowMs) throws org.json.JSONException {
+        String status = "unknown";
+        String source = "unknown";
+        long observedAt = 0L;
+        if (data != null && data.hasFreshBatteryPreheat(nowMs)) {
+            switch (data.batteryPreheatState) {
+                case 0: status = "off"; break;
+                case 1: status = "on"; break;
+                case 2: status = "completed"; break;
+                default: throw new IllegalStateException("Invalid battery preheat state");
+            }
+            source = "local";
+            observedAt = data.batteryPreheatObservedAtMs;
+        } else if (cloud != null && cloud.hasBatteryHeatState() && cloud.batteryHeatObservedAtMs > 0L
+                && nowMs >= cloud.batteryHeatObservedAtMs
+                && nowMs - cloud.batteryHeatObservedAtMs < VehicleCloudSnapshot.TELEMETRY_MAX_AGE_MS) {
+            status = cloud.batteryHeatState > 0 ? "on" : "off";
+            source = "cloud";
+            observedAt = cloud.batteryHeatObservedAtMs;
+        }
+        response.put("batteryHeatStatus", status);
+        response.put("batteryHeatSource", source);
+        response.put("batteryHeatObservedAtMs", observedAt);
+        if (observedAt > 0L) response.put("batteryHeat", "on".equals(status));
+    }
+
+    /** Dispatch the manual preheating request through the existing cloud route. */
     private static void handleBatteryHeat(OutputStream out, String body) throws Exception {
         JSONObject response = new JSONObject();
         try {
@@ -1911,10 +1970,12 @@ public class VehicleControlApiHandler {
                 HttpResponse.sendJson(out, response.toString());
                 return;
             }
+            long requestedAtMs = System.currentTimeMillis();
             CommandResult r = VehicleCommandRouter.getInstance()
                     .execute(new VehicleCommandRouter.BatteryHeatCommand(enabled.booleanValue()));
             logger.info("BatteryHeat: routed result=" + r.outcome + " enabled=" + enabled);
             JSONObject resp = routedResponse(r, "battery-heat");
+            resp.put("requestedAtMs", requestedAtMs);
             resp.put("enabled", enabled.booleanValue());
             HttpResponse.sendJson(out, resp.toString());
         } catch (Exception e) {
@@ -1965,6 +2026,7 @@ public class VehicleControlApiHandler {
             HttpResponse.sendJson(out, response.toString());
             return;
         }
+        if ("open".equals(action) && !StepUpGate.require(StepUpGate.TRUNK_OPEN, out)) return;
 
         CommandResult r = VehicleCommandRouter.getInstance().execute(cmd);
         logger.info("Trunk: action=" + action + " routed result=" + r.outcome + " path=" + r.path);
@@ -2371,14 +2433,23 @@ public class VehicleControlApiHandler {
                 case "purify_off": cmd = new VehicleCommandRouter.AirPurifyCommand(false); break;
                 case "steering_heat_on":  cmd = new VehicleCommandRouter.SteeringWheelHeatCommand(true);  break;
                 case "steering_heat_off": cmd = new VehicleCommandRouter.SteeringWheelHeatCommand(false); break;
+                // Airflow mode: OEM AC_WINDMODE 1..7, or its name (face, face_foot, foot,
+                // foot_defrost, defrost, face_foot_defrost, face_defrost). Cars that offer
+                // only 5 modes (AC_WIND_MODE_NUM) refuse 6 and 7.
                 case "set_airflow": {
-                    Integer modeValue = jsonInteger(req, "mode");
-                    if (modeValue == null || modeValue.intValue() < BydDataCollector.AC_WIND_MODE_MIN
-                            || modeValue.intValue() > BydDataCollector.AC_WIND_MODE_MAX) {
-                        sendClimateInputError(out, response, "mode must be an integer from 1 to 7");
+                    Integer modeValue = req.opt("mode") instanceof String
+                            ? Integer.valueOf(com.overdrive.app.byd.AcVentControl
+                                    .windModeFromName(req.optString("mode")))
+                            : jsonInteger(req, "mode");
+                    int mode = modeValue == null ? -1 : modeValue.intValue();
+                    int count = BydDataCollector.getInstance().readAcWindModeCountNow();
+                    if (!com.overdrive.app.byd.AcVentControl.isValidWindMode(mode, count)) {
+                        sendClimateInputError(out, response, "mode must be 1.." + (count == 5 ? 5 : 7)
+                                + " or one of face, face_foot, foot, foot_defrost, defrost"
+                                + (count == 5 ? "" : ", face_foot_defrost, face_defrost"));
                         return;
                     }
-                    cmd = new VehicleCommandRouter.AcAirflowCommand(modeValue.intValue());
+                    cmd = new VehicleCommandRouter.AcAirflowCommand(mode);
                     break;
                 }
                 case "recirculate_on":  cmd = new VehicleCommandRouter.AcRecirculationCommand(true);  break;   // recirculation
@@ -2387,6 +2458,54 @@ public class VehicleControlApiHandler {
                 case "defrost_front_off": cmd = new VehicleCommandRouter.FrontDefrostCommand(false); break;
                 case "defrost_rear_on":  cmd = new VehicleCommandRouter.RearDefrostCommand(true);  break;
                 case "defrost_rear_off": cmd = new VehicleCommandRouter.RearDefrostCommand(false); break;
+                // Front vent mode per side: { side: driver|passenger, mode: free|focus|avoid|swing|off }.
+                case "vent_mode": {
+                    int side = climateSide(req);
+                    String mode = jsonString(req, "mode");
+                    if (side < 0) {
+                        sendClimateInputError(out, response, "side must be driver or passenger");
+                        return;
+                    }
+                    if (!com.overdrive.app.byd.AcVentControl.isValidMode(mode)) {
+                        sendClimateInputError(out, response,
+                                "mode must be one of free, focus, avoid, swing, off");
+                        return;
+                    }
+                    cmd = new VehicleCommandRouter.AcVentModeCommand(side, mode);
+                    break;
+                }
+                // One front vent's direction: { vent: driver_left|driver_right|passenger_left|
+                // passenger_right, h, v } in whole degrees from straight ahead, clamped to the
+                // vent's range. Answers with the values actually sent.
+                case "vent_direction": {
+                    int vent = com.overdrive.app.byd.AcVentControl.ventIndex(jsonString(req, "vent"));
+                    Integer h = jsonInteger(req, "h");
+                    Integer v = jsonInteger(req, "v");
+                    if (vent < 0) {
+                        sendClimateInputError(out, response,
+                                "vent must be driver_left, driver_right, passenger_left or passenger_right");
+                        return;
+                    }
+                    if (h == null || v == null || Math.abs(h.intValue()) > 90 || Math.abs(v.intValue()) > 90) {
+                        sendClimateInputError(out, response, "h and v must be integers from -90 to 90");
+                        return;
+                    }
+                    VehicleCommandRouter.AcVentDirectionCommand dir =
+                            new VehicleCommandRouter.AcVentDirectionCommand(
+                                    vent, h.intValue(), v.intValue(), isRightHandDrive());
+                    CommandResult dr = VehicleCommandRouter.getInstance().execute(dir);
+                    invalidateClimateLiveReadbacks();
+                    logger.info("Climate: action=vent_direction vent=" + vent + " h=" + h + " v=" + v
+                            + " " + dr.outcome + " path=" + dr.path);
+                    JSONObject dirResp = routedResponse(dr, action);
+                    int[] sent = dir.sent;
+                    if (sent != null) {
+                        dirResp.put("h", sent[0]);
+                        dirResp.put("v", sent[1]);
+                    }
+                    HttpResponse.sendJson(out, dirResp.toString());
+                    return;
+                }
                 default:
                     logger.warn("Climate: unknown action '" + action + "'");
                     response.put("success", false);
@@ -2394,7 +2513,11 @@ public class VehicleControlApiHandler {
                     HttpResponse.sendJson(out, response.toString());
                     return;
             }
+            // A climate start or absolute setpoint can switch an off car on (router wake).
+            if (("power_on".equals(action) || cmd.wakeVehicleIfOff())
+                    && !StepUpGate.require(StepUpGate.POWER_ON, out)) return;
             CommandResult r = VehicleCommandRouter.getInstance().execute(cmd);
+            invalidateClimateLiveReadbacks();
             logger.info("Climate: action=" + action + " " + r.outcome + " path=" + r.path);
             // Auto-off timer bookkeeping, applied only when the command actually took effect
             // so a refused/failed write never leaves a timer that would switch off an AC this
@@ -2455,6 +2578,8 @@ public class VehicleControlApiHandler {
                 HttpResponse.sendJson(out, response.toString());
                 return;
             }
+            // A booked climate start can switch the car on later.
+            if (!"delete".equals(action) && !StepUpGate.require(StepUpGate.POWER_ON, out)) return;
 
             Long bookingId = req.has("bookingId") ? jsonLong(req, "bookingId") : null;
             if (("update".equals(action) || "delete".equals(action))
@@ -3205,6 +3330,7 @@ public class VehicleControlApiHandler {
                 return;
             }
             boolean queue = "queue".equals(req.optString("ifPlaying", ""));
+            // Remote speech in the cabin makes voice refuse gated intents for a while.
             boolean ok = com.overdrive.app.byd.AudioPlaybackController.speak(text, channel, queue);
             response.put("success", ok);
             HttpResponse.sendJson(out, response.toString());
@@ -3484,6 +3610,8 @@ public class VehicleControlApiHandler {
                     // AppLauncher / ClusterCast (reuses openApp's trusted resolver), NOT raw shell.
                     String pkg = req.optString("package", "");
                     int display = req.optInt("display", 0);
+                    if (display == 1 && !StepUpGate.requireBundle(
+                            "screenControl", "Show an app on the cluster screen", out)) return;
                     boolean moved;
                     if (display == 1) {
                         // Driver cluster: the fission display doesn't exist until the OEM
@@ -3629,6 +3757,12 @@ public class VehicleControlApiHandler {
      * (exists, readable, under an allowed media root) and plays asynchronously, so
      * this returns as soon as playback is queued.
      */
+    /** Any caller off the car screen: remote cabin audio needs the lock's approval. */
+    static boolean isRemoteCaller() {
+        HttpServer.CallerFacts f = HttpServer.callerFacts();
+        return f != null && (f.tunnelRelayed || !f.loopback);
+    }
+
     private static void handlePlayAudio(OutputStream out, String body) throws Exception {
         JSONObject response = new JSONObject();
         try {
@@ -4636,6 +4770,53 @@ public class VehicleControlApiHandler {
             return (int) Math.round((setpoint - 32) * 5.0 / 9.0);
         }
         return setpoint;
+    }
+
+    private static void putIfKnown(JSONObject o, String key, Boolean value) throws Exception {
+        if (value != null) o.put(key, value.booleanValue());
+    }
+
+    private static final long CLIMATE_LIVE_TTL_MS = 2_000L;
+    private static final Object climateLiveLock = new Object();
+    private static JSONObject climateLiveCache;
+    private static long climateLiveAtMs;
+
+    /** Live AC-device reads for the state, shared by concurrent pollers for 2 s. */
+    private static JSONObject climateLiveReadbacks(BydDataCollector collector) throws Exception {
+        synchronized (climateLiveLock) {
+            long now = android.os.SystemClock.elapsedRealtime();
+            if (climateLiveCache != null && now - climateLiveAtMs < CLIMATE_LIVE_TTL_MS) {
+                return climateLiveCache;
+            }
+            JSONObject live = new JSONObject();
+            int windModeCount = collector.readAcWindModeCountNow();
+            if (windModeCount != BydVehicleData.UNAVAILABLE) live.put("windModeCount", windModeCount);
+            putIfKnown(live, "sync", collector.readAcTemperatureSyncNow());
+            putIfKnown(live, "auto", collector.readAcAutoModeNow());
+            putIfKnown(live, "defrostFront", collector.readAcDefrostNow(1));
+            putIfKnown(live, "defrostRear", collector.readAcDefrostNow(2));
+            JSONObject vents = collector.readAcVentStateNow(isRightHandDrive());
+            if (vents != null) live.put("vents", vents);
+            climateLiveCache = live;
+            climateLiveAtMs = android.os.SystemClock.elapsedRealtime();
+            return live;
+        }
+    }
+
+    private static void invalidateClimateLiveReadbacks() {
+        synchronized (climateLiveLock) {
+            climateLiveCache = null;
+        }
+    }
+
+    /** "side": "driver" | "passenger", or 1 | 2. Returns AcVentControl.SIDE_*, or -1. */
+    static int climateSide(JSONObject req) {
+        Object side = req.opt("side");
+        if ("driver".equals(side)) return com.overdrive.app.byd.AcVentControl.SIDE_DRIVER;
+        if ("passenger".equals(side)) return com.overdrive.app.byd.AcVentControl.SIDE_PASSENGER;
+        Integer n = jsonInteger(req, "side");
+        return n != null && com.overdrive.app.byd.AcVentControl.isValidSide(n.intValue())
+                ? n.intValue() : -1;
     }
 
     /**

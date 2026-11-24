@@ -1,5 +1,7 @@
 package com.overdrive.app.trips;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.monitor.VehicleDataMonitor;
 import com.overdrive.app.storage.StorageManager;
@@ -370,7 +372,7 @@ public class TripApiHandler {
         } catch (Throwable ignored) {}
         boolean haveAnyDir = false;
         if (dirs != null) {
-            for (java.io.File d : dirs) { if (d != null && d.isDirectory()) { haveAnyDir = true; break; } }
+            for (java.io.File d : dirs) { if (d != null && RemovableStorageFs.isDirectory(d)) { haveAnyDir = true; break; } }
         }
         if (!haveAnyDir) {
             return errorResponse("Trip storage isn't available right now.", 409);
@@ -507,7 +509,7 @@ public class TripApiHandler {
         }
         if (existing.telemetryFilePath == null || existing.telemetryFilePath.isEmpty()
                 || TripDatabase.isImportedPath(existing.telemetryFilePath)
-                || !new File(existing.telemetryFilePath).isFile()) {
+                || !RemovableStorageFs.isFile(new File(existing.telemetryFilePath))) {
             return errorResponse("Telemetry data unavailable", 410);
         }
         TripRecord updated = db.rescoreTripFromTelemetry(tripId);
@@ -572,7 +574,7 @@ public class TripApiHandler {
         }
 
         File telemetryFile = new File(filePath);
-        if (!telemetryFile.exists()) {
+        if (!RemovableStorageFs.exists(telemetryFile)) {
             return errorResponse("Telemetry data unavailable", 410);
         }
 
@@ -620,8 +622,8 @@ public class TripApiHandler {
         // Delete telemetry file if it exists
         if (trip.telemetryFilePath != null && !trip.telemetryFilePath.isEmpty()) {
             File telemetryFile = new File(trip.telemetryFilePath);
-            if (telemetryFile.exists()) {
-                if (telemetryFile.delete()) {
+            if (RemovableStorageFs.exists(telemetryFile)) {
+                if (RemovableStorageFs.delete(telemetryFile)) {
                     logger.info("Deleted telemetry file: " + telemetryFile.getName());
                 } else {
                     logger.warn("Failed to delete telemetry file: " + telemetryFile.getName());
@@ -1399,7 +1401,7 @@ public class TripApiHandler {
         }
 
         File telemetryFile = new File(filePath);
-        if (!telemetryFile.exists()) {
+        if (!RemovableStorageFs.exists(telemetryFile)) {
             return errorResponse("Telemetry data unavailable", 410);
         }
 
@@ -1449,7 +1451,11 @@ public class TripApiHandler {
      * This ensures old trips without kWh readings still show cost in the UI.
      */
     private void enrichTripEnergy(TripRecord trip) {
-        TripConfig config = manager.getConfig();
+        enrichTripEnergy(trip, manager.getConfig());
+    }
+
+    /** Display-only backfill for finished rows in both the Trips page and cluster. */
+    public static void enrichTripEnergy(TripRecord trip, TripConfig config) {
         boolean costNeedsRecompute = false;
 
         // Electric leg back-fill: estimate energy from SoC delta when BMS
@@ -1521,16 +1527,7 @@ public class TripApiHandler {
             // accumulator delta first (independent of tank size), then the
             // legacy fuelPct×tank estimate. A reset/rollover (end < start)
             // falls through to the estimate.
-            double litres = 0;
-            if (trip.fuelConStart >= 0 && trip.fuelConEnd >= 0
-                    && trip.fuelConEnd >= trip.fuelConStart) {
-                litres = trip.fuelConEnd - trip.fuelConStart;
-            } else if (trip.fuelPctStart >= 0 && trip.fuelPctEnd >= 0
-                    && trip.fuelPctStart >= trip.fuelPctEnd
-                    && (trip.fuelPctStart - trip.fuelPctEnd) >= 1.0
-                    && config.getTankCapacityL() > 0) {
-                litres = ((trip.fuelPctStart - trip.fuelPctEnd) / 100.0) * config.getTankCapacityL();
-            }
+            double litres = TripPricing.litresUsed(trip, config.getTankCapacityL());
 
             if (litres > 0) {
                 double pricePerL = config.getFuelPricePerL();

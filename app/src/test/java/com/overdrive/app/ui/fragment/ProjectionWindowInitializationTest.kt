@@ -11,7 +11,7 @@ class ProjectionWindowInitializationTest {
         val physical = intArrayOf(960, 100, 1920, 620)
         var reflected: IntArray? = null
         var rememberedOrFullApplied = false
-        val handled = reflectHostedProjectionWindow(true, physical) {
+        val handled = reflectActiveProjectionWindow(true, physical) {
             reflected = it
         }
         if (!handled) rememberedOrFullApplied = true
@@ -26,7 +26,7 @@ class ProjectionWindowInitializationTest {
     fun missingHostedBoundsWaitForStatusInsteadOfCommittingAFallback() {
         var geometryWrites = 0
         for (actual in listOf<IntArray?>(null, intArrayOf(-1, 0, 1920, 720))) {
-            val handled = reflectHostedProjectionWindow(true, actual) { geometryWrites++ }
+            val handled = reflectActiveProjectionWindow(true, actual) { geometryWrites++ }
             if (!handled) geometryWrites++ // old local-window/FULL fallback
             assertTrue(handled)
         }
@@ -35,7 +35,7 @@ class ProjectionWindowInitializationTest {
 
     @Test
     fun legacyProjectionKeepsItsWindowFlowAndHidesOnlyDiLink5Controls() {
-        assertFalse(reflectHostedProjectionWindow(false, null) {
+        assertFalse(reflectActiveProjectionWindow(false, null) {
             error("no hosted window on the legacy path")
         })
         assertFalse(projectionUsesDiLink5Controls("legacy"))

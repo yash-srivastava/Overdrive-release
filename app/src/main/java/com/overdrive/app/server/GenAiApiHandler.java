@@ -91,6 +91,8 @@ public final class GenAiApiHandler {
                 && "POST".equals(method)) {
             JSONObject input = parseBody(body, out);
             if (input == null) return true;
+            if ("save".equals(input.optString("decision", ""))
+                    && !StepUpGate.requireBundle("config", "Save an automation", out)) return true;
             JSONObject response = GenAiRoutineLearner.decision(
                     input.optString("suggestionId", ""),
                     input.optString("decision", ""));
@@ -410,6 +412,7 @@ public final class GenAiApiHandler {
                 && "POST".equals(method)) {
             JSONObject input = parseBody(body, out);
             if (input == null) return true;
+            if (!StepUpGate.requireBundle("config", "Save an automation", out)) return true;
             handleAutomationCommit(input, out);
             return true;
         }
@@ -543,6 +546,11 @@ public final class GenAiApiHandler {
         String type = action.optString("type", "");
         if ("run_automation".equals(type)) {
             String id = action.optString("automationId", "");
+            if (Automations.isServiceModeDisabled()) {
+                sendError(out, 409, "service_mode_paused", text("automation_paused_service_mode",
+                        "Automations are paused by Service Mode."));
+                return;
+            }
             if (voicePath) {
                 VoiceExecutionPolicy.Verdict policy = VoiceExecutionPolicy.check(
                         Automations.primaryActionsOf(id),
@@ -560,6 +568,7 @@ public final class GenAiApiHandler {
                     return;
                 }
             }
+            if (!StepUpGate.requireBundle("run", "Run an automation", out)) return;
             AutomationApiHandler.dispatchExplicitAutomation(id, false);
             JSONObject accepted = new JSONObject()
                     .put("success", true)
@@ -589,6 +598,7 @@ public final class GenAiApiHandler {
                     text("proposal_unsupported", "The proposed action is unsupported."));
             return;
         }
+        if (command.wakeVehicleIfOff() && !StepUpGate.require(StepUpGate.POWER_ON, out)) return;
         CommandResult result =
                 VehicleCommandRouter.getInstance().execute(command);
         if (result.outcome == VehicleCommandRouter.Outcome.SUCCESS) {
@@ -864,7 +874,7 @@ public final class GenAiApiHandler {
                 ? metadata.optString("title", "").trim()
                 : report.optString("title", "").trim();
         if (title.isEmpty()) {
-            title = "OverDrive Incident Evidence Report";
+            title = Messages.get("genai.incident_default_title");
         }
         return new JSONObject()
                 .put("success", true)

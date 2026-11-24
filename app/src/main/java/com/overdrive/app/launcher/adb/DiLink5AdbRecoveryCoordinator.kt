@@ -1127,7 +1127,7 @@ class DiLink5AdbRecoveryCoordinator internal constructor(
             Manifest.permission.WRITE_SECURE_SETTINGS,
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
         override fun seedWriteSecureSettings(): Boolean = try {
-            executor.executeSync("pm grant ${context.packageName} android.permission.WRITE_SECURE_SETTINGS", 5_000)
+            executor.executeSync("pm grant ${com.overdrive.app.util.ShellUser.flag()} ${context.packageName} android.permission.WRITE_SECURE_SETTINGS", 5_000)
             hasWriteSecureSettings()
         } catch (_: Exception) {
             false

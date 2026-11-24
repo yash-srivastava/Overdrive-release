@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="projection_cluster_controls">Контроле инструмент табле</string>
+    <string name="projection_cluster_back">Назад</string>
+    <string name="projection_cluster_home">Кућа</string>
+    <string name="projection_cluster_volume_down">Јачина звука −</string>
+    <string name="projection_cluster_volume_up">Јачина звука +</string>
+    <string name="projection_cluster_control_unavailable">Управљање инструмент таблом није доступно. Проверите активну пројекцију и поново покрените позадински сервис после ажурирања.</string>
+</resources>

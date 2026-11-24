@@ -77,6 +77,26 @@ public class ClusterLayoutTaskLauncherTest {
                 Arrays.asList(new Stack(7, 5, 1, null)), 42));
     }
 
+    @Test public void minimumWindowHeightAndOffsetCanClipAValidSlot() {
+        assertTrue(ClusterLayoutTaskLauncher.overflowsSlot(0, 0, 900, 440, 900, 380));
+        assertTrue(ClusterLayoutTaskLauncher.overflowsSlot(0, 24, 900, 404, 900, 380));
+        assertTrue(ClusterLayoutTaskLauncher.overflowsSlot(-2, 0, 898, 380, 900, 380));
+        assertFalse(ClusterLayoutTaskLauncher.overflowsSlot(0, 0, 900, 380, 900, 380));
+        assertFalse(ClusterLayoutTaskLauncher.overflowsSlot(10, 10, 890, 370, 900, 380));
+        assertFalse(ClusterLayoutTaskLauncher.overflowsSlot(0, 0, 0, 0, 900, 380));
+    }
+
+    @Test public void slotFullscreenFallbackRequiresExclusiveRootOnOwnedDisplay() {
+        List<Stack> owned = Collections.singletonList(new Stack(7, 5, 1, new int[]{42}));
+        assertTrue(ClusterLayoutTaskLauncher.exclusiveSlotRoot(owned, 42, 7));
+        assertFalse(ClusterLayoutTaskLauncher.exclusiveSlotRoot(owned, 42, 9));
+        assertFalse(ClusterLayoutTaskLauncher.exclusiveSlotRoot(owned, 45, 7));
+        assertFalse(ClusterLayoutTaskLauncher.exclusiveSlotRoot(
+                Collections.singletonList(new Stack(7, 5, 1, new int[]{42, 43})), 42, 7));
+        assertFalse(ClusterLayoutTaskLauncher.exclusiveSlotRoot(
+                Collections.singletonList(new Stack(0, 5, 1, new int[]{42})), 42, 0));
+    }
+
     @Test public void emptySplitEscalationRefusesAnyLiveOrUnreadableSplitStack() {
         Stack empty = new Stack(7, 3, 1, new int[0]);
         assertTrue(ClusterLayoutTaskLauncher.allSplitStacksEmpty(Arrays.asList(empty)));

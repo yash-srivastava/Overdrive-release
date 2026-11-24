@@ -83,8 +83,15 @@ public class FoveatedCropper {
     private int uCropRect = -1;
     private int uRedMaskStrength = -1;
     private volatile boolean redMaskEnabled = false;
+    private int uTexMatrix = -1;
+    private final boolean applyTextureMatrix;
+    private final Object textureMatrixLock = new Object();
+    private final float[] textureMatrix = {
+        1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f,
+        0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f
+    };
 
-    // The cropper does not consume a SurfaceTexture transform matrix —
+    // Existing paths do not consume a SurfaceTexture transform matrix —
     // its samples are computed in producer-space UV directly via the
     // role's corner remap + per-role flip. See the FRAGMENT_SHADER comment
     // for why.
@@ -196,6 +203,17 @@ public class FoveatedCropper {
             "}\n";
     }
 
+    static String buildFragmentShader(boolean isTexture2D, boolean applyTextureMatrix) {
+        String shader = buildFragmentShader(isTexture2D);
+        if (!applyTextureMatrix) return shader;
+        return shader
+            .replace("uniform vec4 uCropRect;\n",
+                "uniform vec4 uCropRect;\nuniform mat4 uTexMatrix;\n")
+            .replace("vec4 src = texture2D(uCameraTex, samplePos);",
+                "vec4 src = texture2D(uCameraTex, "
+                    + "(uTexMatrix * vec4(samplePos, 0.0, 1.0)).xy);");
+    }
+
     private static final float[] VERTEX_COORDS = {
         -1.0f, -1.0f,
          1.0f, -1.0f,
@@ -260,7 +278,16 @@ public class FoveatedCropper {
                            float[] quadrantStripOffsetX,
                            float[] quadrantCornerOffsetsXY,
                            boolean isTexture2D) {
+        this(stripWidth, stripHeight, quadrantStripOffsetX,
+            quadrantCornerOffsetsXY, isTexture2D, false);
+    }
+
+    public FoveatedCropper(int stripWidth, int stripHeight,
+                           float[] quadrantStripOffsetX,
+                           float[] quadrantCornerOffsetsXY,
+                           boolean isTexture2D, boolean applyTextureMatrix) {
         this.isTexture2D = isTexture2D;
+        this.applyTextureMatrix = applyTextureMatrix;
         this.stripWidth = Math.max(1, stripWidth);
         this.stripHeight = Math.max(1, stripHeight);
         this.quadrantStripOffsetX = (quadrantStripOffsetX != null && quadrantStripOffsetX.length == 4)
@@ -270,6 +297,14 @@ public class FoveatedCropper {
             (quadrantCornerOffsetsXY != null && quadrantCornerOffsetsXY.length == 8)
                 ? quadrantCornerOffsetsXY.clone()
                 : DEFAULT_QUADRANT_CORNER_OFFSETS_XY.clone();
+    }
+
+    /** Used only by the opt-in strip SurfaceTexture transport. */
+    public void setTextureMatrix(float[] matrix) {
+        if (!applyTextureMatrix || matrix == null || matrix.length < 16) return;
+        synchronized (textureMatrixLock) {
+            System.arraycopy(matrix, 0, textureMatrix, 0, 16);
+        }
     }
 
     /** Result of a crop call. {@link #rgb} may be null on the very first
@@ -347,7 +382,7 @@ public class FoveatedCropper {
     public void init() {
         try {
             program = GlUtil.createProgram(
-                VERTEX_SHADER, buildFragmentShader(isTexture2D));
+                VERTEX_SHADER, buildFragmentShader(isTexture2D, applyTextureMatrix));
             if (program == 0) {
                 logger.error("Foveated crop shader compilation failed");
                 return;
@@ -357,6 +392,9 @@ public class FoveatedCropper {
             uCameraTex = GLES20.glGetUniformLocation(program, "uCameraTex");
             uCropRect = GLES20.glGetUniformLocation(program, "uCropRect");
             uRedMaskStrength = GLES20.glGetUniformLocation(program, "uRedMaskStrength");
+            if (applyTextureMatrix) {
+                uTexMatrix = GLES20.glGetUniformLocation(program, "uTexMatrix");
+            }
 
             // One-shot GL version probe. PBO + fence-sync require GLES 3.
             String glVer = GLES20.glGetString(GLES20.GL_VERSION);
@@ -626,6 +664,11 @@ public class FoveatedCropper {
         }
         if (uRedMaskStrength >= 0) {
             GLES20.glUniform1f(uRedMaskStrength, redMaskEnabled ? 1.0f : 0.0f);
+        }
+        if (applyTextureMatrix && uTexMatrix >= 0) {
+            synchronized (textureMatrixLock) {
+                GLES20.glUniformMatrix4fv(uTexMatrix, 1, false, textureMatrix, 0);
+            }
         }
 
         GLES20.glEnableVertexAttribArray(aPosition);

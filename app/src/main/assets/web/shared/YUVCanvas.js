@@ -60,6 +60,8 @@
 
     this.animationTime = parOptions.animationTime || 0;
 
+    this.reusePlaneTextures = parOptions.reusePlaneTextures === true;
+
     this.canvasElement.width = this.width;
     this.canvasElement.height = this.height;
 
@@ -75,6 +77,7 @@
 /**
  * Draw the next output picture using WebGL
  */
+    if (!this.reusePlaneTextures) {
     if (this.type === "yuv420"){
       this.drawNextOuptutPictureGL = function(par) {
         var gl = this.contextGL;
@@ -190,6 +193,155 @@
       };
     };
 
+    } else {
+    if (this.type === "yuv420"){
+      this.drawNextOuptutPictureGL = function(par) {
+        var gl = this.contextGL;
+        var texturePosBuffer = this.texturePosBuffer;
+        var uTexturePosBuffer = this.uTexturePosBuffer;
+        var vTexturePosBuffer = this.vTexturePosBuffer;
+
+        var yTextureRef = this.yTextureRef;
+        var uTextureRef = this.uTextureRef;
+        var vTextureRef = this.vTextureRef;
+
+        var yData = par.yData;
+        var uData = par.uData;
+        var vData = par.vData;
+
+        var width = this.width;
+        var height = this.height;
+
+        var yDataPerRow = par.yDataPerRow || width;
+        var yRowCnt     = par.yRowCnt || height;
+
+        var chromaWidth = this.customYUV444 ? width : width / 2;
+        var chromaHeight = this.customYUV444 ? height : height / 2;
+        var uDataPerRow = par.uDataPerRow || chromaWidth;
+        var uRowCnt     = par.uRowCnt || chromaHeight;
+
+        // U and V normally share the decoder's stride and row count.
+        var vDataPerRow = par.vDataPerRow || uDataPerRow;
+        var vRowCnt     = par.vRowCnt || uRowCnt;
+
+        gl.viewport(0, 0, width, height);
+
+        this.uploadTextureCoordinates(texturePosBuffer, this.yCoords,
+            width / yDataPerRow, height / yRowCnt);
+        this.uploadTextureCoordinates(uTexturePosBuffer, this.uCoords,
+            chromaWidth / uDataPerRow, chromaHeight / uRowCnt);
+        this.uploadTextureCoordinates(vTexturePosBuffer, this.vCoords,
+            chromaWidth / vDataPerRow, chromaHeight / vRowCnt);
+
+        gl.activeTexture(gl.TEXTURE0);
+        var yReady = this.uploadPlane(yTextureRef, this.yTextureSize,
+            yDataPerRow, yRowCnt, yData);
+        gl.activeTexture(gl.TEXTURE1);
+        var uReady = this.uploadPlane(uTextureRef, this.uTextureSize,
+            uDataPerRow, uRowCnt, uData);
+        gl.activeTexture(gl.TEXTURE2);
+        var vReady = this.uploadPlane(vTextureRef, this.vTextureSize,
+            vDataPerRow, vRowCnt, vData);
+        if (!yReady || !uReady || !vReady) return;
+
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      };
+
+    }else if (this.type === "yuv422"){
+      this.drawNextOuptutPictureGL = function(par) {
+        var gl = this.contextGL;
+        var texturePosBuffer = this.texturePosBuffer;
+
+        var textureRef = this.textureRef;
+
+        var data = par.data;
+
+        var width = this.width;
+        var height = this.height;
+
+        var dataPerRow = par.dataPerRow || (width * 2);
+        var rowCnt     = par.rowCnt || height;
+
+        gl.viewport(0, 0, width, height);
+
+        this.uploadTextureCoordinates(texturePosBuffer, this.yCoords,
+            width / (dataPerRow / 2), height / rowCnt);
+
+        if (this.lastResolutionWidth !== dataPerRow ||
+            this.lastResolutionHeight !== height) {
+          gl.uniform2f(this.resolutionLocation, dataPerRow, height);
+          this.lastResolutionWidth = dataPerRow;
+          this.lastResolutionHeight = height;
+        }
+
+        gl.activeTexture(gl.TEXTURE0);
+        if (!this.uploadPlane(textureRef, this.yTextureSize, dataPerRow, rowCnt, data)) return;
+
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      };
+    };
+
+    };
+  };
+
+  // Keep bufferData each frame to preserve buffer orphaning on hidden canvases.
+  YUVCanvas.prototype.uploadTextureCoordinates = function(buffer, state, right, bottom) {
+    var values = state.values;
+    if (state.right !== right || state.bottom !== bottom) {
+      values[0] = values[4] = right;
+      values[5] = values[7] = bottom;
+      state.right = right;
+      state.bottom = bottom;
+    }
+    var gl = this.contextGL;
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, values, gl.DYNAMIC_DRAW);
+  };
+
+  // Uploads are checked for short data and exceptions, without a GPU-synchronizing getError().
+  YUVCanvas.prototype.uploadPlane = function(texture, size, width, height, data) {
+    // A short plane can fail silently with INVALID_OPERATION. Do not cache it.
+    if (data == null || typeof data.byteLength !== 'number' ||
+        !isFinite(width) || !isFinite(height) || width <= 0 || height <= 0 ||
+        width !== Math.floor(width) || height !== Math.floor(height) ||
+        data.byteLength < width * height) {
+      size.width = size.height = 0;
+      size.reuseFrames = 0;
+      return false;
+    }
+
+    var gl = this.contextGL;
+    try {
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+
+      // Decoder strides can be non-multiples of four.
+      if (width % 4 !== 0 && !this.unpackAlignmentOne) {
+        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+        this.unpackAlignmentOne = true;
+      }
+
+      // WebGL reports some allocation failures only via getError(), which
+      // stalls the first frame. Periodically redefine the texture instead:
+      // an undetected failed allocation gets another allocation attempt.
+      if (size.width === width && size.height === height && size.reuseFrames < 29) {
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height,
+            gl.LUMINANCE, gl.UNSIGNED_BYTE, data);
+        size.reuseFrames++;
+      } else {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, width, height, 0,
+            gl.LUMINANCE, gl.UNSIGNED_BYTE, data);
+        size.width = width;
+        size.height = height;
+        size.reuseFrames = 0;
+      }
+      return true;
+    } catch (e) {
+      // Retry allocation on a later valid frame if the driver throws.
+      size.width = size.height = 0;
+      size.reuseFrames = 0;
+      if (e instanceof TypeError) throw e;
+      return false;
+    }
   };
 
   /**
@@ -366,6 +518,11 @@ YUVCanvas.prototype.initProgram = function() {
   gl.uniformMatrix4fv(YUV2RGBRef, false, YUV2RGB);
 
   this.shaderProgram = program;
+  if (this.type === 'yuv422' && this.reusePlaneTextures) {
+    this.resolutionLocation = gl.getUniformLocation(program, 'resolution');
+    this.lastResolutionWidth = null;
+    this.lastResolutionHeight = null;
+  }
 };
 
 /**
@@ -431,6 +588,10 @@ YUVCanvas.prototype.initBuffers = function() {
   gl.vertexAttribPointer(texturePosRef, 2, gl.FLOAT, false, 0, 0);
 
   this.texturePosBuffer = texturePosBuffer;
+  if (this.reusePlaneTextures) {
+    this.yCoords = { right: 1, bottom: 1,
+        values: new Float32Array([1, 0, 0, 0, 1, 1, 0, 1]) };
+  }
 
   if (this.type === "yuv420"){
     var uTexturePosBuffer = gl.createBuffer();
@@ -442,6 +603,10 @@ YUVCanvas.prototype.initBuffers = function() {
     gl.vertexAttribPointer(uTexturePosRef, 2, gl.FLOAT, false, 0, 0);
 
     this.uTexturePosBuffer = uTexturePosBuffer;
+    if (this.reusePlaneTextures) {
+      this.uCoords = { right: 1, bottom: 1,
+          values: new Float32Array([1, 0, 0, 0, 1, 1, 0, 1]) };
+    }
 
 
     var vTexturePosBuffer = gl.createBuffer();
@@ -453,6 +618,10 @@ YUVCanvas.prototype.initBuffers = function() {
     gl.vertexAttribPointer(vTexturePosRef, 2, gl.FLOAT, false, 0, 0);
 
     this.vTexturePosBuffer = vTexturePosBuffer;
+    if (this.reusePlaneTextures) {
+      this.vCoords = { right: 1, bottom: 1,
+          values: new Float32Array([1, 0, 0, 0, 1, 1, 0, 1]) };
+    }
   };
 
 };
@@ -470,16 +639,19 @@ YUVCanvas.prototype.initTextures = function() {
     var ySamplerRef = gl.getUniformLocation(program, 'ySampler');
     gl.uniform1i(ySamplerRef, 0);
     this.yTextureRef = yTextureRef;
+    if (this.reusePlaneTextures) this.yTextureSize = { width: 0, height: 0, reuseFrames: 0 };
 
     var uTextureRef = this.initTexture();
     var uSamplerRef = gl.getUniformLocation(program, 'uSampler');
     gl.uniform1i(uSamplerRef, 1);
     this.uTextureRef = uTextureRef;
+    if (this.reusePlaneTextures) this.uTextureSize = { width: 0, height: 0, reuseFrames: 0 };
 
     var vTextureRef = this.initTexture();
     var vSamplerRef = gl.getUniformLocation(program, 'vSampler');
     gl.uniform1i(vSamplerRef, 2);
     this.vTextureRef = vTextureRef;
+    if (this.reusePlaneTextures) this.vTextureSize = { width: 0, height: 0, reuseFrames: 0 };
 
   }else if (this.type === "yuv422"){
     // only one texture for 422
@@ -487,6 +659,7 @@ YUVCanvas.prototype.initTextures = function() {
     var samplerRef = gl.getUniformLocation(program, 'sampler');
     gl.uniform1i(samplerRef, 0);
     this.textureRef = textureRef;
+    if (this.reusePlaneTextures) this.yTextureSize = { width: 0, height: 0, reuseFrames: 0 };
 
   };
 };

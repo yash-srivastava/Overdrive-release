@@ -56,9 +56,7 @@ public class VehicleControlAvailabilityAssetTest {
         String css = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.css");
         String script = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
 
-        // 8 original cloud tiles + the two remote-preconditioning buttons. Vent
-        // is deliberately absent because it now has a working local 15% leg.
-        assertEquals(10, count(html, "data-requires-cloud=\"true\""));
+        assertEquals(11, count(html, "data-requires-cloud=\"true\""));
         assertFalse("steering heat is dual-path — marking it dashes out a working control",
                 html.contains("id=\"btnSteeringHeat\" title=\"Steering wheel heater\""
                         + " data-i18n-attr=\"title:vehicle.steering_heat\""
@@ -140,25 +138,16 @@ public class VehicleControlAvailabilityAssetTest {
         assertTrue(script.contains("clearBtn.style.display = s.bookingId ? '' : 'none';"));
     }
 
-    /**
-     * Battery preconditioning is cloud-only in BOTH directions and has no SDK
-     * readback. Without a state channel the tile was write-only: after a reload
-     * every tap re-sent "on", so the heater could never be switched off.
-     */
     @Test
-    public void batteryHeatHasAReadbackSoItCanBeSwitchedOff() throws IOException {
+    public void batteryHeatReadoutIsAvailableIndependentlyOfItsCloudControls() throws IOException {
+        String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
         String script = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
-        String api = readRepositoryFile(
-                "app/src/main/java/com/overdrive/app/server/VehicleControlApiHandler.java");
-
-        // Server publishes it from a FRESH cloud snapshot, and omits the key otherwise.
-        assertTrue(api.contains("response.put(\"batteryHeat\", cs.batteryHeatState > 0);"));
-        assertTrue(api.contains("cs.isTelemetryFresh() && cs.hasBatteryHeatState()"));
-        // Client renders it and reconciles it, with an in-flight guard.
-        assertTrue(script.contains("updateBatteryHeatUI: function()"));
-        assertTrue(script.contains("typeof data.batteryHeat === 'boolean'"));
-        assertTrue(script.contains("!self._batteryHeatPending"));
-        assertTrue(script.contains("self.updateBatteryHeatUI();"));
+        assertTrue(html.contains("id=\"batteryHeatStatus\" role=\"status\""));
+        assertTrue(html.contains("id=\"btnBatteryHeatOn\" data-requires-cloud=\"true\""));
+        assertTrue(html.contains("id=\"btnBatteryHeatOff\" data-requires-cloud=\"true\""));
+        assertTrue(script.contains("self.requestBatteryHeat(true)"));
+        assertTrue(script.contains("self.requestBatteryHeat(false)"));
+        assertTrue(script.contains("self.receiveBatteryHeat(data, batteryHeatPoll)"));
     }
 
     /**

@@ -132,7 +132,7 @@ public class Di5ParkedKeepAliveContractTest {
         assertTrue(hold.contains("voltageGuard.releaseLatch(\"ACC ON / lease end\")"));
         assertTrue(hold.contains("external charging confirmed"));
         assertFalse(hold.contains("releaseLatch(\"voltage recovered\")"));
-        // Own token, never DiPlus's; release strips only our token.
+        // Own token, never another app's; release strips only our token.
         assertTrue(hold.contains("AP_HOLD_TOKEN = \"ovdrv\""));
         assertFalse(hold.contains("\"vandp\""));
         // Release order: heartbeat, then sentry flags, then AP.

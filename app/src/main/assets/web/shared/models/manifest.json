@@ -1,5 +1,5 @@
 {
-  "version": 13,
+  "version": 14,
   "default": "seal",
   "baseUrl": "https://github.com/yash-srivastava/Overdrive-release/releases/download/models-v1/",
   "batteryChemistryDefinitions": {
@@ -39,6 +39,7 @@
   "models": [
     {
       "id": "seal",
+      "forwardAxis": "+Z",
       "name": "BYD Seal",
       "file": "seal.glb",
       "sizeBytes": 1653240,
@@ -57,6 +58,7 @@
     },
     {
       "id": "sealion7",
+      "forwardAxis": "+Z",
       "name": "BYD Sealion 7",
       "file": "sealion7.glb",
       "sizeBytes": 1645180,
@@ -76,6 +78,7 @@
     },
     {
       "id": "shark",
+      "forwardAxis": "+Z",
       "name": "BYD Shark",
       "file": "seal.glb",
       "sizeBytes": 1653240,
@@ -95,6 +98,7 @@
     },
     {
       "id": "seal-u",
+      "forwardAxis": "+Z",
       "name": "BYD Seal U",
       "file": "seal-u.glb",
       "sizeBytes": 1808308,
@@ -113,6 +117,7 @@
     },
     {
       "id": "seal-u-dmi",
+      "forwardAxis": "+Z",
       "name": "BYD Seal U DM-i",
       "file": "seal-u-dmi.glb",
       "sizeBytes": 1711432,
@@ -132,6 +137,7 @@
     },
     {
       "id": "dolphin",
+      "forwardAxis": "+Z",
       "name": "BYD Dolphin",
       "file": "dolphin.glb",
       "sizeBytes": 1327816,
@@ -151,6 +157,7 @@
     },
     {
       "id": "atto3",
+      "forwardAxis": "+Z",
       "name": "BYD Atto 3",
       "file": "atto3.glb",
       "sizeBytes": 1642648,
@@ -169,6 +176,7 @@
     },
     {
       "id": "atto3-evo",
+      "forwardAxis": "-Z",
       "name": "BYD Atto 3 Evo",
       "file": "atto3-evo.glb",
       "sizeBytes": 1606272,
@@ -188,6 +196,7 @@
     },
     {
       "id": "atto2",
+      "forwardAxis": "+Z",
       "name": "BYD Atto 2",
       "file": "atto2.glb",
       "sizeBytes": 1244776,
@@ -207,6 +216,7 @@
     },
     {
       "id": "han",
+      "forwardAxis": "+Z",
       "name": "BYD Han",
       "file": "han.glb",
       "sizeBytes": 1548304,
@@ -225,6 +235,7 @@
     },
     {
       "id": "tang",
+      "forwardAxis": "+Z",
       "name": "BYD Tang",
       "file": "tang.glb",
       "sizeBytes": 1629596,
@@ -243,6 +254,7 @@
     },
     {
       "id": "m6",
+      "forwardAxis": "+Z",
       "name": "BYD M6",
       "file": "m6.glb",
       "sizeBytes": 1856336,
@@ -262,6 +274,7 @@
     },
     {
       "id": "seagull",
+      "forwardAxis": "+Z",
       "name": "BYD Seagull",
       "file": "seagull.glb",
       "sizeBytes": 2558920,
@@ -280,6 +293,7 @@
     },
     {
       "id": "destroyer",
+      "forwardAxis": "+Z",
       "name": "BYD Destroyer 05",
       "file": "destroyer.glb",
       "sizeBytes": 1708884,

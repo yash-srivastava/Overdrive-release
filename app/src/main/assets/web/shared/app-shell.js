@@ -13,7 +13,7 @@
  *       <div id="app-shell-mount"></div>
  *       <main class="main-content">…page-specific content…</main>
  *     </div>
- *     <script src="../shared/app-shell.js?v=20"></script>
+ *     <script src="../shared/app-shell.js?v=26"></script>
  *
  * If a page omits #app-shell-mount the shell appends itself to <body>.
  *
@@ -100,7 +100,9 @@
         { href: 'road-sense.html',                        i18n: 'nav.road_sense',     label: 'RoadSense',      svg: '<path d="M3.2 20.2 L8.6 11 L15.4 11 L20.8 20.2 Z"/><path d="M12 12.4v1.3M12 15.7v1.6M12 18.7v1.1"/><path d="M12 3.2v2.4"/><path d="M12 7.6h.01"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
         { href: 'widgets.html',                           i18n: 'nav.widgets',        label: 'Widgets',        svg: '<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="18" height="8" rx="2"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
         { href: 'widget-builder.html', browserOnly: true, i18n: 'widgetBuilder.nav', label: 'Widget Builder', svg: '<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><path d="M14 20.5l.6-2.9 5.2-5.2 2.3 2.3-5.2 5.2z"/><path d="M14 5h7M14 9h4"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
+        { href: 'dashboard-builder.html', i18n: 'dashboardBuilder.nav', label: 'Dashboard Builder', svg: '<rect x="2" y="5" width="20" height="14" rx="3"/><path d="M5 14a4 4 0 0 1 8 0m-4 0 2-3m4-2h4m-4 4h3"/>' },
         { href: 'notifications.html',                     i18n: 'nav.notifications',  label: 'Notifications',  svg: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>' },
+        { href: 'service-mode.html',                       i18n: 'nav.service_mode',   label: 'Service Mode',   svg: '<path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="6"/><path d="m9.5 12 1.7 1.7 3.4-3.4"/>' },
         { href: 'daemons.html', browserOnly: true,       i18n: 'nav.daemons',        label: 'Daemons',        svg: '<rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01"/>' },
         { href: 'sessions.html', browserOnly: true,      i18n: 'nav.sessions',       label: 'Signed-in Browsers', svg: '<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M9 11l2 2 4-4"/>' },
 
@@ -777,6 +779,10 @@
     }
 
     function mount() {
+        if (inCarApp()) {
+            var browserLinks = document.querySelectorAll('a[data-browser-only]');
+            for (var i = 0; i < browserLinks.length; i++) browserLinks[i].remove();
+        }
         var holder = findMount();
         if (!holder) return;
         // Render shell into the mount point as <aside class="sidebar"> so all

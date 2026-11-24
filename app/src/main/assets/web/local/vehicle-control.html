@@ -22,6 +22,8 @@
         (function () {
             var mode = null;
             try { mode = localStorage.getItem('vc.viewMode'); } catch (e) {}
+            // Custom Layouts' "Change" comes for the paint and model pickers, which only the 3D view has.
+            if (location.hash === '#appearance') mode = 'immersive';
             window.VC_LITE = (mode !== 'immersive');
             document.documentElement.className +=
                 window.VC_LITE ? ' vc-mode-lite' : ' vc-mode-immersive';
@@ -30,15 +32,15 @@
             }
         })();
     </script>
-    <script src="../shared/app-shell.js?v=23"></script>
+    <script src="../shared/app-shell.js?v=26"></script>
     <link rel="stylesheet" href="../shared/styles.css?v=38">
     <link rel="stylesheet" href="../shared/revamp.css?v=2">
-    <link rel="stylesheet" href="../shared/vehicle-control.css?v=52">
+    <link rel="stylesheet" href="../shared/vehicle-control.css?v=55">
 </head>
 <body>
     <div class="app-layout">
         <!-- Sidebar (hidden by WebViewFragment injection, but kept for standalone browser access) -->
-        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=23) -->
+        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=24) -->
         <div id="app-shell-mount"></div>
         <!-- Main Content -->
         <main class="main-content">
@@ -243,14 +245,6 @@
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><line x1="5" y1="5" x2="19" y2="19"/></svg>
                                 <span data-i18n="vehicle.ac_off">AC Off</span>
                             </button>
-                            <button class="vc-tile" id="btnBatteryHeat" title="Battery heat" data-i18n-attr="title:vehicle_control.battery_heat_label" data-requires-cloud="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <rect width="16" height="10" x="2" y="7" rx="2" ry="2"/>
-                                    <line x1="22" x2="22" y1="11" y2="13"/>
-                                    <path d="M6 11v2"/><path d="M10 11v2"/>
-                                </svg>
-                                <span data-i18n="vehicle_control.battery_heat_label">Battery heat</span>
-                            </button>
                             <div class="vc-block-row">
                                 <div class="vc-block vc-block--stepper">
                                     <span class="vc-block-title" data-i18n="vehicle.temperature">Temperature</span>
@@ -277,6 +271,16 @@
                                     </div>
                                 </div>
                             </div>
+                            <section class="vc-block vc-block--full vc-block--divider" aria-labelledby="batteryHeatLabel">
+                                <div class="vc-block-head">
+                                    <span class="vc-block-title" id="batteryHeatLabel" data-i18n="vehicle_control.battery_heat_label">Battery preheating</span>
+                                    <span class="vc-readout" id="batteryHeatStatus" role="status">—</span>
+                                </div>
+                                <div class="vc-schedule-bar vc-block-actions">
+                                    <button type="button" class="vc-charge-action" id="btnBatteryHeatOn" data-requires-cloud="true" data-i18n="keymap.on">On</button>
+                                    <button type="button" class="vc-charge-action" id="btnBatteryHeatOff" data-requires-cloud="true" data-i18n="keymap.off">Off</button>
+                                </div>
+                            </section>
                             <!-- ── Remote preconditioning (cloud BOOKINGAIR) ──
                                  One scheduled remote-AC session: time, temperature and one of
                                  the OEM's five session lengths. Cloud-only — there is no local
@@ -702,6 +706,107 @@
                                 </div>
                                 <div class="vc-safety-fixed" data-i18n="automation.safety_always_on">Vehicle power on/off and IVI reboot always require the car to be parked. These guards cannot be turned off.</div>
                             </div>
+                            <!-- Face ID / fingerprint lock. Stays hidden until /api/stepup/status answers. -->
+                            <div class="vc-stepup" id="vcStepUp" style="display:none;">
+                                <div class="vc-safety-info vc-stepup-head">
+                                    <span class="vc-safety-name" id="vcStepUpTitle" data-i18n="stepup.title">Face ID or fingerprint lock</span>
+                                    <span class="vc-safety-desc" id="vcStepUpDesc" data-i18n="stepup.desc">Ask for Face ID or fingerprint on your phone before a remote unlock, trunk opening or power change. The car screen, the car's Wi-Fi and hotspot, automations and proximity unlock never ask.</span>
+                                </div>
+                                <div class="vc-safety-row">
+                                    <div class="vc-safety-info">
+                                        <span class="vc-safety-name" id="vcStepUpEnableName" data-i18n="stepup.enable">Require Face ID or fingerprint</span>
+                                        <span class="vc-safety-desc" id="vcStepUpEnableHint" data-i18n="stepup.enable_needs_phone" style="display:none;">Add a phone first.</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" role="switch" id="vcStepUpEnable" aria-labelledby="vcStepUpEnableName" aria-describedby="vcStepUpEnableHint vcStepUpDesc">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="vc-stepup-sub" id="vcStepUpActionsTitle" data-i18n="stepup.actions_title">Ask before</div>
+                                <div class="vc-safety-row">
+                                    <div class="vc-safety-info">
+                                        <span class="vc-safety-name" id="vcStepUpActUnlockName" data-i18n="stepup.action_unlock">Unlocking the doors</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="vcStepUpActUnlock" data-vc-stepup-action="unlock" aria-labelledby="vcStepUpActionsTitle vcStepUpActUnlockName">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="vc-safety-row">
+                                    <div class="vc-safety-info">
+                                        <span class="vc-safety-name" id="vcStepUpActTrunkOpenName" data-i18n="stepup.action_trunk_open">Opening the trunk</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="vcStepUpActTrunkOpen" data-vc-stepup-action="trunkOpen" aria-labelledby="vcStepUpActionsTitle vcStepUpActTrunkOpenName">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="vc-safety-row">
+                                    <div class="vc-safety-info">
+                                        <span class="vc-safety-name" id="vcStepUpActPowerOffName" data-i18n="stepup.action_power_off">Switching the car off</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="vcStepUpActPowerOff" data-vc-stepup-action="powerOff" aria-labelledby="vcStepUpActionsTitle vcStepUpActPowerOffName">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="vc-safety-row">
+                                    <div class="vc-safety-info">
+                                        <span class="vc-safety-name" id="vcStepUpActPowerOnName" data-i18n="stepup.action_power_on">Switching the car on</span>
+                                        <span class="vc-safety-desc" id="vcStepUpActPowerOnDesc" data-i18n="stepup.action_power_on_desc">Also asks before a remote climate start, which can switch the car on.</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="vcStepUpActPowerOn" data-vc-stepup-action="powerOn" aria-labelledby="vcStepUpActionsTitle vcStepUpActPowerOnName" aria-describedby="vcStepUpActPowerOnDesc">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="vc-stepup-sub" data-i18n="stepup.phones_title">Phones</div>
+                                <div class="vc-stepup-phones" id="vcStepUpPhones"></div>
+                                <div class="vc-safety-desc vc-stepup-empty" id="vcStepUpPhonesEmpty" data-i18n="stepup.phones_empty">No phones added yet.</div>
+                                <!-- Car screen only: the phone enters the code shown here. -->
+                                <div class="vc-stepup-block" id="vcStepUpPair" style="display:none;">
+                                    <button type="button" class="vc-modal-btn primary" id="vcStepUpPairStart" data-i18n="stepup.add_phone_car">Add a phone</button>
+                                    <div class="vc-stepup-pair" id="vcStepUpPairArea" style="display:none;">
+                                        <div id="vcStepUpPairStatus" aria-live="polite">
+                                            <div class="vc-safety-desc" id="vcStepUpPairPresence" data-i18n="stepup.pair_presence">Press the brake pedal, or open and close a front door.</div>
+                                            <div id="vcStepUpPairReady" style="display:none;">
+                                                <div class="vc-safety-desc" data-i18n="stepup.pair_code">On your phone, open Vehicle Control → Safety and enter this code:</div>
+                                                <div class="vc-stepup-code" id="vcStepUpPairCode" dir="ltr"></div>
+                                            </div>
+                                            <div class="vc-safety-desc" id="vcStepUpPairWaiting" data-i18n="stepup.waiting" style="display:none;">Waiting for Face ID or fingerprint…</div>
+                                            <div class="vc-safety-desc vc-stepup-done" id="vcStepUpPairDone" data-i18n="stepup.phone_added_car" style="display:none;">Phone added.</div>
+                                            <div class="vc-safety-desc vc-stepup-expired" id="vcStepUpPairExpired" data-i18n="stepup.pair_expired" style="display:none;">The code expired. Start again.</div>
+                                        </div>
+                                        <!-- Outside the live region: it changes every second. -->
+                                        <div class="vc-safety-desc vc-stepup-countdown" id="vcStepUpPairCountdown" style="display:none;"></div>
+                                        <button type="button" class="vc-modal-btn" id="vcStepUpPairCancel" data-i18n="stepup.cancel">Cancel</button>
+                                    </div>
+                                </div>
+                                <div class="vc-safety-desc vc-stepup-block" id="vcStepUpPairBlocked" data-i18n="stepup.pair_blocked_remote_view" style="display:none;">Stop remote screen control first.</div>
+                                <!-- Phone on a stable secure link only. -->
+                                <div class="vc-stepup-block" id="vcStepUpRegister" style="display:none;">
+                                    <div class="vc-safety-desc" data-i18n="stepup.start_on_car">Start on the car screen: Vehicle Control → Safety → Add a phone. Then enter the code here.</div>
+                                    <button type="button" class="vc-modal-btn primary" id="vcStepUpRegOpen" aria-expanded="false" aria-controls="vcStepUpRegForm" data-i18n="stepup.add_this_phone">Add this phone</button>
+                                    <form class="vc-stepup-form" id="vcStepUpRegForm" style="display:none;" novalidate>
+                                        <label class="vc-safety-desc vc-stepup-label" for="vcStepUpCode" data-i18n="stepup.code_label">Code from the car screen</label>
+                                        <input type="text" class="vc-stepup-input vc-stepup-input--code" id="vcStepUpCode" inputmode="numeric" maxlength="12" autocomplete="one-time-code" dir="ltr">
+                                        <label class="vc-safety-desc vc-stepup-label" for="vcStepUpLabel" data-i18n="stepup.phone_name_label">Phone name</label>
+                                        <input type="text" class="vc-stepup-input" id="vcStepUpLabel" maxlength="40" autocomplete="off">
+                                        <div class="vc-stepup-buttons">
+                                            <button type="submit" class="vc-modal-btn primary" id="vcStepUpRegSubmit" data-i18n="stepup.add">Add</button>
+                                            <button type="button" class="vc-modal-btn" id="vcStepUpRegCancel" data-i18n="stepup.cancel">Cancel</button>
+                                        </div>
+                                    </form>
+                                    <div class="vc-stepup-buttons" id="vcStepUpCreateRow" style="display:none;">
+                                        <button type="button" class="vc-modal-btn primary" id="vcStepUpCreate" data-i18n="stepup.create_passkey">Create passkey</button>
+                                        <button type="button" class="vc-modal-btn" id="vcStepUpCreateCancel" data-i18n="stepup.cancel">Cancel</button>
+                                    </div>
+                                    <div class="vc-safety-desc vc-stepup-result" id="vcStepUpRegResult" role="status" aria-live="polite" tabindex="-1" style="display:none;"></div>
+                                </div>
+                                <div class="vc-safety-desc vc-stepup-block" id="vcStepUpNeedLink" data-i18n="stepup.need_secure_link" style="display:none;">To add this phone, open OverDrive through your secure link: zrok, your Cloudflare domain or Tailscale HTTPS.</div>
+                                <div class="vc-stepup-warn" id="vcStepUpWarnAdb" data-i18n="stepup.remote_adb_warning" style="display:none;">Remote ADB over Tailscale is on. Anyone with ADB access can get around this lock.</div>
+                                <div class="vc-stepup-warn" id="vcStepUpWarnView" data-i18n="stepup.remote_view_warning" style="display:none;">Remote screen control is active. The car screen asks too until it ends.</div>
+                            </div>
                         </div>
                         <!-- Remote-key diagnostics (experimental): the command-format selector and
                              the MCU readiness-gate toggle. Local settings only; no cloud leg. -->
@@ -826,13 +931,13 @@
     <!-- auth.js MUST load before any other script that calls fetch(), so it can
          install its global fetch override that auto-attaches the JWT bearer
          token (works through tunnels where cookies are stripped). -->
-    <script src="../shared/auth.js?v=12"></script>
+    <script src="../shared/auth.js?v=18"></script>
     <script src="../shared/pwa-init.js?v=index1"></script>
     <!-- core.js polls /status every 5s and populates the sidebar status card
          (12V, ACC, SOC, range, SOH, fuel, network). Without it those values
          all stay unread since vehicle-control.js only manages the 3D scene. -->
-    <script src="../shared/core.js?v=27"></script>
-    <script src="../shared/update-flow.js?v=3"></script>
+    <script src="../shared/core.js?v=31"></script>
+    <script src="../shared/update-flow.js?v=6"></script>
     <!-- Mode-gated loader. In immersive mode this injects the heavy stack
          (SotaPlayer + three.js + Draco/GLTF/Orbit + gsap ≈ 820 KB of script,
          plus the 1.6 MB GLB the scene then fetches) in strict order via
@@ -853,7 +958,7 @@
                 '../shared/vendor/gsap.min.js?v=12'
             ];
             var chain = window.VC_LITE ? [] : window.VC_VENDOR_CHAIN.slice();
-            chain.push('../shared/vehicle-control.js?v=vclite40');
+            chain.push('../shared/vehicle-control.js?v=vclite49');
             for (var i = 0; i < chain.length; i++) {
                 var s = document.createElement('script');
                 s.src = chain[i];

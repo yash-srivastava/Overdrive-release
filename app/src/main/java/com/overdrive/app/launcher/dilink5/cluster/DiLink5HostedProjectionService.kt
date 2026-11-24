@@ -13,6 +13,8 @@ import android.view.Gravity
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.WindowManager
+import com.overdrive.app.ui.view.AaosMapAreaCheck
+import java.util.concurrent.Executors
 
 /** App-UID overlay owner used only through the DUMP-protected explicit service. */
 class DiLink5HostedProjectionService : Service() {
@@ -26,12 +28,13 @@ class DiLink5HostedProjectionService : Service() {
 
     private val overlays = HashMap<Long, Overlay>()
     private val owner = Binder()
+    private val probes = Executors.newSingleThreadExecutor()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            DiLink5HostedProjectionBridge.ACTION_PROBE_DISPLAY -> probeDisplay(intent)
+            DiLink5HostedProjectionBridge.ACTION_PROBE_DISPLAY -> probes.execute { probeDisplay(intent) }
             DiLink5HostedProjectionBridge.ACTION_CREATE -> create(intent)
             DiLink5HostedProjectionBridge.ACTION_RELEASE ->
                 release(
@@ -44,6 +47,8 @@ class DiLink5HostedProjectionService : Service() {
     }
 
     override fun onDestroy() {
+        // Finish already-submitted display probes, including a one-shot start with no overlays.
+        probes.shutdown()
         overlays.keys.toList().forEach { generation ->
             release(generation, overlays[generation]?.bridge)
         }
@@ -81,11 +86,16 @@ class DiLink5HostedProjectionService : Service() {
             metrics.heightPixels,
             metrics.densityDpi,
         )
-        receiver.send(if (visible) 1 else 0, if (visible) android.os.Bundle().apply {
+        val aaosMapArea = intent.getBooleanExtra(DiLink5HostedProjectionBridge.EXTRA_AAOS_MAP_AREA, false)
+        val area = if (aaosMapArea && visible && display != null) AaosMapAreaCheck.confirmedBounds(this, display) else null
+        val admitted = visible && (!aaosMapArea || area != null)
+        receiver.send(if (admitted) 1 else 0, if (admitted) android.os.Bundle().apply {
             putInt(DiLink5HostedProjectionBridge.RESULT_DISPLAY_ID, displayId)
             putInt(DiLink5HostedProjectionBridge.RESULT_DISPLAY_WIDTH, metrics.widthPixels)
             putInt(DiLink5HostedProjectionBridge.RESULT_DISPLAY_HEIGHT, metrics.heightPixels)
             putInt(DiLink5HostedProjectionBridge.RESULT_DISPLAY_DENSITY, metrics.densityDpi)
+            if (area != null) putIntArray(DiLink5HostedProjectionBridge.RESULT_CONFIRMED_MAP_BOUNDS,
+                intArrayOf(area.left, area.top, area.right, area.bottom))
         } else null)
     }
 
@@ -107,10 +117,23 @@ class DiLink5HostedProjectionService : Service() {
         }
         val manager = getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager ?: return
         val display = manager.getDisplay(physicalId)?.takeIf { it.isValid } ?: return
+        val aaosMapArea = intent.getBooleanExtra(DiLink5HostedProjectionBridge.EXTRA_AAOS_MAP_AREA, false)
+        val left = intent.getIntExtra(DiLink5HostedProjectionBridge.EXTRA_LEFT, 0)
+        val top = intent.getIntExtra(DiLink5HostedProjectionBridge.EXTRA_TOP, 0)
+        val area = if (aaosMapArea) {
+            AaosMapAreaCheck.confirmedBounds(this, display)?.takeIf {
+                it.left == left && it.top == top && it.width() == width && it.height() == height &&
+                    it.width() == bufferWidth && it.height() == bufferHeight
+            } ?: return
+        } else null
         val displayContext = createDisplayContext(display)
-        val windowManager = displayContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+        // The marker and the hosted surface must get their insets and window token from the same display.
+        val windowContext = if (aaosMapArea) {
+            displayContext.createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null)
+        } else displayContext
+        val windowManager = windowContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
             ?: return
-        val view = SurfaceView(displayContext)
+        val view = SurfaceView(windowContext)
         view.holder.setFixedSize(bufferWidth, bufferHeight)
         val callback = object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
@@ -149,7 +172,7 @@ class DiLink5HostedProjectionService : Service() {
             }
         }
         view.holder.addCallback(callback)
-        val params = WindowManager.LayoutParams(
+        val params = if (area != null) AaosMapAreaCheck.windowParams(area) else WindowManager.LayoutParams(
             width,
             height,
             2038,
@@ -157,9 +180,22 @@ class DiLink5HostedProjectionService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = intent.getIntExtra(DiLink5HostedProjectionBridge.EXTRA_LEFT, 0)
-            y = intent.getIntExtra(DiLink5HostedProjectionBridge.EXTRA_TOP, 0)
-            title = "OverDrive cluster projection"
+            x = left
+            y = top
+        }
+        params.title = "OverDrive cluster projection"
+        if (area != null) {
+            // Reject a platform relayout (insets, clipping, display replacement) that no
+            // longer puts these pixels inside the exact physical frame checked while parked.
+            view.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+                val position = IntArray(2)
+                view.getLocationOnScreen(position)
+                if (position[0] != left || position[1] != top || view.width != width ||
+                    view.height != height || AaosMapAreaCheck.confirmedBounds(this, display) != area) {
+                    view.visibility = android.view.View.INVISIBLE
+                    view.post { release(generation, bridge) }
+                }
+            }
         }
         overlays[generation] = Overlay(generation, windowManager, view, callback, bridge)
         try {

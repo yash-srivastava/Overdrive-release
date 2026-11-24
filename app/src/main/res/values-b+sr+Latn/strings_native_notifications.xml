@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notif_channel_roadsense_overlay">RoadSense prikaz preko aplikacija</string>
+    <string name="notif_roadsense_overlay_text">Prikaz opasnosti preko aplikacija je aktivan</string>
+    <string name="notif_channel_roadsense_imu">RoadSense IMU</string>
+    <string name="notif_roadsense_imu_text">Praćenje puta je aktivno</string>
+    <string name="notif_channel_onscreen_messages">Poruke na ekranu</string>
+    <string name="notif_onscreen_message_title">Poruka na ekranu</string>
+    <string name="notif_channel_parked_impact">Praćenje udaraca pri parkiranju</string>
+    <string name="notif_parked_impact_title">Režim nadzora</string>
+    <string name="notif_parked_impact_text">Praćenje udaraca dok je vozilo parkirano</string>
+    <string name="notif_network_hotspot">Mreža i pristupna tačka</string>
+    <string name="notif_channel_media_playback">Reprodukcija medija</string>
+    <string name="notif_roadsense_chime_title">RoadSense upozorenje</string>
+    <string name="notif_roadsense_chime_text">Reprodukcija bezbednosnog zvučnog signala</string>
+    <string name="notif_channel_location">Lokacijski servis</string>
+    <string name="notif_channel_location_desc">GPS praćenje za nadzor</string>
+    <string name="notif_location_title">Lokacija je aktivna</string>
+    <string name="notif_location_text">GPS praćenje radi</string>
+    <string name="notif_vehicle_control">Upravljanje vozilom</string>
+    <string name="notif_media_title">Reprodukcija zvuka</string>
+    <string name="notif_media_text">OverDrive automatizacija</string>
+    <string name="notif_channel_keepalive">Održavanje pozadinskih servisa aktivnim</string>
+    <string name="notif_channel_keepalive_desc">Održava pozadinske servise aktivnim u pozadini</string>
+    <string name="notif_channel_summary">Overdrive status</string>
+    <string name="notif_channel_summary_desc">Objedinjeni red statusa za Overdrive pozadinske servise</string>
+    <string name="notif_channel_remote_voice">Udaljeni glas</string>
+    <string name="notif_channel_status_overlay">Prikaz statusa preko aplikacija</string>
+    <string name="notif_channel_status_overlay_desc">Prikaz statusa snimanja i vožnje preko aplikacija</string>
+</resources>

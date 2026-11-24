@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_navigation_title">导航</string>
+    <string name="settings_navigation_subtitle">选择哪些可选页面固定显示在左侧导航栏中。</string>
+    <string name="settings_navigation_fixed_hint">仪表板、设置和关于始终可用。</string>
+    <string name="settings_navigation_reset">恢复默认</string>
+    <string name="settings_navigation_reset_done">导航栏已恢复</string>
+    <string name="settings_navigation_shown">显示</string>
+    <string name="settings_navigation_hidden">隐藏</string>
+    <string name="settings_navigation_option_state">%1$s，在导航栏中%2$s</string>
+</resources>

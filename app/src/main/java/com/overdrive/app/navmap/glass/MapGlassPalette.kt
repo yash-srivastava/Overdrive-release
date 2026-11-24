@@ -5,14 +5,18 @@ import com.overdrive.app.overlay.glass.GlassColor
 import com.overdrive.app.overlay.glass.GlassTheme
 
 /** Map overlay colours for one theme, derived from [GlassTheme] (dev/roadsense-map/03-GLASS-UI.md §Colours). */
-class MapGlassPalette private constructor(val night: Boolean) {
+class MapGlassPalette private constructor(val night: Boolean, navigator: Boolean = false) {
 
     val theme: GlassTheme = GlassTheme.of(night)
 
     /** Rim, body, core and glow of one ribbon (route or a congestion level). */
     class Ribbon(val rim: Int, val body: Int, val core: Int, val glow: Int)
 
-    val route = Ribbon(
+    val route = if (navigator) {
+        val casing = if (night) 0xff173631.toInt() else 0xffedfbf0.toInt()
+        val line = if (night) 0xff77d3bc.toInt() else 0xff157f6d.toInt()
+        Ribbon(casing, line, line, line)
+    } else Ribbon(
         rim = if (night) GlassColor.darken(theme.accent, 0.55f) else GlassColor.darken(theme.accent, 0.42f),
         body = if (night) GlassColor.mix(theme.accent, theme.glowAccent, 0.5f) else theme.accent,
         core = if (night) GlassColor.lighten(theme.accent, 0.45f) else theme.glowAccent,
@@ -47,8 +51,8 @@ class MapGlassPalette private constructor(val night: Boolean) {
     val puck: Int = GlassColor.mix(theme.accent, theme.glowAccent, 0.55f)
 
     // Layer opacities that differ by theme.
-    val routeShadowOpacity = if (night) 0.55f else 0.30f
-    val specOpacity = if (night) 0.78f else 0.85f
+    val routeShadowOpacity = if (navigator) 0f else if (night) 0.55f else 0.30f
+    val specOpacity = if (navigator) 0f else if (night) 0.78f else 0.85f
     val trafficSpecOpacity = if (night) 0.75f else 0.85f
     val trafficGlowOpacity = if (night) 0.75f else 0.55f
     val arrowShadowOpacity = if (night) 0.60f else 0.34f
@@ -57,6 +61,7 @@ class MapGlassPalette private constructor(val night: Boolean) {
         private val NIGHT = MapGlassPalette(true)
         private val DAY = MapGlassPalette(false)
         fun of(night: Boolean): MapGlassPalette = if (night) NIGHT else DAY
+        fun navigator(night: Boolean) = MapGlassPalette(night, navigator = true)
 
         /** "#RRGGBB" for paint properties set from a colour string. */
         fun hex(c: Int): String = String.format("#%06X", c and 0xFFFFFF)

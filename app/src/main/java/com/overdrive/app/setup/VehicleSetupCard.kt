@@ -300,6 +300,7 @@ class VehicleSetupCard(private val fragment: Fragment) {
             "dilink4" -> R.string.vehicle_setup_mode_dilink4
             "dilink5" -> R.string.vehicle_setup_mode_dilink5
             "camera2" -> R.string.vehicle_setup_mode_camera2
+            com.overdrive.app.camera.AvmSurfaceTexturePlatform.MODE -> R.string.camera_mode_option_surfacetexture
             else -> R.string.vehicle_setup_mode_default
         }
     )

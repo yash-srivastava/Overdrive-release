@@ -165,6 +165,7 @@ public final class AutomationApiHandler {
         if (path.startsWith("/api/action-groups/") && method.equals("DELETE")) {
             String id = decodeId(path.substring("/api/action-groups/".length()));
             if (isBlankId(id)) return rejectBlankId(out);
+            if (!StepUpGate.requireBundle("config", "Change action groups", out)) return true;
             com.overdrive.app.automation.ActionGroups.SaveResult removed =
                     com.overdrive.app.automation.ActionGroups.deleteWithResult(id);
             if (!removed.isValid()) {
@@ -187,6 +188,7 @@ public final class AutomationApiHandler {
         JSONObject json;
         try { json = new JSONObject(body); }
         catch (JSONException e) { HttpResponse.sendError(out, 400, "Malformed JSON body."); return true; }
+        if (!StepUpGate.requireBundle("config", "Change action groups", out)) return true;
         com.overdrive.app.automation.ActionGroups.SaveResult saved =
                 com.overdrive.app.automation.ActionGroups.saveWithResult(id, json);
         if (saved.isValid()) {
@@ -219,13 +221,15 @@ public final class AutomationApiHandler {
      * directly (call state today; a small, curated set going forward).
      */
     private static boolean publishExternalEvent(String body, OutputStream out) throws Exception {
+        if (!StepUpGate.carOnlyFeed(out)) return true;
         if (body == null || body.isBlank()) { HttpResponse.sendJsonError(out, "Empty request body"); return true; }
         JSONObject json;
         try { json = new JSONObject(body); }
         catch (JSONException e) { HttpResponse.sendError(out, 400, "Malformed JSON body."); return true; }
         String event = json.optString("event", "");
         String value = json.optString("value", "");
-        boolean ok = Automations.publishExternalEvent(event, value);
+        // Rules this feed triggers are the owner's automations: in-process, never asked.
+        boolean ok = StepUpGate.callWithExemption(true, () -> Automations.publishExternalEvent(event, value));
         JSONObject resp = new JSONObject();
         resp.put("success", ok);
         if (!ok) resp.put("error", "Unknown or unsupported external event: " + event);
@@ -260,6 +264,7 @@ public final class AutomationApiHandler {
         JSONObject map = json.optJSONObject("automations");
         boolean replace = json.optBoolean("replace", false);
         if (map == null) map = json; // bare map (no wrapper) → merge
+        if (!StepUpGate.requireBundle("config", "Change automations", out)) return true;
         int count = Automations.importAutomations(map, replace);
         JSONObject resp = new JSONObject();
         resp.put("success", count > 0);
@@ -303,6 +308,7 @@ public final class AutomationApiHandler {
         JSONObject map = json.optJSONObject("actionGroups");
         boolean replace = json.optBoolean("replace", false);
         if (map == null) map = json; // bare map (no wrapper) → merge
+        if (!StepUpGate.requireBundle("config", "Change action groups", out)) return true;
         int count = com.overdrive.app.automation.ActionGroups.importGroups(map, replace);
         // -1 = parsed but NOT persisted. Answer 500 rather than confirming a save that would
         // vanish at the next daemon restart (Invariant 7).
@@ -458,6 +464,7 @@ public final class AutomationApiHandler {
             }
         }
 
+        if (!StepUpGate.requireBundle("config", "Change safety settings", out)) return true;
         boolean ok = allowShell == null
                 || com.overdrive.app.config.UnifiedConfigManager
                         .setAutomationShellAllowed(allowShell.booleanValue());
@@ -539,6 +546,36 @@ public final class AutomationApiHandler {
         return true;
     }
 
+    /** The name of row {@code id} in an [{id, name}] list, or the id itself when absent. */
+    // The prompt text is built only when a prompt is actually needed.
+    private static String automationName(String id) {
+        try {
+            return nameOf(Automations.listForPicker(null), id);
+        } catch (Throwable t) {
+            return id;
+        }
+    }
+
+    private static String groupName(String id) {
+        try {
+            return nameOf(com.overdrive.app.automation.ActionGroups.listJson(), id);
+        } catch (Throwable t) {
+            return id;
+        }
+    }
+
+    private static String nameOf(JSONArray rows, String id) {
+        if (rows == null) return id;
+        for (int i = 0; i < rows.length(); i++) {
+            JSONObject row = rows.optJSONObject(i);
+            if (row != null && id.equals(row.optString("id"))) {
+                String name = row.optString("name", "");
+                return name.isEmpty() ? id : name;
+            }
+        }
+        return id;
+    }
+
     private static boolean getAutomations(OutputStream out) throws Exception {
         HttpResponse.sendJson(out, Automations.toJson().toString());
         return true;
@@ -589,6 +626,7 @@ public final class AutomationApiHandler {
             HttpResponse.sendError(out, 400, Automations.MQTT_CHANNEL_ERROR);
             return true;
         }
+        if (!StepUpGate.requireBundle("config", "Change automations", out)) return true;
         if (Automations.updateAutomation(id, parsed)) {
             HttpResponse.sendJsonSuccess(out);
         } else {
@@ -606,6 +644,7 @@ public final class AutomationApiHandler {
      * @return true so the router treats the request as handled
      */
     private static boolean deleteAutomation(String id, OutputStream out) throws Exception {
+        if (!StepUpGate.requireBundle("config", "Change automations", out)) return true;
         if (Automations.deleteAutomation(id)) {
             HttpResponse.sendJsonSuccess(out);
         } else {
@@ -644,8 +683,19 @@ public final class AutomationApiHandler {
      * @return true so the router treats the request as handled
      */
     private static boolean testAutomation(String id, OutputStream out) throws Exception {
+        if (Automations.isServiceModeDisabled()) {
+            HttpResponse.sendJson(out, 403, new JSONObject()
+                    .put("success", false)
+                    .put("error", "Automation execution is paused by Service Mode.")
+                    .toString());
+            return true;
+        }
         if (!Automations.exists(id)) {
             HttpResponse.sendError(out, 404, "Automation not found.");
+            return true;
+        }
+        if (StepUpGate.anyGated() && !StepUpGate.callerExempt()
+                && !StepUpGate.requireBundle("run", "Run " + automationName(id), out)) {
             return true;
         }
         // Fire off-thread; triggerExplicitActions already wraps action execution in
@@ -683,8 +733,19 @@ public final class AutomationApiHandler {
      * where it is needed.
      */
     private static boolean runActionGroup(String id, OutputStream out) throws Exception {
+        if (Automations.isServiceModeDisabled()) {
+            HttpResponse.sendJson(out, 403, new JSONObject()
+                    .put("success", false)
+                    .put("error", "Action-group execution is paused by Service Mode.")
+                    .toString());
+            return true;
+        }
         if (!com.overdrive.app.automation.ActionGroups.exists(id)) {
             HttpResponse.sendError(out, 404, "Action group not found.");
+            return true;
+        }
+        if (StepUpGate.anyGated() && !StepUpGate.callerExempt()
+                && !StepUpGate.requireBundle("run", "Run " + groupName(id), out)) {
             return true;
         }
         TEST_EXECUTOR.submit(() -> {
@@ -728,6 +789,7 @@ public final class AutomationApiHandler {
             HttpResponse.sendError(out, 400, "Body must contain a boolean \"disabled\" field.");
             return true;
         }
+        if (!StepUpGate.requireBundle("config", "Change automations", out)) return true;
         if (Automations.disableAutomation(id, json.getBoolean("disabled"))) {
             HttpResponse.sendJsonSuccess(out);
         } else {
@@ -759,6 +821,7 @@ public final class AutomationApiHandler {
                     "Body must contain mode \"automatic\", \"manual\", or \"disabled\".");
             return true;
         }
+        if (!StepUpGate.requireBundle("config", "Change automations", out)) return true;
         if (Automations.setAutomationMode(id, (String) rawMode)) {
             HttpResponse.sendJsonSuccess(out);
         } else {

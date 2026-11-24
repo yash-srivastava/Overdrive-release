@@ -138,6 +138,7 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
             return;
         }
         instance = this;
+        AutoStartReapply.onServiceConnected(this);
 
         // Seed the conditional-keymap foreground cache in case the active window
         // was already open before this service connected. Future window changes
@@ -362,6 +363,8 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
      */
     private void captureSeatPosition(int slot) {
         captureExecutor.execute(() -> {
+            // Config read off the a11y thread; the daemon also refuses captures while paused.
+            if (com.overdrive.app.config.ServiceModeFeatureGate.isPausedInConfig("seat_positions")) return;
             HttpURLConnection conn = null;
             try {
                 conn = DaemonHttpClient.open("/api/positions/capture?slot=" + slot, "POST", 3000, 8000);
@@ -417,10 +420,11 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
      * Drive {@link AutoStartEnabler} once, off the main thread, reporting the outcome back
      * on it.
      *
-     * <p>Triggered deliberately from the setup wizard's button and never automatically. An
-     * earlier version ran it from onServiceConnected, which re-fired on every reconnect and
-     * app-churn and repeatedly popped BYD's dialog in the user's face. Single-flight is
-     * enforced inside the enabler, so a double-tap cannot double-run.
+     * <p>Triggered from the setup wizard's button, or by the opt-in {@link AutoStartReapply}
+     * at most a few times per install. An earlier version ran it from every
+     * onServiceConnected, which re-fired on every reconnect and app-churn and repeatedly
+     * popped BYD's dialog in the user's face. Single-flight is enforced inside the enabler,
+     * so a double-tap cannot double-run.
      */
     public void runAutoStartEnabler(final Callback callback) {
         try {
@@ -459,7 +463,10 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
         wifiDebuggingDialogLifecycle.unbind();
         // Only if it is still OURS: a reconnect can construct the new instance before the old
         // one unbinds, and an unguarded null would erase the live service's registration.
-        if (instance == this) instance = null;
+        if (instance == this) {
+            instance = null;
+            AutoStartReapply.onServiceDisconnected();
+        }
         return super.onUnbind(intent);
     }
 
@@ -471,7 +478,10 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
     @Override
     public void onDestroy() {
         Log.w(TAG, "AccessibilityService destroyed — attempting restart");
-        if (instance == this) instance = null;
+        if (instance == this) {
+            instance = null;
+            AutoStartReapply.onServiceDisconnected();
+        }
         wifiDebuggingDialogLifecycle.destroy();
 
         // Non-daemon single-thread pool with no core timeout: every disable/re-enable cycle

@@ -1,5 +1,7 @@
 package com.overdrive.app.server;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.storage.ExternalStorageCleaner;
 
 import org.json.JSONArray;
@@ -9,7 +11,7 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.io.RandomAccessFile;
+import com.overdrive.app.storage.removable.SeekableFileReader;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Collections;
@@ -171,8 +173,8 @@ public final class FactoryDvrApiHandler {
     }
 
     private static boolean allowed(File file, File root) {
-        return root.isDirectory() && file.getPath().startsWith(root.getPath() + File.separator)
-                && file.isFile() && file.canRead();
+        return RemovableStorageFs.isDirectory(root) && file.getPath().startsWith(root.getPath() + File.separator)
+                && RemovableStorageFs.isFile(file) && RemovableStorageFs.canRead(file);
     }
 
     private static String idFor(File file) throws Exception {
@@ -198,7 +200,7 @@ public final class FactoryDvrApiHandler {
     private static void stream(OutputStream out, File file, String requestedRange, boolean download)
             throws Exception {
         // no-store: private OEM footage that the dashcam may still overwrite.
-        try (RandomAccessFile input = new RandomAccessFile(file, "r")) {
+        try (SeekableFileReader input = new SeekableFileReader(file)) {
             long size = input.length();
             if (size == 0) {
                 HttpResponse.sendError(out, 410, "Factory DVR file is empty");

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="projection_cluster_controls">Bediening van het instrumentenpaneel</string>
+    <string name="projection_cluster_back">Terug</string>
+    <string name="projection_cluster_home">Home</string>
+    <string name="projection_cluster_volume_down">Volume −</string>
+    <string name="projection_cluster_volume_up">Volume +</string>
+    <string name="projection_cluster_control_unavailable">Bediening van het instrumentenpaneel is niet beschikbaar. Controleer de actieve projectie en start de daemon na het bijwerken opnieuw.</string>
+</resources>

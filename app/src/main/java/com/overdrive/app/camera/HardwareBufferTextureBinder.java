@@ -42,4 +42,10 @@ public final class HardwareBufferTextureBinder {
      */
     public static native boolean bindHardwareBufferToTextureNative(
         HardwareBuffer hwBuffer, int textureId);
+
+    /**
+     * Re-targets {@code textureId} to a black 1x1 buffer so it no longer imports
+     * a camera buffer. Caller's thread holds the context; false = still bound as before.
+     */
+    public static native boolean bindPlaceholderNative(int textureId);
 }

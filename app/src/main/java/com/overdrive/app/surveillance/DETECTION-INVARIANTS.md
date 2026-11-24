@@ -40,10 +40,12 @@ window). Brakes: 10 s min-gap after any stop + a hard budget of 3 assisted
 (unconfirmed) triggers per rolling 10 min + TTL'd latch (10 s) + quadrant scoping
 + brightness/incoherence discriminators at every consumer.
 
-**With YOLO loaded, channels 2-4 cannot record on their own:** the final gate after
-the overrides (`if (aiAvailable && !aiRecentlyConfirmed) shouldSuppress = true`, v44.2)
-re-suppresses them, so only class evidence (1) authorizes a recording. Their
-"override … recording" log lines therefore don't mean a recording started.
+**With YOLO loaded, channels 2 and 4 cannot record on their own:** the final gate after
+the overrides (`if (aiAvailable && !aiRecentlyConfirmed && !salienceExempts) shouldSuppress = true`,
+v44.2) re-suppresses them, so only class evidence (1) authorizes a recording, and their
+"override … recording" log lines don't mean a recording started. Channel 3 (salience) is
+exempt when the user has enabled `motionSalienceEnabled` (#922), since the toggle exists
+to record what the classifier misses; its own brakes (I9, I10, I11) apply instead.
 
 **Light-change check (feeds channel 1).** Early AI only dispatches cameras whose
 motion survived, and the `>25%` flash filter discards a whole camera — so a close car
@@ -184,6 +186,15 @@ than per-quadrant-instance; affects only a log line.
 
 - The S4 motion-overlap filter is dilated by one block; `ThumbnailBuffer`'s copy is
   NOT. Opposite penalties: drop-the-detection vs cosmetic scenery flag. Do not unify.
+- Timeline sidecars may cosmetically relabel a PERSON span as ANIMAL only when
+  repeated same-box animal frames (IoU >= 0.4, <= 1 s apart) bracket 1-2 PERSON
+  frames, the animal peak meets the person peak, and the span has one camera and
+  one object. Evidence is per span (pre-roll ring and post-roll), never actor lists.
+  A PERSON at a span edge, beside an animal, elsewhere in the frame, or on a fast
+  subject keeps PERSON; a person YOLO mostly calls an animal cannot be told apart.
+  A span the static-actor drop would then remove stays PERSON, so no marker is
+  lost; only type/maxConf and the derived stats/legend change. Triggers, severity,
+  actors, SRT and hero are untouched.
 - `beatsAsThreat` demotes an all-scenery headline, but the count loops are untouched
   and `pushWorthy` latches before the demotion. Cosmetic surfaces may narrow;
   gates may not.

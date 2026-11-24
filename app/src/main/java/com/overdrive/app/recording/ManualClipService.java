@@ -1,5 +1,7 @@
 package com.overdrive.app.recording;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.server.RecordingsIndex;
@@ -569,7 +571,7 @@ public final class ManualClipService {
             // mutate the global fallback state used by UI and cleanup routing.
             dir = storage.resolveTargetWithEnospcFallback(dir, OUTPUT_RESERVE_BYTES, false);
             if (dir == null) return null;
-            if (!dir.exists() && !dir.mkdirs() && !dir.exists()) return null;
+            if (!RemovableStorageFs.exists(dir) && !RemovableStorageFs.mkdirs(dir) && !RemovableStorageFs.exists(dir)) return null;
             if (!storage.ensureRecordingsSpaceForRecorder(OUTPUT_RESERVE_BYTES, dir)) return null;
 
             String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
@@ -583,7 +585,7 @@ public final class ManualClipService {
                 String name = "replay_" + timestamp
                         + (suffix == 0 ? "" : "_" + suffix) + ".mp4";
                 File candidate = new File(dir, name);
-                if (!candidate.exists() && !new File(candidate.getAbsolutePath() + ".tmp").exists()) {
+                if (!RemovableStorageFs.exists(candidate) && !RemovableStorageFs.exists(new File(candidate.getAbsolutePath() + ".tmp"))) {
                     return candidate;
                 }
             }

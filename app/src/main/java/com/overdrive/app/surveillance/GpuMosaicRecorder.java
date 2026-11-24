@@ -1,5 +1,7 @@
 package com.overdrive.app.surveillance;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import android.opengl.EGLSurface;
 import android.opengl.GLUtils;
 import com.overdrive.app.logging.DaemonLogger;
@@ -310,6 +312,12 @@ public class GpuMosaicRecorder {
     private int cpuOverlayGen;  // guarded by cpuOverlayTables; bumped on init/release
     private final java.util.concurrent.atomic.AtomicBoolean cpuOverlayBuilding =
         new java.util.concurrent.atomic.AtomicBoolean(false);
+    // Raw-lens 2x2 frames carry the overlay band opaque, so players can show it un-dewarped.
+    // Mode of each table, written before the table is published.
+    private final boolean[] cpuOverlayTableStrip = new boolean[3];
+    // All-black band for strip frames without a matching telemetry table; one build per session.
+    private volatile java.nio.ByteBuffer cpuStripBlankTable;
+    private int cpuStripBlankTriedGen = -1;  // guarded by cpuOverlayTables
     private static final java.util.concurrent.ExecutorService CPU_OVERLAY_BUILDER =
         java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(() -> {
@@ -327,12 +335,20 @@ public class GpuMosaicRecorder {
     private int cpuMissingFrames;
     // CPU recording thread (see CpuLane); null unless the CPU engine is running.
     private volatile CpuLane cpuLane;
-    private final java.util.concurrent.atomic.AtomicInteger cpuSuperseded =
+    // Frames the full CPU recording queue dropped, per log window.
+    private final java.util.concurrent.atomic.AtomicInteger cpuDropped =
+        new java.util.concurrent.atomic.AtomicInteger();
+    // Never reset: drops plus frames that found a backlog; recorder-pressure input for the road model.
+    private final java.util.concurrent.atomic.AtomicLong cpuPressureTotal =
+        new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicInteger cpuQueueHigh =
         new java.util.concurrent.atomic.AtomicInteger();
     private long cpuWindowStartMs;
     private long cpuWorstTotalNs;
     private long cpuWorstComposeNs;
     private long cpuWorstOverlayNs;
+    private long cpuWorstThreadCpuNs;
+    private long cpuWorstLagNs;
     private int cpuQueued;
     private int cpuNoBuffer;
     private int cpuBusy;
@@ -1467,8 +1483,8 @@ public class GpuMosaicRecorder {
             }
 
             // Ensure directory exists
-            if (!targetDir.exists()) {
-                targetDir.mkdirs();
+            if (!RemovableStorageFs.exists(targetDir)) {
+                RemovableStorageFs.mkdirs(targetDir);
             }
 
             // Reserve ~100MB for new recording. Time it explicitly — a slow
@@ -1517,9 +1533,9 @@ public class GpuMosaicRecorder {
             try {
                 long freeBytes = -1L;
                 try {
-                    java.io.File probe = targetDir.exists() ? targetDir : targetDir.getParentFile();
-                    if (probe != null && probe.exists()) {
-                        freeBytes = new android.os.StatFs(probe.getAbsolutePath()).getAvailableBytes();
+                    java.io.File probe = RemovableStorageFs.exists(targetDir) ? targetDir : targetDir.getParentFile();
+                    if (probe != null && RemovableStorageFs.exists(probe)) {
+                        freeBytes = RemovableStorageFs.statFsAvailableBytes(probe.getAbsolutePath());
                     }
                 } catch (Throwable ignore) { /* unmounted — leave -1 */ }
                 logger.info("Recording start: target=" + targetDir.getAbsolutePath()
@@ -1533,7 +1549,7 @@ public class GpuMosaicRecorder {
                 java.io.File internal = storageManager.resolveTargetWithEnospcFallback(
                     targetDir, 100 * 1024 * 1024, true);
                 if (internal != null && !internal.equals(targetDir)) {
-                    if (!internal.exists()) internal.mkdirs();
+                    if (!RemovableStorageFs.exists(internal)) RemovableStorageFs.mkdirs(internal);
                     storageManager.ensureRecordingsSpaceForRecorder(100 * 1024 * 1024, internal);
                     logger.warn("Recording start failed on a card that refuses writes ("
                         + targetDir.getAbsolutePath() + ") — retrying on " + internal.getAbsolutePath());
@@ -2215,6 +2231,11 @@ public class GpuMosaicRecorder {
         return cpuEngine;
     }
 
+    /** CPU recording queue drops plus frames that found a backlog, since this recorder was built (never reset). */
+    public long cpuPressureTotal() {
+        return cpuPressureTotal.get();
+    }
+
     /** Called (camera or CPU recording thread) when the CPU engine can't run here; arg is a RecordingEngine.WHY_* code. */
     public void setCpuEngineFailureListener(java.util.function.Consumer<String> listener) {
         this.cpuEngineFailureListener = listener;
@@ -2248,6 +2269,9 @@ public class GpuMosaicRecorder {
         }
         overlayRenderer = new OverlayBitmapRenderer();
         resetCpuOverlay();
+        if (overlayEnabled && recordLayout == 0 && (rectifyK1 != 0.0f || rectifyK2 != 0.0f)) {
+            ensureCpuStripBlank();
+        }
         cpuOverlayErrorLogged = false;
         cpuEngineFailed = false;
         cpuCodecErrors = 0;
@@ -2290,8 +2314,8 @@ public class GpuMosaicRecorder {
     /**
      * CPU engine counterpart of drawFrame, on the camera thread: same gates, then
      * the frame goes to the CPU recording thread, which copies it into the encoder
-     * while this thread goes on with the GPU views. Never waits: a newer frame
-     * replaces one still waiting, and a full encoder drops it.
+     * while this thread goes on with the GPU views. Never waits: a full queue
+     * drops its oldest frame, and a full encoder drops the frame being written.
      */
     public void submitCpuFrame(CpuFrameSource frame, CpuFrameSource windshieldFrame,
                                boolean windshieldReady, long frameTimestampNs) {
@@ -2334,20 +2358,22 @@ public class GpuMosaicRecorder {
             return;
         }
 
-        // Lens on, 2x2 grid: raw tiles and no overlay (the player dewarps; overlay
-        // pixels would be resampled into the picture). Dashcam clips dewarp here.
+        // Lens on, 2x2 grid: raw tiles the player dewarps. With the overlay on, its band is
+        // burned opaque on every frame (blank between recordings) and players show it as is.
+        // Dashcam clips dewarp here.
         int layout = recordLayout;
         float k1 = rectifyK1;
         float k2 = rectifyK2;
         boolean rawLens = layout == 0 && (k1 != 0.0f || k2 != 0.0f);
-        boolean overlay = overlayEnabled && overlayRecordingModeAllowed && overlayRenderer != null
-                && !rawLens;
-        if (overlay) refreshCpuOverlay();
+        boolean strip = rawLens && overlayEnabled;
+        boolean overlay = overlayEnabled && overlayRecordingModeAllowed && overlayRenderer != null;
+        if (strip) ensureCpuStripBlank();
+        if (overlay) refreshCpuOverlay(strip);
         // Dashcam top band: the windshield frame when ready, else the 360 front
         // (the shader's own fallback).
         CpuFrameSource windshield = layout == 1 && windshieldReady ? windshieldFrame : null;
         lane.post(new CpuFrameJob(frame, windshield, frameTimestampNs, overlay,
-            k1, k2, rectifyAspect, layout, rawLens));
+            k1, k2, rectifyAspect, layout, rawLens, strip));
     }
 
     /** Camera teardown: hands back a frame still waiting for the CPU recording thread. */
@@ -2361,6 +2387,7 @@ public class GpuMosaicRecorder {
         HardwareEventRecorderGpu enc = encoder;
         if (!cpuEngine || cpuEngineFailed || enc == null) return;
         long start = System.nanoTime();
+        long cpuStart = android.os.Debug.threadCpuTimeNanos();
         if (!w.bindSource(job.source.image)) {
             failCpuEngine(RecordingEngine.WHY_FRAMES_UNREADABLE, w.error);
             return;
@@ -2368,7 +2395,12 @@ public class GpuMosaicRecorder {
         // A windshield frame the CPU can't read falls back to the 360 front too.
         w.windshield = job.windshield != null && w.bindWindshield(job.windshield.image);
         int overlayTable = job.overlay ? acquireCpuOverlayTable() : -1;
-        w.overlayTable = overlayTable >= 0 ? cpuOverlayTables[overlayTable] : null;
+        java.nio.ByteBuffer table = overlayTable >= 0
+                && cpuOverlayTableStrip[overlayTable] == job.strip
+            ? cpuOverlayTables[overlayTable] : null;
+        if (table == null && job.strip) table = cpuStripBlankTable;
+        w.overlayTable = table;
+        w.stripDrawn = false;
         w.job = job;
         w.composeNs = 0;
         w.overlayNs = 0;
@@ -2392,6 +2424,8 @@ public class GpuMosaicRecorder {
                 lastSwappedPtsNs = ptsNs;
                 cpuCodecErrors = 0;
                 cpuQueued++;
+                long lagNs = System.nanoTime() - job.ptsNs;  // capture to encoder input
+                if (lagNs > cpuWorstLagNs) cpuWorstLagNs = lagNs;
                 if (recording) {
                     lastFrameTime = System.currentTimeMillis();
                     frameCount++;
@@ -2427,17 +2461,23 @@ public class GpuMosaicRecorder {
             cpuWorstTotalNs = elapsedNs;
             cpuWorstComposeNs = w.composeNs;
             cpuWorstOverlayNs = w.overlayNs;
+            // Thread CPU time of the same frame: total - cpu = time spent waiting for a core.
+            cpuWorstThreadCpuNs = cpuStart >= 0
+                ? android.os.Debug.threadCpuTimeNanos() - cpuStart : -1_000_000L;
         }
         long nowMs = System.currentTimeMillis();
         if (cpuWindowStartMs == 0) {
             cpuWindowStartMs = nowMs;
         } else if (nowMs - cpuWindowStartMs >= DRAW_STAGE_LOG_INTERVAL_MS) {
             logger.info(String.format(Locale.US,
-                "CpuFrame(worst/30s): total=%dms copy=%dms ovl=%dms queued=%d noBuffer=%d busy=%d superseded=%d",
+                "CpuFrame(worst/30s): total=%dms copy=%dms ovl=%dms cpu=%dms lag=%dms queued=%d"
+                    + " noBuffer=%d busy=%d dropped=%d qmax=%d",
                 cpuWorstTotalNs / 1_000_000, cpuWorstComposeNs / 1_000_000,
-                cpuWorstOverlayNs / 1_000_000, cpuQueued, cpuNoBuffer, cpuBusy,
-                cpuSuperseded.getAndSet(0)));
+                cpuWorstOverlayNs / 1_000_000, cpuWorstThreadCpuNs / 1_000_000,
+                cpuWorstLagNs / 1_000_000, cpuQueued, cpuNoBuffer, cpuBusy,
+                cpuDropped.getAndSet(0), cpuQueueHigh.getAndSet(0)));
             cpuWorstTotalNs = cpuWorstComposeNs = cpuWorstOverlayNs = 0;
+            cpuWorstThreadCpuNs = cpuWorstLagNs = 0;
             cpuQueued = cpuNoBuffer = cpuBusy = 0;
             cpuWindowStartMs = nowMs;
         }
@@ -2468,14 +2508,22 @@ public class GpuMosaicRecorder {
      * thread, so the camera thread never waits on it. While a rebuild runs, the
      * renderer keeps its newest bitmap pending and frames blend the last table.
      */
-    private void refreshCpuOverlay() {
+    /** The overlay band: the top 1/12 of the frame, full width, even-sized. */
+    int cpuOverlayBandWidth() {
+        return viewportWidth & ~1;
+    }
+
+    int cpuOverlayBandHeight() {
+        return Math.round(viewportHeight / 12f) & ~1;
+    }
+
+    private void refreshCpuOverlay(final boolean strip) {
         if (cpuOverlayBuilding.get()) return;
         android.graphics.Bitmap bitmap = overlayRenderer.swapAndGetFront();
         if (bitmap == null || bitmap.isRecycled()) return;
         if (bitmap.getConfig() != android.graphics.Bitmap.Config.ARGB_8888) return;
-        // The GL overlay quad covers the top 1/12 of the frame, full width.
-        final int bandW = viewportWidth & ~1;
-        final int bandH = Math.round(viewportHeight / 12f) & ~1;
+        final int bandW = cpuOverlayBandWidth();
+        final int bandH = cpuOverlayBandHeight();
         int tableBytes = CpuMosaicCompositor.nativeOverlayBytes(bandW, bandH);
         if (tableBytes <= 0) return;
         int pixelBytes = bitmap.getRowBytes() * bitmap.getHeight();
@@ -2504,7 +2552,8 @@ public class GpuMosaicRecorder {
         }
         cpuOverlayBuilding.set(true);
         try {
-            CPU_OVERLAY_BUILDER.execute(() -> buildCpuOverlayTable(rgba, bw, bh, rowBytes, bandW, bandH, gen));
+            CPU_OVERLAY_BUILDER.execute(() ->
+                buildCpuOverlayTable(rgba, bw, bh, rowBytes, bandW, bandH, gen, strip));
         } catch (RuntimeException e) {
             cpuOverlayBuilding.set(false);
             logCpuOverlayError("CPU overlay rebuild not scheduled: " + e.getMessage());
@@ -2513,16 +2562,21 @@ public class GpuMosaicRecorder {
 
     /** Builder thread: fills a table the camera thread isn't using, then publishes it. */
     private void buildCpuOverlayTable(java.nio.ByteBuffer rgba, int bw, int bh, int rowBytes,
-                                      int bandW, int bandH, int gen) {
+                                      int bandW, int bandH, int gen, boolean strip) {
         try {
             int front = cpuOverlayFront, hazard = cpuOverlayHazard;
             int t = 0;
             while (t == front || t == hazard) t++;  // one of three is always free
             java.nio.ByteBuffer table = cpuOverlayTables[t];
+            // Premultiplied RGB at full alpha is the overlay drawn over black.
+            if (strip) makeOpaque(rgba, bw, bh, rowBytes);
             if (table != null && CpuMosaicCompositor.nativePrepareOverlay(
                     rgba, bw, bh, rowBytes, table, bandW, bandH)) {
                 synchronized (cpuOverlayTables) {
-                    if (gen == cpuOverlayGen) cpuOverlayFront = t;  // not into a re-initialised session
+                    if (gen == cpuOverlayGen) {  // not into a re-initialised session
+                        cpuOverlayTableStrip[t] = strip;
+                        cpuOverlayFront = t;
+                    }
                 }
             }
         } catch (Throwable e) {
@@ -2532,11 +2586,56 @@ public class GpuMosaicRecorder {
         }
     }
 
+    static void makeOpaque(java.nio.ByteBuffer rgba, int bw, int bh, int rowBytes) {
+        for (int y = 0; y < bh; y++) {
+            int row = y * rowBytes + 3;
+            for (int x = 0; x < bw; x++) rgba.put(row + x * 4, (byte) 0xFF);
+        }
+    }
+
+    /** Builds the all-black strip table off the camera thread; one attempt per session. */
+    private void ensureCpuStripBlank() {
+        if (cpuStripBlankTable != null) return;
+        final int gen;
+        synchronized (cpuOverlayTables) {
+            if (cpuStripBlankTriedGen == cpuOverlayGen) return;
+            cpuStripBlankTriedGen = cpuOverlayGen;
+            gen = cpuOverlayGen;
+        }
+        final int bandW = cpuOverlayBandWidth();
+        final int bandH = cpuOverlayBandHeight();
+        try {
+            CPU_OVERLAY_BUILDER.execute(() -> {
+                try {
+                    int bytes = CpuMosaicCompositor.nativeOverlayBytes(bandW, bandH);
+                    java.nio.ByteBuffer black = java.nio.ByteBuffer.allocateDirect(16);
+                    for (int i = 3; i < 16; i += 4) black.put(i, (byte) 0xFF);
+                    java.nio.ByteBuffer table = bytes > 0
+                        ? java.nio.ByteBuffer.allocateDirect(bytes).order(java.nio.ByteOrder.nativeOrder())
+                        : null;
+                    if (table == null || !CpuMosaicCompositor.nativePrepareOverlay(
+                            black, 2, 2, 8, table, bandW, bandH)) {
+                        logCpuOverlayError("CPU overlay strip not built (" + bandW + "x" + bandH + ")");
+                        return;
+                    }
+                    synchronized (cpuOverlayTables) {
+                        if (gen == cpuOverlayGen) cpuStripBlankTable = table;
+                    }
+                } catch (Throwable e) {
+                    logCpuOverlayError("CPU overlay strip failed: " + e.getMessage());
+                }
+            });
+        } catch (RuntimeException e) {
+            logCpuOverlayError("CPU overlay strip not scheduled: " + e.getMessage());
+        }
+    }
+
     /** Drops the published table; a rebuild still running won't publish afterwards. */
     private void resetCpuOverlay() {
         synchronized (cpuOverlayTables) {
             cpuOverlayGen++;
             cpuOverlayFront = -1;
+            cpuStripBlankTable = null;
         }
         cpuOverlayHazard = -1;
     }
@@ -2569,11 +2668,12 @@ public class GpuMosaicRecorder {
         final float aspect;
         final int layout;
         final boolean rawLens;
+        final boolean strip;  // raw-lens frame whose overlay band is burned opaque
         private final java.util.concurrent.atomic.AtomicBoolean released =
             new java.util.concurrent.atomic.AtomicBoolean();
 
         CpuFrameJob(CpuFrameSource source, CpuFrameSource windshield, long ptsNs, boolean overlay,
-                    float k1, float k2, float aspect, int layout, boolean rawLens) {
+                    float k1, float k2, float aspect, int layout, boolean rawLens, boolean strip) {
             this.source = source;
             this.windshield = windshield;
             this.ptsNs = ptsNs;
@@ -2583,6 +2683,7 @@ public class GpuMosaicRecorder {
             this.aspect = aspect;
             this.layout = layout;
             this.rawLens = rawLens;
+            this.strip = strip;
             source.retain();
             if (windshield != null) windshield.retain();
         }
@@ -2596,16 +2697,23 @@ public class GpuMosaicRecorder {
         }
     }
 
+    // Frames waiting for the CPU recording thread. Frames carry capture-time PTS, so a
+    // stalled copy only delays encoding; the queue rides it out instead of dropping.
+    // The CPU camera reader's pool is sized for it (PanoramicCameraGpu).
+    public static final int CPU_LANE_DEPTH = 4;
+
     /**
      * CPU recording thread: copies frames into the encoder in parallel with the
-     * camera thread's GPU work (blind-spot, live view). One frame runs and one
-     * waits; a newer frame replaces the waiting one, whose images go back at once.
+     * camera thread's GPU work (blind-spot, live view). One frame runs and up to
+     * CPU_LANE_DEPTH wait in order; a full queue drops its oldest frame, whose
+     * images go back at once.
      */
     private final class CpuLane implements Runnable {
         private final Object lock = new Object();
         private final CpuGridWriter writer = new CpuGridWriter();
         private final Thread thread = new Thread(this, "CpuRecordLane");
-        private CpuFrameJob pending;     // guarded by lock
+        private final java.util.ArrayDeque<CpuFrameJob> waiting =
+            new java.util.ArrayDeque<>(CPU_LANE_DEPTH);  // guarded by lock
         private boolean running = true;  // guarded by lock
 
         void start() {
@@ -2614,29 +2722,35 @@ public class GpuMosaicRecorder {
         }
 
         void post(CpuFrameJob job) {
-            CpuFrameJob handBack;
+            CpuFrameJob handBack = null;
+            boolean backlog = false;
             synchronized (lock) {
                 if (running) {
-                    handBack = pending;
-                    pending = job;
+                    backlog = !waiting.isEmpty();
+                    if (waiting.size() >= CPU_LANE_DEPTH) handBack = waiting.pollFirst();
+                    waiting.addLast(job);
+                    if (waiting.size() > cpuQueueHigh.get()) cpuQueueHigh.set(waiting.size());
                     lock.notifyAll();
                 } else {
                     handBack = job;
                 }
             }
+            if (backlog) cpuPressureTotal.incrementAndGet();
             if (handBack != null) {
                 handBack.releaseSources();
-                if (handBack != job) cpuSuperseded.incrementAndGet();
+                if (handBack != job) cpuDropped.incrementAndGet();
             }
         }
 
         void dropPending() {
-            CpuFrameJob dropped;
-            synchronized (lock) {
-                dropped = pending;
-                pending = null;
+            while (true) {
+                CpuFrameJob dropped;
+                synchronized (lock) {
+                    dropped = waiting.pollFirst();
+                }
+                if (dropped == null) return;
+                dropped.releaseSources();
             }
-            if (dropped != null) dropped.releaseSources();
         }
 
         /** Stops after the running frame; false if it hasn't ended within the timeout. */
@@ -2668,15 +2782,14 @@ public class GpuMosaicRecorder {
             while (true) {
                 CpuFrameJob job;
                 synchronized (lock) {
-                    while (running && pending == null) {
+                    while (running && waiting.isEmpty()) {
                         try {
                             lock.wait();
                         } catch (InterruptedException ignored) {
                         }
                     }
                     if (!running) break;
-                    job = pending;
-                    pending = null;
+                    job = waiting.pollFirst();
                 }
                 try {
                     writeCpuFrame(writer, job);
@@ -2711,6 +2824,7 @@ public class GpuMosaicRecorder {
         private boolean windshieldErrorLogged;
         boolean windshield;
         java.nio.ByteBuffer overlayTable;
+        boolean stripDrawn;
         CpuFrameJob job;
         boolean sourceRejected;
         String error;
@@ -2846,8 +2960,14 @@ public class GpuMosaicRecorder {
                     cpuOverlayErrorLogged = true;
                     logger.warn("CPU overlay blend rejected (rc=" + orc + "); recording without it");
                 }
+                stripDrawn = j.strip && orc == 0;
             }
             return true;
+        }
+
+        @Override
+        public boolean stripDrawn() {
+            return stripDrawn;
         }
     }
 

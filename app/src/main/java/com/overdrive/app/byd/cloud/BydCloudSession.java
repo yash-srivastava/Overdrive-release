@@ -20,6 +20,9 @@ public final class BydCloudSession {
     public final String superId;
     private final long loginTimeMs;
     private final long ttlMs;
+    /** "vin|endpoint" pairs refused with and without userType; not retried for this login. */
+    final java.util.Set<String> userTypeSettled =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     public BydCloudSession(String userId, String signToken, String encryToken) {
         this(userId, signToken, encryToken, "", DEFAULT_TTL_MS);

@@ -137,6 +137,53 @@ public class Di3ProjectionTransportContractTest {
                 "unresolved DI5 recovery ownership"));
     }
 
+    @Test
+    public void automaticMapRestorationCannotPreemptANewerCustomLayout() throws IOException {
+        String root = "app/src/main/java/com/overdrive/app/";
+        String cast = readRepositoryFile(root + "launcher/ClusterCast.java");
+        String projector = readRepositoryFile(root + "navmap/ClusterMapProjector.java");
+        String controller = readRepositoryFile(root + "surveillance/ClusterProjectionController.java");
+        assertTrue(cast.contains("ClusterMapProjector.restoreAfterLegacyCastStop()"));
+        assertOrdered(projector, "public static void start()", "start(true);",
+                "public static void restoreAfterLegacyCastStop()", "start(false);");
+        assertOrdered(projector, "private static synchronized void start(boolean explicitSelection)",
+                "if (!explicitSelection)", "CustomLayoutsController.claimsAutomaticProjection()",
+                "return;", "startAdmitted(explicitSelection)", "publishActiveFlag(true)",
+                "? controller.acquireSustained()", ": controller.acquireAutomaticMapHold()");
+        assertTrue(section(projector, "private static void armLateDisplayRetry", "private static boolean sleepWhileActive")
+                .contains("startWhenSettled(false);"));
+        // A selection arriving between the map's admission check and its completed hold also wins.
+        assertOrdered(controller, "public boolean acquireSustained(String token)",
+                "return acquireSustained(token, true)", "public boolean acquireAutomaticMapHold()",
+                "return acquireSustained(\"map\", false)", "if (!requestOpen())",
+                "if (notifySelection) notifyCustomLayoutsOfOwner(holderToken)");
+    }
+
+    @Test
+    public void automaticProjectionKeepsItsIntentThroughQueuedAndTransportAdmission() throws IOException {
+        String root = "app/src/main/java/com/overdrive/app/";
+        String acc = readRepositoryFile(root + "monitor/AccMonitor.java");
+        String cast = readRepositoryFile(root + "launcher/ClusterCast.java");
+        String map = readRepositoryFile(root + "navmap/ClusterMapProjector.java");
+        String projection = readRepositoryFile(root + "surveillance/ClusterProjectionController.java");
+        String di5 = readRepositoryFile(root + "launcher/DiLink5ClusterCast.kt");
+        assertOrdered(acc, "private static void maybeAutoStartClusterProjection", "&& !clusterRecoveryOwner)",
+                "return;", "ClusterMapProjector.startAutomaticallyWhenSettled()", "ClusterCast.startAutomaticallyWhenSettled(projPkg)");
+        assertOrdered(cast, "public static boolean startWhenSettled(String pkg)", "return startWhenSettled(pkg, true)",
+                "public static boolean startAutomaticallyWhenSettled(String pkg)", "return startWhenSettled(pkg, false)",
+                "Thread queued", "start(pkg, explicitSelection)");
+        assertOrdered(cast, "private static void armLateDisplayRetry", "startAutomaticallyWhenSettled(pkg)");
+        assertOrdered(cast, "private static synchronized boolean start(String pkg, boolean explicitSelection)",
+                "claimsAutomaticProjection()", "startAdmitted(pkg, explicitSelection)",
+                "DiLink5ClusterCast.start(pkg, explicitSelection)", "controller.acquireAutomaticCastHold()");
+        assertTrue(projection.contains("return acquireSustained(\"castapp\", false)"));
+        assertOrdered(map, "public static void startAutomaticallyWhenSettled()", "startWhenSettled(false)",
+                "Thread queued", "start(explicitSelection)", "DiLink5ClusterCast.startMap(false)");
+        assertOrdered(di5, "if (target.automatic && activeKind == SessionKind.CUSTOM) return null",
+                "activePackage to generation", "stopInternal(previousGeneration", "if (target.automatic && !selectionStillAllows(target)) return null",
+                "ticket = StartTicket(nextGeneration)");
+    }
+
     private static String section(
             String source, String startNeedle, String endNeedle) {
         int start = source.indexOf(startNeedle);

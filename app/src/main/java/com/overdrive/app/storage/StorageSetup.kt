@@ -145,7 +145,7 @@ object StorageSetup {
             return
         }
         val pkg = context.packageName
-        val cmd = "appops set $pkg MANAGE_EXTERNAL_STORAGE allow"
+        val cmd = "appops set ${com.overdrive.app.util.ShellUser.flag()} $pkg MANAGE_EXTERNAL_STORAGE allow"
         adb.execute(cmd, object : AdbShellExecutor.ShellCallback {
             override fun onSuccess(output: String) {
                 val nowGranted = Environment.isExternalStorageManager()
@@ -171,7 +171,16 @@ object StorageSetup {
         Log.i(TAG, "App UID: $myUid")
         Log.i(TAG, "Android SDK: ${Build.VERSION.SDK_INT}")
         Log.i(TAG, "isExternalStorageManager: ${if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Environment.isExternalStorageManager() else "N/A (pre-R)"}")
-        
+
+        // Headless-system-user units (BYD100F) run the app as user 10: BASE_DIR is user 0's
+        // storage, invisible here, and the camera daemon (user 0) creates it itself.
+        val userId = myUid / 100_000
+        if (userId != 0) {
+            Log.i(TAG, "App runs as Android user $userId; $BASE_DIR belongs to user 0 - skipped")
+            Log.i(TAG, "========== STORAGE SETUP END (skipped) ==========")
+            return true
+        }
+
         val baseDir = File(BASE_DIR)
         var success = true
         

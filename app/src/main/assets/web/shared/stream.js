@@ -50,6 +50,22 @@ BYD.stream = {
     _broadwayWorkerUrl: null,
     activeFps: 10,  // Updated from /api/stream/quality response; default matches MEDIUM preset
     isDiLink5: false,
+    // Diagnostics require an explicit session switch. No query strings are
+    // used: the Android page router matches /live-view verbatim.
+    diagnosticBroadway: (function() {
+        try { return sessionStorage.getItem('od.broadwayAbDiagnostic') === '1'; }
+        catch (e) { return false; }
+    }()),
+    forceBroadway: (function() {
+        try { return sessionStorage.getItem('od.broadwayAbDiagnostic') === '1'
+            && /^(off|on)$/.test(sessionStorage.getItem('od.broadwayAbMode') || ''); }
+        catch (e) { return false; }
+    }()),
+    reusePlaneTextures: (function() {
+        try { return sessionStorage.getItem('od.broadwayAbDiagnostic') === '1'
+            && sessionStorage.getItem('od.broadwayAbMode') === 'on'; }
+        catch (e) { return false; }
+    }()),
     // Last view mode the backend accepted; currentViewMode is set optimistically.
     confirmedViewMode: -1,
     // Bumped by stopStream. An async start/view-switch compares its captured
@@ -79,7 +95,7 @@ BYD.stream = {
     hasWebCodecs: typeof VideoDecoder !== 'undefined',
 
     _willUseBroadway() {
-        return this.decoderMode === 'broadway' ||
+        return this.forceBroadway || this.decoderMode === 'broadway' ||
             (!(this.hasWebCodecs && typeof SotaPlayer !== 'undefined') &&
              (this.isIOS || !window.MediaSource || typeof JMuxer === 'undefined'));
     },
@@ -99,7 +115,11 @@ BYD.stream = {
         // newer click. Mirrors recording.js _oemPollToken.
         const token = (this._viewPollToken || 0) + 1;
         this._viewPollToken = token;
-        const delays = [500, 1000, 2000, 3000, 4000];
+        // DVR-backed views (6 DVR, 9 All + DVR) wait out a multi-second camera warmup.
+        const dvrView = mode === 6 || mode === 9;
+        const delays = dvrView
+            ? [500, 1000, 1500, 2000, 3000, 3000, 4000]
+            : [500, 1000, 2000, 3000, 4000];
         let data = initialResponse;
         let toastShown = false;
         const cancelled = () => this._viewPollToken !== token
@@ -115,14 +135,14 @@ BYD.stream = {
             await new Promise(r => setTimeout(r, delays[i]));
             if (cancelled()) return { cancelled: true };
             try {
-                // DVR warm-up is completed by the daemon lifecycle worker.
-                // Polling the mutating route endpoint used to re-bind the OEM
-                // source every pass; on single-client HAL variants that could
-                // make the feed alternate between AVM and DVR. Observe mode 6
-                // through the read-only status endpoint after the first click.
-                data = mode === 6
-                    ? await this._requestViewStatus(mode, selectionToken)
-                    : await this._requestViewRoute(mode, selectionToken);
+                // The daemon lifecycle worker completes a DVR warm-up, so DVR views
+                // are observed read-only. Only the pano/stream bring-up, which the
+                // route itself performs, is retried through the route.
+                const routeStillNeeded = !dvrView || (data
+                    && (data.errorCode === 'pano_starting' || data.errorCode === 'stream_starting'));
+                data = routeStillNeeded
+                    ? await this._requestViewRoute(mode, selectionToken)
+                    : await this._requestViewStatus(mode, selectionToken);
             } catch (e) { continue; }
             if (data && data.cancelled) return data;
             if (cancelled()) return { cancelled: true };
@@ -138,7 +158,7 @@ BYD.stream = {
                 // path, hence the mode-based fallback.
                 const key = (data.errorCode && typeof data.errorCode === 'string')
                     ? 'stream.' + data.errorCode
-                    : (mode === 6 ? 'stream.oem_starting' : 'stream.pano_starting');
+                    : (dvrView ? 'stream.oem_starting' : 'stream.pano_starting');
                 const message = BYD.i18n.t(key);
                 if (typeof this.showStartupStatus === 'function') {
                     this.showStartupStatus(message);
@@ -381,6 +401,10 @@ BYD.stream = {
      * Priority: WebCodecs > JMuxer > Broadway
      */
     async initDecoder() {
+        // Diagnostic override: choose Broadway before WebCodecs/JMuxer, and
+        // send decoder=broadway to the backend from the first request.
+        if (this.forceBroadway) return await this.initBroadway();
+
         // Try WebCodecs first (SOTA - best performance)
         if (this.hasWebCodecs && typeof SotaPlayer !== 'undefined') {
             const success = await this.initWebCodecs();
@@ -584,10 +608,22 @@ BYD.stream = {
                 useWorker: true,
                 workerFile: workerUrl,
                 webgl: true,
+                // Opt-in diagnostics only; normal Broadway preserves the old GL path.
+                reusePlaneTextures: this.forceBroadway && this.reusePlaneTextures,
+                // GPU readback timings are collected only in forced diagnostic mode.
+                benchmarkPlaneTextures: this.forceBroadway === true,
                 reuseMemory: this.isDiLink5 === true,
                 size: { width: 1280, height: 960 }
             });
             
+            // The release WebView suppresses console logs; publish each 300-frame
+            // summary into the visible diagnostic overlay as well.
+            this.broadwayPlayer.onPlaneUploadSummary = (summary) => {
+                if (this.diagnosticBroadway && typeof this.showBroadwaySummary === 'function') {
+                    this.showBroadwaySummary(summary);
+                }
+            };
+
             // 6. Setup Canvas
             const container = document.getElementById('sw_container');
             if (container) {

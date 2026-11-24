@@ -9,6 +9,18 @@ import org.junit.Test;
 
 public class ClusterTransportTest {
 
+    @Test
+    public void sealionAndroid11FirmwareUsesTheProductAndSdkEvenWithRegionalDeviceOrMissingFingerprint() {
+        assertEquals(ClusterTransport.AAOS_HDMI,
+                ClusterTransport.resolve("auto", false, 30, "DX_BYD_AUTO", "regional_device",
+                        "BYD/DX_BYD_AUTO/regional_device:11/RQ3A.211001.001/build:user/test-keys").transport);
+        assertEquals(ClusterTransport.AAOS_HDMI,
+                ClusterTransport.resolve("legacy", true, 30, "DX_BYD_AUTO", null, null).transport);
+        assertFalse(ClusterTransport.isAaosHdmiFirmware("DiLink5.0", 30));
+        assertFalse(ClusterTransport.isAaosHdmiFirmware("DX_BYD_AUTO_EXTRA", 30));
+        assertFalse(ClusterTransport.isAaosHdmiFirmware("DX_BYD_AUTO", 33));
+    }
+
     private static final String DILINK5_PRODUCT = "DiLink5.0";
     private static final String DILINK5_FINGERPRINT =
             "BYD-AUTO/DiLink5.0/DiLink5.0:12/SKQ1.230128.001/"
@@ -20,7 +32,7 @@ public class ClusterTransportTest {
     @Test
     public void diLink5CameraModeAlwaysWinsOverConfigAndFirmware() {
         ClusterTransport.Resolution mode = ClusterTransport.resolve(
-                "legacy", true, LEGACY_PRODUCT, null, LEGACY_FINGERPRINT);
+                "legacy", true, 28, LEGACY_PRODUCT, null, LEGACY_FINGERPRINT);
         assertEquals(ClusterTransport.DILINK5, mode.transport);
         assertEquals(ClusterTransport.SOURCE_MODE, mode.source);
         assertTrue(mode.isDiLink5());
@@ -29,14 +41,14 @@ public class ClusterTransportTest {
     @Test
     public void explicitConfigOverrideBeatsFirmwareDetection() {
         ClusterTransport.Resolution forcedLegacy = ClusterTransport.resolve(
-                "legacy", false,
+                "legacy", false, 31,
                 DILINK5_PRODUCT, DILINK5_PRODUCT, DILINK5_FINGERPRINT);
         assertEquals(ClusterTransport.LEGACY, forcedLegacy.transport);
         assertEquals(ClusterTransport.SOURCE_CONFIG, forcedLegacy.source);
         assertFalse(forcedLegacy.isDiLink5());
 
         ClusterTransport.Resolution forcedDiLink5 = ClusterTransport.resolve(
-                "dilink5", false,
+                "dilink5", false, 28,
                 LEGACY_PRODUCT, LEGACY_PRODUCT, LEGACY_FINGERPRINT);
         assertEquals(ClusterTransport.DILINK5, forcedDiLink5.transport);
         assertEquals(ClusterTransport.SOURCE_CONFIG, forcedDiLink5.source);
@@ -48,41 +60,41 @@ public class ClusterTransportTest {
         // mode, no QCarCam library — its AutoContainer rejects the legacy
         // protocol, so auto must route the cluster to the DI5 transport.
         ClusterTransport.Resolution auto = ClusterTransport.resolve(
-                "auto", false,
+                "auto", false, 31,
                 DILINK5_PRODUCT, DILINK5_PRODUCT, DILINK5_FINGERPRINT);
         assertEquals(ClusterTransport.DILINK5, auto.transport);
         assertEquals(ClusterTransport.SOURCE_FIRMWARE, auto.source);
 
         ClusterTransport.Resolution absentKey = ClusterTransport.resolve(
-                null, false, null, null, DILINK5_FINGERPRINT);
+                null, false, 31, null, null, DILINK5_FINGERPRINT);
         assertEquals(ClusterTransport.DILINK5, absentKey.transport);
 
         ClusterTransport.Resolution trinket = ClusterTransport.resolve(
-                null, false, "trinket", "trinket",
+                null, false, 33, "trinket", "trinket",
                 "BYD-AUTO/trinket/trinket:13/build");
         assertEquals(ClusterTransport.DILINK5, trinket.transport);
 
         ClusterTransport.Resolution d50f = ClusterTransport.resolve(
-                null, false, "D50F_LC", null, null);
+                null, false, 33, "D50F_LC", null, null);
         assertEquals(ClusterTransport.DILINK5, d50f.transport);
     }
 
     @Test
     public void autoKeepsLegacyTransportOffDiLink5Firmware() {
         ClusterTransport.Resolution legacy = ClusterTransport.resolve(
-                "auto", false,
+                "auto", false, 28,
                 LEGACY_PRODUCT, LEGACY_PRODUCT, LEGACY_FINGERPRINT);
         assertEquals(ClusterTransport.LEGACY, legacy.transport);
         assertEquals(ClusterTransport.SOURCE_DEFAULT, legacy.source);
 
         ClusterTransport.Resolution unknownIdentity = ClusterTransport.resolve(
-                null, false, null, null, null);
+                null, false, 28, null, null, null);
         assertEquals(ClusterTransport.LEGACY, unknownIdentity.transport);
 
         // Unrecognized config values fall back to auto, never to a forced
         // transport.
         ClusterTransport.Resolution garbage = ClusterTransport.resolve(
-                "bogus", false,
+                "bogus", false, 28,
                 LEGACY_PRODUCT, LEGACY_PRODUCT, LEGACY_FINGERPRINT);
         assertEquals(ClusterTransport.LEGACY, garbage.transport);
         assertEquals(ClusterTransport.SOURCE_DEFAULT, garbage.source);

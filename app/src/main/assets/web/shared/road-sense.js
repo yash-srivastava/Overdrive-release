@@ -1947,6 +1947,7 @@ BYD.roadSense = {
     // All POSTs use fetch() (the in-app WebView drops XHR POST bodies).
 
     async loadClusterStatus() {
+        this.loadClusterBars();
         // Reflect the SHARED cluster size profile (blindspot.clusterSizeProfile,
         // mirrored into config.bsClusterLayout on load) into the map-tab selector.
         var layoutSel = document.getElementById('rsClusterLayout');
@@ -2054,6 +2055,112 @@ BYD.roadSense = {
 
     toggleClusterAdasHide() {
         return this._toggleSurveillanceFlag('rsClusterAdasHide', 'clusterAdasHideEnabled');
+    },
+
+    // Full cluster (DI3): one setting shared with the Custom Layouts and Projection screens.
+    //   GET  /api/custom-layouts/carrier         → { carrier: { state, busy, restartRecommended, config } }
+    //   POST /api/custom-layouts/carrier/config  { removeOemBars | hideVehicleIcons: bool }
+    //   POST /api/custom-layouts/carrier/restore
+    async loadClusterBars() {
+        try {
+            const resp = await fetch('/api/custom-layouts/carrier');
+            const data = await resp.json();
+            if (data && data.success && data.carrier) this._renderClusterBars(data.carrier);
+        } catch (e) {
+            console.warn('RoadSense: full cluster status failed:', e);
+        }
+    },
+
+    _renderClusterBars(c) {
+        const supported = c.state !== 'unavailable';
+        const cfg = c.config || {};
+        const barsOn = cfg.removeOemBars !== false;
+        ['rsClusterBarsRow', 'rsClusterIconsRow'].forEach(id => {
+            const row = document.getElementById(id);
+            if (row) row.style.display = supported ? '' : 'none';
+        });
+        const bars = document.getElementById('rsClusterBars');
+        const icons = document.getElementById('rsClusterIcons');
+        if (bars) { bars.checked = barsOn; bars.disabled = !!c.busy; }
+        if (icons) { icons.checked = cfg.hideVehicleIcons !== false; icons.disabled = !!c.busy || !barsOn; }
+        const lines = {
+            unknown: ['road_sense.map_cluster_bars_checking', 'Checking this car\u2019s cluster\u2026'],
+            pendingRestart: ['road_sense.map_cluster_bars_restart', 'Restart needed \u00b7 restart the cluster while parked to apply'],
+            active: ['road_sense.map_cluster_bars_active', 'Active \u00b7 OverDrive uses the whole cluster'],
+            error: ['road_sense.map_cluster_bars_error', 'Error \u00b7 couldn\u2019t set up the full cluster. Try again.'],
+            notInstalled: ['road_sense.map_cluster_bars_not_installed', 'Not set up yet'],
+        };
+        let line = c.busy ? ['road_sense.map_cluster_bars_working', 'Setting up the cluster\u2026']
+            : (!barsOn && !c.restartRecommended) ? ['road_sense.map_cluster_bars_off', 'Off \u00b7 the BYD top and bottom bars stay']
+            : (c.restartRecommended && c.state !== 'pendingRestart') ? ['road_sense.map_cluster_bars_restored', 'BYD cluster restored \u00b7 restart the cluster to finish']
+            : (lines[c.state] || lines.unknown);
+        const status = document.getElementById('rsClusterBarsStatus');
+        if (status) {
+            const t = BYD.i18n.t(line[0]);
+            status.textContent = (t && t !== line[0]) ? t : line[1];
+        }
+        const actions = document.getElementById('rsClusterBarsActions');
+        const restorable = supported && (c.state === 'active' || c.state === 'pendingRestart' || c.state === 'error');
+        if (actions) actions.style.display = (restorable || c.restartRecommended) ? '' : 'none';
+        const restore = document.getElementById('rsClusterBarsRestore');
+        if (restore) { restore.style.display = restorable ? '' : 'none'; restore.disabled = !!c.busy; }
+    },
+
+    async toggleClusterBars(key, id) {
+        const el = document.getElementById(id);
+        if (!el || el.disabled) return;
+        const on = el.checked;
+        el.disabled = true;
+        try {
+            const body = {};
+            body[key] = on;
+            const resp = await fetch('/api/custom-layouts/carrier/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const data = await resp.json();
+            if (data && data.success && data.carrier) {
+                this._renderClusterBars(data.carrier);
+                this._toastSaved();
+            } else {
+                el.checked = !on;
+                this._toastFailed();
+            }
+        } catch (e) {
+            console.warn('RoadSense: full cluster toggle failed:', e);
+            el.checked = !on;
+            this._toastFailed();
+        } finally {
+            el.disabled = false;
+            setTimeout(() => this.loadClusterBars(), 3000);
+        }
+    },
+
+    async restoreClusterBars() {
+        const t = BYD.i18n.t('road_sense.map_cluster_bars_restore_confirm');
+        const msg = (t && t !== 'road_sense.map_cluster_bars_restore_confirm') ? t
+            : 'Restore the BYD cluster? This removes the full-cluster file. Restart the cluster afterwards to finish.';
+        if (!window.confirm(msg)) return;
+        try {
+            const resp = await fetch('/api/custom-layouts/carrier/restore', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+            const data = await resp.json();
+            if (data && data.success && data.carrier) {
+                this._renderClusterBars(data.carrier);
+                this._toastSaved();
+            } else {
+                this._toastFailed();
+            }
+        } catch (e) {
+            console.warn('RoadSense: full cluster restore failed:', e);
+            this._toastFailed();
+        } finally {
+            setTimeout(() => this.loadClusterBars(), 3000);
+        }
     },
 
     async _toggleSurveillanceFlag(id, key) {

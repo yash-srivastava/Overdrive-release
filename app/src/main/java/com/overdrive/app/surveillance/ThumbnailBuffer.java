@@ -1,5 +1,7 @@
 package com.overdrive.app.surveillance;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -1049,20 +1051,20 @@ public final class ThumbnailBuffer {
             // no regeneration path once the sidecar names it as heroThumbnail.
             // Same discipline EventTimelineCollector uses for the JSON sidecar.
             File tmpFile = new File(outFile.getAbsolutePath() + ".tmp");
-            try (FileOutputStream fos = new FileOutputStream(tmpFile)) {
+            try (FileOutputStream fos = RemovableStorageFs.openOutput(tmpFile)) {
                 out.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, fos);
                 try { fos.getFD().sync(); } catch (Throwable ignored) {}
             }
             // World-readable so the Telegram daemon (separate UID, typically
             // shell/2000) can read the JPEG with sendPhoto. Set on tmp BEFORE
             // rename so the readable bit lands atomically with the file move.
-            try { tmpFile.setReadable(true, /*ownerOnly=*/false); } catch (Throwable ignored) {}
-            if (!tmpFile.renameTo(outFile)) {
+            try { RemovableStorageFs.setReadable(tmpFile, true, false); } catch (Throwable ignored) {}
+            if (!RemovableStorageFs.renameTo(tmpFile, outFile)) {
                 // Rename failed (e.g. cross-volume on weird mounts). Best-effort
                 // direct copy as a fallback so we don't lose the hero entirely.
-                outFile.delete();
-                if (!tmpFile.renameTo(outFile)) {
-                    tmpFile.delete();
+                RemovableStorageFs.delete(outFile);
+                if (!RemovableStorageFs.renameTo(tmpFile, outFile)) {
+                    RemovableStorageFs.delete(tmpFile);
                     throw new java.io.IOException("Failed to atomically rename " + tmpFile + " → " + outFile);
                 }
             }

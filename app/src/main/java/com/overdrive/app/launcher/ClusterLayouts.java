@@ -82,6 +82,12 @@ public final class ClusterLayouts {
                     : "layouts_require_verified_di3_platform";
             return false;
         }
+        // Custom Layouts releases synchronously (and turns off) before Layouts take admission.
+        try {
+            com.overdrive.app.customlayouts.daemon.CustomLayoutsController.onOtherOwnerStarted("layouts");
+        } catch (Throwable t) {
+            CameraDaemon.log("Cluster layouts: Custom Layouts hand-off failed: " + t.getMessage());
+        }
         initializeRecoveryFence();
         // A previous layout's cleanup finishes on its own; a new start waits for it briefly.
         long cleanupDeadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(CLEANUP_WAIT_MS);
@@ -114,6 +120,15 @@ public final class ClusterLayouts {
     public static boolean stop() {
         lastFailure = "";
         cancel(false, "stopped");
+        return awaitCleanup(1600);
+    }
+
+    public static boolean stopForCustomLayouts(BooleanSupplier stillAcquiring) {
+        synchronized (ADMISSION) {
+            if (!stillAcquiring.getAsBoolean()) return true;
+            lastFailure = "";
+            cancel(false, "stopped");
+        }
         return awaitCleanup(1600);
     }
 
@@ -511,7 +526,17 @@ public final class ClusterLayouts {
                 return;
             }
         }
-        tickWatchdogs(current);
+        try {
+            tickWatchdogs(current);
+        } catch (ClusterLayoutTaskLauncher.SlotFitException clipped) {
+            synchronized (ADMISSION) {
+                if (session == current && STATE.owns(generation)) {
+                    lastFailure = clipped.getMessage();
+                    cancel(false, lastFailure);
+                }
+            }
+            return;
+        }
         if (!live(current)) return;
         if (System.nanoTime() >= current.nextTargetCheck) {
             current.nextTargetCheck = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);

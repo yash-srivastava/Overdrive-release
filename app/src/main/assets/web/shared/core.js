@@ -1072,11 +1072,401 @@ BYD.screenshotPrivacy = (function () {
     };
 })();
 
+/**
+ * Offline copy notice. When the car can't be reached, the phone's service worker serves its
+ * saved copy: replies carry X-OverDrive-Offline, pages an od-offline-shell meta tag.
+ */
+BYD.offline = (function () {
+    var DAY_MS = 86400000;
+    var RELOAD_KEY = 'od_offline_shell_reload';
+    var AUTO_RELOAD_KEY = 'od_offline_auto_reload';
+    var EDGE_RELOAD_KEY = 'od_offline_edge_reload';
+    var DIALOGS = '[aria-modal="true"],[role="dialog"],[role="alertdialog"],dialog[open],.modal-backdrop';
+    var INPUT_QUIET_MS = 5000;
+    // Pages with Apply/Save turn these on while edits are staged.
+    var PENDING = '.unsaved-indicator,.has-changes';
+    // Last pointer, touch, key, click, input or change event from the user.
+    var lastInput = 0;
+    // Touched since load (a click, key, input or change): it may hold unsaved edits, so no automatic reload.
+    var dirty = false;
+    // This page asked for a reload; the automatic one is not tried again.
+    var reloadAsked = false;
+    // While a reload is on its way, page handlers miss all of these; HELD ones also lose their default action.
+    // STOPPED ones keep it (passive listeners), so drags still scroll; a native slider moves but its input/change are stopped.
+    var HELD = ['pointerup', 'mouseup', 'touchend', 'click', 'keydown', 'submit'];
+    var STOPPED = ['pointerdown', 'mousedown', 'pointermove', 'mousemove', 'touchstart', 'touchmove', 'input', 'change'];
+    var HOLD_OPTS = { capture: true, passive: false };
+    var STOP_OPTS = { capture: true, passive: true };
+    var releaseTimer = null;
+    // Modifier keys and shortcuts aren't edits.
+    var MODIFIER = /^(Shift|Control|Alt|Meta|OS|CapsLock|Fn|AltGraph)$/;
+    // A live /status showed another app version than this offline shell.
+    var staleShell = false;
+    var active = false;
+    // The car answers again but the page still shows copied content: the banner offers a reload.
+    var back = false;
+    var cachedAt = null;
+    var dataFromCopy = false;
+    var shellSeen = false;
+    // App version of an offline shell page; null once a live /status has settled it.
+    var shellVersion = null;
+    // 'connecting' (the service worker hasn't heard from the car yet) or 'offline' while the banner shows.
+    // Connecting turns offline after 10 s. Within one outage offline turns back to connecting only on od-link-up.
+    var link = null;
+    var connectTimer = null;
+    var CONNECTING_MS = 10000;
+    // A same-origin GET other than /status failed on this page (auth.js calls noteLoadFailed()).
+    var loadFailed = false;
+    // Copied or failed data that no onReconnect handler refreshes: reload once that's safe.
+    var wantReload = false;
+    var reconnectHandlers = [];
+
+    function tr(key, vars, fallback) {
+        var v = BYD.i18n && BYD.i18n.t ? BYD.i18n.t(key, vars) : null;
+        if (v && v !== key) return v;
+        for (var name in vars) fallback = fallback.split('{' + name + '}').join(vars[name]);
+        return fallback;
+    }
+
+    function when(ms) {
+        var d = new Date(ms);
+        var lang = BYD.i18n.getLang();
+        // Same format as the sidebar clock (startClock).
+        var time = BYD.clock.time(d, lang, { hour: '2-digit', minute: '2-digit', hour12: false });
+        if (d.toDateString() === new Date().toDateString()) return time;
+        return d.toLocaleDateString(lang, { month: 'short', day: 'numeric' }) + ' ' + time;
+    }
+
+    function text() {
+        var age = cachedAt ? Date.now() - cachedAt : 0;
+        if (link === 'connecting') {
+            return tr('offline.connecting', { time: cachedAt ? when(cachedAt) : '--' },
+                'Connecting to the car · showing data from {time}');
+        }
+        if (age > 3 * DAY_MS) {
+            return tr('offline.banner_old', { days: Math.floor(age / DAY_MS) },
+                "Can't reach the car through this link · showing data from {days} days ago. " +
+                'If you changed or reset the tunnel, this link may no longer work.');
+        }
+        return tr('offline.banner', { time: cachedAt ? when(cachedAt) : '--' },
+            "Can't reach the car through this link · showing data from {time}");
+    }
+
+    function inBanner(t) {
+        for (var n = t; n && n.nodeType === 1; n = n.parentNode) {
+            if (n.id === 'odOfflineBanner') return true;
+        }
+        return false;
+    }
+
+    // Window capture runs before any page handler, whatever the page's CSS (e.g. a dock with pointer-events:auto).
+    function holdInput(e) {
+        if (inBanner(e.target)) return;
+        e.stopImmediatePropagation();
+        if (HELD.indexOf(e.type) >= 0) e.preventDefault();
+    }
+
+    function hold(on) {
+        var method = on ? 'addEventListener' : 'removeEventListener';
+        HELD.forEach(function (type) { window[method](type, holdInput, HOLD_OPTS); });
+        STOPPED.forEach(function (type) { window[method](type, holdInput, STOP_OPTS); });
+    }
+
+    /** Reloads. Until the new page commits (at most 20 s), only the banner takes taps and keys. */
+    function reloadNow() {
+        if (releaseTimer === null) hold(true);
+        else clearTimeout(releaseTimer);
+        releaseTimer = setTimeout(function () {
+            releaseTimer = null;
+            hold(false);
+        }, 20000);
+        window.location.reload();
+    }
+
+    function render() {
+        if ((!active && !back) || !document.body) return;
+        var el = document.getElementById('odOfflineBanner');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'odOfflineBanner';
+            el.setAttribute('aria-live', 'polite');
+            // A card clear of the top edge, where iOS blurs content. top:8px stays where env() is unsupported.
+            el.style.cssText = 'position:fixed;top:8px;top:calc(env(safe-area-inset-top, 0px) + 8px);' +
+                'left:10px;right:10px;margin:0 auto;max-width:560px;z-index:40000;' +
+                'padding:7px 12px;border-radius:10px;box-shadow:0 4px 14px rgba(0,0,0,.28);' +
+                'color:#1c1917;font-size:13px;font-weight:600;line-height:1.35;text-align:center;' +
+                '-webkit-text-size-adjust:100%;';
+            el.addEventListener('click', function () { if (back) reloadNow(); });
+            el.addEventListener('keydown', function (e) {
+                if (!back || !(e.key === 'Enter' || e.key === ' ' || e.keyCode === 13 || e.keyCode === 32)) return;
+                e.preventDefault();
+                reloadNow();
+            });
+            document.body.appendChild(el);
+        }
+        var role = back ? 'button' : 'status';
+        if (el.getAttribute('role') !== role) {
+            el.setAttribute('role', role);
+            if (back) el.setAttribute('tabindex', '0');
+            else el.removeAttribute('tabindex');
+            // The amber/connecting card lets taps through to the header under it (menu, back) while saved pages show.
+            el.style.pointerEvents = back ? 'auto' : 'none';
+            el.style.cursor = back ? 'pointer' : '';
+        }
+        el.style.background = back ? '#6ee7b7' : link === 'connecting' ? '#e2e8f0' : '#fbbf24';
+        var value = back ? tr('offline.back_online', null, 'Connected again. Tap to refresh.') : text();
+        if (el.textContent !== value) el.textContent = value;
+    }
+
+    function emit(name, detail) {
+        try {
+            window.dispatchEvent(new CustomEvent(name, { detail: detail }));
+        } catch (e) { /* CustomEvent unsupported */ }
+    }
+
+    function setLink(next) {
+        if (next !== 'connecting') {
+            link = 'offline';
+            clearTimeout(connectTimer);
+            connectTimer = null;
+        } else if (!link) {
+            link = 'connecting';
+            connectTimer = setTimeout(function () {
+                connectTimer = null;
+                if (active && link === 'connecting') { link = 'offline'; render(); }
+            }, CONNECTING_MS);
+        }
+    }
+
+    /** opts.data: non-/status data on this page came from the copy. opts.link: 'unknown' (connecting) or 'down' (default). */
+    function show(ms, opts) {
+        var at = Number(ms);
+        // The banner names the oldest copy on the page.
+        if (isFinite(at) && at > 0) cachedAt = cachedAt ? Math.min(cachedAt, at) : at;
+        if (opts && opts.data === true) dataFromCopy = true;
+        var wasActive = active;
+        active = true;
+        back = false;
+        setLink(opts && opts.link === 'unknown' ? 'connecting' : 'offline');
+        document.documentElement.setAttribute('data-od-offline', '1');
+        if (document.body) render();
+        else document.addEventListener('DOMContentLoaded', render);
+        if (!wasActive) emit('byd:offline', { cachedAt: cachedAt });
+    }
+
+    function hide() {
+        if (!active && !back) return;
+        var wasActive = active;
+        active = false;
+        back = false;
+        link = null;
+        clearTimeout(connectTimer);
+        connectTimer = null;
+        wantReload = false;
+        cachedAt = null;
+        dataFromCopy = false;
+        document.documentElement.removeAttribute('data-od-offline');
+        var el = document.getElementById('odOfflineBanner');
+        if (el && el.parentNode) el.parentNode.removeChild(el);
+        if (wasActive) emit('byd:online', null);
+    }
+
+    /** Laid out, not visibility:hidden, no ancestor at opacity 0 (some closed overlays stay mounted, faded out). */
+    function shown(el) {
+        if (!el.getClientRects().length) return false;
+        if (!window.getComputedStyle) return true;
+        if (window.getComputedStyle(el).visibility === 'hidden') return false;
+        for (var n = el; n && n.nodeType === 1; n = n.parentNode) {
+            if (parseFloat(window.getComputedStyle(n).opacity) === 0) return false;
+        }
+        return true;
+    }
+
+    /** A .has-changes control, or an .unsaved-indicator switched on. display isn't inherited, so a marker
+     *  on an inactive tab still reads as on; Apply/Save switching them off makes the page safe again. */
+    function editsPending() {
+        var marks = document.querySelectorAll(PENDING);
+        for (var i = 0; i < marks.length; i++) {
+            if (marks[i].classList.contains('has-changes')) return true;
+            var cs = window.getComputedStyle ? window.getComputedStyle(marks[i]) : null;
+            if (cs ? cs.display !== 'none' : marks[i].classList.contains('show')) return true;
+        }
+        return false;
+    }
+
+    /** A BYD module (one level down, e.g. BYD.surveillance) reports edits staged on any of its tabs. */
+    function moduleUnsaved() {
+        var mods = window.BYD || {};
+        var keys = Object.keys(mods);
+        for (var i = 0; i < keys.length; i++) {
+            try {
+                var m = mods[keys[i]];
+                if (m !== null && typeof m === 'object' && m.hasUnsavedChanges === true) return true;
+            } catch (e) { /* a getter that throws is skipped */ }
+        }
+        return false;
+    }
+
+    /** Visible page, nothing changed or staged, no unsettled write, no input for 5 s, no focused field, no open dialog. */
+    function safeToReload() {
+        try {
+            if (document.hidden || dirty || editsPending()) return false;
+            if (moduleUnsaved()) return false;
+            // auth.js declares BYDAuth with const: a global binding, not a window property.
+            if (typeof BYDAuth !== 'undefined' && BYDAuth && BYDAuth.pendingWrites > 0) return false;
+            if (Date.now() - lastInput < INPUT_QUIET_MS) return false;
+            var el = document.activeElement;
+            if (el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable)) return false;
+            var open = document.querySelectorAll(DIALOGS);
+            for (var i = 0; i < open.length; i++) {
+                if (shown(open[i])) return false;
+            }
+            return true;
+        } catch (e) { return false; }
+    }
+
+    /** True, and recorded, unless this tab already reloaded for key within ms. Storage errors: false. */
+    function reloadAllowed(key, ms) {
+        try {
+            if (Date.now() - (Number(sessionStorage.getItem(key)) || 0) < ms) return false;
+            sessionStorage.setItem(key, String(Date.now()));
+        } catch (e) { return false; }
+        return true;
+    }
+
+    /** A shell on an older app version reloads once that's safe; true when it asked. */
+    function reloadShell(status) {
+        var version = status && status.appVersion;
+        if (shellVersion !== null && version) {
+            staleShell = version !== shellVersion;
+            shellVersion = null;
+        }
+        // At most one reload a minute per tab, so a shell that keeps coming back can't loop.
+        if (!staleShell || reloadAsked || !safeToReload() || !reloadAllowed(RELOAD_KEY, 60000)) return false;
+        reloadAsked = true;
+        reloadNow();
+        return true;
+    }
+
+    /** Live /status. The first one while the banner shows is the reconnect: the banner goes, byd:online fires and
+     *  onReconnect handlers refresh the page in place. A reload follows only for a changed app version, or for
+     *  copied or failed data when no handler is registered. */
+    function onLiveStatus(status) {
+        if (active) {
+            var copied = dataFromCopy, at = cachedAt;
+            hide();
+            reconnectHandlers.slice().forEach(function (fn) {
+                try { fn(); } catch (e) { /* one failing handler doesn't stop the others */ }
+            });
+            wantReload = !reconnectHandlers.length && (copied || loadFailed);
+            // Without handlers the copy stays on screen until that reload.
+            if (wantReload) { dataFromCopy = copied; cachedAt = at; }
+        }
+        // A handler that showed the banner again started a new outage; its own reconnect decides.
+        if (active) return;
+        // Both rules are checked again on every live reply until one asks for a reload.
+        var askedBefore = reloadAsked;
+        if (!reloadShell(status) && wantReload && !reloadAsked && safeToReload() && reloadAllowed(AUTO_RELOAD_KEY, 30000)) {
+            reloadAsked = true;
+            reloadNow();
+        }
+        // A wanted reload that has to wait, or an earlier one that left this page here, offers the green tap banner.
+        if ((staleShell || wantReload) && !back && (askedBefore || !reloadAsked)) {
+            back = true;
+            render();
+        }
+    }
+
+    function readShell() {
+        var meta = shellSeen ? null : document.querySelector('meta[name="od-offline-shell"]');
+        if (!meta) return;
+        shellSeen = true;
+        // "<cachedAt>|<appVersion>[|<link>]". The worker serves copied pages at once while the link is unknown,
+        // so a copied page alone doesn't mean the car is down.
+        var parts = (meta.getAttribute('content') || '').split('|');
+        shellVersion = parts.length > 1 ? parts[1] : '';
+        show(parts[0], { link: parts[2] === 'down' ? 'down' : 'unknown' });
+    }
+
+    if (BYD.i18n && BYD.i18n.onChange) BYD.i18n.onChange(render);
+    readShell();
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', readShell);
+    /** Any input or change may be an unsaved edit (some pages stage switches until Apply), except in the global search. */
+    function unsavedEdit(e) {
+        var el = e.target;
+        return !(el && el.nodeType === 1 && el.closest && el.closest('.od-search-panel'));
+    }
+    /** A tap on the amber or connecting card's area, which falls through to the header under it. No coordinates: no. */
+    function onAmberCard(e) {
+        if (!active || typeof e.clientX !== 'number' || typeof e.clientY !== 'number') return false;
+        var el = document.getElementById('odOfflineBanner');
+        if (!el) return false;
+        var r = el.getBoundingClientRect();
+        return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+    }
+
+    /** A click, or a key that could edit, outside the banner. */
+    function touches(e) {
+        if (inBanner(e.target)) return false;
+        if (e.type === 'click') return !onAmberCard(e);
+        return e.type === 'keydown' && !MODIFIER.test(e.key || '') && !e.metaKey && !e.ctrlKey && !e.altKey;
+    }
+    // Capture phase: a handler that stops propagation can't hide the input. Script-made taps, clicks and keys
+    // don't count; script-made input/change do (custom controls fire them from click handlers).
+    var noteInput = function (e) {
+        var value = e.type === 'input' || e.type === 'change';
+        if (!value && e.isTrusted === false) return;
+        lastInput = Date.now();
+        if (value ? unsavedEdit(e) : touches(e)) dirty = true;
+    };
+    ['pointerdown', 'touchstart', 'keydown', 'click', 'input', 'change'].forEach(function (type) {
+        document.addEventListener(type, noteInput, true);
+    });
+
+    return {
+        show: show,
+        hide: hide,
+        isActive: function () { return active; },
+        /** 'connecting', 'offline', or null when neither banner shows (also while the green one does). */
+        linkState: function () { return active ? link : null; },
+        /** fn() runs once per reconnect, after the banner is gone, to refresh the page's views in place. */
+        onReconnect: function (fn) {
+            if (typeof fn === 'function' && reconnectHandlers.indexOf(fn) < 0) reconnectHandlers.push(fn);
+        },
+        noteLoadFailed: function () { loadFailed = true; },
+        /** od-link-up: the worker heard the car, so writes go out while the page's own poll comes back. A later
+         *  copy tagged down makes the card amber again. */
+        /** od-edge-page: the tunnel edge answers pages itself now (sign-in, share gone, login), and the link
+         *  needs the user, so reload past the safety rules; at most once per 30 s per tab, never on http. */
+        _edgePage: function () {
+            // The sign-in page is already where the edge sends a refused session.
+            if (/\/login\.html$/.test(window.location.pathname)) return;
+            if (window.location.protocol === 'http:' || !reloadAllowed(EDGE_RELOAD_KEY, 30000)) return;
+            reloadAsked = true;
+            reloadNow();
+        },
+        _linkUp: function () {
+            if (!active) return;
+            clearTimeout(connectTimer);
+            connectTimer = null;
+            if (link === 'offline') {
+                link = 'connecting';
+                render();
+            }
+        },
+        _onLiveStatus: onLiveStatus
+    };
+})();
+
 BYD.core = {
     deviceId: null,
     pollInterval: null,
     tickInFlight: false,
+    // Set by startStatusPolling.
+    _pollNow: null,
     lastStatus: null,
+    // True only when the latest /status reply was the phone's saved copy (X-OverDrive-Offline).
+    lastPollWasCopy: false,
     // Counts /status fetch failures (network error, non-2xx, JSON parse).
     // Drives the UI "stale" / "disconnected" indicators and a sooner retry,
     // so a brief tunnel/Wi-Fi blip doesn't blank the dashboard for 5 s.
@@ -1096,6 +1486,8 @@ BYD.core = {
     POLL_STALE_AFTER_FAILURES: 2,
     // A request in flight when the link dropped can hang on a dead socket; bound it so the poll resumes.
     STATUS_FETCH_TIMEOUT_MS: 8000,
+    // Without a saved copy the service worker sends the follow-up to the network; don't wait for it.
+    STATUS_COPY_TIMEOUT_MS: 3000,
 
     /**
      * Initialize core module
@@ -1154,6 +1546,17 @@ BYD.core = {
      */
     startStatusPolling() {
         var self = this;
+        // An od-link-up during a tick queues one poll for the moment that tick ends.
+        var pollAgain = false;
+        function next(delay) {
+            self.tickInFlight = false;
+            if (pollAgain) {
+                pollAgain = false;
+                tick();
+            } else {
+                self.pollInterval = setTimeout(tick, delay);
+            }
+        }
         function tick() {
             // Single-flight guard: never run two self-rescheduling chains at
             // once. A visibilitychange firing mid-fetch must not spawn a
@@ -1162,7 +1565,6 @@ BYD.core = {
             self.tickInFlight = true;
             self.pollInterval = null;  // no pending timer while fetching
             self.refreshStatus().then(function (ok) {
-                self.tickInFlight = false;
                 var delay;
                 if (typeof document !== 'undefined' && document.hidden) {
                     // Tab not visible — back off to the hidden cadence
@@ -1171,12 +1573,11 @@ BYD.core = {
                 } else {
                     delay = ok ? self.POLL_INTERVAL_OK_MS : self.POLL_INTERVAL_RETRY_MS;
                 }
-                self.pollInterval = setTimeout(tick, delay);
+                next(delay);
             }, function () {
                 // refreshStatus() is async and could reject — clear the flag and
                 // reschedule so a thrown error can never wedge polling forever.
-                self.tickInFlight = false;
-                self.pollInterval = setTimeout(tick, self.POLL_INTERVAL_RETRY_MS);
+                next(self.POLL_INTERVAL_RETRY_MS);
             });
         }
         // Resume immediately when the tab becomes visible again: cancel the
@@ -1202,6 +1603,15 @@ BYD.core = {
             window.addEventListener('pageshow', wake);
             window.addEventListener('focus', wake);
         }
+        // Service worker link-up (_onLinkUp): poll now, or right after the poll in flight (one queued at most).
+        self._pollNow = function () {
+            if (self.tickInFlight) {
+                pollAgain = true;
+                return;
+            }
+            if (self.pollInterval) { clearTimeout(self.pollInterval); self.pollInterval = null; }
+            tick();
+        };
         // The chain re-arms itself after every tick; restart it if it ever ends with nothing pending.
         setInterval(function () {
             if (!self.tickInFlight && !self.pollInterval
@@ -1231,10 +1641,12 @@ BYD.core = {
     async refreshStatus() {
         var abort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
         var deadlineTimer = null;
+        var timedOut = false;
         var timeoutMs = this.STATUS_FETCH_TIMEOUT_MS;
         // Chrome 58 (in-car WebView) has no AbortController: the race still releases the poll.
         var deadline = new Promise(function (resolve, reject) {
             deadlineTimer = setTimeout(function () {
+                timedOut = true;
                 if (abort) { try { abort.abort(); } catch (ignored) {} }
                 reject(new Error('status request timed out'));
             }, timeoutMs);
@@ -1242,16 +1654,28 @@ BYD.core = {
         deadline.catch(function () {});
         var recovered = this.pollFailureCount >= this.POLL_STALE_AFTER_FAILURES;
         try {
-            const res = await Promise.race([
-                abort ? fetch('/status', { signal: abort.signal }) : fetch('/status'),
-                deadline
-            ]);
+            let res = null;
+            let status;
+            try {
+                res = await Promise.race([
+                    abort ? fetch('/status', { signal: abort.signal }) : fetch('/status'),
+                    deadline
+                ]);
+                if (res.ok) status = await Promise.race([res.json(), deadline]);
+            } catch (e) {
+                // Network error or our timeout (not an HTTP error or bad JSON): one try at the saved copy.
+                const copy = (timedOut || !res) ? await this._statusCopy() : null;
+                if (!copy) throw e;
+                res = copy.res;
+                status = copy.status;
+            }
             // 401 means JWT is missing/expired/invalid — bounce to login so
             // the user lands on a screen that actually does something. The
             // global fetch wrapper in auth.js attaches Authorization but does
             // NOT redirect on 401; we handle it here for /status specifically.
             if (res.status === 401) {
                 clearTimeout(deadlineTimer);
+                this.lastPollWasCopy = false;
                 this._showStaleBanner('disconnected');
                 const path = window.location.pathname + window.location.search;
                 window.location.href = '/login.html?redirect=' + encodeURIComponent(path);
@@ -1260,16 +1684,21 @@ BYD.core = {
             if (!res.ok) {
                 throw new Error('HTTP ' + res.status);
             }
-            const status = await Promise.race([res.json(), deadline]);
             clearTimeout(deadlineTimer);
-            this.pollFailureCount = 0;
-            this._clearStaleBanner();
+            // Set by the phone's service worker on a reply it served from its saved copy.
+            const offlineAt = res.headers ? res.headers.get('X-OverDrive-Offline') : null;
+            const offline = offlineAt != null;
+            this.lastPollWasCopy = offline;
+            if (!offline) {
+                this.pollFailureCount = 0;
+                this._clearStaleBanner();
+            }
             this.lastStatus = status;
             // Track whether the server has ever delivered real vehicle data.
             // Drives the "Waiting for vehicle…" placeholder vs. last-known
             // behaviour on cards downstream.
             const hadData = !!(status.soc || status.range || status.charging);
-            if (hadData) this.hasEverHadVehicleData = true;
+            if (hadData && !offline) this.hasEverHadVehicleData = true;
 
             // One persisted developer switch controls native and web captures.
             // Apply before updating fields so newly-written sensitive values
@@ -1379,7 +1808,7 @@ BYD.core = {
 
             // Connection dot
             const connDot = document.getElementById('connDot');
-            if (connDot) {
+            if (connDot && !offline) {
                 connDot.classList.add('connected');
             }
 
@@ -1402,6 +1831,21 @@ BYD.core = {
                 BYD.recording.updateFromStatus(status);
             }
 
+            if (offline) {
+                // The saved copy stays on screen, but the poll counts as failed.
+                this.pollFailureCount++;
+                if (window.RemoteAccess && RemoteAccess.updateBluetoothStatus) {
+                    RemoteAccess.updateBluetoothStatus(status.bluetooth, true);
+                }
+                if (connDot) connDot.classList.remove('connected');
+                this._showStaleBanner('disconnected');
+                // The worker says whether it has heard from the car yet ('unknown') or not ('down').
+                const linkHeader = res.headers.get('X-OverDrive-Link');
+                BYD.offline.show(Number(offlineAt), { link: linkHeader === 'unknown' ? 'unknown' : 'down' });
+                return null;
+            }
+            BYD.offline._onLiveStatus(status);
+
             if (recovered) {
                 // Pages restart their own pollers once the link is back.
                 setTimeout(function () {
@@ -1411,6 +1855,7 @@ BYD.core = {
             return status;
         } catch (e) {
             clearTimeout(deadlineTimer);
+            this.lastPollWasCopy = false;
             this.pollFailureCount++;
             if (window.RemoteAccess && RemoteAccess.updateBluetoothStatus) {
                 RemoteAccess.updateBluetoothStatus(this.lastStatus && this.lastStatus.bluetooth, true);
@@ -1426,6 +1871,40 @@ BYD.core = {
                 this._showStaleBanner(this.pollFailureCount > 4 ? 'disconnected' : 'stale');
             }
             return null;
+        }
+    },
+
+    /** The service worker saw the car answer again: poll now while the page shows the saved copy. */
+    _onLinkUp() {
+        BYD.offline._linkUp();
+        if (!BYD.offline.isActive() && !this.lastPollWasCopy) return;
+        if (this._pollNow) this._pollNow();
+        else this.refreshStatus().catch(function () {});
+    },
+
+    /** The phone's service worker copy of /status ({res, status}), or null. Only pages it controls. */
+    async _statusCopy() {
+        if (!(typeof navigator !== 'undefined' && navigator.serviceWorker && navigator.serviceWorker.controller)) return null;
+        var abort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+        var timer = null;
+        var timeoutMs = this.STATUS_COPY_TIMEOUT_MS;
+        var bound = new Promise(function (resolve, reject) {
+            timer = setTimeout(function () {
+                if (abort) { try { abort.abort(); } catch (ignored) {} }
+                reject(new Error('status copy timed out'));
+            }, timeoutMs);
+        });
+        bound.catch(function () {});
+        try {
+            var init = { headers: { 'X-OverDrive-Want-Copy': '1' } };
+            if (abort) init.signal = abort.signal;
+            var res = await Promise.race([fetch('/status', init), bound]);
+            if (!res.ok || !res.headers || res.headers.get('X-OverDrive-Offline') == null) return null;
+            return { res: res, status: await Promise.race([res.json(), bound]) };
+        } catch (e) {
+            return null;
+        } finally {
+            clearTimeout(timer);
         }
     },
 
@@ -2011,6 +2490,17 @@ BYD.core = {
         }, duration);
     }
 };
+
+// The phone's service worker posts od-link-up when the car answers again after an outage.
+try {
+    if (navigator.serviceWorker && typeof navigator.serviceWorker.addEventListener === 'function') {
+        navigator.serviceWorker.addEventListener('message', function (e) {
+            var type = e && e.data && e.data.type;
+            if (type === 'od-link-up') BYD.core._onLinkUp();
+            else if (type === 'od-edge-page') BYD.offline._edgePage();
+        });
+    }
+} catch (e) { /* no service worker access here */ }
 
 // Expose toast globally for convenience
 BYD.utils = BYD.utils || {};

@@ -158,7 +158,7 @@ public final class GeocodingResolver {
      * user can tag dashcam clips while leaving sentry clips untagged.
      */
     public PlaceResult resolveCachedOnly(double lat, double lng, String flow) {
-        if (!isFlowEnabled(flow)) return null;
+        if (!isFlowEnabled(flow) || !GeoCoordinates.isUsable(lat, lng)) return null;
         PlaceResult sz = resolveSafeZone(lat, lng);
         if (sz != null) return sz;
         return GeoCache.getInstance().get(lat, lng, LocaleManager.get());
@@ -183,7 +183,7 @@ public final class GeocodingResolver {
      * {@code allowOnline} toggle for Tier C (Nominatim).
      */
     public void resolveAsync(double lat, double lng, String flow, ResolveCallback callback) {
-        if (!isFlowEnabled(flow)) return;
+        if (!isFlowEnabled(flow) || !GeoCoordinates.isUsable(lat, lng)) return;
         final String locale = LocaleManager.get();
         final String key = Geohash.encode(lat, lng) + "|" + locale;
 
@@ -304,7 +304,7 @@ public final class GeocodingResolver {
     }
 
     public PlaceResult resolveBlocking(double lat, double lng, String flow) {
-        if (!isFlowEnabled(flow)) return null;
+        if (!isFlowEnabled(flow) || !GeoCoordinates.isUsable(lat, lng)) return null;
         return doResolve(lat, lng, LocaleManager.get(), flow, null);
     }
 
@@ -318,7 +318,7 @@ public final class GeocodingResolver {
      * rate-limiter token and issued the HTTP request.
      */
     public PlaceResult resolveBlocking(double lat, double lng, String flow, boolean[] reachedNominatim) {
-        if (!isFlowEnabled(flow)) return null;
+        if (!isFlowEnabled(flow) || !GeoCoordinates.isUsable(lat, lng)) return null;
         return doResolve(lat, lng, LocaleManager.get(), flow, reachedNominatim);
     }
 

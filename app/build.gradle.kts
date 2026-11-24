@@ -15,12 +15,38 @@ plugins {
 
 val openh264Version = "2.6.0"
 
+// Private overlay: present only in official-build checkouts (gitignored here).
+// When present, its sources/resources/assets/native code join the main source set
+// and replace the public no-op stubs in src/oss.
+val privateApp = rootProject.file("private/app")
+val hasPrivateOverlay = File(privateApp, "src/main").isDirectory
+val officialProps = Properties().apply {
+    val f = rootProject.file("private/official.properties")
+    if (f.isFile) f.inputStream().use { load(it) }
+}
+fun officialProp(key: String): String =
+    ((project.findProperty(key) as? String) ?: officialProps.getProperty(key, "")).trim()
+
+// Source provenance baked into every APK: public and private commits, plus whether either tree was dirty.
+fun gitOut(dir: File, vararg args: String): String? = try {
+    val p = ProcessBuilder(listOf("git", "-C", dir.path) + args).redirectErrorStream(true).start()
+    val out = p.inputStream.bufferedReader().readText().trim()
+    if (p.waitFor() == 0) out else null
+} catch (e: Exception) { null }
+fun gitSha(dir: File): String = gitOut(dir, "rev-parse", "HEAD")?.takeIf { it.matches(Regex("[0-9a-f]{40}")) } ?: ""
+fun gitDirty(dir: File): Boolean = gitOut(dir, "status", "--porcelain", "--untracked-files=no")?.isNotEmpty() ?: false
+val sourceSha = gitSha(rootProject.projectDir)
+val privateSha = if (hasPrivateOverlay) gitSha(rootProject.file("private")) else ""
+val sourceDirty = gitDirty(rootProject.projectDir)
+val privateDirty = hasPrivateOverlay && gitDirty(rootProject.file("private"))
+
 // SafeKeep sign-in app IDs for official builds: safekeep-oauth.properties at the repo root
 // (gitignored) or -P / ~/.gradle/gradle.properties overrides.
 // Empty in source builds, where users enter their own app registration instead.
 val safeKeepOAuth = Properties().apply {
-    val f = rootProject.file("safekeep-oauth.properties")
-    if (f.isFile) f.inputStream().use { load(it) }
+    val f = listOf(rootProject.file("safekeep-oauth.properties"), rootProject.file("private/safekeep-oauth.properties"))
+        .firstOrNull { it.isFile }
+    f?.inputStream()?.use { load(it) }
 }
 fun safeKeepOAuthField(key: String): String {
     val v = ((project.findProperty(key) as? String) ?: safeKeepOAuth.getProperty(key, "")).trim()
@@ -345,6 +371,8 @@ val preparePackagedMainAssets = tasks.register<Sync>("preparePackagedMainAssets"
     from("src/main/assets") {
         exclude("web/local/shared", "web/local/shared/**")
     }
+    if (hasPrivateOverlay) from(File(privateApp, "src/main/assets"))
+    else from("src/oss/assets")
     into(packagedMainAssetsDir)
 }
 
@@ -414,6 +442,7 @@ android {
     }
     namespace = "com.overdrive.app"
     compileSdk = 36
+    useLibrary("android.car", false)
 
     sourceSets {
         getByName("main") {
@@ -421,6 +450,21 @@ android {
             // The merge-task dependency above produces this directory before
             // AGP reads it; variant overlays remain unchanged.
             assets.setSrcDirs(listOf(packagedMainAssetsDir))
+            if (hasPrivateOverlay) {
+                java.srcDir(File(privateApp, "src/main/java"))
+                aidl.srcDir(File(privateApp, "src/main/aidl"))
+                res.srcDir(File(privateApp, "src/main/res"))
+            } else {
+                java.srcDir("src/oss/java")
+                res.srcDir("src/oss/res")
+                jniLibs.srcDir("src/oss/jniLibs")
+            }
+        }
+        getByName("test") {
+            if (hasPrivateOverlay) java.srcDir(File(privateApp, "src/test/java"))
+        }
+        getByName("androidTest") {
+            if (hasPrivateOverlay) java.srcDir(File(privateApp, "src/androidTest/java"))
         }
     }
     buildToolsVersion = "36.0.0"
@@ -444,8 +488,8 @@ android {
         // value (e.g. `-PoverdriveVersionName=27.4 -PoverdriveVersionCode=12`)
         // without a source edit per release; the defaults track the current
         // rolling head so a plain local build is still accurate.
-        versionCode = (project.findProperty("overdriveVersionCode") as? String)?.toIntOrNull() ?: 210
-        versionName = (project.findProperty("overdriveVersionName") as? String) ?: "62.1"
+        versionCode = (project.findProperty("overdriveVersionCode") as? String)?.toIntOrNull() ?: 225
+        versionName = (project.findProperty("overdriveVersionName") as? String) ?: "65.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
         // Note: abiFilters removed - using splits.abi instead for size optimization
@@ -457,6 +501,10 @@ android {
         // OFF/empty by default (release/debug); braveheart flips them on. Restored from
         // the working build's generated BuildConfig (default-config fields).
         buildConfigField("boolean", "LOG_CAPTURE", "false")
+        buildConfigField("String", "SOURCE_SHA", "\"$sourceSha\"")
+        buildConfigField("String", "PRIVATE_SHA", "\"$privateSha\"")
+        buildConfigField("boolean", "SOURCE_DIRTY", "$sourceDirty")
+        buildConfigField("boolean", "PRIVATE_DIRTY", "$privateDirty")
         buildConfigField("String", "LOG_UPLOAD_URL", "\"\"")
         // Hard-off for the in-car DiLink 5 BYD Cloud keep-alive poller in this
         // release. A future build must deliberately flip this before the
@@ -523,7 +571,7 @@ android {
             // Optional: this ruleset is not part of the open-source tree, so only add it
             // when present. Without it the build still succeeds — console calls simply
             // survive R8 instead of being stripped.
-            val stripConsole = file("proguard-rules-strip-console.pro")
+            val stripConsole = File(privateApp, "proguard-rules-strip-console.pro")
             if (stripConsole.exists()) proguardFilesList.add(stripConsole)
             proguardFiles(*proguardFilesList.toTypedArray())
             
@@ -564,7 +612,7 @@ android {
             // than hardcoded, so this tree carries no deployment-specific endpoint.
             // Empty → the in-app log upload is disabled, same as release/debug.
             buildConfigField("String", "LOG_UPLOAD_URL",
-                "\"${project.findProperty("overdriveLogUploadUrl") as? String ?: ""}\"")
+                "\"${officialProp("overdriveLogUploadUrl")}\"")
         }
     }
     
@@ -727,6 +775,11 @@ dependencies {
     // inference is the only physical bypass for the bandwidth contention.
     // See YoloDetector.kt for the full mechanism comment.
     implementation("org.tensorflow:tensorflow-lite:2.14.0")
+    if (hasPrivateOverlay) {
+        // Custom Layouts (private overlay): one-time bake of the user's car into cached sprites.
+        implementation("com.google.android.filament:filament-android:1.75.1")
+        implementation("com.google.android.filament:gltfio-android:1.75.1")
+    }
     implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
     
     // OkHttp for Telegram HTTP client with proxy support

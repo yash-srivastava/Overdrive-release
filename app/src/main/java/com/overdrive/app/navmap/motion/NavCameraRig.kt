@@ -115,7 +115,7 @@ class NavCameraRig {
         val kmh = speedLp(speedMps, dt) * 3.6
 
         val z = zoom.step(if (rasterBands) bandZoom(kmh) else targetZoom(kmh, distToTurnM, sinceTurnM), dt)
-        val tl = tilt.step(TILT_MIN + (TILT_MAX - TILT_MIN) * unit((kmh - 20.0) / 80.0), dt)
+        val tl = tilt.step(GUIDANCE_TILT + (TILT_MAX - GUIDANCE_TILT) * unit((kmh - 20.0) / 80.0), dt)
         val base = if (cluster) ANCHOR_CLUSTER else ANCHOR_HEAD_UNIT
         val f = anchor.step(base + ANCHOR_SPEED_GAIN * unit(kmh / 100.0), dt)
         follow.lat = puckLat
@@ -213,7 +213,8 @@ class NavCameraRig {
         private val BAND_ZOOM = doubleArrayOf(17.4, 17.0, 16.0, 15.0)
         private const val BAND_HYST_KMH = 4.0
 
-        private const val TILT_MIN = 55.0
+        const val GUIDANCE_TILT = 55.0
+        const val RESTING_TILT = GUIDANCE_TILT * 0.62
         private const val TILT_MAX = 57.0
         // Puck height as a fraction of the view from the top; lower at speed to show more road ahead.
         private const val ANCHOR_HEAD_UNIT = 0.66

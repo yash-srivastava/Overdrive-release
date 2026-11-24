@@ -47,7 +47,7 @@ public class RemoteAccessSnappyLocksAssetTest {
                 + "including first connection or reconnection. No prior Away signal is required.</p>"));
         assertEquals(0, count(html, "<div class=\"ra-unlock-trigger\">"));
         assertEquals(1, count(html, "id=\"raUnlockTrigger\""));
-        assertEquals(1, count(html, "remote-access.js?v=30"));
+        assertEquals(1, count(html, "remote-access.js?v=31"));
         String script = readRepositoryFile(SCRIPT);
         // Advanced-only and only with Automatic unlock on; Advanced on restores the custom choice, off resets.
         assertTrue(script.contains("el('raUnlockTrigger').disabled = !state.ready || state.saving || !el('raUnlockOnArrival').checked ||\n"

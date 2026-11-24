@@ -1,0 +1,226 @@
+package com.overdrive.app.services;
+
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.PowerManager;
+import android.os.SystemClock;
+import android.provider.Settings;
+import android.util.Log;
+
+import com.overdrive.app.auth.PinSession;
+import com.overdrive.app.byd.routing.DrivingSafetyGuard;
+import com.overdrive.app.camera.dilink5.DiLink5Platform;
+import com.overdrive.app.overlay.SetupGuideDialog;
+
+import java.util.concurrent.atomic.AtomicBoolean;
+
+/**
+ * Opt-in: re-applies BYD's "Disable Auto-Start" switch by itself after an install or update.
+ *
+ * <p>BYD resets the switch on every install, and only its own dialog can change it
+ * ({@code ACCESS_APPOPSDATA} is signature-only), so this drives {@link AutoStartEnabler} once
+ * per install: screen on, parked, at most {@link #MAX_ATTEMPTS} dialog launches, then the setup
+ * guide takes over again.
+ */
+public final class AutoStartReapply {
+
+    private static final String TAG = "AutostartReapply";
+    private static final String PREFS = "overdrive_setup";
+    private static final String KEY_ENABLED = "autostart_reapply_enabled";
+    private static final String KEY_DONE_INSTALL = "autostart_reapply_done_install";
+    private static final String KEY_ATTEMPT_INSTALL = "autostart_reapply_attempt_install";
+    private static final String KEY_ATTEMPTS = "autostart_reapply_attempts";
+
+    private static final long FIRST_CHECK_DELAY_MS = 20_000L;
+    private static final long RECHECK_MS = 60_000L;
+    // A long drive right after an update must not run the budget out before the car parks.
+    private static final int MAX_CHECKS_PER_CONNECTION = 240;
+    private static final int MAX_ATTEMPTS = 3;
+    private static final long MIN_ATTEMPT_SPACING_MS = 120_000L;
+    private static final long PIN_RETURN_GRACE_MS = 60_000L;
+
+    private static final Handler MAIN = new Handler(Looper.getMainLooper());
+    private static final AtomicBoolean IN_FLIGHT = new AtomicBoolean(false);
+    private static final Runnable CHECK = AutoStartReapply::check;
+
+    // Main thread only.
+    private static int checksLeft;
+    private static long lastAttemptElapsed = -MIN_ATTEMPT_SPACING_MS;
+    private static volatile Boolean available;
+
+    private AutoStartReapply() {
+    }
+
+    /** BYD's dialog exists here and the DiLink 5 daemon path is not the one in use. */
+    public static boolean isAvailable(Context context) {
+        if (DiLink5Platform.isSelected()) return false;
+        Boolean cached = available;
+        if (cached != null) return cached;
+        boolean found;
+        try {
+            found = context.getPackageManager().resolveActivity(
+                    SetupGuideDialog.buildAppStartManagementIntent(), 0) != null;
+        } catch (Throwable t) {
+            found = false;
+        }
+        available = found;
+        return found;
+    }
+
+    public static boolean isEnabled(Context context) {
+        return prefs(context).getBoolean(KEY_ENABLED, false);
+    }
+
+    public static void setEnabled(Context context, boolean enabled) {
+        prefs(context).edit().putBoolean(KEY_ENABLED, enabled).apply();
+        Log.i(TAG, "re-apply after updates " + (enabled ? "enabled" : "disabled"));
+    }
+
+    /** Opted in and able to act on this install: the service is enabled and it hasn't given up. */
+    public static boolean willHandleCurrentInstall(Context context) {
+        if (!isEnabled(context) || !isAvailable(context)) return false;
+        long install = currentInstall(context);
+        if (install <= 0L || attemptsFor(context, install) >= MAX_ATTEMPTS) return false;
+        return KeepAliveAccessibilityService.isRunning() || isServiceEnabled(context);
+    }
+
+    /** The switch was confirmed off for this install (by the guide's button or by this class). */
+    public static boolean isDoneForCurrentInstall(Context context) {
+        long install = currentInstall(context);
+        return install > 0L && prefs(context).getLong(KEY_DONE_INSTALL, 0L) == install;
+    }
+
+    public static void markDoneForCurrentInstall(Context context) {
+        long install = currentInstall(context);
+        if (install > 0L) prefs(context).edit().putLong(KEY_DONE_INSTALL, install).apply();
+    }
+
+    /** Called on the main thread once the accessibility service is wired. */
+    static void onServiceConnected(KeepAliveAccessibilityService service) {
+        if (!isPending(service)) return;
+        checksLeft = MAX_CHECKS_PER_CONNECTION;
+        MAIN.removeCallbacks(CHECK);
+        MAIN.postDelayed(CHECK, FIRST_CHECK_DELAY_MS);
+        Log.i(TAG, "pending for this install; first check in " + FIRST_CHECK_DELAY_MS + "ms");
+    }
+
+    static void onServiceDisconnected() {
+        MAIN.removeCallbacks(CHECK);
+    }
+
+    private static boolean isPending(Context context) {
+        if (!isEnabled(context) || !isAvailable(context)) return false;
+        long install = currentInstall(context);
+        if (install <= 0L || isDoneForCurrentInstall(context)) return false;
+        return attemptsFor(context, install) < MAX_ATTEMPTS;
+    }
+
+    private static void check() {
+        final KeepAliveAccessibilityService service = KeepAliveAccessibilityService.getInstance();
+        if (service == null || !isPending(service) || checksLeft <= 0) return;
+        checksLeft--;
+        if (SystemClock.elapsedRealtime() - lastAttemptElapsed < MIN_ATTEMPT_SPACING_MS
+                || !IN_FLIGHT.compareAndSet(false, true)) {
+            reschedule();
+            return;
+        }
+        new Thread(() -> {
+            String blocked = gateReason(service);
+            MAIN.post(() -> {
+                if (blocked != null || KeepAliveAccessibilityService.getInstance() != service) {
+                    IN_FLIGHT.set(false);
+                    if (blocked != null) Log.i(TAG, "deferred: " + blocked);
+                    reschedule();
+                    return;
+                }
+                launch(service);
+            });
+        }, "autostart-reapply-gate").start();
+    }
+
+    /** Null when BYD's dialog may open now; reads the daemon, so off the main thread. */
+    private static String gateReason(Context context) {
+        try {
+            PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+            if (pm != null && !pm.isInteractive()) return "screen off";
+        } catch (Throwable ignored) {
+        }
+        return DrivingSafetyGuard.isActionBlockedViaDaemon(DrivingSafetyGuard.GUARD_SCREEN_MEDIA)
+                ? "not parked (or vehicle state unavailable)" : null;
+    }
+
+    private static void launch(KeepAliveAccessibilityService service) {
+        final Context context = service.getApplicationContext();
+        final long install = currentInstall(context);
+        final int attempt = attemptsFor(context, install) + 1;
+        prefs(context).edit()
+                .putLong(KEY_ATTEMPT_INSTALL, install)
+                .putInt(KEY_ATTEMPTS, attempt)
+                .apply();
+        lastAttemptElapsed = SystemClock.elapsedRealtime();
+        Log.i(TAG, "attempt " + attempt + "/" + MAX_ATTEMPTS + " for install " + install);
+        PinSession.INSTANCE.expectReturn(PIN_RETURN_GRACE_MS);
+        service.runAutoStartEnabler((success, result) -> {
+            IN_FLIGHT.set(false);
+            if (success) {
+                markDoneForCurrentInstall(context);
+                Log.i(TAG, "done (result=" + result + ")");
+                return;
+            }
+            boolean terminal = result == AutoStartEnabler.Result.NOT_THIS_FIRMWARE
+                    || result == AutoStartEnabler.Result.NO_ROW
+                    || attempt >= MAX_ATTEMPTS;
+            if (terminal) {
+                // The guide was skipped for this update; bring its manual button back.
+                prefs(context).edit().putInt(KEY_ATTEMPTS, MAX_ATTEMPTS).apply();
+                SetupGuideDialog.reset(context);
+                Log.w(TAG, "gave up (result=" + result + "); setup guide will show next launch");
+                return;
+            }
+            Log.w(TAG, "attempt " + attempt + " failed (result=" + result + "); will retry");
+            reschedule();
+        });
+    }
+
+    private static void reschedule() {
+        if (checksLeft <= 0) return;
+        MAIN.removeCallbacks(CHECK);
+        MAIN.postDelayed(CHECK, RECHECK_MS);
+    }
+
+    private static boolean isServiceEnabled(Context context) {
+        try {
+            String enabled = Settings.Secure.getString(context.getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            if (enabled == null) return false;
+            ComponentName self = new ComponentName(context, KeepAliveAccessibilityService.class);
+            for (String entry : enabled.split(":")) {
+                if (self.equals(ComponentName.unflattenFromString(entry.trim()))) return true;
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
+
+    private static int attemptsFor(Context context, long install) {
+        SharedPreferences p = prefs(context);
+        return p.getLong(KEY_ATTEMPT_INSTALL, 0L) == install ? p.getInt(KEY_ATTEMPTS, 0) : 0;
+    }
+
+    private static long currentInstall(Context context) {
+        try {
+            PackageInfo pi = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
+            return pi.lastUpdateTime;
+        } catch (Throwable t) {
+            return 0L;
+        }
+    }
+
+    private static SharedPreferences prefs(Context context) {
+        return context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+}

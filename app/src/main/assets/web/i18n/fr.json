@@ -57,6 +57,7 @@
     "key_mapping": "Mappage des touches"
   },
   "road_sense": {
+    "cluster_size_not_loaded": "Impossible de lire la taille enregistrée du combiné d'instruments — rechargez la page avant de la modifier.",
     "page_title": "Paramètres RoadSense",
     "tab_general": "Généraux",
     "tab_map": "Carte",
@@ -815,7 +816,8 @@
       "storage_limit_desc": "Supprimer automatiquement les plus anciens lorsque la limite est atteinte",
       "rate_source_note": "Les trajets sont coûtés au taux de votre dernière charge à un emplacement tarifaire enregistré. Ce taux s'applique jusqu'à ce moment-là.",
       "rate_from_charge": "Les trajets sont coûtés à votre dernière charge : {rate}/kWh.",
-      "rate_from_charge_named": "Les trajets sont facturés à votre dernière charge: {rate}/kWh ({label})."
+      "rate_from_charge_named": "Les trajets sont facturés à votre dernière charge: {rate}/kWh ({label}).",
+      "not_loaded": "Impossible de lire les réglages de trajets enregistrés — rechargez la page avant de les modifier."
     },
     "recover": {
       "title": "Récupérer les courses manquantes",
@@ -1480,7 +1482,8 @@
     "telemetry_field_location": "Position GPS",
     "telemetry_field_vin": "VIN (n° de série)",
     "telemetry_fields_label": "Champs à brûler",
-    "telemetry_fields_desc": "Choisissez ce que la superposition dessine sur le voyage et les enregistrements manuels."
+    "telemetry_fields_desc": "Choisissez ce que la superposition dessine sur le voyage et les enregistrements manuels.",
+    "settings_not_loaded": "Impossible de lire les réglages d'enregistrement enregistrés — rechargez la page avant de les modifier."
   },
   "events": {
     "select_date": "Sélectionnez une date",
@@ -2568,6 +2571,8 @@
     "driver_door_unlocked": "Porte du chauffeur déverrouillée"
   },
   "roi": {
+    "zones_not_loaded": "Impossible de lire les zones enregistrées — rechargez la page avant de les modifier.",
+    "schedule_not_loaded": "Impossible de lire le planning enregistré — rechargez la page avant de le modifier.",
     "editing": "Rédaction",
     "window_n": "Fenêtre {n}",
     "remove": "Supprimer",
@@ -2847,7 +2852,7 @@
     "daemon_title": "Daemon",
     "auto_start_acc_off": "Démarrage automatique lorsque le véhicule est éteint",
     "auto_start_acc_off_desc": "Lancez le daemon de robot Telegram automatiquement lorsque le véhicule passe à ACC OFF, de sorte que les commandes fonctionnent pendant que le véhicule est stationné.",
-    "daemon_start_pointer": "Le démarrage / arrêt manuel du daemon se trouve sur la page Daemons dans l'application native.",
+    "daemon_start_pointer": "Le démarrage / arrêt manuel du daemon se trouve sur la page {daemons} dans l'application native.",
     "delivery_pointer": "Les préférences de livraison (quels événements atteignent le chat) sont en direct sur l'onglet Notifications → Telegram.",
     "tyre_alerts": "Alertes de pression des pneus",
     "tyre_alerts_desc": "Envoyer un message Telegram quand un pneu sort de la plage de pression configurée, ou quand le TPMS signale une fuite. Utilise les limites fixées sous la pression des pneus.",
@@ -3321,7 +3326,9 @@
     "no_apps": "Aucune application trouvée",
     "app_missing": "(manquant)",
     "display_head_unit": "Unité principale",
-    "display_cluster": "Pilote cluster"
+    "display_cluster": "Pilote cluster",
+    "not_loaded": "Impossible de lire les affectations de touches enregistrées — rechargez la page avant de les modifier.",
+    "qc_not_loaded": "Impossible de lire les commandes rapides enregistrées — rechargez la page avant de les modifier."
   },
   "voice_assistant": {
     "command_language": "Langue des commandes",
@@ -3506,5 +3513,78 @@
     "forget_confirm_body": "Briefing trajet oublie les noms de lieux, les routines masquées, les choix d'application et vos réponses. Vos trajets sont conservés, il pourra donc réapprendre.",
     "forgot": "Habitudes oubliées. Vos trajets sont conservés.",
     "save_failed": "Impossible d'enregistrer. Réessayez."
+  },
+  "offline": {
+    "banner": "Impossible de joindre la voiture via ce lien · dernières données : {time}",
+    "banner_old": "Impossible de joindre la voiture via ce lien · dernières données : il y a {days} jours. Si vous avez modifié ou réinitialisé le tunnel, ce lien ne fonctionne peut-être plus.",
+    "car_unreachable": "Impossible de joindre la voiture. La commande n'a peut-être pas été transmise.",
+    "back_online": "De nouveau connecté. Touchez pour actualiser.",
+    "connecting": "Connexion à la voiture · dernières données : {time}",
+    "not_sent": "La voiture est hors ligne, rien n'a donc été envoyé. Réessayez quand elle sera de nouveau joignable."
+  },
+  "stepup": {
+    "title": "Protection par Face ID ou empreinte digitale",
+    "desc": "Demande Face ID ou l'empreinte digitale avant que quiconque hors de la voiture la déverrouille, ouvre le coffre, la mette en marche ou l'arrête. Rien n'est demandé depuis l'écran de la voiture, ni pour les automatisations ou le déverrouillage de proximité. Tant que la protection est activée, les commandes vocales ne peuvent pas effectuer ces actions.",
+    "enable": "Exiger Face ID ou l'empreinte digitale",
+    "enable_needs_phone": "Ajoutez d'abord un téléphone.",
+    "actions_title": "Demander pour",
+    "action_unlock": "Déverrouillage des portes",
+    "action_trunk_open": "Ouverture du coffre",
+    "action_power_off": "Arrêt de la voiture",
+    "action_power_on": "Mise en marche de la voiture",
+    "action_power_on_desc": "Demande aussi avant un démarrage de la climatisation à distance, qui peut mettre la voiture en marche.",
+    "phones_title": "Téléphones",
+    "phones_empty": "Aucun téléphone ajouté pour l'instant.",
+    "phone_added": "Ajouté le {date}",
+    "phone_last_used": "Dernière utilisation le {date}",
+    "phone_remove": "Retirer",
+    "phone_remove_confirm": "Retirer ce téléphone ? Il ne pourra plus approuver les actions à distance.",
+    "remove_last_confirm": "C'est le dernier téléphone. Le retirer désactive la protection. Continuer ?",
+    "add_phone_car": "Ajouter un téléphone",
+    "pair_presence": "Appuyez sur la pédale de frein, ou ouvrez puis fermez une porte avant.",
+    "pair_code": "Sur votre téléphone, ouvrez Contrôle du véhicule → Sécurité et saisissez ce code :",
+    "pair_expires": "Le code expire dans {seconds} s",
+    "pair_expired": "Le code a expiré. Recommencez.",
+    "pair_blocked_remote_view": "Arrêtez d'abord le contrôle de l'écran à distance.",
+    "add_this_phone": "Ajouter ce téléphone",
+    "start_on_car": "Commencez sur l'écran de la voiture : Contrôle du véhicule → Sécurité → Ajouter un téléphone. Saisissez ensuite le code ici.",
+    "code_label": "Code affiché sur l'écran de la voiture",
+    "phone_name_label": "Nom du téléphone",
+    "added_ok": "Ce téléphone peut désormais approuver les actions à distance.",
+    "need_secure_link": "Pour ajouter ce téléphone, ouvrez OverDrive via votre lien sécurisé : zrok, votre domaine Cloudflare ou Tailscale HTTPS.",
+    "not_supported": "Ce navigateur ne peut pas utiliser Face ID ou l'empreinte digitale ici.",
+    "prompt_failed": "Impossible de confirmer votre identité. L'action n'a pas été envoyée.",
+    "cancelled": "Annulé. L'action n'a pas été envoyée.",
+    "needs_secure_link_action": "Cette action nécessite Face ID ou l'empreinte digitale. Utilisez votre lien sécurisé ou l'écran de la voiture.",
+    "car_only": "Tant que la protection par Face ID ou empreinte digitale est activée, cela ne fonctionne que depuis l'écran de la voiture.",
+    "remote_adb_warning": "L'ADB à distance via Tailscale est activé. Toute personne ayant un accès ADB peut contourner cette protection.",
+    "remote_view_warning": "Le contrôle de l'écran à distance est actif. Jusqu'à sa fin, l'écran de la voiture demande aussi une confirmation.",
+    "wrong_code": "Ce code n'a pas fonctionné. Vérifiez-le et réessayez.",
+    "error_generic": "Impossible d'enregistrer. Réessayez.",
+    "add": "Ajouter",
+    "cancel": "Annuler",
+    "confirm_unlock": "Déverrouiller la voiture ?",
+    "confirm_trunkOpen": "Ouvrir le coffre ?",
+    "confirm_powerOff": "Arrêter la voiture ?",
+    "confirm_powerOn": "Mettre la voiture en marche ?",
+    "confirm_run": "Exécuter cette action ?",
+    "confirm_config": "Enregistrer cette modification ?",
+    "confirm_settings": "Modifier les réglages de la protection ?",
+    "confirm_screenControl": "Contrôler l'écran de la voiture ?",
+    "confirm_keyInject": "Envoyer une touche à l'écran de la voiture ?",
+    "confirm_generic": "Confirmer cette action ?",
+    "confirm_button": "Confirmer avec Face ID ou l'empreinte digitale",
+    "waiting": "En attente de Face ID ou de l'empreinte digitale…",
+    "too_many_codes": "Trop de codes erronés. Recommencez sur l'écran de la voiture.",
+    "already_added": "Ce téléphone est déjà ajouté.",
+    "setup_cancelled": "Annulé. Rien n'a été ajouté.",
+    "create_passkey": "Créer une clé d'accès",
+    "try_again": "Réessayer",
+    "phone_added_car": "Téléphone ajouté.",
+    "remote_view_action": "Arrêtez d'abord le contrôle de l'écran à distance.",
+    "store_unreadable": "Impossible de lire les réglages de la protection. Désactivez la protection ici pour les réinitialiser.",
+    "too_many_phones": "Vous avez ajouté le nombre maximal de téléphones autorisé. Retirez-en d'abord un.",
+    "unknown_phone": "Ce téléphone n'est plus ajouté.",
+    "link_checking": "Vérification du lien sécurisé. Réessayez dans quelques secondes."
   }
 }

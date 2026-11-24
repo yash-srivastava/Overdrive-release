@@ -72,6 +72,8 @@ public final class TfliteTextOcrBackend implements TextOcrBackend {
     static final int MAX_FINE_BOXES = 8;
     /** A native-resolution box mostly inside a whole-frame box is the same text. */
     static final float FINE_COVERED_FRAC = 0.5f;
+    /** Lines of one placard ("B2" over "D13") differ in height by less than this. */
+    static final float STACKED_MAX_HEIGHT_RATIO = 2.5f;
     static final int REC_MAX_W = 320;
     static final int REC_MIN_W = 32;
     static final int NUM_THREADS = 2;
@@ -229,18 +231,26 @@ public final class TfliteTextOcrBackend implements TextOcrBackend {
             src = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length, o);
             if (src == null) return out;
             List<int[]> boxes = detect(src);
+            List<int[]> read = new ArrayList<>();
+            List<TextLine> readLines = new ArrayList<>();
             int n = 0;
             for (int[] b : boxes) {
                 if (n++ >= MAX_BOXES) break;
-                recogniseBox(src, b, out);
+                TextLine l = recogniseBox(src, b, out);
+                if (l != null && l.confidence >= SignageReader.MIN_LINE_CONF) { read.add(b); readLines.add(l); }
             }
             List<int[]> fine;
+            List<int[]> kept = read;
             try {
-                fine = detectFine(src, boxes);
+                List<int[]> single = new ArrayList<>(read);
+                fine = detectFine(src, single);
+                kept = single;
             } catch (Throwable t) {
                 log.log("Signage OCR fine pass failed: " + t);
                 fine = Collections.emptyList();
             }
+            // A box the fine pass splits into stacked lines read them merged; those lines replace its read.
+            for (int i = 0; i < read.size(); i++) if (!kept.contains(read.get(i))) out.remove(readLines.get(i));
             for (int[] b : fine) recogniseBox(src, b, out);
         } catch (Throwable t) {
             log.log("Signage OCR read failed: " + t);
@@ -250,17 +260,19 @@ public final class TfliteTextOcrBackend implements TextOcrBackend {
         return out;
     }
 
-    private void recogniseBox(Bitmap src, int[] b, List<TextLine> out) {
+    /** The line added to {@code out}, or null when the box read nothing. */
+    private TextLine recogniseBox(Bitmap src, int[] b, List<TextLine> out) {
         int bw = b[2] - b[0] + 1, bh = b[3] - b[1] + 1;
-        if (bw < 8 || bh < 8) return;
+        if (bw < 8 || bh < 8) return null;
         Bitmap crop = Bitmap.createBitmap(src, b[0], b[1], bw, bh);
         try {
             CtcDecoder.Decoded d = recognise(crop);
-            if (d.text != null && !d.text.trim().isEmpty()) {
-                out.add(new TextLine(d.text.trim(), d.confidence,
-                        (b[0] + bw / 2f) / src.getWidth(), (b[1] + bh / 2f) / src.getHeight(),
-                        (float) bw / src.getWidth(), (float) bh / src.getHeight()));
-            }
+            if (d.text == null || d.text.trim().isEmpty()) return null;
+            TextLine l = new TextLine(d.text.trim(), d.confidence,
+                    (b[0] + bw / 2f) / src.getWidth(), (b[1] + bh / 2f) / src.getHeight(),
+                    (float) bw / src.getWidth(), (float) bh / src.getHeight());
+            out.add(l);
+            return l;
         } finally {
             if (crop != src) crop.recycle();
         }
@@ -317,7 +329,8 @@ public final class TfliteTextOcrBackend implements TextOcrBackend {
                 x1 = clamp(x1 + margin, 0, src.getWidth() - 1);
                 y1 = clamp(y1 + margin, 0, src.getHeight() - 1);
                 if (x1 <= x0 || y1 <= y0) continue;
-                boxes.add(new int[] {x0, y0, x1, y1, c.area});
+                boxes.add(new int[] {x0, y0, x1, y1, c.area, Math.round(c.minX * sx), Math.round(c.minY * sy),
+                        Math.round((c.maxX + 1) * sx) - 1, Math.round((c.maxY + 1) * sy) - 1});
             }
             // Largest text first (signage is big), then reading order.
             Collections.sort(boxes, (a, b) -> Integer.compare(b[4], a[4]));
@@ -334,8 +347,9 @@ public final class TfliteTextOcrBackend implements TextOcrBackend {
 
     /**
      * Native-resolution pass for text too small for {@link #detect}'s whole-frame resize (pillar
-     * placards a few pixels tall after it): detector tiles stitched into one map. Only boxes the
-     * whole-frame pass did not already cover are returned, so its reads are unchanged.
+     * placards a few pixels tall after it): detector tiles stitched into one map. Boxes inside one
+     * of the {@code coarse} boxes (those read) are dropped. A coarse box holding stacked lines is a
+     * placard squashed into one box: it is removed from {@code coarse} and its lines are returned.
      */
     private List<int[]> detectFine(Bitmap src, List<int[]> coarse) {
         List<int[]> out = new ArrayList<>();
@@ -386,6 +400,7 @@ public final class TfliteTextOcrBackend implements TextOcrBackend {
             List<ConnectedComponents.Component> comps =
                     ConnectedComponents.label(map, fw, fh, DET_BIN_THRESH, DET_MIN_AREA);
             float inv = 1f / s;
+            List<int[]> found = new ArrayList<>();
             for (ConnectedComponents.Component c : comps) {
                 if (c.meanScore() < DET_BOX_THRESH) continue;
                 int[] u = ConnectedComponents.unclip(c, DET_UNCLIP_RATIO, fw, fh);
@@ -399,11 +414,22 @@ public final class TfliteTextOcrBackend implements TextOcrBackend {
                 x1 = clamp(x1 + margin, 0, sw - 1);
                 y1 = clamp(y1 + margin, 0, sh - 1);
                 if (x1 <= x0 || y1 <= y0) continue;
-                int[] box = {x0, y0, x1, y1, c.area};
-                if (!covered(box, coarse)) out.add(box);
+                // 5..8: the detector's text kernel before unclip, which keeps adjacent lines apart.
+                found.add(new int[] {x0, y0, x1, y1, c.area, Math.round(c.minX * inv), Math.round(c.minY * inv),
+                        Math.round((c.maxX + 1) * inv) - 1, Math.round((c.maxY + 1) * inv) - 1});
+            }
+            List<int[]> merged = new ArrayList<>();
+            coarse.removeIf(c -> holdsStackedLines(c, found) && merged.add(c));
+            // The lines of a removed box stand in for its read: they get their own cap.
+            List<int[]> lines = new ArrayList<>();
+            for (int[] box : found) {
+                if (covered(box, coarse)) continue;
+                if (covered(box, merged)) lines.add(box); else out.add(box);
             }
             Collections.sort(out, (a, b) -> Integer.compare(b[4], a[4]));
             if (out.size() > MAX_FINE_BOXES) out = new ArrayList<>(out.subList(0, MAX_FINE_BOXES));
+            Collections.sort(lines, (a, b) -> Integer.compare(b[4], a[4]));
+            out.addAll(lines.subList(0, Math.min(lines.size(), MAX_FINE_BOXES)));
             Collections.sort(out, (a, b) -> {
                 int rowA = a[1] / 24, rowB = b[1] / 24;
                 return rowA != rowB ? Integer.compare(rowA, rowB) : Integer.compare(a[0], b[0]);
@@ -436,6 +462,35 @@ public final class TfliteTextOcrBackend implements TextOcrBackend {
             if (iw > 0 && ih > 0 && iw * ih >= FINE_COVERED_FRAC * area) return true;
         }
         return false;
+    }
+
+    /**
+     * True when two {@code fine} kernels centred on {@code box}'s kernel (indices 5..8, within a quarter of
+     * its height) are lines stacked in one column. Its unclipped box also reaches into neighbouring lines.
+     */
+    static boolean holdsStackedLines(int[] box, List<int[]> fine) {
+        if (box.length < 9) return false;
+        float t = (box[8] - box[6] + 1) / 4f;
+        List<int[]> in = new ArrayList<>();
+        for (int[] f : fine) {
+            if (f.length < 9) continue;
+            float cx = (f[5] + f[7]) / 2f, cy = (f[6] + f[8]) / 2f;
+            if (cx >= box[5] - t && cx <= box[7] + t && cy >= box[6] - t && cy <= box[8] + t) in.add(f);
+        }
+        for (int i = 0; i < in.size(); i++) {
+            for (int j = i + 1; j < in.size(); j++) if (stacked(in.get(i), in.get(j))) return true;
+        }
+        return false;
+    }
+
+    /** Kernels (indices 5..8) on separate rows, of similar height, overlapping by half the narrower width. */
+    static boolean stacked(int[] a, int[] b) {
+        int[] top = a[6] <= b[6] ? a : b, bottom = top == a ? b : a;
+        if (top[8] >= bottom[6]) return false;
+        int ha = a[8] - a[6] + 1, hb = b[8] - b[6] + 1;
+        if (Math.max(ha, hb) > STACKED_MAX_HEIGHT_RATIO * Math.min(ha, hb)) return false;
+        int overlap = Math.min(a[7], b[7]) - Math.max(a[5], b[5]) + 1;
+        return overlap >= 0.5f * Math.min(a[7] - a[5] + 1, b[7] - b[5] + 1);
     }
 
     /** ImageNet-normalised {@code tw×th} pixels (row stride {@code w}), padded with 0 (the mean) to {@code w×h}. */

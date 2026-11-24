@@ -1,5 +1,7 @@
 package com.overdrive.app.server.timeline;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -83,13 +85,13 @@ public final class SidecarTimeline {
         if (mp4 == null || mp4.getParentFile() == null) return facts;
         try {
             File json = sidecarFor(mp4);
-            if (!json.isFile()) return facts;
+            if (!RemovableStorageFs.isFile(json)) return facts;
             facts.present = true;
-            long length = json.length();
+            long length = RemovableStorageFs.length(json);
             if (length <= 0 || length > MAX_BYTES) return facts;
             byte[] bytes = new byte[(int) length];
             int filled = 0;
-            try (InputStream in = new FileInputStream(json)) {
+            try (InputStream in = RemovableStorageFs.openInput(json)) {
                 int n;
                 while (filled < bytes.length && (n = in.read(bytes, filled, bytes.length - filled)) > 0) {
                     filled += n;

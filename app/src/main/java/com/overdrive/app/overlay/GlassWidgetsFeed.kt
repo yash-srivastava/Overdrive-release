@@ -50,6 +50,8 @@ internal object GlassWidgetsFeed {
         val chargeCost: ChargeCost? = null,
         /** Core reads the car as switched off: neither on nor charging. */
         val carOff: Boolean = false,
+        /** A DiLink 3/4 plug-in hybrid's drive power (kW, − regen); custom widgets only. */
+        val driveKw: Float? = null,
     )
 
     /** A charge's energy added and cost so far: the session's own figures, else live energy at the live rate ([costEstimated]). */
@@ -128,6 +130,7 @@ internal object GlassWidgetsFeed {
             chargeCost = if (!charging) null else ChargeCost(num(c, "addedKwh"), num(c, "cost"),
                 c.optString("currency").trim().take(8).takeIf { !c.isNull("currency") && it.isNotEmpty() }, c.optBoolean("costEstimated", false)),
             carOff = st.optString("acc") == "off",
+            driveKw = p?.let { num(it, "driveKw") },
         )
     }
 
@@ -163,10 +166,10 @@ internal object GlassWidgetsFeed {
         GlassDriveView.Trip(t.live, t.km, t.minutes.roundToInt(), t.whPerKm, s.tripTopKmh, if (t.live) regenPct else null)
     }
 
-    /** One `/api/widgets/live` reading; NaN where the car didn't report it, and the blind spot when sent. */
+    /** One `/api/widgets/live` reading; NaN where the car didn't report it, and the blind spot when sent. [driveKw] is as in [Snapshot]. */
     class Live(
         val kw: Float, val kmh: Float, val accel: Float, val brake: Float, val frontRpm: Float, val rearRpm: Float,
-        val hasBs: Boolean, val bsLeft: Int, val bsRight: Int, val bsAny: Int,
+        val hasBs: Boolean, val bsLeft: Int, val bsRight: Int, val bsAny: Int, val driveKw: Float = Float.NaN,
     ) {
         /** The busier motor's speed (the front reads negated in reverse). */
         val rpm: Float get() = if (frontRpm.isNaN()) abs(rearRpm) else if (rearRpm.isNaN()) abs(frontRpm) else maxOf(abs(frontRpm), abs(rearRpm))
@@ -179,6 +182,7 @@ internal object GlassWidgetsFeed {
             num(o, "accelPct") ?: Float.NaN, num(o, "brakePct") ?: Float.NaN,
             num(o, "frontRpm") ?: Float.NaN, num(o, "rearRpm") ?: Float.NaN,
             bs != null, bs?.optInt("left", 0) ?: 0, bs?.optInt("right", 0) ?: 0, bs?.optInt("any", 0) ?: 0,
+            num(o, "driveKw") ?: Float.NaN,
         )
     }
 

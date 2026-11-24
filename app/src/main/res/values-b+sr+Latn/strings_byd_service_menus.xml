@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_security_byd_tools_title">BYD servisni meniji</string>
+    <string name="settings_security_byd_tools_description">Otvorite ugrađene alatke za konfiguraciju multimedijalne jedinice.</string>
+    <string name="settings_security_byd_adb_title">ADB / Opcije za programere</string>
+    <string name="settings_security_byd_adb_hint">Otvorite opcije za programere i tamo uključite USB otklanjanje grešaka.</string>
+    <string name="settings_security_byd_adb_unavailable">ADB podešavanja nisu dostupna na ovom firmveru.</string>
+    <string name="settings_security_country_code_title">Kod države</string>
+    <string name="settings_security_country_code_warning">Ovo otvara BYD podešavanja države/regiona. Promena koda države može uticati na regionalne servise ili zahtevati ponovno pokretanje multimedijalne jedinice. Nastavite samo dok ste parkirani.</string>
+    <string name="settings_security_country_code_open">Otvorite podešavanja</string>
+    <string name="settings_security_country_code_unavailable">Kod države nije dostupan na ovoj multimedijalnoj jedinici.</string>
+</resources>

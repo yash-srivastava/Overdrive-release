@@ -36,6 +36,9 @@ object ImuFrameCodec {
 
     const val COMMAND = "IMU_BATCH"
 
+    /** Sidecar diagnostic line (`{"command":"IMU_STATUS","m":"..."}`), logged by the daemon. */
+    const val STATUS_COMMAND = "IMU_STATUS"
+
     /** Target wall-clock span per batch. ~100 ms ⇒ ~10 samples/sensor at 100 Hz. */
     const val TARGET_BATCH_MS = 100L
 
@@ -46,13 +49,21 @@ object ImuFrameCodec {
     private const val KEY_COMMAND = "command"
     private const val KEY_ACCEL = "a"
     private const val KEY_GYRO = "g"
+    // Optional accel sample period (ms); only the DiLink 5 sidecar sends it.
+    private const val KEY_PERIOD = "p"
+    private const val MIN_PERIOD_MS = 2.0
+    private const val MAX_PERIOD_MS = 500.0
 
     /**
      * Encode a batch into a single newline-terminated wire line (the daemon's
      * IPC reader is line-oriented, like the GPS sidecar). Either list may be
      * empty but not both (caller shouldn't send empty frames).
      */
-    fun encode(accel: List<ImuAccelSample>, gyro: List<ImuGyroSample>): String {
+    fun encode(
+        accel: List<ImuAccelSample>,
+        gyro: List<ImuGyroSample>,
+        periodMs: Float? = null,
+    ): String {
         val obj = JSONObject()
         obj.put(KEY_COMMAND, COMMAND)
         val a = JSONArray()
@@ -65,11 +76,17 @@ object ImuFrameCodec {
         }
         obj.put(KEY_ACCEL, a)
         obj.put(KEY_GYRO, g)
+        if (periodMs != null) obj.put(KEY_PERIOD, Math.round(periodMs * 10f) / 10.0)
         return obj.toString() + "\n"
     }
 
     /** Decoded frame: the two sample lists pulled off the wire. */
-    data class Decoded(val accel: List<ImuAccelSample>, val gyro: List<ImuGyroSample>)
+    data class Decoded(
+        val accel: List<ImuAccelSample>,
+        val gyro: List<ImuGyroSample>,
+        /** Tagged accel sample period, or null for an untagged (100 Hz) stream. */
+        val periodMs: Float? = null,
+    )
 
     /**
      * Decode one wire line back into samples. Returns null if [line] is not an
@@ -132,6 +149,8 @@ object ImuFrameCodec {
                 )
             }
         }
-        return Decoded(accel, gyro)
+        val period = obj.optDouble(KEY_PERIOD, Double.NaN)
+        val periodMs = if (period >= MIN_PERIOD_MS && period <= MAX_PERIOD_MS) period.toFloat() else null
+        return Decoded(accel, gyro, periodMs)
     }
 }

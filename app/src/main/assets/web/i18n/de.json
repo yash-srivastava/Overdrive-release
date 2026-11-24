@@ -57,6 +57,7 @@
     "key_mapping": "Tastenbelegung"
   },
   "road_sense": {
+    "cluster_size_not_loaded": "Die gespeicherte Größe des Kombiinstruments konnte nicht gelesen werden — laden Sie die Seite neu, bevor Sie sie ändern.",
     "page_title": "RoadSense Einstellungen",
     "tab_general": "Allgemein",
     "tab_map": "Karte",
@@ -820,7 +821,8 @@
       "storage_limit_desc": "Automatisierte Löschung der ältesten, wenn die Grenze erreicht wurde",
       "rate_source_note": "Reisen werden nach dem Tarif Ihrer letzten Gebühr zu einem gespeicherten Tarif berechnet. Dieser Tarif gilt bis dato als vereinbart.",
       "rate_from_charge": "Fahrten werden auf Ihre letzte Gebühr berechnet: {rate}/kWh.",
-      "rate_from_charge_named": "Fahrten werden auf Ihre letzte Gebühr berechnet: {rate}/kWh ({label})."
+      "rate_from_charge_named": "Fahrten werden auf Ihre letzte Gebühr berechnet: {rate}/kWh ({label}).",
+      "not_loaded": "Die gespeicherten Fahrteneinstellungen konnten nicht gelesen werden — laden Sie die Seite neu, bevor Sie sie ändern."
     },
     "recover": {
       "title": "Fehlende Reisen wiederherstellen",
@@ -1485,7 +1487,8 @@
     "telemetry_field_location": "GPS-Position",
     "telemetry_field_vin": "FIN (Fahrgestellnummer)",
     "telemetry_fields_label": "Zu brennende Felder",
-    "telemetry_fields_desc": "Wählen Sie aus, was das Overlay bei Fahrt- und manuellen Aufnahmen zieht."
+    "telemetry_fields_desc": "Wählen Sie aus, was das Overlay bei Fahrt- und manuellen Aufnahmen zieht.",
+    "settings_not_loaded": "Die gespeicherten Aufnahmeeinstellungen konnten nicht gelesen werden — laden Sie die Seite neu, bevor Sie sie ändern."
   },
   "events": {
     "select_date": "Datum auswählen",
@@ -2573,6 +2576,8 @@
     "driver_door_unlocked": "Fahrertür entsperrt"
   },
   "roi": {
+    "zones_not_loaded": "Die gespeicherten Zonen konnten nicht gelesen werden — laden Sie die Seite neu, bevor Sie sie ändern.",
+    "schedule_not_loaded": "Der gespeicherte Zeitplan konnte nicht gelesen werden — laden Sie die Seite neu, bevor Sie ihn ändern.",
     "editing": "EINWEISUNG",
     "window_n": "Fenster {n}",
     "remove": "Entfernen",
@@ -2852,7 +2857,7 @@
     "daemon_title": "Daemon",
     "auto_start_acc_off": "Autostart, wenn das Fahrzeug aus ist",
     "auto_start_acc_off_desc": "Starten Sie den Telegram-Bot-Daemon automatisch, wenn das Fahrzeug auf ACC OFF geht, so dass die Befehle während des Parken funktionieren.",
-    "daemon_start_pointer": "Die manuelle Start-/Stop-Anleitung des Daemons findet sich auf der Daemons-Seite in der nativen App.",
+    "daemon_start_pointer": "Die manuelle Start-/Stop-Anleitung des Daemons findet sich auf der {daemons}-Seite in der nativen App.",
     "delivery_pointer": "Die Liefervorlieben (die Ereignisse erreichen den Chat) finden Sie im Tab \"Benachrichtigungen → Telegram\".",
     "tyre_alerts": "Reifendruck-Warnungen",
     "tyre_alerts_desc": "Senden Sie eine Telegramm-Nachricht, wenn ein Reifen außerhalb Ihres konfigurierten Druckbereichs oder wenn das TPMS ein Leck meldet. Verwendet die Grenzwerte unter Reifendruckgrenzen.",
@@ -3326,7 +3331,9 @@
     "no_apps": "Keine Apps gefunden",
     "app_missing": "(fehlend)",
     "display_head_unit": "Infotainmentsystem",
-    "display_cluster": "Fahrer-Kombiinstrument"
+    "display_cluster": "Fahrer-Kombiinstrument",
+    "not_loaded": "Die gespeicherten Tastenbelegungen konnten nicht gelesen werden — laden Sie die Seite neu, bevor Sie sie ändern.",
+    "qc_not_loaded": "Die gespeicherten Schnellsteuerungen konnten nicht gelesen werden — laden Sie die Seite neu, bevor Sie sie ändern."
   },
   "voice_assistant": {
     "command_language": "Befehlssprache",
@@ -3511,5 +3518,78 @@
     "forget_confirm_body": "Fahrt-Briefing vergisst Ortsnamen, ausgeblendete Routinen, App-Auswahl und Ihre Antworten. Ihre Fahrten bleiben erhalten, damit es erneut lernen kann.",
     "forgot": "Muster vergessen. Ihre Fahrten bleiben erhalten.",
     "save_failed": "Speichern fehlgeschlagen. Versuchen Sie es erneut."
+  },
+  "offline": {
+    "banner": "Das Auto ist über diesen Link nicht erreichbar · Datenstand: {time}",
+    "banner_old": "Das Auto ist über diesen Link nicht erreichbar · Datenstand: vor {days} Tagen. Wenn Sie den Tunnel geändert oder zurückgesetzt haben, funktioniert dieser Link möglicherweise nicht mehr.",
+    "car_unreachable": "Das Auto ist nicht erreichbar. Der Befehl wurde möglicherweise nicht übermittelt.",
+    "back_online": "Wieder verbunden. Zum Aktualisieren tippen.",
+    "connecting": "Verbindung zum Auto wird hergestellt · Datenstand: {time}",
+    "not_sent": "Das Auto ist offline, daher wurde das nicht gesendet. Versuchen Sie es erneut, wenn es wieder erreichbar ist."
+  },
+  "stepup": {
+    "title": "Sperre per Face ID oder Fingerabdruck",
+    "desc": "Fragt nach Face ID oder Fingerabdruck, bevor jemand außerhalb des Autos es entriegelt, den Kofferraum öffnet oder es ein- oder ausschaltet. Am Bildschirm im Auto, bei Automatisierungen und beim Entriegeln per Annäherung wird nie nachgefragt. Solange die Sperre aktiv ist, können Sprachbefehle diese Aktionen nicht ausführen.",
+    "enable": "Face ID oder Fingerabdruck verlangen",
+    "enable_needs_phone": "Fügen Sie zuerst ein Telefon hinzu.",
+    "actions_title": "Nachfragen bei",
+    "action_unlock": "Entriegeln der Türen",
+    "action_trunk_open": "Öffnen des Kofferraums",
+    "action_power_off": "Ausschalten des Autos",
+    "action_power_on": "Einschalten des Autos",
+    "action_power_on_desc": "Fragt auch vor einem Fernstart der Klimatisierung nach, der das Auto einschalten kann.",
+    "phones_title": "Telefone",
+    "phones_empty": "Noch keine Telefone hinzugefügt.",
+    "phone_added": "Hinzugefügt am {date}",
+    "phone_last_used": "Zuletzt verwendet am {date}",
+    "phone_remove": "Entfernen",
+    "phone_remove_confirm": "Dieses Telefon entfernen? Es kann danach keine Aktionen aus der Ferne mehr freigeben.",
+    "remove_last_confirm": "Das ist das letzte Telefon. Wenn Sie es entfernen, wird die Sperre ausgeschaltet. Fortfahren?",
+    "add_phone_car": "Telefon hinzufügen",
+    "pair_presence": "Treten Sie das Bremspedal oder öffnen und schließen Sie eine Vordertür.",
+    "pair_code": "Öffnen Sie auf Ihrem Telefon Fahrzeugsteuerung → Sicherheit und geben Sie diesen Code ein:",
+    "pair_expires": "Code läuft in {seconds} s ab",
+    "pair_expired": "Der Code ist abgelaufen. Beginnen Sie erneut.",
+    "pair_blocked_remote_view": "Beenden Sie zuerst die Fernsteuerung des Bildschirms.",
+    "add_this_phone": "Dieses Telefon hinzufügen",
+    "start_on_car": "Beginnen Sie am Bildschirm im Auto: Fahrzeugsteuerung → Sicherheit → Telefon hinzufügen. Geben Sie dann hier den Code ein.",
+    "code_label": "Code vom Bildschirm im Auto",
+    "phone_name_label": "Name des Telefons",
+    "added_ok": "Dieses Telefon kann jetzt Aktionen aus der Ferne freigeben.",
+    "need_secure_link": "Um dieses Telefon hinzuzufügen, öffnen Sie OverDrive über Ihren sicheren Link: zrok, Ihre Cloudflare-Domain oder Tailscale HTTPS.",
+    "not_supported": "Dieser Browser kann Face ID oder Fingerabdruck hier nicht verwenden.",
+    "prompt_failed": "Es konnte nicht bestätigt werden, dass Sie es sind. Die Aktion wurde nicht gesendet.",
+    "cancelled": "Abgebrochen. Die Aktion wurde nicht gesendet.",
+    "needs_secure_link_action": "Diese Aktion erfordert Face ID oder Fingerabdruck. Verwenden Sie Ihren sicheren Link oder den Bildschirm im Auto.",
+    "car_only": "Solange die Sperre per Face ID oder Fingerabdruck aktiv ist, funktioniert das nur am Bildschirm im Auto.",
+    "remote_adb_warning": "Remote-ADB über Tailscale ist aktiv. Jeder mit ADB-Zugriff kann diese Sperre umgehen.",
+    "remote_view_warning": "Die Fernsteuerung des Bildschirms ist aktiv. Bis sie endet, fragt auch der Bildschirm im Auto nach.",
+    "wrong_code": "Dieser Code hat nicht funktioniert. Prüfen Sie ihn und versuchen Sie es erneut.",
+    "error_generic": "Speichern fehlgeschlagen. Versuchen Sie es erneut.",
+    "add": "Hinzufügen",
+    "cancel": "Abbrechen",
+    "confirm_unlock": "Auto entriegeln?",
+    "confirm_trunkOpen": "Kofferraum öffnen?",
+    "confirm_powerOff": "Auto ausschalten?",
+    "confirm_powerOn": "Auto einschalten?",
+    "confirm_run": "Diese Aktion ausführen?",
+    "confirm_config": "Diese Änderung speichern?",
+    "confirm_settings": "Einstellungen der Sperre ändern?",
+    "confirm_screenControl": "Bildschirm im Auto steuern?",
+    "confirm_keyInject": "Eine Taste an den Bildschirm im Auto senden?",
+    "confirm_generic": "Diese Aktion bestätigen?",
+    "confirm_button": "Mit Face ID oder Fingerabdruck bestätigen",
+    "waiting": "Warten auf Face ID oder Fingerabdruck…",
+    "too_many_codes": "Zu viele falsche Codes. Beginnen Sie am Bildschirm im Auto erneut.",
+    "already_added": "Dieses Telefon wurde bereits hinzugefügt.",
+    "setup_cancelled": "Abgebrochen. Es wurde nichts hinzugefügt.",
+    "create_passkey": "Passkey erstellen",
+    "try_again": "Erneut versuchen",
+    "phone_added_car": "Telefon hinzugefügt.",
+    "remote_view_action": "Beenden Sie zuerst die Fernsteuerung des Bildschirms.",
+    "store_unreadable": "Die Einstellungen der Sperre konnten nicht gelesen werden. Schalten Sie die Sperre hier aus, um sie zurückzusetzen.",
+    "too_many_phones": "Sie haben die maximale Anzahl an Telefonen hinzugefügt. Entfernen Sie zuerst eines.",
+    "unknown_phone": "Dieses Telefon ist nicht mehr hinzugefügt.",
+    "link_checking": "Der sichere Link wird geprüft. Versuchen Sie es in ein paar Sekunden erneut."
   }
 }

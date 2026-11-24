@@ -8,8 +8,11 @@ import com.overdrive.app.trips.OdometerReader;
 import org.json.JSONObject;
 
 import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Where the parked car stands, for the safe-zone gate when live GPS is unusable. Tightest first:
@@ -98,6 +101,8 @@ public final class ParkedPosition {
     private Odometer lastKnownOdometer;
     private Odometer sample, previousSample, latestReading;
     private boolean sampling, restoreAttempted;
+    // Throttle attempts too: an unavailable odometer must not cost a binder call per GPS fix.
+    private long lastOdometerAttemptMs;
     private long savedFixElapsedMs;
     private String unavailable = "no GPS fix recorded since OverDrive started";
     private java.util.concurrent.ExecutorService sampler;
@@ -228,8 +233,10 @@ public final class ParkedPosition {
     }
 
     synchronized boolean samplingDue(long nowMs) {
-        if (sampling || (sample != null && nowMs - sample.atMs < ODOMETER_PERIOD_MS)) return false;
+        if (sampling || (lastOdometerAttemptMs != 0
+                && nowMs - lastOdometerAttemptMs < ODOMETER_PERIOD_MS)) return false;
         sampling = true;
+        lastOdometerAttemptMs = nowMs;
         return true;
     }
 
@@ -302,7 +309,6 @@ public final class ParkedPosition {
                     || lastKnown.fixElapsedMs == savedFixElapsedMs) return;
             fix = lastKnown;
             odometer = lastKnownOdometer;
-            savedFixElapsedMs = fix.fixElapsedMs;
         }
         try {
             String json = new JSONObject().put("lat", fix.latitude).put("lng", fix.longitude)
@@ -310,14 +316,21 @@ public final class ParkedPosition {
                     .put("odometerKm", odometer.km).put("odometerStepKm", odometer.stepKm).toString();
             File target = new File(file);
             File tmp = new File(file + ".tmp");
-            try (FileWriter writer = new FileWriter(tmp)) {
+            try (OutputStreamWriter writer = new OutputStreamWriter(
+                    new FileOutputStream(tmp), StandardCharsets.UTF_8)) {
                 writer.write(json);
             }
             if (!tmp.renameTo(target)) {
-                try (FileWriter writer = new FileWriter(target)) {
+                try (OutputStreamWriter writer = new OutputStreamWriter(
+                        new FileOutputStream(target), StandardCharsets.UTF_8)) {
                     writer.write(json);
                 }
                 tmp.delete();
+            }
+            // Only acknowledge a successful write. A full/unmounted storage
+            // device must not suppress retries on the next ACC-off edge.
+            synchronized (this) {
+                savedFixElapsedMs = fix.fixElapsedMs;
             }
             log("saved last fix ±" + Math.round(fix.accuracyM) + " m at odometer "
                     + String.format(java.util.Locale.US, "%.1f", odometer.km) + " km");
@@ -334,10 +347,16 @@ public final class ParkedPosition {
             File source = new File(file);
             if (!source.isFile()) return;
             StringBuilder text = new StringBuilder();
-            try (FileReader reader = new FileReader(source)) {
+            try (InputStreamReader reader = new InputStreamReader(
+                    new FileInputStream(source), StandardCharsets.UTF_8)) {
                 char[] buffer = new char[512];
                 int n;
-                while ((n = reader.read(buffer)) > 0 && text.length() < 4096) text.append(buffer, 0, n);
+                // Bound the actual read, not just the loop condition: an
+                // oversized or corrupt sidecar must not grow the buffer.
+                while (text.length() < 4096 && (n = reader.read(buffer, 0,
+                        Math.min(buffer.length, 4096 - text.length()))) > 0) {
+                    text.append(buffer, 0, n);
+                }
             }
             JSONObject json = new JSONObject(text.toString());
             double lat = json.optDouble("lat", Double.NaN), lng = json.optDouble("lng", Double.NaN);

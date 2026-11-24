@@ -1,5 +1,7 @@
 package com.overdrive.app.launcher;
 
+import android.graphics.Rect;
+
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.surveillance.ClusterProjectionController;
 
@@ -48,6 +50,7 @@ public final class ClusterCast {
 
     /** Distinct sustained token so this coexists with the map/blind-spot holders. */
     private static final String TOKEN = "castapp";
+    private static final String WAZE_PACKAGE = "com.waze";
 
     // WINDOWING_MODE_FULLSCREEN — fills the whole fission panel. FREEFORM (5) placed a
     // ~270px floating box (the "small projection" symptom the map hit); fullscreen is
@@ -77,6 +80,7 @@ public final class ClusterCast {
     private static final long QUEUED_START_SETTLE_MS = 45_000L;
     private static final long SESSION_WATCH_POLL_MS = 5_000L;
     private static final int SESSION_WATCH_MISSES = 3;
+    private static final long BEAT_HOLD_MS = 6_000L;
     // Post-launch resume verify+retry (am start exits on ACCEPT, not RESUMED-on-display).
     private static final int LAUNCH_VERIFY_ATTEMPTS = 3;
     private static final int LAUNCH_VERIFY_POLLS_PER_ATTEMPT = 6;
@@ -404,7 +408,7 @@ public final class ClusterCast {
 
     public static ResizeResult resizeWithResult(int l, int t, int r, int b, boolean commit,
                                                 String forPkg, long expectedGeneration) {
-        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) {
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()) {
             return ResizeResult.of(DiLink5ClusterCast.resize(
                     l, t, r, b, commit, forPkg, expectedGeneration));
         }
@@ -490,43 +494,145 @@ public final class ClusterCast {
                     bounds = new android.graphics.Rect(freeformBounds);
                 }
             }
-            if (displayId < 0) return ResizeResult.retry("cluster display not resolved yet");
-            int[] panel = clusterPanelSizeCached();
-            try {
-                String dockBlocked = "";
-                if (commit && ClusterFreeformWindow.dockingSupported()) {
-                    ClusterFreeformWindow.Placement p = ClusterFreeformWindow.applyDocked(
-                            pkg, bounds, displayId, panel[0], panel[1]);
-                    if (p.status == ClusterFreeformWindow.Placement.APPLIED
-                            || p.status == ClusterFreeformWindow.Placement.RETRY) {
-                        return new ResizeResult(
-                                p.status == ClusterFreeformWindow.Placement.APPLIED, false,
-                                p.status == ClusterFreeformWindow.Placement.RETRY, false,
-                                p.docked() ? "docked" : "fullscreen", p.actual, p.reason);
-                    }
-                    // Docking needs the cluster to itself and an AMS that accepts it. Where it
-                    // cannot run, the freeform ladder still only touches our own task.
-                    if (p.status == ClusterFreeformWindow.Placement.BLOCKED) dockBlocked = p.reason;
-                    logger.info("cluster cast: docking did not place " + pkg + " ("
-                            + p.reason + ") — using freeform");
-                }
-                boolean fullPanel = panel[0] > 1 && panel[1] > 1 && bounds.left <= 0
-                        && bounds.top <= 0 && bounds.right >= panel[0] && bounds.bottom >= panel[1];
-                if (fullPanel) {
-                    ClusterFreeformWindow.restoreFullscreen(pkg, displayId);
-                    return new ResizeResult(true, false, false, false, "fullscreen",
-                            new android.graphics.Rect(0, 0, panel[0], panel[1]), "");
-                }
-                boolean ok = ClusterFreeformWindow.applyBounds(pkg, bounds, commit, displayId);
-                return new ResizeResult(ok, false, false, !ok && !dockBlocked.isEmpty(), "freeform",
-                        ok ? new android.graphics.Rect(bounds) : null,
-                        ok ? "" : (dockBlocked.isEmpty()
-                                ? "the cluster did not accept freeform bounds" : dockBlocked));
-            } catch (Throwable e) {
-                logger.warn("cluster cast: resize failed: " + e.getMessage());
-                return new ResizeResult(false, false, false, false, "", null,
-                        String.valueOf(e.getMessage()));
+            if (displayId <= 0) return ResizeResult.retry("cluster display not resolved yet");
+            if (commit && WAZE_PACKAGE.equals(pkg)) {
+                return placeWaze(bounds, displayId, generation);
             }
+            if (bounds == null) return ResizeResult.of(false);
+            int[] panel = clusterPanelSizeCached();
+            return applyLegacyBounds(pkg, bounds, commit, displayId, panel[0], panel[1]);
+        }
+    }
+
+    /** A resumed task can retain a head-unit or previous split-window rectangle on the cluster.
+     * Read the live display and task together. With no user box a healthy task needs no resize. */
+    private static ResizeResult placeWaze(Rect requested, int displayId, long generation) {
+        ClusterDisplaySnapshot display = ClusterDisplayReader.read(displayId);
+        if (display == null || !display.usableFission()) {
+            if (display != null) {
+                String name = display.name.toLowerCase(Locale.ROOT);
+                if (!name.contains("fission") || name.contains("shared_fission")
+                        || (!display.state.isEmpty() && !"ON".equals(display.state))) {
+                    return ResizeResult.retry("live target is no longer an active fission display");
+                }
+            }
+            if (requested == null) return ResizeResult.retry("live fission display bounds unavailable");
+            // Older firmware can expose a usable window without publishing a full logical-display
+            // descriptor. Keep its explicit sizing support; only automate repairs with firm data.
+            if (display == null || display.width <= 1 || display.height <= 1) {
+                int[] size = clusterPanelSizeCached();
+                if (!currentWazePlacement(displayId, generation)) return ResizeResult.of(false);
+                ResizeResult dispatch = applyLegacyBounds(WAZE_PACKAGE, requested, true, displayId,
+                        size[0], size[1]);
+                return withoutMeasuredBounds(dispatch);
+            }
+        }
+        Rect panel = new Rect(0, 0, display.width, display.height);
+        Rect before = ClusterFreeformWindow.liveTaskBounds(WAZE_PACKAGE, displayId);
+        if (before == null && requested == null) return ResizeResult.retry("live Waze task bounds unavailable");
+        if (requested == null && panel.contains(before)) {
+            return new ResizeResult(true, false, false, false, "", before, "");
+        }
+        // Full is the default when no explicit box was saved. Do not save this automatic repair.
+        Rect target = requested == null ? panel
+                : ClusterFreeformWindow.fitMinimumSize(requested, 0, 0, display.width, display.height);
+        boolean retried = false;
+        while (true) {
+            if (!currentWazePlacement(displayId, generation)) return ResizeResult.of(false);
+            ResizeResult placed = applyLegacyBounds(WAZE_PACKAGE, target, true, displayId,
+                    display.width, display.height);
+            Rect actual = ClusterFreeformWindow.liveTaskBounds(WAZE_PACKAGE, displayId);
+            // The docked result also carries a real AMS readback. Freeform/fullscreen fallbacks
+            // may echo their input, so never publish those bounds as an observation.
+            if (actual == null && before == null && "docked".equals(placed.mode)
+                    && placed.bounds != null && !placed.bounds.isEmpty()) actual = placed.bounds;
+            if (actual == null) {
+                return before == null ? withoutMeasuredBounds(placed)
+                        : ResizeResult.retry("Waze task moved or bounds unavailable");
+            }
+            boolean exact = ClusterFreeformWindow.sameRect(actual, target);
+            boolean dockGrowth = !exact && "docked".equals(placed.mode) && placed.applied
+                    && ClusterFreeformWindow.dockGrewFromRequest(
+                            WAZE_PACKAGE, displayId, target, actual, panel);
+            if (panel.contains(actual)) {
+                if (placed.applied && !exact && !dockGrowth &&
+                        !ClusterFreeformWindow.sameRect(actual, ClusterFreeformWindow.fitTaskMinimum(
+                                WAZE_PACKAGE, displayId, target, panel))) {
+                    return new ResizeResult(false, false, false, false, placed.mode, actual,
+                            "Waze kept a different window size");
+                }
+                return new ResizeResult(placed.applied, false, placed.retryable, placed.blocked,
+                        placed.mode, actual, placed.reason);
+            }
+            logger.warn("cluster cast: Waze task " + actual.toShortString() + " exceeds display "
+                    + displayId + " " + panel.toShortString() + ", target " + target.toShortString());
+            // Retry an explicit placement only at its verified dock size or the task's advertised
+            // minimum. Unrelated stale bounds must not become the user's saved window.
+            Rect fitted = null;
+            if (requested != null && !retried) {
+                fitted = dockGrowth
+                        ? ClusterFreeformWindow.fitMinimumSize(actual, 0, 0, display.width, display.height)
+                        : ClusterFreeformWindow.fitTaskMinimum(WAZE_PACKAGE, displayId, target, panel);
+            }
+            if (fitted != null && !target.equals(fitted)) {
+                retried = true;
+                target = fitted;
+                continue;
+            }
+            return new ResizeResult(false, false, false, placed.blocked, placed.mode, actual,
+                    "Waze task extends outside the cluster display");
+        }
+    }
+
+    /** A legacy firmware accepted the command without sufficient evidence of the final rect.
+     * Leaving bounds absent preserves the user's requested box in both preference stores. */
+    private static ResizeResult withoutMeasuredBounds(ResizeResult dispatch) {
+        return new ResizeResult(dispatch.applied, dispatch.deferred, dispatch.retryable,
+                dispatch.blocked, dispatch.mode, null, dispatch.reason);
+    }
+
+    private static synchronized boolean currentWazePlacement(int displayId, long generation) {
+        return WAZE_PACKAGE.equals(castPkg) && !castStopInProgress && castDisplayId == displayId
+                && castSessionGeneration == generation;
+    }
+
+    /** Called under PLACEMENT_LOCK after revalidating this session and its live display. */
+    private static ResizeResult applyLegacyBounds(String pkg, Rect bounds, boolean commit,
+                                                  int displayId, int panelW, int panelH) {
+        try {
+            String dockBlocked = "";
+            if (commit && ClusterFreeformWindow.dockingSupported()) {
+                ClusterFreeformWindow.Placement p = ClusterFreeformWindow.applyDocked(
+                        pkg, bounds, displayId, panelW, panelH);
+                if (p.status == ClusterFreeformWindow.Placement.APPLIED
+                        || p.status == ClusterFreeformWindow.Placement.RETRY) {
+                    return new ResizeResult(
+                            p.status == ClusterFreeformWindow.Placement.APPLIED, false,
+                            p.status == ClusterFreeformWindow.Placement.RETRY, false,
+                            p.docked() ? "docked" : "fullscreen", p.actual, p.reason);
+                }
+                // Docking needs the cluster to itself and an AMS that accepts it. Where it
+                // cannot run, the freeform ladder still only touches our own task.
+                if (p.status == ClusterFreeformWindow.Placement.BLOCKED) dockBlocked = p.reason;
+                logger.info("cluster cast: docking did not place " + pkg + " ("
+                        + p.reason + ") — using freeform");
+            }
+            boolean fullPanel = panelW > 1 && panelH > 1 && bounds.left <= 0
+                    && bounds.top <= 0 && bounds.right >= panelW && bounds.bottom >= panelH;
+            if (fullPanel) {
+                ClusterFreeformWindow.restoreFullscreen(pkg, displayId);
+                return new ResizeResult(true, false, false, false, "fullscreen",
+                        new android.graphics.Rect(0, 0, panelW, panelH), "");
+            }
+            boolean ok = ClusterFreeformWindow.applyBounds(pkg, bounds, commit, displayId);
+            return new ResizeResult(ok, false, false, !ok && !dockBlocked.isEmpty(), "freeform",
+                    ok ? new android.graphics.Rect(bounds) : null,
+                    ok ? "" : (dockBlocked.isEmpty()
+                            ? "the cluster did not accept freeform bounds" : dockBlocked));
+        } catch (Throwable e) {
+            logger.warn("cluster cast: resize failed: " + e.getMessage());
+            return new ResizeResult(false, false, false, false, "", null,
+                    String.valueOf(e.getMessage()));
         }
     }
 
@@ -579,7 +685,7 @@ public final class ClusterCast {
      * work) so a fullscreen launch there is not squeezed into split-screen-secondary.
      */
     public static void clearStaleClusterDock(int displayId) {
-        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) return;
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()) return;
         synchronized (PLACEMENT_LOCK) {
             try {
                 ClusterFreeformWindow.clearDisplayDock(displayId);
@@ -688,7 +794,11 @@ public final class ClusterCast {
      * already on display 0.
     */
     public static void reparentStrandedCastAtBoot() {
-        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) {
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.isAaosHdmi()) {
+            DiLink5ClusterCast.recoverAtBoot(false);
+            return;
+        }
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()) {
             // DI5 recovery owns the cross-mode fence. Once its compositor
             // ownership is proven clear it must also consume any stranded
             // legacy task/gauge marker before leaving RECOVERING.
@@ -799,20 +909,20 @@ public final class ClusterCast {
     /** The package currently (being) cast onto the cluster, or null if none. Read by the
      *  package-removed watcher to tear down a live cast whose app was just uninstalled. */
     public static synchronized String getCastPackage() {
-        return com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()
+        return com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()
                 ? DiLink5ClusterCast.getCastPackage() : castPkg;
     }
 
     /** Current cast identity for race-safe dependent cleanup, or 0 when no cast is active. */
     public static synchronized long currentSessionGeneration() {
-        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) {
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()) {
             return DiLink5ClusterCast.currentSessionGeneration();
         }
         return castPkg != null ? castSessionGeneration : 0L;
     }
 
     public static synchronized boolean isActive() {
-        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) {
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()) {
             return DiLink5ClusterCast.isActive();
         }
         String pkg = castPkg;
@@ -833,6 +943,8 @@ public final class ClusterCast {
                 ClusterAppDensity.deferRestoration("legacy:" + castSessionGeneration);
                 resolveOutcome(castSessionGeneration, false, "the cluster projection was closed");
                 castPkg = null;
+
+                com.overdrive.app.customlayouts.daemon.projection.ClusterBeat.release(com.overdrive.app.customlayouts.daemon.projection.ClusterBeat.CAST);
                 launchThread = null;
                 try { ClusterFreeformWindow.invalidateTaskCache(); } catch (Throwable ignored) {}
                 scheduleDockResidueCleanup(castDisplayId);
@@ -852,7 +964,13 @@ public final class ClusterCast {
      * package or an unresolvable component (so the caller can report failure), NOT on
      * the async resume race.
      */
-    public static synchronized boolean start(String pkg) {
+    public static boolean start(String pkg) {
+        return start(pkg, true);
+    }
+
+    private static synchronized boolean start(String pkg, boolean explicitSelection) {
+        if (!explicitSelection &&
+                com.overdrive.app.customlayouts.daemon.CustomLayoutsController.claimsAutomaticProjection()) return false;
         com.overdrive.app.launcher.layout.LayoutModeGate.StandardStart admission =
                 com.overdrive.app.launcher.layout.LayoutModeGate.enterStandard();
         if (admission == null) {
@@ -860,15 +978,15 @@ public final class ClusterCast {
             return refuse("stop the cluster layout first");
         }
         try {
-            return startAdmitted(pkg);
+            return startAdmitted(pkg, explicitSelection);
         } finally {
             admission.close();
         }
     }
 
-    private static boolean startAdmitted(String pkg) {
-        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) {
-            return DiLink5ClusterCast.start(pkg);
+    private static boolean startAdmitted(String pkg, boolean explicitSelection) {
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()) {
+            return DiLink5ClusterCast.start(pkg, explicitSelection);
         }
         ACCEPTED_GENERATION.remove();
         castIntentEpoch++;
@@ -926,10 +1044,13 @@ public final class ClusterCast {
         logger.info("cluster cast: start " + pkg + " (" + component + ")");
         // Acquire our hold FIRST so the projection is pinned before we touch the map.
         try {
-            if (!ClusterProjectionController.getInstance()
-                    .acquireSustained(TOKEN)) {
+            ClusterProjectionController controller = ClusterProjectionController.getInstance();
+            boolean acquired = explicitSelection ? controller.acquireSustained(TOKEN) : controller.acquireAutomaticCastHold();
+            if (!acquired) {
                 logger.warn("cluster cast: sustained projection was not admitted");
                 castPkg = null;
+
+                com.overdrive.app.customlayouts.daemon.projection.ClusterBeat.release(com.overdrive.app.customlayouts.daemon.projection.ClusterBeat.CAST);
                 return refuse("the cluster projection is busy; try again in a moment");
             }
         } catch (Throwable t) {
@@ -942,6 +1063,8 @@ public final class ClusterCast {
             try { ClusterProjectionController.getInstance().releaseSustained(TOKEN); }
             catch (Throwable ignored) {}
             castPkg = null;
+
+            com.overdrive.app.customlayouts.daemon.projection.ClusterBeat.release(com.overdrive.app.customlayouts.daemon.projection.ClusterBeat.CAST);
             return refuse("the cluster projection could not be opened");
         }
         final long generation = castSessionGeneration;
@@ -990,7 +1113,7 @@ public final class ClusterCast {
      * fire-and-forget callers. Legacy platforms keep their established behavior.
      */
     public static boolean startAndAwait(String pkg, long timeoutMs) {
-        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) {
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()) {
             return DiLink5ClusterCast.startAndAwait(pkg, timeoutMs);
         }
         return start(pkg);
@@ -1001,7 +1124,7 @@ public final class ClusterCast {
      * that is still running, so Start right after Stop queues behind it instead of failing.
      */
     public static boolean startAfterSettle(String pkg, long timeoutMs) {
-        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) {
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()) {
             return start(pkg);
         }
         final long startedAt = android.os.SystemClock.elapsedRealtime();
@@ -1046,7 +1169,7 @@ public final class ClusterCast {
     }
 
     /** True while a legacy stop is still re-homing the app and holding the projection. */
-    static boolean isStopping() {
+    public static boolean isStopping() {
         synchronized (ClusterCast.class) {
             return castStopInProgress;
         }
@@ -1057,7 +1180,7 @@ public final class ClusterCast {
      * the app is on the cluster (true) or the cast failed or is still pending (false).
      */
     public static boolean startAfterSettleAndAwait(String pkg, long settleMs, long awaitMs) {
-        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) {
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()) {
             return DiLink5ClusterCast.startAndAwait(pkg, settleMs + awaitMs);
         }
         lastLegacyFailure = "";
@@ -1080,9 +1203,17 @@ public final class ClusterCast {
 
     /** Non-blocking start; a stop or gauge restore still running is waited out on its own thread. */
     public static boolean startWhenSettled(String pkg) {
-        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()
+        return startWhenSettled(pkg, true);
+    }
+
+    public static boolean startAutomaticallyWhenSettled(String pkg) {
+        return startWhenSettled(pkg, false);
+    }
+
+    private static boolean startWhenSettled(String pkg, boolean explicitSelection) {
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()
                 || !legacyStartSettling()) {
-            return start(pkg);
+            return start(pkg, explicitSelection);
         }
         final long intent = castIntentEpoch;
         try {
@@ -1102,14 +1233,14 @@ public final class ClusterCast {
                     logger.info("cluster cast: queued start of " + pkg + " dropped (superseded)");
                     return;
                 }
-                start(pkg);
+                start(pkg, explicitSelection);
             }, "ClusterCastQueued");
             queued.setDaemon(true);
             queued.start();
             logger.info("cluster cast: " + pkg + " queued behind the running stop/restore");
             return true;
         } catch (Throwable t) {
-            return start(pkg);
+            return start(pkg, explicitSelection);
         }
     }
 
@@ -1121,12 +1252,12 @@ public final class ClusterCast {
     }
 
     public static String getStartPhase() {
-        return com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()
+        return com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()
                 ? DiLink5ClusterCast.getPhase() : (isActive() ? "active" : "idle");
     }
 
     public static String getLastStartFailure() {
-        return com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()
+        return com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()
                 ? DiLink5ClusterCast.getLastFailureReason() : lastLegacyFailure;
     }
 
@@ -1166,6 +1297,17 @@ public final class ClusterCast {
                 || stop(CLEAR_AFFINITY, expectedGeneration);
     }
 
+    /** Bind takeover to the outgoing cast. Re-homing runs outside the start monitor. */
+    public static boolean stopForCustomLayouts(java.util.function.BooleanSupplier stillAcquiring) {
+        final long outgoing;
+        synchronized (ClusterCast.class) {
+            outgoing = currentSessionGeneration();
+            if (!stillAcquiring.getAsBoolean()) return true;
+            castIntentEpoch++; // also invalidate a legacy start still queued behind a restore
+        }
+        return stopIfSession(outgoing);
+    }
+
     /** @param rehomeToHeadUnit true → the explicit "move app back to head unit" foreground
      *   reparent; false → the ACC-off-safe no-rehome path. Retained for the existing
      *   {@code move_display} caller; new call sites should use {@link #stop()} (background
@@ -1175,7 +1317,7 @@ public final class ClusterCast {
     }
 
     private static boolean stop(int rehomeMode, long expectedGeneration) {
-        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) {
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()) {
             if (expectedGeneration > 0L) {
                 return DiLink5ClusterCast.stopIfSession(expectedGeneration);
             } else if (rehomeMode == NO_REHOME) {
@@ -1201,6 +1343,8 @@ public final class ClusterCast {
             logger.info("cluster cast: stop " + pkg + " (rehomeMode=" + rehomeMode + ")");
             castIntentEpoch++;
             castPkg = null;
+
+            com.overdrive.app.customlayouts.daemon.projection.ClusterBeat.release(com.overdrive.app.customlayouts.daemon.projection.ClusterBeat.CAST);
             launchThread = null;   // supersede any in-flight verify loop
             freeformBounds = null; // forget the box; next cast starts full-panel unless re-set
             stoppingGeneration = castSessionGeneration;
@@ -1208,6 +1352,7 @@ public final class ClusterCast {
             castStopInProgress = true;
             resolveOutcome(stoppingGeneration, false, "the cast was stopped");
         }
+        com.overdrive.app.customlayouts.daemon.projection.ClusterBeat.release(com.overdrive.app.customlayouts.daemon.projection.ClusterBeat.CAST);
         // Freeform hygiene (feature-gated): if we converted the app to freeform, restore it to
         // FULLSCREEN + clear its freeform bounds BEFORE the reparent, while the task is still on
         // the live cluster display. This leaves the display in a pristine state so the nav-map /
@@ -1291,8 +1436,7 @@ public final class ClusterCast {
                     org.json.JSONObject cfg = com.overdrive.app.config.UnifiedConfigManager.forceReload();
                     org.json.JSONObject nav = cfg != null ? cfg.optJSONObject("navMap") : null;
                     if (nav != null && nav.optBoolean("autoProjectCluster", false)) {
-                        logger.info("cluster cast: restoring auto-project map after cast stop");
-                        com.overdrive.app.navmap.ClusterMapProjector.start();
+                        com.overdrive.app.navmap.ClusterMapProjector.restoreAfterLegacyCastStop();
                     }
                 } catch (Throwable t) {
                     logger.warn("cluster cast: map restore after stop failed: " + t.getMessage());
@@ -1332,6 +1476,11 @@ public final class ClusterCast {
      * gauges (the fission VirtualDisplay outlives the OEM 18→0 close). When we detect the
      * token is gone, reconcile our own flags so isActive() and a later start() are correct.
      */
+    /** The full-cluster beat: the cast app is on the fission display (session watch polls every 5 s). */
+    private static void holdBeat(Thread self) {
+        if (stillOurs(self)) com.overdrive.app.customlayouts.daemon.projection.ClusterBeat.hold(com.overdrive.app.customlayouts.daemon.projection.ClusterBeat.CAST, BEAT_HOLD_MS);
+    }
+
     private static boolean stillOurs(Thread self) {
         if (castPkg == null || launchThread != self) return false;
         boolean held;
@@ -1351,6 +1500,8 @@ public final class ClusterCast {
                     ClusterAppDensity.deferRestoration("legacy:" + castSessionGeneration);
                     resolveOutcome(castSessionGeneration, false, "the cluster projection was closed");
                     castPkg = null;
+
+                    com.overdrive.app.customlayouts.daemon.projection.ClusterBeat.release(com.overdrive.app.customlayouts.daemon.projection.ClusterBeat.CAST);
                     launchThread = null;
                     // Same reasoning as isActive(): cache-only cleanup, no AMS work in a teardown
                     // window. Prevents a recycled task id from being resized by a later cast.
@@ -1480,7 +1631,7 @@ public final class ClusterCast {
                         return;
                     }
                     logger.info("cluster cast: cluster display appeared late — retrying " + pkg);
-                    startWhenSettled(pkg);
+                    startAutomaticallyWhenSettled(pkg);
                     return;
                 }
             }, "ClusterCastLateDisplay");
@@ -1524,9 +1675,9 @@ public final class ClusterCast {
             return;
         }
         if (resumed) {
+            if (!ownApp) holdBeat(self);
             resolveOutcome(generation, true, "");
-            // Freeform conversion runs once the app is RESUMED fullscreen (never bare
-            // `am start --windowingMode 5`). No-op when the flag is off or no box was set.
+            // Place a saved box after resume and check Waze for stale, off-panel task bounds.
             maybeApplyFreeform(component, self);
         } else {
             logger.warn("cluster cast: failed to confirm resume on displayId " + displayId
@@ -1570,12 +1721,14 @@ public final class ClusterCast {
             if (where.displayId == displayId) {
                 consecutiveMoves = 0;
                 lastOnCluster = true;
+                holdBeat(self);
                 if (!confirmed && polls % 4 == 0) {
                     // Another activity resumed on top means nothing of ours is visible.
                     String top = resumedPackageOnDisplay(displayId);
                     if (top == null || pkg.equals(top)) {
                         confirmed = true;
                         resolveOutcome(generation, true, "");
+                        if (WAZE_PACKAGE.equals(pkg)) maybeApplyFreeform(component, self);
                     } else if (frontRequests < 3) {
                         frontRequests++;
                         ClusterFreeformWindow.focusTask(where.taskId, displayId);
@@ -1629,6 +1782,7 @@ public final class ClusterCast {
             if (onCluster == null) continue;
             if (onCluster) {
                 misses = 0;
+                holdBeat(self);
             } else if (++misses >= SESSION_WATCH_MISSES) {
                 endCast(generation, pkg + " left the cluster");
                 return;
@@ -1643,9 +1797,8 @@ public final class ClusterCast {
         stopIfSession(generation);
     }
 
-    /** After the app resumes fullscreen on the cluster, convert it to freeform at the
-     *  remembered box bounds (feature-gated). No bounds set → leave it fullscreen (full-panel
-     *  default). {@code component} is "pkg/activity"; we resize by package. Guarded.
+    /** After the app resumes on the cluster, place its remembered box (feature-gated). With
+     *  no box saved, Waze gets a readback for stale geometry. Other apps keep their launch size.
      *
      *  <p>This is the app's FIRST placement, so it runs as a COMMIT (full escalation ladder +
      *  verification): the task has just resumed fullscreen and its parent stack is still in
@@ -1683,7 +1836,7 @@ public final class ClusterCast {
                 bounds = saved;
             }
         }
-        if (bounds == null || bounds.width() <= 0 || bounds.height() <= 0) return;
+        if (bounds == null ? !WAZE_PACKAGE.equals(pkg) : bounds.isEmpty()) return;
         final long generation;
         synchronized (ClusterCast.class) {
             if (!pkg.equals(castPkg) || castStopInProgress) return;
@@ -1696,12 +1849,12 @@ public final class ClusterCast {
             if (result.applied) {
                 logger.info("cluster cast: placed " + pkg + " " + result.mode + " at "
                         + (result.bounds != null ? result.bounds.toShortString()
-                                : bounds.toShortString()) + " (attempt " + attempt + ")");
+                                : String.valueOf(bounds)) + " (attempt " + attempt + ")");
                 return;
             }
             if (!(result.retryable || result.blocked) || attempt == INITIAL_PLACEMENT_ATTEMPTS) {
                 logger.warn("cluster cast: initial placement of " + pkg + " at "
-                        + bounds.toShortString() + " not applied: " + result.reason);
+                        + String.valueOf(bounds) + " not applied: " + result.reason);
                 return;
             }
             if (!sleepWhileActive(INITIAL_PLACEMENT_RETRY_MS, self)) return;

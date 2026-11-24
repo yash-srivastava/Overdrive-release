@@ -471,11 +471,11 @@ public final class ClusterProjectionController {
 
     /** Cheap volatile reads for the show-gate in the pipeline. */
     public boolean isOpen()  {
-        return !com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()
+        return !com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()
                 && projState == ST_OPEN;
     }
     public boolean isReady() {
-        return !com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()
+        return !com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()
                 && ready && projState == ST_OPEN;
     }
 
@@ -497,7 +497,7 @@ public final class ClusterProjectionController {
      *  Cheap: one post; the dumpsys runs at most once per posted re-drive on projThread.
      *  No-op if the projection isn't open/ready. */
     public void requestShowRedrive() {
-        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) return;
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()) return;
         if (shuttingDown) return;
         if (projState != ST_OPEN) return;   // not open → nothing to re-drive
         projHandler.post(() -> {
@@ -531,7 +531,7 @@ public final class ClusterProjectionController {
     /** Legacy open progress without constructing the controller: 1 ready, 0 opening, -1 not open. */
     public static int legacyOpenProgress() {
         ClusterProjectionController i = instance;
-        if (i == null || com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) return -1;
+        if (i == null || com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()) return -1;
         int state = i.projState;
         if (state == ST_OPEN) return i.ready ? 1 : 0;
         return state == ST_OPENING ? 0 : -1;
@@ -577,7 +577,7 @@ public final class ClusterProjectionController {
      * read + at most one post. Also refreshes the linger timer.
      */
     public boolean requestOpen() {
-        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) {
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()) {
             return false;
         }
         if (isLegacyProjectionAdmissionBlocked()) {
@@ -640,12 +640,25 @@ public final class ClusterProjectionController {
      * is held. Re-acquiring the same token is idempotent. See {@link #releaseSustained(String)}.
      */
     public boolean acquireSustained(String token) {
+        return acquireSustained(token, true);
+    }
+
+    /** Restoring an earlier map never cancels a newer selection of Custom Layouts. */
+    public boolean acquireAutomaticMapHold() {
+        return acquireSustained("map", false);
+    }
+
+    public boolean acquireAutomaticCastHold() {
+        return acquireSustained("castapp", false);
+    }
+
+    private boolean acquireSustained(String token, boolean notifySelection) {
         if (!com.overdrive.app.launcher.layout.LayoutModeGate.allowsSustainedToken(
                 token, com.overdrive.app.launcher.ClusterLayouts.isActive())) {
             logger.warn("cluster projection: Layouts owns admission");
             return false;
         }
-        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) {
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()) {
             logger.warn("legacy cluster projection is unavailable on the DI5 "
                     + "cluster transport");
             return false;
@@ -694,7 +707,18 @@ public final class ClusterProjectionController {
                 watchdogHandler.removeCallbacks(lingerTask);
             }
         });
+        if (notifySelection) notifyCustomLayoutsOfOwner(holderToken);
         return true;
+    }
+
+    /** A map or app cast now holds the projection; Custom Layouts steps aside without a close. */
+    private static void notifyCustomLayoutsOfOwner(String token) {
+        if (!"map".equals(token) && !"castapp".equals(token)) return;
+        try {
+            com.overdrive.app.customlayouts.daemon.CustomLayoutsController.onOtherOwnerStarted(token);
+        } catch (Throwable t) {
+            logger.warn("Custom Layouts hand-off failed: " + t.getMessage());
+        }
     }
 
     /** Back-compat: release the nav map's sustained hold (token "map"). */
@@ -719,7 +743,7 @@ public final class ClusterProjectionController {
 
     private void releaseSustained(String token, boolean turnSignalOnly) {
         sustainedHolders.remove(token != null ? token : "default");
-        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) {
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()) {
             // DI5 direct projection has its own owner/lifecycle. A release from a
             // legacy blind-spot/camera cleanup must never turn into a stray 18→0
             // against the active shared-display session.
@@ -766,7 +790,7 @@ public final class ClusterProjectionController {
 
     /** True while ANY consumer holds the projection sustained (gates BS coexistence). */
     public boolean isSustainedHeld() {
-        return !com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()
+        return !com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()
                 && sustainedHeld();
     }
 
@@ -779,7 +803,7 @@ public final class ClusterProjectionController {
      *  retarget / ACC-off) is never repainted over the restored gauges. */
     public static boolean isSustainedHeldStatic() {
         ClusterProjectionController i = instance;
-        return !com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()
+        return !com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()
                 && i != null && i.sustainedHeld();
     }
 
@@ -791,7 +815,7 @@ public final class ClusterProjectionController {
      *  ALL holders — so a torn-down cast reports inactive without a keep-alive loop. */
     public static boolean holdsTokenStatic(String token) {
         ClusterProjectionController i = instance;
-        return !com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()
+        return !com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()
                 && i != null && token != null && i.sustainedHolders.contains(token);
     }
 
@@ -834,7 +858,7 @@ public final class ClusterProjectionController {
      * Public so disable / disarm / target-flip / errors can all force the gauges back.
      */
     public void forceClose(String reason) {
-        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()
                 && projState == ST_CLOSED) {
             // The legacy controller owns no physical projection. Retire only its
             // bookkeeping; do not detach the DI5 mirror and do not emit 18→0.
@@ -863,6 +887,11 @@ public final class ClusterProjectionController {
                 .onLegacyProjectionForceClosed(); }
         catch (Throwable t) {
             logger.warn("map pre-close invalidation failed: " + t.getMessage());
+        }
+        try { com.overdrive.app.customlayouts.daemon.CustomLayoutsController
+                .onLegacyProjectionForceClosed(reason); }
+        catch (Throwable t) {
+            logger.warn("Custom Layouts pre-close invalidation failed: " + t.getMessage());
         }
 
         // The app-view mirror owns a second SF display that reads the fission layer stack.
@@ -1373,6 +1402,9 @@ public final class ClusterProjectionController {
     private static LegacyBootRecoveryResult
             clearStaleGateAtBootResultSynchronously(
             boolean allowDiLink5RecoveryFence) {
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.isAaosHdmi()) {
+            return LegacyBootRecoveryResult.UNSUPPORTED;
+        }
         BootRestoreTicket ticket;
         boolean ownsRestore = false;
         synchronized (BOOT_RESTORE_LOCK) {
@@ -1745,7 +1777,7 @@ public final class ClusterProjectionController {
     public void shutdown() {
         watchdogHandler.removeCallbacks(maxCapTask);
         watchdogHandler.removeCallbacks(lingerTask);
-        if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService()
                 && projState == ST_CLOSED) {
             synchronized (this) {
                 shuttingDown = true;
@@ -2124,6 +2156,21 @@ public final class ClusterProjectionController {
         } catch (Throwable failure) {
             logger.warn("legacy restore profile read failed: "
                     + failure.getMessage());
+            return seedDefault;
+        }
+    }
+
+    /** The user's cluster size (29 = 8.8", 30 = 12.3", 31 = 10.25"), as the open sequence resolves it. */
+    public static int configuredSizeProfile() {
+        int seedDefault = fingerprintSizeProfile();
+        try {
+            org.json.JSONObject root = UnifiedConfigManager.loadConfig();
+            org.json.JSONObject surveillance = root.optJSONObject("surveillance");
+            org.json.JSONObject blindspot = root.optJSONObject("blindspot");
+            int size = surveillance != null ? surveillance.optInt("clusterSizeProfile", seedDefault) : seedDefault;
+            if (blindspot != null) size = blindspot.optInt("clusterSizeProfile", size);
+            return isKnownLegacySizeProfile(size) ? size : seedDefault;
+        } catch (Throwable failure) {
             return seedDefault;
         }
     }
@@ -2530,6 +2577,7 @@ public final class ClusterProjectionController {
 
     private static DiLink5CommandResult sendDiLink5ContainerInfoResult(
             int op, boolean allowInactiveCleanup) {
+        if (com.overdrive.app.camera.dilink5.ClusterTransport.isAaosHdmi()) return DiLink5CommandResult.UNAVAILABLE;
         boolean cleanupOpcode = isAllowedDiLink5CleanupOpcode(op);
         // The DI5 container protocol is admitted whenever the DI5 cluster
         // transport is selected (dilink5 camera mode, config override, or

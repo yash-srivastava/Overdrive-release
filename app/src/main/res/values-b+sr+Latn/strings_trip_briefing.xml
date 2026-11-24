@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="trip_briefing_greeting_morning">Dobro jutro.</string>
+    <string name="trip_briefing_greeting_afternoon">Dobar dan.</string>
+    <string name="trip_briefing_greeting_evening">Dobro veče.</string>
+    <string name="trip_briefing_heading_home">Idete kući?</string>
+    <string name="trip_briefing_heading_work">Idete na posao?</string>
+    <string name="trip_briefing_heading_place">Idete do %1$s?</string>
+    <string name="trip_briefing_extra_range">Domet je na granici: preostalo je %1$s za vožnju od %2$s.</string>
+    <string name="trip_briefing_extra_rain">Kiša je verovatna oko %1$s.</string>
+    <string name="trip_briefing_question">Želite uputstva za put?</string>
+    <string name="trip_briefing_distance_km">%1$d km</string>
+    <string name="trip_briefing_distance_mi">%1$d mi</string>
+    <string name="trip_briefing_said_home">kuća</string>
+    <string name="trip_briefing_said_work">posao</string>
+    <string name="trip_briefing_title_home">Kuća</string>
+    <string name="trip_briefing_title_work">Posao</string>
+    <string name="trip_briefing_title_unnamed">Vaše uobičajeno stajalište</string>
+    <string name="trip_briefing_name_place">Dajte naziv ovom mestu</string>
+    <string name="trip_briefing_no">Ne</string>
+    <string name="trip_briefing_go_failed">Navigacija nije pokrenuta. Otvorite mapu da pokrenete navigaciju.</string>
+    <string name="trip_briefing_app_car">Navigacija vozila</string>
+    <plurals name="trip_briefing_duration">
+        <item quantity="one">Približno %1$d minut.</item>
+        <item quantity="few">Približno %1$d minuta.</item>
+        <item quantity="other">Približno %1$d minuta.</item>
+    </plurals>
+    <plurals name="trip_briefing_extra_hazards">
+        <item quantity="one">%1$d nova opasnost na putu.</item>
+        <item quantity="few">%1$d nove opasnosti na putu.</item>
+        <item quantity="other">%1$d novih opasnosti na putu.</item>
+    </plurals>
+</resources>

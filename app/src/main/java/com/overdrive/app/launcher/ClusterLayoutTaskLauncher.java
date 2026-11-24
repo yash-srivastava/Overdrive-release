@@ -223,27 +223,71 @@ final class ClusterLayoutTaskLauncher implements ClusterLayoutTaskLaunch.Operati
     }
 
     @Override public String resize(int taskId) {
+        Object atm;
+        Rect bounds = new Rect(0, 0, resource.width, resource.height);
         try {
-            Object atm = service();
+            atm = service();
             if (!ownedTask(atm, taskId) || !current()) return "task_identity_unverified";
             // A refused move must not resize a task still on the head unit.
             if (displayForTask(atm, taskId) != resource.virtualDisplayId || !current())
                 return "target_display_unverified";
-            Rect bounds = new Rect(0, 0, resource.width, resource.height);
+        } catch (Throwable error) { return failure(error); }
+
+        String result = requestResize(atm, taskId, bounds);
+        Rect actual = ClusterFreeformWindow.getTaskBounds(atm, taskId);
+        if (actual == null || !overflowsSlot(actual.left, actual.top, actual.right, actual.bottom,
+                resource.width, resource.height)) return result;
+
+        // Android can grow even a successful freeform resize to the minimum task height.
+        // Our private display already matches the slot, so a fullscreen guest inherits its size.
+        String detail = pkg + " task=" + taskId + " slot=" + bounds.toShortString()
+                + " actual=" + actual.toShortString();
+        if (!ownsExclusiveSlotTask(atm, taskId)
+                || !ClusterFreeformWindow.setTaskWindowingModeInPlace(atm, taskId, 1))
+            throw new SlotFitException(detail);
+        Rect fitted = ClusterFreeformWindow.getTaskBounds(atm, taskId);
+        if (!bounds.equals(fitted) || !ownsExclusiveSlotTask(atm, taskId))
+            throw new SlotFitException(detail + " fullscreen=" + fitted);
+        return "OK fullscreen " + detail;
+    }
+
+    private String requestResize(Object atm, int taskId, Rect bounds) {
+        try {
             Method method;
-            Object result;
+            Object reply;
             try {
                 method = atm.getClass().getMethod("resizeTask", int.class, Rect.class, int.class);
                 if (!current()) return "cancelled";
-                result = method.invoke(atm, taskId, bounds, 1);
+                reply = method.invoke(atm, taskId, bounds, 1);
             } catch (NoSuchMethodException absent) {
                 method = atm.getClass().getMethod("resizeTask", int.class, Rect.class);
                 if (!current()) return "cancelled";
-                result = method.invoke(atm, taskId, bounds);
+                reply = method.invoke(atm, taskId, bounds);
             }
-            return Boolean.FALSE.equals(result) ? "SKIP resize refused by windowing mode"
-                    : "OK resizeTask(" + taskId + "," + resource.width + "x" + resource.height + ")";
+            return Boolean.FALSE.equals(reply) ? "SKIP resize refused by windowing mode"
+                    : "OK resizeTask(" + taskId + "," + bounds.toShortString() + ")";
         } catch (Throwable error) { return failure(error); }
+    }
+
+    private boolean ownsExclusiveSlotTask(Object atm, int taskId) {
+        try {
+            return ownedTask(atm, taskId)
+                    && exclusiveSlotRoot(stacks(atm), taskId, resource.virtualDisplayId) && current();
+        } catch (Exception error) { return false; }
+    }
+
+    static boolean exclusiveSlotRoot(List<?> roots, int taskId, int displayId) {
+        Object root = exclusiveRoot(roots, taskId);
+        return displayId > 0 && root != null && integer(field(root, "displayId")) == displayId;
+    }
+
+    static boolean overflowsSlot(int left, int top, int right, int bottom, int width, int height) {
+        return left < right && top < bottom
+                && (left < 0 || top < 0 || right > width || bottom > height);
+    }
+
+    static final class SlotFitException extends IllegalStateException {
+        SlotFitException(String detail) { super("slot_window_clipped:" + detail); }
     }
 
     @Override public String focus(int taskId) {

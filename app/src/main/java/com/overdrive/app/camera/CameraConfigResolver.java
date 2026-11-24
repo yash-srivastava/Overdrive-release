@@ -54,6 +54,9 @@ public final class CameraConfigResolver {
                 : autoProfile
                 ? CameraProfiles.infer(vehicleModelHint)
                 : CameraProfiles.get(selectedProfileId);
+        if (autoProfile && AvmSurfaceTexturePlatform.usesByd100fTileOrder()) {
+            profile = AvmSurfaceTexturePlatform.byd100fProfile(profile);
+        }
 
         int persistedPanoCameraId = dilink5 ? profile.getPanoCameraId()
                 : optNonNegative(camera, "probedCameraId", profile.getPanoCameraId());
@@ -74,6 +77,36 @@ public final class CameraConfigResolver {
         boolean manual = !dilink5 && camera.optBoolean("manualOverride", false);
         boolean validated = dilink5 || camera.optBoolean("probedAndValidated", false);
         boolean fallback = !dilink5 && camera.optBoolean("fallbackFromProbe", false);
+
+        // Describe the values selected above without changing their precedence.
+        // In particular, even unvalidated legacy saves remain effective.
+        String cameraIdSource = CameraConfigProvenance.savedOrProfile(
+                dilink5, camera.optInt("probedCameraId", -1), manual, validated);
+        String surfaceModeSource = CameraConfigProvenance.savedOrProfile(
+                dilink5, camera.optInt("probedSurfaceMode", -1), false, false);
+        String geometrySource = dilink5 ? CameraConfigProvenance.MODE_PROFILE
+                : savedGeometryUsable ? CameraConfigProvenance.SAVED_UNVERIFIED
+                : CameraConfigProvenance.PROFILE_FALLBACK;
+
+        if (AvmSurfaceTexturePlatform.shouldResolvePanoramicTag(
+                com.overdrive.app.camera.dilink5.DiLink5Platform.currentActiveMode(),
+                autoProfile, manual, validated)) {
+            try {
+                AvmSurfaceTextureBackend.bootstrapVendorBridge();
+                int halCameraId = AvmCameraHelper.discoverPanoCameraId();
+                if (halCameraId >= 0) {
+                    panoCameraId = halCameraId;
+                    panoSurfaceMode = 0;
+                    cameraIdSource = CameraConfigProvenance.HAL_BMM_TAG;
+                    surfaceModeSource = CameraConfigProvenance.MODE_PROFILE;
+                    logger.info("SurfaceTexture panoramic HAL id=" + halCameraId
+                            + " preview=0; preserving profile geometry and role mapping");
+                }
+            } catch (Exception | LinkageError failure) {
+                logger.warn("SurfaceTexture camera discovery failed: "
+                        + failure.getMessage());
+            }
+        }
 
         if (dilink4) {
             // DIPlus panoramic recording does not use a vehicle-profile pin
@@ -96,6 +129,8 @@ public final class CameraConfigResolver {
                 }
                 panoCameraId = halSelection.getCameraId();
                 panoSurfaceMode = halSelection.getPreviewIndex();
+                cameraIdSource = CameraConfigProvenance.HAL_BMM_TAG;
+                surfaceModeSource = CameraConfigProvenance.HAL_TAG_PREVIEW_INDEX;
             }
             // Effective DI4 selection is HAL-owned, not a manual/profile pin.
             manual = false;
@@ -139,6 +174,9 @@ public final class CameraConfigResolver {
                 manual,
                 validated,
                 fallback,
+                cameraIdSource,
+                surfaceModeSource,
+                geometrySource,
                 roleMappings);
     }
 
@@ -160,6 +198,9 @@ public final class CameraConfigResolver {
                 false,
                 true,
                 false,
+                CameraConfigProvenance.MODE_PROFILE,
+                CameraConfigProvenance.MODE_PROFILE,
+                CameraConfigProvenance.MODE_PROFILE,
                 profile.getDefaultRoleMappings());
     }
 
@@ -180,6 +221,9 @@ public final class CameraConfigResolver {
                 false,
                 true,
                 false,
+                CameraConfigProvenance.MODE_PROFILE,
+                CameraConfigProvenance.MODE_PROFILE,
+                CameraConfigProvenance.MODE_PROFILE,
                 profile.getDefaultRoleMappings());
     }
 
@@ -525,6 +569,9 @@ public final class CameraConfigResolver {
         putSafely(out, "resolvedCameraProfileLabel", resolved.getProfile().getDisplayName());
         putSafely(out, "panoCameraId", resolved.getPanoCameraId());
         putSafely(out, "panoSurfaceMode", resolved.getPanoSurfaceMode());
+        putSafely(out, "panoCameraIdSource", resolved.getPanoCameraIdSource());
+        putSafely(out, "panoSurfaceModeSource", resolved.getPanoSurfaceModeSource());
+        putSafely(out, "panoGeometrySource", resolved.getPanoGeometrySource());
         putSafely(out, "panoWidth", resolved.getPanoWidth());
         putSafely(out, "panoHeight", resolved.getPanoHeight());
         boolean passiveApa = isPassiveApaModeEnabled();

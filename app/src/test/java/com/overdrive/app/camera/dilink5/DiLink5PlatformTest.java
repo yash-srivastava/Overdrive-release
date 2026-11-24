@@ -44,6 +44,8 @@ public class DiLink5PlatformTest {
                 DiLink5Platform.normalizeConfiguredMode("DiLink4"));
         assertEquals("dilink5",
                 DiLink5Platform.normalizeConfiguredMode("DILINK5"));
+        assertEquals("surfacetexture",
+                DiLink5Platform.normalizeConfiguredMode(" SurfaceTexture "));
         assertNull(DiLink5Platform.normalizeConfiguredMode(null));
         assertNull(DiLink5Platform.normalizeConfiguredMode(""));
         assertNull(DiLink5Platform.normalizeConfiguredMode("legacy"));
@@ -53,6 +55,7 @@ public class DiLink5PlatformTest {
     public void panelControlUsesOnlyRuntimeFencedModes() {
         assertFalse(DiLink5Platform.isPanelControlMode(null));
         assertFalse(DiLink5Platform.isPanelControlMode("default"));
+        assertFalse(DiLink5Platform.isPanelControlMode("surfacetexture"));
         assertTrue(DiLink5Platform.isPanelControlMode("dilink4"));
         assertTrue(DiLink5Platform.isPanelControlMode("dilink5"));
     }
@@ -120,6 +123,28 @@ public class DiLink5PlatformTest {
                 "default", "dilink4", "default", "dilink5"));
         assertFalse(DiLink5Platform.canStageMode(
                 "default", null, "default", "invalid"));
+    }
+
+    @Test
+    public void surfaceTextureSwitchDoesNotChangeOtherModesBeforeRestart() {
+        for (String mode : new String[]{"default", "dilink4", "dilink5", "camera2"}) {
+            assertEquals(mode, DiLink5Platform.effectiveMode(
+                mode, "surfacetexture", "surfacetexture"));
+            assertFalse(DiLink5Platform.isSelected("surfacetexture", "auto"));
+            assertFalse(DiLink5Platform.isDiLink4Mode("surfacetexture"));
+        }
+        assertEquals("surfacetexture",
+            DiLink5Platform.effectiveMode("surfacetexture", null, "surfacetexture"));
+        assertTrue(DiLink5Platform.canStageMode(
+            "default", "surfacetexture", "surfacetexture", "surfacetexture"));
+        assertFalse(DiLink5Platform.canStageMode(
+            "default", "surfacetexture", "surfacetexture", "dilink4"));
+        String generation = UUID.randomUUID().toString();
+        DiLink5Platform.ActiveModeSnapshot snapshot =
+            DiLink5Platform.parseActiveModeMarker(marker("surfacetexture", generation));
+        assertNotNull(snapshot);
+        assertEquals("surfacetexture", snapshot.mode);
+        assertTrue(snapshot.supportsLegacyVehicleApi());
     }
 
     @Test

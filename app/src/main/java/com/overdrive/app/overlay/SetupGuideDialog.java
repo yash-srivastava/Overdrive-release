@@ -12,11 +12,13 @@ import android.provider.Settings;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.widget.CompoundButton;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import com.overdrive.app.R;
 import com.overdrive.app.camera.dilink5.DiLink5Platform;
+import com.overdrive.app.services.AutoStartReapply;
 import com.overdrive.app.services.KeepAliveAccessibilityService;
 import com.overdrive.app.util.BydDataCacheWhitelist;
 
@@ -57,6 +59,13 @@ public class SetupGuideDialog {
         }
 
         boolean isUpdate = lastSeen > 0L;
+        // Opted in: AutoStartReapply redoes BYD's switch and resets this marker if it gives up.
+        if (isUpdate && AutoStartReapply.willHandleCurrentInstall(context)
+                && OverlayPermissionChecker.isGranted(context)) {
+            Log.i(TAG, "update guide skipped: auto-start is re-applied automatically");
+            markCurrentInstallSeen(context);
+            return false;
+        }
         show(context, isUpdate);
         return true;
     }
@@ -122,6 +131,10 @@ public class SetupGuideDialog {
                     autoStartStep,
                     SystemClock.elapsedRealtime() + AUTOSTART_SERVICE_WAIT_MS);
         });
+        if (AutoStartReapply.isDoneForCurrentInstall(context)) {
+            autoStartStep.markComplete(context, R.string.setup_autostart_enabled);
+        }
+        bindAutoStartReapply(context, view, autoStartStep);
 
         // Step 3: Overlay permission
         final StepRow overlayStep = new StepRow(view,
@@ -293,6 +306,7 @@ public class SetupGuideDialog {
             com.overdrive.app.services.AutoStartEnabler.Result result) {
         if (success) {
             Log.i(TAG, "autostart auto-enable done (result=" + result + ")");
+            AutoStartReapply.markDoneForCurrentInstall(context);
             step.markComplete(context, R.string.setup_autostart_enabled);
             return;
         }
@@ -304,6 +318,27 @@ public class SetupGuideDialog {
                 context.getString(R.string.setup_autostart_failed),
                 Toast.LENGTH_LONG).show();
         openAutoStartSettings(context);
+    }
+
+    /** The opt-in switch; turning it on also runs the step now if this install still needs it. */
+    private static void bindAutoStartReapply(Context context, View root, StepRow step) {
+        CompoundButton toggle = root.findViewById(R.id.swAutoStartReapply);
+        View hint = root.findViewById(R.id.tvAutoStartReapplyHint);
+        if (toggle == null) return;
+        int visibility = AutoStartReapply.isAvailable(context) ? View.VISIBLE : View.GONE;
+        toggle.setVisibility(visibility);
+        if (hint != null) hint.setVisibility(visibility);
+        if (visibility != View.VISIBLE) return;
+        toggle.setChecked(AutoStartReapply.isEnabled(context));
+        toggle.setOnCheckedChangeListener((button, on) -> {
+            AutoStartReapply.setEnabled(context, on);
+            if (on && !AutoStartReapply.isDoneForCurrentInstall(context)
+                    && step.button != null
+                    && step.button.getVisibility() == View.VISIBLE
+                    && step.button.isEnabled()) {
+                step.button.performClick();
+            }
+        });
     }
 
     private static void renderOverlayPermission(Context context, StepRow step) {

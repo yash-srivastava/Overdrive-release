@@ -10,7 +10,7 @@
     <title data-i18n="app.notifications_title">Notifications - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
     <script src="../shared/theme.js?v=12"></script>
-    <script src="../shared/app-shell.js?v=23"></script>
+    <script src="../shared/app-shell.js?v=26"></script>
     <!--
       WebView detection MUST run before app-tabs.js builds the tab bar so
       we can filter OT_TABS to the Telegram-only flow on the head unit.
@@ -39,7 +39,7 @@
       users can still reach Telegram delivery and vehicle setup.
       The Telegram block reuses the legacy IDs (v2TelegramSendStartPing,
       v2TelegramTierGroup, v2TelegramNotices/Alerts/Critical) so the
-      SurvSettings bindings in shared/surveillance.js?v=survtoggle20 keep firing.
+      SurvSettings bindings in shared/surveillance.js?v=survtoggle22 keep firing.
     -->
     <script>
         var __OT_LOG_TAB = { id: 'log', label: 'Log', i18n: 'notif.tab_log', svg: '<line x1="8" y1="7" x2="18" y2="7"/><line x1="8" y1="12" x2="18" y2="12"/><line x1="8" y1="17" x2="14" y2="17"/><circle cx="4.5" cy="7" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="17" r="1"/>' };
@@ -996,7 +996,7 @@
 <body class="r-settings">
     <div class="app-layout">
         <!-- Sidebar -->
-        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=23) -->
+        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=24) -->
         <div id="app-shell-mount"></div>
         <!-- Main Content -->
         <main class="main-content">
@@ -1555,15 +1555,15 @@
     <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
     <div id="toastContainer" class="toast-container"></div>
 
-    <script src="../shared/auth.js"></script>
+    <script src="../shared/auth.js?v=18"></script>
     <script src="../shared/pwa-init.js?v=index1"></script>
-    <script src="../shared/core.js?v=27"></script>
-    <script src="../shared/update-flow.js?v=3"></script>
+    <script src="../shared/core.js?v=31"></script>
+    <script src="../shared/update-flow.js?v=6"></script>
     <!-- surveillance.js owns the SurvSettings module that backs the Telegram
          tier toggles. We load it here so the v2TelegramSendStartPing /
          v2TelegramTierGroup controls hooked into surveillance.js wiring
          keep firing without a per-page bridge. -->
-    <script src="../shared/surveillance.js?v=survtoggle20"></script>
+    <script src="../shared/surveillance.js?v=survtoggle22"></script>
     <script src="../shared/notif-log.js?v=3"></script>
     <script>
         function toggleSidebar() {
@@ -1620,7 +1620,7 @@
         }
 
         // ===== Telegram delivery preferences module =====
-        // Lives here (not in shared/surveillance.js?v=survtoggle20) because the four toggles
+        // Lives here (not in shared/surveillance.js?v=survtoggle22) because the four toggles
         // are notification-page-local — they don't bind to surveillance config
         // and don't need the heavier SurvSettings init flow. Load + save go
         // through /api/telegram/preferences (same endpoint telegram.html

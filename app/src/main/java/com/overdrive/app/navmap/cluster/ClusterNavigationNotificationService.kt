@@ -21,7 +21,7 @@ class ClusterNavigationNotificationService : NotificationListenerService() {
     override fun onNotificationPosted(notification: StatusBarNotification?) {
         val item = notification ?: return
         if (!ClusterGuidanceClient.enabled()) return
-        val source = source(item.packageName) ?: return
+        val source = guidanceSource(item.packageName) ?: return
         val value = item.notification ?: return
         // Nav notifications are ongoing. A saved-place suggestion from Maps is not guidance.
         if (value.flags and Notification.FLAG_ONGOING_EVENT == 0 && value.category != "navigation") {
@@ -49,7 +49,7 @@ class ClusterNavigationNotificationService : NotificationListenerService() {
 
     override fun onNotificationRemoved(notification: StatusBarNotification?) {
         val item = notification ?: return
-        val source = source(item.packageName) ?: return
+        val source = guidanceSource(item.packageName) ?: return
         clearIfOwned(source, item.key)
     }
 
@@ -74,9 +74,11 @@ class ClusterNavigationNotificationService : NotificationListenerService() {
         ClusterGuidanceClient.clear(source)
     }
 
-    private fun source(pkg: String): String? = when (pkg) {
-        "com.google.android.apps.maps", "app.revanced.android.apps.maps" -> "maps"
-        "com.waze" -> "waze"
-        else -> null
+    companion object {
+        fun guidanceSource(pkg: String): String? = when (pkg) {
+            "com.google.android.apps.maps", "app.revanced.android.apps.maps" -> "maps"
+            "com.waze" -> "waze"
+            else -> null
+        }
     }
 }

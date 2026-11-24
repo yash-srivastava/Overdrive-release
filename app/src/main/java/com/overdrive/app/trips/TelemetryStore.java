@@ -1,5 +1,7 @@
 package com.overdrive.app.trips;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.logging.DaemonLogger;
 
 import org.json.JSONObject;
@@ -46,7 +48,7 @@ public class TelemetryStore {
      * @return list of TelemetrySample objects parsed from all gzip streams
      */
     public static List<TelemetrySample> readFromFile(File file) {
-        if (file == null || !file.exists() || file.length() == 0) {
+        if (file == null || !RemovableStorageFs.exists(file) || RemovableStorageFs.length(file) == 0) {
             return new ArrayList<>();
         }
 
@@ -77,7 +79,7 @@ public class TelemetryStore {
         String jsonLines = serializeToJsonLines(samples);
         byte[] jsonBytes = jsonLines.getBytes("UTF-8");
 
-        try (OutputStream fos = new BufferedOutputStream(new FileOutputStream(file, false));
+        try (OutputStream fos = new BufferedOutputStream(RemovableStorageFs.openOutput(file, false));
              GZIPOutputStream gzos = new GZIPOutputStream(fos)) {
             gzos.write(jsonBytes);
         }
@@ -172,8 +174,8 @@ public class TelemetryStore {
      * Read all bytes from a file into a byte array.
      */
     private static byte[] readAllBytes(File file) throws IOException {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream((int) file.length());
-        try (BufferedInputStream bis = new BufferedInputStream(new FileInputStream(file))) {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream((int) RemovableStorageFs.length(file));
+        try (BufferedInputStream bis = new BufferedInputStream(RemovableStorageFs.openInput(file))) {
             byte[] buffer = new byte[8192];
             int bytesRead;
             while ((bytesRead = bis.read(buffer)) != -1) {

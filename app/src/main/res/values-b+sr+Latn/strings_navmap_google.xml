@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="navmap_google_layers_cd">Slojevi mape</string>
+    <string name="navmap_google_type_default">Google mapa</string>
+    <string name="navmap_google_type_satellite">Satelit</string>
+    <string name="navmap_google_type_hybrid">Hibrid</string>
+    <string name="navmap_google_type_terrain">Teren</string>
+    <string name="navmap_google_type_overdrive">OverDrive mapa</string>
+    <string name="navmap_google_traffic">Saobraćaj uživo</string>
+    <string name="navmap_google_traffic_on">Saobraćaj uživo je uključen</string>
+    <string name="navmap_google_traffic_off">Saobraćaj uživo je isključen</string>
+    <string name="navmap_google_traffic_paused">Saobraćaj uživo je pauziran do %1$s (besplatno dnevno ograničenje)</string>
+    <string name="navmap_google_map_paused">Google mapa je pauzirana do %1$s (besplatno dnevno ograničenje)</string>
+    <string name="navmap_google_map_unavailable">Google mapa nije dostupna, prikazuje se OverDrive mapa</string>
+    <string name="navmap_google_key_problem">Problem sa Google Maps ključem. Proverite RoadSense podešavanja.</string>
+    <string name="navmap_google_route_key_problem">Google rutiranje je odbilo ključ. Proverite RoadSense podešavanja.</string>
+    <string name="navmap_google_route_limit">Dostignuto je današnje ograničenje Google rutiranja</string>
+    <string name="navmap_google_arrived">Stigli ste na odredište</string>
+    <string name="navmap_google_traffic_delay">+%1$s zbog saobraćaja</string>
+    <string name="navmap_google_no_delays">Nema zastoja u saobraćaju</string>
+    <string name="navmap_google_faster_route">Pronađena je brža ruta, štedi %1$s</string>
+    <string name="navmap_google_faster_route_switch">Prebacite</string>
+    <string name="navmap_google_routes_by_google">Rute obezbeđuje Google</string>
+    <string name="navmap_google_routing_provided_by">Rutiranje obezbeđuje %1$s</string>
+    <string name="navmap_google_place_failed">Nije moguće otvoriti to mesto</string>
+    <string name="navmap_google_finding_place">Pronalaženje mesta…</string>
+</resources>

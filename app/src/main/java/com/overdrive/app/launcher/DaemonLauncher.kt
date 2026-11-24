@@ -3105,7 +3105,7 @@ class DaemonLauncher(
         
         logManager.debug(TAG, "Granting bodywork permissions...")
         
-        val commands = permissions.map { "pm grant $packageName $it 2>/dev/null || true" }
+        val commands = permissions.map { "pm grant ${com.overdrive.app.util.ShellUser.flag()} $packageName $it 2>/dev/null || true" }
         
         executeCommandSequence(commands, 0) {
             logManager.info(TAG, "Bodywork permissions granted")

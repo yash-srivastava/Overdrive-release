@@ -1486,7 +1486,7 @@
     <string name="settings_remote_listener_title">Kabin dinlemeyi etkinleştir</string>
     <string name="settings_remote_listener_subtitle">Kimliği doğrulanmış Canlı görüntü ve İletişim oturumlarının, araç açıkken kabin mikrofonunu dinlemesine izin ver.</string>
     <string name="settings_remote_audio_channel_title">Ses uyumluluğu</string>
-    <string name="settings_remote_audio_channel_subtitle">Medya, mevcut hoparlör ve mikrofon yollarını korur. Navigasyon, Di+ yönlendirmesine ve 8 kHz mikrofon kaydına uyar.</string>
+    <string name="settings_remote_audio_channel_subtitle">Medya, mevcut hoparlör ve mikrofon yollarını korur. Navigasyon, BYD yönlendirmesine ve 8 kHz mikrofon kaydına uyar.</string>
     <string name="settings_remote_audio_channel_media">Medya</string>
     <string name="settings_remote_audio_channel_navigation">Navigasyon</string>
     <string name="settings_remote_output_override_title">Özel ses düzeyi kullan</string>
@@ -1527,6 +1527,7 @@
     <string name="settings_about_vehicle_vin_hidden_a11y">VIN gizli</string>
     <string name="settings_about_vehicle_loading">Yükleniyor…</string>
     <string name="settings_about_vehicle_unavailable">Kullanılamıyor</string>
+    <string name="settings_about_tier_hall_of_fame">Onur Listesi</string>
     <string name="settings_about_tier_diamond">Elmas</string>
     <string name="settings_about_tier_platinum">Platin</string>
     <string name="settings_about_tier_gold">Altın</string>

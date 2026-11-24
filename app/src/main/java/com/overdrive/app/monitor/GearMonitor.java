@@ -33,6 +33,8 @@ public class GearMonitor {
     
     private static final long POLL_INTERVAL_MS = 200;  // 5 Hz polling
     private static final long CACHED_GEAR_MAX_AGE_MS = 1000L;
+    // A reused telemetry snapshot must stay valid past the next poll, or fresh-sample readers see a gap every second.
+    private static final long SNAPSHOT_REUSE_MAX_AGE_MS = CACHED_GEAR_MAX_AGE_MS - 2 * POLL_INTERVAL_MS;
     private static final long DILINK5_BRIDGE_GEAR_MAX_AGE_MS = 5000L;
     private static final long DILINK5_CARSVC_GEAR_MAX_AGE_MS =
             com.overdrive.app.byd.CarSvcTelemetry.DUMP_TTL_MS + 1_000L;
@@ -49,10 +51,7 @@ public class GearMonitor {
     private volatile Method getGearMethod;
     private Thread pollThread;
     private volatile boolean isRunning = false;
-    private volatile int currentGear = GEAR_P;
-    /** Elapsed-realtime timestamp of the last valid gear observation. */
-    private volatile long lastUpdateTime = 0;
-    private volatile long lastUpdateMaxAgeMs = CACHED_GEAR_MAX_AGE_MS;
+    private volatile GearSample observation = new GearSample(GEAR_P, 0L, CACHED_GEAR_MAX_AGE_MS);
     private volatile long lastDiLink5ProbeTime = 0;
     private volatile int cachedDiLink5ProbeGear = BydVehicleData.UNAVAILABLE;
     private volatile long cachedDiLink5ProbeObservedAt = 0;
@@ -148,9 +147,8 @@ public class GearMonitor {
                 getGearMethod = null;
                 return;
             }
-            currentGear = initialGearRead;
-            lastUpdateTime = SystemClock.elapsedRealtime();
-            logger.info("Initial gear: " + gearToString(currentGear));
+            observation = new GearSample(initialGearRead, SystemClock.elapsedRealtime(), CACHED_GEAR_MAX_AGE_MS);
+            logger.info("Initial gear: " + gearToString(initialGearRead));
             
             isRunning = true;
             
@@ -158,7 +156,7 @@ public class GearMonitor {
             // can run. Starting the thread first allowed a fast P -> D shift to
             // update currentGear before this initial callback, permanently
             // collapsing the P edge during async trip-manager startup.
-            final int initialGear = currentGear;
+            final int initialGear = initialGearRead;
             pollThread = new Thread(() -> {
                 while (isRunning) {
                     try {
@@ -182,7 +180,7 @@ public class GearMonitor {
                                 && isValidGearMode(snap.gearMode)
                                 && gearAgeMs >= 0L
                                 && gearAgeMs
-                                        < CACHED_GEAR_MAX_AGE_MS) {
+                                        < SNAPSHOT_REUSE_MAX_AGE_MS) {
                             // Only a recent successful gear read is cacheable.
                             gear = snap.gearMode;
                             gearObservedAtElapsedRealtimeMs =
@@ -206,10 +204,11 @@ public class GearMonitor {
                                     + gear);
                             continue;
                         }
-                        int previousGear = currentGear;
-                        currentGear = gear;
-                        lastUpdateTime =
-                                gearObservedAtElapsedRealtimeMs;
+                        GearSample previous = observation;
+                        int previousGear = previous.gear;
+                        if (previousGear != gear || previous.observedAtElapsedMs != gearObservedAtElapsedRealtimeMs) {
+                            observation = new GearSample(gear, gearObservedAtElapsedRealtimeMs, CACHED_GEAR_MAX_AGE_MS);
+                        }
                         if (gear != previousGear) {
                             logger.info("Gear changed: " + gearToString(previousGear) + " -> " + gearToString(gear));
                             CameraDaemon.onGearChanged(gear);
@@ -243,8 +242,7 @@ public class GearMonitor {
      */
     private void startDiLink5() {
         logger.info("Starting DiLink5 gear monitor...");
-        lastUpdateTime = 0L;
-        lastUpdateMaxAgeMs = CACHED_GEAR_MAX_AGE_MS;
+        observation = new GearSample(observation.gear, 0L, CACHED_GEAR_MAX_AGE_MS);
         lastDiLink5ProbeTime = 0L;
         cachedDiLink5ProbeGear = BydVehicleData.UNAVAILABLE;
         cachedDiLink5ProbeObservedAt = 0L;
@@ -261,13 +259,12 @@ public class GearMonitor {
                             && isObservationFresh(
                                     true, now, sample.observedAtElapsedMs,
                                     sample.maxAgeMs)) {
-                        boolean firstObservation = lastUpdateTime <= 0L;
-                        int previousGear = currentGear;
-                        currentGear = sample.gear;
+                        GearSample previous = observation;
+                        boolean firstObservation = previous.observedAtElapsedMs <= 0L;
+                        int previousGear = previous.gear;
                         // Keep the source observation time. Polling a cached
                         // value must not make it fresh again.
-                        lastUpdateTime = sample.observedAtElapsedMs;
-                        lastUpdateMaxAgeMs = sample.maxAgeMs;
+                        observation = sample;
                         if (firstObservation || sample.gear != previousGear) {
                             logger.info("Gear changed: "
                                     + (firstObservation
@@ -399,10 +396,10 @@ public class GearMonitor {
         }
     }
 
-    private static final class GearSample {
-        final int gear;
-        final long observedAtElapsedMs;
-        final long maxAgeMs;
+    public static final class GearSample {
+        public final int gear;
+        public final long observedAtElapsedMs;
+        public final long maxAgeMs;
 
         GearSample(int gear, long observedAtElapsedMs, long maxAgeMs) {
             this.gear = gear;
@@ -434,15 +431,20 @@ public class GearMonitor {
      */
     public int getCurrentGear() {
         return com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
-                ? getCurrentGearIfFresh() : currentGear;
+                ? getCurrentGearIfFresh() : observation.gear;
     }
 
     /** Return only a gear that came from the currently active, fresh poller. */
     public int getCurrentGearIfFresh() {
-        long now = SystemClock.elapsedRealtime();
-        return isObservationFresh(
-                isRunning, now, lastUpdateTime, lastUpdateMaxAgeMs)
-                ? currentGear : BydVehicleData.UNAVAILABLE;
+        GearSample sample = getFreshSample();
+        return sample == null ? BydVehicleData.UNAVAILABLE : sample.gear;
+    }
+
+    /** Gear, source time and source validity from the same poll. */
+    public GearSample getFreshSample() {
+        GearSample sample = observation;
+        return isObservationFresh(isRunning, SystemClock.elapsedRealtime(), sample.observedAtElapsedMs, sample.maxAgeMs)
+                ? sample : null;
     }
 
     static boolean isObservationFresh(
@@ -477,9 +479,8 @@ public class GearMonitor {
                 }
             }
         }
-        long at = lastUpdateTime;
-        int gear = getCurrentGearIfFresh();
-        return gear == BydVehicleData.UNAVAILABLE ? null : new GearReading(gear, at);
+        GearSample sample = getFreshSample();
+        return sample == null ? null : new GearReading(sample.gear, sample.observedAtElapsedMs);
     }
 
     /** A gear and when it was taken at its source (elapsedRealtime). */
@@ -497,7 +498,7 @@ public class GearMonitor {
      * Get last update time.
      */
     public long getLastUpdateTime() {
-        return lastUpdateTime;
+        return observation.observedAtElapsedMs;
     }
     
     /**

@@ -57,6 +57,7 @@
     "key_mapping": "キー割り当て"
   },
   "road_sense": {
+    "cluster_size_not_loaded": "保存済みのメーター表示サイズを読み込めませんでした — 変更する前にページを再読み込みしてください。",
     "page_title": "RoadSense 設定",
     "tab_general": "全般",
     "tab_map": "地図",
@@ -817,7 +818,8 @@
       "storage_limit_desc": "制限に達すると自動で古いものを削除する",
       "rate_source_note": "旅行は、保存された関税場所での最後の料金の割合で費用がかかります。この料金はそれまで適用されます。",
       "rate_from_charge": "最後のチャージ: {rate}/kWh。",
-      "rate_from_charge_named": "最後のチャージ: {rate}/kWh({label})"
+      "rate_from_charge_named": "最後のチャージ: {rate}/kWh({label})",
+      "not_loaded": "保存済みのトリップ設定を読み込めませんでした — 変更する前にページを再読み込みしてください。"
     },
     "recover": {
       "title": "不足しているトリップを回復する",
@@ -1482,7 +1484,8 @@
     "telemetry_field_location": "GPS位置",
     "telemetry_field_vin": "車台番号 (VIN)",
     "telemetry_fields_label": "燃焼するフィールド",
-    "telemetry_fields_desc": "オーバーレイがトリップとマニュアル録音に表示されるものを選択します。"
+    "telemetry_fields_desc": "オーバーレイがトリップとマニュアル録音に表示されるものを選択します。",
+    "settings_not_loaded": "保存済みの録画設定を読み込めませんでした — 変更する前にページを再読み込みしてください。"
   },
   "events": {
     "select_date": "日付を選択する",
@@ -2570,6 +2573,8 @@
     "driver_door_unlocked": "ドライバーのドアがロック解除されました"
   },
   "roi": {
+    "zones_not_loaded": "保存済みのゾーンを読み込めませんでした — 変更する前にページを再読み込みしてください。",
+    "schedule_not_loaded": "保存済みのスケジュールを読み込めませんでした — 変更する前にページを再読み込みしてください。",
     "editing": "編集",
     "window_n": "窓 {n}",
     "remove": "削除",
@@ -2849,7 +2854,7 @@
     "daemon_title": "デイモン",
     "auto_start_acc_off": "車両が停止したときに自動起動",
     "auto_start_acc_off_desc": "Telegramボットダイモンを自動起動します 車両がACCOFFに移動すると,コマンドが駐車中に動作します. 車両が起動するとダイモンが停止します.",
-    "daemon_start_pointer": "デイモンの手動の開始/停止はネイティブアプリの デイモンページに表示されます.",
+    "daemon_start_pointer": "デイモンの手動の開始/停止はネイティブアプリの{daemons}ページに表示されます.",
     "delivery_pointer": "配信設定 (チャットに届くイベント) は,通知 → Telegramタブでライブです.",
     "tyre_alerts": "タイヤ圧アラート",
     "tyre_alerts_desc": "タイヤが設定された圧力範囲外に出たとき、またはTPMSが漏洩を報告したときにTelegramメッセージを送信します。 タイヤ圧限界で設定された制限を使用します。",
@@ -3323,7 +3328,9 @@
     "level_5": "レベル5",
     "level_7": "レベル7",
     "level_9": "レベル9",
-    "level_11": "レベル11"
+    "level_11": "レベル11",
+    "not_loaded": "保存済みのキー割り当てを読み込めませんでした — 変更する前にページを再読み込みしてください。",
+    "qc_not_loaded": "保存済みのクイックコントロールを読み込めませんでした — 変更する前にページを再読み込みしてください。"
   },
   "voice_assistant": {
     "command_language": "コマンドの言語",
@@ -3508,5 +3515,78 @@
     "forget_confirm_body": "出発前ブリーフィングは、場所の名前、非表示のルート、アプリの選択、回答を消去します。走行履歴は残るため、もう一度学習できます。",
     "forgot": "傾向を消去しました。走行履歴は残っています。",
     "save_failed": "保存できませんでした。もう一度お試しください。"
+  },
+  "offline": {
+    "banner": "このリンクでは車に接続できません · {time}時点のデータを表示しています",
+    "banner_old": "このリンクでは車に接続できません · {days}日前のデータを表示しています。トンネルを変更またはリセットした場合、このリンクは使えなくなっている可能性があります。",
+    "car_unreachable": "車に接続できません。コマンドが届いていない可能性があります。",
+    "back_online": "再接続しました。タップして更新してください。",
+    "connecting": "車に接続しています · {time}時点のデータを表示しています",
+    "not_sent": "車がオフラインのため送信されませんでした。接続が戻ったらもう一度お試しください。"
+  },
+  "stepup": {
+    "title": "Face ID または指紋による保護",
+    "desc": "車の外にいる人が解錠、トランクのオープン、電源のオン・オフを行う前に、Face ID または指紋による確認を求めます。車の画面、オートメーション、近接解錠では確認を求めません。保護がオンの間は、音声コマンドでこれらの操作はできません。",
+    "enable": "Face ID または指紋を必須にする",
+    "enable_needs_phone": "先にスマートフォンを追加してください。",
+    "actions_title": "次の操作の前に確認",
+    "action_unlock": "ドアを解錠する",
+    "action_trunk_open": "トランクを開ける",
+    "action_power_off": "車の電源を切る",
+    "action_power_on": "車の電源を入れる",
+    "action_power_on_desc": "車の電源が入ることがあるため、リモートでのエアコン起動の前にも確認します。",
+    "phones_title": "スマートフォン",
+    "phones_empty": "まだスマートフォンが追加されていません。",
+    "phone_added": "追加日：{date}",
+    "phone_last_used": "最終使用日：{date}",
+    "phone_remove": "削除",
+    "phone_remove_confirm": "このスマートフォンを削除しますか？リモート操作を承認できなくなります。",
+    "remove_last_confirm": "これが最後のスマートフォンです。削除すると保護がオフになります。続行しますか？",
+    "add_phone_car": "スマートフォンを追加",
+    "pair_presence": "ブレーキペダルを踏むか、前席のドアを開けて閉めてください。",
+    "pair_code": "スマートフォンで 車両コントロール → 安全 を開き、このコードを入力してください：",
+    "pair_expires": "コードの有効期限まであと {seconds} 秒",
+    "pair_expired": "コードの有効期限が切れました。もう一度やり直してください。",
+    "pair_blocked_remote_view": "先に画面のリモート操作を終了してください。",
+    "add_this_phone": "このスマートフォンを追加",
+    "start_on_car": "車の画面で開始してください：車両コントロール → 安全 → スマートフォンを追加。その後、ここにコードを入力します。",
+    "code_label": "車の画面に表示されたコード",
+    "phone_name_label": "スマートフォンの名前",
+    "added_ok": "このスマートフォンでリモート操作を承認できるようになりました。",
+    "need_secure_link": "このスマートフォンを追加するには、安全なリンク（zrok、Cloudflare のドメイン、または Tailscale HTTPS）から OverDrive を開いてください。",
+    "not_supported": "このブラウザでは、ここで Face ID や指紋を使用できません。",
+    "prompt_failed": "本人確認ができませんでした。操作は送信されていません。",
+    "cancelled": "キャンセルしました。操作は送信されていません。",
+    "needs_secure_link_action": "この操作には Face ID または指紋が必要です。安全なリンクか車の画面を使用してください。",
+    "car_only": "Face ID または指紋による保護がオンの間は、車の画面からのみ操作できます。",
+    "remote_adb_warning": "Tailscale 経由のリモート ADB がオンです。ADB にアクセスできる人は誰でもこの保護を回避できます。",
+    "remote_view_warning": "画面のリモート操作が有効です。終了するまでは車の画面でも確認を求めます。",
+    "wrong_code": "コードが正しくありません。確認してもう一度お試しください。",
+    "error_generic": "保存できませんでした。もう一度お試しください。",
+    "add": "追加",
+    "cancel": "キャンセル",
+    "confirm_unlock": "車を解錠しますか？",
+    "confirm_trunkOpen": "トランクを開けますか？",
+    "confirm_powerOff": "車の電源を切りますか？",
+    "confirm_powerOn": "車の電源を入れますか？",
+    "confirm_run": "この操作を実行しますか？",
+    "confirm_config": "この変更を保存しますか？",
+    "confirm_settings": "保護の設定を変更しますか？",
+    "confirm_screenControl": "車の画面を操作しますか？",
+    "confirm_keyInject": "車の画面にキーを送信しますか？",
+    "confirm_generic": "この操作を承認しますか？",
+    "confirm_button": "Face ID または指紋で確認",
+    "waiting": "Face ID または指紋を待っています…",
+    "too_many_codes": "間違ったコードが多すぎます。車の画面でもう一度やり直してください。",
+    "already_added": "このスマートフォンはすでに追加されています。",
+    "setup_cancelled": "キャンセルしました。何も追加されていません。",
+    "create_passkey": "パスキーを作成",
+    "try_again": "再試行",
+    "phone_added_car": "スマートフォンを追加しました。",
+    "remote_view_action": "先に画面のリモート操作を終了してください。",
+    "store_unreadable": "保護の設定を読み込めませんでした。ここで保護をオフにするとリセットされます。",
+    "too_many_phones": "追加できるスマートフォンの上限に達しました。先に1台削除してください。",
+    "unknown_phone": "そのスマートフォンはもう追加されていません。",
+    "link_checking": "安全なリンクを確認しています。数秒後にもう一度お試しください。"
   }
 }

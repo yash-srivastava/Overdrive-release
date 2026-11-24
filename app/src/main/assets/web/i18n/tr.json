@@ -69,6 +69,7 @@
     "remote_dev_view": "Uzaktan geliştirici görünümü"
   },
   "road_sense": {
+    "cluster_size_not_loaded": "Kayıtlı gösterge paneli boyutu okunamadı — değiştirmeden önce sayfayı yeniden yükleyin.",
     "page_title": "RoadSense Ayarları",
     "tab_general": "Genel",
     "tab_map": "Harita",
@@ -708,7 +709,8 @@
       "storage_limit_desc": "Sınıra ulaşıldığında en eskileri otomatik sil",
       "rate_source_note": "Yolculuklar, kayıtlı bir tarife konumundaki son şarjınızın fiyatıyla hesaplanır. O zamana kadar bu fiyat geçerlidir.",
       "rate_from_charge": "Yolculuklar son şarjınızın fiyatıyla hesaplanır: {rate}/kWh.",
-      "rate_from_charge_named": "Yolculuklar son şarjınızın fiyatıyla hesaplanır: {rate}/kWh ({label})."
+      "rate_from_charge_named": "Yolculuklar son şarjınızın fiyatıyla hesaplanır: {rate}/kWh ({label}).",
+      "not_loaded": "Kayıtlı yolculuk ayarları okunamadı — değiştirmeden önce sayfayı yeniden yükleyin."
     },
     "cdr": {
       "delete_confirm": "Yer açmak için eski BYD dashcam dosyaları silinsin mi?",
@@ -1375,7 +1377,8 @@
     "clip_duration_desc": "Kaydedilen her video segmentinin uzunluğu. Hem sürüş (ACC açık) hem de park halindeki gözetim (ACC kapalı) kayıtlarına, bir sonraki segment değişiminde uygulanır.",
     "clip_5min": "5 dk",
     "clip_10min": "10 dk",
-    "clip_duration": "Klip Süresi"
+    "clip_duration": "Klip Süresi",
+    "settings_not_loaded": "Kayıtlı kayıt ayarları okunamadı — değiştirmeden önce sayfayı yeniden yükleyin."
   },
   "events": {
     "select_date": "Tarih seç",
@@ -2565,6 +2568,8 @@
     "cpd_failed": "Çocuk varlığı algılama ayarı başarısız"
   },
   "roi": {
+    "zones_not_loaded": "Kayıtlı bölgeler okunamadı — değiştirmeden önce sayfayı yeniden yükleyin.",
+    "schedule_not_loaded": "Kayıtlı zamanlama okunamadı — değiştirmeden önce sayfayı yeniden yükleyin.",
     "editing": "DÜZENLENİYOR",
     "window_n": "Pencere {n}",
     "remove": "Kaldır",
@@ -2781,6 +2786,7 @@
     "tier_bronze": "Bronz",
     "tier_diamond": "Elmas",
     "tier_gold": "Altın",
+    "tier_halloffame": "Onur Listesi",
     "tier_platinum": "Platin",
     "tier_silver": "Gümüş",
     "tiers_explainer": "Elmas, platin, altın, gümüş ve bronz, birinin toplamda ne kadar katkı yaptığını gösterir; ×N ise kaç ayrı kez katkı yaptığını gösterir."
@@ -2864,7 +2870,7 @@
     "daemon_title": "Daemon",
     "auto_start_acc_off": "Araç kapalıyken otomatik başlat",
     "auto_start_acc_off_desc": "Araç ACC OFF durumuna geçtiğinde Telegram bot daemon'unu otomatik başlatır; böylece park halindeyken komutlar çalışır. Araç çalıştırıldığında daemon durur.",
-    "daemon_start_pointer": "Daemon'u elle başlatıp durdurmak için yerel uygulamadaki Daemon'lar sayfasını kullanın.",
+    "daemon_start_pointer": "Daemon'u elle başlatıp durdurmak için yerel uygulamadaki {daemons} sayfasını kullanın.",
     "delivery_pointer": "Gönderim tercihleri (hangi olayların sohbete ulaşacağı) Bildirimler → Telegram sekmesindedir.",
     "tyre_alerts": "Lastik basıncı uyarıları",
     "tyre_alerts_desc": "Bir lastik ayarladığınız basınç aralığının dışına çıktığında ya da TPMS bir sızıntı bildirdiğinde Telegram mesajı gönderir. Lastik basıncı sınırları bölümünde belirlenen sınırları kullanır.",
@@ -3693,7 +3699,9 @@
     "qc_need_action": "Düğmenin ne yapacağını seçin.",
     "qc_need_label": "Düğmeye bir etiket verin.",
     "qc_save_failed": "Kontrol paneli düğmeleri kaydedilemedi",
-    "qc_saved": "Kontrol paneli düğmeleri kaydedildi"
+    "qc_saved": "Kontrol paneli düğmeleri kaydedildi",
+    "not_loaded": "Kayıtlı tuş atamaları okunamadı — değiştirmeden önce sayfayı yeniden yükleyin.",
+    "qc_not_loaded": "Kayıtlı hızlı kontroller okunamadı — değiştirmeden önce sayfayı yeniden yükleyin."
   },
   "community": {
     "tab_community": "Topluluk",
@@ -4599,5 +4607,78 @@
     "forget_confirm_body": "Yolculuk Brifingi yer adlarını, gizli rutinleri, uygulama seçimlerini ve yanıtlarınızı unutur. Yolculuklarınız korunur, böylece yeniden öğrenebilir.",
     "forgot": "Alışkanlıklar unutuldu. Yolculuklarınız korunuyor.",
     "save_failed": "Kaydedilemedi. Tekrar deneyin."
+  },
+  "offline": {
+    "banner": "Bu bağlantı üzerinden araca ulaşılamıyor · son veriler: {time}",
+    "banner_old": "Bu bağlantı üzerinden araca ulaşılamıyor · son veriler: {days} gün önce. Tüneli değiştirdiyseniz veya sıfırladıysanız bu bağlantı artık çalışmayabilir.",
+    "car_unreachable": "Araca ulaşılamıyor. Komut iletilmemiş olabilir.",
+    "back_online": "Bağlantı yeniden kuruldu. Yenilemek için dokunun.",
+    "connecting": "Araca bağlanılıyor · son veriler: {time}",
+    "not_sent": "Araç çevrimdışı olduğu için bu gönderilmedi. Bağlantı geri geldiğinde tekrar deneyin."
+  },
+  "stepup": {
+    "title": "Face ID veya parmak izi koruması",
+    "desc": "Araç dışındaki biri aracın kilidini açmadan, bagajı açmadan veya aracı çalıştırmadan ya da kapatmadan önce Face ID veya parmak izi ister. Araç ekranı, otomasyonlar ve yakınlıkla kilit açma hiçbir zaman sormaz. Koruma açıkken sesli komutlar bu işlemleri yapamaz.",
+    "enable": "Face ID veya parmak izi iste",
+    "enable_needs_phone": "Önce bir telefon ekleyin.",
+    "actions_title": "Şunlardan önce sor",
+    "action_unlock": "Kapıların kilidini açma",
+    "action_trunk_open": "Bagajı açma",
+    "action_power_off": "Aracı kapatma",
+    "action_power_on": "Aracı çalıştırma",
+    "action_power_on_desc": "Aracı çalıştırabilen uzaktan klima başlatma öncesinde de sorar.",
+    "phones_title": "Telefonlar",
+    "phones_empty": "Henüz telefon eklenmedi.",
+    "phone_added": "Eklenme: {date}",
+    "phone_last_used": "Son kullanım: {date}",
+    "phone_remove": "Kaldır",
+    "phone_remove_confirm": "Bu telefon kaldırılsın mı? Artık uzaktan işlemleri onaylayamayacak.",
+    "remove_last_confirm": "Bu son telefon. Kaldırırsanız koruma kapanır. Devam edilsin mi?",
+    "add_phone_car": "Telefon ekle",
+    "pair_presence": "Fren pedalına basın veya bir ön kapıyı açıp kapatın.",
+    "pair_code": "Telefonunuzda Araç Kontrolü → Güvenlik bölümünü açın ve bu kodu girin:",
+    "pair_expires": "Kodun süresi {seconds} sn içinde dolacak",
+    "pair_expired": "Kodun süresi doldu. Yeniden başlayın.",
+    "pair_blocked_remote_view": "Önce uzaktan ekran kontrolünü durdurun.",
+    "add_this_phone": "Bu telefonu ekle",
+    "start_on_car": "Araç ekranında başlayın: Araç Kontrolü → Güvenlik → Telefon ekle. Ardından kodu buraya girin.",
+    "code_label": "Araç ekranındaki kod",
+    "phone_name_label": "Telefon adı",
+    "added_ok": "Bu telefon artık uzaktan işlemleri onaylayabilir.",
+    "need_secure_link": "Bu telefonu eklemek için OverDrive'ı güvenli bağlantınız üzerinden açın: zrok, Cloudflare alan adınız veya Tailscale HTTPS.",
+    "not_supported": "Bu tarayıcı burada Face ID veya parmak izi kullanamıyor.",
+    "prompt_failed": "Kimliğiniz doğrulanamadı. İşlem gönderilmedi.",
+    "cancelled": "İptal edildi. İşlem gönderilmedi.",
+    "needs_secure_link_action": "Bu işlem Face ID veya parmak izi gerektiriyor. Güvenli bağlantınızı veya araç ekranını kullanın.",
+    "car_only": "Face ID veya parmak izi koruması açıkken bu işlem yalnızca araç ekranından yapılabilir.",
+    "remote_adb_warning": "Tailscale üzerinden uzaktan ADB açık. ADB erişimi olan herkes bu korumayı aşabilir.",
+    "remote_view_warning": "Uzaktan ekran kontrolü etkin. Sona erene kadar araç ekranı da onay ister.",
+    "wrong_code": "Bu kod çalışmadı. Kontrol edip tekrar deneyin.",
+    "error_generic": "Kaydedilemedi. Tekrar deneyin.",
+    "add": "Ekle",
+    "cancel": "İptal",
+    "confirm_unlock": "Aracın kilidi açılsın mı?",
+    "confirm_trunkOpen": "Bagaj açılsın mı?",
+    "confirm_powerOff": "Araç kapatılsın mı?",
+    "confirm_powerOn": "Araç çalıştırılsın mı?",
+    "confirm_run": "Bu işlem çalıştırılsın mı?",
+    "confirm_config": "Bu değişiklik kaydedilsin mi?",
+    "confirm_settings": "Koruma ayarları değiştirilsin mi?",
+    "confirm_screenControl": "Araç ekranı kontrol edilsin mi?",
+    "confirm_keyInject": "Araç ekranına bir tuş gönderilsin mi?",
+    "confirm_generic": "Bu işlem onaylansın mı?",
+    "confirm_button": "Face ID veya parmak iziyle onayla",
+    "waiting": "Face ID veya parmak izi bekleniyor…",
+    "too_many_codes": "Çok fazla yanlış kod girildi. Araç ekranında yeniden başlayın.",
+    "already_added": "Bu telefon zaten eklenmiş.",
+    "setup_cancelled": "İptal edildi. Hiçbir şey eklenmedi.",
+    "create_passkey": "Geçiş anahtarı oluştur",
+    "try_again": "Tekrar dene",
+    "phone_added_car": "Telefon eklendi.",
+    "remote_view_action": "Önce uzaktan ekran kontrolünü durdurun.",
+    "store_unreadable": "Koruma ayarları okunamadı. Sıfırlamak için korumayı buradan kapatın.",
+    "too_many_phones": "İzin verilen en fazla sayıda telefon eklediniz. Önce birini kaldırın.",
+    "unknown_phone": "Bu telefon artık ekli değil.",
+    "link_checking": "Güvenli bağlantı kontrol ediliyor. Birkaç saniye sonra tekrar deneyin."
   }
 }

@@ -15,6 +15,7 @@ import com.overdrive.app.roadsense.detect.GyroStats
 import com.overdrive.app.roadsense.detect.HazardType
 import com.overdrive.app.roadsense.detect.ImuAccelSample
 import com.overdrive.app.roadsense.detect.ImuGyroSample
+import com.overdrive.app.roadsense.detect.ImuSessionStats
 import com.overdrive.app.roadsense.detect.ImuStream
 import com.overdrive.app.roadsense.detect.RawImuRecorder
 import com.overdrive.app.roadsense.detect.RejectionFilter
@@ -37,6 +38,7 @@ import com.overdrive.app.roadsense.sync.DeviceId
 import com.overdrive.app.roadsense.sync.RoadSenseSyncProvider
 import com.overdrive.app.roadsense.sync.TileCursor
 import com.overdrive.app.roadsense.warn.OverlayState
+import java.util.Locale
 import kotlin.math.abs
 
 /**
@@ -208,6 +210,15 @@ class RoadSenseController @JvmOverloads constructor(
 
     // Persistent IMU-flow heartbeat state (diagnostics; IPC thread only).
     private var imuBatchCount = 0L
+    // Accel period tagged by the DiLink 5 sidecar; null = untagged 100 Hz stream. IPC thread only.
+    private var imuPeriodMs: Float? = null
+    private val imuStats = ImuSessionStats()
+    private val candidateClock = java.text.SimpleDateFormat("HH:mm:ss.SSS", Locale.ROOT)
+    // Rate limit for sidecar IMU_STATUS lines (IPC pool threads).
+    private val imuStatusLock = Any()
+    private var imuStatusWindowStartMs = 0L
+    private var imuStatusInWindow = 0
+    private var imuStatusDropped = 0
     private var lastImuHeartbeatMs = 0L
     private var lastSeenSpeedKmh = 0f
 
@@ -444,17 +455,21 @@ class RoadSenseController @JvmOverloads constructor(
         }
     }
 
+    /** Apply a Service Mode transition without overwriting roadSense.enabled. */
+    fun onServiceModeChanged() {
+        Thread({
+            try { reconcile() } catch (t: Throwable) { Log.w(TAG, "service-mode reconcile failed: ${t.message}") }
+        }, "roadsense-service-mode").apply { isDaemon = true }.start()
+    }
+
     /**
-     * Start or stop the heavy machinery to match the persisted roadSense.enabled flag.
-     * forceReload so a cross-UID web write is seen immediately (the listener fires in this
-     * daemon process, but the flag may have been written via the app→daemon IPC path and
-     * only just landed on disk). Serialized on [lifecycleLock] so overlapping toggle
-     * notifications can't race start() against stop(). start()/stop() are themselves
-     * idempotent (guarded by [started]), so a redundant reconcile is a cheap no-op.
+     * Match the running machinery to the saved master toggle and Service Mode gate.
+     * The lifecycle lock serializes overlapping toggles and pause transitions.
      */
     private fun reconcile() {
         val enabled = try {
-            RoadSenseConfig.snapshot(forceReload = true).enabled
+            RoadSenseConfig.snapshot(forceReload = true).enabled &&
+                !com.overdrive.app.config.ServiceModeFeatureGate.isPaused("roadsense")
         } catch (t: Throwable) {
             Log.w(TAG, "reconcile snapshot failed: ${t.message}"); return
         }
@@ -621,6 +636,7 @@ class RoadSenseController @JvmOverloads constructor(
             resetTransient()
         }
         val decoded = ImuFrameCodec.decode(frame) ?: return 0
+        if (decoded.periodMs != imuPeriodMs) applyImuPeriod(decoded.periodMs)
         val n = imuStream.feed(decoded, clock())
         // Drain deferred classifications whose POST-event envelope has now elapsed (D-040).
         // feed() ran onAccel/onGyro synchronously above, so lastContextSampleMs is the newest
@@ -638,9 +654,64 @@ class RoadSenseController @JvmOverloads constructor(
                 " rejects=" + dropRejects.entries.joinToString(",") { "${it.key}:${it.value}" }
             plog.info("imu-flow: batches~${imuBatchCount} samples, cal=${"%.3f".format(calibrator.maturity)} " +
                 "events=${detector.totalCandidates} stored=$dropStored noDyn=$dropNoDyn noPose=$dropNoPose" +
-                rejects + " speed=${"%.0f".format(lastSeenSpeedKmh)}km/h")
+                rejects + " speed=${"%.0f".format(lastSeenSpeedKmh)}km/h" + diLink5FlowSuffix())
         }
         return n
+    }
+
+    /** Adapt the per-sample detector constants to a tagged stream's period; null restores 100 Hz. */
+    private fun applyImuPeriod(periodMs: Float?) {
+        val current = imuPeriodMs
+        if (periodMs != null && current != null && abs(periodMs - current) <= current * PERIOD_TOLERANCE) return
+        imuPeriodMs = periodMs
+        gravity.setSamplePeriodMs(periodMs)
+        detector.setSamplePeriodMs(periodMs)
+        val what = if (periodMs == null) "nominal 100Hz" else String.format(Locale.ROOT, "period=%.1fms", periodMs)
+        plog.info("imu profile: $what ${detector.profileSummary} ${gravity.profileSummary}")
+    }
+
+    /** Signal/threshold summary appended to the imu-flow heartbeat for tagged streams only. */
+    private fun diLink5FlowSuffix(): String {
+        val period = imuPeriodMs ?: return ""
+        val calRms = kotlin.math.sqrt(calibrator.snapshot().second.coerceAtLeast(0f))
+        return " | " + imuStats.drain(period, calRms, calibrator.vehicleScale)
+    }
+
+    private fun describeCandidate(c: DetectionCandidate): String {
+        val kmh = c.speedMps * 3.6f
+        return String.format(
+            Locale.ROOT,
+            "t=%s v=%.0f thr=%.2f up=%.2f dn=%.2f rise=%d%s dur=%d dip=%b axle=%s asym=%.2f%s pitch=%.2f/%.2f%s",
+            candidateClock.format(java.util.Date(c.tMs)), kmh, detector.thresholdAt(kmh), c.peakUp, c.peakDown, c.riseTimeMs,
+            if (c.riseResolved) "" else "(n/a)", c.durationMs, c.dipLeading, c.axlePairGapMs?.toString() ?: "-",
+            c.lateralAsymmetry, if (c.asymmetryValid) "" else "(n/a)", c.peakPitchUp, c.peakPitchDown,
+            if (c.pitchValid) "" else "(n/a)",
+        )
+    }
+
+    /**
+     * One sidecar diagnostic line into the daemon log. The IPC port is unauthenticated
+     * loopback, so the text is length-capped, stripped of control characters and rate-limited.
+     */
+    fun onImuStatus(message: String) {
+        val dropped: Int
+        synchronized(imuStatusLock) {
+            val now = clock()
+            if (now - imuStatusWindowStartMs > IMU_STATUS_WINDOW_MS || now < imuStatusWindowStartMs) {
+                imuStatusWindowStartMs = now
+                imuStatusInWindow = 0
+            }
+            if (imuStatusInWindow >= IMU_STATUS_MAX_PER_WINDOW) {
+                imuStatusDropped++
+                return
+            }
+            imuStatusInWindow++
+            dropped = imuStatusDropped
+            imuStatusDropped = 0
+        }
+        val clean = StringBuilder(minOf(message.length, IMU_STATUS_MAX_CHARS))
+        for (ch in message.take(IMU_STATUS_MAX_CHARS)) clean.append(if (ch < ' ' || ch == '\u007f') ' ' else ch)
+        plog.info("imu-sidecar: $clean" + if (dropped > 0) " (+$dropped dropped)" else "")
     }
 
     /**
@@ -657,7 +728,8 @@ class RoadSenseController @JvmOverloads constructor(
         // Snapshot once: we also consult overlayVisible below for the app-side overlay
         // launch, and a single read keeps the two decisions consistent within this tick.
         val cfgSnap = RoadSenseConfig.snapshot()
-        featureEnabled = cfgSnap.enabled
+        featureEnabled = cfgSnap.enabled &&
+            !com.overdrive.app.config.ServiceModeFeatureGate.isPaused("roadsense")
         // Pick up any change to the speed-adaptive cornering-yaw knobs (rare; off the
         // 100 Hz IMU path — this is the ~2 Hz vehicle poll).
         maybeRebuildRejection(cfgSnap)
@@ -1433,7 +1505,8 @@ class RoadSenseController @JvmOverloads constructor(
             cachedDynamics = vehicleSource.latest(nowWall)
             // Refresh the master-enabled flag on the same throttle (config is
             // file-backed; reading it per-100Hz-sample would be wasteful I/O).
-            featureEnabled = RoadSenseConfig.snapshot().enabled
+            featureEnabled = RoadSenseConfig.snapshot().enabled &&
+                !com.overdrive.app.config.ServiceModeFeatureGate.isPaused("roadsense")
         }
         if (nowWall - lastGpsPollMs > GPS_POLL_MS) {
             lastGpsPollMs = nowWall
@@ -1446,6 +1519,7 @@ class RoadSenseController @JvmOverloads constructor(
         val speedKmh = dyn?.speedKmh ?: (gpsBuffer.latest()?.speedMps?.times(3.6f) ?: 0f)
         val speedMps = speedKmh / 3.6f
         lastSeenSpeedKmh = speedKmh   // for the persistent IMU-flow heartbeat
+        if (imuPeriodMs != null) imuStats.onAccel(sample.tMs, aVert, speedKmh, detector.thresholdAt(speedKmh))
 
         // 4) feed the silent vehicle calibrator (quiet samples only — it self-gates)
         calibrator.onSample(aVert, speedKmh, detector.inEvent, eventsPerSec())
@@ -1521,6 +1595,7 @@ class RoadSenseController @JvmOverloads constructor(
         // sharp-edged hazards (audit: gyro-yaw false-reject). Fix: project the gyro
         // vector onto the MEASURED gravity unit vector to isolate the true yaw rate
         // about vertical (allocation-free, hot-path safe).
+        if (imuPeriodMs != null) imuStats.onGyro(sample.tMs)
         val yaw = abs(gravity.alongGravity(sample.gx, sample.gy, sample.gz))
         // Age out a peak older than ~one event window so a turn made before the
         // current jolt no longer dominates (audit detection #1). Uses the sensor
@@ -1606,6 +1681,9 @@ class RoadSenseController @JvmOverloads constructor(
         // it wasn't a brake/turn artefact, so be conservative and skip mapping.
         if (dyn == null) {
             dropNoDyn++
+            if (imuPeriodMs != null && imuStats.allowCandidateLine()) {
+                plog.info("cand ${describeCandidate(candidate)} -> noDynamics")
+            }
             resetEventGyro(); return
         }
         // CONTEXT vetoes only (softPedal=true): gear / cornering / washboard / curb are
@@ -1614,6 +1692,12 @@ class RoadSenseController @JvmOverloads constructor(
         // (D-040) so braking INTO a real breaker — the user's exact scenario — isn't dropped.
         val gyroStats = GyroStats(peakYawRateRps = peakYaw)
         val verdict = rejection.evaluate(candidate, dyn, gyroStats, eventsPerSec(), softPedal = true)
+        if (imuPeriodMs != null && imuStats.allowCandidateLine()) {
+            val outcome = if (verdict.rejected) "reject:${verdict.reason}" else "classify"
+            plog.info("cand ${describeCandidate(candidate)} " +
+                String.format(Locale.ROOT, "yaw=%.2f brake=%d accel=%d", peakYaw, dyn.brakePercent, dyn.accelPercent) +
+                " -> $outcome")
+        }
         resetEventGyro()
         if (verdict.rejected) {
             if (verdict.reason == "washboard") {
@@ -1674,6 +1758,15 @@ class RoadSenseController @JvmOverloads constructor(
         val candidate = p.candidate
         // PRIMARY gate: temporal multi-sensor fusion over the now-complete envelope.
         val v = hazardClassifier.classify(candidate, contextRing.toList(), candidate.tMs)
+        if (imuPeriodMs != null && imuStats.allowCandidateLine()) {
+            plog.info(String.format(
+                Locale.ROOT,
+                "cand t=%s classifier real=%.2f pitch=%.2f cross=%.2f artifact=%.2f couplet=%s type=%s -> %s",
+                candidateClock.format(java.util.Date(candidate.tMs)), v.realnessScore, v.pitchScore, v.crossingScore, v.artifactScore,
+                if (v.pitchCoupletUsed) v.pitchCoupletSign.toString() else "-", v.type,
+                if (v.accept) "accept" else "reject",
+            ))
+        }
         if (!v.accept) {
             dropRejects["classifier"] = (dropRejects["classifier"] ?: 0) + 1
             Log.d(TAG, "classifier reject realness=${"%.2f".format(v.realnessScore)} " +
@@ -1947,6 +2040,11 @@ class RoadSenseController @JvmOverloads constructor(
         /** Persistent IMU-flow heartbeat cadence (diagnostics). 30 s keeps the daemon
          *  log small over a long drive while still proving the pipeline ran. */
         private const val IMU_HEARTBEAT_MS = 30_000L
+        /** Tagged period change below this fraction keeps the current profile. */
+        private const val PERIOD_TOLERANCE = 0.1f
+        private const val IMU_STATUS_WINDOW_MS = 10 * 60_000L
+        private const val IMU_STATUS_MAX_PER_WINDOW = 60
+        private const val IMU_STATUS_MAX_CHARS = 1_200
         /** How often to persist calibration to UCM (per-vehicle, slow-changing). 60 s
          *  is plenty — a lost minute of learning is trivial, and it keeps the full-file
          *  config rewrite rare. */

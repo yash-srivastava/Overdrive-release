@@ -42,7 +42,7 @@ public final class Di5ParkedKeepAliveSettings {
     public static final boolean DEFAULT_MCU_POWER_HOLD = true;  // OEM-app parity (V1 default)
     public static final boolean DEFAULT_CAMERA_HEARTBEAT = false;
     public static final boolean DEFAULT_AP_HOLD = false;
-    public static final int DEFAULT_REASSERT_SECONDS = 30;      // DiPlus mode-3 parity
+    public static final int DEFAULT_REASSERT_SECONDS = 30;      // reference mode-3 parity
     public static final double DEFAULT_CUTOFF_VOLTAGE = 11.8;
     public static final int DEFAULT_CUTOFF_SAMPLES = 3;
     public static final int DEFAULT_VOLTAGE_MAX_AGE_SECONDS = 120;
@@ -188,7 +188,7 @@ public final class Di5ParkedKeepAliveSettings {
 
     /**
      * vendor.peripheral shutdown-critical token. Experimental: requires BOTH the
-     * lever and a recorded pre-flight pass — DiPlus only issues this in its hidden
+     * lever and a recorded pre-flight pass — the reference app only issues this in its hidden
      * Debug Mode 2, so it is unproven and stays capability-gated.
      */
     public boolean isApHoldEffective() {

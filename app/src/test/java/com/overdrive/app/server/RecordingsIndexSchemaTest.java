@@ -28,6 +28,7 @@ public class RecordingsIndexSchemaTest {
             assertTrue(hasColumn(connection, "PARKING_SESSION_ID"));
             assertTrue(hasColumn(connection, "EVENT_CAMERAS"));
             assertTrue(hasColumn(connection, "PEAK_CONFIDENCE"));
+            assertTrue(hasColumn(connection, "CLOUD_DETERRENT_ACTIONS"));
         }
     }
 
@@ -84,6 +85,49 @@ public class RecordingsIndexSchemaTest {
                 assertTrue(count.next());
                 assertEquals(2, count.getInt(1));
                 assertNotEquals(internal.recordingId, sd.recordingId);
+            }
+        }
+    }
+
+    @Test
+    public void cloudActionMigrationRefreshesOnlyOlderCloudRows() throws Exception {
+        try (Connection connection = open("cloud_actions")) {
+            RecordingsIndexSchema.ensure(connection);
+            try (Statement statement = connection.createStatement()) {
+                // Recreate the pre-v9 schema, retaining the two legacy flags.
+                statement.execute("ALTER TABLE recordings DROP COLUMN cloud_deterrent_actions");
+                statement.execute("INSERT INTO recordings (recording_id, filename, abs_path,"
+                        + " root_id, volume_id, relative_path, type, ts_ms, sidecar_mtime, deterrent_flags)"
+                        + " VALUES ('cloud', 'cloud.mp4', '/cloud.mp4', 'root', 'vol', 'cloud.mp4',"
+                        + " 'sentry', 1, 123, 1)");
+                statement.execute("INSERT INTO recordings (recording_id, filename, abs_path,"
+                        + " root_id, volume_id, relative_path, type, ts_ms, sidecar_mtime, deterrent_flags)"
+                        + " VALUES ('screen', 'screen.mp4', '/screen.mp4', 'root', 'vol', 'screen.mp4',"
+                        + " 'sentry', 2, 456, 2)");
+            }
+            RecordingsIndexSchema.ensure(connection);
+            assertTrue(hasColumn(connection, "CLOUD_DETERRENT_ACTIONS"));
+            try (Statement statement = connection.createStatement();
+                 ResultSet rows = statement.executeQuery(
+                         "SELECT recording_id, sidecar_mtime FROM recordings ORDER BY recording_id")) {
+                assertTrue(rows.next());
+                assertEquals("cloud", rows.getString(1));
+                assertEquals(0L, rows.getLong(2));
+                assertTrue(rows.next());
+                assertEquals("screen", rows.getString(1));
+                assertEquals(456L, rows.getLong(2));
+                assertFalse(rows.next());
+            }
+            // Repeated ensure must not invalidate an already refreshed row.
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("UPDATE recordings SET sidecar_mtime = 789 WHERE recording_id = 'cloud'");
+            }
+            RecordingsIndexSchema.ensure(connection);
+            try (Statement statement = connection.createStatement();
+                 ResultSet rows = statement.executeQuery(
+                         "SELECT sidecar_mtime FROM recordings WHERE recording_id = 'cloud'")) {
+                assertTrue(rows.next());
+                assertEquals(789L, rows.getLong(1));
             }
         }
     }

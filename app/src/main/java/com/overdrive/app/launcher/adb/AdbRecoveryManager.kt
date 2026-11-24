@@ -458,7 +458,7 @@ class AdbRecoveryManager internal constructor(
         } catch (_: Exception) { false }
         override fun seedWriteSecureSettings(): Boolean = try {
             shell.executeSync(
-                "pm grant ${context.packageName} android.permission.WRITE_SECURE_SETTINGS", 5_000,
+                "pm grant ${com.overdrive.app.util.ShellUser.flag()} ${context.packageName} android.permission.WRITE_SECURE_SETTINGS", 5_000,
             )
             hasWriteSecureSettings()
         } catch (_: Exception) { false }

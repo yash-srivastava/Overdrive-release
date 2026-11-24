@@ -11,440 +11,13 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#00876C">
     <script src="../shared/theme.js?v=12"></script>
-    <script src="../shared/app-shell.js?v=23"></script>
+    <script src="../shared/app-shell.js?v=26"></script>
     <link rel="stylesheet" href="../shared/leaflet.css">
     <link rel="stylesheet" href="../shared/styles.css?v=38">
     <link rel="stylesheet" href="../shared/revamp.css?v=2">
 </head>
 <body class="dashboard-page">
-    <div class="app-layout">
-        <div id="app-shell-mount"></div>
-
-        <main class="main-content">
-            <div class="mobile-header" id="mobileHeader">
-                <button class="menu-toggle" onclick="toggleSidebar()" aria-label="Open menu" data-i18n-attr="aria-label:dashboard.aria_open_menu">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/>
-                    </svg>
-                </button>
-                <span style="font-weight:600;" data-i18n="dashboard.heading">Dashboard</span>
-                <div style="width:40px;"></div>
-            </div>
-
-            <div class="dashboard-page-body">
-                <div class="dash-hero-copy" data-theme-dock>
-                    <h1 data-i18n="dashboard.heading">Dashboard</h1>
-                    <p id="dashHeroSubtitle" data-i18n="dashboard.subtitle">Vehicle status, position and main controls.</p>
-                </div>
-
-                <!-- Bento grid. The hero and the AI insight come first and carry
-                     no data-card-id, so the reorder controller below never moves
-                     them; the remaining cards carry data-card-id for layout
-                     persistence. -->
-                <section class="dash-grid" id="dashCards">
-                <section class="dash-hero">
-                    <!--
-                      Vehicle glance panel. Replaces the decorative hero GLB
-                      (the sidebar EV-card still renders the 3D model) with
-                      live state: a top-down schematic annotated with per-door
-                      lock pills + per-corner tyre pressure and temperature from /api/vehicle/state
-                      (polled every 6s by refreshVehicleState), an SoC ring +
-                      range fed by /api/status, and glance rows for climate /
-                      windows / tyres. When a charge session is live the panel
-                      gains a charging strip (power · time-to-full · kWh) —
-                      the "what matters right now" takeover. The drive state
-                      and status chips live here too, so the schematic sits
-                      beside them in one grid.
-                    -->
-                    <div class="dash-glance" id="dashGlance">
-                    <div class="dash-hero-main">
-                        <div class="dash-drive-state is-pending" id="dashDriveState"
-                             role="status" aria-live="polite" aria-atomic="true">
-                            <!-- The gear readout overlays this slot. Do not render the
-                                 obsolete power SVG: it flashes before the page CSS loads. -->
-                            <div class="dash-drive-icon" aria-hidden="true"></div>
-                            <div class="dash-drive-copy">
-                                <span id="dashDrivePower"
-                                      data-i18n="dashboard.drive_power_pending">Vehicle --</span>
-                                <strong id="dashDriveMode"
-                                        data-i18n="dashboard.drive_state_waiting">Waiting for status</strong>
-                                <small id="dashDriveDetail">--</small>
-                            </div>
-                            <div class="dash-drive-readouts">
-                                <div class="dash-drive-readout dash-drive-gear">
-                                    <span data-i18n="dashboard.drive_metric_gear">Gear</span>
-                                    <strong id="dashDriveGear">--</strong>
-                                </div>
-                                <div class="dash-drive-readout dash-drive-speed">
-                                    <span data-i18n="dashboard.drive_metric_speed">Speed</span>
-                                    <div>
-                                        <strong id="dashDriveSpeed">--</strong>
-                                        <small id="dashDriveSpeedUnit">km/h</small>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                        <div class="dash-glance-car" id="dashGlanceCar" aria-hidden="true">
-                            <span class="dash-car-ripple"></span><span class="dash-car-ripple r2"></span>
-                            <svg class="dash-car-svg" viewBox="0 0 150 260" preserveAspectRatio="xMidYMid meet">
-                                <defs>
-                                    <linearGradient id="dashCarBodyShade" x1="0" y1="0" x2="1" y2="0"><stop offset="0" class="dash-car-edge"/><stop offset="0.5" class="dash-car-mid"/><stop offset="1" class="dash-car-edge"/></linearGradient>
-                                    <linearGradient id="dashCarGlassShade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="dash-car-glass-a"/><stop offset="1" class="dash-car-glass-b"/></linearGradient>
-                                    <radialGradient id="dashCarGlowShade" cx="0.5" cy="0.5" r="0.5"><stop offset="0" class="dash-car-glow-a"/><stop offset="1" class="dash-car-glow-b"/></radialGradient>
-                                </defs>
-                                <ellipse class="dash-car-glow" cx="75" cy="131" rx="86" ry="128" fill="url(#dashCarGlowShade)"/>
-                                <path class="dash-car-cable" d="M122 206C137 210 147 222 165 234"/>
-                                <circle class="dash-car-port-ring" cx="121" cy="206" r="4"/>
-                                <!-- wheels — coloured by tyre pressure state -->
-                                <rect id="glTyreFL" class="dash-car-tyre" x="18" y="46" width="13" height="34" rx="5"/>
-                                <rect id="glTyreFR" class="dash-car-tyre" x="119" y="46" width="13" height="34" rx="5"/>
-                                <rect id="glTyreRL" class="dash-car-tyre" x="18" y="186" width="13" height="34" rx="5"/>
-                                <rect id="glTyreRR" class="dash-car-tyre" x="119" y="186" width="13" height="34" rx="5"/>
-                                <!-- body + glass -->
-                                <path class="dash-car-body" d="M75 12 C51 12 37 24 35 50 L31 92 L31 196 C31 228 47 248 75 248 C103 248 119 228 119 196 L119 92 L115 50 C113 24 99 12 75 12 Z"/>
-                                <path id="glGlassFront" class="dash-car-glass" d="M48 62 C58 54 92 54 102 62 L98 88 C84 82 66 82 52 88 Z"/>
-                                <path id="glGlassRear" class="dash-car-glass" d="M52 202 C66 208 84 208 98 202 L102 222 C92 230 58 230 48 222 Z"/>
-                                <rect class="dash-car-roof" x="46" y="98" width="58" height="96" rx="16"/>
-                                <!-- per-door lock pills (locked / unlocked / unknown) -->
-                                <rect id="glDoorLF" class="dash-car-door lf" x="27" y="98" width="5" height="44" rx="2.5"/>
-                                <rect id="glDoorLR" class="dash-car-door lr" x="27" y="148" width="5" height="44" rx="2.5"/>
-                                <rect id="glDoorRF" class="dash-car-door rf" x="118" y="98" width="5" height="44" rx="2.5"/>
-                                <rect id="glDoorRR" class="dash-car-door rr" x="118" y="148" width="5" height="44" rx="2.5"/>
-                                <!-- Per-corner tyre pressure and temperature -->
-                                <text id="glPsiFL" class="dash-car-psi" x="24" y="25" text-anchor="middle">--</text>
-                                <text id="glPsiFR" class="dash-car-psi" x="126" y="25" text-anchor="middle">--</text>
-                                <text id="glPsiRL" class="dash-car-psi" x="24" y="240" text-anchor="middle">--</text>
-                                <text id="glPsiRR" class="dash-car-psi" x="126" y="240" text-anchor="middle">--</text>
-                                <g class="dash-car-temp" style="fill:var(--on-surface-variant);font-size:9px;font-weight:600;font-family:inherit">
-                                    <text id="glTempFL" x="24" y="42" text-anchor="middle">--</text>
-                                    <text id="glTempFR" x="126" y="42" text-anchor="middle">--</text>
-                                    <text id="glTempRL" x="24" y="255" text-anchor="middle">--</text>
-                                    <text id="glTempRR" x="126" y="255" text-anchor="middle">--</text>
-                                </g>
-                                <path class="dash-car-light dash-car-head" d="M44 30Q52 20 64 17"/>
-                                <path class="dash-car-light dash-car-head" d="M106 30Q98 20 86 17"/>
-                                <path class="dash-car-light dash-car-tail" d="M50 238Q75 246 100 238"/>
-                                <circle class="dash-car-port" cx="121" cy="206" r="3.5"/>
-                                <!-- centre lock glyph -->
-                                <g id="glLockGlyph" class="dash-car-lock" transform="translate(75,142)">
-                                    <path id="glLockShackle" d="M-4 -3 v-3 a4 4 0 0 1 8 0 v3" fill="none"/>
-                                    <rect x="-7" y="-3" width="14" height="11" rx="2.5"/>
-                                </g>
-                            </svg>
-                        </div>
-                        <div class="dash-glance-side">
-                            <div class="dash-soc-ring" id="dashSocRing" role="img" aria-live="polite">
-                                <svg viewBox="0 0 96 96" aria-hidden="true">
-                                    <circle class="dash-ring-track" cx="48" cy="48" r="41"/>
-                                    <circle class="dash-ring-fill" id="dashRingFill" cx="48" cy="48" r="41"/>
-                                </svg>
-                                <div class="dash-ring-text">
-                                    <strong id="dashHeroSoc">--</strong>
-                                    <span id="dashHeroRange">--</span>
-                                </div>
-                            </div>
-                            <div class="dash-soc-bar" aria-hidden="true"><i id="dashSocBarFill"></i></div>
-                            <div class="dash-range-intel" id="dashRangeIntel" hidden aria-live="polite">
-                                <div class="dash-range-values">
-                                    <div class="dash-range-value dash-range-value--personalized">
-                                        <span data-i18n="trip.card.personalized_range">Personalized Range</span>
-                                        <strong id="dashPersonalizedRange">--</strong>
-                                    </div>
-                                    <div class="dash-range-value dash-range-value--vehicle">
-                                        <span data-i18n="dashboard.kicker_vehicle">Vehicle</span>
-                                        <strong id="dashVehicleRange">--</strong>
-                                    </div>
-                                </div>
-                                <div class="dash-range-tracks" aria-hidden="true">
-                                    <div><i id="dashPersonalizedTrack"></i></div>
-                                    <div><i id="dashVehicleTrack"></i></div>
-                                </div>
-                                <div class="dash-range-meta">
-                                    <span id="dashRangeConfidence"></span>
-                                    <span id="dashRangeSamples"></span>
-                                    <span id="dashRangeLegs"></span>
-                                    <a id="dashRangeCalibrate" class="dash-range-cal" href="trips.html#calibrate-range" data-i18n="trip.range_cal.button" hidden>Calibrate</a>
-                                </div>
-                            </div>
-                            <!-- PHEV-only fuel gauge — hidden unless /api/status
-                                 emits range.fuelPercent (the server gates that
-                                 field on nominal capacity, so BEVs never see it). -->
-                            <div class="dash-glance-fuel" id="dashGlanceFuel" hidden>
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 22V6a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16"/><path d="M2 22h12"/><path d="M13 10h2a2 2 0 0 1 2 2v5a1.5 1.5 0 0 0 3 0V9l-3-3"/><path d="M5 8h6"/></svg>
-                                <div class="dash-fuel-bar"><i id="dashFuelBarFill"></i></div>
-                                <span id="dashGlanceFuelText">--</span>
-                            </div>
-                        </div>
-                        <div class="dash-hero-status">
-                            <a class="dash-chip" id="dashSurvChip" href="surveillance.html" data-ico="shield"><span class="dash-chip-text" data-i18n="dashboard.chip_surveillance_pending">Surveillance --</span></a>
-                            <a class="dash-chip alert is-live" id="dashRecChip" href="events.html" hidden><span class="dash-chip-text" data-i18n="dashboard.chip_recording">Recording</span></a>
-                            <span class="dash-chip" id="dashGpsChip" data-ico="nav"><span class="dash-chip-text" data-i18n="dashboard.chip_gps_pending">GPS --</span></span>
-                            <a class="dash-chip" id="dashConnChip" href="network.html" data-ico="wifi"><span class="dash-chip-text" data-i18n="dashboard.chip_network_pending">Network --</span></a>
-                        </div>
-                        <div class="dash-glance-rows">
-                            <div class="dash-glance-row">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
-                                <span data-i18n="dashboard.metric_lock">Lock</span>
-                                <strong id="glLockText">--</strong>
-                            </div>
-                            <div class="dash-glance-row">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M4.2 6l15.6 12M4.2 18 19.8 6"/></svg>
-                                <span data-i18n="dashboard.glance_climate">Climate</span>
-                                <strong id="glClimateText">--</strong>
-                            </div>
-                            <div class="dash-glance-row">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 12h18"/></svg>
-                                <span data-i18n="dashboard.glance_windows">Windows</span>
-                                <strong id="glWindowsText">--</strong>
-                            </div>
-                            <div class="dash-glance-row">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/></svg>
-                                <span data-i18n="dashboard.glance_tyres">Tyres</span>
-                                <strong id="glTyresText">--</strong>
-                            </div>
-                            <div class="dash-glance-row">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3z"/></svg>
-                                <span data-i18n="dashboard.glance_sentry">Sentry</span>
-                                <strong id="glSentryText">--</strong>
-                            </div>
-                        </div>
-                        <div class="dash-glance-strips">
-                            <div class="dash-glance-rec" id="dashGlanceRec" hidden>
-                                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><circle cx="12" cy="12" r="7"/></svg>
-                                <span id="dashGlanceRecText">--</span>
-                            </div>
-                            <div class="dash-glance-charge" id="dashGlanceCharge" hidden>
-                                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><path d="M13 2 3 14h7l-1 8 11-13h-7l1-7z"/></svg>
-                                <span id="dashGlanceChargeText">--</span>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <button class="dash-ai-insight" id="dashAiInsight" type="button"
-                        aria-expanded="false" aria-live="polite" hidden>
-                    <span class="dash-ai-insight-icon" aria-hidden="true">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                             stroke-width="1.8" stroke-linecap="round"
-                             stroke-linejoin="round">
-                            <rect x="4" y="6" width="16" height="13" rx="3"/>
-                            <path d="M9 3v3M8 12h.01M16 12h.01M9 16h6"/>
-                        </svg>
-                    </span>
-                    <span class="dash-ai-insight-copy">
-                        <span class="dash-ai-insight-kicker"
-                              data-i18n="dashboard.ai_insight_kicker">AI insight</span>
-                        <strong id="dashAiInsightTitle"
-                                data-i18n="dashboard.ai_insight_default_title">Vehicle brief</strong>
-                        <span id="dashAiInsightText" class="dash-ai-insight-text"></span>
-                        <small id="dashAiInsightMeta"></small>
-                    </span>
-                    <svg class="dash-ai-insight-arrow" viewBox="0 0 24 24"
-                         fill="none" stroke="currentColor" stroke-width="2"
-                         aria-hidden="true">
-                        <path d="m6 9 6 6 6-6"/>
-                    </svg>
-                </button>
-
-                    <article class="dash-card dash-module-faults-card" id="dashModuleFaults" hidden aria-live="polite">
-                        <div class="dash-card-head">
-                            <div>
-                                <span class="dash-card-kicker" data-i18n="moduleFaults.dashboard_kicker">Vehicle health</span>
-                                <h2 data-i18n="moduleFaults.dashboard_title">Module faults detected</h2>
-                            </div>
-                            <span class="dash-module-faults-count" id="dashModuleFaultsCount"></span>
-                        </div>
-                        <p class="dash-module-faults-summary" id="dashModuleFaultsSummary" data-i18n="moduleFaults.dashboard_summary">The vehicle is reporting diagnostic warnings.</p>
-                        <ul class="dash-module-faults-list" id="dashModuleFaultsList"></ul>
-                        <a class="dash-module-faults-link" href="module-faults.html" data-i18n="moduleFaults.dashboard_details">View module fault details</a>
-                    </article>
-
-                    <article class="dash-card dash-actions-card" data-card-id="commands">
-                        <div class="dash-card-head">
-                            <div>
-                                <span class="dash-card-kicker" data-i18n="dashboard.kicker_commands">Commands</span>
-                                <h2 data-i18n="dashboard.card_commands">Quick controls</h2>
-                            </div>
-                            <button class="dash-card-grip" type="button" aria-label="Drag to reorder" tabindex="-1" data-i18n-attr="aria-label:dashboard.drag_to_reorder">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></svg>
-                            </button>
-                        </div>
-                        <div class="dash-command-grid dash-command-grid-main">
-                            <button class="dash-command" type="button" onclick="BYD.dashboard.command(this, '/api/vehicle/lock')">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
-                                <span data-i18n="dashboard.cmd_lock">Lock</span>
-                            </button>
-                            <button class="dash-command" type="button" onclick="BYD.dashboard.command(this, '/api/vehicle/unlock')">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></svg>
-                                <span data-i18n="dashboard.cmd_unlock">Unlock</span>
-                            </button>
-                            <button class="dash-command" type="button" onclick="BYD.dashboard.command(this, '/api/vehicle/flash')">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 3 14h8l-1 8 11-13h-8l1-7z"/></svg>
-                                <span data-i18n="dashboard.cmd_flash">Flash</span>
-                            </button>
-                            <button class="dash-command" type="button" onclick="BYD.dashboard.command(this, '/api/vehicle/find-car')">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/><path d="M11 8v3l2 2"/></svg>
-                                <span data-i18n="dashboard.cmd_find">Find</span>
-                            </button>
-                            <button class="dash-command" type="button" onclick="BYD.dashboard.command(this, '/api/vehicle/trunk', {action:'open'})">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2z"/><polyline points="12 11 12 6"/><polyline points="9 8 12 5 15 8"/></svg>
-                                <span data-i18n="dashboard.cmd_trunk_open">Open trunk</span>
-                            </button>
-                            <button class="dash-command" type="button" onclick="BYD.dashboard.command(this, '/api/vehicle/trunk', {action:'close'})">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2z"/><polyline points="12 9 12 14"/><polyline points="9 12 12 15 15 12"/></svg>
-                                <span data-i18n="dashboard.cmd_trunk_close">Close trunk</span>
-                            </button>
-                        </div>
-                        <div class="dash-pills" id="dashPills">
-                            <!-- Vehicle power. Local rail only; stays display:none until
-                                 /api/vehicle/cloud-status confirms that rail exists on this car. -->
-                            <div class="dash-command-grid dash-command-grid-power" id="dashPowerCommands" style="display:none">
-                                <button class="dash-command" type="button" onclick="BYD.dashboard.powerCommand(this, true)">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></svg>
-                                    <span data-i18n="vehicle.power_on">Power on</span>
-                                </button>
-                                <button class="dash-command" type="button" onclick="BYD.dashboard.powerCommand(this, false)">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64A9 9 0 0 1 20.77 15"/><path d="M6.16 6.16a9 9 0 1 0 12.68 12.68"/><path d="M12 2v4"/><line x1="2" y1="2" x2="22" y2="22"/></svg>
-                                    <span data-i18n="vehicle.power_off">Power off</span>
-                                </button>
-                            </div>
-                            <!-- User-defined buttons (GET /api/quick-controls). Rendered into its
-                                 own grid so the built-in commands above are never reordered or
-                                 replaced; stays display:none until at least one button exists. -->
-                            <div class="dash-command-grid" id="dashCustomCommands" style="display:none"></div>
-                            <div class="dash-command-grid dash-command-grid-media">
-                                <a class="dash-command" href="live-view.html">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/><path d="M2 12a9 9 0 0 0 8 8"/><circle cx="2" cy="12" r="2"/></svg>
-                                    <span data-i18n="dashboard.cmd_live">Live</span>
-                                </a>
-                                <a class="dash-command" href="events.html">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg>
-                                    <span data-i18n="dashboard.cmd_recordings">Recordings</span>
-                                </a>
-                                <a class="dash-command" href="trips.html">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></svg>
-                                    <span data-i18n="dashboard.cmd_trips">Trips</span>
-                                </a>
-                                <a class="dash-command" href="parking.html">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 17V7h4a3 3 0 0 1 0 6H9"/></svg>
-                                    <span data-i18n="dashboard.cmd_parking">Parking</span>
-                                </a>
-                            </div>
-                            <button type="button" class="dash-pills-more" id="dashPillsMore" hidden aria-expanded="false" aria-controls="dashPills"><span data-i18n="common.more">More</span></button>
-                        </div>
-                    </article>
-
-                    <!-- Charging card — live plug/charge state + key metrics,
-                         tap-through to the full charging.html history page. -->
-                    <article class="dash-card dash-info-card dash-charge-card" data-card-id="charging">
-                        <div class="dash-card-head">
-                            <span class="dash-tile-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 L4 14 h7 l-1 8 9-12 h-7 z"/></svg>
-                            </span>
-                            <div>
-                                <span class="dash-card-kicker" data-i18n="charge.kicker">Energy</span>
-                                <h2 data-i18n="charge.card_title">Charging</h2>
-                            </div>
-                            <button class="dash-card-grip" type="button" aria-label="Drag to reorder" tabindex="-1" data-i18n-attr="aria-label:dashboard.drag_to_reorder">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></svg>
-                            </button>
-                        </div>
-                        <div class="dash-charge-chip" id="dashChargeChip">
-                            <span class="ic_status_dot dot-idle" id="dashChargeDot"></span>
-                            <span id="dashChargeState" data-i18n="charge.state_idle">Idle</span>
-                        </div>
-                        <div class="dash-charge-big">
-                            <strong id="dashChargeTtf">--</strong>
-                            <span data-i18n="charge.metric_ttf">Time to full</span>
-                        </div>
-                        <div class="dash-mini-bar" aria-hidden="true"><i id="dashChargeSocBar"></i></div>
-                        <div class="dash-metric-grid dash-metric-grid--4">
-                            <div class="dash-metric"><span data-i18n="charge.metric_soc">SoC</span><strong id="dashChargeSoc">--</strong></div>
-                            <div class="dash-metric"><span data-i18n="charge.metric_power">Power</span><strong id="dashChargePower">--</strong></div>
-                            <div class="dash-metric"><span data-i18n="charge.metric_session">Session</span><strong id="dashChargeKwh">--</strong></div>
-                        </div>
-                        <div class="dash-action-row">
-                            <button class="dash-primary-btn dash-tile-link" type="button" onclick="location.href='charging.html'">
-                                <span data-i18n="charge.open">Charging details</span>
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-                            </button>
-                        </div>
-                    </article>
-
-                    <article class="dash-card dash-location-card" data-card-id="location">
-                        <div class="dash-card-head">
-                            <div>
-                                <span class="dash-card-kicker" data-i18n="dashboard.kicker_position">Position</span>
-                                <h2 data-i18n="dashboard.card_location">Vehicle location</h2>
-                            </div>
-                            <button class="dash-card-grip" type="button" aria-label="Drag to reorder" tabindex="-1" data-i18n-attr="aria-label:dashboard.drag_to_reorder">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></svg>
-                            </button>
-                        </div>
-                        <div class="dash-location-map">
-                            <div id="mapContainer"></div>
-                        </div>
-                        <div class="dash-action-row">
-                            <button class="dash-primary-btn" type="button" onclick="BYD.dashboard.openDirections()">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11 22 2l-9 19-2-8-8-2Z"/><path d="m11 13 4-4"/></svg>
-                                <span data-i18n="dashboard.directions">Navigate to car</span>
-                            </button>
-                        </div>
-                    </article>
-
-                    <article class="dash-card dash-info-card" data-card-id="info">
-                        <div class="dash-card-head">
-                            <div>
-                                <span class="dash-card-kicker" data-i18n="dashboard.kicker_vehicle">Vehicle</span>
-                                <h2 data-i18n="dashboard.card_info">Main info</h2>
-                            </div>
-                            <button class="dash-card-grip" type="button" aria-label="Drag to reorder" tabindex="-1" data-i18n-attr="aria-label:dashboard.drag_to_reorder">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></svg>
-                            </button>
-                        </div>
-                        <div class="dash-metric-grid has-connectivity" id="dashInfoGrid">
-                            <div class="dash-metric"><span data-i18n="dashboard.metric_battery"><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="16" height="10" rx="2"/><path d="M22 11v2"/></svg>Battery</span><strong id="dashSoc">--</strong></div>
-                            <!-- On PHEVs the strong shows TOTAL range and the small
-                                 carries the EV + fuel breakdown; on BEVs the small
-                                 stays hidden and strong = electric range. -->
-                            <div class="dash-metric"><span id="dashRangeLabel" data-i18n="dashboard.metric_range"><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="19" r="3"/><circle cx="18" cy="5" r="3"/><path d="M9 19h4a4 4 0 0 0 0-8H9a4 4 0 0 1 0-8h2"/></svg>Range</span><strong id="dashRange">--</strong><small id="dashRangeBreakdown" style="display:none"></small></div>
-                            <!-- PHEV-only; unhidden when /api/status carries range.fuelPercent -->
-                            <div class="dash-metric" id="dashFuelMetric" style="display:none"><span data-i18n="vehicle.fuel"><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 22V6a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16"/><path d="M2 22h12"/><path d="M13 10h2a2 2 0 0 1 2 2v5a1.5 1.5 0 0 0 3 0V9l-3-3"/><path d="M5 8h6"/></svg>Fuel</span><strong id="dashFuel">--</strong></div>
-                            <div class="dash-metric"><span><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v5"/></svg>12V</span><strong id="dash12v">--</strong></div>
-                            <div class="dash-metric" id="dashPowerMetric"><span data-i18n="dashboard.metric_power"><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>Power</span><strong id="dashAcc">--</strong></div>
-                            <div class="dash-connectivity-metrics">
-                                <!-- Value = SSID / Mobile Data / Ethernet; small = IPv4, then Wi-Fi dBm, when known.
-                                     The Wi-Fi switch and its note sit in the tile's top corner. -->
-                                <div class="dash-metric dash-network-metric"><span data-i18n="dashboard.metric_network"><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>Network</span>
-                                    <div class="dash-wifi-ctrl" id="dashWifiCtrl" hidden>
-                                        <label class="toggle-switch dash-wifi-switch" id="dashWifiSwitch"><input type="checkbox" id="dashWifiToggle" onchange="BYD.dashboard.toggleWifi(this.checked)"><span class="toggle-slider"></span></label>
-                                    </div><strong id="dashNetwork">--</strong>
-                                    <div class="dash-net-detail"><small id="dashNetworkIp" style="display:none"></small><small id="dashNetworkRssi" class="dash-net-rssi" style="display:none"></small><button type="button" class="dash-wifi-info" id="dashWifiInfoBtn" hidden aria-expanded="false" aria-controls="dashWifiNote" data-i18n-attr="title:dashboard.wifi_note_title;aria-label:dashboard.wifi_note_title" title="Wi-Fi and BYD connected services" aria-label="Wi-Fi and BYD connected services" onclick="BYD.dashboard.toggleWifiNote()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></svg></button></div>
-                                    <p class="dash-wifi-note" id="dashWifiNote" hidden data-i18n="dashboard.wifi_cloud_note">Joining Wi-Fi can switch off the car's own SIM link to BYD, so BYD app remote controls may stop working until Wi-Fi is off.</p>
-                                </div>
-                                <div class="dash-metric dash-bluetooth-metric" id="dashBluetoothMetric" data-state="unknown">
-                                    <span data-i18n="dashboard.metric_bluetooth"><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7l10 10-5 4V3l5 4L7 17"/></svg>Bluetooth</span>
-                                    <strong class="dash-radio-value" id="dashBluetoothValue" role="status" aria-live="polite" aria-label="Vehicle Bluetooth: Unknown">
-                                        <span id="dashBluetooth"><span data-i18n="common.unknown">Unknown</span></span>
-                                    </strong>
-                                    <small id="dashBluetoothDetail"><span data-i18n="dashboard.bluetooth_detail_initial">Vehicle radio</span></small>
-                                </div>
-                            </div>
-                            <div class="dash-metric" id="dashLockMetric"><span data-i18n="dashboard.metric_lock"><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Lock</span><strong id="dashLock">--</strong></div>
-                            <!-- Hidden until /api/vehicle/state carries odometer.totalKm;
-                                 small = EV/HEV split when the vehicle reports it (DM-i). -->
-                            <div class="dash-metric" id="dashOdoMetric" style="display:none"><span data-i18n="charge.detail_odometer"><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 14 4-4"/><path d="M3.3 19a10 10 0 1 1 17.4 0"/></svg>Odometer</span><strong id="dashOdo">--</strong><small id="dashOdoSplit" style="display:none"></small></div>
-                        </div>
-                    </article>
-                </section>
-            </div>
-        </main>
-    </div>
-
-    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
-    <div id="toastContainer" class="toast-container"></div>
-
+    <!-- Styles before the markup so a slow load never paints it unstyled; in <body> so they stay after styles injected into <head>. -->
     <style>
         .dashboard-page .main-content {
             padding: 0;
@@ -494,6 +67,12 @@
             line-height: 1.4;
             overflow-wrap: break-word;
         }
+        .dash-hero-copy .dash-parked-drain {
+            margin-top: 8px;
+            color: var(--on-surface);
+            font-weight: 600;
+        }
+        .dash-parked-drain[hidden] { display: none; }
 
         /* ── Bento grid ──────────────────────────────────────────────
            One grid holds the hero, the AI insight and the reorderable
@@ -1265,6 +844,29 @@
             margin-top: 16px;
         }
         .dash-range-intel[hidden] { display: none; }
+        /* Which range leads: the label plus the app's own switch, at the Wi-Fi tile's size. */
+        .dash-range-preference {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 6px;
+            color: var(--on-surface-variant);
+            font-size: var(--fs-caption);
+            font-weight: 500;
+            line-height: 1.3;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .dash-range-preference[hidden] { display: none; }
+        .dash-range-preference > span:first-child { min-width: 0; margin-right: 12px; }
+        [dir="rtl"] .dash-range-preference > span:first-child { margin-right: 0; margin-left: 12px; }
+        /* 52x32: the standard track without the 8px hit padding above and below. */
+        .dash-range-switch { flex: 0 0 auto; height: 32px; transform: scale(.8); transform-origin: 100% 50%; }
+        [dir="rtl"] .dash-range-switch { transform-origin: 0 50%; }
+        .dash-range-switch .toggle-slider { top: 0; bottom: 0; }
+        @media (pointer: coarse) { .dash-range-preference { min-height: 40px; } }
+        .dash-range-intel.vehicle-first .dash-range-value--vehicle { order: -1; }
+        .dash-range-intel.vehicle-first .dash-range-tracks > div:last-child { order: -1; }
         .dash-range-values {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2902,6 +2504,7 @@
                 white-space: nowrap;
             }
             .dash-hero-copy p { display: none; }
+            .dash-hero-copy .dash-parked-drain:not([hidden]) { display: block; margin: 0 0 12px; }
             .dash-hero-copy { margin: 0; }
             .dashboard-page-body { padding-top: 4px; }
         }
@@ -2947,11 +2550,453 @@
         }
     </style>
 
-    <script src="../shared/auth.js"></script>
+    <div class="app-layout">
+        <div id="app-shell-mount"></div>
+
+        <main class="main-content">
+            <div class="mobile-header" id="mobileHeader">
+                <button class="menu-toggle" onclick="toggleSidebar()" aria-label="Open menu" data-i18n-attr="aria-label:dashboard.aria_open_menu">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/>
+                    </svg>
+                </button>
+                <span style="font-weight:600;" data-i18n="dashboard.heading">Dashboard</span>
+                <div style="width:40px;"></div>
+            </div>
+
+            <div class="dashboard-page-body">
+                <div class="dash-hero-copy" data-theme-dock>
+                    <h1 data-i18n="dashboard.heading">Dashboard</h1>
+                    <p id="dashHeroSubtitle" data-i18n="dashboard.subtitle">Vehicle status, position and main controls.</p>
+                    <p id="dashParkedDrain" class="dash-parked-drain" hidden aria-live="polite"></p>
+                </div>
+
+                <!-- Bento grid. The hero and the AI insight come first and carry
+                     no data-card-id, so the reorder controller below never moves
+                     them; the remaining cards carry data-card-id for layout
+                     persistence. -->
+                <section class="dash-grid" id="dashCards">
+                <section class="dash-hero">
+                    <!--
+                      Vehicle glance panel. Replaces the decorative hero GLB
+                      (the sidebar EV-card still renders the 3D model) with
+                      live state: a top-down schematic annotated with per-door
+                      lock pills + per-corner tyre pressure and temperature from /api/vehicle/state
+                      (polled every 6s by refreshVehicleState), an SoC ring +
+                      range fed by /api/status, and glance rows for climate /
+                      windows / tyres. When a charge session is live the panel
+                      gains a charging strip (power · time-to-full · kWh) —
+                      the "what matters right now" takeover. The drive state
+                      and status chips live here too, so the schematic sits
+                      beside them in one grid.
+                    -->
+                    <div class="dash-glance" id="dashGlance">
+                    <div class="dash-hero-main">
+                        <div class="dash-drive-state is-pending" id="dashDriveState"
+                             role="status" aria-live="polite" aria-atomic="true">
+                            <!-- The gear readout overlays this slot. Do not render the
+                                 obsolete power SVG: it flashes before the page CSS loads. -->
+                            <div class="dash-drive-icon" aria-hidden="true"></div>
+                            <div class="dash-drive-copy">
+                                <span id="dashDrivePower"
+                                      data-i18n="dashboard.drive_power_pending">Vehicle --</span>
+                                <strong id="dashDriveMode"
+                                        data-i18n="dashboard.drive_state_waiting">Waiting for status</strong>
+                                <small id="dashDriveDetail">--</small>
+                            </div>
+                            <div class="dash-drive-readouts">
+                                <div class="dash-drive-readout dash-drive-gear">
+                                    <span data-i18n="dashboard.drive_metric_gear">Gear</span>
+                                    <strong id="dashDriveGear">--</strong>
+                                </div>
+                                <div class="dash-drive-readout dash-drive-speed">
+                                    <span data-i18n="dashboard.drive_metric_speed">Speed</span>
+                                    <div>
+                                        <strong id="dashDriveSpeed">--</strong>
+                                        <small id="dashDriveSpeedUnit">km/h</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                        <div class="dash-glance-car" id="dashGlanceCar" aria-hidden="true">
+                            <span class="dash-car-ripple"></span><span class="dash-car-ripple r2"></span>
+                            <svg class="dash-car-svg" viewBox="0 0 150 260" preserveAspectRatio="xMidYMid meet">
+                                <defs>
+                                    <linearGradient id="dashCarBodyShade" x1="0" y1="0" x2="1" y2="0"><stop offset="0" class="dash-car-edge"/><stop offset="0.5" class="dash-car-mid"/><stop offset="1" class="dash-car-edge"/></linearGradient>
+                                    <linearGradient id="dashCarGlassShade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="dash-car-glass-a"/><stop offset="1" class="dash-car-glass-b"/></linearGradient>
+                                    <radialGradient id="dashCarGlowShade" cx="0.5" cy="0.5" r="0.5"><stop offset="0" class="dash-car-glow-a"/><stop offset="1" class="dash-car-glow-b"/></radialGradient>
+                                </defs>
+                                <ellipse class="dash-car-glow" cx="75" cy="131" rx="86" ry="128" fill="url(#dashCarGlowShade)"/>
+                                <path class="dash-car-cable" d="M122 206C137 210 147 222 165 234"/>
+                                <circle class="dash-car-port-ring" cx="121" cy="206" r="4"/>
+                                <!-- wheels — coloured by tyre pressure state -->
+                                <rect id="glTyreFL" class="dash-car-tyre" x="18" y="46" width="13" height="34" rx="5"/>
+                                <rect id="glTyreFR" class="dash-car-tyre" x="119" y="46" width="13" height="34" rx="5"/>
+                                <rect id="glTyreRL" class="dash-car-tyre" x="18" y="186" width="13" height="34" rx="5"/>
+                                <rect id="glTyreRR" class="dash-car-tyre" x="119" y="186" width="13" height="34" rx="5"/>
+                                <!-- body + glass -->
+                                <path class="dash-car-body" d="M75 12 C51 12 37 24 35 50 L31 92 L31 196 C31 228 47 248 75 248 C103 248 119 228 119 196 L119 92 L115 50 C113 24 99 12 75 12 Z"/>
+                                <path id="glGlassFront" class="dash-car-glass" d="M48 62 C58 54 92 54 102 62 L98 88 C84 82 66 82 52 88 Z"/>
+                                <path id="glGlassRear" class="dash-car-glass" d="M52 202 C66 208 84 208 98 202 L102 222 C92 230 58 230 48 222 Z"/>
+                                <rect class="dash-car-roof" x="46" y="98" width="58" height="96" rx="16"/>
+                                <!-- per-door lock pills (locked / unlocked / unknown) -->
+                                <rect id="glDoorLF" class="dash-car-door lf" x="27" y="98" width="5" height="44" rx="2.5"/>
+                                <rect id="glDoorLR" class="dash-car-door lr" x="27" y="148" width="5" height="44" rx="2.5"/>
+                                <rect id="glDoorRF" class="dash-car-door rf" x="118" y="98" width="5" height="44" rx="2.5"/>
+                                <rect id="glDoorRR" class="dash-car-door rr" x="118" y="148" width="5" height="44" rx="2.5"/>
+                                <!-- Per-corner tyre pressure and temperature -->
+                                <text id="glPsiFL" class="dash-car-psi" x="24" y="25" text-anchor="middle">--</text>
+                                <text id="glPsiFR" class="dash-car-psi" x="126" y="25" text-anchor="middle">--</text>
+                                <text id="glPsiRL" class="dash-car-psi" x="24" y="240" text-anchor="middle">--</text>
+                                <text id="glPsiRR" class="dash-car-psi" x="126" y="240" text-anchor="middle">--</text>
+                                <g class="dash-car-temp" style="fill:var(--on-surface-variant);font-size:9px;font-weight:600;font-family:inherit">
+                                    <text id="glTempFL" x="24" y="42" text-anchor="middle">--</text>
+                                    <text id="glTempFR" x="126" y="42" text-anchor="middle">--</text>
+                                    <text id="glTempRL" x="24" y="255" text-anchor="middle">--</text>
+                                    <text id="glTempRR" x="126" y="255" text-anchor="middle">--</text>
+                                </g>
+                                <path class="dash-car-light dash-car-head" d="M44 30Q52 20 64 17"/>
+                                <path class="dash-car-light dash-car-head" d="M106 30Q98 20 86 17"/>
+                                <path class="dash-car-light dash-car-tail" d="M50 238Q75 246 100 238"/>
+                                <circle class="dash-car-port" cx="121" cy="206" r="3.5"/>
+                                <!-- centre lock glyph -->
+                                <g id="glLockGlyph" class="dash-car-lock" transform="translate(75,142)">
+                                    <path id="glLockShackle" d="M-4 -3 v-3 a4 4 0 0 1 8 0 v3" fill="none"/>
+                                    <rect x="-7" y="-3" width="14" height="11" rx="2.5"/>
+                                </g>
+                            </svg>
+                        </div>
+                        <div class="dash-glance-side">
+                            <div class="dash-soc-ring" id="dashSocRing" role="img" aria-live="polite">
+                                <svg viewBox="0 0 96 96" aria-hidden="true">
+                                    <circle class="dash-ring-track" cx="48" cy="48" r="41"/>
+                                    <circle class="dash-ring-fill" id="dashRingFill" cx="48" cy="48" r="41"/>
+                                </svg>
+                                <div class="dash-ring-text">
+                                    <strong id="dashHeroSoc">--</strong>
+                                    <span id="dashHeroRange">--</span>
+                                </div>
+                            </div>
+                            <div class="dash-soc-bar" aria-hidden="true"><i id="dashSocBarFill"></i></div>
+                            <div class="dash-range-intel" id="dashRangeIntel" hidden aria-live="polite">
+                                <label class="dash-range-preference" id="dashRangePreference" hidden>
+                                    <span data-i18n="dashboard.prefer_personalized_range">Prioritize personalized range</span>
+                                    <span class="toggle-switch dash-range-switch"><input type="checkbox" id="dashPreferPersonalized" checked onchange="BYD.dashboard.setRangePreference(this.checked)"><span class="toggle-slider"></span></span>
+                                </label>
+                                <div class="dash-range-values">
+                                    <div class="dash-range-value dash-range-value--personalized">
+                                        <span data-i18n="trip.card.personalized_range">Personalized Range</span>
+                                        <strong id="dashPersonalizedRange">--</strong>
+                                    </div>
+                                    <div class="dash-range-value dash-range-value--vehicle">
+                                        <span data-i18n="dashboard.kicker_vehicle">Vehicle</span>
+                                        <strong id="dashVehicleRange">--</strong>
+                                    </div>
+                                </div>
+                                <div class="dash-range-tracks" aria-hidden="true">
+                                    <div><i id="dashPersonalizedTrack"></i></div>
+                                    <div><i id="dashVehicleTrack"></i></div>
+                                </div>
+                                <div class="dash-range-meta">
+                                    <span id="dashRangeConfidence"></span>
+                                    <span id="dashRangeSamples"></span>
+                                    <span id="dashRangeLegs"></span>
+                                    <a id="dashRangeCalibrate" class="dash-range-cal" href="trips.html#calibrate-range" data-i18n="trip.range_cal.button" hidden>Calibrate</a>
+                                </div>
+                            </div>
+                            <!-- PHEV-only fuel gauge — hidden unless /api/status
+                                 emits range.fuelPercent (the server gates that
+                                 field on nominal capacity, so BEVs never see it). -->
+                            <div class="dash-glance-fuel" id="dashGlanceFuel" hidden>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 22V6a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16"/><path d="M2 22h12"/><path d="M13 10h2a2 2 0 0 1 2 2v5a1.5 1.5 0 0 0 3 0V9l-3-3"/><path d="M5 8h6"/></svg>
+                                <div class="dash-fuel-bar"><i id="dashFuelBarFill"></i></div>
+                                <span id="dashGlanceFuelText">--</span>
+                            </div>
+                        </div>
+                        <div class="dash-hero-status">
+                            <a class="dash-chip" id="dashSurvChip" href="surveillance.html" data-ico="shield"><span class="dash-chip-text" data-i18n="dashboard.chip_surveillance_pending">Surveillance --</span></a>
+                            <a class="dash-chip alert is-live" id="dashRecChip" href="events.html" hidden><span class="dash-chip-text" data-i18n="dashboard.chip_recording">Recording</span></a>
+                            <span class="dash-chip" id="dashGpsChip" data-ico="nav"><span class="dash-chip-text" data-i18n="dashboard.chip_gps_pending">GPS --</span></span>
+                            <a class="dash-chip" id="dashConnChip" href="network.html" data-ico="wifi"><span class="dash-chip-text" data-i18n="dashboard.chip_network_pending">Network --</span></a>
+                        </div>
+                        <div class="dash-glance-rows">
+                            <div class="dash-glance-row">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+                                <span data-i18n="dashboard.metric_lock">Lock</span>
+                                <strong id="glLockText">--</strong>
+                            </div>
+                            <div class="dash-glance-row">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M4.2 6l15.6 12M4.2 18 19.8 6"/></svg>
+                                <span data-i18n="dashboard.glance_climate">Climate</span>
+                                <strong id="glClimateText">--</strong>
+                            </div>
+                            <div class="dash-glance-row">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 12h18"/></svg>
+                                <span data-i18n="dashboard.glance_windows">Windows</span>
+                                <strong id="glWindowsText">--</strong>
+                            </div>
+                            <div class="dash-glance-row">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/></svg>
+                                <span data-i18n="dashboard.glance_tyres">Tyres</span>
+                                <strong id="glTyresText">--</strong>
+                            </div>
+                            <div class="dash-glance-row">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3z"/></svg>
+                                <span data-i18n="dashboard.glance_sentry">Sentry</span>
+                                <strong id="glSentryText">--</strong>
+                            </div>
+                        </div>
+                        <div class="dash-glance-strips">
+                            <div class="dash-glance-rec" id="dashGlanceRec" hidden>
+                                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><circle cx="12" cy="12" r="7"/></svg>
+                                <span id="dashGlanceRecText">--</span>
+                            </div>
+                            <div class="dash-glance-charge" id="dashGlanceCharge" hidden>
+                                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><path d="M13 2 3 14h7l-1 8 11-13h-7l1-7z"/></svg>
+                                <span id="dashGlanceChargeText">--</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <button class="dash-ai-insight" id="dashAiInsight" type="button"
+                        aria-expanded="false" aria-live="polite" hidden>
+                    <span class="dash-ai-insight-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                             stroke-width="1.8" stroke-linecap="round"
+                             stroke-linejoin="round">
+                            <rect x="4" y="6" width="16" height="13" rx="3"/>
+                            <path d="M9 3v3M8 12h.01M16 12h.01M9 16h6"/>
+                        </svg>
+                    </span>
+                    <span class="dash-ai-insight-copy">
+                        <span class="dash-ai-insight-kicker"
+                              data-i18n="dashboard.ai_insight_kicker">AI insight</span>
+                        <strong id="dashAiInsightTitle"
+                                data-i18n="dashboard.ai_insight_default_title">Vehicle brief</strong>
+                        <span id="dashAiInsightText" class="dash-ai-insight-text"></span>
+                        <small id="dashAiInsightMeta"></small>
+                    </span>
+                    <svg class="dash-ai-insight-arrow" viewBox="0 0 24 24"
+                         fill="none" stroke="currentColor" stroke-width="2"
+                         aria-hidden="true">
+                        <path d="m6 9 6 6 6-6"/>
+                    </svg>
+                </button>
+
+                    <article class="dash-card dash-module-faults-card" id="dashModuleFaults" hidden aria-live="polite">
+                        <div class="dash-card-head">
+                            <div>
+                                <span class="dash-card-kicker" data-i18n="moduleFaults.dashboard_kicker">Vehicle health</span>
+                                <h2 data-i18n="moduleFaults.dashboard_title">Module faults detected</h2>
+                            </div>
+                            <span class="dash-module-faults-count" id="dashModuleFaultsCount"></span>
+                        </div>
+                        <p class="dash-module-faults-summary" id="dashModuleFaultsSummary" data-i18n="moduleFaults.dashboard_summary">The vehicle is reporting diagnostic warnings.</p>
+                        <ul class="dash-module-faults-list" id="dashModuleFaultsList"></ul>
+                        <a class="dash-module-faults-link" href="module-faults.html" data-i18n="moduleFaults.dashboard_details">View module fault details</a>
+                    </article>
+
+                    <article class="dash-card dash-actions-card" data-card-id="commands">
+                        <div class="dash-card-head">
+                            <div>
+                                <span class="dash-card-kicker" data-i18n="dashboard.kicker_commands">Commands</span>
+                                <h2 data-i18n="dashboard.card_commands">Quick controls</h2>
+                            </div>
+                            <button class="dash-card-grip" type="button" aria-label="Drag to reorder" tabindex="-1" data-i18n-attr="aria-label:dashboard.drag_to_reorder">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></svg>
+                            </button>
+                        </div>
+                        <div class="dash-command-grid dash-command-grid-main">
+                            <button class="dash-command" type="button" onclick="BYD.dashboard.command(this, '/api/vehicle/lock')">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+                                <span data-i18n="dashboard.cmd_lock">Lock</span>
+                            </button>
+                            <button class="dash-command" type="button" onclick="BYD.dashboard.command(this, '/api/vehicle/unlock')">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></svg>
+                                <span data-i18n="dashboard.cmd_unlock">Unlock</span>
+                            </button>
+                            <button class="dash-command" type="button" onclick="BYD.dashboard.command(this, '/api/vehicle/flash')">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 3 14h8l-1 8 11-13h-8l1-7z"/></svg>
+                                <span data-i18n="dashboard.cmd_flash">Flash</span>
+                            </button>
+                            <button class="dash-command" type="button" onclick="BYD.dashboard.command(this, '/api/vehicle/find-car')">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/><path d="M11 8v3l2 2"/></svg>
+                                <span data-i18n="dashboard.cmd_find">Find</span>
+                            </button>
+                            <button class="dash-command" type="button" onclick="BYD.dashboard.command(this, '/api/vehicle/trunk', {action:'open'})">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2z"/><polyline points="12 11 12 6"/><polyline points="9 8 12 5 15 8"/></svg>
+                                <span data-i18n="dashboard.cmd_trunk_open">Open trunk</span>
+                            </button>
+                            <button class="dash-command" type="button" onclick="BYD.dashboard.command(this, '/api/vehicle/trunk', {action:'close'})">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2z"/><polyline points="12 9 12 14"/><polyline points="9 12 12 15 15 12"/></svg>
+                                <span data-i18n="dashboard.cmd_trunk_close">Close trunk</span>
+                            </button>
+                        </div>
+                        <div class="dash-pills" id="dashPills">
+                            <!-- Vehicle power. Local rail only; stays display:none until
+                                 /api/vehicle/cloud-status confirms that rail exists on this car. -->
+                            <div class="dash-command-grid dash-command-grid-power" id="dashPowerCommands" style="display:none">
+                                <button class="dash-command" type="button" onclick="BYD.dashboard.powerCommand(this, true)">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></svg>
+                                    <span data-i18n="vehicle.power_on">Power on</span>
+                                </button>
+                                <button class="dash-command" type="button" onclick="BYD.dashboard.powerCommand(this, false)">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64A9 9 0 0 1 20.77 15"/><path d="M6.16 6.16a9 9 0 1 0 12.68 12.68"/><path d="M12 2v4"/><line x1="2" y1="2" x2="22" y2="22"/></svg>
+                                    <span data-i18n="vehicle.power_off">Power off</span>
+                                </button>
+                            </div>
+                            <!-- Reuse Vehicle Control's parked-only IVI reboot API and confirmation.
+                                 The shortcut is shown only when the vehicle reports support. -->
+                            <button class="dash-command" id="dashIviReboot" type="button"
+                                    style="display:none" title="Reboot IVI (parked only)"
+                                    data-i18n-attr="title:vehicle.ivi_reboot_title"
+                                    onclick="BYD.dashboard.rebootIvi(this)">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+                                <span data-i18n="vehicle.ivi_reboot">Reboot IVI</span>
+                            </button>
+                            <!-- User-defined buttons (GET /api/quick-controls). Rendered into its
+                                 own grid so the built-in commands above are never reordered or
+                                 replaced; stays display:none until at least one button exists. -->
+                            <div class="dash-command-grid" id="dashCustomCommands" style="display:none"></div>
+                            <div class="dash-command-grid dash-command-grid-media">
+                                <a class="dash-command" href="live-view.html">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/><path d="M2 12a9 9 0 0 0 8 8"/><circle cx="2" cy="12" r="2"/></svg>
+                                    <span data-i18n="dashboard.cmd_live">Live</span>
+                                </a>
+                                <a class="dash-command" href="events.html">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg>
+                                    <span data-i18n="dashboard.cmd_recordings">Recordings</span>
+                                </a>
+                                <a class="dash-command" href="trips.html">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></svg>
+                                    <span data-i18n="dashboard.cmd_trips">Trips</span>
+                                </a>
+                                <a class="dash-command" href="parking.html">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 17V7h4a3 3 0 0 1 0 6H9"/></svg>
+                                    <span data-i18n="dashboard.cmd_parking">Parking</span>
+                                </a>
+                            </div>
+                            <button type="button" class="dash-pills-more" id="dashPillsMore" hidden aria-expanded="false" aria-controls="dashPills"><span data-i18n="common.more">More</span></button>
+                        </div>
+                    </article>
+
+                    <!-- Charging card — live plug/charge state + key metrics,
+                         tap-through to the full charging.html history page. -->
+                    <article class="dash-card dash-info-card dash-charge-card" data-card-id="charging">
+                        <div class="dash-card-head">
+                            <span class="dash-tile-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 L4 14 h7 l-1 8 9-12 h-7 z"/></svg>
+                            </span>
+                            <div>
+                                <span class="dash-card-kicker" data-i18n="charge.kicker">Energy</span>
+                                <h2 data-i18n="charge.card_title">Charging</h2>
+                            </div>
+                            <button class="dash-card-grip" type="button" aria-label="Drag to reorder" tabindex="-1" data-i18n-attr="aria-label:dashboard.drag_to_reorder">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></svg>
+                            </button>
+                        </div>
+                        <div class="dash-charge-chip" id="dashChargeChip">
+                            <span class="ic_status_dot dot-idle" id="dashChargeDot"></span>
+                            <span id="dashChargeState" data-i18n="charge.state_idle">Idle</span>
+                        </div>
+                        <div class="dash-charge-big">
+                            <strong id="dashChargeTtf">--</strong>
+                            <span data-i18n="charge.metric_ttf">Time to full</span>
+                        </div>
+                        <div class="dash-mini-bar" aria-hidden="true"><i id="dashChargeSocBar"></i></div>
+                        <div class="dash-metric-grid dash-metric-grid--4">
+                            <div class="dash-metric"><span data-i18n="charge.metric_soc">SoC</span><strong id="dashChargeSoc">--</strong></div>
+                            <div class="dash-metric"><span data-i18n="charge.metric_power">Power</span><strong id="dashChargePower">--</strong></div>
+                            <div class="dash-metric"><span data-i18n="charge.metric_session">Session</span><strong id="dashChargeKwh">--</strong></div>
+                        </div>
+                        <div class="dash-action-row">
+                            <button class="dash-primary-btn dash-tile-link" type="button" onclick="location.href='charging.html'">
+                                <span data-i18n="charge.open">Charging details</span>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+                            </button>
+                        </div>
+                    </article>
+
+                    <article class="dash-card dash-location-card" data-card-id="location">
+                        <div class="dash-card-head">
+                            <div>
+                                <span class="dash-card-kicker" data-i18n="dashboard.kicker_position">Position</span>
+                                <h2 data-i18n="dashboard.card_location">Vehicle location</h2>
+                            </div>
+                            <button class="dash-card-grip" type="button" aria-label="Drag to reorder" tabindex="-1" data-i18n-attr="aria-label:dashboard.drag_to_reorder">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></svg>
+                            </button>
+                        </div>
+                        <div class="dash-location-map">
+                            <div id="mapContainer"></div>
+                        </div>
+                        <div class="dash-action-row">
+                            <button class="dash-primary-btn" type="button" onclick="BYD.dashboard.openDirections()">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11 22 2l-9 19-2-8-8-2Z"/><path d="m11 13 4-4"/></svg>
+                                <span data-i18n="dashboard.directions">Navigate to car</span>
+                            </button>
+                        </div>
+                    </article>
+
+                    <article class="dash-card dash-info-card" data-card-id="info">
+                        <div class="dash-card-head">
+                            <div>
+                                <span class="dash-card-kicker" data-i18n="dashboard.kicker_vehicle">Vehicle</span>
+                                <h2 data-i18n="dashboard.card_info">Main info</h2>
+                            </div>
+                            <button class="dash-card-grip" type="button" aria-label="Drag to reorder" tabindex="-1" data-i18n-attr="aria-label:dashboard.drag_to_reorder">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></svg>
+                            </button>
+                        </div>
+                        <div class="dash-metric-grid has-connectivity" id="dashInfoGrid">
+                            <div class="dash-metric"><span data-i18n="dashboard.metric_battery"><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="16" height="10" rx="2"/><path d="M22 11v2"/></svg>Battery</span><strong id="dashSoc">--</strong></div>
+                            <!-- On PHEVs the strong shows TOTAL range and the small
+                                 carries the EV + fuel breakdown; on BEVs the small
+                                 stays hidden and strong = electric range. -->
+                            <div class="dash-metric"><span id="dashRangeLabel" data-i18n="dashboard.metric_range"><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="19" r="3"/><circle cx="18" cy="5" r="3"/><path d="M9 19h4a4 4 0 0 0 0-8H9a4 4 0 0 1 0-8h2"/></svg>Range</span><strong id="dashRange">--</strong><small id="dashRangeBreakdown" style="display:none"></small></div>
+                            <!-- PHEV-only; unhidden when /api/status carries range.fuelPercent -->
+                            <div class="dash-metric" id="dashFuelMetric" style="display:none"><span data-i18n="vehicle.fuel"><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 22V6a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16"/><path d="M2 22h12"/><path d="M13 10h2a2 2 0 0 1 2 2v5a1.5 1.5 0 0 0 3 0V9l-3-3"/><path d="M5 8h6"/></svg>Fuel</span><strong id="dashFuel">--</strong></div>
+                            <div class="dash-metric"><span><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v5"/></svg>12V</span><strong id="dash12v">--</strong></div>
+                            <div class="dash-metric" id="dashPowerMetric"><span data-i18n="dashboard.metric_power"><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>Power</span><strong id="dashAcc">--</strong></div>
+                            <div class="dash-connectivity-metrics">
+                                <!-- Value = SSID / Mobile Data / Ethernet; small = IPv4, then Wi-Fi dBm, when known.
+                                     The Wi-Fi switch and its note sit in the tile's top corner. -->
+                                <div class="dash-metric dash-network-metric"><span data-i18n="dashboard.metric_network"><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>Network</span>
+                                    <div class="dash-wifi-ctrl" id="dashWifiCtrl" hidden>
+                                        <label class="toggle-switch dash-wifi-switch" id="dashWifiSwitch"><input type="checkbox" id="dashWifiToggle" onchange="BYD.dashboard.toggleWifi(this.checked)"><span class="toggle-slider"></span></label>
+                                    </div><strong id="dashNetwork">--</strong>
+                                    <div class="dash-net-detail"><small id="dashNetworkIp" style="display:none"></small><small id="dashNetworkRssi" class="dash-net-rssi" style="display:none"></small><button type="button" class="dash-wifi-info" id="dashWifiInfoBtn" hidden aria-expanded="false" aria-controls="dashWifiNote" data-i18n-attr="title:dashboard.wifi_note_title;aria-label:dashboard.wifi_note_title" title="Wi-Fi and BYD connected services" aria-label="Wi-Fi and BYD connected services" onclick="BYD.dashboard.toggleWifiNote()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></svg></button></div>
+                                    <p class="dash-wifi-note" id="dashWifiNote" hidden data-i18n="dashboard.wifi_cloud_note">Joining Wi-Fi can switch off the car's own SIM link to BYD, so BYD app remote controls may stop working until Wi-Fi is off.</p>
+                                </div>
+                                <div class="dash-metric dash-bluetooth-metric" id="dashBluetoothMetric" data-state="unknown">
+                                    <span data-i18n="dashboard.metric_bluetooth"><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7l10 10-5 4V3l5 4L7 17"/></svg>Bluetooth</span>
+                                    <strong class="dash-radio-value" id="dashBluetoothValue" role="status" aria-live="polite" aria-label="Vehicle Bluetooth: Unknown">
+                                        <span id="dashBluetooth"><span data-i18n="common.unknown">Unknown</span></span>
+                                    </strong>
+                                    <small id="dashBluetoothDetail"><span data-i18n="dashboard.bluetooth_detail_initial">Vehicle radio</span></small>
+                                </div>
+                            </div>
+                            <div class="dash-metric" id="dashLockMetric"><span data-i18n="dashboard.metric_lock"><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Lock</span><strong id="dashLock">--</strong></div>
+                            <!-- Hidden until /api/vehicle/state carries odometer.totalKm;
+                                 small = EV/HEV split when the vehicle reports it (DM-i). -->
+                            <div class="dash-metric" id="dashOdoMetric" style="display:none"><span data-i18n="charge.detail_odometer"><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 14 4-4"/><path d="M3.3 19a10 10 0 1 1 17.4 0"/></svg>Odometer</span><strong id="dashOdo">--</strong><small id="dashOdoSplit" style="display:none"></small></div>
+                        </div>
+                    </article>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+    <div id="toastContainer" class="toast-container"></div>
+
+    <script src="../shared/auth.js?v=18"></script>
     <script src="../shared/pwa-init.js?v=index1"></script>
-    <script src="../shared/core.js?v=27"></script>
+    <script src="../shared/core.js?v=31"></script>
     <script src="../shared/module-faults-dashboard.js?v=1"></script>
-    <script src="../shared/update-flow.js?v=3"></script>
+    <script src="../shared/update-flow.js?v=6"></script>
     <!-- Load Leaflet after the dashboard markup to avoid blocking its parsing
          on slow connections; keep it ahead of the map module. -->
     <script src="../shared/leaflet.js"></script>
@@ -2964,16 +3009,135 @@
 
         BYD.dashboard = {
             lastStatus: null,
+            personalizedRangeFirst: true,
+            rangePreferenceSaving: false,
+            setRangePreference: function(enabled) {
+                var self = this;
+                var toggle = document.getElementById('dashPreferPersonalized');
+                if (this.rangePreferenceSaving) return;
+                this.rangePreferenceSaving = true;
+                if (toggle) toggle.disabled = true;
+                fetch('/api/settings/range-display', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ personalizedRangeFirst: enabled })
+                }).then(function(r) {
+                    if (!r.ok) throw new Error('Range preference request failed');
+                    return r.json();
+                }).then(function(data) {
+                    if (!data || data.success !== true || data.personalizedRangeFirst !== enabled) {
+                        throw new Error('Range preference was not saved');
+                    }
+                    self.personalizedRangeFirst = enabled;
+                    self.renderHalRange(self.lastStatus);
+                    self.updatePersonalizedRange(BYD.core.personalizedRangeSnapshot);
+                }).catch(function() {
+                    BYD.utils.toast(BYD.i18n.t('dashboard.range_preference_failed')
+                        || 'Could not save range display preference.', 'error');
+                }).then(function() {
+                    self.rangePreferenceSaving = false;
+                    if (toggle) {
+                        toggle.checked = self.personalizedRangeFirst;
+                        toggle.disabled = false;
+                    }
+                });
+            },
             vehicleStateRequest: null,
             vehicleStateRefreshQueued: false,
             vehicleStateFailureCount: 0,
             vehicleStatePollTimer: null,
             aiInsightTimer: null,
             aiInsightEnabled: false,
+            parkingDrainRequest: null,
+            parkingDrainSnapshot: null,
+            PARKING_DRAIN_POLL_MS: 60000,
             VEHICLE_STATE_STALE_AFTER_FAILURES: 2,
             VEHICLE_STATE_POLL_MS: 6000,
             VEHICLE_STATE_TIMEOUT_MS: 8000,
             AI_INSIGHT_POLL_MS: 300000,
+            // Parking Intelligence has live energy for an open session. After
+            // returning to the car, the head-unit dashboard's ACC-event delta
+            // remains available independently of Parking Intelligence.
+            renderParkingDrain: function(reading) {
+                this.parkingDrainSnapshot = reading || null;
+                var element = document.getElementById('dashParkedDrain');
+                if (!element) return;
+                var soc = reading && reading.deltaSoc;
+                if (typeof soc !== 'number' || !isFinite(soc)
+                        || soc >= -0.5 || soc < -100) {
+                    element.textContent = '';
+                    element.hidden = true;
+                    return;
+                }
+                var percent = (-soc).toFixed(1) + '%';
+                var kwh = reading.deltaKwh;
+                var hasKwh = typeof kwh === 'number' && isFinite(kwh)
+                    && kwh < 0 && kwh > -500;
+                var key = hasKwh
+                    ? 'dashboard.parked_drain_kwh' : 'dashboard.parked_drain';
+                var vars = { soc: percent };
+                if (hasKwh) vars.kwh = (-kwh).toFixed(1);
+                var translated = BYD.i18n.t(key, vars);
+                element.textContent = translated && translated !== key
+                    ? translated
+                    : ('Used ' + percent + ' while parked'
+                        + (hasKwh ? ' (≈' + vars.kwh + ' kWh)' : ''));
+                element.hidden = false;
+            },
+            refreshParkingDrain: function() {
+                if (document.hidden || this.parkingDrainRequest) return;
+                var self = this;
+                this.parkingDrainRequest = fetch('/api/parking/current', { cache: 'no-store' })
+                    .then(function(response) {
+                        if (!response.ok) throw new Error('Parking status unavailable');
+                        return response.json();
+                    })
+                    .catch(function() { return null; })
+                    .then(function(status) {
+                        if (status && status.success === true && status.current) {
+                            var current = status.current;
+                            var age = Date.now() - current.startedMs;
+                            var energy = current.energy;
+                            // Never show the last completed cycle during a new
+                            // open park, or infer a delta from an invalid clock.
+                            self.renderParkingDrain(current.open === true
+                                && current.clockUntrusted !== true
+                                && age >= 10 * 60 * 1000
+                                && energy && energy.live === true
+                                ? { deltaSoc: energy.socDelta, deltaKwh: energy.kwh }
+                                : null);
+                            return;
+                        }
+                        return fetch('/api/performance/parking-delta?maxAgeHours=72',
+                                { cache: 'no-store' })
+                            .then(function(response) {
+                                if (!response.ok) throw new Error('Parking delta unavailable');
+                                return response.json();
+                            })
+                            .then(function(delta) {
+                                var age = delta && Date.now() - delta.onTs;
+                                self.renderParkingDrain(delta && delta.available !== false
+                                    && typeof delta.onTs === 'number'
+                                    && age >= 0 && age <= 7 * 24 * 60 * 60 * 1000
+                                    ? delta : null);
+                            });
+                    })
+                    .catch(function() { self.renderParkingDrain(null); })
+                    .then(function() { self.parkingDrainRequest = null; });
+            },
+            initParkingDrain: function() {
+                var self = this;
+                BYD.i18n.onChange(function() {
+                    self.renderParkingDrain(self.parkingDrainSnapshot);
+                });
+                document.addEventListener('visibilitychange', function() {
+                    if (!document.hidden) self.refreshParkingDrain();
+                });
+                this.refreshParkingDrain();
+                setInterval(function() {
+                    if (!document.hidden) self.refreshParkingDrain();
+                }, this.PARKING_DRAIN_POLL_MS);
+            },
             initAiInsight: function() {
                 var self = this;
                 var card = document.getElementById('dashAiInsight');
@@ -3020,6 +3184,9 @@
                 if (document.hidden || !this.aiInsightEnabled) return;
                 var language = window.BYD && BYD.i18n
                     ? BYD.i18n.getLang() : 'en';
+                // Overlapping reads: a success paints unless a newer success did, a failure only if nothing
+                // newer painted. A painted success re-arms the one poll.
+                var seq = this.aiInsightSeq = (this.aiInsightSeq || 0) + 1;
                 fetch('/api/genai/insights/dashboard?lang='
                         + encodeURIComponent(language), { cache: 'no-store' })
                     .then(function(response) {
@@ -3031,16 +3198,22 @@
                                 && BYD.i18n.getLang() !== language) {
                             return;
                         }
+                        if (seq < (self.aiInsightOk || 0)) return;
+                        self.aiInsightOk = seq;
+                        if (seq > (self.aiInsightLast || 0)) self.aiInsightLast = seq;
                         var enabled = !!(data && data.enabled);
                         self.renderAiInsight(enabled ? data.item : null);
                         // Disabled means no recurring GenAI dashboard work.
                         if (enabled && self.aiInsightEnabled) {
+                            self.stopAiInsightPolling();
                             self.aiInsightTimer = setTimeout(function() {
                                 self.refreshAiInsight();
                             }, self.AI_INSIGHT_POLL_MS);
                         }
                     })
                     .catch(function() {
+                        if (seq < (self.aiInsightLast || 0)) return;
+                        self.aiInsightLast = seq;
                         self.renderAiInsight(null);
                     });
             },
@@ -3132,7 +3305,8 @@
                         .replace('{parts}', openParts.join(', ')), 'warning');
                 }
                 btn.classList.add('pending');
-                fetch(url, {
+                // Settles once the pending mark is gone (fireCustom paints a list that waited).
+                return fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: payload ? JSON.stringify(payload) : undefined
@@ -3149,47 +3323,134 @@
                     setTimeout(function() { BYD.dashboard.refreshVehicleState(); }, 700);
                 }).catch(function() {
                     if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('dashboard.toast_command_failed') || 'Command failed', 'error');
-                }).finally(function() {
+                }).then(function() {
+                    // Not .finally(): Chrome 58 (the car WebView floor) lacks it.
                     btn.classList.remove('pending');
                 });
+            },
+            // Match Vehicle Control's confirmation and exact parked-only endpoint.
+            // Keep the shortcut disabled through the dialog and POST to prevent double taps.
+            rebootIvi: function(btn) {
+                if (!btn || btn.disabled || btn.classList.contains('pending')) return;
+                function translated(key, fallback) {
+                    var value = BYD.i18n.t(key);
+                    return value && value !== key ? value : fallback;
+                }
+                var title = translated('vehicle.ivi_reboot_confirm_title', 'Reboot IVI?');
+                var body = translated('vehicle.ivi_reboot_confirm_body',
+                    'The display and OverDrive will be unavailable while the IVI restarts.');
+                btn.disabled = true;
+                BYD.dashboard.ignoreTapsBriefly();
+                var confirmation;
+                try {
+                    confirmation = BYD.utils && BYD.utils.confirmDialog
+                        ? BYD.utils.confirmDialog({
+                            title: title,
+                            body: body,
+                            confirmLabel: translated('vehicle.ivi_reboot', 'Reboot IVI'),
+                            cancelLabel: translated('common.cancel', 'Cancel'),
+                            danger: true
+                        })
+                        : window.confirm(title + ' ' + body);
+                } catch (ignored) {
+                    btn.disabled = false;
+                    return;
+                }
+                Promise.resolve(confirmation).then(function(confirmed) {
+                    if (!confirmed) return;
+                    btn.classList.add('pending');
+                    return fetch('/api/system/ivi-reboot', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ confirm: 'REBOOT' })
+                    }).then(function(response) {
+                        return response.json().then(function(data) {
+                            var ok = response.ok && data && data.success === true;
+                            var message = (data && (data.message || data.error))
+                                || translated(ok ? 'vehicle.ivi_reboot_requested'
+                                    : 'vehicle.ivi_reboot_failed',
+                                    ok ? 'IVI reboot requested' : 'IVI reboot failed');
+                            if (BYD.utils && BYD.utils.toast) {
+                                BYD.utils.toast(message, ok ? 'success' : 'error');
+                            }
+                        });
+                    });
+                }).catch(function() {
+                    if (BYD.utils && BYD.utils.toast) {
+                        BYD.utils.toast(translated('vehicle.ivi_reboot_failed',
+                            'IVI reboot failed'), 'error');
+                    }
+                }).then(done, done);
+                function done() {
+                    btn.classList.remove('pending');
+                    btn.disabled = false;
+                }
+            },
+            updateIviRebootAvailability: function(available) {
+                var btn = document.getElementById('dashIviReboot');
+                if (!btn) return;
+                var display = available ? '' : 'none';
+                if (btn.style.display !== display) {
+                    btn.style.display = display;
+                    this.layoutPills();
+                }
             },
             // User-defined quick controls. The button carries only its id; the daemon looks the
             // action up in the persisted list and fires it through the SAME executor a physical
             // key uses, so the client can never name an action the user didn't save.
             loadCustomCommands: function() {
+                // Overlapping reads: a list paints unless a newer list did; an error reply (which empties
+                // the grid) only if nothing newer painted.
+                var seq = this.customCommandsSeq = (this.customCommandsSeq || 0) + 1;
                 fetch('/api/quick-controls').then(function(r) {
                     return r.json();
                 }).then(function(data) {
                     var grid = document.getElementById('dashCustomCommands');
-                    if (!grid) return;
-                    var buttons = (data && data.success && data.buttons) ? data.buttons : [];
-                    grid.textContent = '';
-                    if (!buttons.length) { grid.style.display = 'none'; return; }
-                    for (var i = 0; i < buttons.length; i++) {
-                        var b = buttons[i];
-                        if (!b || !b.id) continue;
-                        var el = document.createElement('button');
-                        el.className = 'dash-command';
-                        el.type = 'button';
-                        el.setAttribute('data-qc-id', b.id);
-                        // Label via textContent, never innerHTML — a user-authored label must
-                        // not be able to inject markup into the dashboard.
-                        var span = document.createElement('span');
-                        span.textContent = b.label || b.id;
-                        el.appendChild(span);
-                        el.addEventListener('click', function() {
-                            BYD.dashboard.fireCustom(this);
-                        });
-                        grid.appendChild(el);
-                    }
-                    grid.style.display = '';
-                    BYD.dashboard.layoutPills();
+                    var dash = BYD.dashboard, ok = !!(data && data.success);
+                    if (!grid || (ok ? seq < (dash.customCommandsOk || 0) : seq < (dash.customCommandsLast || 0))) return;
+                    if (ok) dash.customCommandsOk = seq;
+                    if (seq > (dash.customCommandsLast || 0)) dash.customCommandsLast = seq;
+                    dash.paintCustomCommands(data);
                 }).catch(function() {});
+            },
+            // A rebuilt button would lose the pending mark that blocks a second send: while one is sending,
+            // the newest list waits, and fireCustom paints it once the command settles.
+            paintCustomCommands: function(data) {
+                var grid = document.getElementById('dashCustomCommands');
+                if (!grid) return;
+                if (document.querySelector('#dashCustomCommands .pending')) { this.customCommandsWaiting = data; return; }
+                this.customCommandsWaiting = null;
+                var buttons = (data && data.success && data.buttons) ? data.buttons : [];
+                grid.textContent = '';
+                if (!buttons.length) { grid.style.display = 'none'; return; }
+                for (var i = 0; i < buttons.length; i++) {
+                    var b = buttons[i];
+                    if (!b || !b.id) continue;
+                    var el = document.createElement('button');
+                    el.className = 'dash-command';
+                    el.type = 'button';
+                    el.setAttribute('data-qc-id', b.id);
+                    // Label via textContent, never innerHTML — a user-authored label must
+                    // not be able to inject markup into the dashboard.
+                    var span = document.createElement('span');
+                    span.textContent = b.label || b.id;
+                    el.appendChild(span);
+                    el.addEventListener('click', function() {
+                        BYD.dashboard.fireCustom(this);
+                    });
+                    grid.appendChild(el);
+                }
+                grid.style.display = '';
+                BYD.dashboard.layoutPills();
             },
             fireCustom: function(btn) {
                 var id = btn && btn.getAttribute('data-qc-id');
                 if (!id) return;
-                BYD.dashboard.command(btn, '/api/quick-controls/fire/' + encodeURIComponent(id));
+                var sent = BYD.dashboard.command(btn, '/api/quick-controls/fire/' + encodeURIComponent(id));
+                if (sent) sent.then(function() {
+                    var dash = BYD.dashboard;
+                    if (dash.customCommandsWaiting) dash.paintCustomCommands(dash.customCommandsWaiting);
+                });
             },
             // Vehicle power rides the local remote-key rail only, so the row is shown only once
             // the daemon confirms that rail exists; a failed probe leaves it hidden.
@@ -3238,10 +3499,21 @@
                 more.hidden = false;
                 box.classList.add('is-collapsed');
             },
+            // On a phone a danger dialog's confirm button opens under the finger, so the second
+            // tap of a double tap would confirm it: ignore taps for a moment after it opens.
+            ignoreTapsBriefly: function() {
+                var armAt = Date.now() + 450;
+                function strayTap(ev) {
+                    if (Date.now() < armAt) { ev.stopPropagation(); ev.preventDefault(); }
+                }
+                document.addEventListener('click', strayTap, true);
+                setTimeout(function() { document.removeEventListener('click', strayTap, true); }, 500);
+            },
             // Confirmed first: switching the car off is disruptive to anyone inside. The router
             // still refuses both unless the car is parked and stationary.
             powerCommand: function(btn, on) {
                 if (!btn || btn.classList.contains('pending')) return;
+                BYD.dashboard.ignoreTapsBriefly();
                 function translated(key, fallback) {
                     var value = BYD.i18n.t(key);
                     return value && value !== key ? value : fallback;
@@ -3299,6 +3571,8 @@
                             throw new Error('Invalid vehicle-state response');
                         }
                         self.vehicleStateFailureCount = 0;
+                        self.updateIviRebootAvailability(data.iviRebootAvailable === true
+                            || data.dilink5 === true);
                         self.updateVehicleState(data);
                         return data;
                     }).catch(function() {
@@ -3308,7 +3582,8 @@
                             self.markVehicleStateUnavailable();
                         }
                         return null;
-                    }).finally(function() {
+                    }).then(function(value) {
+                        // Not .finally(): Chrome 58 (the car WebView floor) lacks it.
                         clearTimeout(deadlineTimer);
                         self.vehicleStateRequest = null;
                         if (self.vehicleStateRefreshQueued) {
@@ -3317,6 +3592,7 @@
                                 self.refreshVehicleState();
                             }, 0);
                         }
+                        return value;
                     });
                 this.vehicleStateRequest = request;
                 return request;
@@ -3378,15 +3654,24 @@
             refreshWifi: function() {
                 var self = this;
                 if (this.wifiBusy) return;
+                // Polled reads can overlap on a slow link: a known state applies unless a newer one did,
+                // an unknown one only if nothing newer applied.
+                var seq = this.wifiReadSeq = (this.wifiReadSeq || 0) + 1;
+                var applies = function(known) {
+                    if (self.wifiBusy || (known ? seq < (self.wifiReadOk || 0) : seq < (self.wifiReadLast || 0))) return false;
+                    if (known) self.wifiReadOk = seq;
+                    if (seq > (self.wifiReadLast || 0)) self.wifiReadLast = seq;
+                    return true;
+                };
                 fetch('/api/network/wifi', { cache: 'no-store' }).then(function(r) {
                     return r.ok ? r.json() : null;
                 }).then(function(data) {
-                    if (self.wifiBusy) return;
-                    self.wifiEnabled = data && data.success && typeof data.enabled === 'boolean'
-                        ? data.enabled : null;
+                    var known = !!(data && data.success && typeof data.enabled === 'boolean');
+                    if (!applies(known)) return;
+                    self.wifiEnabled = known ? data.enabled : null;
                     self.renderWifi();
                 }).catch(function() {
-                    if (self.wifiBusy) return;
+                    if (!applies(false)) return;
                     self.wifiEnabled = null;
                     self.renderWifi();
                 });
@@ -3453,6 +3738,7 @@
                 this.startVehicleStatePolling();
             },
             markVehicleStateUnavailable: function() {
+                this.updateIviRebootAvailability(false);
                 // Reuse the normal reducer with explicit unknown values so every
                 // lock/window/climate/tyre class is cleared consistently.
                 this.updateVehicleState({
@@ -3467,11 +3753,18 @@
             // Cheap flat-counter endpoint; polled slowly (60s) since new
             // events land minutes apart, not seconds.
             refreshSecurityDigest: function() {
+                // Polled reads can overlap on a slow link: a reply from the car applies unless a newer one
+                // did, an error reply only if nothing newer applied.
+                var seq = this.digestSeq = (this.digestSeq || 0) + 1;
                 fetch('/api/recordings/stats').then(function(r) {
                     return r.json();
                 }).then(function(data) {
                     var el = document.getElementById('glSentryText');
-                    if (!el) return;
+                    var dash = BYD.dashboard;
+                    var ok = !!(data && (data.success === true || data.indexUnavailable === true));
+                    if (!el || (ok ? seq < (dash.digestOk || 0) : seq < (dash.digestLast || 0))) return;
+                    if (ok) dash.digestOk = seq;
+                    if (seq > (dash.digestLast || 0)) dash.digestLast = seq;
                     // indexUnavailable → counters are zeroed and NOT
                     // authoritative (same contract events.js honours).
                     if (!data || !data.success || data.indexUnavailable) {
@@ -3921,7 +4214,9 @@
 
                 var label = document.getElementById('dashRangeLabel');
                 if (label) {
-                    label.textContent = BYD.i18n.t('dashboard.metric_range') || 'Range';
+                    label.textContent = this.personalizedRangeFirst
+                        ? (BYD.i18n.t('dashboard.metric_range') || 'Range')
+                        : (BYD.i18n.t('dashboard.kicker_vehicle') || 'Vehicle');
                 }
                 var value = document.getElementById('dashRange');
                 if (value) value.textContent = rangeText;
@@ -3953,6 +4248,12 @@
                     return;
                 }
 
+                var vehicleFirst = !this.personalizedRangeFirst && snapshot.vehicleKm > 0;
+                panel.classList.toggle('vehicle-first', vehicleFirst);
+                var preferenceRow = document.getElementById('dashRangePreference');
+                if (preferenceRow) preferenceRow.hidden = !(snapshot.vehicleKm > 0);
+                var toggle = document.getElementById('dashPreferPersonalized');
+                if (toggle && !this.rangePreferenceSaving) toggle.checked = this.personalizedRangeFirst;
                 var personalizedText = BYD.units.dist(snapshot.personalizedKm);
                 var vehicleText = snapshot.vehicleKm > 0
                     ? BYD.units.dist(snapshot.vehicleKm) : '--';
@@ -4021,19 +4322,22 @@
 
                 var rangeLabel = document.getElementById('dashRangeLabel');
                 if (rangeLabel) {
-                    rangeLabel.textContent =
-                        BYD.i18n.t('trip.card.personalized_range')
-                        || 'Personalized Range';
+                    rangeLabel.textContent = vehicleFirst
+                        ? (BYD.i18n.t('dashboard.kicker_vehicle') || 'Vehicle')
+                        : (BYD.i18n.t('trip.card.personalized_range') || 'Personalized Range');
                 }
                 var rangeValue = document.getElementById('dashRange');
-                if (rangeValue) rangeValue.textContent = personalizedText;
+                if (rangeValue) rangeValue.textContent = vehicleFirst ? vehicleText : personalizedText;
                 var rangeBreakdown = document.getElementById('dashRangeBreakdown');
                 if (rangeBreakdown) {
                     var vehicleLabel =
                         BYD.i18n.t('dashboard.kicker_vehicle') || 'Vehicle';
-                    rangeBreakdown.textContent = snapshot.vehicleKm > 0
-                        ? vehicleLabel + ' · ' + vehicleText : '';
-                    rangeBreakdown.style.display = snapshot.vehicleKm > 0
+                    var personalizedLabel = BYD.i18n.t('trip.card.personalized_range')
+                        || 'Personalized Range';
+                    rangeBreakdown.textContent = vehicleFirst
+                        ? personalizedLabel + ' · ' + personalizedText
+                        : (snapshot.vehicleKm > 0 ? vehicleLabel + ' · ' + vehicleText : '');
+                    rangeBreakdown.style.display = vehicleFirst || snapshot.vehicleKm > 0
                         ? '' : 'none';
                 }
 
@@ -4041,7 +4345,7 @@
                     && this.lastStatus.soc
                     && this.lastStatus.soc.percent !== undefined)
                     ? this.lastStatus.soc.percent : null;
-                this.glance.setSoc(socPercent, personalizedText);
+                this.glance.setSoc(socPercent, vehicleFirst ? vehicleText : personalizedText);
                 panel.hidden = false;
                 if (glance) glance.classList.add('has-range');
             },
@@ -4372,6 +4676,9 @@
             updateFromStatus: function(status) {
                 if (!status) return;
                 this.lastStatus = status;
+                if (!this.rangePreferenceSaving && typeof status.personalizedRangeFirst === 'boolean') {
+                    this.personalizedRangeFirst = status.personalizedRangeFirst;
+                }
                 this.setAiInsightEnabled(
                     status.genAiDashboardEnabled === true);
 
@@ -4516,8 +4823,9 @@
 
                 var gpsFix = status.gps || {};
                 if (gpsFix.hasLocation) {
-                    var stale = gpsFix.isCached || gpsFix.isStale || gpsFix.isFixStale;
-                    var fixAge = Number(gpsFix.fixAgeMs || gpsFix.ageMs) || 0;
+                    var fromCopy = !!(BYD.core && BYD.core.lastPollWasCopy);
+                    var stale = fromCopy || gpsFix.isCached || gpsFix.isStale || gpsFix.isFixStale;
+                    var fixAge = fromCopy ? 0 : Number(gpsFix.fixAgeMs || gpsFix.ageMs) || 0;
                     var accuracy = Number(gpsFix.accuracy);
                     if (stale) {
                         setChip('dashGpsChip', fixAge > 0
@@ -4641,13 +4949,17 @@
         var originalCoreRefreshStatus = BYD.core.refreshStatus.bind(BYD.core);
         BYD.core.refreshStatus = function() {
             return originalCoreRefreshStatus().then(function(status) {
-                if (status && BYD.dashboard && BYD.dashboard.updateFromStatus) {
-                    BYD.dashboard.updateFromStatus(status);
-                } else if (BYD.dashboard && BYD.dashboard.setStatusHealth
-                        && BYD.core.pollFailureCount
-                            >= BYD.core.POLL_STALE_AFTER_FAILURES) {
+                // An offline copy returns null but leaves its data in lastStatus.
+                var copy = !status && BYD.core.lastPollWasCopy
+                    ? BYD.core.lastStatus : null;
+                if ((status || copy) && BYD.dashboard && BYD.dashboard.updateFromStatus) {
+                    BYD.dashboard.updateFromStatus(status || copy);
+                }
+                if (!status && BYD.dashboard && BYD.dashboard.setStatusHealth
+                        && (copy || BYD.core.pollFailureCount
+                            >= BYD.core.POLL_STALE_AFTER_FAILURES)) {
                     BYD.dashboard.setStatusHealth(
-                        BYD.core.pollFailureCount > 4
+                        (copy || BYD.core.pollFailureCount > 4)
                             ? 'disconnected' : 'stale');
                 }
                 return status;
@@ -4714,12 +5026,42 @@
             BYD.dashboard.refreshWifi();
             setInterval(function() { if (!document.hidden) BYD.dashboard.refreshWifi(); }, 30000);
             BYD.dashboard.initAiInsight();
+            BYD.dashboard.initParkingDrain();
             BYD.dashboard.refreshSecurityDigest();
             setInterval(function() { BYD.dashboard.refreshSecurityDigest(); }, 60000);
             // Once, after i18n: the labels are user-authored so they need no translation,
             // and the grid stays hidden when the user has defined no buttons.
             BYD.dashboard.loadCustomCommands();
             BYD.dashboard.loadPowerControls();
+            if (window.BYD && BYD.offline && typeof BYD.offline.onReconnect === 'function') {
+                var reconnectDeferred = false;
+                BYD.offline.onReconnect(function refreshTiles() {
+                    // Hidden: on the next return to the page, once.
+                    if (document.hidden) {
+                        if (reconnectDeferred) return;
+                        reconnectDeferred = true;
+                        document.addEventListener('visibilitychange', function shown() {
+                            if (document.hidden) return;
+                            document.removeEventListener('visibilitychange', shown);
+                            reconnectDeferred = false;
+                            refreshTiles();
+                        });
+                        return;
+                    }
+                    var dash = BYD.dashboard;
+                    // While a button is sending, the list read here waits to paint (paintCustomCommands).
+                    dash.loadCustomCommands();
+                    dash.loadPowerControls();
+                    // The rest are polled; read them now. Hidden, the AI and parking reads wait for the return.
+                    dash.refreshAiInsight();
+                    dash.refreshParkingDrain();
+                    dash.refreshSecurityDigest();
+                    dash.refreshWifi();
+                    if (BYD.moduleFaultsDashboard && typeof BYD.moduleFaultsDashboard.refresh === 'function') {
+                        BYD.moduleFaultsDashboard.refresh();
+                    }
+                });
+            }
         });
 
         // ── Dashboard card reorder ──────────────────────────────────

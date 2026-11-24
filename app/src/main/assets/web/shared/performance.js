@@ -233,6 +233,13 @@ BYD.performance = {
         window.addEventListener('pageshow', () => {
             this.syncViewLifecycle();
         });
+        if (window.BYD && BYD.offline && typeof BYD.offline.onReconnect === 'function') {
+            BYD.offline.onReconnect(() => {
+                // Restarted from stopped, the minute pollers read at once, as on a return to the page.
+                this.stopAncillaryPolling();
+                this.syncViewLifecycle();
+            });
+        }
     },
 
     _detectActiveTab() {

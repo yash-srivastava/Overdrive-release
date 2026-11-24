@@ -74,6 +74,7 @@
     "remote_dev_view": "Vista remota de desarrollo"
   },
   "road_sense": {
+    "cluster_size_not_loaded": "No se pudo leer el tamaño guardado del cuadro de instrumentos. Recarga la página antes de cambiarlo.",
     "page_title": "Ajustes de RoadSense",
     "tab_general": "General",
     "tab_map": "Mapa",
@@ -962,7 +963,8 @@
       "storage_limit_desc": "Al alcanzar el límite, se borran automáticamente los más antiguos",
       "rate_source_note": "Los viajes se valoran con la tarifa de tu última carga en una ubicación con tarifa guardada. Hasta entonces se aplica esta tarifa.",
       "rate_from_charge": "Los viajes se valoran con la tarifa de tu última carga: {rate}/kWh.",
-      "rate_from_charge_named": "Los viajes se valoran con la tarifa de tu última carga: {rate}/kWh ({label})."
+      "rate_from_charge_named": "Los viajes se valoran con la tarifa de tu última carga: {rate}/kWh ({label}).",
+      "not_loaded": "No se pudieron leer los ajustes de viajes guardados. Recarga la página antes de cambiarlos."
     },
     "recover": {
       "title": "Recuperar viajes perdidos",
@@ -1718,7 +1720,8 @@
     "telemetry_fields_label": "Campos que incrustar",
     "telemetry_fields_desc": "Elige qué dibuja la superposición en las grabaciones de viaje y manuales.",
     "trigger_blind_spot": "Alertas de ángulo muerto",
-    "trigger_blind_spot_desc": "Graba también cuando el radar de ángulo muerto del vehículo detecta otro vehículo a tu lado. La grabación continúa hasta que el radar y el ángulo muerto estén despejados. Requiere tener activada la detección de ángulo muerto del vehículo."
+    "trigger_blind_spot_desc": "Graba también cuando el radar de ángulo muerto del vehículo detecta otro vehículo a tu lado. La grabación continúa hasta que el radar y el ángulo muerto estén despejados. Requiere tener activada la detección de ángulo muerto del vehículo.",
+    "settings_not_loaded": "No se pudieron leer los ajustes de grabación guardados. Recarga la página antes de cambiarlos."
   },
   "events": {
     "select_date": "Seleccionar fecha",
@@ -2955,6 +2958,8 @@
     "remote_access_short": "Proximidad"
   },
   "roi": {
+    "zones_not_loaded": "No se pudieron leer las zonas guardadas. Recarga la página antes de cambiarlas.",
+    "schedule_not_loaded": "No se pudo leer el horario guardado. Recarga la página antes de cambiarlo.",
     "editing": "EDITANDO",
     "window_n": "Franja {n}",
     "remove": "Quitar",
@@ -3195,6 +3200,7 @@
     "tier_bronze": "Bronce",
     "tier_diamond": "Diamante",
     "tier_gold": "Oro",
+    "tier_halloffame": "Salón de la Fama",
     "tier_platinum": "Platino",
     "tier_silver": "Plata",
     "tiers_explainer": "Diamante, platino, oro, plata y bronce indican cuánto ha aportado una persona en total; ×N muestra cuántas veces distintas lo ha hecho."
@@ -3278,7 +3284,7 @@
     "daemon_title": "Daemon",
     "auto_start_acc_off": "Iniciar automáticamente con el vehículo apagado",
     "auto_start_acc_off_desc": "Inicia el daemon del bot de Telegram automáticamente cuando el vehículo pasa a ACC apagado, para que los comandos funcionen con el vehículo estacionado. El daemon se detiene cuando el vehículo arranca.",
-    "daemon_start_pointer": "El inicio y la detención manuales del daemon están en la página Daemons de la app nativa.",
+    "daemon_start_pointer": "El inicio y la detención manuales del daemon están en la página {daemons} de la app nativa.",
     "delivery_pointer": "Las preferencias de envío (qué eventos llegan al chat) están en la pestaña Notificaciones → Telegram.",
     "tyre_alerts": "Alertas de presión de neumáticos",
     "tyre_alerts_desc": "Envía un mensaje de Telegram cuando un neumático sale del rango de presión configurado o cuando el TPMS detecta una fuga. Usa los límites definidos en «Límites de presión de los neumáticos».",
@@ -3882,7 +3888,9 @@
     "qc_need_action": "Elige qué debe hacer el botón.",
     "qc_need_label": "Ponle una etiqueta al botón.",
     "qc_save_failed": "No se pudieron guardar los botones del panel",
-    "qc_saved": "Botones del panel guardados"
+    "qc_saved": "Botones del panel guardados",
+    "not_loaded": "No se pudieron leer las asignaciones de teclas guardadas. Recarga la página antes de cambiarlas.",
+    "qc_not_loaded": "No se pudieron leer los controles rápidos guardados. Recarga la página antes de cambiarlos."
   },
   "voice_assistant": {
     "command_language": "Idioma de los comandos",
@@ -6132,5 +6140,78 @@
     "time_minutes": "hace {n} min",
     "time_hours": "hace {n} h",
     "time_days": "hace {n} días"
+  },
+  "offline": {
+    "banner": "No se puede contactar con el vehículo a través de este enlace · últimos datos: {time}",
+    "banner_old": "No se puede contactar con el vehículo a través de este enlace · últimos datos: hace {days} días. Si cambiaste o restableciste el túnel, es posible que este enlace ya no funcione.",
+    "car_unreachable": "No se puede contactar con el vehículo. Es posible que el comando no se haya entregado.",
+    "back_online": "Conectado de nuevo. Toca para actualizar.",
+    "connecting": "Conectando con el vehículo · últimos datos: {time}",
+    "not_sent": "El vehículo no tiene conexión, así que no se envió. Inténtalo de nuevo cuando vuelva a estar disponible."
+  },
+  "stepup": {
+    "title": "Protección con Face ID o huella dactilar",
+    "desc": "Pide Face ID o la huella dactilar antes de que alguien fuera del vehículo lo desbloquee, abra el maletero o lo encienda o apague. Nunca se pide en la pantalla del vehículo, en las automatizaciones ni en el desbloqueo por proximidad. Mientras la protección esté activada, los comandos de voz no pueden realizar estas acciones.",
+    "enable": "Exigir Face ID o huella dactilar",
+    "enable_needs_phone": "Primero añade un teléfono.",
+    "actions_title": "Pedir antes de",
+    "action_unlock": "Desbloquear las puertas",
+    "action_trunk_open": "Abrir el maletero",
+    "action_power_off": "Apagar el vehículo",
+    "action_power_on": "Encender el vehículo",
+    "action_power_on_desc": "También pide antes de encender la climatización a distancia, que puede encender el vehículo.",
+    "phones_title": "Teléfonos",
+    "phones_empty": "Aún no has añadido ningún teléfono.",
+    "phone_added": "Añadido el {date}",
+    "phone_last_used": "Último uso: {date}",
+    "phone_remove": "Quitar",
+    "phone_remove_confirm": "¿Quitar este teléfono? Ya no podrá aprobar acciones a distancia.",
+    "remove_last_confirm": "Es el último teléfono. Si lo quitas, se desactiva la protección. ¿Continuar?",
+    "add_phone_car": "Añadir un teléfono",
+    "pair_presence": "Pisa el pedal de freno o abre y cierra una puerta delantera.",
+    "pair_code": "En tu teléfono, abre Control del vehículo → Seguridad e introduce este código:",
+    "pair_expires": "El código caduca en {seconds} s",
+    "pair_expired": "El código ha caducado. Vuelve a empezar.",
+    "pair_blocked_remote_view": "Primero detén el control remoto de la pantalla.",
+    "add_this_phone": "Añadir este teléfono",
+    "start_on_car": "Empieza en la pantalla del vehículo: Control del vehículo → Seguridad → Añadir un teléfono. Luego introduce aquí el código.",
+    "code_label": "Código de la pantalla del vehículo",
+    "phone_name_label": "Nombre del teléfono",
+    "added_ok": "Este teléfono ya puede aprobar acciones a distancia.",
+    "need_secure_link": "Para añadir este teléfono, abre OverDrive a través de tu enlace seguro: zrok, tu dominio de Cloudflare o Tailscale HTTPS.",
+    "not_supported": "Este navegador no puede usar Face ID ni la huella dactilar aquí.",
+    "prompt_failed": "No se pudo confirmar que eres tú. La acción no se envió.",
+    "cancelled": "Cancelado. La acción no se envió.",
+    "needs_secure_link_action": "Esta acción requiere Face ID o huella dactilar. Usa tu enlace seguro o la pantalla del vehículo.",
+    "car_only": "Mientras la protección con Face ID o huella dactilar esté activada, esto solo funciona desde la pantalla del vehículo.",
+    "remote_adb_warning": "El ADB remoto por Tailscale está activado. Cualquiera con acceso ADB puede saltarse esta protección.",
+    "remote_view_warning": "El control remoto de la pantalla está activo. Hasta que termine, la pantalla del vehículo también pedirá confirmación.",
+    "wrong_code": "Ese código no ha funcionado. Revísalo e inténtalo de nuevo.",
+    "error_generic": "No se pudo guardar. Inténtalo de nuevo.",
+    "add": "Añadir",
+    "cancel": "Cancelar",
+    "confirm_unlock": "¿Desbloquear el vehículo?",
+    "confirm_trunkOpen": "¿Abrir el maletero?",
+    "confirm_powerOff": "¿Apagar el vehículo?",
+    "confirm_powerOn": "¿Encender el vehículo?",
+    "confirm_run": "¿Ejecutar esta acción?",
+    "confirm_config": "¿Guardar este cambio?",
+    "confirm_settings": "¿Cambiar los ajustes de la protección?",
+    "confirm_screenControl": "¿Controlar la pantalla del vehículo?",
+    "confirm_keyInject": "¿Enviar una tecla a la pantalla del vehículo?",
+    "confirm_generic": "¿Confirmar esta acción?",
+    "confirm_button": "Confirmar con Face ID o huella dactilar",
+    "waiting": "Esperando Face ID o huella dactilar…",
+    "too_many_codes": "Demasiados códigos incorrectos. Vuelve a empezar en la pantalla del vehículo.",
+    "already_added": "Este teléfono ya está añadido.",
+    "setup_cancelled": "Cancelado. No se ha añadido nada.",
+    "create_passkey": "Crear llave de acceso",
+    "try_again": "Reintentar",
+    "phone_added_car": "Teléfono añadido.",
+    "remote_view_action": "Primero detén el control remoto de la pantalla.",
+    "store_unreadable": "No se pudieron leer los ajustes de la protección. Desactiva la protección aquí para restablecerlos.",
+    "too_many_phones": "Ya has añadido el máximo de teléfonos permitido. Quita uno primero.",
+    "unknown_phone": "Ese teléfono ya no está añadido.",
+    "link_checking": "Comprobando el enlace seguro. Inténtalo de nuevo en unos segundos."
   }
 }

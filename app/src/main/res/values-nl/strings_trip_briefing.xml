@@ -15,7 +15,7 @@
         <item quantity="other">Ongeveer %1$d minuten.</item>
     </plurals>
     <!-- %1$s: range left, %2$s: the trip's length, each "31 km" or "19 mi". -->
-    <string name="trip_briefing_extra_range">Krap bereik: nog %1$s voor een rit van %2$s.</string>
+    <string name="trip_briefing_extra_range">De actieradius is krap: nog %1$s voor een rit van %2$s.</string>
     <plurals name="trip_briefing_extra_hazards">
         <item quantity="one">%1$d nieuw gevaar onderweg.</item>
         <item quantity="other">%1$d nieuwe gevaren onderweg.</item>

@@ -2139,15 +2139,15 @@ public class AccSentryDaemon {
             boolean backgroundAppOps =
                     applyBackgroundAccessCommand(
                             "RUN_IN_BACKGROUND",
-                            "appops set " + pkg
+                            "appops set " + com.overdrive.app.util.ShellUser.flag() + " " + pkg
                                     + " RUN_IN_BACKGROUND allow")
                     & applyBackgroundAccessCommand(
                             "RUN_ANY_IN_BACKGROUND",
-                            "appops set " + pkg
+                            "appops set " + com.overdrive.app.util.ShellUser.flag() + " " + pkg
                                     + " RUN_ANY_IN_BACKGROUND allow")
                     & applyBackgroundAccessCommand(
                             "WAKE_LOCK",
-                            "appops set " + pkg + " WAKE_LOCK allow");
+                            "appops set " + com.overdrive.app.util.ShellUser.flag() + " " + pkg + " WAKE_LOCK allow");
             boolean deviceIdle = applyBackgroundAccessCommand(
                     "device-idle whitelist",
                     "dumpsys deviceidle whitelist +" + pkg);
@@ -2163,16 +2163,16 @@ public class AccSentryDaemon {
             boolean startupManager =
                     applyBackgroundAccessCommand(
                             "AUTO_START",
-                            "cmd appops set " + pkg + " AUTO_START allow"
-                                    + " && cmd appops get " + pkg
+                            "cmd appops set " + com.overdrive.app.util.ShellUser.flag() + " " + pkg + " AUTO_START allow"
+                                    + " && cmd appops get " + com.overdrive.app.util.ShellUser.flag() + " " + pkg
                                     + " AUTO_START 2>/dev/null"
                                     + " | grep -Eq "
                                     + "'(^|[[:space:]:])allow([[:space:]]|$)'")
                     | applyBackgroundAccessCommand(
                             "BOOT_COMPLETED",
-                            "cmd appops set " + pkg
+                            "cmd appops set " + com.overdrive.app.util.ShellUser.flag() + " " + pkg
                                     + " BOOT_COMPLETED allow"
-                                    + " && cmd appops get " + pkg
+                                    + " && cmd appops get " + com.overdrive.app.util.ShellUser.flag() + " " + pkg
                                     + " BOOT_COMPLETED 2>/dev/null"
                                     + " | grep -Eq "
                                     + "'(^|[[:space:]:])allow([[:space:]]|$)'");

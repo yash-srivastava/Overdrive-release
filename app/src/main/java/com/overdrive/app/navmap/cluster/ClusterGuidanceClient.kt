@@ -2,8 +2,10 @@ package com.overdrive.app.navmap.cluster
 
 import android.os.SystemClock
 import com.overdrive.app.config.UnifiedConfigManager
+import com.overdrive.app.customlayouts.CustomLayoutsConfig
 import com.overdrive.app.navmap.nav.NavGuidanceEngine
 import com.overdrive.app.util.DaemonHttpClient
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.Executors
 
@@ -22,9 +24,12 @@ object ClusterGuidanceClient {
 
     @JvmStatic
     fun enabled(): Boolean = try {
-        val config = UnifiedConfigManager.loadConfig().optJSONObject("projection")
+        val all = UnifiedConfigManager.loadConfig()
+        val config = all.optJSONObject("projection")
         config?.optBoolean("clusterGuidanceEnabled", false) == true ||
-            config?.optBoolean("clusterGuidanceDi5StripEnabled", false) == true
+            config?.optBoolean("clusterGuidanceDi5StripEnabled", false) == true ||
+            // Custom Layouts draws the guidance on its own cluster.
+            all.optJSONObject(CustomLayoutsConfig.SECTION)?.optBoolean(CustomLayoutsConfig.ENABLED, false) == true
     } catch (_: Throwable) { false }
 
     fun publishRoadSense(state: NavGuidanceEngine.GuidanceState, etaSeconds: Double) {
@@ -36,21 +41,29 @@ object ClusterGuidanceClient {
         val maneuver = state.currentManeuver ?: run { clear("roadsense"); return }
         if (!state.distanceToManeuverM.isFinite() || !state.remainingDistanceM.isFinite() ||
             !etaSeconds.isFinite()) return
-        publish(ClusterGuidanceFrame("roadsense", maneuver.type, meters(state.distanceToManeuverM),
+        val event = event(ClusterGuidanceFrame("roadsense", maneuver.type, meters(state.distanceToManeuverM),
             ClusterGuidanceText.roadLabel(maneuver.streetNames, maneuver.instruction, maneuver.type),
             meters(state.remainingDistanceM), meters(etaSeconds), maneuver.roundaboutExitCount))
+        // Own routing only: lane arrows at this maneuver and the one after it, for Custom Layouts.
+        if (maneuver.lanes.isNotEmpty()) event.put("lanes", JSONArray().apply {
+            maneuver.lanes.forEach { put(JSONObject().put("d", it.directions).put("a", it.active).put("v", it.valid)) }
+        })
+        state.nextManeuver?.let { event.put("thenType", it.type).put("thenDistanceMeters", meters(maneuver.lengthMeters)) }
+        enqueue("roadsense", event)
     }
 
     @JvmStatic
     fun publish(frame: ClusterGuidanceFrame) {
         if (!enabled()) return
-        enqueue(frame.source, JSONObject()
-            .put("source", frame.source).put("sequence", SystemClock.elapsedRealtimeNanos())
-            .put("maneuverType", frame.maneuverType).put("distanceMeters", frame.distanceMeters)
-            .put("roadName", frame.roadName).put("remainingDistanceMeters", frame.remainingDistanceMeters)
-            .put("remainingTimeSeconds", frame.remainingTimeSeconds).put("roundaboutExit", frame.roundaboutExit)
-            .put("canIconOverride", frame.canIconOverride))
+        enqueue(frame.source, event(frame))
     }
+
+    private fun event(frame: ClusterGuidanceFrame): JSONObject = JSONObject()
+        .put("source", frame.source).put("sequence", SystemClock.elapsedRealtimeNanos())
+        .put("maneuverType", frame.maneuverType).put("distanceMeters", frame.distanceMeters)
+        .put("roadName", frame.roadName).put("remainingDistanceMeters", frame.remainingDistanceMeters)
+        .put("remainingTimeSeconds", frame.remainingTimeSeconds).put("roundaboutExit", frame.roundaboutExit)
+        .put("canIconOverride", frame.canIconOverride)
 
     @JvmStatic
     fun clear(source: String) {

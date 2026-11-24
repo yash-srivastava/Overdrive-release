@@ -68,6 +68,11 @@ BYD.recording = {
     hasUnsavedChanges: false,
     lastConfigTimestamp: 0,  // Track config file timestamp for sync
     _hydrated: false,
+    // The car's values arrived: quality (/api/settings/quality), unified (rectify, proximity guard) and a mode.
+    // A tab whose sources haven't refuses edits and Apply, which would save the defaults on screen.
+    _qualityLoaded: false,
+    _unifiedLoaded: false,
+    _modeLoaded: false,
     _writeQueue: Promise.resolve(),
     _cdrReady: false,
     _cdrWritesPending: 0,
@@ -125,6 +130,11 @@ BYD.recording = {
         // round-trip on every page load. The remaining six loaders are
         // idempotent reads that don't touch this.config, so they run in
         // parallel — first-paint goes from ~8 sequential RTTs to ~2.
+        // Before the reads below: a page with a handler is refreshed in place, never reloaded.
+        if (!this._reconnectBound && window.BYD && BYD.offline && typeof BYD.offline.onReconnect === 'function') {
+            this._reconnectBound = true;
+            BYD.offline.onReconnect(() => this._refreshAfterReconnect());
+        }
         await this.loadConfig();
         await Promise.all([
             this.loadStorageStats(),
@@ -202,6 +212,51 @@ BYD.recording = {
                 }
             } catch (_) {}
         });
+        // A reconnect while the reads above were on their way: read what didn't arrive (a banner that shows again gets its own).
+        if (this._reconnectDuringInit) {
+            this._reconnectDuringInit = false;
+            if (!(BYD.offline && typeof BYD.offline.isActive === 'function' && BYD.offline.isActive())) this._refreshAfterReconnect();
+        }
+    },
+
+    /** Reads only what never arrived (loaded settings follow the 10 s poll). While hidden: on the next return,
+     *  once; while init reads: when it's done. A focused address field keeps its typing. */
+    _refreshAfterReconnect() {
+        if (document.hidden) {
+            if (this._reconnectDeferred) return;
+            this._reconnectDeferred = true;
+            const shown = () => {
+                if (document.hidden) return;
+                document.removeEventListener('visibilitychange', shown);
+                this._reconnectDeferred = false;
+                this._refreshAfterReconnect();
+            };
+            document.addEventListener('visibilitychange', shown);
+            return;
+        }
+        if (!this._hydrated) { this._reconnectDuringInit = true; return; }
+        if (!this._tabLoaded('quality') || !this._tabLoaded('capture')) this.reloadConfig();
+        if (!this._nativeDvrLoaded) this.loadNativeDvr();
+        if (!this._geocodingLoaded
+                && document.activeElement !== document.getElementById('geocodingCustomUrl')) this.loadGeocoding();
+    },
+
+    /** Whether a tab's fields hold the car's values (false: its edits and Apply are refused). */
+    _tabLoaded(tab) {
+        if (tab === 'quality') return this._qualityLoaded && this._unifiedLoaded;
+        if (tab === 'capture') return this._unifiedLoaded && this._modeLoaded;
+        return true;
+    },
+
+    /** At most once per 3 s: a slider drag refuses every input event. */
+    _toastNotLoaded() {
+        const now = Date.now();
+        if (this._notLoadedToastAt != null && Math.abs(now - this._notLoadedToastAt) < 3000) return;
+        this._notLoadedToastAt = now;
+        const key = 'recording.settings_not_loaded';
+        let text = BYD.i18n && BYD.i18n.t ? BYD.i18n.t(key) : null;
+        if (!text || text === key) text = 'Could not read the saved recording settings — reload the page before changing them.';
+        if (BYD.utils && BYD.utils.toast) BYD.utils.toast(text, 'error');
     },
     
     async reloadConfig() {
@@ -229,7 +284,7 @@ BYD.recording = {
                 // (graying out Apply). Bail without advancing lastConfigTimestamp
                 // so the next reload re-attempts once the edit is saved. Mirrors
                 // the guards in the other re-sync blocks and surveillance.js.
-                if (newTimestamp > this.lastConfigTimestamp && !this.hasUnsavedChanges) {
+                if ((newTimestamp > this.lastConfigTimestamp || !this._qualityLoaded) && !this.hasUnsavedChanges) {
                     this.config.recordingQuality = data.recordingQuality || 'STANDARD';
                     this.config.recordingCodec = data.recordingCodec || 'H264';
                     this.config.cameraFps = data.cameraFps || 15;
@@ -244,6 +299,7 @@ BYD.recording = {
                     }
                     this.savedConfig = JSON.parse(JSON.stringify(this.config));
                     this.lastConfigTimestamp = newTimestamp;
+                    this._qualityLoaded = true;
                     this.updateUI();
                     console.log('Recording config reloaded (timestamp:', newTimestamp, ')');
                 }
@@ -344,11 +400,13 @@ BYD.recording = {
                         this.savedConfig.proximityGuard = JSON.parse(JSON.stringify(this.config.proximityGuard));
                     }
                 }
+                if (!this.hasUnsavedChanges) this._unifiedLoaded = true;
             }
         } catch (e) {}
         if (reloadedMode && !this.hasUnsavedChanges) {
             this.config.recordingMode = reloadedMode;
             if (this.savedConfig) this.savedConfig.recordingMode = reloadedMode;
+            this._modeLoaded = true;
         }
         
         // Also reload storage settings
@@ -401,6 +459,7 @@ BYD.recording = {
                     this.config.segmentDurationMinutes = data.segmentDurationMinutes;
                 }
                 this.lastConfigTimestamp = data.lastModified || Date.now();
+                this._qualityLoaded = true;
             }
         } catch (e) {}
 
@@ -421,6 +480,7 @@ BYD.recording = {
             const modeData = await modeResp.json();
             if (modeData.status === 'ok') {
                 this.config.recordingMode = modeData.mode || 'NONE';
+                this._modeLoaded = true;
             }
         } catch (e) {}
         
@@ -430,8 +490,10 @@ BYD.recording = {
             const proxData = await proxResp.json();
             console.log('Unified config response:', proxData);
             if (proxData.success && proxData.config) {
+                this._unifiedLoaded = true;
                 // Load recording mode from unified config if available
                 if (proxData.config.recording && proxData.config.recording.mode) {
+                    this._modeLoaded = true;
                     this.config.recordingMode = proxData.config.recording.mode;
                     console.log('Loaded recording mode from unified:', this.config.recordingMode);
                 }
@@ -1246,6 +1308,8 @@ BYD.recording = {
             label.textContent = (v === 0) ? offTxt : (v + '%');
         }
         this.markChanged();
+        // Put back (settings never arrived): nothing goes live either.
+        if (this.config.rectifyStrength !== v) return;
         // Debounced live POST so the recorder applies the new value as the
         // user drags. Avoids hammering the daemon on every input event.
         if (this._rectifyDebounce) clearTimeout(this._rectifyDebounce);
@@ -1329,6 +1393,21 @@ BYD.recording = {
 
     markChanged() {
         var dirtyByTab = this._tabDirty();
+        // An edit on a tab whose settings never arrived is put back: Apply would save the defaults.
+        var refused = false;
+        for (var tab in dirtyByTab) {
+            if (!dirtyByTab[tab] || this._tabLoaded(tab)) continue;
+            this._recTabFieldMap[tab].forEach(function (k) {
+                var v = this.savedConfig[k];
+                this.config[k] = v === undefined ? v : JSON.parse(JSON.stringify(v));
+            }, this);
+            dirtyByTab[tab] = false;
+            refused = true;
+        }
+        if (refused) {
+            this.updateUI();
+            this._toastNotLoaded();
+        }
         this.hasUnsavedChanges = false;
         for (var k in dirtyByTab) {
             if (dirtyByTab[k]) { this.hasUnsavedChanges = true; break; }
@@ -1661,6 +1740,10 @@ BYD.recording = {
     },
 
     async _saveSettingsNow() {
+        if (!this._tabLoaded(this._activeTabId())) {
+            this._toastNotLoaded();
+            return;
+        }
         const btn = document.getElementById('btnApply');
         const origHtml = btn ? btn.innerHTML : null;
         const savedBefore = this.savedConfig
@@ -2164,6 +2247,7 @@ BYD.recording = {
                 inputUrl.value = advCfg.customNominatimBase || '';
                 inputUrl.disabled = !recCfg.enabled;
             }
+            this._geocodingLoaded = true;
             return true;
         } catch (e) {
             console.warn('Failed to load geocoding state:', e);
@@ -2326,6 +2410,7 @@ BYD.recording = {
             const data = await resp.json();
             if (data && data.success) {
                 this._renderNativeDvrCard(data.state || 'enabled');
+                this._nativeDvrLoaded = true;
             }
         } catch (e) {
             console.warn('Failed to load native DVR state:', e);

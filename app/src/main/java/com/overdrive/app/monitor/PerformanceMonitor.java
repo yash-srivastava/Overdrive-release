@@ -12,8 +12,10 @@ import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
-import java.io.RandomAccessFile;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedList;
+import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -37,7 +39,7 @@ public class PerformanceMonitor {
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
     
     // Singleton
-    private static PerformanceMonitor instance;
+    private static volatile PerformanceMonitor instance;
     private static final Object lock = new Object();
     
     // Configuration
@@ -68,6 +70,10 @@ public class PerformanceMonitor {
     private long lastAppCpuTime = 0;
     private long lastCpuTimeForApp = 0;  // Tracks CPU time baseline for app CPU calculation
     private long lastIdleTime = 0;
+    private final CpuFrequencySampler cpuFrequencySampler = new CpuFrequencySampler();
+    // Reused output of parseAggregateCpuTimes(): {total jiffies, idle jiffies}.
+    // Only touched inside collectMetrics(), under samplingLock.
+    private final long[] cpuTimesScratch = new long[2];
 
     // GPU busy tracking — kgsl exposes "busy total" cumulative ticks on most
     // MSM kernels (filename varies: gpu_busy / gpubusy / gpu_busy_time). Usage
@@ -103,14 +109,21 @@ public class PerformanceMonitor {
     private java.io.File resolvedCpuTempFile = null;
     private java.io.File resolvedGpuTempFile = null;
     // CPU and GPU temperature discovery share the same thermal-zone topology.
-    // Read each zone type once instead of independently opening every /type
-    // file during both first-use scans. Null means the shared index is unresolved.
-    private String[] cachedThermalZoneTypes = null;
-    private boolean[] loadedThermalZoneTypes = null;
-    
+    // Enumerate the actual thermal-zone directory once. BYD firmware exposes
+    // 48 zones (including GPU/CPU low-frequency and step zones), so fixed
+    // 30/40-entry scans silently omitted part of the device topology.
+    private int[] thermalZoneIndices = null;
+    private final Map<Integer, String> cachedThermalZoneTypes = new HashMap<>();
+
     // Scheduler
     private ScheduledExecutorService scheduler;
     private volatile boolean isRunning = false;
+    // shutdownNow() interrupts the old scheduler but does not wait for an
+    // in-flight procfs/sysfs sample to finish. Epoch checks stop that old
+    // task from publishing after disconnect (or racing a new session).
+    private volatile long monitoringEpoch = 0;
+    private long sampledEpoch = -1;
+    private final Object samplingLock = new Object();
     
     // SOTA: Client connection tracking for on-demand polling
     private final java.util.concurrent.ConcurrentHashMap<String, Long> activeClients = new java.util.concurrent.ConcurrentHashMap<>();
@@ -143,8 +156,14 @@ public class PerformanceMonitor {
     
     public synchronized void start() {
         if (isRunning) return;
+        // A new session starts with an empty chart; counters reset on its first sample.
+        synchronized (history) {
+            history.clear();
+        }
+        latestSnapshot.set(null);
         isRunning = true;
-        
+        final long epoch = ++monitoringEpoch;
+
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "PerfMonitor");
             t.setPriority(Thread.MIN_PRIORITY);
@@ -152,12 +171,14 @@ public class PerformanceMonitor {
         });
         
         // Fixed delay: a sweep slower than the interval must not run the next one back-to-back.
-        scheduler.scheduleWithFixedDelay(this::collectMetrics, 0, SAMPLE_INTERVAL_MS, TimeUnit.MILLISECONDS);
+        scheduler.scheduleWithFixedDelay(() -> collectMetrics(epoch),
+                0, SAMPLE_INTERVAL_MS, TimeUnit.MILLISECONDS);
         logger.info("Performance monitoring started");
     }
     
     public synchronized void stop() {
         isRunning = false;
+        ++monitoringEpoch;
         if (scheduler != null) {
             scheduler.shutdownNow();
             scheduler = null;
@@ -291,56 +312,73 @@ public class PerformanceMonitor {
     
     // ==================== METRICS COLLECTION ====================
     
-    private void collectMetrics() {
-        try {
-            PerformanceSnapshot snapshot = new PerformanceSnapshot();
-            snapshot.timestamp = System.currentTimeMillis();
-            
-            // CPU metrics
-            collectCpuMetrics(snapshot);
-            
-            // Memory metrics
-            collectMemoryMetrics(snapshot);
-            
-            // GPU metrics (estimated from thermal/frequency)
-            collectGpuMetrics(snapshot);
-            
-            // App-specific metrics
-            collectAppMetrics(snapshot);
-            
-            // Store in history
-            synchronized (history) {
-                history.addLast(snapshot);
-                while (history.size() > HISTORY_SIZE) {
-                    history.removeFirst();
-                }
+    private void collectMetrics(long epoch) {
+        // An interrupted sampler can finish sysfs reads after shutdownNow().
+        // Serialize old/new instances and discard their work after disconnect.
+        synchronized (samplingLock) {
+            if (!isRunning || monitoringEpoch != epoch) return;
+            if (sampledEpoch != epoch) {
+                // Jiffy deltas are only meaningful within a continuous sampling
+                // session. Reconnects must not average across parked idle time.
+                lastCpuTime = 0;
+                lastIdleTime = 0;
+                lastAppCpuTime = 0;
+                lastCpuTimeForApp = 0;
+                lastGpuBusy = -1;
+                lastGpuTotal = -1;
+                sampledEpoch = epoch;
             }
-            latestSnapshot.set(snapshot);
+            try {
+                PerformanceSnapshot snapshot = new PerformanceSnapshot();
+                snapshot.timestamp = System.currentTimeMillis();
             
-        } catch (Exception e) {
-            logger.error("Failed to collect metrics", e);
+                // CPU metrics
+                collectCpuMetrics(snapshot);
+            
+                // Memory metrics
+                collectMemoryMetrics(snapshot);
+            
+                // GPU metrics (estimated from thermal/frequency)
+                collectGpuMetrics(snapshot);
+            
+                // App-specific metrics
+                collectAppMetrics(snapshot);
+            
+                // stop()/start() hold this monitor, so guard the final epoch
+                // check AND publication with the same lock. Otherwise stop()
+                // could race between the check and latestSnapshot.set().
+                synchronized (this) {
+                    if (!isRunning || monitoringEpoch != epoch) return;
+                    synchronized (history) {
+                        history.addLast(snapshot);
+                        while (history.size() > HISTORY_SIZE) {
+                            history.removeFirst();
+                        }
+                    }
+                    latestSnapshot.set(snapshot);
+                }
+            } catch (Exception e) {
+                logger.error("Failed to collect metrics", e);
+            }
         }
     }
     
     private void collectCpuMetrics(PerformanceSnapshot snapshot) {
         try {
-            // Read /proc/stat for system CPU
-            RandomAccessFile reader = new RandomAccessFile("/proc/stat", "r");
-            String line = reader.readLine();
-            reader.close();
-            
-            if (line != null && line.startsWith("cpu ")) {
-                String[] parts = line.split("\\s+");
-                long user = Long.parseLong(parts[1]);
-                long nice = Long.parseLong(parts[2]);
-                long system = Long.parseLong(parts[3]);
-                long idle = Long.parseLong(parts[4]);
-                long iowait = Long.parseLong(parts[5]);
-                long irq = Long.parseLong(parts[6]);
-                long softirq = Long.parseLong(parts[7]);
-                
-                long totalCpu = user + nice + system + idle + iowait + irq + softirq;
-                long totalIdle = idle + iowait;
+            // Read /proc/stat for system CPU. Only the aggregate first line is
+            // needed; a buffered reader fetches it in one read() instead of
+            // RandomAccessFile.readLine()'s one read() per byte.
+            String line;
+            try (BufferedReader reader = new BufferedReader(new FileReader("/proc/stat"))) {
+                line = reader.readLine();
+            }
+
+            // A malformed aggregate line skips this tick's system and app CPU
+            // deltas (their baselines must advance together); freq/temp still run.
+            boolean systemSampled = parseAggregateCpuTimes(line, cpuTimesScratch);
+            if (systemSampled) {
+                long totalCpu = cpuTimesScratch[0];
+                long totalIdle = cpuTimesScratch[1];
                 
                 if (lastCpuTime > 0) {
                     long cpuDelta = totalCpu - lastCpuTime;
@@ -356,11 +394,12 @@ public class PerformanceMonitor {
             }
             
             // Read /proc/[pid]/stat for app CPU
-            RandomAccessFile appReader = new RandomAccessFile("/proc/" + pid + "/stat", "r");
-            String appLine = appReader.readLine();
-            appReader.close();
-            
-            if (appLine != null) {
+            String appLine;
+            try (BufferedReader appReader = new BufferedReader(new FileReader("/proc/" + pid + "/stat"))) {
+                appLine = appReader.readLine();
+            }
+
+            if (systemSampled && appLine != null) {
                 // /proc/<pid>/stat field 2 (comm) is parenthesized and may
                 // itself contain spaces or ')'. Splitting the whole line both
                 // allocates an array of every field and misindexes CPU times
@@ -422,6 +461,45 @@ public class PerformanceMonitor {
 
     
     /**
+     * Aggregate "cpu " line of /proc/stat: out = {user+nice+system+idle+iowait+irq+softirq, idle+iowait}
+     * (steal and later columns excluded). Returns false, out untouched, for any other or malformed line.
+     */
+    static boolean parseAggregateCpuTimes(String line, long[] out) {
+        if (line == null || out == null || out.length < 2 || !line.startsWith("cpu ")) {
+            return false;
+        }
+        final int length = line.length();
+        int cursor = 3;
+        long total = 0;
+        long idle = 0;
+        for (int field = 1; field <= 7; field++) {
+            while (cursor < length && Character.isWhitespace(line.charAt(cursor))) {
+                cursor++;
+            }
+            int start = cursor;
+            long value = 0;
+            while (cursor < length && !Character.isWhitespace(line.charAt(cursor))) {
+                char c = line.charAt(cursor);
+                if (c < '0' || c > '9' || cursor - start >= 18) {
+                    return false;
+                }
+                value = value * 10 + (c - '0');
+                cursor++;
+            }
+            if (cursor == start) {
+                return false;
+            }
+            total += value;
+            if (field == 4 || field == 5) {
+                idle += value;
+            }
+        }
+        out[0] = total;
+        out[1] = idle;
+        return true;
+    }
+
+    /**
      * Read one numeric field from /proc/<pid>/stat without splitting the line.
      * Linux field 2 (comm) is enclosed in parentheses but can contain spaces
      * and closing parentheses, so field numbering must begin after its final
@@ -464,8 +542,8 @@ public class PerformanceMonitor {
             // Only MemTotal and MemAvailable contribute to the dashboard's
             // memory metrics. Avoid regex splitting and parsing unrelated
             // /proc/meminfo values on every sample.
-            long memTotal = 0;
-            long memAvailable = 0;
+            long memTotal = -1;
+            long memAvailable = -1;
             try (BufferedReader reader = new BufferedReader(new FileReader("/proc/meminfo"))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
@@ -474,12 +552,21 @@ public class PerformanceMonitor {
                     } else if (line.startsWith("MemAvailable:")) {
                         memAvailable = parseMemInfoValueKb(line);
                     }
+                    if (memTotal > 0 && memAvailable >= 0) break;
                 }
             }
-            
-            snapshot.memTotalMb = memTotal / 1024.0;
-            snapshot.memUsedMb = (memTotal - memAvailable) / 1024.0;
-            snapshot.memUsagePercent = 100.0 * (memTotal - memAvailable) / memTotal;
+
+            // Some vendor /proc mounts deny or truncate meminfo. A missing
+            // MemTotal previously divided by zero (NaN/Infinity in chart JSON),
+            // while a missing MemAvailable looked like 100% RAM pressure.
+            if (memTotal > 0) {
+                snapshot.memTotalMb = memTotal / 1024.0;
+                if (memAvailable >= 0) {
+                    long usedKb = memTotal - Math.min(memAvailable, memTotal);
+                    snapshot.memUsedMb = usedKb / 1024.0;
+                    snapshot.memUsagePercent = 100.0 * usedKb / memTotal;
+                }
+            }
             
             // App memory via Debug API
             Debug.MemoryInfo memInfo = new Debug.MemoryInfo();
@@ -800,64 +887,15 @@ public class PerformanceMonitor {
     
     // ==================== HELPER METHODS ====================
     
+    // Report the fastest live clock and the highest static ceiling across
+    // cpufreq policies. cpu0-only sampling is wrong on the Dolphin's 4+4 SoC:
+    // the silver cluster tops out at 1804 MHz, the gold cluster at 2016 MHz.
     private int readCpuFrequency() {
-        String[] paths = {
-            "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq",
-            "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_cur_freq"
-        };
-        
-        for (String path : paths) {
-            try {
-                BufferedReader reader = new BufferedReader(new FileReader(path));
-                String line = reader.readLine();
-                reader.close();
-                if (line != null) {
-                    return Integer.parseInt(line.trim()) / 1000;  // KHz to MHz
-                }
-            } catch (Exception ignored) {}
-        }
-        return 0;
+        return cpuFrequencySampler.currentPeakMhz();
     }
 
-    // Cached CPU max-freq (KHz→MHz). The ceiling is static per boot, so resolve
-    // it once. 0 = not yet resolved; -1 = resolved-absent (don't retry).
-    private int cachedCpuMaxFreqMhz = 0;
-
-    /**
-     * Reads the CPU's maximum scaling frequency. Paired with {@link
-     * #readCpuFrequency()} this makes thermal throttling self-evident on the
-     * Performance page WITHOUT adb: when cpuFreqMhz sits well below
-     * cpuMaxFreqMhz under load (and CPU temp is high), the SoC is throttling —
-     * which on this shared SDM665 drags the whole head-unit UI, not just
-     * OverDrive. cpuinfo_max_freq is the hardware ceiling; scaling_max_freq is
-     * the governor's current cap (can itself be lowered by thermal HAL) — we
-     * prefer cpuinfo_max_freq so a thermally-capped governor still compares
-     * against the true hardware max.
-     */
     private int readCpuMaxFrequency() {
-        if (cachedCpuMaxFreqMhz != 0) {
-            return cachedCpuMaxFreqMhz > 0 ? cachedCpuMaxFreqMhz : 0;
-        }
-        String[] paths = {
-            "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq",
-            "/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq"
-        };
-        for (String path : paths) {
-            try {
-                BufferedReader reader = new BufferedReader(new FileReader(path));
-                String line = reader.readLine();
-                reader.close();
-                if (line != null) {
-                    int mhz = Integer.parseInt(line.trim()) / 1000;  // KHz to MHz
-                    if (mhz > 0) {
-                        cachedCpuMaxFreqMhz = mhz;
-                        return mhz;
-                    }
-                }
-            } catch (Exception ignored) {}
-        }
-        cachedCpuMaxFreqMhz = -1;  // resolved-absent; stop retrying
-        return 0;
+        return cpuFrequencySampler.hardwarePeakMhz();
     }
 
     private double readCpuTemperature() {
@@ -876,7 +914,7 @@ public class PerformanceMonitor {
             "cpu-0-0", "cpu-0-1", "cpu-1-0", "cpu-1-1", "tsens_tz_sensor"
         };
 
-        for (int i = 0; i < 30; i++) {
+        for (int i : getThermalZoneIndices(30)) {
             String type = getThermalZoneType(i);
             if (type == null) continue;
             String typeLower = type.toLowerCase().trim();
@@ -917,25 +955,75 @@ public class PerformanceMonitor {
     }
 
     /**
-     * Read each thermal-zone type at most once across CPU and GPU discovery.
-     * Resolve entries lazily so a match near the start of the zone list does
-     * not force reads of every later zone. Missing entries are cached too.
+     * Return the numeric thermal-zone IDs actually present on this kernel.
+     * Do not assume IDs are contiguous or impose a fixed upper bound: the BYD
+     * Dolphin firmware exports 48 zones, while other Qualcomm builds differ.
+     * The directory topology is stable for the daemon lifetime, so enumerate
+     * once and reuse the sorted result for CPU/GPU discovery and diagnostics.
      */
-    private String getThermalZoneType(int index) {
-        if (cachedThermalZoneTypes == null) {
-            cachedThermalZoneTypes = new String[30];
-            loadedThermalZoneTypes = new boolean[30];
+    private synchronized int[] getThermalZoneIndices(int legacyScanLimit) {
+        if (thermalZoneIndices == null) {
+            int[] discovered = discoverThermalZoneIndices(
+                    new java.io.File("/sys/class/thermal"));
+            if (discovered.length > 0) thermalZoneIndices = discovered;
         }
-        if (loadedThermalZoneTypes[index]) return cachedThermalZoneTypes[index];
+        if (thermalZoneIndices != null) return thermalZoneIndices;
+        // Listing denied or empty: probe the fixed id range, uncached.
+        int[] legacy = new int[legacyScanLimit];
+        for (int i = 0; i < legacyScanLimit; i++) legacy[i] = i;
+        return legacy;
+    }
 
+    static int[] discoverThermalZoneIndices(java.io.File zonesDirectory) {
+        java.io.File[] entries = zonesDirectory.listFiles();
+        if (entries == null || entries.length == 0) return new int[0];
+
+        int[] indices = new int[entries.length];
+        int count = 0;
+        for (java.io.File entry : entries) {
+            String name = entry.getName();
+            if (!entry.isDirectory() || !name.startsWith("thermal_zone")) continue;
+            String suffix = name.substring("thermal_zone".length());
+            if (suffix.isEmpty()) continue;
+            boolean digitsOnly = true;
+            for (int i = 0; i < suffix.length(); i++) {
+                if (suffix.charAt(i) < '0' || suffix.charAt(i) > '9') {
+                    digitsOnly = false;
+                    break;
+                }
+            }
+            if (!digitsOnly) continue;
+            try {
+                int index = Integer.parseInt(suffix);
+                indices[count] = index;
+                count++; // Only count successfully parsed, valid zone IDs.
+            } catch (NumberFormatException ignored) {
+                // Skip numeric suffixes outside the signed-int range.
+            }
+        }
+        indices = Arrays.copyOf(indices, count);
+        Arrays.sort(indices);
+        return indices;
+    }
+
+    /**
+     * Read each zone type at most once across CPU and GPU discovery.
+     * Missing/unreadable entries are cached too, avoiding repeated sysfs I/O.
+     */
+    private synchronized String getThermalZoneType(int index) {
+        if (cachedThermalZoneTypes.containsKey(index)) {
+            return cachedThermalZoneTypes.get(index);
+        }
+
+        String type = null;
         try (BufferedReader reader = new BufferedReader(new FileReader(
                 "/sys/class/thermal/thermal_zone" + index + "/type"))) {
-            cachedThermalZoneTypes[index] = reader.readLine();
+            type = reader.readLine();
         } catch (Exception ignored) {
             // A missing/unreadable zone is cached as null.
         }
-        loadedThermalZoneTypes[index] = true;
-        return cachedThermalZoneTypes[index];
+        cachedThermalZoneTypes.put(index, type);
+        return type;
     }
 
     /**
@@ -968,7 +1056,7 @@ public class PerformanceMonitor {
         try {
             // Discover thermal zones
             JSONArray thermalZones = new JSONArray();
-            for (int i = 0; i < 40; i++) {
+            for (int i : getThermalZoneIndices(40)) {
                 try {
                     String typePath = "/sys/class/thermal/thermal_zone" + i + "/type";
                     BufferedReader typeReader = new BufferedReader(new FileReader(typePath));
@@ -1066,7 +1154,7 @@ public class PerformanceMonitor {
             "gpuss-1", "gpuss-max", "gpu-step"
         };
 
-        for (int i = 0; i < 30; i++) {
+        for (int i : getThermalZoneIndices(30)) {
             String type = getThermalZoneType(i);
             if (type == null) continue;
             String typeLower = type.toLowerCase().trim();

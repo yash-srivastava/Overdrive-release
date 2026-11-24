@@ -1,6 +1,7 @@
 package com.overdrive.app.ui.timeline
 
 import android.content.Context
+import android.content.Intent
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Canvas
@@ -33,7 +34,9 @@ import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.activity.OnBackPressedCallback
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.fragment.app.Fragment
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -42,7 +45,9 @@ import com.google.android.material.button.MaterialButtonToggleGroup
 import com.google.android.material.color.MaterialColors
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.overdrive.app.R
+import com.overdrive.app.ui.MainActivity
 import com.overdrive.app.ui.timeline.player.TimelinePlayer
+import com.overdrive.app.util.DaemonHttpClient
 import com.overdrive.app.ui.timeline.player.VideoPipeline
 import com.overdrive.app.ui.timeline.view.CameraTile
 import com.overdrive.app.ui.timeline.view.TimelineVideoView
@@ -57,6 +62,8 @@ import java.util.Date
 import java.util.EnumMap
 import java.util.Locale
 import java.util.TimeZone
+import java.io.File
+import java.net.URLEncoder
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -105,6 +112,15 @@ class TimelineFragment : Fragment() {
     private var playing = false
     private var positionMs = UNSET
     private var currentSeg: TlSegment? = null
+    private var theaterMode = false
+    private var theaterParentGravity: Int? = null
+    private var shareExec: ExecutorService? = null
+    @Volatile private var shareInFlight = false
+    private val theaterBack = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() {
+            setTheater(false)
+        }
+    }
     private var families: List<String> = emptyList()
     private var activeFamily: String? = null
     private var scrubbing = false
@@ -174,6 +190,7 @@ class TimelineFragment : Fragment() {
     private val showLabels = Runnable { ui?.labels?.animate()?.alpha(1f)?.setDuration(FADE_MS)?.start() }
 
     private class Ui(root: View) {
+        val root: View = root.findViewById(R.id.tlRoot)
         val playerBox: TlPlayerBox = root.findViewById(R.id.tlPlayerBox)
         val labels: TlCameraLabelsView = root.findViewById(R.id.tlCameraLabels)
         val emptyDay: TextView = root.findViewById(R.id.tlEmptyDay)
@@ -188,6 +205,9 @@ class TimelineFragment : Fragment() {
         val playPause: ImageButton = root.findViewById(R.id.tlPlayPause)
         val next: ImageButton = root.findViewById(R.id.tlNext)
         val speed: TextView = root.findViewById(R.id.tlSpeed)
+        val fullscreen: ImageButton = root.findViewById(R.id.tlFullscreen)
+        val share: ImageButton = root.findViewById(R.id.tlShare)
+        val panel: View = root.findViewById(R.id.tlPanel)
         val momentsPane: View = root.findViewById(R.id.tlMomentsPane)
         val momentsCount: TextView = root.findViewById(R.id.tlMomentsCount)
         val moments: RecyclerView = root.findViewById(R.id.tlMoments)
@@ -229,6 +249,7 @@ class TimelineFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         val ctx = requireContext()
+        requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, theaterBack)
         viewGen++
         val u = Ui(view)
         ui = u
@@ -422,6 +443,7 @@ class TimelineFragment : Fragment() {
         seekGapSliver = null
         gapTargetMs = UNSET
         pendingDayMs = UNSET
+        setTheater(false)
         super.onDestroyView()
     }
 
@@ -432,6 +454,8 @@ class TimelineFragment : Fragment() {
         specs = null
         io?.shutdownNow()
         io = null
+        shareExec?.shutdownNow()
+        shareExec = null
         onDayChanged = null
         super.onDestroy()
     }
@@ -1392,6 +1416,8 @@ class TimelineFragment : Fragment() {
                 menu.showSheet(state)
             }
         }
+        u.fullscreen.setOnClickListener { setTheater(!theaterMode) }
+        u.share.setOnClickListener { shareCurrentSegment() }
         u.gapHint.setOnClickListener {
             val target = gapTargetMs
             if (target > 0L) jump(target, true)
@@ -1403,8 +1429,136 @@ class TimelineFragment : Fragment() {
             context?.let { TimelinePrefs.setPreferredSource(it, preferSource) }
         }
         u.retry.setOnClickListener { repo?.retry() }
-        for (b in listOf(u.prev, u.playPause, u.next, u.speed, u.sourceChip)) {
+        for (b in listOf(u.prev, u.playPause, u.next, u.fullscreen, u.share, u.speed, u.sourceChip)) {
             b.setOnTouchListener { v, ev -> pressFeedback(v, ev); false }
+        }
+        refreshFullscreenButton()
+    }
+
+    private fun setTheater(on: Boolean) {
+        if (theaterMode == on) return
+        theaterMode = on
+        theaterBack.isEnabled = on
+        (activity as? MainActivity)?.setContentImmersive(on)
+        val u = ui
+        if (u == null) {
+            theaterParentGravity = null
+            return
+        }
+        u.panel.visibility = if (on) View.GONE else View.VISIBLE
+        u.momentsPane.visibility = if (on) View.GONE else View.VISIBLE
+        u.playerBox.theater = on
+        // Landscape: the player shares a row with the moments pane; centre it while that is hidden.
+        (u.playerBox.parent as? LinearLayout)?.takeIf { it.orientation == LinearLayout.HORIZONTAL }?.let { row ->
+            if (on) {
+                theaterParentGravity = row.gravity
+                row.gravity = Gravity.CENTER_HORIZONTAL or Gravity.TOP
+            } else {
+                theaterParentGravity?.let { row.gravity = it }
+                theaterParentGravity = null
+            }
+        }
+        refreshFullscreenButton()
+        u.root.requestLayout()
+    }
+
+    private fun refreshFullscreenButton() {
+        val b = ui?.fullscreen ?: return
+        b.setImageResource(if (theaterMode) R.drawable.ic_fullscreen_exit else R.drawable.ic_fullscreen)
+        b.contentDescription = getString(
+            if (theaterMode) R.string.timeline_cd_exit_fullscreen else R.string.timeline_cd_fullscreen,
+        )
+    }
+
+    private fun shareCurrentSegment() {
+        val seg = currentSeg
+        if (seg == null || !seg.available) {
+            appToast?.show(getString(R.string.timeline_share_unavailable), AppToast.Kind.WARNING)
+            return
+        }
+        if (seg.end == null) {
+            appToast?.show(getString(R.string.timeline_share_recording), AppToast.Kind.WARNING)
+            return
+        }
+        if (shareInFlight) return
+        val exec = shareExec ?: Executors.newSingleThreadExecutor { r ->
+            Thread(r, "TimelineShare").apply { isDaemon = true }
+        }.also { shareExec = it }
+        shareInFlight = true
+        val gen = viewGen
+        runCatching {
+            exec.execute {
+                val file = try { downloadSegmentForShare(seg) } finally { shareInFlight = false }
+                main.post {
+                    if (gen != viewGen || ui == null) return@post
+                    if (file == null) {
+                        appToast?.show(getString(R.string.timeline_share_failed), AppToast.Kind.ERROR)
+                    } else {
+                        shareVideoFile(file)
+                    }
+                }
+            }
+        }.onFailure { shareInFlight = false }
+    }
+
+    private fun downloadSegmentForShare(seg: TlSegment): File? {
+        val ctx = context?.applicationContext ?: return null
+        val dir = File(ctx.cacheDir, "timeline-share")
+        if (!dir.isDirectory && !dir.mkdirs()) return null
+        val safeId = seg.id.replace(Regex("[^a-f0-9]"), "")
+        if (safeId.isEmpty()) return null
+        val target = File(dir, "$safeId.mp4")
+        if (seg.sizeBytes > 0L && target.isFile && target.length() == seg.sizeBytes) return target
+        dir.listFiles()?.forEach { if (it != target) it.delete() }
+        target.delete()
+        val partial = File(dir, "${target.name}.part")
+        partial.delete()
+        var conn: java.net.HttpURLConnection? = null
+        return try {
+            conn = DaemonHttpClient.open(
+                "/video/id/${URLEncoder.encode(seg.id, "UTF-8")}",
+                "GET",
+                connectTimeoutMs = 3_000,
+                readTimeoutMs = 300_000,
+            )
+            if (conn.responseCode !in 200..299) return null
+            conn.inputStream.use { input ->
+                partial.outputStream().buffered().use { output ->
+                    val buf = ByteArray(64 * 1024)
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        output.write(buf, 0, n)
+                    }
+                }
+            }
+            val expected = conn.contentLengthLong
+            if (expected > 0L && partial.length() != expected) return null
+            if (!partial.renameTo(target)) {
+                target.delete()
+                if (!partial.renameTo(target)) return null
+            }
+            target
+        } catch (_: Throwable) {
+            null
+        } finally {
+            partial.delete()
+            conn?.disconnect()
+        }
+    }
+
+    private fun shareVideoFile(file: File) {
+        val ctx = context ?: return
+        try {
+            val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", file)
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "video/mp4"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(intent, getString(R.string.action_share)))
+        } catch (_: Exception) {
+            appToast?.show(getString(R.string.timeline_share_failed), AppToast.Kind.ERROR)
         }
     }
 
@@ -1938,22 +2092,32 @@ class TlPlayerBox @JvmOverloads constructor(
         return super.onTouchEvent(ev)
     }
 
+    /** Fullscreen timeline: the player may take the whole row/column. */
+    var theater = false
+        set(value) {
+            if (field == value) return
+            field = value
+            requestLayout()
+        }
+
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val wMode = MeasureSpec.getMode(widthMeasureSpec)
         val wSize = MeasureSpec.getSize(widthMeasureSpec)
         val hMode = MeasureSpec.getMode(heightMeasureSpec)
         val hSize = MeasureSpec.getSize(heightMeasureSpec)
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val widthFraction = if (theater) 1f else MAX_WIDTH_FRACTION
+        val heightFraction = if (theater) 1f else MAX_HEIGHT_FRACTION
         val w: Int
         val h: Int
         if (landscape && hMode == MeasureSpec.EXACTLY) {
             h = hSize
             val byHeight = h * 4 / 3
-            w = if (wMode == MeasureSpec.UNSPECIFIED) byHeight else minOf(byHeight, (wSize * MAX_WIDTH_FRACTION).toInt())
+            w = if (wMode == MeasureSpec.UNSPECIFIED) byHeight else minOf(byHeight, (wSize * widthFraction).toInt())
         } else {
             w = if (wMode == MeasureSpec.UNSPECIFIED) hSize * 4 / 3 else wSize
             val byWidth = w * 3 / 4
-            h = if (hMode == MeasureSpec.UNSPECIFIED) byWidth else minOf(byWidth, (hSize * MAX_HEIGHT_FRACTION).toInt())
+            h = if (hMode == MeasureSpec.UNSPECIFIED) byWidth else minOf(byWidth, (hSize * heightFraction).toInt())
         }
         super.onMeasure(
             MeasureSpec.makeMeasureSpec(w.coerceAtLeast(0), MeasureSpec.EXACTLY),

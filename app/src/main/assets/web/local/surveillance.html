@@ -11,7 +11,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#00876C">
     <script src="../shared/theme.js?v=12"></script>
-    <script src="../shared/app-shell.js?v=23"></script>
+    <script src="../shared/app-shell.js?v=26"></script>
     <!--
       Per-page bottom-tab manifest. Tabs grouped by user task:
         General   — mode toggle + schedule + deterrent (when/how surveillance runs)
@@ -267,7 +267,7 @@
 <body class="r-settings">
     <div class="app-layout">
         <!-- Sidebar -->
-        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=23) -->
+        <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=24) -->
         <div id="app-shell-mount"></div>
         <!-- Main Content -->
         <main class="main-content" aria-busy="true" inert style="pointer-events:none">
@@ -1860,16 +1860,16 @@
     <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
     <div id="toastContainer" class="toast-container"></div>
 
-    <script src="../shared/auth.js"></script>
+    <script src="../shared/auth.js?v=18"></script>
     <script src="../shared/pwa-init.js?v=index1"></script>
-    <script src="../shared/core.js?v=27"></script>
-    <script src="../shared/update-flow.js?v=3"></script>
+    <script src="../shared/core.js?v=31"></script>
+    <script src="../shared/update-flow.js?v=6"></script>
     <script src="../shared/storage-budget.js?v=9"></script>
     <script src="../shared/settings-hydration.js?v=1"></script>
-    <script src="../shared/surveillance.js?v=survtoggle20"></script>
+    <script src="../shared/surveillance.js?v=survtoggle22"></script>
     <script src="../shared/safe-locations.js?v=6"></script>
-    <script src="../shared/roi-schedule.js?v=5"></script>
-    <script src="../shared/parking-settings.js?v=5"></script>
+    <script src="../shared/roi-schedule.js?v=7"></script>
+    <script src="../shared/parking-settings.js?v=7"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');

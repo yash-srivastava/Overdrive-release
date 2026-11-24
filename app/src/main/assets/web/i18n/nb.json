@@ -370,7 +370,8 @@
       "storage_limit_desc": "Auto-slett eldste når grensen er nådd",
       "rate_source_note": "Reiser beregnes etter hastigheten av din siste lade på en lagret takstplassering. Denne prisen gjelder frem til da.",
       "rate_from_charge": "Reiser kodes ved ditt siste kostnad: {rate}/kWh.",
-      "rate_from_charge_named": "Reiser kodes ved din siste faktura: {rate}/kWh ({label})."
+      "rate_from_charge_named": "Reiser kodes ved din siste faktura: {rate}/kWh ({label}).",
+      "not_loaded": "Kunne ikke lese de lagrede turinnstillingene — last inn siden på nytt før du endrer dem."
     },
     "cdr": {
       "delete_confirm": "Slett gamle BYD dashbord for å frigjøre verdensrommet?",
@@ -956,7 +957,8 @@
     "layout_dashcam_toast": "Dashcam oppsett aktivert",
     "layout_update_failed": "Kunne ikke oppdatere opptaksoppsettet",
     "telemetry_fields_label": "Felt å brenne i",
-    "telemetry_fields_desc": "Velg hva overleggstegningene tegner på tur og manuelle opptak."
+    "telemetry_fields_desc": "Velg hva overleggstegningene tegner på tur og manuelle opptak.",
+    "settings_not_loaded": "Kunne ikke lese de lagrede opptaksinnstillingene — last inn siden på nytt før du endrer dem."
   },
   "events": {
     "select_date": "Velg dato",
@@ -2034,6 +2036,8 @@
     "cpd_failed": "Innstilling for deteksjon av barnenærvær feilet"
   },
   "roi": {
+    "zones_not_loaded": "Kunne ikke lese de lagrede sonene — last inn siden på nytt før du endrer dem.",
+    "schedule_not_loaded": "Kunne ikke lese den lagrede tidsplanen — last inn siden på nytt før du endrer den.",
     "editing": "REDIGER",
     "window_n": "Vindu {n}",
     "remove": "Fjern",
@@ -2288,7 +2292,7 @@
     "daemon_title": "Daemon",
     "auto_start_acc_off": "Start automatisk når kjøretøyet er av",
     "auto_start_acc_off_desc": "Start Telegram bot daemon automatisk når kjøretøyet går til ACC OFF, så kommandoer virker mens parked. Patronen stopper når kjøretøyet starter opp.",
-    "daemon_start_pointer": "Manuell start / stopp av daemonen lever på Daemons siden i den innebygde appen.",
+    "daemon_start_pointer": "Manuell start / stopp av daemonen lever på {daemons} siden i den innebygde appen.",
     "delivery_pointer": "Leveringsinnstillinger (noe som vil komme fram til chat) live på varslene → Telegram-fanen.",
     "tyre_alerts": "Trykkvarsler for dekk",
     "tyre_alerts_desc": "Send en Telegram-melding når et dekk går utenfor det konfigurerte trykkområdet ditt, eller når TPMS rapporterer en lekkasje. Bruk grenseverdiene satt under dekktrykksgrensene.",
@@ -2353,6 +2357,7 @@
     "toast_no_location": "Bilens plassering er ikke tilgjengelig"
   },
   "road_sense": {
+    "cluster_size_not_loaded": "Kunne ikke lese den lagrede instrumentpanelstørrelsen — last inn siden på nytt før du endrer den.",
     "bs_calib_desc": "Trykk på en side for å åpne et live-forhåndsvisningsvindu på bilens skjerm, og dra deretter glidebryterne nedenfor for å justere den. Forhåndsvisningsflatene over denne siden - dra den til side hvis den dekker kontrollene. Bruk den når den ser riktig ut.",
     "bs_rear_pitch": "Bakre vippe",
     "bs_needs_overlay": "Tillat \"vis over andre apper\" å vise blindete punkter visningen",
@@ -2980,7 +2985,9 @@
     "size_small": "Liten",
     "size_medium": "Middels",
     "size_large": "Stor",
-    "size_full": "Fullskjerm"
+    "size_full": "Fullskjerm",
+    "not_loaded": "Kunne ikke lese de lagrede tastetilordningene — last inn siden på nytt før du endrer dem.",
+    "qc_not_loaded": "Kunne ikke lese de lagrede hurtigkontrollene — last inn siden på nytt før du endrer dem."
   },
   "charge": {
     "tariff_repriced": {
@@ -3502,5 +3509,78 @@
     "forget_confirm_body": "Reisebriefing glemmer stedsnavn, skjulte rutiner, appvalg og svarene dine. Reisene dine beholdes, så den kan lære på nytt.",
     "forgot": "Mønstrene er glemt. Reisene dine beholdes.",
     "save_failed": "Kunne ikke lagre. Prøv igjen."
+  },
+  "offline": {
+    "banner": "Får ikke kontakt med bilen via denne lenken · data fra {time}",
+    "banner_old": "Får ikke kontakt med bilen via denne lenken · dataene er {days} dager gamle. Hvis du har endret eller tilbakestilt tunnelen, virker kanskje ikke denne lenken lenger.",
+    "car_unreachable": "Får ikke kontakt med bilen. Kommandoen er kanskje ikke levert.",
+    "back_online": "Tilkoblet igjen. Trykk for å oppdatere.",
+    "connecting": "Kobler til bilen · data fra {time}",
+    "not_sent": "Bilen er frakoblet, så dette ble ikke sendt. Prøv igjen når den er tilbake."
+  },
+  "stepup": {
+    "title": "Beskyttelse med Face ID eller fingeravtrykk",
+    "desc": "Ber om Face ID eller fingeravtrykk før noen utenfor bilen låser den opp, åpner bagasjerommet eller slår den av eller på. Bilskjermen, automatiseringer og opplåsing ved nærhet spør aldri. Mens beskyttelsen er på, kan ikke talekommandoer utføre disse handlingene.",
+    "enable": "Krev Face ID eller fingeravtrykk",
+    "enable_needs_phone": "Legg til en telefon først.",
+    "actions_title": "Spør ved",
+    "action_unlock": "Opplåsing av dørene",
+    "action_trunk_open": "Åpning av bagasjerommet",
+    "action_power_off": "Avslåing av bilen",
+    "action_power_on": "Påslåing av bilen",
+    "action_power_on_desc": "Spør også før fjernstart av klimaanlegget, som kan slå på bilen.",
+    "phones_title": "Telefoner",
+    "phones_empty": "Ingen telefoner er lagt til ennå.",
+    "phone_added": "Lagt til {date}",
+    "phone_last_used": "Sist brukt {date}",
+    "phone_remove": "Fjern",
+    "phone_remove_confirm": "Vil du fjerne denne telefonen? Den kan ikke lenger godkjenne fjernhandlinger.",
+    "remove_last_confirm": "Dette er den siste telefonen. Hvis du fjerner den, slås beskyttelsen av. Vil du fortsette?",
+    "add_phone_car": "Legg til en telefon",
+    "pair_presence": "Trykk på bremsepedalen, eller åpne og lukk en fordør.",
+    "pair_code": "Åpne Kontroll av kjøretøy → Sikkerhet på telefonen, og skriv inn denne koden:",
+    "pair_expires": "Koden utløper om {seconds} s",
+    "pair_expired": "Koden er utløpt. Start på nytt.",
+    "pair_blocked_remote_view": "Stopp fjernstyringen av skjermen først.",
+    "add_this_phone": "Legg til denne telefonen",
+    "start_on_car": "Start på bilskjermen: Kontroll av kjøretøy → Sikkerhet → Legg til en telefon. Skriv deretter inn koden her.",
+    "code_label": "Kode fra bilskjermen",
+    "phone_name_label": "Navn på telefonen",
+    "added_ok": "Denne telefonen kan nå godkjenne fjernhandlinger.",
+    "need_secure_link": "For å legge til denne telefonen må du åpne OverDrive via den sikre lenken din: zrok, Cloudflare-domenet ditt eller Tailscale HTTPS.",
+    "not_supported": "Denne nettleseren kan ikke bruke Face ID eller fingeravtrykk her.",
+    "prompt_failed": "Kunne ikke bekrefte at det er deg. Handlingen ble ikke sendt.",
+    "cancelled": "Avbrutt. Handlingen ble ikke sendt.",
+    "needs_secure_link_action": "Denne handlingen krever Face ID eller fingeravtrykk. Bruk den sikre lenken din eller bilskjermen.",
+    "car_only": "Mens beskyttelsen med Face ID eller fingeravtrykk er på, fungerer dette bare fra bilskjermen.",
+    "remote_adb_warning": "Ekstern ADB via Tailscale er på. Alle med ADB-tilgang kan omgå denne beskyttelsen.",
+    "remote_view_warning": "Fjernstyring av skjermen er aktiv. Bilskjermen spør også til den avsluttes.",
+    "wrong_code": "Koden virket ikke. Sjekk den og prøv igjen.",
+    "error_generic": "Kunne ikke lagre. Prøv igjen.",
+    "add": "Legg til",
+    "cancel": "Avbryt",
+    "confirm_unlock": "Vil du låse opp bilen?",
+    "confirm_trunkOpen": "Vil du åpne bagasjerommet?",
+    "confirm_powerOff": "Vil du slå av bilen?",
+    "confirm_powerOn": "Vil du slå på bilen?",
+    "confirm_run": "Vil du kjøre denne handlingen?",
+    "confirm_config": "Vil du lagre denne endringen?",
+    "confirm_settings": "Vil du endre innstillingene for beskyttelsen?",
+    "confirm_screenControl": "Vil du styre bilskjermen?",
+    "confirm_keyInject": "Vil du sende en tast til bilskjermen?",
+    "confirm_generic": "Vil du bekrefte denne handlingen?",
+    "confirm_button": "Bekreft med Face ID eller fingeravtrykk",
+    "waiting": "Venter på Face ID eller fingeravtrykk…",
+    "too_many_codes": "For mange feil koder. Start på nytt på bilskjermen.",
+    "already_added": "Denne telefonen er allerede lagt til.",
+    "setup_cancelled": "Avbrutt. Ingenting ble lagt til.",
+    "create_passkey": "Opprett tilgangsnøkkel",
+    "try_again": "Prøv igjen",
+    "phone_added_car": "Telefonen er lagt til.",
+    "remote_view_action": "Stopp fjernstyringen av skjermen først.",
+    "store_unreadable": "Innstillingene for beskyttelsen kunne ikke leses. Slå av beskyttelsen her for å tilbakestille dem.",
+    "too_many_phones": "Du har lagt til så mange telefoner som er tillatt. Fjern én først.",
+    "unknown_phone": "Den telefonen er ikke lagt til lenger.",
+    "link_checking": "Sjekker den sikre lenken. Prøv igjen om noen sekunder."
   }
 }

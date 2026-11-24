@@ -14,6 +14,8 @@ var RoiEditor = (function() {
     var savedEnabled = [false, false, false, false];
     var snapshotImages = [null, null, null, null];
     var snapshotGenerations = [0, 0, 0, 0];
+    // Set once the car's zones arrive. Until then nothing here changes or saves: a save would write defaults.
+    var zonesLoaded = false, loadSeq = 0, loadOk = 0, reconnectBound = false, reconnectDeferred = false;
     var canvasW = 640, canvasH = 480;
     function qName(q) {
         var keys = ['roi.cam_front', 'roi.cam_right', 'roi.cam_rear', 'roi.cam_left'];
@@ -43,7 +45,40 @@ var RoiEditor = (function() {
 
         var loaded = loadConfig();
         loadSnapshot(currentQuadrant);
+        if (!reconnectBound && window.BYD && BYD.offline && typeof BYD.offline.onReconnect === 'function') {
+            reconnectBound = true;
+            BYD.offline.onReconnect(onReconnect);
+        }
         return loaded;
+    }
+
+    // While hidden: on the next return to the page, once.
+    function onReconnect() {
+        if (document.hidden) {
+            if (reconnectDeferred) return;
+            reconnectDeferred = true;
+            document.addEventListener('visibilitychange', function shown() {
+                if (document.hidden) return;
+                document.removeEventListener('visibilitychange', shown);
+                reconnectDeferred = false;
+                reload();
+            });
+            return;
+        }
+        reload();
+    }
+
+    /** Reads the zones again only if they never arrived (edits are blocked until then, so none are lost). */
+    function reload() {
+        return zonesLoaded ? Promise.resolve() : loadConfig();
+    }
+
+    function blocked() {
+        if (zonesLoaded) return false;
+        var key = 'roi.zones_not_loaded', text = window.BYD && BYD.i18n ? BYD.i18n.t(key) : null;
+        if (!text || text === key) text = 'Could not read the saved zones — reload the page before changing them.';
+        if (window.BYD && BYD.utils && BYD.utils.toast) BYD.utils.toast(text, 'error');
+        return true;
     }
 
     function getBlock(cx, cy) {
@@ -56,7 +91,7 @@ var RoiEditor = (function() {
     }
 
     function startPaint(cx, cy) {
-        if (!roiEnabledFlags[currentQuadrant]) return;
+        if (!roiEnabledFlags[currentQuadrant] || blocked()) return;
         var idx = getBlock(cx, cy); if (idx < 0) return;
         initBlocks(currentQuadrant);
         // Toggle: if block is active, paint deactivates; if inactive, paint activates
@@ -75,6 +110,10 @@ var RoiEditor = (function() {
 
     function toggleRoi() {
         var cb = document.getElementById('roiEnabled');
+        if (blocked()) {
+            if (cb) cb.checked = roiEnabledFlags[currentQuadrant];
+            return;
+        }
         roiEnabledFlags[currentQuadrant] = cb ? cb.checked : false;
         var c = document.getElementById('roiDrawingContent');
         if (c) c.style.display = roiEnabledFlags[currentQuadrant] ? 'block' : 'none';
@@ -184,6 +223,7 @@ var RoiEditor = (function() {
     }
 
     function save() {
+        if (blocked()) return;
         initBlocks(currentQuadrant);
         var en = roiEnabledFlags[currentQuadrant];
         var qk = ['Q0', 'Q1', 'Q2', 'Q3'];
@@ -221,11 +261,13 @@ var RoiEditor = (function() {
     }
 
     function selectAll() {
+        if (blocked()) return;
         initBlocks(currentQuadrant);
         for (var i = 0; i < TOTAL; i++) blocks[currentQuadrant][i] = 1;
         draw(); updateUnsaved();
     }
     function clear() {
+        if (blocked()) return;
         initBlocks(currentQuadrant);
         for (var i = 0; i < TOTAL; i++) blocks[currentQuadrant][i] = 0;
         draw(); updateUnsaved();
@@ -234,7 +276,11 @@ var RoiEditor = (function() {
     function msg(m, t) { if (typeof window.showToast === 'function') window.showToast(m, t); }
 
     function loadConfig() {
+        var seq = ++loadSeq;
         return fetch('/api/surveillance/config').then(function(r) { return r.json(); }).then(function(d) {
+            // Not the car's zones (an error reply), or a newer read already painted: ignored. Failures paint nothing.
+            if (!d || d.success === false || seq < loadOk) return;
+            loadOk = seq;
             var cfg = (d && d.config) ? d.config : d;  // Unwrap {config: ...} envelope
             var geometry = cfg.motionGrid;
             if (geometry && geometry.gridCols === 10 && geometry.gridRows === 8
@@ -260,6 +306,7 @@ var RoiEditor = (function() {
                 savedBlocks[q] = blocks[q].slice();
                 savedEnabled[q] = roiEnabledFlags[q];
             }
+            zonesLoaded = true;
             var cb = document.getElementById('roiEnabled');
             if (cb) cb.checked = roiEnabledFlags[currentQuadrant];
             var c = document.getElementById('roiDrawingContent');
@@ -268,7 +315,7 @@ var RoiEditor = (function() {
         }).catch(function() {});
     }
 
-    return { init: init, selectCamera: selectCamera, toggleRoi: toggleRoi, save: save, selectAll: selectAll, clear: clear };
+    return { init: init, selectCamera: selectCamera, toggleRoi: toggleRoi, save: save, selectAll: selectAll, clear: clear, reload: reload };
 })();
 
 
@@ -278,6 +325,9 @@ var RoiEditor = (function() {
 var ScheduleEditor = (function() {
     'use strict';
     var rules = [];
+    // Set once the car's schedule arrives. Until then it can't change or save: a save would write defaults.
+    var scheduleLoaded = false, loadSeq = 0, loadOk = 0, savedJson = null, reconnectBound = false;
+    var reconnectDeferred = false;
     // i18n: derive short weekday names from Intl using a known week (Sun..Sat).
     var dayNames = (function() {
         var out = [];
@@ -289,18 +339,57 @@ var ScheduleEditor = (function() {
         }
         return out;
     })();
-    function init() { return loadConfig(); }
+    function init() {
+        if (!reconnectBound && window.BYD && BYD.offline && typeof BYD.offline.onReconnect === 'function') {
+            reconnectBound = true;
+            BYD.offline.onReconnect(onReconnect);
+        }
+        return loadConfig();
+    }
+    // Only a load that failed or never happened, and never over unsaved edits. Hidden: on the next return, once.
+    function onReconnect() {
+        if (document.hidden) {
+            if (reconnectDeferred) return;
+            reconnectDeferred = true;
+            document.addEventListener('visibilitychange', function shown() {
+                if (document.hidden) return;
+                document.removeEventListener('visibilitychange', shown);
+                reconnectDeferred = false;
+                onReconnect();
+            });
+            return;
+        }
+        if (!scheduleLoaded && !dirty()) init();
+    }
     function pad(n) { return n < 10 ? '0'+n : ''+n; }
     function msg(m,t) { if (typeof window.showToast === 'function') window.showToast(m,t); }
+    function snapshot() {
+        var cb = document.getElementById('scheduleEnabled');
+        return JSON.stringify({ en: cb ? cb.checked : false, rules: rules });
+    }
+    // Edits since the last load or save; none can be made before the first load.
+    function dirty() { return savedJson !== null && snapshot() !== savedJson; }
+    function blocked() {
+        if (scheduleLoaded) return false;
+        var key = 'roi.schedule_not_loaded', text = window.BYD && BYD.i18n ? BYD.i18n.t(key) : null;
+        if (!text || text === key) text = 'Could not read the saved schedule — reload the page before changing it.';
+        if (window.BYD && BYD.utils && BYD.utils.toast) BYD.utils.toast(text, 'error');
+        return true;
+    }
 
     function toggle() {
         var cb = document.getElementById('scheduleEnabled'), en = cb ? cb.checked : false;
+        if (blocked()) {
+            if (cb) cb.checked = !en;
+            return;
+        }
         document.getElementById('scheduleContent').style.display = en ? 'block' : 'none';
         var badge = document.getElementById('scheduleBadge');
         if (badge) { badge.textContent = en ? BYD.i18n.t('roi.editing') : BYD.i18n.t('status.off'); badge.className = 'status-badge '+(en?'active':'inactive'); }
         updateSaveBtn(); updateSummary();
     }
     function addRule() {
+        if (blocked()) return;
         rules.push({ days:[1,2,3,4,5], startHour:18, startMin:0, endHour:8, endMin:0 });
         document.getElementById('scheduleContent').style.display = 'block';
         var cb = document.getElementById('scheduleEnabled'); if (cb) cb.checked = true;
@@ -378,6 +467,7 @@ var ScheduleEditor = (function() {
         el.textContent = parts.join(' | '); el.style.color = 'var(--success)';
     }
     function save() {
+        if (blocked()) return;
         var cb = document.getElementById('scheduleEnabled'), en = cb ? cb.checked : false;
         // If enabled with no rules, auto-disable instead of blocking save
         if (en && rules.length === 0) { en = false; if (cb) cb.checked = false; }
@@ -386,11 +476,13 @@ var ScheduleEditor = (function() {
         for (var i = 0; i < rules.length; i++) payload.scheduleRules.push({ days:rules[i].days, startHour:rules[i].startHour, startMin:rules[i].startMin, endHour:rules[i].endHour, endMin:rules[i].endMin });
         var saveBtn = document.getElementById('scheduleSaveBtn');
         if (saveBtn) saveBtn.disabled = true;
+        var sent = snapshot();
         fetch('/api/surveillance/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
             .then(function(r){
                 if (!r.ok) throw new Error('HTTP ' + r.status);
                 return r.json();
             }).then(function(){
+                savedJson = sent;
                 msg(BYD.i18n.t('roi.schedule_saved'),'success');
                 var badge = document.getElementById('scheduleBadge');
                 if (badge) { badge.textContent = en ? BYD.i18n.t('roi.badge_on') : BYD.i18n.t('roi.badge_off'); badge.className = 'status-badge '+(en?'active':'inactive'); }
@@ -398,7 +490,11 @@ var ScheduleEditor = (function() {
             .then(function(){ if (saveBtn) saveBtn.disabled = false; updateSaveBtn(); });
     }
     function loadConfig() {
+        var seq = ++loadSeq;
         return fetch('/api/surveillance/config').then(function(r){return r.json();}).then(function(d) {
+            // Not the car's schedule (an error reply), or a newer read already painted: ignored.
+            if (!d || d.success === false || seq < loadOk) return;
+            loadOk = seq;
             var cfg = d.config || d;
             var en = cfg.scheduleEnabled || false; rules = [];
             var arr = cfg.scheduleRules;
@@ -408,6 +504,8 @@ var ScheduleEditor = (function() {
             var badge = document.getElementById('scheduleBadge');
             if (badge) { badge.textContent = en ? BYD.i18n.t('roi.badge_on') : BYD.i18n.t('roi.badge_off'); badge.className = 'status-badge '+(en?'active':'inactive'); }
             renderRules();
+            scheduleLoaded = true;
+            savedJson = snapshot();
         }).catch(function(){});
     }
     return { init:init, toggle:toggle, addRule:addRule, save:save };

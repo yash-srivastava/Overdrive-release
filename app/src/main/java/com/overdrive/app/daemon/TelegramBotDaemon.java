@@ -1,5 +1,7 @@
 package com.overdrive.app.daemon;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import android.os.Looper;
 
 import com.overdrive.app.daemon.telegram.CommandContext;
@@ -318,7 +320,7 @@ public class TelegramBotDaemon {
             Thread.sleep(500);
             
             // Clean up stale lock file (SIGKILL doesn't trigger shutdown hooks)
-            new java.io.File(LOCK_FILE).delete();
+            RemovableStorageFs.delete(new java.io.File(LOCK_FILE));
             
             log("Old instance cleanup complete (my PID: " + myPid + ")");
         } catch (Exception e) {
@@ -372,7 +374,7 @@ public class TelegramBotDaemon {
                         if (pid == myPid) {
                             stale = true;
                             reason = "lock held by our own PID (previous crash)";
-                        } else if (!new java.io.File("/proc/" + pid).exists()) {
+                        } else if (!RemovableStorageFs.exists(new java.io.File("/proc/" + pid))) {
                             stale = true;
                             reason = "dead PID " + pid;
                         } else {
@@ -409,7 +411,7 @@ public class TelegramBotDaemon {
                 if (stale) {
                     log("Singleton: stale lock (" + reason + ") — cleaning up");
                     try { lockFileHandle.close(); } catch (Exception ignored) {}
-                    lockFileObj.delete();
+                    RemovableStorageFs.delete(lockFileObj);
 
                     // Bounded retry loop. The kernel may not have released
                     // the inode-level lock the instant the holder process
@@ -472,8 +474,8 @@ public class TelegramBotDaemon {
      */
     private static CmdlineMatch classifyCmdline(int pid) {
         java.io.File f = new java.io.File("/proc/" + pid + "/cmdline");
-        if (!f.exists()) return CmdlineMatch.NO_MATCH; // PID gone
-        if (!f.canRead()) return CmdlineMatch.UNKNOWN; // hidepid / EACCES
+        if (!RemovableStorageFs.exists(f)) return CmdlineMatch.NO_MATCH; // PID gone
+        if (!RemovableStorageFs.canRead(f)) return CmdlineMatch.UNKNOWN; // hidepid / EACCES
         String cmdline = readProcCmdline(pid);
         if (cmdline.isEmpty()) return CmdlineMatch.NO_MATCH; // kernel thread / race
         return isTelegramDaemonCmdline(cmdline) ? CmdlineMatch.MATCH : CmdlineMatch.NO_MATCH;
@@ -486,8 +488,8 @@ public class TelegramBotDaemon {
      */
     private static String readProcCmdline(int pid) {
         java.io.File f = new java.io.File("/proc/" + pid + "/cmdline");
-        if (!f.exists()) return "";
-        try (java.io.FileInputStream fis = new java.io.FileInputStream(f)) {
+        if (!RemovableStorageFs.exists(f)) return "";
+        try (java.io.FileInputStream fis = RemovableStorageFs.openInput(f)) {
             byte[] buf = new byte[4096];
             int total = 0;
             int n;
@@ -531,7 +533,7 @@ public class TelegramBotDaemon {
                 lockFileHandle.close();
                 lockFileHandle = null;
             }
-            new java.io.File(LOCK_FILE).delete();
+            RemovableStorageFs.delete(new java.io.File(LOCK_FILE));
         } catch (Exception e) {
             log("Error releasing singleton lock: " + e.getMessage());
         }
@@ -1364,17 +1366,17 @@ public class TelegramBotDaemon {
                             // throttle-suppressed call doesn't silently swallow
                             // the hint and deny the next legit notify its
                             // post-update framing.
-                            boolean postUpdatePresent = new File(
+                            boolean postUpdatePresent = RemovableStorageFs.exists(new File(
                                     com.overdrive.app.util.ScratchRoot.path("overdrive_post_update_pending_telegram")
-                                ).exists();
+                                ));
                             // A FAILED install (Telegram-triggered) leaves the
                             // failure hint instead of the success hint — bypass
                             // the throttle for that too so the owner learns the
                             // install failed NOW, not 10 min later (symmetric
                             // with the post-update success bypass above).
-                            boolean installFailedPresent = new File(
+                            boolean installFailedPresent = RemovableStorageFs.exists(new File(
                                     com.overdrive.app.util.ScratchRoot.path("overdrive_install_failed_pending_telegram")
-                                ).exists();
+                                ));
                             if (!postUpdatePresent
                                     && !installFailedPresent
                                     && shouldThrottleTunnelNotify()) {
@@ -1488,7 +1490,7 @@ public class TelegramBotDaemon {
                         String finalCaption = formatMotionMessage(cmd, /*finalized=*/true);
                         String heroPath = cmd.optString("heroPhotoPath", "");
                         boolean ok;
-                        if (!heroPath.isEmpty() && new java.io.File(heroPath).exists()) {
+                        if (!heroPath.isEmpty() && RemovableStorageFs.exists(new java.io.File(heroPath))) {
                             ok = sendPhoto(ownerChatId, heroPath, finalCaption);
                             if (!ok) {
                                 // Photo upload failed — fall back to text so the
@@ -1533,7 +1535,7 @@ public class TelegramBotDaemon {
                     String markup = urlKeyboardMarkup(cmd.optJSONArray("buttons"));
                     String photoPath = cmd.optString("photoPath", "");
                     boolean pOk;
-                    if (!photoPath.isEmpty() && new java.io.File(photoPath).exists()) {
+                    if (!photoPath.isEmpty() && RemovableStorageFs.exists(new java.io.File(photoPath))) {
                         pOk = sendPhoto(ownerChatId, photoPath, pText.toString(), markup);
                         if (!pOk) pOk = sendMessageWithUrlButtons(ownerChatId, pText.toString(), markup);
                     } else {
@@ -1867,8 +1869,7 @@ public class TelegramBotDaemon {
      */
     private static String readBootId() {
         try (java.io.BufferedReader r = new java.io.BufferedReader(
-                new java.io.InputStreamReader(new java.io.FileInputStream(
-                        "/proc/sys/kernel/random/boot_id")))) {
+                new java.io.InputStreamReader(RemovableStorageFs.openInput(new java.io.File("/proc/sys/kernel/random/boot_id"))))) {
             String line = r.readLine();
             return line != null ? line.trim() : "";
         } catch (Exception e) {
@@ -1903,8 +1904,8 @@ public class TelegramBotDaemon {
     private static boolean shouldThrottleTunnelNotify() {
         try {
             File stamp = new File(TUNNEL_NOTIFY_STAMP_FILE);
-            if (!stamp.exists()) return false;
-            long age = System.currentTimeMillis() - stamp.lastModified();
+            if (!RemovableStorageFs.exists(stamp)) return false;
+            long age = System.currentTimeMillis() - RemovableStorageFs.lastModified(stamp);
             if (age < 0 || age >= TUNNEL_NOTIFY_THROTTLE_MS) return false;
 
             // Boot-id check: same rationale as the greeting throttle.
@@ -1913,7 +1914,7 @@ public class TelegramBotDaemon {
             String currentBootId = readBootId();
             String stampedBootId = "";
             try (java.io.BufferedReader r = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(new java.io.FileInputStream(stamp)))) {
+                    new java.io.InputStreamReader(RemovableStorageFs.openInput(stamp)))) {
                 String line = r.readLine();
                 if (line != null) stampedBootId = line.trim();
             } catch (Exception ignored) {}
@@ -1937,14 +1938,14 @@ public class TelegramBotDaemon {
         try {
             File stamp = new File(TUNNEL_NOTIFY_STAMP_FILE);
             String body = readBootId();
-            try (java.io.FileWriter fw = new java.io.FileWriter(stamp)) {
+            try (java.io.Writer fw = new java.io.OutputStreamWriter(RemovableStorageFs.openOutput(stamp), java.nio.charset.StandardCharsets.UTF_8)) {
                 fw.write(body);
             }
             // chmod 666 so the app process (UID 10xxx) can stat the
             // file for diagnostics. The throttle write itself is
             // daemon-only; this is just for observability.
-            try { stamp.setReadable(true, false); } catch (Exception ignored) {}
-            try { stamp.setWritable(true, false); } catch (Exception ignored) {}
+            try { RemovableStorageFs.setReadable(stamp, true, false); } catch (Exception ignored) {}
+            try { RemovableStorageFs.setWritable(stamp, true, false); } catch (Exception ignored) {}
         } catch (Exception e) {
             // Worst case: one extra notification on the next event.
             log("Tunnel stamp write error: " + e.getMessage());
@@ -1993,18 +1994,18 @@ public class TelegramBotDaemon {
         {
             try {
                 File stamp = new File(GREETING_STAMP_FILE);
-                if (stamp.exists()) {
+                if (RemovableStorageFs.exists(stamp)) {
                     // Clamp a future mtime to "just now" instead of treating it as
                     // un-throttled. The head unit boots with a wrong RTC and
                     // corrects it seconds later — exactly the window in which the
                     // restart triggers cluster — so a backwards clock step made
                     // `age` negative and re-announced the greeting.
-                    long age = System.currentTimeMillis() - stamp.lastModified();
+                    long age = System.currentTimeMillis() - RemovableStorageFs.lastModified(stamp);
                     if (age < 0) age = 0;
                     if (age < GREETING_THROTTLE_MS) {
                         String stampedBootId = "";
                         try (java.io.BufferedReader r = new java.io.BufferedReader(
-                                new java.io.InputStreamReader(new java.io.FileInputStream(stamp)))) {
+                                new java.io.InputStreamReader(RemovableStorageFs.openInput(stamp)))) {
                             String line = r.readLine();
                             if (line != null) stampedBootId = line.trim();
                         } catch (Exception ignored) {}
@@ -2136,7 +2137,7 @@ public class TelegramBotDaemon {
                 // Provably never reached Telegram — release the claim so the
                 // next start retries. A replay cannot duplicate.
                 log("Startup greeting not delivered — clearing stamp so the next start retries");
-                try { new File(GREETING_STAMP_FILE).delete(); } catch (Exception ignored) {}
+                try { RemovableStorageFs.delete(new File(GREETING_STAMP_FILE)); } catch (Exception ignored) {}
             } else if (outcome == SEND_AMBIGUOUS) {
                 log("Startup greeting outcome ambiguous — keeping stamp to avoid a duplicate");
             } else {
@@ -2155,11 +2156,11 @@ public class TelegramBotDaemon {
     private static void writeGreetingStamp(String currentBootId) {
         try {
             File stamp = new File(GREETING_STAMP_FILE);
-            try (java.io.FileWriter fw = new java.io.FileWriter(stamp)) {
+            try (java.io.Writer fw = new java.io.OutputStreamWriter(RemovableStorageFs.openOutput(stamp), java.nio.charset.StandardCharsets.UTF_8)) {
                 fw.write(currentBootId == null || currentBootId.isEmpty() ? "" : currentBootId);
             }
-            try { stamp.setReadable(true, false); } catch (Exception ignored) {}
-            try { stamp.setWritable(true, false); } catch (Exception ignored) {}
+            try { RemovableStorageFs.setReadable(stamp, true, false); } catch (Exception ignored) {}
+            try { RemovableStorageFs.setWritable(stamp, true, false); } catch (Exception ignored) {}
         } catch (Exception e) {
             // Worst case is one extra greeting on the next restart.
             log("Greeting stamp write error: " + e.getMessage());
@@ -2840,7 +2841,7 @@ public class TelegramBotDaemon {
         // Clear the per-thread undelivered flag before starting (see sendMessage).
         lastSendUndelivered.set(Boolean.FALSE);
         File photoFile = new File(photoPath);
-        if (!photoFile.exists()) {
+        if (!RemovableStorageFs.exists(photoFile)) {
             log("Photo file not found: " + photoPath);
             return false;  // local miss, not a network drop — don't mark undelivered
         }
@@ -2860,7 +2861,7 @@ public class TelegramBotDaemon {
                             .setType(MultipartBody.FORM)
                             .addFormDataPart("chat_id", String.valueOf(chatId))
                             .addFormDataPart("photo", photoFile.getName(),
-                                    RequestBody.create(photoFile, MediaType.parse("image/jpeg")));
+                                    fileBody(photoFile, MediaType.parse("image/jpeg")));
 
                     if (caption != null && !caption.isEmpty()) {
                         bodyBuilder.addFormDataPart("caption", caption);
@@ -3151,14 +3152,36 @@ public class TelegramBotDaemon {
     /** Telegram bot API file-upload ceiling. Above this, sendVideo/sendDocument 400. */
     private static final long TELEGRAM_MAX_UPLOAD_BYTES = 50L * 1000L * 1000L;  // 50 MB
 
+    /** Multipart body for a file; card files are streamed, since OkHttp opens a File by path. */
+    private static RequestBody fileBody(final File file, final MediaType type) {
+        if (!RemovableStorageFs.isRouted(file)) return RequestBody.create(file, type);
+        final long length = RemovableStorageFs.length(file);
+        return new RequestBody() {
+            @Override public MediaType contentType() {
+                return type;
+            }
+
+            @Override public long contentLength() {
+                return length;
+            }
+
+            @Override public void writeTo(okio.BufferedSink sink) throws java.io.IOException {
+                try (java.io.InputStream in = RemovableStorageFs.openInput(file);
+                     okio.Source source = okio.Okio.source(in)) {
+                    sink.writeAll(source);
+                }
+            }
+        };
+    }
+
     public static boolean sendVideo(long chatId, String videoPath, String caption) {
         try {
             File videoFile = new File(videoPath);
-            if (!videoFile.exists()) {
+            if (!RemovableStorageFs.exists(videoFile)) {
                 log("Video file not found: " + videoPath);
                 return false;
             }
-            long len = videoFile.length();
+            long len = RemovableStorageFs.length(videoFile);
             if (len == 0L) {
                 log("Video file is 0 bytes, skipping upload: " + videoPath);
                 return false;
@@ -3184,7 +3207,7 @@ public class TelegramBotDaemon {
                         .addFormDataPart("chat_id", String.valueOf(chatId))
                         .addFormDataPart("supports_streaming", "true")
                         .addFormDataPart("video", videoFile.getName(),
-                                RequestBody.create(videoFile, MediaType.parse("video/mp4")));
+                                fileBody(videoFile, MediaType.parse("video/mp4")));
 
                 if (caption != null && !caption.isEmpty()) {
                     bodyBuilder.addFormDataPart("caption", caption);
@@ -3231,11 +3254,11 @@ public class TelegramBotDaemon {
     public static boolean sendDocument(long chatId, String filePath, String caption) {
         try {
             File docFile = new File(filePath);
-            if (!docFile.exists()) {
+            if (!RemovableStorageFs.exists(docFile)) {
                 log("Document file not found: " + filePath);
                 return false;
             }
-            long len = docFile.length();
+            long len = RemovableStorageFs.length(docFile);
             if (len == 0L) {
                 log("Document is 0 bytes, skipping upload: " + filePath);
                 return false;
@@ -3255,7 +3278,7 @@ public class TelegramBotDaemon {
                         .setType(MultipartBody.FORM)
                         .addFormDataPart("chat_id", String.valueOf(chatId))
                         .addFormDataPart("document", docFile.getName(),
-                                RequestBody.create(docFile, MediaType.parse("application/json")));
+                                fileBody(docFile, MediaType.parse("application/json")));
 
                 if (caption != null && !caption.isEmpty()) {
                     bodyBuilder.addFormDataPart("caption", caption);
@@ -3387,7 +3410,7 @@ public class TelegramBotDaemon {
     private static void saveTunnelUrl(String url) {
         try {
             File urlFile = new File(PATH_TELEGRAM_URL_FILE());
-            try (java.io.FileWriter fw = new java.io.FileWriter(urlFile)) {
+            try (java.io.Writer fw = new java.io.OutputStreamWriter(RemovableStorageFs.openOutput(urlFile), java.nio.charset.StandardCharsets.UTF_8)) {
                 fw.write(url);
             }
             log("Tunnel URL saved to file: " + url);
@@ -3408,9 +3431,9 @@ public class TelegramBotDaemon {
      */
     private static String consumePostUpdateHint() {
         File hint = new File(com.overdrive.app.util.ScratchRoot.path("overdrive_post_update_pending_telegram"));
-        if (!hint.exists()) return null;
+        if (!RemovableStorageFs.exists(hint)) return null;
         String version = null;
-        try (BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(hint)))) {
+        try (BufferedReader r = new BufferedReader(new InputStreamReader(RemovableStorageFs.openInput(hint)))) {
             String line = r.readLine();
             if (line != null) {
                 String trimmed = line.trim();
@@ -3421,7 +3444,7 @@ public class TelegramBotDaemon {
         }
         // Delete unconditionally — even if the read failed we don't want a
         // stale hint to keep flagging unrelated tunnel restarts.
-        try { hint.delete(); } catch (Exception ignored) {}
+        try { RemovableStorageFs.delete(hint); } catch (Exception ignored) {}
         return version;
     }
 
@@ -3439,9 +3462,9 @@ public class TelegramBotDaemon {
      */
     private static String consumeInstallFailedHint() {
         File hint = new File(com.overdrive.app.util.ScratchRoot.path("overdrive_install_failed_pending_telegram"));
-        if (!hint.exists()) return null;
+        if (!RemovableStorageFs.exists(hint)) return null;
         String reason = null;
-        try (BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(hint)))) {
+        try (BufferedReader r = new BufferedReader(new InputStreamReader(RemovableStorageFs.openInput(hint)))) {
             StringBuilder sb = new StringBuilder();
             String line;
             while ((line = r.readLine()) != null) {
@@ -3457,7 +3480,7 @@ public class TelegramBotDaemon {
         // unrelated tunnel restart. Fall back to a generic reason if the file
         // existed but was empty/unreadable — the user should still learn the
         // install failed.
-        try { hint.delete(); } catch (Exception ignored) {}
+        try { RemovableStorageFs.delete(hint); } catch (Exception ignored) {}
         if (reason == null) reason = "unknown (see head unit)";
         return reason;
     }

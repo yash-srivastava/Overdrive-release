@@ -16,6 +16,18 @@ import java.util.concurrent.atomic.AtomicReference
 
 class DiLink5ClusterCastTest {
     @Test
+    fun factoryMiniMapUsesOnlyTheRunningSharedMiniMapAndItsLogicalWindowSize() {
+        val base = """mBaseDisplayInfo=DisplayInfo{"shared_fission_bg_XDJAScreenProjection_1", displayId 4, real 1920 x 720, state ON}"""
+        val override = base.replace("mBase", "mOverride").replace("x 720", "x 660")
+        val full = base.replace("_1", "_0").replace("displayId 4", "displayId 3")
+        val background = base.replace("shared_fission_bg_XDJAScreenProjection_1", "fission_bg_XDJAScreenProjection")
+        assertEquals(DiLink5ProjectionDisplayRef(4, "shared_fission_bg_XDJAScreenProjection_1", 1920, 660),
+            resolveFactoryMiniMapDisplay(listOf(full, background, base, override)))
+        assertNull(resolveFactoryMiniMapDisplay(listOf(full, background, base, override.replace("state ON", "state OFF"))))
+        assertNull(resolveFactoryMiniMapDisplay(listOf(base, override.replace("1920 x 660", "1 x 1"))))
+    }
+
+    @Test
     fun aConfirmedReturnMakesTheSameTasksNextFullscreenResetADistinctDensityLoss() {
         val watch = DirectDensityLossEpisodes(17)
         val strikes = linkedSetOf<String>()
@@ -173,7 +185,7 @@ class DiLink5ClusterCastTest {
 
         val source = File("src/main/java/com/overdrive/app/launcher/DiLink5ClusterCast.kt").readText()
         val methodStart = source.indexOf("private fun enableAndAwaitProjectionDisplay(")
-        val methodEnd = source.indexOf("private fun isAutoProjectionTransport()", methodStart)
+        val methodEnd = source.indexOf("private fun readProjectionConfig()", methodStart)
         val method = source.substring(methodStart, methodEnd)
         val visibilityCheck = method.indexOf("isAppDisplayVisible(")
         val enableDispatch = method.indexOf("sendDiLink5ContainerInfoResult(16)")
@@ -211,7 +223,7 @@ class DiLink5ClusterCastTest {
         assertEquals(3, Regex("appMoved = appMovedGeneration == expectedGeneration").findAll(markers).count())
 
         val enableStart = source.indexOf("private fun enableAndAwaitProjectionDisplay(")
-        val enableEnd = source.indexOf("private fun isAutoProjectionTransport()", enableStart)
+        val enableEnd = source.indexOf("private fun readProjectionConfig()", enableStart)
         val enable = source.substring(enableStart, enableEnd)
         assertTrue(enable.indexOf("val preferredName") < enable.indexOf("isAppDisplayVisible("))
         assertTrue(enable.contains("return configureProjectionTarget(context, preEnableTarget"))
@@ -807,6 +819,21 @@ class DiLink5ClusterCastTest {
     }
 
     @Test
+    fun uncertainTaskCleanupRetriesWithoutClaimingTheFactoryCompositor() {
+        val source = File("src/main/java/com/overdrive/app/launcher/DiLink5ClusterCast.kt").readText()
+            .substringAfter("private fun recoverOrphanedStateSynchronously()")
+            .substringBefore("private fun readRecoveryMarker()")
+        val ownership = source.substringAfter("val needsPowerDown =").substringBefore("val taskMayBeMoved")
+        assertTrue(ownership.contains("mayOwnDiLink5ProjectionCompositor("))
+        assertTrue(ownership.contains("marker.powered || poweredGeneration > 0L"))
+        assertTrue(ownership.contains("marker.enableIndeterminate || enableIndeterminateGeneration > 0L"))
+        assertTrue(ownership.contains("marker.teardownIndeterminate || teardownIndeterminateGeneration > 0L"))
+        assertFalse(ownership.contains("cleanupUncertain"))
+        assertTrue(source.contains("!needsPowerDown && !taskMayBeMoved && !cleanupUncertain"))
+        assertTrue(source.contains("val poweredDown = !needsPowerDown || powerDownCompositor("))
+    }
+
+    @Test
     fun indeterminateEnableOwnershipExpiresOnlyAcrossAProvenBootChange() {
         val bootA = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
         val bootB = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
@@ -1316,6 +1343,19 @@ class DiLink5ClusterCastTest {
                 3, "shared_fission_bg_XDJAScreenProjection_0", 0, 0
             ),
             refs[1]
+        )
+    }
+
+    @Test
+    fun seaLion07MiniMapUsesTheSelectedSharedDisplaysActualHeightAndRightSide() {
+        // BYDMate #263 lists _0 as 1920x720 and _1 as 1920x660 on the same head unit.
+        assertEquals(
+            DiLink5ProjectionBounds(1306, 0, 1920, 660),
+            factoryMiniMapDefaultBounds(1920, 660)
+        )
+        assertEquals(
+            DiLink5ProjectionBounds(870, 0, 1280, 480),
+            factoryMiniMapDefaultBounds(1280, 480)
         )
     }
 

@@ -100,6 +100,11 @@
         .upd-channel-seg.active { background:var(--secondary-container); color:var(--on-secondary-container); }
         .upd-channel-seg:disabled { cursor:default; opacity:0.7; }
         .upd-channel-desc { font-size:12px; color:var(--on-surface-variant); line-height:1.5; margin:-8px 0 16px; }
+        .upd-auto { display:block; margin:12px 0 18px; font-size:13px; color:var(--on-surface); }
+        .upd-auto > span { display:flex; align-items:center; font-weight:600; }
+        .upd-auto input { width:20px; height:20px; margin:0 10px 0 0; accent-color:var(--primary); }
+        [dir="rtl"] .upd-auto input { margin:0 0 0 10px; }
+        .upd-auto small { display:block; margin-top:5px; color:var(--on-surface-variant); font-size:12px; line-height:1.5; }
 
         /* Report-a-bug block (Braveheart beta channel) */
         .upd-report { background:var(--warning-soft); border:0; border-radius:var(--radius-md); padding:12px 14px; margin:0 0 16px; }
@@ -275,6 +280,7 @@
         var localSec = preview.localRecoverySeconds || 60;
         var recommend = preview.recommendInApp !== false;
         var recommendReason = preview.recommendInAppReason || '';
+        var notes = releaseHighlights(res.remoteVersion, res.releaseNotes);
 
         var rotationRowHtml = rotates ?
             '<div class="upd-row">' +
@@ -312,7 +318,7 @@
             '<div class="upd-modal" role="dialog" aria-labelledby="updTitle">' +
               '<h2 id="updTitle">' + BYD.i18n.t('update.title_update_to', {version: escapeHtml(res.remoteVersion || '')}) + '</h2>' +
               '<div class="upd-current">' + escapeHtml(BYD.i18n.t('update.currently_on', {version: res.currentVersion || ''})) + '</div>' +
-              (res.releaseNotes ? '<div class="upd-rel-notes">' + escapeHtml(res.releaseNotes) + '</div>' : '') +
+              (notes ? '<div class="upd-rel-notes">' + escapeHtml(notes) + '</div>' : '') +
               '<div class="upd-warn">' +
                 '<div class="upd-row">' +
                   updIcon('clock') +
@@ -323,6 +329,7 @@
                 downgradeRowHtml +
                 recommendRowHtml +
               '</div>' +
+              '<div id="updAutoMount"></div>' +
               '<div class="upd-actions">' +
                 '<button class="upd-btn upd-btn-cancel" id="updCancel">' + escapeHtml(BYD.i18n.t('common.cancel')) + '</button>' +
                 '<button class="upd-btn upd-btn-primary" id="updConfirm">' + escapeHtml(recommend ? BYD.i18n.t('update.install_anyway') : BYD.i18n.t('update.install')) + '</button>' +
@@ -330,6 +337,8 @@
             '</div>';
 
         document.body.appendChild(bg);
+        var autoMount = $('updAutoMount');
+        if (autoMount) autoMount.appendChild(buildAutoUpdateControl());
         $('updCancel').addEventListener('click', closeModal);
         $('updConfirm').addEventListener('click', function () {
             startInstall(res.currentVersion, res.remoteVersion, res._targetTag);
@@ -342,6 +351,22 @@
         if (bg) bg.remove();
     }
 
+    // A sideload has no GitHub release body. The publishing scripts can
+    // also supply just the channel name and version. Keep the bundled
+    // highlights scoped to the precise build that shipped these features.
+    var bundledHighlights = { '63.4.1': 'update.release_63_4_1', '64.0': 'update.release_64_0' };
+    function releaseHighlights(version, published) {
+        var notes = String(published || '').trim();
+        var match = /^(?:(?:alpha|braveheart|debug|prod|beta)-)?v?(\d+\.\d+(?:\.\d+)?)$/i.exec(version || '');
+        if (!match || !bundledHighlights[match[1]]) return notes;
+        var number = match[1];
+        if (notes && notes !== 'Braveheart (latest) — v' + number && notes !== 'Alpha v' + number &&
+                notes !== 'Bug fixes and improvements.') return notes;
+        var key = bundledHighlights[number];
+        var localized = BYD.i18n.t(key);
+        return localized && localized !== key ? localized : notes;
+    }
+
     // Braveheart "up to date" — a small modal carrying the channel switcher so
     // the user can drop back to Alpha (the switcher is otherwise only in the
     // alpha catalog / braveheart confirm).
@@ -351,10 +376,12 @@
         var bg = document.createElement('div');
         bg.className = 'upd-modal-bg';
         bg.id = 'updModalBg';
+        var notes = releaseHighlights(currentVersion, '');
         bg.innerHTML =
             '<div class="upd-modal" role="dialog">' +
               UPD_DONE_ICON +
               '<h2>' + escapeHtml(BYD.i18n.t('update.latest_version', {version: currentVersion})) + '</h2>' +
+              (notes ? '<div class="upd-rel-notes">' + escapeHtml(notes) + '</div>' : '') +
               '<div id="updChannelMount"></div>' +
               '<div class="upd-channel-desc">' + escapeHtml(BYD.i18n.t('update.channel_braveheart_desc')) + '</div>' +
               '<div id="updReportMount"></div>' +
@@ -426,7 +453,50 @@
             });
             wrap.appendChild(b);
         });
-        return wrap;
+        var box = document.createElement('div');
+        box.appendChild(wrap);
+        box.appendChild(buildAutoUpdateControl());
+        return box;
+    }
+
+    function buildAutoUpdateControl() {
+        var label = document.createElement('label');
+        label.className = 'upd-auto';
+        var row = document.createElement('span');
+        var input = document.createElement('input');
+        input.type = 'checkbox';
+        input.disabled = true;
+        row.appendChild(input);
+        var title = document.createElement('span');
+        title.textContent = BYD.i18n.t('update.auto_install_title');
+        row.appendChild(title);
+        label.appendChild(row);
+        var detail = document.createElement('small');
+        detail.textContent = BYD.i18n.t('update.auto_install_desc');
+        label.appendChild(detail);
+        fetch('/api/update/auto').then(function (r) { return r.json(); }).then(function (res) {
+            if (!res || typeof res.enabled !== 'boolean') return;
+            input.checked = res.enabled;
+            input.disabled = false;
+        }).catch(function () { /* Fail closed without falsely promising persistence. */ });
+        input.addEventListener('change', function () {
+            var requested = input.checked;
+            input.disabled = true;
+            fetch('/api/update/auto?enabled=' + requested, {method:'POST'})
+                .then(function (r) { return r.json(); })
+                .then(function (res) {
+                    if (!res || res.enabled !== requested) {
+                        input.checked = !requested;
+                        toast(BYD.i18n.t('update.auto_install_failed'), 'error');
+                    }
+                    input.disabled = false;
+                }).catch(function () {
+                    input.checked = !requested;
+                    input.disabled = false;
+                    toast(BYD.i18n.t('update.auto_install_failed'), 'error');
+                });
+        });
+        return label;
     }
 
     // Report-a-bug block for the Braveheart (beta) channel: the "send logs →
@@ -574,10 +644,11 @@
             }
             row.appendChild(top);
 
-            if (v.releaseNotes) {
+            var releaseNotes = releaseHighlights(v.version || v.tag, v.releaseNotes);
+            if (releaseNotes) {
                 var notes = document.createElement('div');
                 notes.className = 'upd-ver-notes';
-                notes.textContent = firstLines(v.releaseNotes, 3);
+                notes.textContent = firstLines(releaseNotes, 3);
                 row.appendChild(notes);
             }
 

@@ -358,6 +358,19 @@
                         android:text="@string/camera_mode_option_camera2"
                         android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
                         android:textColor="?attr/colorOnSurface" />
+
+                    <RadioButton
+                        android:id="@+id/rbCameraModeSurfaceTexture"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:buttonTint="?attr/colorPrimary"
+                        android:paddingStart="8dp"
+                        android:paddingTop="8dp"
+                        android:paddingEnd="8dp"
+                        android:paddingBottom="8dp"
+                        android:text="@string/camera_mode_option_surfacetexture"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                        android:textColor="?attr/colorOnSurface" />
                 </RadioGroup>
 
                 <com.google.android.material.button.MaterialButton

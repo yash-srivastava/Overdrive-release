@@ -182,7 +182,8 @@ public final class ScratchRoot {
      * Identity while legacy, so existing command text is unchanged. Only
      * whole path components are rewritten: {@code /data/local/tmp/x} and
      * {@code /data/local/tmp} followed by a delimiter, never
-     * {@code /data/local/tmpfs}.
+     * {@code /data/local/tmpfs} or a nested path such as
+     * {@code /mnt/data/local/tmp}.
      */
     public static String remap(String command) {
         if (command == null || command.isEmpty()) return command;
@@ -195,10 +196,13 @@ public final class ScratchRoot {
         int legacyLength = LEGACY_DIR.length();
         while (idx >= 0) {
             int end = idx + legacyLength;
-            boolean boundary = end >= command.length()
+            // The legacy root must start at a path boundary as well as end at
+            // one. Otherwise a path like /mnt/data/local/tmp is corrupted.
+            boolean startBoundary = startsPath(command, idx);
+            boolean endBoundary = end >= command.length()
                     || !isPathWord(command.charAt(end));
             out.append(command, from, idx);
-            out.append(boundary ? root : LEGACY_DIR);
+            out.append(startBoundary && endBoundary ? root : LEGACY_DIR);
             from = end;
             idx = command.indexOf(LEGACY_DIR, from);
         }
@@ -343,6 +347,19 @@ public final class ScratchRoot {
     private static boolean isPathWord(char c) {
         return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
                 || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.';
+    }
+
+    /**
+     * Extra leading slashes (file:///, //) and an option glued in front (-C/..., ${X:-/...})
+     * still start a path; any other word before the root makes it a nested path.
+     */
+    private static boolean startsPath(String command, int idx) {
+        int i = idx;
+        while (i > 0 && command.charAt(i - 1) == '/') i--;
+        int w = i;
+        while (w > 0 && isPathWord(command.charAt(w - 1))) w--;
+        if (w == i) return true;
+        return command.charAt(w) == '-' && (w == 0 || command.charAt(w - 1) != '/');
     }
 
     static String shellQuote(String value) {

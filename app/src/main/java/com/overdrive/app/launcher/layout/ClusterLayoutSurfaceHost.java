@@ -41,7 +41,7 @@ public final class ClusterLayoutSurfaceHost {
     private static final int SHELL_UID = 2000;
     private static final String SHELL_PACKAGE = "com.android.shell";
     // PRESENTATION | SUPPORTS_TOUCH | DESTROY_ON_REMOVAL, optionally TRUSTED.
-    private static final int PRIVATE_FLAGS = 322, TRUSTED_PRIVATE_FLAGS = 1346;
+    public static final int PRIVATE_FLAGS = 322, TRUSTED_PRIVATE_FLAGS = 1346;
     private static final AtomicLong NAMES = new AtomicLong();
 
     private ClusterLayoutSurfaceHost() {}
@@ -486,25 +486,66 @@ public final class ClusterLayoutSurfaceHost {
 
     private static Context shellContext() throws CreateException {
         if (!isSupported()) throw new CreateException("layouts_unavailable_on_current_platform", null);
+        return shellContext(CameraDaemon.getAppContext(), false);
+    }
+
+    /** Package/UID attribution for daemon-created private virtual displays. */
+    public static Context shellDisplayContext(Context base) throws CreateException {
+        return shellContext(base, true);
+    }
+
+    private static Context shellContext(Context base, boolean forNavigator) throws CreateException {
         if (android.os.Process.myUid() != SHELL_UID)
             throw new CreateException("layouts_require_shell_daemon_uid", null);
-        Context base = CameraDaemon.getAppContext();
         if (base == null) throw new CreateException("daemon_context_unavailable", null);
         try {
-            Context context = base.createPackageContext(SHELL_PACKAGE, Context.CONTEXT_IGNORE_SECURITY);
+            Context context = base.createPackageContext(SHELL_PACKAGE, forNavigator ? 0 : Context.CONTEXT_IGNORE_SECURITY);
+            if (forNavigator) verifyShellPackage(context);
+            if (forNavigator && !shellOwnsAttribution(context)) {
+                Context app = context.getApplicationContext();
+                if (app != null && SHELL_PACKAGE.equals(app.getPackageName()) && shellOwnsAttribution(app)) {
+                    context = app;
+                } else {
+                    context = shellApplicationContext(context);
+                }
+            }
             verifyShellIdentity(context);
             return context;
         } catch (Throwable error) { throw new CreateException(reason("shell_context", error), null); }
     }
 
     private static void verifyShellIdentity(Context context) throws Exception {
+        verifyShellPackage(context);
+        if (!shellOwnsAttribution(context)) throw new SecurityException("shell_op_package_mismatch");
+    }
+
+    private static void verifyShellPackage(Context context) throws Exception {
         if (context == null || android.os.Process.myUid() != SHELL_UID
                 || !SHELL_PACKAGE.equals(context.getPackageName())
                 || context.getApplicationInfo().uid != SHELL_UID
                 || context.getPackageManager().getApplicationInfo(SHELL_PACKAGE, 0).uid != SHELL_UID)
             throw new SecurityException("shell_package_uid_mismatch");
-        Object opPackage = Context.class.getMethod("getOpPackageName").invoke(context);
-        if (!SHELL_PACKAGE.equals(opPackage)) throw new SecurityException("shell_op_package_mismatch");
+    }
+
+    private static boolean shellOwnsAttribution(Context context) throws Exception {
+        return SHELL_PACKAGE.equals(Context.class.getMethod("getOpPackageName").invoke(context));
+    }
+
+    /**
+     * Android 10 createPackageContext() inherits the creator's op package under systemMain().
+     * Build the shell application's root context as LoadedApk does, using its already-verified
+     * package and the framework's default attribution. Does not instantiate the shell Application.
+     */
+    private static Context shellApplicationContext(Context shell) throws Exception {
+        Class<?> impl = Class.forName("android.app.ContextImpl");
+        java.lang.reflect.Field packageField = impl.getDeclaredField("mPackageInfo");
+        packageField.setAccessible(true);
+        Object shellPackage = packageField.get(shell);
+        Class<?> thread = Class.forName("android.app.ActivityThread");
+        Object currentThread = thread.getMethod("currentActivityThread").invoke(null);
+        java.lang.reflect.Method create = impl.getDeclaredMethod("createAppContext", thread, packageField.getType());
+        create.setAccessible(true);
+        return (Context) create.invoke(null, currentThread, shellPackage);
     }
 
     private static DisplayManager manager(Context context) throws CreateException {

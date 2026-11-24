@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notif_channel_roadsense_overlay">RoadSense-overlay</string>
+    <string name="notif_roadsense_overlay_text">Waarschuwingsoverlay actief</string>
+    <string name="notif_channel_roadsense_imu">RoadSense IMU</string>
+    <string name="notif_roadsense_imu_text">Wegdetectie actief</string>
+    <string name="notif_channel_onscreen_messages">Schermberichten</string>
+    <string name="notif_onscreen_message_title">Schermbericht</string>
+    <string name="notif_channel_parked_impact">Botsingsbewaking tijdens parkeren</string>
+    <string name="notif_parked_impact_title">Bewaking</string>
+    <string name="notif_parked_impact_text">Bewaakt botsingen terwijl de auto geparkeerd staat</string>
+    <string name="notif_network_hotspot">Netwerk en hotspot</string>
+    <string name="notif_channel_media_playback">Media afspelen</string>
+    <string name="notif_roadsense_chime_title">RoadSense-waarschuwing</string>
+    <string name="notif_roadsense_chime_text">Veiligheidssignaal afspelen</string>
+    <string name="notif_channel_location">Locatieservice</string>
+    <string name="notif_channel_location_desc">GPS-tracking voor bewaking</string>
+    <string name="notif_location_title">Locatie actief</string>
+    <string name="notif_location_text">GPS-tracking actief</string>
+    <string name="notif_vehicle_control">Voertuigbediening</string>
+    <string name="notif_media_title">Audio afspelen</string>
+    <string name="notif_media_text">OverDrive-automatisering</string>
+    <string name="notif_channel_keepalive">Daemons actief houden</string>
+    <string name="notif_channel_keepalive_desc">Houdt daemons op de achtergrond actief</string>
+    <string name="notif_channel_remote_voice">Spraak op afstand</string>
+    <string name="notif_channel_status_overlay">Statusoverlay</string>
+    <string name="notif_channel_status_overlay_desc">Statusoverlay voor opnames en ritten</string>
+    <string name="notif_channel_summary">OverDrive-status</string>
+    <string name="notif_channel_summary_desc">Gecombineerde statusregel voor de achtergrondservices van OverDrive</string>
+</resources>

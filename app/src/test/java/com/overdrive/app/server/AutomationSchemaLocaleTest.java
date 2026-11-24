@@ -87,7 +87,7 @@ public class AutomationSchemaLocaleTest {
         assertTrue(script.contains("this.renderGroupList();"));
         assertTrue(script.contains("AudioLibrary.refresh();"));
         assertTrue(script.contains("CommunityAutomations.loadPage("));
-        assertTrue(page.contains("automations.js?v=av75"));
+        assertTrue(page.contains("automations.js?v=av78"));
     }
 
     private static JSONArray requestSchema(String lang) throws Exception {

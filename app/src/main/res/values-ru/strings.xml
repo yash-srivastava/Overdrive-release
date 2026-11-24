@@ -1478,7 +1478,7 @@
     <string name="settings_remote_listener_title" tools:ignore="MissingTranslation">Включить прослушивание салона</string>
     <string name="settings_remote_listener_subtitle" tools:ignore="MissingTranslation">Позволяйте аутентифицированным сеансам Live View и Communicate слушать микрофон кабины, пока автомобиль включен.</string>
     <string name="settings_remote_audio_channel_title" tools:ignore="MissingTranslation">Голосовая совместимость</string>
-    <string name="settings_remote_audio_channel_subtitle" tools:ignore="MissingTranslation">Средства массовой информации сохраняют существующие пути динамика и микрофона. Навигация соответствует маршрутизации Di+ и захвату микрофона 8 кГц.</string>
+    <string name="settings_remote_audio_channel_subtitle" tools:ignore="MissingTranslation">Средства массовой информации сохраняют существующие пути динамика и микрофона. Навигация соответствует маршрутизации BYD и захвату микрофона 8 кГц.</string>
     <string name="settings_remote_audio_channel_media" tools:ignore="MissingTranslation">Медиа</string>
     <string name="settings_remote_audio_channel_navigation" tools:ignore="MissingTranslation">Навигация</string>
     <string name="settings_remote_output_override_title">Используйте пользовательский уровень голоса</string>
@@ -1519,6 +1519,7 @@
     <string name="settings_about_vehicle_vin_hidden_a11y">Скрытый VIN</string>
     <string name="settings_about_vehicle_loading">Загрузка..</string>
     <string name="settings_about_vehicle_unavailable">Недоступно</string>
+    <string name="settings_about_tier_hall_of_fame">Зал славы</string>
     <string name="settings_about_tier_diamond">алмаз</string>
     <string name="settings_about_tier_platinum">Платина</string>
     <string name="settings_about_tier_gold">золото</string>

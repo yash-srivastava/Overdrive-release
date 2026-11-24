@@ -155,18 +155,13 @@ public class SafeLocationManager {
     /**
      * Drop any geocache rows whose centroid is near a SafeLocation we just
      * added/edited/removed so a stale public address can't shadow the new
-     * SafeZone label. Reflective dispatch keeps SafeLocationManager free of
-     * a hard compile-time dep on the geo package — the resolver may not be
-     * loaded in trimmed builds (e.g. unit-test classpath).
+     * SafeZone label. Direct call: R8 strips invalidateNear when only reflection reaches it.
      */
     private void invalidateGeoCacheNear(double lat, double lng, int radiusM) {
         try {
-            Class<?> cls = Class.forName("com.overdrive.app.geo.GeoCache");
-            Object inst = cls.getMethod("getInstance").invoke(null);
-            cls.getMethod("invalidateNear", double.class, double.class, double.class)
-                    .invoke(inst, lat, lng, (double) radiusM);
+            com.overdrive.app.geo.GeoCache.getInstance().invalidateNear(lat, lng, radiusM);
         } catch (Throwable ignored) {
-            // GeoCache not on classpath / not yet initialised — safe to skip.
+            // A cache failure must not fail the zone edit.
         }
     }
 

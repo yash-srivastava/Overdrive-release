@@ -413,7 +413,7 @@ public final class ClusterMirrorController {
         // (what the 1-arg clusterDisplaySize does internally) could straddle a layerStack/id
         // change across a projection re-open and pair one display's size with another's stack.
         boolean diLink5 =
-                com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5();
+                com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService();
         if (!diLink5 && ClusterProjectionController
                 .isLegacyProjectionAdmissionBlocked()) {
             logger.info("start: legacy projection blocked by DI5 recovery");

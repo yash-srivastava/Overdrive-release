@@ -1,5 +1,7 @@
 package com.overdrive.app.surveillance;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.util.MessageFormatSafe;
 
@@ -166,22 +168,22 @@ public final class SrtWriter {
                 return null;
             }
 
-            try (FileWriter fw = new FileWriter(tmpFile)) {
+            try (java.io.Writer fw = new java.io.OutputStreamWriter(RemovableStorageFs.openOutput(tmpFile), java.nio.charset.StandardCharsets.UTF_8)) {
                 fw.write(sb.toString());
             }
 
             // Atomic-ish swap so a half-written file never appears under the
             // final name (matches the discipline used by the JSON sidecar
             // writer in EventTimelineCollector).
-            if (!tmpFile.renameTo(srtFile)) {
-                try (FileWriter fw = new FileWriter(srtFile)) {
+            if (!RemovableStorageFs.renameTo(tmpFile, srtFile)) {
+                try (java.io.Writer fw = new java.io.OutputStreamWriter(RemovableStorageFs.openOutput(srtFile), java.nio.charset.StandardCharsets.UTF_8)) {
                     fw.write(sb.toString());
                 }
-                tmpFile.delete();
+                RemovableStorageFs.delete(tmpFile);
             }
 
             try {
-                srtFile.setReadable(true, false);
+                RemovableStorageFs.setReadable(srtFile, true, false);
             } catch (Exception ignored) {
                 // Best-effort; not all filesystems honour this.
             }

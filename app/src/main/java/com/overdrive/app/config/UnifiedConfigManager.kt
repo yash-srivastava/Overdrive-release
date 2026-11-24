@@ -675,7 +675,7 @@ object UnifiedConfigManager {
         //   ApHold           — vendor.peripheral shutdown-critical token; also
         //                      requires ApHoldPreflightPassed (written only by the
         //                      diagnostics flow after a recorded on-car pre-flight)
-        //   ReassertSeconds  — MCU-hold re-assert cadence ("DiPlus mode-3 parity")
+        //   ReassertSeconds  — MCU-hold re-assert cadence ("reference mode-3 parity")
         //   CutoffVoltage / CutoffSamples / VoltageMaxAgeSeconds — best-effort
         //                      12 V cutoff guard (NOT BatteryVoltageMonitorV2's
         //                      MCU thresholds); missing/stale samples do not
@@ -3294,6 +3294,16 @@ object UnifiedConfigManager {
         return updateSection("updates", JSONObject().put("channel", channel))
     }
 
+    /** Disabled for old configs; signed local builds can still be replaced when enabled. */
+    @JvmStatic
+    fun isAutoUpdateEnabled(): Boolean =
+        loadConfig().optJSONObject("updates")?.optBoolean("autoInstall", false) ?: false
+
+    /** Merged write so switching channels never clears auto-install consent. */
+    @JvmStatic
+    fun setAutoUpdateEnabled(enabled: Boolean): Boolean =
+        updateValues("updates", mapOf("autoInstall" to enabled))
+
     /**
      * Get status-overlay (floating pill) visibility section.
      * Each segment defaults to visible=true so installs that pre-date this
@@ -3583,14 +3593,16 @@ object UnifiedConfigManager {
      * than leaking an invalid token to formatters.
      */
     @JvmStatic
-    fun getTyrePressureUnit(): String {
-        val stored = loadConfig().optJSONObject("tyres")
-            ?.optString("pressureUnit", "") ?: ""
-        return when (stored.lowercase()) {
-            "kpa", "psi", "bar" -> stored.lowercase()
+    fun getTyrePressureUnit(): String = getTyrePressureUnit(loadConfig())
+
+    fun getTyrePressureUnit(config: JSONObject): String =
+        normalizeTyrePressureUnit(config.optJSONObject("tyres")?.optString("pressureUnit"))
+
+    fun normalizeTyrePressureUnit(stored: String?): String =
+        when (val unit = stored?.lowercase()) {
+            "kpa", "psi", "bar" -> unit
             else -> TYRE_PRESSURE_UNIT_DEFAULT
         }
-    }
 
     /**
      * Physical vehicle model selected by the user or a future verified
@@ -3663,6 +3675,15 @@ object UnifiedConfigManager {
             NATIVE_VEHICLE_PROFILE_KEY,
             if (enabled) NATIVE_VEHICLE_PROFILE_UNVERIFIED else NATIVE_VEHICLE_PROFILE_DISABLED
         ))
+
+    /** Shared dashboard headline preference; defaults to the historical personalized-first UI. */
+    @JvmStatic
+    fun isPersonalizedRangeFirst(): Boolean =
+        loadConfig().optJSONObject("dashboard")?.optBoolean("personalizedRangeFirst", true) ?: true
+
+    @JvmStatic
+    fun setPersonalizedRangeFirst(enabled: Boolean): Boolean =
+        updateSection("dashboard", JSONObject().put("personalizedRangeFirst", enabled))
 
     /**
      * Web-shell appearance preference (theme picker shipped in the WebView

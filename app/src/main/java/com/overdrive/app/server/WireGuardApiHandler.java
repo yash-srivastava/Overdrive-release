@@ -36,14 +36,18 @@ public class WireGuardApiHandler {
             return true;
         }
         if (p.equals("/api/wireguard/config") && method.equals("POST")) {
+            // A re-pointed tunnel could carry the car's MQTT traffic, which never asks.
+            if (!StepUpGate.requireBundle("config", "Change WireGuard", out)) return true;
             handleSave(out, body);
             return true;
         }
         if (p.equals("/api/wireguard/config") && method.equals("DELETE")) {
+            if (!StepUpGate.requireBundle("config", "Change WireGuard", out)) return true;
             handleDelete(out);
             return true;
         }
         if (p.equals("/api/wireguard/expose") && method.equals("POST")) {
+            if (!StepUpGate.requireBundle("config", "Change WireGuard", out)) return true;
             handleExpose(out, body);
             return true;
         }

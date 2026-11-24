@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="recording_library_loading">正在加载录像</string>
+    <string name="recording_library_refreshing">正在刷新录像</string>
+    <string name="recording_library_loading_more">正在加载更多录像</string>
+    <string name="recording_library_page_error">无法加载更多录像。</string>
+    <string name="recording_library_page_unavailable">更多录像暂时不可用。</string>
+    <string name="recording_library_refresh_error">无法刷新。正在显示已加载的录像。</string>
+    <string name="recording_library_fatal_title">无法打开录像</string>
+    <string name="recording_library_fatal_body">请检查录制服务和存储，然后重试。</string>
+    <string name="recording_library_select">选择录像</string>
+    <string name="recording_library_open_filters">筛选录像</string>
+    <string name="recording_library_clear_search">清除地点搜索</string>
+    <string name="recording_preview_details">录像详情</string>
+    <string name="cd_expand_recording_details">显示录像详情</string>
+    <string name="cd_collapse_recording_details">隐藏录像详情</string>
+    <string name="recording_item_description">%1$s，%2$s，%3$s。打开录像。</string>
+    <string name="recording_item_selection_description">%1$s，%2$s，%3$s。%4$s</string>
+    <string name="recording_item_selected_action">已选中。双击以取消选择。</string>
+    <string name="recording_item_not_selected_action">未选中。双击以选择。</string>
+    <string name="recording_item_select">选择 %1$s</string>
+    <string name="recording_item_deselect">取消选择 %1$s</string>
+    <string name="cd_pause">暂停</string>
+    <string name="cd_player_unmute">开启声音</string>
+    <string name="cd_player_mute_audio">静音</string>
+    <string name="video_player_buffering">正在加载视频</string>
+    <string name="video_player_error_title">无法播放此录像</string>
+    <string name="video_player_error_body">文件可能不可用，或存储设备可能已断开连接。</string>
+    <string name="video_player_retry">重试</string>
+    <string name="video_player_next">下一个录像</string>
+    <string name="video_timeline_empty">事件时间轴。未检测到事件。</string>
+    <string name="video_timeline_events">事件时间轴。检测到 %1$d 个事件。点击可跳转到最近的事件。</string>
+    <string name="video_timeline_selected">%2$s 的 %1$s 事件</string>
+</resources>

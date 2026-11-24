@@ -82,6 +82,9 @@
         ariaStrip: 'Timeline at {time}', ariaStripNearest: 'Timeline at {time}, nearest moment {moment}',
         ariaPlay: 'Play', ariaPause: 'Pause', ariaPrev: 'Previous event', ariaNext: 'Next event',
         ariaSpeed: 'Playback speed {speed}', ariaDate: 'Choose date and time', ariaFilter: 'Filter', ariaListView: 'List view',
+        fullscreen: 'Fullscreen', exitFullscreen: 'Exit fullscreen', share: 'Share segment', shareUnavailable: 'No clip to share',
+        shareCopied: 'Download link copied', shareFailed: "Couldn't share this clip",
+        shareRecording: "This clip is still recording. Share it once it's saved.",
         durHm: '{h} h {m} min', durM: '{m} min', durS: '{s} s',
         watchDrive: 'Watch this drive', watchSession: 'Watch this session', rewind: 'Rewind'
     };
@@ -559,7 +562,7 @@
         data: null, dataRev: 0, moments: [], momentsById: {}, activeId: null, rowEls: {}, listSig: '', titleSig: '',
         camLayout: null, objSig: '', menu: null, menuAnchor: null, hideTimer: null, uiTimer: null, uiAt: 0, rowsRaf: 0,
         userScrollAt: 0, refreshTimer: null, liveKey: null, daysInfo: null, daysAt: 0, hintTo: null, bannerTimer: null,
-        rowDrag: null, suppressClickUntil: 0
+        rowDrag: null, suppressClickUntil: 0, fullscreen: false
     };
     var els = {};
     var store = null;
@@ -575,6 +578,9 @@
         filter: '<svg class="tlv-stroke" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M7 12h10M10 17h4"/></svg>',
         list: '<svg class="tlv-stroke" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7h11M9 12h11M9 17h11"/><path d="M4.5 7h.01M4.5 12h.01M4.5 17h.01" stroke-width="3"/></svg>',
         swap: '<svg class="tlv-stroke" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h11l-3-3M17 17H6l3 3"/></svg>',
+        fullscreen: '<svg class="tlv-stroke tlv-fsico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>',
+        fullscreenExit: '<svg class="tlv-stroke tlv-fsico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>',
+        share: '<svg class="tlv-stroke" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>',
         eq: '<span class="tlv-eq" aria-hidden="true"><i></i><i></i><i></i></span>'
     };
     var KIND_ICON = {
@@ -758,6 +764,8 @@
                         '<button type="button" class="tlv-b2" data-tlv="prev">' + ICON.prev + '</button>' +
                         '<button type="button" class="tlv-b2 tlv-pp" data-tlv="play">' + ICON.play + '</button>' +
                         '<button type="button" class="tlv-b2" data-tlv="next">' + ICON.next + '</button>' +
+                        '<button type="button" class="tlv-b2" data-tlv="fullscreen">' + ICON.fullscreen + '</button>' +
+                        '<button type="button" class="tlv-b2" data-tlv="share">' + ICON.share + '</button>' +
                         '<button type="button" class="tlv-spd" data-tlv="speed" aria-haspopup="dialog" aria-expanded="false">1×</button>' +
                     '</div>' +
                     '<div class="tlv-spdpop tlv-menu" role="dialog" tabindex="-1" hidden></div>' +
@@ -779,7 +787,12 @@
         els.obj = q('.tlv-obj'); els.src = q('.tlv-src'); els.state = q('.tlv-state'); els.banner = q('.tlv-banner');
         els.gapCard = q('.tlv-gapcard');
         els.hint = q('.tlv-nexthint'); els.ctl = q('.tlv-ctl'); els.prev = q('[data-tlv="prev"]'); els.play = q('[data-tlv="play"]');
-        els.next = q('[data-tlv="next"]'); els.spd = q('[data-tlv="speed"]'); els.spdpop = q('.tlv-spdpop');
+        els.next = q('[data-tlv="next"]'); els.fs = q('[data-tlv="fullscreen"]'); els.share = q('[data-tlv="share"]');
+        els.spd = q('[data-tlv="speed"]'); els.spdpop = q('.tlv-spdpop');
+        doc.addEventListener('fullscreenchange', onFsChange);
+        doc.addEventListener('webkitfullscreenchange', onFsChange);
+        doc.addEventListener('fullscreenerror', onFsError);
+        doc.addEventListener('webkitfullscreenerror', onFsError);
         els.panel = q('.tlv-panel'); els.chips = q('.tlv-chips'); els.zoom = q('.tlv-zoom'); els.striphost = q('.tlv-striphost');
         els.list = q('.tlv-list'); els.lt = q('.tlv-lt'); els.lc = q('.tlv-lc'); els.rows = q('.tlv-rows');
         els.vfeed = q('.tlv-vfeed'); els.vhost = q('.tlv-vhost'); els.vrows = q('.tlv-vrows');
@@ -837,6 +850,11 @@
         els.listBtn.setAttribute('aria-label', tr('ariaListView'));
         els.prev.setAttribute('aria-label', tr('ariaPrev'));
         els.next.setAttribute('aria-label', tr('ariaNext'));
+        if (els.fs) {
+            els.fs.setAttribute('aria-label', V.fullscreen ? tr('exitFullscreen') : tr('fullscreen'));
+            els.fs.setAttribute('aria-pressed', V.fullscreen ? 'true' : 'false');
+        }
+        if (els.share) els.share.setAttribute('aria-label', tr('share'));
         els.lt.textContent = tr('moments');
         els.rows.setAttribute('aria-label', tr('moments'));
         els.vrows.setAttribute('aria-label', tr('moments'));
@@ -2323,6 +2341,142 @@
         }).join('');
     }
 
+    // ------------------------------------------------------------------ fullscreen + share
+
+    function fsTarget() { return els.player; }
+
+    function isFsActive() {
+        var el = doc.fullscreenElement || doc.webkitFullscreenElement;
+        return !!el || !!(fsTarget() && fsTarget().classList.contains('is-fullscreen'));
+    }
+
+    function refreshFsButton() {
+        if (!els.fs) return;
+        var on = isFsActive();
+        V.fullscreen = on;
+        els.fs.innerHTML = on ? ICON.fullscreenExit : ICON.fullscreen;
+        els.fs.setAttribute('aria-label', tr(on ? 'exitFullscreen' : 'fullscreen'));
+        els.fs.setAttribute('aria-pressed', on ? 'true' : 'false');
+        if (els.root) els.root.classList.toggle('tlv-fs-on', on);
+        doc.documentElement.classList.toggle('tlv-fs-on', on);
+    }
+
+    function onFsChange() { refreshFsButton(); }
+
+    var fsPending = 0;
+
+    function fsFallback() {
+        var box = fsTarget();
+        if (!box) return;
+        box.classList.add('is-fullscreen');
+        refreshFsButton();
+    }
+
+    function onFsError() {
+        if (fsPending) { clearTimeout(fsPending); fsPending = 0; }
+        fsFallback();
+    }
+
+    function exitFullscreen() {
+        var box = fsTarget();
+        if (!box) return;
+        if (fsPending) { clearTimeout(fsPending); fsPending = 0; }
+        if (box.classList.contains('is-fullscreen')) {
+            box.classList.remove('is-fullscreen');
+        } else if (doc.fullscreenElement && doc.exitFullscreen) {
+            var p = doc.exitFullscreen();
+            if (p && p.catch) p.catch(function () {});
+        } else if (doc.webkitFullscreenElement && doc.webkitExitFullscreen) {
+            doc.webkitExitFullscreen();
+        }
+        refreshFsButton();
+    }
+
+    function toggleFullscreen() {
+        var box = fsTarget();
+        if (!box) return;
+        if (isFsActive()) { exitFullscreen(); return; }
+        try {
+            var p = box.requestFullscreen ? box.requestFullscreen()
+                : box.webkitRequestFullscreen ? box.webkitRequestFullscreen() : null;
+            if (p && p.catch) p.catch(onFsError);
+            else if (!box.requestFullscreen && !box.webkitRequestFullscreen) { fsFallback(); return; }
+        } catch (e) { fsFallback(); return; }
+        // A refused request can also fail silently: fall back if nothing happened.
+        fsPending = setTimeout(function () {
+            fsPending = 0;
+            if (!isFsActive()) fsFallback();
+        }, 600);
+    }
+
+    function segFilename(seg) {
+        if (!seg || !seg.id) return 'recording.mp4';
+        return String(seg.id).replace(/[^a-f0-9]/gi, '') + '.mp4';
+    }
+
+    function downloadCurrentSegment() {
+        var seg = V.item;
+        var url = seg && seg.videoUrl;
+        if (!url) return;
+        var a = doc.createElement('a');
+        a.href = url;
+        a.download = segFilename(seg);
+        doc.body.appendChild(a);
+        a.click();
+        doc.body.removeChild(a);
+    }
+
+    function shareCurrentSegment() {
+        var seg = V.item;
+        if (!seg || seg.available === false || !seg.videoUrl) {
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(tr('shareUnavailable'), 'warning');
+            return;
+        }
+        if (seg.end == null) {
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(tr('shareRecording'), 'warning');
+            return;
+        }
+        var url = seg.videoUrl;
+        var name = segFilename(seg);
+        var nav = root.navigator;
+        var canShareFiles = false;
+        try {
+            canShareFiles = !!(nav && nav.share && nav.canShare && root.File
+                && nav.canShare({ files: [new File([''], name, { type: 'video/mp4' })] }));
+        } catch (e) { canShareFiles = false; }
+        var shareFiles = function (file) {
+            if (!nav.canShare({ files: [file] })) return false;
+            return nav.share({ files: [file], title: name }).then(function () { return true; }).catch(function () { return false; });
+        };
+        (canShareFiles ? fetch(url) : Promise.resolve(null)).then(function (resp) {
+            if (!resp) return false;
+            if (!resp.ok) throw new Error('fetch');
+            return resp.blob().then(function (blob) {
+                var file = new File([blob], name, { type: blob.type || 'video/mp4' });
+                return shareFiles(file);
+            });
+        }).then(function (shared) {
+            if (shared) return;
+            if (root.navigator && root.navigator.share) {
+                var link = ((root.location && root.location.origin) || '') + url;
+                return root.navigator.share({ title: name, url: link }).catch(function () { return false; });
+            }
+            return false;
+        }).then(function (shared) {
+            if (shared) return;
+            var link = ((root.location && root.location.origin) || '') + url;
+            if (root.navigator && root.navigator.clipboard && root.navigator.clipboard.writeText) {
+                return root.navigator.clipboard.writeText(link).then(function () {
+                    if (BYD.utils && BYD.utils.toast) BYD.utils.toast(tr('shareCopied'), 'success');
+                }).catch(function () { downloadCurrentSegment(); });
+            }
+            downloadCurrentSegment();
+        }).catch(function () {
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(tr('shareFailed'), 'error');
+            downloadCurrentSegment();
+        });
+    }
+
     // ------------------------------------------------------------------ input
 
     function onClick(e) {
@@ -2333,6 +2487,8 @@
             case 'play': V.touched = true; togglePlay(); break;
             case 'prev': jumpMoment(-1, true); break;
             case 'next': jumpMoment(1, true); break;
+            case 'fullscreen': toggleFullscreen(); break;
+            case 'share': shareCurrentSegment(); break;
             case 'speed': toggleSpeedMenu(); break;
             case 'setspeed': setSpeed(+v); break;
             case 'toggle': toggleOpt(v); break;
@@ -2361,7 +2517,11 @@
         var modal = doc.getElementById('videoModal');
         if (modal && modal.classList.contains('active')) return;
         var t = e.target, tag = (t && t.tagName) || '';
-        if (e.key === 'Escape') { if (closeMenus()) e.preventDefault(); return; }
+        if (e.key === 'Escape') {
+            if (isFsActive()) { exitFullscreen(); e.preventDefault(); return; }
+            if (closeMenus()) e.preventDefault();
+            return;
+        }
         if (/^(input|textarea|select)$/i.test(tag) || (t && t.isContentEditable)) return;
         if (V.menu && isInMenu(t)) return;
         var onButton = /^(button|a)$/i.test(tag);
@@ -2378,6 +2538,10 @@
                 togglePlay();
                 break;
             case '1': case '2': case '4': case '8': setSpeed(+e.key); break;
+            case 'f': case 'F':
+                if (onButton) return;
+                toggleFullscreen();
+                break;
             default: return;
         }
         e.preventDefault();

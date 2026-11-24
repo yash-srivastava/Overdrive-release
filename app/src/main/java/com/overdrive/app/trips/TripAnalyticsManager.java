@@ -1,5 +1,7 @@
 package com.overdrive.app.trips;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import android.content.Context;
 
 import com.overdrive.app.abrp.SohEstimator;
@@ -37,6 +39,8 @@ public class TripAnalyticsManager {
      * (a car parked for a season, or charging analytics switched off for months).
      */
     private static final int LAST_CHARGE_RATE_MAX_AGE_DAYS = 60;
+    private long tariffTripStart = -1;
+    private org.json.JSONObject liveChargeTariff;
 
     private TripConfig config;
     private TripDatabase database;
@@ -74,8 +78,8 @@ public class TripAnalyticsManager {
 
         // 4. Ensure trips directory exists
         File tripsDir = StorageManager.getInstance().getTripsDir();
-        if (tripsDir != null && !tripsDir.exists()) {
-            boolean created = tripsDir.mkdirs();
+        if (tripsDir != null && !RemovableStorageFs.exists(tripsDir)) {
+            boolean created = RemovableStorageFs.mkdirs(tripsDir);
             logger.info("Trips directory created: " + tripsDir.getAbsolutePath()
                     + " (success=" + created + ")");
         }
@@ -311,6 +315,40 @@ public class TripAnalyticsManager {
         return (detector != null) ? detector.getActiveTrip() : null;
     }
 
+    private org.json.JSONObject readChargeTariff() {
+        try {
+            return com.overdrive.app.monitor.SocHistoryDatabase.getInstance().getLastChargeRate(LAST_CHARGE_RATE_MAX_AGE_DAYS);
+        } catch (Throwable t) {
+            logger.debug("Last-charge rate lookup skipped: " + t.getMessage());
+            return null;
+        }
+    }
+
+    /** A driving session uses the charge which preceded it. Avoid a database query on each HUD poll. */
+    private synchronized org.json.JSONObject chargeTariffForDrive(long startTime) {
+        if (tariffTripStart != startTime) {
+            liveChargeTariff = readChargeTariff();
+            tariffTripStart = startTime;
+        }
+        return liveChargeTariff;
+    }
+
+    /** Snapshot with estimated cost for the cluster. Range estimation does not need to load prices. */
+    public TripRecord getPricedLiveTripSnapshot() {
+        TripRecord trip = getLiveTripSnapshot();
+        if (trip == null || config == null) return trip;
+        if (trip.isPhev && trip.fuelConStart >= 0) {
+            try {
+                double litres = com.overdrive.app.monitor.VehicleDataMonitor.getInstance().getTotalFuelCon();
+                if (litres > 0 && Double.isFinite(litres)) trip.fuelConEnd = litres;
+            } catch (Exception e) {
+                logger.debug("Live trip fuel unavailable: " + e.getMessage());
+            }
+        }
+        TripPricing.apply(trip, trip.getResolvedEnergyKwh(), config, chargeTariffForDrive(trip.startTime));
+        return trip;
+    }
+
     /**
      * Display copy of the active trip with its progress so far (distance, duration, energy/km),
      * or null when no trip is active. The active record itself only gains these at finalize.
@@ -515,7 +553,7 @@ public class TripAnalyticsManager {
             if (journalDir != null && !tripsDirs.contains(journalDir)) tripsDirs.add(journalDir);
             boolean anyDir = false;
             for (File d : tripsDirs) {
-                if (d != null && d.isDirectory()) { anyDir = true; break; }
+                if (d != null && RemovableStorageFs.isDirectory(d)) { anyDir = true; break; }
             }
             final boolean haveAnyDir = anyDir;
             final TripDatabase db = database;
@@ -708,7 +746,7 @@ public class TripAnalyticsManager {
             if (dir == null) continue;
             File f = new File(dir, name);
             try {
-                if (f.isFile() && f.length() > 0) return f;
+                if (RemovableStorageFs.isFile(f) && RemovableStorageFs.length(f) > 0) return f;
             } catch (Throwable ignored) {}
         }
         return null;
@@ -716,16 +754,16 @@ public class TripAnalyticsManager {
 
     /** Delete journal-dir files older than {@code olderThanMs}, sparing the in-flight one. */
     private static void reapStaleJournals(File journalDir, long olderThanMs) {
-        if (journalDir == null || !journalDir.isDirectory()) return;
-        File[] files = journalDir.listFiles();
+        if (journalDir == null || !RemovableStorageFs.isDirectory(journalDir)) return;
+        File[] files = RemovableStorageFs.listFiles(journalDir);
         if (files == null) return;
         String active = null;
         try { active = StorageManager.getInstance().getActiveTripFilePath(); } catch (Throwable ignored) {}
         int reaped = 0;
         for (File f : files) {
-            if (!f.isFile() || !f.getName().endsWith(".jsonl.gz")) continue;
+            if (!RemovableStorageFs.isFile(f) || !f.getName().endsWith(".jsonl.gz")) continue;
             if (active != null && active.equals(f.getAbsolutePath())) continue;
-            if (f.lastModified() < olderThanMs && f.delete()) reaped++;
+            if (RemovableStorageFs.lastModified(f) < olderThanMs && RemovableStorageFs.delete(f)) reaped++;
         }
         if (reaped > 0) logger.info("Reaped " + reaped + " stale trip journal(s)");
     }
@@ -975,162 +1013,14 @@ public class TripAnalyticsManager {
             if (trip.maxSpeedKmh < trip.avgSpeedKmh) trip.maxSpeedKmh = (int) Math.ceil(trip.avgSpeedKmh);
         }
 
-        // Snapshot electricity rate and compute trip cost.
-        //
-        // PHEV vs BEV cost math
-        // ─────────────────────
-        //   electric leg  = energyUsedKwh × electricityRate
-        //   fuel leg      = (Δfuel% / 100) × tankCapacityL × fuelPricePerL   (PHEV only)
-        //   tripCost      = electric leg + fuel leg
-        //
-        // Floors:
-        //   - fuel leg requires Δfuel% ≥ 1 (sensor resolution is 1%).
-        //   - fuel leg requires tankCapacityL > 0 AND fuelPricePerL > 0 from
-        //     user config; otherwise the trip simply doesn't charge a fuel
-        //     leg (UI surfaces this with a "Set tank capacity" hint).
-        //
-        // Regression-safety: BEV trips have isPhev=false and fuelPctStart/End
-        // at -1, so the entire fuel branch is skipped — behaviour is bit-for-
-        // bit identical to the pre-PHEV implementation.
         if (config != null) {
-            // Electricity price for this trip: the rate the LAST CHARGE was
-            // actually billed at, falling back to the configured global rate.
-            //
-            // Why the last charge and not the config value: the kWh a trip burns
-            // were bought at the previous charge's tariff. A driver who charges at
-            // home for 0.08 and then DC-fasts at 0.55 on a road trip should see
-            // the road-trip legs costed at 0.55 — pricing everything at one global
-            // number makes per-trip cost meaningless the moment more than one
-            // tariff is in play. The charge tariff is itself location-aware (see
-            // TariffManager), so this inherits "same place ⇒ same rate" for free.
-            //
-            // The lookup is capped at 60 days so a car parked for a season doesn't
-            // price today's drive at an ancient tariff. No priced charge in that
-            // window (fresh install, analytics off, or petrol-only PHEV use) ⇒
-            // rateSource "config" and the exact pre-existing behaviour.
-            trip.electricityRate = config.getElectricityRate();
-            trip.currency = config.getCurrency();
-            trip.rateSource = "config";
-            trip.rateLabel = "";
-            // Currency of the charge that priced the electric leg, applied below
-            // only if the fuel leg (always in the config currency) is absent.
-            String chargeCurrency = "";
-            try {
-                org.json.JSONObject lastCharge = com.overdrive.app.monitor.SocHistoryDatabase
-                        .getInstance().getLastChargeRate(LAST_CHARGE_RATE_MAX_AGE_DAYS);
-                if (lastCharge != null) {
-                    double r = lastCharge.optDouble("rate", 0);
-                    if (r > 0) {
-                        trip.electricityRate = r;
-                        trip.rateSource = "charge";
-                        trip.rateLabel = lastCharge.optString("tariffLabel", "");
-                        // Currency follows the rate — a charge on a foreign tariff
-                        // carries its own symbol, and showing that price under the
-                        // home symbol would be a lie. But DON'T adopt it yet: the
-                        // petrol leg below is priced in the CONFIG currency, and
-                        // tripCost sums the two. Stash it and apply it only once we
-                        // know there is no fuel leg to disagree with.
-                        String c = lastCharge.optString("currency", "");
-                        if (c != null && !c.isEmpty()) chargeCurrency = c;
-                    }
-                }
-            } catch (Throwable t) {
-                // Charging analytics unavailable — keep the config rate.
-                logger.debug("Last-charge rate lookup skipped: " + t.getMessage());
-            }
-
-            // energyUsed (kWh) and trip.energyPerKm were already resolved above,
-            // before scoring — reuse them here for the cost math.
-
-            // Electric leg
-            double electricCost = 0;
-            if (energyUsed > 0 && trip.electricityRate > 0) {
-                electricCost = energyUsed * trip.electricityRate;
-            }
-            trip.electricCost = electricCost;
-
-            // Fuel leg (PHEV only).
-            //
-            // PRIMARY — hardware cumulative-fuel accumulator delta. The BYD
-            // statistic HAL exposes getTotalFuelConValue(), a lifetime
-            // litres-burned counter; (end - start) is the vehicle's own metered
-            // burn for this trip. This is independent of tank size and free of
-            // the 1%-resolution gauge quantisation, and it captures idle /
-            // charge-sustain burn the gauge barely moves on. Guarded on
-            // end >= start so a counter reset/rollover falls through to the
-            // estimate rather than emitting a negative volume. (This is the
-            // approach the OEM firmware uses; we add the reset guard.)
-            //
-            // FALLBACK — legacy fuelPct×tank estimate, for trips logged before
-            // the accumulator was captured, or trims that don't report it.
-            // Δfuel% < 1 ⇒ below sensor resolution, floored to 0 to avoid
-            // phantom costs from integer flicker; requires user-set tankL.
-            double fuelCost = 0;
-            if (trip.isPhev) {
-                double pricePerL = config.getFuelPricePerL();
-                trip.fuelPricePerL = pricePerL;
-
-                double litres = 0;
-                if (trip.fuelConStart >= 0 && trip.fuelConEnd >= 0
-                        && trip.fuelConEnd >= trip.fuelConStart) {
-                    // Metered burn — preferred. A flat counter (EV-only leg)
-                    // correctly yields 0 litres.
-                    litres = trip.fuelConEnd - trip.fuelConStart;
-                } else {
-                    double tankL = config.getTankCapacityL();
-                    if (trip.fuelPctStart >= 0 && trip.fuelPctEnd >= 0
-                            && trip.fuelPctStart >= trip.fuelPctEnd
-                            && (trip.fuelPctStart - trip.fuelPctEnd) >= 1.0
-                            && tankL > 0) {
-                        litres = ((trip.fuelPctStart - trip.fuelPctEnd) / 100.0) * tankL;
-                    }
-                }
-
-                if (litres > 0) {
-                    trip.litresUsed = litres;
-                    if (pricePerL > 0) {
-                        fuelCost = litres * pricePerL;
-                    }
-                }
-            }
-            trip.fuelCost = fuelCost;
-            trip.tripCost = electricCost + fuelCost;
-
-            // Resolve the currency clash properly. Relabelling alone was not enough:
-            // tripCost ADDS the electric leg (priced in the charge's currency) to the
-            // fuel leg (always priced in the config currency), so a foreign charge
-            // currency made the total a sum of two currencies whatever symbol we
-            // printed. There is no FX layer, so when they disagree AND both legs
-            // exist, fall the electric leg back to the CONFIG rate: one currency
-            // throughout, at the cost of not using the foreign tariff for that trip.
-            if (!chargeCurrency.isEmpty()) {
-                boolean clash = fuelCost > 0 && !chargeCurrency.equals(config.getCurrency());
-                if (clash) {
-                    trip.electricityRate = config.getElectricityRate();
-                    trip.rateSource = "config";
-                    trip.rateLabel = "";
-                    double reCost = (energyUsed > 0 && trip.electricityRate > 0)
-                            ? energyUsed * trip.electricityRate : 0;
-                    // Reassign the LOCAL too, not just the field: the cost log below
-                    // prints `electricCost`, so leaving the local at the foreign-rate
-                    // product made the log contradict its own factors and total.
-                    electricCost = reCost;
-                    trip.electricCost = electricCost;
-                    trip.tripCost = electricCost + fuelCost;
-                    logger.info("Trip cost: charge currency " + chargeCurrency
-                            + " != config " + config.getCurrency()
-                            + " and a petrol leg exists — electric leg re-priced at the config rate");
-                } else {
-                    trip.currency = chargeCurrency;
-                }
-            }
-
+            TripPricing.apply(trip, energyUsed, config, readChargeTariff());
             if (trip.tripCost > 0) {
-                if (trip.isPhev && fuelCost > 0) {
+                if (trip.isPhev && trip.fuelCost > 0) {
                     logger.info(String.format(
                             "Trip cost: electric %.2f kWh × %s%.2f = %s%.2f + petrol %.2f L × %s%.2f = %s%.2f → %s%.2f total",
-                            energyUsed, trip.currency, trip.electricityRate, trip.currency, electricCost,
-                            trip.litresUsed, trip.currency, trip.fuelPricePerL, trip.currency, fuelCost,
+                            energyUsed, trip.currency, trip.electricityRate, trip.currency, trip.electricCost,
+                            trip.litresUsed, trip.currency, trip.fuelPricePerL, trip.currency, trip.fuelCost,
                             trip.currency, trip.tripCost));
                 } else {
                     logger.info(String.format("Trip cost: %.2f kWh × %s%.2f = %s%.2f (rate from %s%s)",
@@ -1155,8 +1045,8 @@ public class TripAnalyticsManager {
         if (telemetryPath != null) {
             try {
                 File f = new File(telemetryPath);
-                if (f.exists() && f.isFile()) {
-                    trip.sizeBytes = f.length();
+                if (RemovableStorageFs.exists(f) && RemovableStorageFs.isFile(f)) {
+                    trip.sizeBytes = RemovableStorageFs.length(f);
                 }
             } catch (Throwable e) {
                 logger.warn("Failed to stat telemetry file for size accounting: " + e.getMessage());
@@ -1217,7 +1107,7 @@ public class TripAnalyticsManager {
                 if (newPath != null && telemetryPath != null) {
                     File oldFile = new File(telemetryPath);
                     File newFile = new File(newPath);
-                    if (oldFile.exists() && !oldFile.getAbsolutePath().equals(newFile.getAbsolutePath())) {
+                    if (RemovableStorageFs.exists(oldFile) && !oldFile.getAbsolutePath().equals(newFile.getAbsolutePath())) {
                         // Marker flip + rename run ATOMICALLY under the trips
                         // cleanup lock (renameActiveTripFile): every reaper
                         // pass holds that lock and protects the marker's exact
@@ -1430,8 +1320,8 @@ public class TripAnalyticsManager {
             // Clean up telemetry file
             if (telemetryPath != null) {
                 File telemetryFile = new File(telemetryPath);
-                if (telemetryFile.exists()) {
-                    if (telemetryFile.delete()) {
+                if (RemovableStorageFs.exists(telemetryFile)) {
+                    if (RemovableStorageFs.delete(telemetryFile)) {
                         logger.info("Discarded telemetry file: " + telemetryFile.getName());
                     } else {
                         logger.warn("Failed to delete discarded telemetry file: "

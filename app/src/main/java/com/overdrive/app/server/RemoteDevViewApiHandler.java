@@ -70,6 +70,9 @@ public final class RemoteDevViewApiHandler {
                     .toString());
                 return true;
             }
+            if (!StepUpGate.requireBundle("screenControl", "Control the car screen", out)) {
+                return true;
+            }
             RemoteDevViewBridgeClient.Response launch = BRIDGE.start(true);
             if (launch == null) {
                 unavailable(out, "App-process bridge is unavailable");

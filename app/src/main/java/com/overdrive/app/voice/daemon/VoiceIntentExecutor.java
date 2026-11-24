@@ -11,6 +11,7 @@ import com.overdrive.app.genai.GenAiRoutineLearner;
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.recording.ManualClipService;
 import com.overdrive.app.recording.ManualClipWindow;
+import com.overdrive.app.server.StepUpGate;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -46,6 +47,10 @@ public final class VoiceIntentExecutor {
     private static final int FAN_MIN = 1;
     private static final int FAN_MAX = 7;
     private static final int CLIP_DEFAULT_BEFORE_S = 30;
+    static final String STEP_UP_REFUSAL =
+            "For safety, use Vehicle Control for that. It needs Face ID or fingerprint.";
+    static final String STEP_UP_REFUSAL_CAR =
+            "For safety, use Vehicle Control on the car screen for that.";
     // Seats a person may name that the car has no voice control for (the matcher reports "rear").
     private static final Set<String> UNSUPPORTED_SEATS = new HashSet<>(Arrays.asList(
             "rear", "back", "left", "right", "all"));
@@ -91,6 +96,10 @@ public final class VoiceIntentExecutor {
 
         /** Runs one router command; returns true on SUCCESS. */
         boolean run(VehicleCommand cmd) {
+            if (cmd.wakeVehicleIfOff() && needsStepUp(StepUpGate.POWER_ON)) {
+                note(cmd.name(), REFUSED);
+                return false;
+            }
             CommandResult r = VehicleCommandRouter.getInstance().execute(cmd);
             record(cmd.name(), r);
             return r != null && r.outcome == Outcome.SUCCESS;
@@ -160,6 +169,11 @@ public final class VoiceIntentExecutor {
             return response(false, REFUSED, 3, new JSONArray(),
                     "adas.off".equals(intent) ? "Driver assistance can only be turned on by voice."
                             : "That command is not available by voice.");
+        }
+        // Ahead of the spoken confirmation, so nobody is asked to confirm a command voice won't run.
+        String gated = gatedActionOf(intent);
+        if (gated != null && needsStepUp(gated)) {
+            return response(false, REFUSED, tier, new JSONArray(), stepUpRefusalText());
         }
         if (needsConfirmation(intent, slots)) {
             if (DrivingSafetyGuard.isMovementBlocked()) {
@@ -298,6 +312,42 @@ public final class VoiceIntentExecutor {
         return "child_lock".equals(intent) && Boolean.FALSE.equals(bool(slots, "on"));
     }
 
+    /** The step-up action a spoken intent is; climate writes that can wake the car are gated where sent. */
+    static String gatedActionOf(String intent) {
+        switch (intent) {
+            case "vehicle.unlock": return StepUpGate.UNLOCK;
+            case "trunk.open": return StepUpGate.TRUNK_OPEN;
+            case "vehicle.power_off": return StepUpGate.POWER_OFF;
+            default: return null;
+        }
+    }
+
+    // In the car the screen still works; from outside, the action needs the phone's approval.
+    private static String stepUpRefusalText() {
+        try {
+            return StepUpGate.callerExempt() ? STEP_UP_REFUSAL_CAR : STEP_UP_REFUSAL;
+        } catch (Throwable t) {
+            return STEP_UP_REFUSAL;
+        }
+    }
+
+    // While the lock covers an action, voice never performs it: audio played into the cabin
+    // (remote speech, sounds, push-to-talk) could otherwise speak the command for someone.
+    private static boolean needsStepUp(String action) {
+        try {
+            if (!StepUpGate.isGated(action)) return false;
+            // Only a car confirmed on can't be woken; unknown counts as off.
+            return !StepUpGate.POWER_ON.equals(action) || !DrivingSafetyGuard.isAccConfirmedOn();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static void refuseForStepUp(Plan plan) {
+        plan.code = REFUSED;
+        plan.message = stepUpRefusalText();
+    }
+
     static String confirmationQuestion(String intent, JSONObject slots) {
         switch (intent) {
             case "vehicle.unlock": return "Unlock the car?";
@@ -363,6 +413,10 @@ public final class VoiceIntentExecutor {
 
     /** ClimateOn sets the dial then powers on (and wakes a car that is off). */
     static boolean ensureClimateOn(Plan plan, double celsius, String doneMessage) {
+        if (needsStepUp(StepUpGate.POWER_ON)) {
+            refuseForStepUp(plan);
+            return false;
+        }
         VehicleCommandRouter.ClimateOnCommand cmd =
                 new VehicleCommandRouter.ClimateOnCommand(celsius, DEFAULT_REMOTE_MINUTES);
         CommandResult r = VehicleCommandRouter.getInstance().execute(cmd);
@@ -407,6 +461,11 @@ public final class VoiceIntentExecutor {
         }
         BydDataCollector c = BydDataCollector.getInstance();
         int acBefore = c.readAcPowerNow();
+        // With the AC off the step ends in a ClimateOn; refuse before the dial moves.
+        if (acBefore == 0 && needsStepUp(StepUpGate.POWER_ON)) {
+            refuseForStepUp(plan);
+            return;
+        }
         VehicleCommandRouter.ClimateStepTempCommand step =
                 new VehicleCommandRouter.ClimateStepTempCommand(
                         0, BydDataCollector.AC_TEMP_AREA_DRIVER, delta);
@@ -679,6 +738,10 @@ public final class VoiceIntentExecutor {
     }
 
     static boolean single(Plan plan, VehicleCommand cmd, String doneMessage) {
+        if (cmd.wakeVehicleIfOff() && needsStepUp(StepUpGate.POWER_ON)) {
+            refuseForStepUp(plan);
+            return false;
+        }
         CommandResult r = VehicleCommandRouter.getInstance().execute(cmd);
         plan.record(cmd.name(), r);
         plan.finishFrom(r, doneMessage);

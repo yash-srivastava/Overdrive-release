@@ -222,8 +222,12 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
      *   on the in-memory set as a same-process race backstop.
      */
     @JvmOverloads
-    fun startDaemon(type: DaemonType, userInitiated: Boolean = true) {
-        val controller = controllers[type] ?: return
+    fun startDaemon(
+        type: DaemonType,
+        userInitiated: Boolean = true,
+        onTerminal: ((Boolean) -> Unit)? = null
+    ) {
+        val controller = controllers[type] ?: run { onTerminal?.invoke(false); return }
 
         if (userInitiated) {
             // Clear user-stopped flag so health check can manage this daemon
@@ -279,6 +283,7 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
             if (type in DaemonStartupManager.userStoppedDaemons) {
                 LogManager.getInstance().info("Daemons",
                     "Skipping health-check revival of ${type.displayName} — user-stopped flag set")
+                onTerminal?.invoke(false)
                 return
             }
             // Without a token every attempt fails at once; skip it and let the status poll show the setup prompt.
@@ -293,22 +298,38 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
 
-        launchController(type, controller)
+        if (onTerminal != null) launchController(type, controller, onTerminal)
+        else launchController(type, controller)
     }
 
+    // Keep the ordinary (and explicit user-start) launch path unchanged.
     private fun launchController(type: DaemonType, controller: DaemonController) {
-        updateState(type, DaemonStatus.STARTING, appStr(R.string.daemon_status_starting))
+        launchController(type, controller, null)
+    }
 
+    /** Only the startup retry coordinator needs a terminal result. */
+    private fun launchController(
+        type: DaemonType, controller: DaemonController,
+        onTerminal: ((Boolean) -> Unit)?
+    ) {
+        updateState(type, DaemonStatus.STARTING, appStr(R.string.daemon_status_starting))
+        val delivered = java.util.concurrent.atomic.AtomicBoolean(false)
+        fun finish(success: Boolean) {
+            if (delivered.compareAndSet(false, true)) onTerminal?.invoke(success)
+        }
         controller.start(object : DaemonCallback {
             override fun onStatusChanged(status: DaemonStatus, message: String) {
-                if (lateAfterUserStop(type)) return
+                if (lateAfterUserStop(type)) { finish(false); return }
                 updateState(type, status, message)
+                if (status == DaemonStatus.RUNNING) finish(true)
+                if (status == DaemonStatus.ERROR) finish(false)
             }
 
             override fun onError(error: String) {
-                if (lateAfterUserStop(type)) return
+                if (lateAfterUserStop(type)) { finish(false); return }
                 lastLaunchError[type] = error
                 updateState(type, DaemonStatus.ERROR, error)
+                finish(false)
             }
         })
     }

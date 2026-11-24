@@ -1,5 +1,7 @@
 package com.overdrive.app.proximity;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.storage.StorageManager;
 import com.overdrive.app.surveillance.GpuSurveillancePipeline;
@@ -169,8 +171,12 @@ public class ProximityRecordingHandler {
                             red
                                     ? com.overdrive.app.notifications.NotificationEvent.Severity.CRITICAL
                                     : com.overdrive.app.notifications.NotificationEvent.Severity.WARN,
-                            red ? "Object very close" : "Object nearby",
-                            red ? "Within 0.5 m" : "Within 0.8 m",
+                            com.overdrive.app.server.Messages.get(red
+                                    ? "notifications.proximity_push_title_red"
+                                    : "notifications.proximity_push_title_yellow"),
+                            com.overdrive.app.server.Messages.get(red
+                                    ? "notifications.proximity_push_body_red"
+                                    : "notifications.proximity_push_body_yellow"),
                             "proximity-" + triggerLevel,
                             url,
                             data));
@@ -249,7 +255,7 @@ public class ProximityRecordingHandler {
                     ? videoFile.substring(0, videoFile.length() - 4) + ".jpg"
                     : videoFile + ".jpg";
             File heroFile = new File(outputDir, heroName);
-            String snapshotName = heroFile.exists() ? heroName : videoFile;
+            String snapshotName = RemovableStorageFs.exists(heroFile) ? heroName : videoFile;
             String encSnap = java.net.URLEncoder.encode(snapshotName, "UTF-8");
             String thumbTok = com.overdrive.app.auth.AuthManager
                     .signThumbToken(snapshotName, 600L);
@@ -266,8 +272,12 @@ public class ProximityRecordingHandler {
                             red
                                     ? com.overdrive.app.notifications.NotificationEvent.Severity.CRITICAL
                                     : com.overdrive.app.notifications.NotificationEvent.Severity.WARN,
-                            red ? "Object very close" : "Object nearby",
-                            red ? "Within 0.5 m" : "Within 0.8 m",
+                            com.overdrive.app.server.Messages.get(red
+                                    ? "notifications.proximity_push_title_red"
+                                    : "notifications.proximity_push_title_yellow"),
+                            com.overdrive.app.server.Messages.get(red
+                                    ? "notifications.proximity_push_body_red"
+                                    : "notifications.proximity_push_body_yellow"),
                             activeNotificationTag != null
                                     ? activeNotificationTag : "proximity-" + triggerLevel,
                             url,
@@ -342,7 +352,8 @@ public class ProximityRecordingHandler {
             SimpleDateFormat sdf = new SimpleDateFormat(datePattern, locale);
             String timestamp = sdf.format(new Date());
             
-            String distance = triggerLevel.equals("RED") ? "0-0.5m" : "0-0.8m";
+            String distance = TelegramMessages.get(
+                    "RED".equals(triggerLevel) ? "proximity.distance_red" : "proximity.distance_yellow");
             String triggerKey = "RED".equals(triggerLevel)
                     ? "proximity.trigger.red" : "proximity.trigger.yellow";
             String triggerLabel = TelegramMessages.get(triggerKey);

@@ -540,7 +540,8 @@ public class TelegramNotifier {
                         pattern, java.util.Locale.forLanguageTag(language));
                 String timeStr = sdf.format(new java.util.Date(timestamp));
 
-                String distance = triggerLevel.equals("RED") ? "0-0.5m" : "0-0.8m";
+                String distance = TelegramMessages.get("RED".equals(triggerLevel)
+                        ? "proximity.distance_red" : "proximity.distance_yellow");
                 String triggerKey = "RED".equals(triggerLevel)
                         ? "proximity.trigger.red" : "proximity.trigger.yellow";
 

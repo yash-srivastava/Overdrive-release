@@ -86,7 +86,7 @@ public class NotificationAction extends BaseAction {
         NotificationEvent event = new NotificationEvent(
                 "automation.action",
                 severity,
-                "Automation triggered",
+                Messages.get("notifications.automation_triggered_title"),
                 message,
                 "automation-" + System.currentTimeMillis(),
                 null,

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="projection_cluster_controls">仪表盘控制</string>
+    <string name="projection_cluster_back">返回</string>
+    <string name="projection_cluster_home">主页</string>
+    <string name="projection_cluster_volume_down">音量 −</string>
+    <string name="projection_cluster_volume_up">音量 +</string>
+    <string name="projection_cluster_control_unavailable">仪表盘控制不可用。请检查当前投屏，并在更新后重启守护进程。</string>
+</resources>

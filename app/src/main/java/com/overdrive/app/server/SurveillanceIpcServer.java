@@ -1,5 +1,7 @@
 package com.overdrive.app.server;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.remote.RemoteDevViewBridgeAuth;
@@ -489,7 +491,7 @@ public class SurveillanceIpcServer implements Runnable {
                     if (!com.overdrive.app.config.UnifiedConfigManager.setSurveillanceEnabled(true)) {
                         logger.warn("Failed to persist surveillanceEnabled=true via Telegram IPC");
                         response.put("success", false);
-                        response.put("error", "Failed to save the surveillance setting");
+                        response.put("error", Messages.get("errors.surveillance_setting_save_failed"));
                         break;
                     }
                     if (!accOn) {
@@ -527,7 +529,7 @@ public class SurveillanceIpcServer implements Runnable {
                     if (!com.overdrive.app.config.UnifiedConfigManager.setSurveillanceEnabled(false)) {
                         logger.warn("Failed to persist surveillanceEnabled=false via Telegram IPC");
                         response.put("success", false);
-                        response.put("error", "Failed to save the surveillance setting");
+                        response.put("error", Messages.get("errors.surveillance_setting_save_failed"));
                         break;
                     }
                     if (!accOn) {
@@ -540,7 +542,7 @@ public class SurveillanceIpcServer implements Runnable {
                     response.put("success", true);
                     response.put("enabled", false);
                     response.put("deferred", accOn);
-                    response.put("message", "Surveillance stopped");
+                    response.put("message", Messages.get("ipc.surveillance_stopped"));
                     break;
                 }
                     
@@ -552,13 +554,13 @@ public class SurveillanceIpcServer implements Runnable {
                     String title;
                     String body;
                     if (com.overdrive.app.power.PowerNotice.KIND_LOW_12V_STOP.equals(kind)) {
-                        title = "Sentry paused: 12V battery low";
-                        body = "Sentry stopped to protect the 12V battery. It resumes when the battery recovers.";
+                        title = Messages.get("notifications.power_notice_low_12v_title");
+                        body = Messages.get("notifications.power_notice_low_12v_body");
                     } else if (com.overdrive.app.power.PowerNotice.KIND_SOC_CUTOFF.equals(kind)) {
-                        title = "Sentry stopped: low battery";
-                        body = "Overdrive stopped to protect the drive battery"
-                                + (detail.isEmpty() ? "." : " — " + detail + ".")
-                                + " It stays off until the car is next switched on.";
+                        title = Messages.get("notifications.power_notice_soc_title");
+                        body = detail.isEmpty()
+                                ? Messages.get("notifications.power_notice_soc_body")
+                                : Messages.get("notifications.power_notice_soc_body_with_detail", detail);
                     } else {
                         response.put("success", false);
                         response.put("error", "unknown notice kind");
@@ -603,7 +605,7 @@ public class SurveillanceIpcServer implements Runnable {
                     if (!com.overdrive.app.config.UnifiedConfigManager.setSurveillanceEnabled(true)) {
                         logger.warn("Failed to persist surveillanceEnabled=true via app-UI IPC");
                         response.put("success", false);
-                        response.put("error", "Failed to save the surveillance setting");
+                        response.put("error", Messages.get("errors.surveillance_setting_save_failed"));
                         break;
                     }
                     // OEM resolver: survSuppressed depends on master toggle.
@@ -624,7 +626,7 @@ public class SurveillanceIpcServer implements Runnable {
                     if (!com.overdrive.app.config.UnifiedConfigManager.setSurveillanceEnabled(false)) {
                         logger.warn("Failed to persist surveillanceEnabled=false via app-UI IPC");
                         response.put("success", false);
-                        response.put("error", "Failed to save the surveillance setting");
+                        response.put("error", Messages.get("errors.surveillance_setting_save_failed"));
                         break;
                     }
                     if (!accOn) {
@@ -685,6 +687,12 @@ public class SurveillanceIpcServer implements Runnable {
                     String s = request.optString("section", "");
                     JSONObject data = request.optJSONObject("data");
                     boolean ok = false;
+                    // Service Mode state is owned by the daemon's dedicated manager.
+                    if ("serviceMode".equals(s)) {
+                        response.put("success", false);
+                        response.put("error", "Service Mode state uses its dedicated API");
+                        break;
+                    }
                     // (the device secret is the daemon's to keep: no forwarded write sets it)
                     if ("auth".equals(s) && data != null) {
                         data.remove("deviceSecret");
@@ -714,6 +722,11 @@ public class SurveillanceIpcServer implements Runnable {
                     String s = request.optString("section", "");
                     JSONObject values = request.optJSONObject("values");
                     boolean ok = false;
+                    if ("serviceMode".equals(s)) {
+                        response.put("success", false);
+                        response.put("error", "Service Mode state uses its dedicated API");
+                        break;
+                    }
                     if (!s.isEmpty() && values != null) {
                         java.util.Map<String, Object> map = new java.util.HashMap<>();
                         java.util.Iterator<String> it = values.keys();
@@ -942,6 +955,16 @@ public class SurveillanceIpcServer implements Runnable {
                     return null;
                 }
 
+                // Sidecar diagnostics: log-only, capped and rate-limited by the controller.
+                case com.overdrive.app.roadsense.detect.ImuFrameCodec.STATUS_COMMAND: { // "IMU_STATUS"
+                    com.overdrive.app.roadsense.RoadSenseController rs =
+                            com.overdrive.app.daemon.CameraDaemon.getRoadSense();
+                    if (rs != null) {
+                        rs.onImuStatus(request.optString("m", ""));
+                    }
+                    return null;
+                }
+
                 // ==================== ABRP COMMANDS ====================
                 case "SET_ABRP_CONFIG":
                     handleSetAbrpConfig(request, response);
@@ -1156,7 +1179,7 @@ public class SurveillanceIpcServer implements Runnable {
             
             // Handle surveillance storage type change (INTERNAL, SD_CARD, USB)
             if (config.has("surveillanceStorageType")) {
-                String typeStr = config.getString("surveillanceStorageType").toUpperCase();
+                String typeStr = config.getString("surveillanceStorageType").toUpperCase(java.util.Locale.ROOT);
                 com.overdrive.app.storage.StorageManager storageManager =
                     com.overdrive.app.storage.StorageManager.getInstance();
                 com.overdrive.app.storage.StorageManager.StorageType type;
@@ -1197,7 +1220,7 @@ public class SurveillanceIpcServer implements Runnable {
                 // acknowledging a change that won't survive.
                 if (!com.overdrive.app.config.UnifiedConfigManager.setSurveillanceEnabled(enabled)) {
                     logger.warn("Failed to persist surveillanceEnabled=" + enabled + " via IPC");
-                    return "Failed to save the surveillance setting";
+                    return Messages.get("errors.surveillance_setting_save_failed");
                 }
                 if (enabled) {
                     // RACE CONDITION FIX: Only enable surveillance if ACC is actually OFF.
@@ -1348,9 +1371,9 @@ public class SurveillanceIpcServer implements Runnable {
             // legacy `bitrate` (LOW/MEDIUM/HIGH) only as a fallback.
             String tierIn = null;
             if (config.has("recordingQuality")) {
-                tierIn = config.optString("recordingQuality", "").toUpperCase();
+                tierIn = config.optString("recordingQuality", "").toUpperCase(java.util.Locale.ROOT);
             } else if (config.has("bitrate")) {
-                String legacy = config.optString("bitrate", "").toUpperCase();
+                String legacy = config.optString("bitrate", "").toUpperCase(java.util.Locale.ROOT);
                 switch (legacy) {
                     case "LOW":    tierIn = "ECONOMY"; break;
                     case "MEDIUM": tierIn = "STANDARD"; break;
@@ -1366,7 +1389,7 @@ public class SurveillanceIpcServer implements Runnable {
             
             // Handle codec setting
             if (config.has("codec")) {
-                String codec = config.optString("codec", "H264").toUpperCase();
+                String codec = config.optString("codec", "H264").toUpperCase(java.util.Locale.ROOT);
                 if (codec.equals("H264") || codec.equals("H265")) {
                     CameraDaemon.setRecordingCodec(codec);
                     // Also update HttpServer's static setting for web UI sync
@@ -2599,8 +2622,7 @@ public class SurveillanceIpcServer implements Runnable {
                         com.overdrive.app.updater.AppUpdater.channelOfLabel(versionRef[0]) != null
                                 ? versionRef[0]
                                 : com.overdrive.app.updater.AppUpdater.getInstalledVersion();
-                try (java.io.FileWriter fw = new java.io.FileWriter(
-                        com.overdrive.app.updater.UpdateLifecycle.TELEGRAM_POST_UPDATE_HINT_FILE)) {
+                try (java.io.Writer fw = new java.io.OutputStreamWriter(RemovableStorageFs.openOutput(new java.io.File(com.overdrive.app.updater.UpdateLifecycle.TELEGRAM_POST_UPDATE_HINT_FILE)), java.nio.charset.StandardCharsets.UTF_8)) {
                     fw.write(hintVersion);
                     fw.write('\n');
                 }
@@ -2704,8 +2726,7 @@ public class SurveillanceIpcServer implements Runnable {
             if (error != null) r.put("error", error);
             r.put("ts", System.currentTimeMillis());
         } catch (Exception ignored) {}
-        try (java.io.FileWriter fw = new java.io.FileWriter(
-                com.overdrive.app.util.ScratchRoot.path("overdrive_update_progress.json"))) {
+        try (java.io.Writer fw = new java.io.OutputStreamWriter(RemovableStorageFs.openOutput(new java.io.File(com.overdrive.app.util.ScratchRoot.path("overdrive_update_progress.json"))), java.nio.charset.StandardCharsets.UTF_8)) {
             fw.write(r.toString());
         } catch (Exception ignored) {}
     }
@@ -2732,9 +2753,9 @@ public class SurveillanceIpcServer implements Runnable {
     private static void surfaceIpcInstallFailure(String error) {
         java.io.File hint = new java.io.File(
                 com.overdrive.app.updater.UpdateLifecycle.TELEGRAM_POST_UPDATE_HINT_FILE);
-        boolean wasIpcTriggered = hint.exists();
+        boolean wasIpcTriggered = RemovableStorageFs.exists(hint);
         if (wasIpcTriggered) {
-            try { hint.delete(); } catch (Exception ignored) {}
+            try { RemovableStorageFs.delete(hint); } catch (Exception ignored) {}
         }
         if (!wasIpcTriggered) return;
         String raw = (error != null && !error.trim().isEmpty())
@@ -2766,7 +2787,7 @@ public class SurveillanceIpcServer implements Runnable {
     private void handleGetUpdateProgress(JSONObject response) throws Exception {
         response.put("success", true);
         java.io.File f = new java.io.File(com.overdrive.app.util.ScratchRoot.path("overdrive_update_progress.json"));
-        if (!f.exists()) {
+        if (!RemovableStorageFs.exists(f)) {
             response.put("phase", "idle");
             response.put("percent", -1);
             response.put("message", "");
@@ -2774,7 +2795,7 @@ public class SurveillanceIpcServer implements Runnable {
         }
         String json = null;
         try (java.io.BufferedReader r = new java.io.BufferedReader(
-                new java.io.InputStreamReader(new java.io.FileInputStream(f)))) {
+                new java.io.InputStreamReader(RemovableStorageFs.openInput(f)))) {
             StringBuilder sb = new StringBuilder();
             String line;
             while ((line = r.readLine()) != null) sb.append(line);

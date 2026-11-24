@@ -232,6 +232,7 @@
 
                 <!-- CLUSTER WINDOW -->
                 <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/projectionEditableWindowCard"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_marginEnd="6dp"
@@ -371,6 +372,12 @@
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
                         android:padding="@dimen/dashboard_modern_card_padding">
+
+                        <LinearLayout
+                            android:id="@+id/projectionStandardSettings"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical">
 
                         <TextView
                             android:layout_width="wrap_content"
@@ -637,6 +644,15 @@
                                 app:autoSizeTextType="uniform" />
                         </com.google.android.material.button.MaterialButtonToggleGroup>
 
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:id="@+id/projectionDiLink5Controls"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:visibility="gone">
+
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
@@ -646,6 +662,7 @@
                             android:textColor="?attr/colorOnSurface" />
 
                         <TextView
+                            android:id="@+id/projectionPathDescription"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="2dp"
@@ -667,6 +684,7 @@
                                 android:layout_width="0dp"
                                 android:layout_height="@dimen/dashboard_modern_touch_target"
                                 android:layout_weight="1"
+                                android:paddingHorizontal="4dp"
                                 android:text="@string/projection_path_auto" />
 
                             <com.google.android.material.button.MaterialButton
@@ -675,6 +693,7 @@
                                 android:layout_width="0dp"
                                 android:layout_height="@dimen/dashboard_modern_touch_target"
                                 android:layout_weight="1"
+                                android:paddingHorizontal="4dp"
                                 android:text="@string/projection_path_hosted" />
 
                             <com.google.android.material.button.MaterialButton
@@ -683,7 +702,20 @@
                                 android:layout_width="0dp"
                                 android:layout_height="@dimen/dashboard_modern_touch_target"
                                 android:layout_weight="1"
+                                android:paddingHorizontal="4dp"
                                 android:text="@string/projection_path_direct" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/projectionPathFactoryMini"
+                                style="@style/Widget.Overdrive.M3.Button.Outlined"
+                                android:layout_width="0dp"
+                                android:layout_height="@dimen/dashboard_modern_touch_target"
+                                android:layout_weight="1.5"
+                                android:paddingHorizontal="4dp"
+                                android:text="@string/projection_path_factory_mini"
+                                app:autoSizeMaxTextSize="14sp"
+                                app:autoSizeMinTextSize="10sp"
+                                app:autoSizeTextType="uniform" />
                         </com.google.android.material.button.MaterialButtonToggleGroup>
 
                         <com.google.android.material.button.MaterialButtonToggleGroup
@@ -728,9 +760,9 @@
                             <SeekBar android:id="@+id/projectionHostedY" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" />
                             <TextView android:id="@+id/projectionHostedScaleValue" android:layout_width="wrap_content" android:layout_height="wrap_content" />
                             <SeekBar android:id="@+id/projectionHostedScale" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" />
-                            <TextView android:id="@+id/projectionDirectScaleValue" android:layout_width="wrap_content" android:layout_height="wrap_content" />
-                            <SeekBar android:id="@+id/projectionDirectScale" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" />
                         </LinearLayout>
+                        <TextView android:id="@+id/projectionDirectScaleValue" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                        <SeekBar android:id="@+id/projectionDirectScale" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" />
 
                         <TextView
                             android:id="@+id/projectionPathStatus"
@@ -740,6 +772,8 @@
                             android:textAppearance="@style/TextAppearance.Material3.BodySmall"
                             android:textColor="?attr/colorOnSurfaceVariant" />
 
+                        </LinearLayout>
+
                         <TextView
                             android:id="@+id/projectionTransportStatus"
                             android:layout_width="match_parent"
@@ -747,6 +781,13 @@
                             android:layout_marginTop="6dp"
                             android:textAppearance="@style/TextAppearance.Material3.BodySmall"
                             android:textColor="?attr/colorOnSurfaceVariant" />
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/projectionAaosMapCheck"
+                            style="@style/Widget.Overdrive.M3.Button.Outlined"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/aaos_map_area_button"
+                            android:visibility="gone" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
             </LinearLayout>

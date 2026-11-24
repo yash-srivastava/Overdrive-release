@@ -1,5 +1,7 @@
 package com.overdrive.app.server;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.genai.GenAiRuntime;
 
@@ -112,7 +114,7 @@ public final class GenAiIncidentPacks {
             throw new PackException(404, "recording_not_found",
                     "Recording was not found.");
         }
-        if (!video.isFile() || !video.canRead()) {
+        if (!RemovableStorageFs.isFile(video) || !RemovableStorageFs.canRead(video)) {
             throw new PackException(410, "recording_unavailable",
                     "Recording is no longer accessible.");
         }
@@ -127,7 +129,7 @@ public final class GenAiIncidentPacks {
             String recordingId, File video, GenAiRuntime runtime)
             throws PackException {
         if (!validRecordingId(recordingId) || video == null
-                || !video.isFile() || !video.canRead()
+                || !RemovableStorageFs.isFile(video) || !RemovableStorageFs.canRead(video)
                 || !video.getName().endsWith(".mp4")) {
             throw new PackException(400, "invalid_recording",
                     "A finalized readable MP4 is required.");
@@ -138,8 +140,8 @@ public final class GenAiIncidentPacks {
                     "Recording identity no longer matches its indexed path.");
         }
 
-        long videoSize = video.length();
-        long videoMtime = video.lastModified();
+        long videoSize = RemovableStorageFs.length(video);
+        long videoMtime = RemovableStorageFs.lastModified(video);
         String videoHash = hashStableFile(
                 video, videoSize, videoMtime, "recording_changed");
         SidecarSnapshot sidecar = snapshotSidecar(video);
@@ -207,7 +209,7 @@ public final class GenAiIncidentPacks {
         File temp = new File(root,
                 "." + packId + ".tmp-" + UUID.randomUUID());
         File target = new File(root, packId);
-        if (!temp.mkdir()) {
+        if (!RemovableStorageFs.mkdir(temp)) {
             throw new PackException(500, "pack_store_failed",
                     "Could not create the incident-pack workspace.");
         }
@@ -281,8 +283,7 @@ public final class GenAiIncidentPacks {
 
     /** List locally stored pack summaries, newest first. */
     public static JSONObject list() throws PackException {
-        File[] directories = ensureRoot().listFiles(
-                file -> file.isDirectory()
+        File[] directories = RemovableStorageFs.listFiles(ensureRoot(), file -> RemovableStorageFs.isDirectory(file)
                         && PACK_ID.matcher(file.getName()).matches());
         List<JSONObject> items = new ArrayList<>();
         if (directories != null) {
@@ -360,7 +361,7 @@ public final class GenAiIncidentPacks {
                 throw new PackException(404, "recording_not_found",
                         "Source recording is outside managed storage.");
             }
-            if (!video.isFile() || !video.canRead()) {
+            if (!RemovableStorageFs.isFile(video) || !RemovableStorageFs.canRead(video)) {
                 throw new PackException(410, "recording_unavailable",
                         "Source recording is no longer accessible.");
             }
@@ -411,15 +412,15 @@ public final class GenAiIncidentPacks {
         boolean finished = false;
         try {
             File pdf = new File(directory, PDF_FILE);
-            if (pdf.isFile()) {
+            if (RemovableStorageFs.isFile(pdf)) {
                 putFile(zip, pdf, ZIP_PDF, timestamp);
             }
             File preview = new File(directory, PREVIEW_FILE);
-            if (preview.isFile()) {
+            if (RemovableStorageFs.isFile(preview)) {
                 putFile(zip, preview, ZIP_PREVIEW, timestamp);
             }
             File readme = new File(directory, README_FILE);
-            if (readme.isFile()) {
+            if (RemovableStorageFs.isFile(readme)) {
                 putFile(zip, readme, ZIP_README, timestamp);
             }
             putFile(zip, new File(directory, METADATA_FILE),
@@ -429,7 +430,7 @@ public final class GenAiIncidentPacks {
             putFile(zip, new File(directory, REPORT_FILE),
                     ZIP_REPORT, timestamp);
             File sidecar = new File(directory, SIDECAR_FILE);
-            if (sidecar.isFile()) {
+            if (RemovableStorageFs.isFile(sidecar)) {
                 putFile(zip, sidecar, ZIP_SIDECAR, timestamp);
             }
             if (includeVideo) {
@@ -1153,7 +1154,7 @@ public final class GenAiIncidentPacks {
                 name.length() - ".mp4".length());
         File sidecar = new File(video.getParentFile(),
                 stem + ".json");
-        if (!sidecar.isFile() || !sidecar.canRead()) {
+        if (!RemovableStorageFs.isFile(sidecar) || !RemovableStorageFs.canRead(sidecar)) {
             return SidecarSnapshot.none(null);
         }
         try {
@@ -1167,14 +1168,14 @@ public final class GenAiIncidentPacks {
             return SidecarSnapshot.none(
                     "sidecar_path_invalid");
         }
-        if (sidecar.length() <= 0L
-                || sidecar.length() > MAX_SIDECAR_BYTES) {
+        if (RemovableStorageFs.length(sidecar) <= 0L
+                || RemovableStorageFs.length(sidecar) > MAX_SIDECAR_BYTES) {
             return SidecarSnapshot.none("sidecar_size_invalid");
         }
 
         for (int attempt = 0; attempt < 2; attempt++) {
-            long size = sidecar.length();
-            long mtime = sidecar.lastModified();
+            long size = RemovableStorageFs.length(sidecar);
+            long mtime = RemovableStorageFs.lastModified(sidecar);
             byte[] bytes;
             try {
                 bytes = readBounded(sidecar, MAX_SIDECAR_BYTES);
@@ -1182,8 +1183,8 @@ public final class GenAiIncidentPacks {
                 throw new PackException(409, "sidecar_unavailable",
                         "Could not snapshot the event sidecar.", e);
             }
-            if (size == sidecar.length()
-                    && mtime == sidecar.lastModified()
+            if (size == RemovableStorageFs.length(sidecar)
+                    && mtime == RemovableStorageFs.lastModified(sidecar)
                     && size == bytes.length) {
                 byte[] confirmation;
                 try {
@@ -1192,8 +1193,8 @@ public final class GenAiIncidentPacks {
                 } catch (IOException e) {
                     continue;
                 }
-                if (size != sidecar.length()
-                        || mtime != sidecar.lastModified()
+                if (size != RemovableStorageFs.length(sidecar)
+                        || mtime != RemovableStorageFs.lastModified(sidecar)
                         || !Arrays.equals(bytes, confirmation)) {
                     continue;
                 }
@@ -1236,23 +1237,23 @@ public final class GenAiIncidentPacks {
         } catch (IOException e) {
             return PreviewSnapshot.none("preview_path_invalid");
         }
-        if (!preview.isFile() || !preview.canRead()) {
+        if (!RemovableStorageFs.isFile(preview) || !RemovableStorageFs.canRead(preview)) {
             return PreviewSnapshot.none("preview_unavailable");
         }
-        if (preview.length() <= 0L
-                || preview.length() > MAX_PREVIEW_BYTES) {
+        if (RemovableStorageFs.length(preview) <= 0L
+                || RemovableStorageFs.length(preview) > MAX_PREVIEW_BYTES) {
             return PreviewSnapshot.none("preview_size_invalid");
         }
 
         for (int attempt = 0; attempt < 2; attempt++) {
-            long size = preview.length();
-            long mtime = preview.lastModified();
+            long size = RemovableStorageFs.length(preview);
+            long mtime = RemovableStorageFs.lastModified(preview);
             try {
                 byte[] bytes = readBounded(
                         preview, MAX_PREVIEW_BYTES);
                 JpegInfo info = jpegInfo(bytes);
-                if (size == preview.length()
-                        && mtime == preview.lastModified()
+                if (size == RemovableStorageFs.length(preview)
+                        && mtime == RemovableStorageFs.lastModified(preview)
                         && size == bytes.length
                         && info != null) {
                     return new PreviewSnapshot(
@@ -1401,9 +1402,9 @@ public final class GenAiIncidentPacks {
                         ? MAX_SIDECAR_BYTES
                         : ZIP_PREVIEW.equals(path)
                         ? MAX_PREVIEW_BYTES : MAX_JSON_BYTES;
-                if (local == null || !local.isFile()
-                        || local.length() > maxSize
-                        || local.length() != entry.getLong("sizeBytes")
+                if (local == null || !RemovableStorageFs.isFile(local)
+                        || RemovableStorageFs.length(local) > maxSize
+                        || RemovableStorageFs.length(local) != entry.getLong("sizeBytes")
                         || !hashFile(local).equals(
                                 entry.getString("sha256"))) {
                     throw new PackException(500, "pack_corrupt",
@@ -1435,8 +1436,8 @@ public final class GenAiIncidentPacks {
         long expectedSize = source.optLong("sizeBytes", -1L);
         long expectedMtime = source.optLong("mtimeMs", -1L);
         if (expectedSize < 0L
-                || video.length() != expectedSize
-                || video.lastModified() != expectedMtime) {
+                || RemovableStorageFs.length(video) != expectedSize
+                || RemovableStorageFs.lastModified(video) != expectedMtime) {
             throw new PackException(409, "recording_changed",
                     "Source recording changed after the pack was created.");
         }
@@ -1464,13 +1465,13 @@ public final class GenAiIncidentPacks {
 
     private static byte[] readBounded(File file, int maxBytes)
             throws IOException {
-        if (!file.isFile() || file.length() < 0L
-                || file.length() > maxBytes) {
+        if (!RemovableStorageFs.isFile(file) || RemovableStorageFs.length(file) < 0L
+                || RemovableStorageFs.length(file) > maxBytes) {
             throw new IOException("File exceeds safe read limit");
         }
         ByteArrayOutputStream out = new ByteArrayOutputStream(
-                (int) file.length());
-        try (FileInputStream input = new FileInputStream(file)) {
+                (int) RemovableStorageFs.length(file));
+        try (FileInputStream input = RemovableStorageFs.openInput(file)) {
             byte[] buffer = new byte[8192];
             int total = 0;
             int count;
@@ -1491,8 +1492,8 @@ public final class GenAiIncidentPacks {
         File home = new File(System.getProperty(
                 HOME_PROPERTY, DEFAULT_HOME));
         File root = new File(home, PACKS_DIR);
-        if ((!root.exists() && !root.mkdirs())
-                || !root.isDirectory()
+        if ((!RemovableStorageFs.exists(root) && !RemovableStorageFs.mkdirs(root))
+                || !RemovableStorageFs.isDirectory(root)
                 || java.nio.file.Files.isSymbolicLink(
                         root.toPath())) {
             throw new PackException(500, "pack_store_unavailable",
@@ -1520,7 +1521,7 @@ public final class GenAiIncidentPacks {
             }
             File directory = candidate.getCanonicalFile();
             if (!root.equals(directory.getParentFile())
-                    || !directory.isDirectory()) {
+                    || !RemovableStorageFs.isDirectory(directory)) {
                 throw new PackException(404, "pack_not_found",
                         "Incident pack was not found.");
             }
@@ -1536,7 +1537,7 @@ public final class GenAiIncidentPacks {
     private static void writeSynced(File file, byte[] bytes)
             throws IOException {
         try (FileOutputStream output =
-                     new FileOutputStream(file, false)) {
+                     RemovableStorageFs.openOutput(file, false)) {
             output.write(bytes);
             output.flush();
             output.getFD().sync();
@@ -1546,7 +1547,7 @@ public final class GenAiIncidentPacks {
 
     private static void publishAtomically(
             File temporary, File target) throws PackException {
-        if (target.exists()) {
+        if (RemovableStorageFs.exists(target)) {
             throw new PackException(409, "pack_already_exists",
                     "Incident pack already exists.");
         }
@@ -1565,29 +1566,29 @@ public final class GenAiIncidentPacks {
 
     private static void ownerOnly(
             File file, boolean directory, boolean writable) {
-        if (file == null || !file.exists()) return;
-        file.setReadable(false, false);
-        file.setWritable(false, false);
-        file.setExecutable(false, false);
-        file.setReadable(true, true);
-        if (writable) file.setWritable(true, true);
-        if (directory) file.setExecutable(true, true);
+        if (file == null || !RemovableStorageFs.exists(file)) return;
+        RemovableStorageFs.setReadable(file, false, false);
+        RemovableStorageFs.setWritable(file, false, false);
+        RemovableStorageFs.setExecutable(file, false, false);
+        RemovableStorageFs.setReadable(file, true, true);
+        if (writable) RemovableStorageFs.setWritable(file, true, true);
+        if (directory) RemovableStorageFs.setExecutable(file, true, true);
     }
 
     private static boolean deleteTree(File file) {
         if (file == null) return true;
         if (java.nio.file.Files.isSymbolicLink(
                 file.toPath())) {
-            return file.delete();
+            return RemovableStorageFs.delete(file);
         }
-        if (!file.exists()) return true;
-        File[] children = file.listFiles();
+        if (!RemovableStorageFs.exists(file)) return true;
+        File[] children = RemovableStorageFs.listFiles(file);
         if (children != null) {
             for (File child : children) {
                 if (!deleteTree(child)) return false;
             }
         }
-        return file.delete();
+        return RemovableStorageFs.delete(file);
     }
 
     private static void addManifestEntry(
@@ -2032,7 +2033,7 @@ public final class GenAiIncidentPacks {
         ZipEntry entry = new ZipEntry(entryName);
         entry.setTime(timestamp);
         zip.putNextEntry(entry);
-        try (FileInputStream input = new FileInputStream(file)) {
+        try (FileInputStream input = RemovableStorageFs.openInput(file)) {
             copy(input, zip, null);
         }
         zip.closeEntry();
@@ -2048,15 +2049,15 @@ public final class GenAiIncidentPacks {
         zip.putNextEntry(entry);
         MessageDigest digest = sha256Digest();
         long copied;
-        try (FileInputStream input = new FileInputStream(video)) {
+        try (FileInputStream input = RemovableStorageFs.openInput(video)) {
             copied = copy(input, zip, digest);
         }
         zip.closeEntry();
         zip.setLevel(Deflater.DEFAULT_COMPRESSION);
         String actualHash = hex(digest.digest());
         if (copied != source.getLong("sizeBytes")
-                || video.length() != copied
-                || video.lastModified() != source.getLong("mtimeMs")
+                || RemovableStorageFs.length(video) != copied
+                || RemovableStorageFs.lastModified(video) != source.getLong("mtimeMs")
                 || !actualHash.equals(source.getString("sha256"))) {
             throw new PackException(409, "recording_changed",
                     "Source recording changed during download.");
@@ -2081,9 +2082,9 @@ public final class GenAiIncidentPacks {
     private static String hashStableFile(
             File file, long expectedSize, long expectedMtime,
             String errorCode) throws PackException {
-        if (!file.isFile() || !file.canRead()
-                || file.length() != expectedSize
-                || file.lastModified() != expectedMtime) {
+        if (!RemovableStorageFs.isFile(file) || !RemovableStorageFs.canRead(file)
+                || RemovableStorageFs.length(file) != expectedSize
+                || RemovableStorageFs.lastModified(file) != expectedMtime) {
             throw new PackException(409, errorCode,
                     "Source file changed while it was being read.");
         }
@@ -2094,8 +2095,8 @@ public final class GenAiIncidentPacks {
             throw new PackException(410, "recording_unavailable",
                     "Source file became unavailable.", e);
         }
-        if (file.length() != expectedSize
-                || file.lastModified() != expectedMtime) {
+        if (RemovableStorageFs.length(file) != expectedSize
+                || RemovableStorageFs.lastModified(file) != expectedMtime) {
             throw new PackException(409, errorCode,
                     "Source file changed while it was being read.");
         }
@@ -2104,7 +2105,7 @@ public final class GenAiIncidentPacks {
 
     private static String hashFile(File file) throws IOException {
         MessageDigest digest = sha256Digest();
-        try (FileInputStream input = new FileInputStream(file)) {
+        try (FileInputStream input = RemovableStorageFs.openInput(file)) {
             byte[] buffer = new byte[64 * 1024];
             int count;
             while ((count = input.read(buffer)) >= 0) {

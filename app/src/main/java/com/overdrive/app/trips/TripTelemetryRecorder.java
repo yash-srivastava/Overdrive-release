@@ -1,5 +1,7 @@
 package com.overdrive.app.trips;
 
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.monitor.GearMonitor;
 import com.overdrive.app.monitor.GpsMonitor;
@@ -481,7 +483,7 @@ public class TripTelemetryRecorder {
         }
 
         String path = outputFile != null ? outputFile.getAbsolutePath() : null;
-        long fileBytes = (outputFile != null && outputFile.exists()) ? outputFile.length() : -1;
+        long fileBytes = (outputFile != null && RemovableStorageFs.exists(outputFile)) ? RemovableStorageFs.length(outputFile) : -1;
         long gpsPct = sampleCountTotal == 0
                 ? 0
                 : Math.round(100.0 * sampleCountWithGps / sampleCountTotal);
@@ -1359,7 +1361,7 @@ public class TripTelemetryRecorder {
 
         // Append gzipped bytes to the (possibly relocated) output file.
         try (OutputStream fos = new BufferedOutputStream(
-                new FileOutputStream(target, true))) {
+                RemovableStorageFs.openOutput(target, true))) {
             // Avoid duplicating the compressed chunk in a second byte array.
             baos.writeTo(fos);
         }
@@ -1417,13 +1419,17 @@ public class TripTelemetryRecorder {
 
         File oldPath = outputFile;
         boolean migrated = false;
-        if (oldPath.exists() && oldPath.length() > 0
-                && parent != null && parent.exists()) {
+        if (RemovableStorageFs.exists(oldPath) && RemovableStorageFs.length(oldPath) > 0
+                && parent != null && RemovableStorageFs.exists(parent)) {
             try {
-                java.nio.file.Files.copy(
-                        oldPath.toPath(),
-                        newPath.toPath(),
-                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                if (RemovableStorageFs.isRouted(oldPath) || RemovableStorageFs.isRouted(newPath)) {
+                    RemovableStorageFs.copy(oldPath, newPath);
+                } else {
+                    java.nio.file.Files.copy(
+                            oldPath.toPath(),
+                            newPath.toPath(),
+                            java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
                 migrated = true;
                 logger.info("Trip telemetry migrated: " + oldPath.getAbsolutePath()
                         + " -> " + newPath.getAbsolutePath());
@@ -1436,7 +1442,7 @@ public class TripTelemetryRecorder {
             // Log so operators can correlate "trip ended on a different
             // path than it started" with a known volume event.
             logger.info("Trip telemetry rebinding without copy ("
-                    + (oldPath.exists() ? "empty file" : "old parent gone")
+                    + (RemovableStorageFs.exists(oldPath) ? "empty file" : "old parent gone")
                     + "): " + (parent == null ? "<no parent>" : parent.getAbsolutePath())
                     + " -> " + liveDir.getAbsolutePath());
         }
@@ -1467,8 +1473,8 @@ public class TripTelemetryRecorder {
         //     protected file, so newPath is unprotected. Deleting the source
         //     here would trade one corruption window for another. Leave both
         //     files until the next flush retries the marker update.
-        if (migrated && markerUpdated && oldPath.exists()) {
-            if (!oldPath.delete()) {
+        if (migrated && markerUpdated && RemovableStorageFs.exists(oldPath)) {
+            if (!RemovableStorageFs.delete(oldPath)) {
                 logger.warn("Failed to remove migrated source: " + oldPath.getAbsolutePath());
             }
         }

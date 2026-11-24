@@ -417,6 +417,7 @@ class VehicleSetupAssistant(private val activity: MainActivity) {
         val modes = listOfNotNull(
             VehicleSetupPlan.MODE_DEFAULT, "dilink4",
             VehicleSetupDetector.MODE_DILINK5.takeIf { withDi5 }, VehicleSetupDetector.MODE_CAMERA2,
+            com.overdrive.app.camera.AvmSurfaceTexturePlatform.MODE,
         )
         chooserDialog = MaterialAlertDialogBuilder(activity, R.style.Theme_Overdrive_M3_Dialog)
             .setTitle(R.string.vehicle_setup_camera_choice_title)
@@ -857,6 +858,7 @@ class VehicleSetupAssistant(private val activity: MainActivity) {
             "dilink4" -> R.string.vehicle_setup_mode_dilink4
             VehicleSetupDetector.MODE_DILINK5 -> R.string.vehicle_setup_mode_dilink5
             VehicleSetupDetector.MODE_CAMERA2 -> R.string.vehicle_setup_mode_camera2
+            com.overdrive.app.camera.AvmSurfaceTexturePlatform.MODE -> R.string.camera_mode_option_surfacetexture
             else -> R.string.vehicle_setup_mode_default
         }
     )

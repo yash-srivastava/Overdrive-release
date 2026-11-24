@@ -676,6 +676,8 @@ public class MqttConnectionManager {
             // visible while this publisher is online without a current vehicle snapshot.
             payload.put("cabin_temp", JSONObject.NULL);
             payload.put("inside_temp", JSONObject.NULL);
+            // Clear a formerly retained mode when the new session cannot identify it.
+            payload.put("op_mode", JSONObject.NULL);
 
             // Read BYD data from cached snapshot (refreshed by BydDataCollector's 5s polling timer)
             BydDataCollector collector = BydDataCollector.getInstance();
@@ -1192,7 +1194,7 @@ public class MqttConnectionManager {
 
                 // Energy / range / consumption
                 if (vd.energyMode != BydVehicleData.UNAVAILABLE) payload.put("energy_mode", vd.energyMode);
-                if (vd.operationMode != BydVehicleData.UNAVAILABLE) payload.put("op_mode", vd.operationMode);
+                if (vd.operationMode >= 1 && vd.operationMode <= 4) payload.put("op_mode", vd.operationMode);
                 if (!Double.isNaN(vd.totalElecCon) && vd.totalElecCon >= 0) payload.put("total_elec_con", vd.totalElecCon);
                 if (!Double.isNaN(vd.totalFuelCon) && vd.totalFuelCon >= 0) payload.put("total_fuel_con", vd.totalFuelCon);
                 if (vd.fuelRangeKm != BydVehicleData.UNAVAILABLE

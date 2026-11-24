@@ -73,7 +73,7 @@ public class Di4ProducerRecoveryTest {
                 "private Handler ensureDiLink4FrameCallbackHandler() {",
                 "\n    /** Full-pipeline teardown only");
         assertOrdered(callbackThread,
-                "if (!USE_DILINK4_AVM_PATH)",
+                "if (!USE_DILINK4_AVM_PATH && !USE_AVM_SURFACE_TEXTURE_PATH)",
                 "new HandlerThread(\"Di4-FrameCallback\")",
                 "replacementHandler.getLooper() == glHandler.getLooper()");
 
@@ -81,7 +81,7 @@ public class Di4ProducerRecoveryTest {
                 "private void shutdownDiLink4FrameCallbackThread() {",
                 "\n    static boolean shouldAcceptDiLink4SurfaceTextureCallback(");
         assertOrdered(callbackShutdown,
-                "if (USE_DILINK4_AVM_PATH)",
+                "if (USE_DILINK4_AVM_PATH || USE_AVM_SURFACE_TEXTURE_PATH)",
                 "synchronized (diLink4SurfaceTextureStateLock)",
                 "diLink4SurfaceTextureEpoch++;",
                 "thread.quitSafely()");
