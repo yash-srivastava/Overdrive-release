@@ -45,6 +45,31 @@ public class NetworkMonitorPlaceholderContractTest {
     }
 
     @Test
+    public void networkCacheRefreshesWithoutAnInitialSample() {
+        assertTrue(NetworkMonitor.needsNetworkRefresh(-1L, 0L));
+        assertTrue(NetworkMonitor.needsNetworkRefresh(-1L, 1_000L));
+        assertFalse(NetworkMonitor.needsNetworkRefresh(0L, 0L));
+    }
+
+    @Test
+    public void networkCachePreservesTenSecondAgeBoundary() {
+        assertFalse(NetworkMonitor.needsNetworkRefresh(1_000L, 1_000L));
+        assertFalse(NetworkMonitor.needsNetworkRefresh(1_000L, 10_999L));
+        assertFalse(NetworkMonitor.needsNetworkRefresh(1_000L, 11_000L));
+        assertTrue(NetworkMonitor.needsNetworkRefresh(1_000L, 11_001L));
+        assertTrue(NetworkMonitor.needsNetworkRefresh(1_000L, 999L));
+    }
+
+    @Test
+    public void allNetworkCachePathsUseElapsedRealtime() throws IOException {
+        String nm = read(MONITOR);
+        assertTrue(nm.contains("lastUpdateElapsed = -1L;"));
+        assertEquals(7, count(nm, "lastUpdateElapsed = SystemClock.elapsedRealtime();"));
+        assertTrue(nm.contains("needsNetworkRefresh(lastUpdateElapsed, SystemClock.elapsedRealtime())"));
+        assertFalse(nm.contains("System.currentTimeMillis()"));
+    }
+
+    @Test
     public void placeholderIsOneSharedConstant() throws IOException {
         String nm = read(MONITOR);
         assertTrue(nm.contains("public static final String SSID_UNKNOWN_PLACEHOLDER = \"WiFi\";"));
