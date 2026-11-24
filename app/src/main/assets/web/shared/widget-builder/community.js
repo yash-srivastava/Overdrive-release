@@ -114,15 +114,18 @@
     const qs = ['sort=' + enc(C.sort), 'pageSize=' + PAGE];
     if (C.q) qs.push('q=' + enc(C.q));
     if (C.cat) qs.push('category=' + enc(C.cat));
-    if (!reset && C.next) qs.push('cursor=' + enc(C.next));
+    const cursor = reset ? null : C.next;
+    if (cursor) qs.push('cursor=' + enc(cursor));
     U.api('GET', base + 'list?' + qs.join('&')).then(r => {
       if (seq !== C.seq) return;
       C.loading = false;
       if (!r.ok || !Array.isArray(r.data.items)) { C.error = cmError(r, 'cm_load_failed'); renderStatus(); return; }
       const items = r.data.items.map(normalize).filter(Boolean).filter(it => !C.items.some(x => x.id === it.id));
       C.items = C.items.concat(items);
-      const nc = r.data.nextCursor;
-      C.next = nc != null && nc !== '' && items.length ? String(nc) : null;
+      // The daemon can filter every row from a page yet return a valid next cursor.
+      // Keep pagination available even if normalization/deduplication added no cards.
+      const nc = r.data.nextCursor == null ? '' : String(r.data.nextCursor);
+      C.next = nc && nc !== cursor ? nc : null;
       items.forEach(it => C.grid.appendChild(card(it)));
       paintSoon();
       renderStatus();
@@ -136,9 +139,9 @@
     else if (C.error) {
       const e = el('div', 'wb-empty', C.status);
       e.textContent = C.error + ' ';
-      btn('wb-link', e, esc(tr('retry')), () => load(!C.items.length));
-    } else if (!C.items.length && (C.q || C.cat)) el('div', 'wb-empty', C.status, esc(tr('cm_none_match')));
-    else if (!C.items.length) {
+      btn('wb-link', e, esc(tr('retry')), () => load(!C.next));
+    } else if (!C.items.length && !C.next && (C.q || C.cat)) el('div', 'wb-empty', C.status, esc(tr('cm_none_match')));
+    else if (!C.items.length && !C.next) {
       const box = el('div', 'empty-state', el('div', 'card-body', el('div', 'card wb-cm-empty', C.status)));
       el('p', 'empty-text', box, esc(tr('cm_none_yet')));
       shareButton(box);
