@@ -571,6 +571,10 @@ public class NativeMotion {
             byte[] frameRgb, int width, int height,
             int quadrant, long nowMs);
     
+    /** Update from the borrowed 640x480 direct RGB mosaic (no retained reference). */
+    public static native void trackerUpdateMosaic(
+            ByteBuffer mosaicRgb, int quadrant, long nowMs);
+
     /** Check if any track is active in the given quadrant. */
     public static native boolean trackerHasActiveTrack(int quadrant);
     

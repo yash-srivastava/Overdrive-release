@@ -1,4 +1,5 @@
 #include "texture_tracker.h"
+#include "tracker_rgb.h"
 #include <cstring>
 #include <cmath>
 #include <algorithm>
@@ -30,20 +31,6 @@ static const float INNER_CORE_SHRINK = 0.15f;
 // ~0.3m per frame. At 5m distance on a 320px-wide quadrant, that's ~20px.
 // We use 40px to be safe (accounts for closer distances).
 static const int MAX_MOVEMENT_PER_FRAME = 40;
-
-// ============================================================================
-// Utility: RGB to grayscale conversion (fast integer approximation)
-// ============================================================================
-
-static void rgbToGray(const uint8_t* rgb, uint8_t* gray, int width, int height) {
-    int total = width * height;
-    for (int i = 0; i < total; i++) {
-        int r = rgb[i * 3];
-        int g = rgb[i * 3 + 1];
-        int b = rgb[i * 3 + 2];
-        gray[i] = (uint8_t)((r + (g << 1) + b) >> 2);
-    }
-}
 
 // ============================================================================
 // Inner Core Template Extraction
@@ -255,7 +242,7 @@ int tracker_startTrack(
     // Convert frame to grayscale and extract inner core template
     uint8_t grayBuf[320 * 240];
     if (width * height <= 320 * 240) {
-        rgbToGray(frame, grayBuf, width, height);
+        trackerRgbToGray(frame, grayBuf, width, height, width * 3);
         extractInnerCoreTemplate(grayBuf, width, height, x, y, w, h, t.templateData);
     }
 
@@ -266,14 +253,16 @@ void tracker_update(
     TrackerState* state,
     const uint8_t* frame, int width, int height,
     int quadrant,
-    long long nowMs)
+    long long nowMs, int rgbStride)
 {
     if (!state->initialized) return;
 
 #ifdef USE_OPENCV_IMGPROC
     uint8_t grayBuf[320 * 240];
-    if (width * height > 320 * 240) return;
-    rgbToGray(frame, grayBuf, width, height);
+    if (width <= 0 || height <= 0 || height > 320 * 240 / width) return;
+    if (rgbStride == 0) rgbStride = width * 3;
+    if (rgbStride < width * 3) return;
+    bool grayReady = false;
 
     for (int i = 0; i < TRACKER_MAX_TRACKS; i++) {
         TrackedObject& t = state->tracks[i];
@@ -288,6 +277,13 @@ void tracker_update(
         // Time-based YOLO heartbeat: every 3 seconds
         if ((nowMs - t.lastYoloTimeMs) > YOLO_HEARTBEAT_INTERVAL_MS) {
             t.needsYoloVerification = true;
+        }
+
+        // Convert only if a matching, non-expired track needs this frame.
+        // The grayscale result is shared by all tracks in the quadrant.
+        if (!grayReady) {
+            trackerRgbToGray(frame, grayBuf, width, height, rgbStride);
+            grayReady = true;
         }
 
         // Run micro-ROI NCC template matching
@@ -424,7 +420,7 @@ void tracker_refreshTemplate(
             // Re-extract inner core template at the new scale
             uint8_t grayBuf[320 * 240];
             if (width * height <= 320 * 240) {
-                rgbToGray(frame, grayBuf, width, height);
+                trackerRgbToGray(frame, grayBuf, width, height, width * 3);
                 extractInnerCoreTemplate(grayBuf, width, height,
                                          newX, newY, newW, newH, t.templateData);
             }
