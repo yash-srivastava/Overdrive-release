@@ -3141,13 +3141,9 @@ public class HttpServer {
                     }
                     
                     // Runs on the encoder drain thread: everything here is
-                    // non-blocking. Skip the copy for frames the policy is
-                    // discarding anyway while it waits for the next IDR.
-                    if (frameQueue.discardsWhileSkipping(isKeyframe)) return;
-                    byte[] frame = new byte[info.size];
-                    data.position(info.offset);
-                    data.get(frame);
-                    if (!frameQueue.offerVideo(frame, isKeyframe, info.presentationTimeUs)
+                    // non-blocking. Admission precedes the copy, and the queue
+                    // owns the pooled payload until the sender finishes.
+                    if (!frameQueue.offerVideo(data, info.offset, info.size, isKeyframe, info.presentationTimeUs)
                             && frameQueue.consumeSyncFrameRequest()) {
                         // Entered skip: ask for an IDR so the gap ends at the
                         // next possible frame rather than the next natural GOP.
@@ -3218,9 +3214,9 @@ public class HttpServer {
                         try {
                             // Log first few frames for debugging
                             if (frameCount < 5) {
-                                CameraDaemon.log("WS: Frame " + frameCount + " size=" + frame.length + " bytes");
+                                CameraDaemon.log("WS: Frame " + frameCount + " size=" + queued.length + " bytes");
                             }
-                            sendWebSocketBinaryFrame(out, frame);
+                            sendWebSocketBinaryFrame(out, frame, queued.length);
                             lastFrameTime = System.currentTimeMillis();
                             frameCount++;
                             
@@ -3237,6 +3233,8 @@ public class HttpServer {
                         } catch (java.io.IOException e) {
                             CameraDaemon.log("WS: Write error (" + e.getMessage() + ")");
                             break;
+                        } finally {
+                            frameQueue.release(queued);
                         }
                     } else {
                         // No frame for 5 seconds — send ping to keep alive
@@ -3323,17 +3321,17 @@ public class HttpServer {
      */
     private static final int MAX_WS_FRAME_SIZE = 32768;  // 32KB per WebSocket frame
     
-    private void sendWebSocketBinaryFrame(OutputStream out, byte[] data) throws Exception {
-        if (data.length <= MAX_WS_FRAME_SIZE) {
+    private void sendWebSocketBinaryFrame(OutputStream out, byte[] data, int length) throws Exception {
+        if (length <= MAX_WS_FRAME_SIZE) {
             // Small frame — send as single message
-            sendWebSocketRawFrame(out, data, 0, data.length, 0x82, true);
+            sendWebSocketRawFrame(out, data, 0, length, 0x82, true);
         } else {
             // Large frame — fragment into continuation frames
             int offset = 0;
             boolean first = true;
-            while (offset < data.length) {
-                int chunkSize = Math.min(MAX_WS_FRAME_SIZE, data.length - offset);
-                boolean last = (offset + chunkSize >= data.length);
+            while (offset < length) {
+                int chunkSize = Math.min(MAX_WS_FRAME_SIZE, length - offset);
+                boolean last = (offset + chunkSize >= length);
                 int opcode = first ? 0x02 : 0x00;  // binary for first, continuation for rest
                 sendWebSocketRawFrame(out, data, offset, chunkSize, opcode, last);
                 offset += chunkSize;

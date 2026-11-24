@@ -55,13 +55,16 @@ public class HttpServerStreamSenderContractTest {
         // Encoder drain path: offer*, never put()/blocking calls.
         String callback = sender.substring(
                 sender.indexOf("public void onH264Packet("), sender.indexOf("public void onStreamRetired()"));
-        assertTrue(callback.contains("frameQueue.offerVideo(frame, isKeyframe, info.presentationTimeUs)"));
+        assertTrue(callback.contains("frameQueue.offerVideo(data, info.offset, info.size, isKeyframe, info.presentationTimeUs)"));
         assertTrue(callback.contains("BUFFER_FLAG_KEY_FRAME"));
         assertFalse(callback.contains(".put("));
         assertFalse(callback.contains("Thread.sleep"));
         assertTrue("entering skip asks the encoder for an IDR through the rate limiter",
                 callback.contains("consumeSyncFrameRequest()") && callback.contains("requestSyncFrameRateLimited()"));
         assertTrue(sender.contains("frameQueue.offerConfig(combined);"));
+        assertFalse(callback.contains("new byte[info.size]"));
+        assertTrue(sender.contains("sendWebSocketBinaryFrame(out, frame, queued.length);"));
+        assertTrue(sender.contains("frameQueue.release(queued);"));
     }
 
     @Test
