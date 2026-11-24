@@ -893,6 +893,12 @@
         },
         playClip: playClip,
         quickFilter: function (days, btn) {
+            // A different range supersedes the pending list read (including Load more).
+            // Its response must not populate the new range or clear its loading flag.
+            if (state.loading && days !== state.days) {
+                state.listRequest++;
+                state.loading = false;
+            }
             state.days = days;
             var tabs = document.querySelectorAll('.filter-tab');
             for (var i = 0; i < tabs.length; i++) tabs[i].classList.remove('active');
