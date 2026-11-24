@@ -555,7 +555,7 @@ public final class GeocodingResolver {
                         addr.optString("county", ""),
                         addr.optString("state", ""));
                 country = addr.optString("country", "");
-                cc = addr.optString("country_code", "").toUpperCase();
+                cc = nominatimCountryCode(addr);
             }
             if (displayName.isEmpty() && district.isEmpty() && city.isEmpty()) {
                 NominatimRateLimiter.recordSuccess();
@@ -615,6 +615,11 @@ public final class GeocodingResolver {
             if (v != null && !v.isEmpty()) return v;
         }
         return "";
+    }
+
+    // Country codes are identifiers, not localized display text.
+    static String nominatimCountryCode(JSONObject address) {
+        return address.optString("country_code", "").toUpperCase(java.util.Locale.ROOT);
     }
 
     private static java.util.Locale parseLocaleTag(String tag) {
