@@ -2026,7 +2026,8 @@ var CHARGING = {
         var todayKey = this._dateKey(new Date());
         for (var i = firstDay - 1; i >= 0; i--) this._calDayCell(grid, daysInPrev - i, this._dateKey(new Date(year, month - 1, daysInPrev - i)), true, todayKey);
         for (var day = 1; day <= daysInMonth; day++) this._calDayCell(grid, day, this._dateKey(new Date(year, month, day)), false, todayKey);
-        for (var d2 = 1; grid.children.length - 7 + d2 <= 42; d2++) this._calDayCell(grid, d2, this._dateKey(new Date(year, month + 1, d2)), true, todayKey);
+        var trailingDays = 42 - firstDay - daysInMonth;
+        for (var d2 = 1; d2 <= trailingDays; d2++) this._calDayCell(grid, d2, this._dateKey(new Date(year, month + 1, d2)), true, todayKey);
     },
 
     _calDayCell: function (grid, day, dateKey, otherMonth, todayKey) {
