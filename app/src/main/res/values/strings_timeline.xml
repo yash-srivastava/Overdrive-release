@@ -100,6 +100,11 @@
     <string name="timeline_cd_prev_event">Previous event</string>
     <string name="timeline_cd_next_event">Next event</string>
     <string name="timeline_cd_speed">Playback speed %1$s</string>
+    <string name="timeline_cd_fullscreen">Fullscreen</string>
+    <string name="timeline_cd_exit_fullscreen">Exit fullscreen</string>
+    <string name="timeline_cd_share">Share segment</string>
+    <string name="timeline_share_unavailable">No clip to share</string>
+    <string name="timeline_share_failed">Couldn\'t share this clip</string>
     <string name="timeline_cd_date">Choose a day</string>
     <string name="timeline_action_next_moment">Next moment</string>
     <string name="timeline_action_prev_moment">Previous moment</string>

@@ -101,6 +101,11 @@
     <string name="timeline_cd_prev_event">האירוע הקודם</string>
     <string name="timeline_cd_next_event">האירוע הבא</string>
     <string name="timeline_cd_speed">מהירות ניגון %1$s</string>
+    <string name="timeline_cd_fullscreen">מסך מלא</string>
+    <string name="timeline_cd_exit_fullscreen">יציאה ממסך מלא</string>
+    <string name="timeline_cd_share">שתף מקטע</string>
+    <string name="timeline_share_unavailable">אין מקטע לשיתוף</string>
+    <string name="timeline_share_failed">לא ניתן לשתף את המקטע</string>
     <string name="timeline_cd_date">בחירת יום</string>
     <string name="timeline_action_next_moment">הרגע הבא</string>
     <string name="timeline_action_prev_moment">הרגע הקודם</string>
