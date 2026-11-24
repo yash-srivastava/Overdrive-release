@@ -256,6 +256,8 @@ var NOTIFLOG = {
                 card.setAttribute('aria-label', (n.title || '') + ' — ' + self._fmtTime(n.ts));
                 card.addEventListener('click', function () { self._open(n); });
                 card.addEventListener('keydown', function (e) {
+                    // Leave keyboard activation of the nested Delete button to the browser.
+                    if (e.target !== card) return;
                     if (e.key === 'Enter' || e.key === ' ' || e.keyCode === 13 || e.keyCode === 32) {
                         e.preventDefault();
                         self._open(n);
