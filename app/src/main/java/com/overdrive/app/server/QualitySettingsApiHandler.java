@@ -2,6 +2,9 @@ package com.overdrive.app.server;
 
 import com.overdrive.app.storage.removable.RemovableStorageFs;
 
+import android.media.MediaCodecList;
+import android.media.MediaFormat;
+
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.storage.StorageManager;
 
@@ -1399,6 +1402,14 @@ public class QualitySettingsApiHandler {
         codecInfo.put("H264", "H.264/AVC (Compatible)");
         codecInfo.put("H265", "H.265/HEVC (50% smaller)");
         response.put("codecOptions", codecInfo);
+
+        // Report runtime encoder availability instead of assuming every
+        // head unit exposes both recording formats. Keep this separate from
+        // codecOptions so existing clients retain their current labels.
+        JSONObject codecAvailability = new JSONObject();
+        codecAvailability.put("H264", hasVideoEncoder(MediaFormat.MIMETYPE_VIDEO_AVC));
+        codecAvailability.put("H265", hasVideoEncoder(MediaFormat.MIMETYPE_VIDEO_HEVC));
+        response.put("codecAvailability", codecAvailability);
         
         // Add FPS options for UI. Range 10..30 — clamped server-side by
         // GpuSurveillancePipeline.applyFpsChange. The HAL on this device
@@ -1412,6 +1423,18 @@ public class QualitySettingsApiHandler {
         response.put("fpsOptions", fpsInfo);
         
         HttpResponse.sendJson(out, response.toString());
+    }
+
+    private static boolean hasVideoEncoder(String mimeType) {
+        try {
+            MediaFormat format = MediaFormat.createVideoFormat(mimeType, 1280, 720);
+            return new MediaCodecList(MediaCodecList.REGULAR_CODECS)
+                .findEncoderForFormat(format) != null;
+        } catch (Throwable t) {
+            CameraDaemon.log("Video encoder capability probe failed for " + mimeType
+                + ": " + t.getMessage());
+            return false;
+        }
     }
 
     private static void handleQualitySettingsPost(OutputStream out, String body) throws Exception {
