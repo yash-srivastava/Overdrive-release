@@ -38,6 +38,29 @@ jobs:
             ./gitleaks git --log-opts="-1" --redact --no-banner
           fi
 
+  web-tests:
+    name: Web regression tests
+    runs-on: ubuntu-latest
+    needs: guard
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Vehicle canvas lifecycle
+        run: node tools/test-vehicle-canvas-lifecycle.js
+      - name: GenAI localized contracts
+        run: node tools/tests/genai-localized-contracts/run.cjs
+      - name: Link manager cancellation UI
+        run: node tools/tests/link-manager-cancellation/ui.test.cjs
+      - name: Remote view localized clear
+        run: node tools/tests/remote-view-localized-clear/run.cjs
+      - name: Vehicle state hydration
+        run: node tools/tests/vehicle-state-hydration/run.cjs
+
   build:
     name: OSS build
     runs-on: ubuntu-latest
