@@ -235,7 +235,11 @@ public class Di4ProducerRecoveryTest {
                 "if (!acc || mode == Mode.NONE)",
                 "if (pipeline.isRunning())",
                 "CameraDaemon.requestProcessRestartPreservingTrip(");
-        assertFalse(restart.contains("; nothing to restart"));
+        // Legacy AVMCamera keeps its own reopen ladder, so only that branch may no-op.
+        assertTrue(restart.contains("if (isLegacyCameraMode()) {"));
+        String nonLegacy = restart.replaceFirst(
+                "(?s)if \\(isLegacyCameraMode\\(\\)\\) \\{.*?return;\\s*\\}", "");
+        assertFalse(nonLegacy.contains("; nothing to restart"));
         assertOrdered(restart,
                 "pipeline.stop();",
                 "if (pipeline.isRunning())",

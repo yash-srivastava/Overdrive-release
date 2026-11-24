@@ -440,7 +440,8 @@ public class VehicleControlAssetTest {
         assertTrue(script.replace("\r", "").contains(
                 "// the vendor download. _startImmersiveScene rebuilds it from scratch.\n"
                         + "        this.initColorPicker();"));
-        assertTrue(script.contains("if (!this.baseColor) return;"));
+        // An early pick is saved and painted once the scene exists.
+        assertTrue(script.contains("if (this.baseColor) this.applyColor(hex, false);"));
         assertTrue(script.contains("_teardownImmersiveScene: function()"));
 
         // The toggle loads the vendor stack from the page's own list rather

@@ -1855,4 +1855,30 @@
     <string name="camera_recording_engine_why_restart_pending">יעבור למעבד בהפעלת המצלמה הבאה</string>
     <!-- Translations kept from the public repository -->
     <string name="settings_overlay_chip_opacity_subtitle">ערך גבוה = בולט יותר. טווח 10 עד 100 (האחוזים מימין).</string>
+    <string name="projection_path_factory_mini">מפת יצרן מוקטנת</string>
+    <string name="aaos_map_area_button">בדיקת אזור המפה בלוח המחוונים</string>
+    <string name="aaos_map_cast_idle">פתח את מפת היצרן בלוח המחוונים. אשר את אזור המפה בשתי הפריסות לפני ההקרנה.</string>
+    <string name="aaos_map_cast_active">האפליקציה פועלת באזור המפה הקבוע בלוח המחוונים. בדוק את לוח המחוונים כדי לראות את הפלט שלה.</string>
+    <string name="aaos_map_area_permission">בהגדרות Android, פתח את אפליקציות ← גישה מיוחדת לאפליקציות ← הצגה מעל אפליקציות אחרות ואפשר את OverDrive. לאחר מכן חזור לכאן כדי להריץ את הבדיקה.</string>
+    <string name="aaos_map_area_choose">העבר להילוך P. פתח את מפת היצרן בלוח המחוונים ובחר את הפריסה שאתה רואה. מסגרת צהובה תופיע לחמש שניות. אם קצה כלשהו חתוך או מחוץ למפה, השאר אותה לא מאושרת ונסה את האזור השני. ההקרנה משתמשת באזור אחד שאישרת בשתי הפריסות.\n\nאזור בדיקה · %3$s\nמפה מלאה · %1$s\nמפה מוקטנת · %2$s</string>
+    <string name="aaos_map_area_change">שינוי אזור הבדיקה</string>
+    <string name="aaos_map_area_center">מרכז (640 × 280)</string>
+    <string name="aaos_map_area_right">ימין (400 × 256)</string>
+    <string name="aaos_map_area_full">מפה מלאה</string>
+    <string name="aaos_map_area_small">מפה מוקטנת</string>
+    <string name="aaos_map_area_checked">מאושר</string>
+    <string name="aaos_map_area_unchecked">לא מאושר</string>
+    <string name="aaos_map_area_label">בדיקת אזור המפה של OverDrive</string>
+    <string name="aaos_map_area_park">ההילוך השתנה או שאות החניה אבד. עצור את הרכב, בחר P והתחל בדיקה חדשה.</string>
+    <string name="aaos_map_area_manual_title">אשר שהרכב בחניה</string>
+    <string name="aaos_map_area_manual_message">OverDrive אינו יכול לקרוא את ההילוך שנבחר. ודא שלוח המחוונים מציג P ושבלם החניה משולב. האישור שלך חל רק על המסגרת הזו של חמש שניות.</string>
+    <string name="aaos_map_area_manual_confirm">P ובלם חניה אושרו</string>
+    <string name="aaos_map_area_map_required">OverDrive לא הצליח לוודא שמפת היצרן מוצגת בלוח המחוונים. פתח את מפת היצרן, השאר אותה גלויה ונסה את הבדיקה שוב.</string>
+    <string name="aaos_map_area_unavailable">OverDrive לא הצליח להציג את מסגרת הבדיקה המלאה בצג לוח המחוונים. פתח מחדש את מפת היצרן ונסה שוב.</string>
+    <string name="aaos_map_area_result">מה ראית בלוח המחוונים?</string>
+    <string name="aaos_map_area_edges">ראיתי את ארבעת הקצוות של המסגרת הצהובה במלואם בתוך מפת היצרן.</string>
+    <string name="aaos_map_area_gauges">המלבן כולו היה נקי משעונים ומנורות אזהרה. אזורי המהירות והאזהרות נשארו גלויים.</string>
+    <string name="aaos_map_area_unconfirmed">השאר לא מאושר</string>
+    <string name="aaos_map_area_confirm">אישור הפריסה</string>
+    <string name="projection_path_factory_mini_hint">בחר תחילה את מפת היצרן המוקטנת בלוח המחוונים. לאחר ההקרנה, השתמש בשינוי גודל כדי להתאים את האפליקציה לחלון המפה.</string>
 </resources>

@@ -116,21 +116,80 @@ public class GenAiAutomationTest {
     }
 
     @Test
-    public void automationCatalogFitsTheProviderContextBudget() {
+    public void automationCatalogFitsTheProviderContextBudget() throws Exception {
         JSONObject context = GenAiAutomation.schemaContext();
         JSONObject catalog = context.optJSONObject("catalog");
         assertNotNull(catalog);
-        JSONArray events = catalog.optJSONArray("events");
-        JSONArray actions = catalog.optJSONArray("actions");
-        assertNotNull(events);
-        assertNotNull(actions);
-        int length = context.toString().length();
-        // Unit tests see raw i18n keys as labels; translated contexts run ~20% shorter than
-        // this, so 50k here keeps the real payload well inside GenAiRuntime's 48k cap.
-        assertTrue("automation catalog length=" + length
-                        + ", events=" + events.toString().length()
-                        + ", actions=" + actions.toString().length(),
-                length <= 50_000);
+        assertNotNull(catalog.optJSONArray("events"));
+        assertNotNull(catalog.optJSONArray("actions"));
+        // Unit tests see raw i18n keys as labels, so measure the payload every shipped
+        // catalog really produces against the cap GenAiRuntime truncates at.
+        java.lang.reflect.Field cap = GenAiRuntime.class.getDeclaredField("MAX_CONTEXT_CHARS");
+        cap.setAccessible(true);
+        int limit = cap.getInt(null);
+        java.io.File dir = new java.io.File("src/main/assets/server-i18n");
+        java.util.Map<String, String> english = flatten(new JSONObject(read(new java.io.File(dir, "en.json"))));
+        java.io.File[] catalogs = dir.listFiles((d, name) -> name.endsWith(".json"));
+        assertNotNull(catalogs);
+        int worst = 0;
+        String worstLocale = "";
+        for (java.io.File file : catalogs) {
+            java.util.Map<String, String> labels = flatten(new JSONObject(read(file)));
+            int length = String.valueOf(translate(context, english, labels)).length();
+            if (length > worst) {
+                worst = length;
+                worstLocale = file.getName();
+            }
+        }
+        assertTrue(catalogs.length > 1);
+        assertTrue("largest automation context " + worstLocale + "=" + worst + " > " + limit,
+                worst <= limit);
+    }
+
+    private static String read(java.io.File file) throws java.io.IOException {
+        return new String(java.nio.file.Files.readAllBytes(file.toPath()),
+                java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    private static java.util.Map<String, String> flatten(JSONObject object) {
+        java.util.Map<String, String> out = new java.util.HashMap<>();
+        flatten("", object, out);
+        return out;
+    }
+
+    private static void flatten(String prefix, JSONObject object, java.util.Map<String, String> out) {
+        java.util.Iterator<String> keys = object.keys();
+        while (keys.hasNext()) {
+            String key = keys.next();
+            Object value = object.opt(key);
+            if (value instanceof JSONObject) flatten(prefix + key + ".", (JSONObject) value, out);
+            else if (value instanceof String) out.put(prefix + key, (String) value);
+        }
+    }
+
+    private static Object translate(Object value, java.util.Map<String, String> english,
+            java.util.Map<String, String> labels) throws Exception {
+        if (value instanceof JSONObject) {
+            JSONObject in = (JSONObject) value;
+            JSONObject out = new JSONObject();
+            java.util.Iterator<String> keys = in.keys();
+            while (keys.hasNext()) {
+                String key = keys.next();
+                out.put(key, translate(in.get(key), english, labels));
+            }
+            return out;
+        }
+        if (value instanceof JSONArray) {
+            JSONArray in = (JSONArray) value;
+            JSONArray out = new JSONArray();
+            for (int i = 0; i < in.length(); i++) out.put(translate(in.get(i), english, labels));
+            return out;
+        }
+        if (value instanceof String && english.containsKey(value)) {
+            String label = labels.get(value);
+            return label != null ? label : english.get(value);
+        }
+        return value;
     }
 
     @Test

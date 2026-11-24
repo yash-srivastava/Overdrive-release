@@ -144,8 +144,7 @@ public class AvcHalWarmup {
             new java.util.concurrent.atomic.AtomicLong(0L);
     private static long lastRecoveryLaunchMs = 0L;            // WARMUP_LANE
     private static boolean lastRecoveryLaunchLoaded = false;  // WARMUP_LANE
-    private static final String RECOVERY_LAUNCH_MARKER =
-            "/data/local/tmp/overdrive_avc_recovery_launch";
+    private static final String RECOVERY_LAUNCH_MARKER = "overdrive_avc_recovery_launch";
     private static final long RECOVERY_LAUNCH_REQUEST_TTL_MS = 5L * 60_000L;
     private static final long RECOVERY_LAUNCH_MIN_INTERVAL_MS = 10L * 60_000L;
     private static final AvcHalWarmup COLD_OPEN_WARMUP = new AvcHalWarmup();
@@ -476,7 +475,7 @@ public class AvcHalWarmup {
         if (!lastRecoveryLaunchLoaded) {
             lastRecoveryLaunchLoaded = true;
             try (java.io.BufferedReader reader = new java.io.BufferedReader(
-                    new java.io.FileReader(RECOVERY_LAUNCH_MARKER))) {
+                    new java.io.FileReader(com.overdrive.app.util.ScratchRoot.path(RECOVERY_LAUNCH_MARKER)))) {
                 String line = reader.readLine();
                 String[] parts = line != null ? line.trim().split(" ") : new String[0];
                 long stored = parts.length == 2 && parts[0].equals(bootId())
@@ -505,7 +504,7 @@ public class AvcHalWarmup {
         lastRecoveryLaunchMs = nowMs;
         lastRecoveryLaunchLoaded = true;
         recoveryLaunchRequestedMs.set(0L);
-        try (java.io.FileWriter writer = new java.io.FileWriter(RECOVERY_LAUNCH_MARKER, false)) {
+        try (java.io.FileWriter writer = new java.io.FileWriter(com.overdrive.app.util.ScratchRoot.path(RECOVERY_LAUNCH_MARKER), false)) {
             writer.write(bootId() + " " + nowMs);
         } catch (Exception e) {
             logger.warn("AVC recovery marker not written: " + e.getMessage());

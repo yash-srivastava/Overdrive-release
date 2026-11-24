@@ -2,7 +2,10 @@
 """Translation spreadsheets: one .xlsx per language out, checked translations back in.
 
   python3 tools/i18n/sheets.py export [--lang de ...] [--out DIR]
-  python3 tools/i18n/sheets.py import SHEET.xlsx|.csv [--lang de] [--dry-run]
+  python3 tools/i18n/sheets.py import SHEET.xlsx|.csv [--lang de] [--dry-run] [--allow-english]
+
+--allow-english applies rows whose translation equals the English (loanwords, numbers, URLs)
+over an existing translation; use it only after reviewing those rows.
 """
 import argparse, csv, io, json, os, re, sys
 from collections import OrderedDict
@@ -269,7 +272,8 @@ def check(en, tr, android):
         return 'placeholders differ (%s vs %s)' % (' '.join(sorted(PH.findall(en))) or 'none', ' '.join(sorted(PH.findall(tr))) or 'none')
     if sorted(t.lower() for t in TAG.findall(en)) != sorted(t.lower() for t in TAG.findall(tr)):
         return 'markup tags differ'
-    lost = [b for b in BRANDS if b in en and b not in tr] + [b for b in TUNNELS if b in tr and b not in en]
+    lost = [b for b in BRANDS if b in en and not has_brand(tr, b)] + \
+        [b for b in TUNNELS if b in tr and b.lower() not in en.lower()]
     if lost:
         return 'brand name changed or missing: ' + ', '.join(lost)
     if android and re.search(FMT, en) and '%' in re.sub(FMT, '', tr):
@@ -283,13 +287,22 @@ def check(en, tr, android):
     return None
 
 
+# BYD and Google have official Chinese names.
+BRAND_SPELLINGS = {'OverDrive': ('OverDrive', 'Overdrive'), 'Overdrive': ('Overdrive', 'OverDrive'),
+                   'BYD': ('BYD', '比亚迪', '比亞迪'), 'Google': ('Google', '谷歌')}
+
+
+def has_brand(text, brand):
+    return any(b in text for b in BRAND_SPELLINGS.get(brand, (brand,)))
+
+
 def en_raw_of(en):
     """The English display text as resource XML (only markup matters for the check)."""
     return en if has_tags(en) else ''
 
 
 
-def import_sheet(path, lang, dry):
+def import_sheet(path, lang, dry, allow_english=False):
     sheet_lang, rows = read_sheet(path)
     if not lang:
         m = re.search(r'OverDrive-([A-Za-z]{2}(?:-[A-Za-z]{2})?)', os.path.basename(path))
@@ -313,7 +326,7 @@ def import_sheet(path, lang, dry):
         if en_sheet.strip() and en_sheet.strip() != en.strip():
             skipped.append((rid, 'English changed since the sheet was made; translate the new text'))
             continue
-        if tr == en and cur and cur != en:
+        if tr == en and cur and cur != en and not allow_english:
             skipped.append((rid, 'English pasted over an existing translation'))
             continue
         why = check(en, tr, rid.startswith('android:'))
@@ -344,18 +357,26 @@ def import_sheet(path, lang, dry):
 
 
 def write(lang, items):
+    """Render and check every touched file first, then replace each atomically: a bad file writes nothing."""
     by_file = OrderedDict()
     for rid, tr in items:
         area, rest = rid.split(':', 1)
         by_file.setdefault((area, rest.split(':', 1)[0] if area == 'android' else None), []).append((rest, tr))
+    staged = []
     for (area, fn), entries in by_file.items():
         if area == 'android':
-            write_android(lang, fn, [(r.split(':', 1)[1], tr) for r, tr in entries])
+            staged.append(render_android(lang, fn, [(r.split(':', 1)[1], tr) for r, tr in entries]))
         else:
-            write_json(area, lang, entries)
+            staged.append(render_json(area, lang, entries))
+    for path, text in staged:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + '.sheets-tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            f.write(text)
+        os.replace(tmp, path)
 
 
-def write_json(area, lang, entries):
+def render_json(area, lang, entries):
     path = jpath(area, lang)
     data = load_json(path)
     for key, tr in entries:
@@ -373,18 +394,19 @@ def write_json(area, lang, entries):
             node[leaf][form] = tr
         else:
             node[leaf] = tr
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write(json.dumps(data, ensure_ascii=False, indent=2) + '\n')
+    text = json.dumps(data, ensure_ascii=False, indent=2) + '\n'
+    json.loads(text)
+    return path, text
 
 
-def write_android(lang, fn, entries):
+def render_android(lang, fn, entries):
     import xml.etree.ElementTree as ET
     path = os.path.join(adir(lang), fn)
-    en_s, en_p = parse_android(os.path.join(ROOT, 'res', 'values', fn))
+    en_path = os.path.join(ROOT, 'res', 'values', fn)
+    en_s, en_p = parse_android(en_path)
     if os.path.exists(path):
         text = open(path, encoding='utf-8').read()
     else:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
         text = '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n</resources>\n'
     for key, tr in entries:
         name, form = (key.split('#', 1) + [None])[:2]
@@ -396,9 +418,37 @@ def write_android(lang, fn, entries):
             attrs, en_raw = en_s[name]
             raw = a_raw(tr, en_raw)
             text = put_string(text, name, attrs, raw)
+    text = declare_namespaces(text, open(en_path, encoding='utf-8').read())
     ET.fromstring(text.encode('utf-8'))
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write(text)
+    return path, text
+
+
+KNOWN_NS = {'tools': 'http://schemas.android.com/tools', 'xliff': 'urn:oasis:names:tc:xliff:document:1.2'}
+ROOT_TAG = re.compile(r'<resources\b[^>]*>')
+
+
+def declare_namespaces(text, en_text):
+    """Declare on <resources> every prefix the file uses (tools:ignore copied from English, <xliff:g>), URIs as English has them."""
+    m = ROOT_TAG.search(blank_comments(text))
+    if not m:
+        return text
+    root = text[m.start():m.end()]
+    body = blank_comments(text[m.end():])
+    used = set(re.findall(r'\s([A-Za-z_][\w.-]*):[A-Za-z_][\w.-]*\s*=', body)) | set(re.findall(r'</?([A-Za-z_][\w.-]*):[A-Za-z_]', body))
+    em = ROOT_TAG.search(blank_comments(en_text))
+    en_root = en_text[em.start():em.end()] if em else ''
+    add = ''
+    for prefix in sorted(used - {'xmlns', 'xml'}):
+        if re.search(r'\sxmlns:%s\s*=' % re.escape(prefix), root):
+            continue
+        um = re.search(r'\sxmlns:%s\s*=\s*"([^"]*)"' % re.escape(prefix), en_root)
+        uri = um.group(1) if um else KNOWN_NS.get(prefix)
+        if uri:
+            add += ' xmlns:%s="%s"' % (prefix, uri)
+    if not add:
+        return text
+    head, tail = (root[:-2], '/>') if root.endswith('/>') else (root[:-1], '>')
+    return text[:m.start()] + head.rstrip() + add + tail + text[m.end():]
 
 
 def _find(text, rx):
@@ -440,11 +490,12 @@ def main():
     i.add_argument('sheet')
     i.add_argument('--lang')
     i.add_argument('--dry-run', action='store_true')
+    i.add_argument('--allow-english', action='store_true')
     a = ap.parse_args()
     if a.cmd == 'export':
         export(a.lang, a.out)
     else:
-        import_sheet(a.sheet, a.lang, a.dry_run)
+        import_sheet(a.sheet, a.lang, a.dry_run, a.allow_english)
 
 
 if __name__ == '__main__':
