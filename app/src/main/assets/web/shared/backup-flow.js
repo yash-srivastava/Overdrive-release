@@ -225,12 +225,21 @@
 
     // Trip-history bundles can be much larger than settings-only backups.
     var MAX_IMPORT_BYTES = 32 * 1024 * 1024;   // matches native cap + backup HTTP cap
+    var previewGeneration = 0;
 
     function onFileChosen(ev) {
         var file = ev.target && ev.target.files && ev.target.files[0];
         // Reset the input so re-choosing the same file fires change again.
         if (ev.target) ev.target.value = '';
         if (!file) return;
+        // Replace an unconfirmed preview, but leave an active restore/result alone.
+        if ($('bkModalBg')) {
+            var confirm = $('bkConfirm');
+            if (!confirm || confirm.disabled) return;
+            closeModal();
+        }
+        // Even an invalid new file supersedes a previous pending selection.
+        var generation = ++previewGeneration;
         // Reject oversized files BEFORE readAsText pulls the whole thing into
         // memory (a real bundle is a few KB; a 100MB pick would balloon the
         // Chrome-58 WebView heap on the head unit). file.size is bytes.
@@ -240,21 +249,22 @@
         }
         var reader = new FileReader();
         reader.onload = function () {
+            if (generation !== previewGeneration) return;
             var text = reader.result;
-            var parsed;
-            try { parsed = JSON.parse(text); } catch (e) {
+            try { JSON.parse(text); } catch (e) {
                 toast(t('backup.invalid_file', 'That file is not a valid Overdrive backup.'), 'error');
                 return;
             }
-            previewRestore(text, parsed);
+            previewRestore(text, generation);
         };
         reader.onerror = function () {
+            if (generation !== previewGeneration) return;
             toast(t('backup.read_failed', 'Could not read the file.'), 'error');
         };
         reader.readAsText(file);
     }
 
-    function previewRestore(rawText, parsed) {
+    function previewRestore(rawText, generation) {
         fetch('/api/backup/import/preview', {
             method: 'POST',
             credentials: 'same-origin',
@@ -263,6 +273,7 @@
         })
         .then(function (r) { return r.text().then(function (txt) { return { ok: r.ok, body: txt }; }); })
         .then(function (resp) {
+            if (generation !== previewGeneration) return;
             var res;
             try { res = resp.body ? JSON.parse(resp.body) : null; } catch (e) { res = null; }
             if (!resp.ok || !res) { toast(t('backup.preview_failed', 'Could not validate the backup.'), 'error'); return; }
@@ -273,6 +284,7 @@
             showRestoreConfirm(rawText, res.warnings || []);
         })
         .catch(function (e) {
+            if (generation !== previewGeneration) return;
             toast(t('backup.preview_failed', 'Could not validate the backup.') + ': ' +
                 ((e && e.message) || ''), 'error');
         });
