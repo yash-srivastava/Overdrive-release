@@ -1091,13 +1091,17 @@
             lastRangeFrom = from; lastRangeTo = to;
             emit('range', { from: Math.round(from), to: Math.round(to) });
         }
+        function setNumericAttr(name, value) {
+            const text = String(value);
+            if (canvas.getAttribute(name) !== text) canvas.setAttribute(name, text);
+        }
         function setValueAttrs() {
             const lo = model.lo;
             if (isFinite(lo)) {
-                canvas.setAttribute('aria-valuemin', '0');
-                canvas.setAttribute('aria-valuemax', String(Math.max(0, Math.round((hiB() - lo) / 1000))));
-                canvas.setAttribute('aria-valuenow', String(Math.max(0, Math.round((c - lo) / 1000))));
-            } else canvas.setAttribute('aria-valuenow', String(Math.round(c / 1000)));
+                setNumericAttr('aria-valuemin', 0);
+                setNumericAttr('aria-valuemax', Math.max(0, Math.round((hiB() - lo) / 1000)));
+                setNumericAttr('aria-valuenow', Math.max(0, Math.round((c - lo) / 1000)));
+            } else setNumericAttr('aria-valuenow', Math.round(c / 1000));
         }
         const ariaTick = function () { ariaTimer = 0; updateAria(performance.now()); };
         function updateAria(tNow) {
@@ -1111,7 +1115,9 @@
             const txt = m && m.label != null
                 ? tr('tlview.ariaStripNearest', { time: time, moment: String(m.label) })
                 : tr('tlview.ariaStrip', { time: time });
-            if (txt !== ariaText) { ariaText = txt; canvas.setAttribute('aria-valuetext', txt); setValueAttrs(); }
+            if (txt !== ariaText) { ariaText = txt; canvas.setAttribute('aria-valuetext', txt); }
+            // The bounds and relative position can change without changing the spoken time.
+            setValueAttrs();
         }
         const liveTick = function () { liveTimer = 0; invalidate(); };
         function scheduleLiveTick() {
