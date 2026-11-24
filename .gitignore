@@ -56,3 +56,9 @@ frame_grabber_light
 
 # Private overlay (official builds only; lives in the private repo)
 /private/
+
+# Local agent context (never published)
+.claude/
+.agents/
+.kiro/
+CLAUDE.local.md
