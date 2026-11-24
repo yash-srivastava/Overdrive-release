@@ -59,7 +59,8 @@ public final class GeoSnapshot {
         try {
             o.put("lat", lat);
             o.put("lng", lng);
-            if (accuracy > 0f) o.put("accuracy", (double) accuracy);
+            // Invalid optional accuracy must not prevent the timing fields from being written.
+            if (Float.isFinite(accuracy) && accuracy > 0f) o.put("accuracy", (double) accuracy);
             if (ageMs >= 0L) o.put("ageMs", ageMs);
             if (capturedAtMs > 0L) o.put("capturedAtMs", capturedAtMs);
             if (relMs >= 0L) o.put("tMs", relMs);
