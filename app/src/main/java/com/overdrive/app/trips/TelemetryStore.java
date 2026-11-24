@@ -8,16 +8,12 @@ import org.json.JSONObject;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
 /**
@@ -26,8 +22,7 @@ import java.util.zip.GZIPOutputStream;
  * Used by TripTelemetryRecorder (chunked writes) and Trip API (reads).
  *
  * The recorder appends multiple gzip streams to the same file (one per flush).
- * Standard GZIPInputStream only reads the first stream, so readFromFile()
- * handles concatenated gzip streams by reading in a loop until EOF.
+ * Reads concatenated gzip streams incrementally, without staging all expanded JSON.
  */
 public class TelemetryStore {
 
@@ -42,7 +37,7 @@ public class TelemetryStore {
      *
      * The recorder appends a new gzip stream on each flush (every 60s or on stop),
      * so a single file may contain multiple concatenated gzip streams. We read them
-     * all by looping over the raw bytes and creating a new GZIPInputStream for each stream.
+     * all from a compressed snapshot, decoding and parsing each line as it is inflated.
      *
      * @param file the .jsonl.gz file to read
      * @return list of TelemetrySample objects parsed from all gzip streams
@@ -55,8 +50,9 @@ public class TelemetryStore {
         try {
             // Read entire file into memory (telemetry files are bounded by storage limits)
             byte[] fileBytes = readAllBytes(file);
-            String allJsonLines = decompressConcatenatedGzip(fileBytes);
-            return parseJsonLines(allJsonLines);
+            List<TelemetrySample> samples = new ArrayList<>();
+            GzipJsonLines.read(fileBytes, line -> appendSample(samples, line));
+            return samples;
         } catch (Exception e) {
             logger.error("Failed to read telemetry file: " + file.getName(), e);
             return new ArrayList<>();
@@ -120,55 +116,23 @@ public class TelemetryStore {
 
         String[] lines = jsonLines.split("\n");
         for (String line : lines) {
-            String trimmed = line.trim();
-            if (trimmed.isEmpty()) continue;
-            try {
-                JSONObject json = new JSONObject(trimmed);
-                samples.add(TelemetrySample.fromJson(json));
-            } catch (Exception e) {
-                logger.warn("Skipping malformed telemetry line: " + e.getMessage());
-            }
+            appendSample(samples, line);
         }
         return samples;
     }
 
-    // ==================== INTERNAL HELPERS ====================
-
-    /**
-     * Decompress concatenated gzip streams from raw bytes.
-     *
-     * The gzip format allows multiple streams to be concatenated. Each stream has
-     * its own header (magic bytes 0x1f 0x8b). We scan for these headers and
-     * decompress each stream individually, concatenating the results.
-     */
-    private static String decompressConcatenatedGzip(byte[] data) throws IOException {
-        if (data == null || data.length == 0) return "";
-
-        ByteArrayOutputStream result = new ByteArrayOutputStream();
-        ByteArrayInputStream bais = new ByteArrayInputStream(data);
-        byte[] buffer = new byte[4096];
-
-        while (bais.available() > 0) {
-            // Mark position to detect if GZIPInputStream consumes any bytes
-            bais.mark(data.length);
-
-            try {
-                GZIPInputStream gzis = new GZIPInputStream(bais);
-                int bytesRead;
-                while ((bytesRead = gzis.read(buffer)) != -1) {
-                    result.write(buffer, 0, bytesRead);
-                }
-                gzis.close();
-                // After close, bais position is advanced past the consumed gzip stream.
-                // Loop continues to read the next concatenated stream if any.
-            } catch (IOException e) {
-                // If we can't read a gzip stream, we've likely hit trailing garbage or EOF
-                break;
-            }
+    private static void appendSample(List<TelemetrySample> samples, String line) {
+        String trimmed = line.trim();
+        if (trimmed.isEmpty()) return;
+        try {
+            JSONObject json = new JSONObject(trimmed);
+            samples.add(TelemetrySample.fromJson(json));
+        } catch (Exception e) {
+            logger.warn("Skipping malformed telemetry line: " + e.getMessage());
         }
-
-        return result.toString("UTF-8");
     }
+
+    // ==================== INTERNAL HELPERS ====================
 
     /**
      * Read all bytes from a file into a byte array.
