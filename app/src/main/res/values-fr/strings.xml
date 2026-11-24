@@ -1009,7 +1009,6 @@
          deterrent screen all run independently regardless of this state. -->
     <string name="settings_security_title">Sécurité</string>
     <string name="settings_security_subtitle">Verrouillez l\'application OverDrive pour que les passagers et les valets ne puissent pas l\'ouvrir sans votre NIP.</string>
-    <string name="settings_security_stance_title">Verrouillage de l\'interface utilisateur uniquement</string>
     <string name="settings_security_stance_body">La surveillance, l\'enregistrement, la dissuasion, les alertes et les services d\'arrière-plan continuent de fonctionner pendant que l\'application est verrouillée. Le code PIN porte l\'interface OverDrive, rien d\'autre.</string>
     <string name="settings_security_overline_lock">Verrouillage de l\'application</string>
     <string name="settings_security_overline_recovery">Si vous oubliez votre code PIN</string>

@@ -1113,7 +1113,6 @@
     <string name="settings_screenshot_privacy_save_failed">לא ניתן לשמור את הגדרת מצב הפרטיות לצילומי מסך.</string>
     <string name="settings_security_title">אבטחה</string>
     <string name="settings_security_subtitle">נעילת אפליקציית OverDrive כך שנוסעים או נותני שירות לא יוכלו לפתוח אותה ללא קוד ה-PIN שלך.</string>
-    <string name="settings_security_stance_title">נעילת ממשק בלבד</string>
     <string name="settings_security_stance_body">מעקב, הקלטה, הרתעה, התרעות ושירותי רקע ממשיכים לפעול גם כשהאפליקציה נעולה. קוד ה-PIN נועל את ממשק OverDrive בלבד.</string>
     <string name="settings_security_overline_lock">נעילת אפליקציה</string>
     <string name="settings_security_overline_recovery">אם שכחת את קוד ה-PIN</string>

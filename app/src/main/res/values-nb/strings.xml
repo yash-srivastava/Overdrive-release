@@ -728,7 +728,6 @@
     <string name="settings_security_autolock_immediate">Lås umiddelbart</string>
     <string name="settings_security_title">Sikkerhet</string>
     <string name="settings_security_toggle_subtitle_on">– PIN-kode kreves for å åpne OverDrive.</string>
-    <string name="settings_security_stance_title">Kun UI lås</string>
     <string name="roadsense_cal_learning">Lærer kjøretøyet ditt</string>
     <string name="roadsense_sev_severe">Kraftig</string>
     <string name="settings_security_subtitle">Lås OverDrive-appen slik at passasjerer og ventiler ikke kan åpne den uten PIN-koden.</string>

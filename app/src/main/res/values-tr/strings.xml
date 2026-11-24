@@ -863,7 +863,6 @@
          deterrent screen all run independently regardless of this state. -->
     <string name="settings_security_title">Güvenlik</string>
     <string name="settings_security_subtitle">Yolcuların ve vale görevlilerinin PIN\'iniz olmadan açamaması için OverDrive uygulamasını kilitleyin.</string>
-    <string name="settings_security_stance_title">Yalnızca arayüz kilidi</string>
     <string name="settings_security_stance_body">Uygulama kilitliyken gözetim, kayıt, caydırıcı, uyarılar ve arka plan hizmetleri çalışmaya devam eder. PIN yalnızca OverDrive arayüzünü kısıtlar, başka hiçbir şeyi değil.</string>
     <string name="settings_security_overline_lock">Uygulama kilidi</string>
     <string name="settings_security_overline_recovery">PIN\'inizi unutursanız</string>

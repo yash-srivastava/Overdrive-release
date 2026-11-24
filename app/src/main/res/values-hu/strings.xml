@@ -856,7 +856,6 @@
          deterrent screen all run independently regardless of this state. -->
     <string name="settings_security_title">Security</string>
     <string name="settings_security_subtitle">Lock the OverDrive app so passengers and valets can\'t open it without your PIN.</string>
-    <string name="settings_security_stance_title">UI lock only</string>
     <string name="settings_security_stance_body">Surveillance, recording, deterrent, alerts, and background services keep running while the app is locked. The PIN gates the OverDrive interface, nothing else.</string>
     <string name="settings_security_overline_lock">App lock</string>
     <string name="settings_security_overline_recovery">If you forget your PIN</string>

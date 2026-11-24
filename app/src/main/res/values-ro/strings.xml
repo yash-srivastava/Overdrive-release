@@ -859,7 +859,6 @@
          deterrent screen all run independently regardless of this state. -->
     <string name="settings_security_title">Securitate</string>
     <string name="settings_security_subtitle">Blocați aplicația OverDrive astfel încât pasagerii și valetele să nu o poată deschide fără codul PIN.</string>
-    <string name="settings_security_stance_title">Doar blocare UI</string>
     <string name="settings_security_stance_body">Supravegherea, înregistrarea, descurajarea, alertele și serviciile de fundal continuă să ruleze în timp ce aplicația este blocată. Codul PIN pornește interfața OverDrive, nimic altceva.</string>
     <string name="settings_security_overline_lock">Blocare aplicație</string>
     <string name="settings_security_overline_recovery">Dacă uitaţi codul PIN</string>

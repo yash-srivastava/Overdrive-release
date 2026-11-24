@@ -1009,7 +1009,6 @@
          deterrent screen all run independently regardless of this state. -->
     <string name="settings_security_title">Beveiliging</string>
     <string name="settings_security_subtitle">Vergrendel de OverDrive app zodat passagiers en radiatorkranen deze niet kunnen openen zonder uw pincode.</string>
-    <string name="settings_security_stance_title">Alleen UI Vergrendeling</string>
     <string name="settings_security_stance_body">Surveillance, opname, afschrikking, waarschuwingen en achtergronddiensten blijven actief terwijl de app is vergrendeld. De pincode verbindt de OverDrive interface en niets anders.</string>
     <string name="settings_security_overline_lock">App vergrendeling</string>
     <string name="settings_security_overline_recovery">Als je je pincode bent vergeten</string>

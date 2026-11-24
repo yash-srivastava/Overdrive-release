@@ -862,7 +862,6 @@
          deterrent screen all run independently regardless of this state. -->
     <string name="settings_security_title">Seguretat</string>
     <string name="settings_security_subtitle">Bloqueja l\'aplicació OverDrive perquè passatgers i treballadors no puguin obrir-la sense el PIN.</string>
-    <string name="settings_security_stance_title">Només el bloqueig de la IU</string>
     <string name="settings_security_stance_body">Vigilància, gravació, dissuasió, alertes i serveis de fons segueixen funcionant mentre l\'aplicació està bloquejada. El PIN tanca la interfície OverDrive, res més.</string>
     <string name="settings_security_overline_lock">Bloqueig de l\'aplicació</string>
     <string name="settings_security_overline_recovery">Si oblideu el PIN</string>

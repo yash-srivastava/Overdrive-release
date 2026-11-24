@@ -1006,7 +1006,6 @@
          deterrent screen all run independently regardless of this state. -->
     <string name="settings_security_title">セキュリティ</string>
     <string name="settings_security_subtitle">OverDriveアプリをロックして、乗客とバレットがPINなしで開くことができないようにします。</string>
-    <string name="settings_security_stance_title">UI ロックのみ</string>
     <string name="settings_security_stance_body">アプリがロックされている間、監視、記録、抑止、警告、およびバックグラウンドサービスが実行され続けます。PINゲートはOverDriveインターフェイスです。</string>
     <string name="settings_security_overline_lock">アプリロック</string>
     <string name="settings_security_overline_recovery">PINを忘れた場合</string>

@@ -862,7 +862,6 @@
          deterrent screen all run independently regardless of this state. -->
     <string name="settings_security_title">Безпека</string>
     <string name="settings_security_subtitle">Заблокуйте додаток OverDrive, щоб пасажири та валенти не могли відкрити його без PIN-коду.</string>
-    <string name="settings_security_stance_title">Тільки блокування інтерфейсу</string>
     <string name="settings_security_stance_body">Перегляд, записування, стримування, оповіщення та фонові служби і затворювати разом з програмою заблоковано. PIN-кодом ворота інтерфейсу OverDrive, більше нічого іншого.</string>
     <string name="settings_security_overline_lock">Блокування програм</string>
     <string name="settings_security_overline_recovery">Якщо ви забудете PIN-код</string>

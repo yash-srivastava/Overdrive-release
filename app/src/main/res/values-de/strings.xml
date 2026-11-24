@@ -1009,7 +1009,6 @@
          deterrent screen all run independently regardless of this state. -->
     <string name="settings_security_title">Sicherheit</string>
     <string name="settings_security_subtitle">Sperren Sie die OverDrive-App, damit Passagiere und Valets sie ohne PIN nicht öffnen können.</string>
-    <string name="settings_security_stance_title">Nur UI sperren</string>
     <string name="settings_security_stance_body">Überwachung, Aufnahme, Abschreckung, Alarme und Hintergrunddienste laufen weiter, während die App gesperrt ist. Die PIN öffnet die Schnittstelle OverDrive, nichts anderes.</string>
     <string name="settings_security_overline_lock">App-Sperre</string>
     <string name="settings_security_overline_recovery">Wenn Sie Ihre PIN vergessen</string>

@@ -689,7 +689,6 @@
     <string name="settings_privacy_reset_subtitle">Vyberte kategorie: nahrávky, události, konfigurace služeb, uložená telemetrie…</string>
     <string name="settings_security_title">Zabezpečení</string>
     <string name="settings_security_subtitle">Chraňte aplikaci OverDrive PINem před přístupem cestujících a pracovníků valet parkingu.</string>
-    <string name="settings_security_stance_title">Pouze zámek rozhraní</string>
     <string name="settings_security_stance_body">Monitorování, nahrávání, odstrašení, upozornění a služby na pozadí běží i při uzamčení aplikace. PIN chrání pouze rozhraní OverDrive, nic dalšího.</string>
     <string name="settings_security_overline_lock">Zámek aplikace</string>
     <string name="settings_security_overline_recovery">Pokud zapomenete svůj PIN</string>

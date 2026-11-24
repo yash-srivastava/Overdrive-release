@@ -4,8 +4,7 @@
 
   Composition (vertical):
     HERO HEADER : "Security" + 1-line subtitle
-    STANCE CARD : narrative — what the lock guards (UI only) and what
-                  it doesn't (daemons, surveillance, recording).
+    STANCE HELPER : non-interactive body text on UI-only lock scope (not a row).
     LOCK CARD   : Switch to enable/disable PIN. When OFF, tapping the
                   card opens "Set PIN" flow. When ON, shows "Change PIN"
                   + "Auto-lock" rows.
@@ -48,54 +47,6 @@
             android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
             android:textColor="?attr/colorOnSurfaceVariant" />
 
-        <!-- ============== STANCE CARD ============== -->
-        <com.google.android.material.card.MaterialCardView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="@dimen/page_padding_top"
-            app:cardBackgroundColor="?attr/colorSurfaceContainer"
-            app:cardCornerRadius="@dimen/card_radius_standard"
-            app:cardElevation="0dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:padding="@dimen/card_padding_standard">
-
-                <ImageView
-                    android:layout_width="@dimen/card_icon_standard"
-                    android:layout_height="@dimen/card_icon_standard"
-                    android:layout_marginTop="2dp"
-                    android:contentDescription="@null"
-                    android:src="@drawable/ic_security_lock"
-                    app:tint="?attr/colorPrimary" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="16dp"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/settings_security_stance_title"
-                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                        android:textColor="?attr/colorOnSurface" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:text="@string/settings_security_stance_body"
-                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
-                </LinearLayout>
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
         <!-- ============== APP LOCK CARD ============== -->
         <TextView
             android:layout_width="wrap_content"
@@ -105,6 +56,16 @@
             android:text="@string/settings_security_overline_lock"
             android:textAllCaps="true"
             android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+            android:textColor="?attr/colorOnSurfaceVariant" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="@dimen/section_overline_bottom"
+            android:clickable="false"
+            android:focusable="false"
+            android:text="@string/settings_security_stance_body"
+            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
             android:textColor="?attr/colorOnSurfaceVariant" />
 
         <com.google.android.material.card.MaterialCardView

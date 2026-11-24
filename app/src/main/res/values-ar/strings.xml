@@ -874,7 +874,6 @@
          deterrent screen all run independently regardless of this state. -->
     <string name="settings_security_title">أمان</string>
     <string name="settings_security_subtitle">قفل تطبيق OverDrive حتى لا يتمكن المسافرون والقيم من فتحه بدون رقم التعريف الشخصي الخاص بك.</string>
-    <string name="settings_security_stance_title">تأمين واجهة المستخدم فقط</string>
     <string name="settings_security_stance_body">يستمر تشغيل خدمات المراقبة والتسجيل والردع والتنبيهات والخلفية أثناء قفل التطبيق. بوابة PIN الخاصة بواجهة تجاوز القرص، لا شيء آخر.</string>
     <string name="settings_security_overline_lock">قفل التطبيق</string>
     <string name="settings_security_overline_recovery">إذا نسيت رقم التعريف الشخصي</string>

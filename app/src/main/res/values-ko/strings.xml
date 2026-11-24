@@ -860,7 +860,6 @@
          deterrent screen all run independently regardless of this state. -->
     <string name="settings_security_title">보안</string>
     <string name="settings_security_subtitle">승객이나 발렛이 PIN 없이 열 수 없도록 OverDrive 앱을 잠급니다.</string>
-    <string name="settings_security_stance_title">UI 잠금만</string>
     <string name="settings_security_stance_body">앱이 잠긴 동안에도 감시, 녹화, 억제, 알림 및 백그라운드 서비스는 계속 실행됩니다. PIN은 OverDrive 인터페이스만 잠그며, 그 외에는 아무것도 잠그지 않습니다.</string>
     <string name="settings_security_overline_lock">앱 잠금</string>
     <string name="settings_security_overline_recovery">PIN을 잊어버린 경우</string>
