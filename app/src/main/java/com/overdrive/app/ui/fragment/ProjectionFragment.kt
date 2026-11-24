@@ -40,6 +40,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.materialswitch.MaterialSwitch
 import com.overdrive.app.R
 import com.overdrive.app.launcher.dilink5.cluster.DiLink5ProjectionConfig.Transport.FACTORY_MINI
+import com.overdrive.app.launcher.dilink5.cluster.Sealion7HdmiProjection
 import com.overdrive.app.ui.MainActivity
 import com.overdrive.app.ui.view.AaosMapAreaCheck
 import com.overdrive.app.ui.view.ClusterViewMirrorClient
@@ -105,6 +106,10 @@ class ProjectionFragment : Fragment() {
     private var transportStatus: TextView? = null
     private var projectionPathGroup: MaterialButtonToggleGroup? = null
     private var aaosMapCheck: AaosMapAreaCheck? = null
+    private var sealion7HdmiRow: View? = null
+    private var sealion7HdmiSwitch: MaterialSwitch? = null
+    private var sealion7HdmiEnabled = false
+    private var sealion7HdmiWriteInFlight = false
     private var projectionPathDescription: TextView? = null
     private var projectionTargetGroup: MaterialButtonToggleGroup? = null
     private var projectionPathStatus: TextView? = null
@@ -295,6 +300,13 @@ class ProjectionFragment : Fragment() {
             transportStatus = view.findViewById(R.id.projectionTransportStatus)
             projectionPathGroup = view.findViewById(R.id.projectionPathGroup)
             aaosMapCheck = AaosMapAreaCheck(view.findViewById(R.id.projectionAaosMapCheck))
+            sealion7HdmiRow = view.findViewById(R.id.projectionSealion7HdmiRow)
+            sealion7HdmiSwitch = view.findViewById(R.id.projectionSealion7HdmiSwitch)
+            sealion7HdmiSwitch?.setOnCheckedChangeListener { _, checked ->
+                if (checked != sealion7HdmiEnabled && !sealion7HdmiWriteInFlight) {
+                    saveSealion7Hdmi(checked)
+                }
+            }
             projectionPathDescription = view.findViewById(R.id.projectionPathDescription)
             projectionTargetGroup = view.findViewById(R.id.projectionTargetGroup)
             projectionPathStatus = view.findViewById(R.id.projectionPathStatus)
@@ -433,6 +445,9 @@ class ProjectionFragment : Fragment() {
         clusterBarsCard = null
         aaosMapCheck?.close()
         aaosMapCheck = null
+        sealion7HdmiRow = null
+        sealion7HdmiSwitch = null
+        sealion7HdmiWriteInFlight = false
         alive = false
         mirrorRequested = false
         mirrorRequestGeneration++
@@ -1031,11 +1046,37 @@ class ProjectionFragment : Fragment() {
     private fun setTransportStatusLine(resolved: String, source: String) {
         if (resolved.isEmpty()) return
         if (aaosHostedMap) {
-            transportStatus?.setText(if (casting) R.string.aaos_map_cast_active else R.string.aaos_map_cast_idle)
+            aaosMapCheck?.setEnabled(!sealion7HdmiEnabled)
+            transportStatus?.setText(when {
+                sealion7HdmiEnabled && casting -> R.string.projection_sealion7_hdmi_active
+                sealion7HdmiEnabled -> R.string.projection_sealion7_hdmi_idle
+                casting -> R.string.aaos_map_cast_active
+                else -> R.string.aaos_map_cast_idle
+            })
             return
         }
         transportStatus?.text =
             getString(R.string.projection_transport_active, resolved, source)
+    }
+
+    private fun saveSealion7Hdmi(enabled: Boolean) {
+        val switch = sealion7HdmiSwitch ?: return
+        sealion7HdmiWriteInFlight = true
+        updateButtons()
+        fun complete(saved: Boolean) {
+            if (sealion7HdmiSwitch !== switch) return
+            sealion7HdmiWriteInFlight = false
+            if (saved) sealion7HdmiEnabled = enabled
+            // Persisted state comes first, so reconciliation cannot trigger a second write.
+            sealion7HdmiSwitch?.isChecked = sealion7HdmiEnabled
+            if (aaosHostedMap) setTransportStatusLine(resolvedProjectionTransport, "")
+            updateButtons()
+            if (!saved && alive) notifyToast(getString(R.string.projection_setting_save_failed), AppToast.Kind.ERROR)
+        }
+        if (!submitIo {
+                val saved = postUnified("projection", JSONObject().put(Sealion7HdmiProjection.CONFIG_KEY, enabled))
+                postMain { complete(saved) }
+            }) complete(false)
     }
 
     /**
@@ -1605,6 +1646,11 @@ class ProjectionFragment : Fragment() {
         if (aaosHostedMap) adjusting = false
         daemonOwnsWindow = st.projectionPathActive == "hosted" || st.factoryMiniMap
         activeWindowBounds = st.activeWindowBounds
+        sealion7HdmiRow?.visibility = if (st.sealion7HdmiSupported) View.VISIBLE else View.GONE
+        if (!sealion7HdmiWriteInFlight) {
+            sealion7HdmiEnabled = st.sealion7HdmiSupported && st.sealion7HdmiEnabled
+            sealion7HdmiSwitch?.isChecked = sealion7HdmiEnabled
+        }
         if (previousCastPackage != castPackage || previousCastGeneration != castSessionGeneration) {
             commitSeq++ // late replies/retries cannot acquire the replacement session's token
         }
@@ -1874,7 +1920,8 @@ class ProjectionFragment : Fragment() {
     private fun updateButtons() {
         btnCast?.isEnabled =
             !casting && !diLink5ModeRequired && !layoutActive && !layoutBusy
-                && appPackages.isNotEmpty() && !castInFlight
+                && appPackages.isNotEmpty() && !castInFlight && !sealion7HdmiWriteInFlight
+        sealion7HdmiSwitch?.isEnabled = !casting && !layoutBusy && !castInFlight && !sealion7HdmiWriteInFlight
         btnStop?.isEnabled = casting || layoutBusy
         // One slot: Cast while idle, Stop while casting.
         btnCast?.visibility = if (casting || layoutBusy) View.GONE else View.VISIBLE
@@ -2187,6 +2234,8 @@ class ProjectionFragment : Fragment() {
         val clusterTransport: String,
         val clusterTransportSource: String,
         val clusterTransportConfigured: String,
+        val sealion7HdmiSupported: Boolean,
+        val sealion7HdmiEnabled: Boolean,
         val projectionPathConfigured: String,
         val projectionTargetConfigured: String,
         val projectionValues: IntArray,
@@ -2229,6 +2278,8 @@ class ProjectionFragment : Fragment() {
                 j.optString("clusterTransport", ""),
                 j.optString("clusterTransportSource", ""),
                 j.optString("clusterTransportConfigured", "auto"),
+                j.optBoolean("sealion7FullHdmiSupported"),
+                j.optBoolean(Sealion7HdmiProjection.CONFIG_KEY),
                 j.optString("projectionPathConfigured", "auto"),
                 j.optString("projectionTargetConfigured", "standard"),
                 intArrayOf(

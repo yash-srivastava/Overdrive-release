@@ -2360,6 +2360,10 @@
     <string name="aaos_map_area_button">Check cluster map area</string>
     <string name="aaos_map_cast_idle">Open the factory map on the cluster. Confirm the map area in both layouts before casting.</string>
     <string name="aaos_map_cast_active">The app is running in the fixed cluster map area. Check the instrument cluster to see its output.</string>
+    <string name="projection_sealion7_hdmi_title">Full HDMI projection (Sealion 7)</string>
+    <string name="projection_sealion7_hdmi_description">Use the full navigation region for projection. Allow OverDrive to display over other apps in Android Settings. Test while parked.</string>
+    <string name="projection_sealion7_hdmi_idle">Set Instrument navigation to Off or Full in the vehicle settings.</string>
+    <string name="projection_sealion7_hdmi_active">Projection is using the full navigation region. Check its output on the instrument cluster.</string>
     <string name="aaos_map_area_permission">In Android Settings, open Apps → Special app access → Display over other apps and allow OverDrive. Then return here to run the check.</string>
     <string name="aaos_map_area_choose">Shift into Park. Open the factory map on the cluster and choose the layout you see. A yellow outline will appear for five seconds. If any edge is clipped or outside the map, leave it unconfirmed and try the other area. Projection uses one area that you confirm in both layouts.\n\nTest area · %3$s\nFull map · %1$s\nSmall map · %2$s</string>
     <string name="aaos_map_area_change">Change test area</string>

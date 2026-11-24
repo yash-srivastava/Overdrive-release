@@ -400,6 +400,14 @@ public class AccMonitor {
         } catch (Throwable t) {
             CameraDaemon.log("notifyAccEdge panel wake dispatch failed: " + t.getMessage());
         }
+        try {
+            if (clusterRecoveryOwner &&
+                    com.overdrive.app.launcher.dilink5.cluster.Sealion7HdmiProjection.isTestedFirmware()) {
+                com.overdrive.app.launcher.DiLink5ClusterCast.onInstrumentAccOn();
+            }
+        } catch (Throwable t) {
+            CameraDaemon.log("notifyAccEdge instrument restoration dispatch failed: " + t.getMessage());
+        }
         // Non-blocking; a no-op outside the camera daemon (never initialised there).
         try {
             com.overdrive.app.customlayouts.daemon.CustomLayoutsController.onAccEdge(true);

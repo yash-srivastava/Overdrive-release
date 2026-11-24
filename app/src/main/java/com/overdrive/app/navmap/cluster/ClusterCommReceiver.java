@@ -43,9 +43,18 @@ public final class ClusterCommReceiver extends BroadcastReceiver {
         }
         if (reply == null) return;
         final List<Bundle> commands;
+        final DiLink5InstrumentFullSession.Owner instrumentOwner;
         final long deadline;
         try {
-            commands = validated(intent.getParcelableArrayListExtra(ClusterCommContract.EXTRA_COMMANDS));
+            if (intent.hasExtra(ClusterCommContract.EXTRA_INSTRUMENT_OWNER)) {
+                String encoded = intent.getStringExtra(ClusterCommContract.EXTRA_INSTRUMENT_OWNER);
+                instrumentOwner = encoded == null ? null : DiLink5InstrumentFullSession.parseOwner(encoded);
+                commands = instrumentOwner == null || intent.hasExtra(ClusterCommContract.EXTRA_COMMANDS)
+                        ? null : DiLink5InstrumentFullSession.commands(instrumentOwner);
+            } else {
+                instrumentOwner = null;
+                commands = validated(intent.getParcelableArrayListExtra(ClusterCommContract.EXTRA_COMMANDS));
+            }
             deadline = intent.getLongExtra(ClusterCommContract.EXTRA_DEADLINE, 0L);
         } catch (Throwable malformed) {
             send(reply, ClusterCommContract.RESULT_BAD_REQUEST, "", 0);
@@ -62,7 +71,7 @@ public final class ClusterCommReceiver extends BroadcastReceiver {
         try {
             LINK.worker.execute(() -> {
                 try {
-                    LINK.run(app, commands, deadline, reply);
+                    LINK.run(app, commands, instrumentOwner, deadline, reply);
                 } catch (Throwable failure) {
                     send(reply, ClusterCommContract.RESULT_FAILED, "", 0);
                 } finally {
@@ -133,7 +142,7 @@ public final class ClusterCommReceiver extends BroadcastReceiver {
         private long generation;
         private boolean nullBinding, bindingDied;
         private CountDownLatch connected = new CountDownLatch(1);
-        private long checkedGeneration = -1, rejectedGeneration = -1;
+        private long checkedGeneration = -1, rejectedGeneration = -1, confirmedGeneration = -1;
 
         private final class Connection implements ServiceConnection {
             @Override public void onServiceConnected(ComponentName name, IBinder service) {
@@ -177,7 +186,8 @@ public final class ClusterCommReceiver extends BroadcastReceiver {
             if (connected.getCount() == 0) connected = new CountDownLatch(1);
         }
 
-        void run(Context context, List<Bundle> commands, long deadline, ResultReceiver reply) {
+        void run(Context context, List<Bundle> commands,
+                DiLink5InstrumentFullSession.Owner instrumentOwner, long deadline, ResultReceiver reply) {
             if (SystemClock.elapsedRealtime() > deadline) {
                 send(reply, ClusterCommContract.RESULT_EXPIRED, "", 0);
                 return;
@@ -188,13 +198,16 @@ public final class ClusterCommReceiver extends BroadcastReceiver {
                 return;
             }
             String token = nonce + "/" + target.generation;
-            if (checkedGeneration != target.generation) {
+            if (checkedGeneration != target.generation
+                    || instrumentOwner != null && confirmedGeneration != target.generation
+                        && rejectedGeneration != target.generation) {
                 long wait = Math.min(DESCRIPTOR_WAIT_MS, deadline - SystemClock.elapsedRealtime());
                 if (wait <= 0) {
                     send(reply, ClusterCommContract.RESULT_EXPIRED, token, 0);
                     return;
                 }
-                // Once per binder; an unknown answer proceeds, since every call carries the token.
+                // Guidance keeps its existing fallback on an unknown descriptor. Instrument
+                // mode changes require a positive interface match on this particular binder.
                 checkedGeneration = target.generation;
                 String descriptor = descriptor(target.binder, wait);
                 // A failed descriptor transaction yields "" rather than an exception.
@@ -202,30 +215,57 @@ public final class ClusterCommReceiver extends BroadcastReceiver {
                 if (known && !ClusterCommContract.DESCRIPTOR.equals(descriptor)) {
                     Log.w(TAG, "unexpected cluster service interface: " + descriptor);
                     rejectedGeneration = target.generation;
-                } else if (!known && !target.binder.isBinderAlive()) {
+                } else if (known) {
+                    confirmedGeneration = target.generation;
+                } else if (!target.binder.isBinderAlive()) {
                     drop(target);
                     send(reply, ClusterCommContract.RESULT_SERVICE_DIED, token, 0);
                     return;
                 }
             }
-            if (rejectedGeneration == target.generation) {
+            if (rejectedGeneration == target.generation
+                    || instrumentOwner != null && confirmedGeneration != target.generation) {
                 send(reply, ClusterCommContract.RESULT_UNSUPPORTED_INTERFACE, token, 0);
                 return;
+            }
+            if (instrumentOwner != null) {
+                Integer declined = DiLink5InstrumentFullSession.beforeWire(context, instrumentOwner);
+                if (declined != null) {
+                    send(reply, declined, token, 0);
+                    return;
+                }
             }
             if (SystemClock.elapsedRealtime() > deadline) {
                 send(reply, ClusterCommContract.RESULT_EXPIRED, token, 0);
                 return;
             }
             int sent = 0;
+            boolean restore = instrumentOwner != null && instrumentOwner.getClosing();
             for (Bundle command : commands) {
+                if (instrumentOwner != null && SystemClock.elapsedRealtime() > deadline) {
+                    send(reply, ClusterCommContract.RESULT_EXPIRED, token, sent);
+                    return;
+                }
+                if (restore && command.getInt("DataType") == 31 && command.getInt("subtype") == 3) {
+                    Integer declined = DiLink5InstrumentFullSession.beforeOff(context);
+                    if (declined != null) {
+                        send(reply, declined, token, sent);
+                        return;
+                    }
+                }
                 Parcel data = Parcel.obtain();
                 try {
                     data.writeInterfaceToken(ClusterCommContract.DESCRIPTOR);
                     data.writeInt(ClusterCommContract.COMMAND_NAVI);
                     data.writeInt(1);
                     command.writeToParcel(data, 0);
-                    target.binder.transact(ClusterCommContract.TRANSACTION_SEND_COMMAND,
+                    boolean accepted = target.binder.transact(ClusterCommContract.TRANSACTION_SEND_COMMAND,
                             data, null, IBinder.FLAG_ONEWAY);
+                    if (instrumentOwner != null && !accepted) {
+                        if (restore) continue; // Still try the final Off message over a live binder.
+                        send(reply, ClusterCommContract.RESULT_FAILED, token, sent);
+                        return;
+                    }
                     sent++;
                 } catch (DeadObjectException failed) {
                     // Also raised for a full async buffer on a live binder; drop only a dead one.
@@ -236,13 +276,15 @@ public final class ClusterCommReceiver extends BroadcastReceiver {
                     return;
                 } catch (Throwable failure) {
                     Log.w(TAG, "cluster command failed: " + failure.getClass().getSimpleName());
+                    if (restore) continue;
                     send(reply, ClusterCommContract.RESULT_FAILED, token, sent);
                     return;
                 } finally {
                     data.recycle();
                 }
             }
-            send(reply, ClusterCommContract.RESULT_SENT, token, sent);
+            send(reply, sent == commands.size() ? ClusterCommContract.RESULT_SENT
+                    : ClusterCommContract.RESULT_FAILED, token, sent);
         }
 
         private Target connect(Context context, long deadline) {

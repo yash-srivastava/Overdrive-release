@@ -12,7 +12,9 @@ import android.os.ResultReceiver
 import android.view.Gravity
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.View
 import android.view.WindowManager
+import com.overdrive.app.overlay.OverlayPermissionChecker
 import com.overdrive.app.ui.view.AaosMapAreaCheck
 import java.util.concurrent.Executors
 
@@ -87,8 +89,10 @@ class DiLink5HostedProjectionService : Service() {
             metrics.densityDpi,
         )
         val aaosMapArea = intent.getBooleanExtra(DiLink5HostedProjectionBridge.EXTRA_AAOS_MAP_AREA, false)
+        val sealion7Hdmi = intent.getBooleanExtra(DiLink5HostedProjectionBridge.EXTRA_SEALION7_HDMI, false)
         val area = if (aaosMapArea && visible && display != null) AaosMapAreaCheck.confirmedBounds(this, display) else null
-        val admitted = visible && (!aaosMapArea || area != null)
+        val admitted = visible && (!aaosMapArea || area != null) &&
+            (!sealion7Hdmi || (!aaosMapArea && canHostSealion7Hdmi(displayId)))
         receiver.send(if (admitted) 1 else 0, if (admitted) android.os.Bundle().apply {
             putInt(DiLink5HostedProjectionBridge.RESULT_DISPLAY_ID, displayId)
             putInt(DiLink5HostedProjectionBridge.RESULT_DISPLAY_WIDTH, metrics.widthPixels)
@@ -118,8 +122,11 @@ class DiLink5HostedProjectionService : Service() {
         val manager = getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager ?: return
         val display = manager.getDisplay(physicalId)?.takeIf { it.isValid } ?: return
         val aaosMapArea = intent.getBooleanExtra(DiLink5HostedProjectionBridge.EXTRA_AAOS_MAP_AREA, false)
+        val sealion7Hdmi = intent.getBooleanExtra(DiLink5HostedProjectionBridge.EXTRA_SEALION7_HDMI, false)
         val left = intent.getIntExtra(DiLink5HostedProjectionBridge.EXTRA_LEFT, 0)
         val top = intent.getIntExtra(DiLink5HostedProjectionBridge.EXTRA_TOP, 0)
+        if (sealion7Hdmi && (aaosMapArea || !canHostSealion7Hdmi(physicalId) ||
+                !Sealion7HdmiProjection.matchesGeometry(left, top, width, height, bufferWidth, bufferHeight))) return
         val area = if (aaosMapArea) {
             AaosMapAreaCheck.confirmedBounds(this, display)?.takeIf {
                 it.left == left && it.top == top && it.width() == width && it.height() == height &&
@@ -135,8 +142,27 @@ class DiLink5HostedProjectionService : Service() {
             ?: return
         val view = SurfaceView(windowContext)
         view.holder.setFixedSize(bufferWidth, bufferHeight)
+        fun sealion7WindowMatches(): Boolean {
+            val position = IntArray(2)
+            view.getLocationOnScreen(position)
+            val currentDisplay = view.display ?: return false
+            return currentDisplay.displayId == physicalId && AaosMapAreaCheck.isTarget(this, currentDisplay) &&
+                Sealion7HdmiProjection.matchesGeometry(position[0], position[1], view.width, view.height,
+                    bufferWidth, bufferHeight)
+        }
         val callback = object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
+                if (sealion7Hdmi) {
+                    // A surface alone does not establish where WindowManager put the overlay.
+                    view.post {
+                        if (overlays[generation]?.view !== view) return@post
+                        if (sealion7WindowMatches() && holder.surface.isValid) publishSurface(holder)
+                        else release(generation, bridge)
+                    }
+                } else publishSurface(holder)
+            }
+
+            private fun publishSurface(holder: SurfaceHolder) {
                 val data = Parcel.obtain()
                 val reply = Parcel.obtain()
                 try {
@@ -172,19 +198,32 @@ class DiLink5HostedProjectionService : Service() {
             }
         }
         view.holder.addCallback(callback)
-        val params = if (area != null) AaosMapAreaCheck.windowParams(area) else WindowManager.LayoutParams(
-            width,
-            height,
-            2038,
-            264,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = left
-            y = top
+        val params = when {
+            area != null -> AaosMapAreaCheck.windowParams(area)
+            sealion7Hdmi -> WindowManager.LayoutParams(
+                width, height, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                PixelFormat.OPAQUE,
+            ).apply {
+                @Suppress("RtlHardcoded") // Physical HDMI coordinates are independent of locale.
+                gravity = Gravity.TOP or Gravity.LEFT
+            }
+            else -> WindowManager.LayoutParams(width, height, 2038, 264, PixelFormat.TRANSLUCENT).apply {
+                gravity = Gravity.TOP or Gravity.START
+                x = left
+                y = top
+            }
         }
         params.title = "OverDrive cluster projection"
-        if (area != null) {
+        if (sealion7Hdmi) {
+            view.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+                if (!sealion7WindowMatches()) {
+                    view.visibility = View.INVISIBLE
+                    view.post { if (overlays[generation]?.view === view) release(generation, bridge) }
+                }
+            }
+        } else if (area != null) {
             // Reject a platform relayout (insets, clipping, display replacement) that no
             // longer puts these pixels inside the exact physical frame checked while parked.
             view.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
@@ -204,6 +243,9 @@ class DiLink5HostedProjectionService : Service() {
             release(generation, bridge)
         }
     }
+
+    private fun canHostSealion7Hdmi(displayId: Int): Boolean = OverlayPermissionChecker.isGranted(this) &&
+        Sealion7HdmiProjection.findDisplay(this)?.displayId == displayId
 
     private fun release(generation: Long, bridgeOverride: IBinder? = null): Boolean {
         val overlay = overlays[generation]

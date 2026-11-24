@@ -37,6 +37,7 @@ object DiLink5HostedProjectionBridge {
     const val EXTRA_BUFFER_HEIGHT = "hosted_projection_buffer_height"
     const val EXTRA_DENSITY = "hosted_projection_density"
     internal const val EXTRA_AAOS_MAP_AREA = "hosted_projection_aaos_map_area"
+    internal const val EXTRA_SEALION7_HDMI = "hosted_projection_sealion7_hdmi"
     internal const val RESULT_DISPLAY_ID = "display_id"
     internal const val RESULT_DISPLAY_WIDTH = "display_width"
     internal const val RESULT_DISPLAY_HEIGHT = "display_height"
@@ -76,7 +77,10 @@ object DiLink5HostedProjectionBridge {
         val virtualDisplayName: String
     )
 
-    private class Pending {
+    private class Pending(
+        val physicalDisplayId: Int,
+        val sealion7Geometry: HostedProjectionGeometry?,
+    ) {
         val complete = CountDownLatch(1)
         @Volatile var session: HostedSession? = null
         @Volatile var cancelled = false
@@ -200,12 +204,15 @@ object DiLink5HostedProjectionBridge {
     @JvmOverloads
     fun probeAppDisplay(
         daemonContext: Context, physicalDisplayId: Int, aaosMapArea: Boolean = false,
+        sealion7Hdmi: Boolean = false,
     ): AppDisplayInfo? {
         if (physicalDisplayId <= 0) return null
+        if (sealion7Hdmi && (aaosMapArea ||
+                Sealion7HdmiProjection.findDisplay(daemonContext)?.displayId != physicalDisplayId)) return null
         attachDaemonContext(daemonContext)
         // PROJECT_MEDIA may make the OEM display visible to the app UID. Probe the actual
         // app display even if the grant/readback failed; a shell-only decision needs that proof.
-        if (!aaosMapArea) ensureProjectionAppOps()
+        if (!aaosMapArea && !sealion7Hdmi) ensureProjectionAppOps()
         val complete = CountDownLatch(1)
         val observed = AtomicReference<AppDisplayInfo?>()
         val receiver = object : ResultReceiver(null) {
@@ -222,7 +229,9 @@ object DiLink5HostedProjectionBridge {
                             resultData.getIntArray(RESULT_CONFIRMED_MAP_BOUNDS), width, height,
                         ),
                     )
-                    if ((!aaosMapArea || info.confirmedMapBounds != null) && HostedProjectionBoundary.appDisplayInfoValid(
+                    if ((!aaosMapArea || info.confirmedMapBounds != null) &&
+                        (!sealion7Hdmi || Sealion7HdmiProjection.geometry(info) != null) &&
+                        HostedProjectionBoundary.appDisplayInfoValid(
                             info.displayId,
                             physicalDisplayId,
                             info.width,
@@ -239,6 +248,7 @@ object DiLink5HostedProjectionBridge {
                 .setAction(ACTION_PROBE_DISPLAY)
                 .putExtra(EXTRA_PHYSICAL_DISPLAY, physicalDisplayId)
                 .putExtra(EXTRA_AAOS_MAP_AREA, aaosMapArea)
+                .putExtra(EXTRA_SEALION7_HDMI, sealion7Hdmi)
                 .putExtra(EXTRA_RESULT_RECEIVER, receiver)
             if (context?.startService(request) == null) return null
             if (complete.await(WAIT_MS, TimeUnit.MILLISECONDS)) observed.get() else null
@@ -263,11 +273,17 @@ object DiLink5HostedProjectionBridge {
         physicalDisplayName: String,
         geometry: HostedProjectionGeometry,
         aaosMapArea: Boolean = false,
+        sealion7Hdmi: Boolean = false,
     ): HostedSession? {
         if (generation <= 0 || physicalDisplayId <= 0) return null
+        if (sealion7Hdmi && (aaosMapArea ||
+                Sealion7HdmiProjection.findDisplay(daemonContext)?.displayId != physicalDisplayId ||
+                Sealion7HdmiProjection.geometry(AppDisplayInfo(
+                    physicalDisplayId, geometry.panelWidth, geometry.panelHeight, geometry.densityDpi,
+                )) != geometry)) return null
         attachDaemonContext(daemonContext)
-        if (!aaosMapArea && !ensureProjectionAppOps()) return null
-        val ticket = Pending()
+        if (!aaosMapArea && !sealion7Hdmi && !ensureProjectionAppOps()) return null
+        val ticket = Pending(physicalDisplayId, geometry.takeIf { sealion7Hdmi })
         synchronized(lock) {
             if (sessions.containsKey(generation) || retainedDisplays.containsKey(generation) ||
                 pending.put(generation, ticket) != null
@@ -283,6 +299,7 @@ object DiLink5HostedProjectionBridge {
             .putExtra(EXTRA_PHYSICAL_DISPLAY, physicalDisplayId)
             .putExtra(EXTRA_PHYSICAL_NAME, physicalDisplayName)
             .putExtra(EXTRA_AAOS_MAP_AREA, aaosMapArea)
+            .putExtra(EXTRA_SEALION7_HDMI, sealion7Hdmi)
             .putExtra(EXTRA_LEFT, geometry.overlay.left)
             .putExtra(EXTRA_TOP, geometry.overlay.top)
             .putExtra(EXTRA_WIDTH, geometry.overlay.width())
@@ -464,6 +481,11 @@ object DiLink5HostedProjectionBridge {
             }
         } ?: return null
         try {
+        ticket.sealion7Geometry?.let {
+            if (physicalId != ticket.physicalDisplayId || width != it.bufferWidth ||
+                height != it.bufferHeight || density != it.densityDpi ||
+                Sealion7HdmiProjection.findDisplay(daemonContext)?.displayId != physicalId) return null
+        }
         val displayContext = shellDisplayContext(daemonContext) ?: return null
         val manager = displayContext.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
             ?: return null

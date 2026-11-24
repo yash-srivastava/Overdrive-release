@@ -45,6 +45,17 @@ public class ProjectionLayoutAssetTest {
     }
 
     @Test
+    public void bothOrientationsIncludeTheSealion7OptIn() throws IOException {
+        String resource = "projection_sealion7_hdmi_setting";
+        String row = readRepositoryFile("app/src/main/res/layout/" + resource + ".xml");
+        assertTrue(row.contains("@+id/projectionSealion7HdmiRow"));
+        assertTrue(row.contains("@+id/projectionSealion7HdmiSwitch"));
+        for (String path : new String[] {PORTRAIT, LAND}) {
+            assertTrue(path, readRepositoryFile(path).contains("@layout/" + resource));
+        }
+    }
+
+    @Test
     public void cardsWearTheDashboardChrome() throws IOException {
         for (String path : new String[] {PORTRAIT, LAND}) {
             String xml = readRepositoryFile(path);

@@ -12,11 +12,14 @@ import com.overdrive.app.config.UnifiedConfigManager
 import com.overdrive.app.customlayouts.model.Panel
 import com.overdrive.app.daemon.CameraDaemon
 import com.overdrive.app.logging.DaemonLogger
+import com.overdrive.app.launcher.dilink5.cluster.AaosNavigationPresentation
 import com.overdrive.app.launcher.dilink5.cluster.DiLink5HostedProjectionBridge
 import com.overdrive.app.launcher.dilink5.cluster.DiLink5ProjectionConfig
 import com.overdrive.app.launcher.dilink5.cluster.DiLink5ProjectionOwnership
 import com.overdrive.app.launcher.dilink5.cluster.HostedProjectionGeometry
-import com.overdrive.app.launcher.dilink5.cluster.AaosNavigationPresentation
+import com.overdrive.app.launcher.dilink5.cluster.Sealion7HdmiProjection
+import com.overdrive.app.monitor.AccMonitor
+import com.overdrive.app.navmap.cluster.DiLink5InstrumentFullSession
 import com.overdrive.app.ui.view.AaosMapAreaCheck
 import com.overdrive.app.surveillance.ClusterMirrorController
 import com.overdrive.app.surveillance.ClusterProjectionController
@@ -239,7 +242,9 @@ object DiLink5ClusterCast {
         val hostedGeometry: HostedProjectionGeometry? = null,
         val factoryMiniMap: Boolean = false,
         val aaosMapArea: Boolean = false,
+        val sealion7Hdmi: Boolean = false,
     ) {
+        val usesHdmiPanel: Boolean get() = aaosMapArea || sealion7Hdmi
         val requestedCustomMiniMapBounds = if (factoryMiniMap && kind == SessionKind.CUSTOM) {
             persistedBounds(pkg, displayWidth, displayHeight) ?: factoryMiniMapDefaultBounds(displayWidth, displayHeight)
         } else null
@@ -269,6 +274,7 @@ object DiLink5ClusterCast {
         val deferCompositorEnable: Boolean = false,
         val hostedGeometry: HostedProjectionGeometry? = null,
         val aaosMapArea: Boolean = false,
+        val sealion7Hdmi: Boolean = false,
     )
 
     private data class RecoveryMarker(
@@ -429,10 +435,16 @@ object DiLink5ClusterCast {
         ) != null
     }
 
+    @JvmStatic
+    fun supportsCustomLayouts(): Boolean =
+        ClusterTransport.isDiLink5() ||
+            (ClusterTransport.isAaosHdmi() &&
+                CameraDaemon.getAppContext()?.let(Sealion7HdmiProjection::isEnabled) == true)
+
     /** Custom Layouts session; returns its generation (the activity's launch token), 0 if refused. */
     @JvmStatic
     fun startCustomLayouts(owner: Long): Long {
-        if (!ClusterTransport.isDiLink5() || owner <= 0L) return 0L
+        if (owner <= 0L || !supportsCustomLayouts()) return 0L
         return startTarget(
             LaunchTarget(
                 DI5_MAP_PACKAGE,
@@ -547,9 +559,9 @@ object DiLink5ClusterCast {
             pendingStart?.takeIf { it.generation == generation }?.let { return it }
             if (phase == SessionPhase.ACTIVE) {
                 val live = session
-                if (live?.aaosMapArea == true) {
+                if (live?.usesHdmiPanel == true) {
                     val context = CameraDaemon.getAppContext()
-                    if (context == null || !aaosMapAreaReady(context, live)) {
+                    if (context == null || !hdmiPanelReady(context, live)) {
                         DiLink5HostedProjectionBridge.withdrawMapArea(live.hostedResourceGeneration)
                         lastFailureReason = "The active cluster map area is no longer confirmed"
                         return null
@@ -854,6 +866,9 @@ object DiLink5ClusterCast {
                     }
                 },
             )
+            if (lost.second == SessionKind.CUSTOM && ClusterTransport.isAaosHdmi() && loss.cleanupClaimed.get()) {
+                notifyCustomLayoutsEnded(lost.first, "The Sealion 7 cluster window was withdrawn")
+            }
         }, "DiLink5HostedSurfaceCleanup").apply {
             isDaemon = true
             start()
@@ -1001,9 +1016,9 @@ object DiLink5ClusterCast {
         val bounds = clampDiLink5ProjectionBounds(
             left, top, right, bottom, live.displayWidth, live.displayHeight
         ) ?: return false
-        if (live.aaosMapArea) {
+        if (live.usesHdmiPanel) {
             val context = CameraDaemon.getAppContext() ?: return false
-            if (!aaosMapAreaReady(context, live)) {
+            if (!hdmiPanelReady(context, live)) {
                 DiLink5HostedProjectionBridge.withdrawMapArea(live.hostedResourceGeneration)
                 return false
             }
@@ -1540,6 +1555,7 @@ object DiLink5ClusterCast {
                 recoveryRetryTicket
             }
         }
+        val instrumentRestored = recoverInstrumentModeIfIdle()
         val markerRead = readRecoveryMarker()
         if (markerRead.failed) {
             synchronized(stateLock) {
@@ -1594,7 +1610,7 @@ object DiLink5ClusterCast {
             )
         val pkg = markerRead.marker.pkg
         val appMoved = markerRead.marker.appMoved
-        if (!pending &&
+        if (instrumentRestored && !pending &&
             !powered &&
             !appMoved &&
             !enableIndeterminate &&
@@ -1742,7 +1758,7 @@ object DiLink5ClusterCast {
                         pkg = pkg
                     )
                 }
-                recovered = rehomed && poweredDown && markerWritten
+                recovered = rehomed && poweredDown && markerWritten && instrumentRestored
                 if (recovered) {
                     logger.info(
                         "DI5 cluster cast: recovered stale projection state"
@@ -2091,6 +2107,7 @@ object DiLink5ClusterCast {
         }
         recoverUnpublishedHostedResources()
         recoverPersistedHostedOwnership()
+        val instrumentRestored = recoverInstrumentModeIfIdle()
         val hostedOwnershipUnresolved = DiLink5ProjectionOwnership.loadAll()
             .any { it.transport == "hosted" } || synchronized(stateLock) {
                 uncertainHostedResources.isNotEmpty()
@@ -2139,7 +2156,7 @@ object DiLink5ClusterCast {
             marker.appMoved || appMovedGeneration > 0L || session != null
         // A failed task/host cleanup still takes the serialized recovery path and clears
         // FAILED on success. It cannot establish ownership of the driver's factory compositor.
-        if (!needsPowerDown && !taskMayBeMoved && !cleanupUncertain) {
+        if (instrumentRestored && !needsPowerDown && !taskMayBeMoved && !cleanupUncertain) {
             if (!marker.pending) return !hostedOwnershipUnresolved
             val cleared = writeMarker(
                 pending = false,
@@ -2239,7 +2256,7 @@ object DiLink5ClusterCast {
                 pkg = if (taskMayBeMoved && !rehomed) recoveryPkg else ""
             )
             recovered = rehomed && poweredDown && markerWritten &&
-                !hostedOwnershipUnresolved
+                !hostedOwnershipUnresolved && instrumentRestored
             if (!recovered) {
                 logger.warn(
                     "DI5 cluster cast: orphaned shutdown recovery incomplete"
@@ -2433,9 +2450,10 @@ object DiLink5ClusterCast {
                 projectionTarget.hostedGeometry,
                 factoryMiniMap = factoryMiniMap,
                 aaosMapArea = projectionTarget.aaosMapArea,
+                sealion7Hdmi = projectionTarget.sealion7Hdmi,
             )
             session = live
-            if (live.aaosMapArea) watchAaosMapArea(context, live)
+            if (live.usesHdmiPanel) watchHdmiPanel(context, live)
             ClusterFreeformWindow.invalidateTaskCache()
             if (activeTarget.transport == "direct" && !factoryMiniMap) {
                 ClusterFreeformWindow.beginDirectPlacementAttempt()
@@ -2594,7 +2612,7 @@ object DiLink5ClusterCast {
                     throw IllegalStateException("hosted ownership commit could not be persisted")
                 }
             }
-            if (!factoryMiniMap && !live.aaosMapArea) try {
+            if (!factoryMiniMap && !live.usesHdmiPanel) try {
                 rememberStableSharedDisplay(
                     context.getSystemService(Context.DISPLAY_SERVICE)
                         as DisplayManager,
@@ -2624,6 +2642,18 @@ object DiLink5ClusterCast {
                     ))
                 ) {
                     throw IllegalStateException("hosted post-placement ownership could not be persisted")
+                }
+            }
+            // The panel can remain Off until the hosted task has a verified foreground and journal.
+            if (live.sealion7Hdmi) {
+                synchronized(taskMutationLock.lock) {
+                    if (!isCurrent(expectedGeneration, pkg)) return
+                    check(Sealion7HdmiProjection.isEnabled(context) &&
+                        DiLink5HostedProjectionBridge.isSurfaceAlive(live.hostedResourceGeneration) &&
+                        DiLink5InstrumentFullSession.start(context, expectedGeneration, readCurrentBootId()) {
+                            isCurrent(expectedGeneration, pkg)
+                        }
+                    ) { "Could not activate the Sealion 7 instrument display" }
                 }
             }
             synchronized(stateLock) {
@@ -3340,17 +3370,27 @@ object DiLink5ClusterCast {
         }
     }
 
-    private fun aaosMapAreaReady(context: Context, live: Session): Boolean {
+    private fun hdmiPanelReady(context: Context, live: Session): Boolean {
+        if (live.sealion7Hdmi) {
+            if (!AccMonitor.isAccStateAuthoritative() || !AccMonitor.isAccOn() ||
+                Sealion7HdmiProjection.findDisplay(context)?.displayId != live.physicalDisplayId
+            ) return false
+            return if (phase == SessionPhase.ACTIVE) {
+                DiLink5InstrumentFullSession.isSelectionCurrent(context, live.generation)
+            } else {
+                DiLink5InstrumentFullSession.isSupportedSelection(context)
+            }
+        }
         val area = live.hostedGeometry?.overlay ?: return false
         return AaosNavigationPresentation.isOpen(context, live.physicalDisplayId) &&
             DiLink5HostedProjectionBridge.probeAppDisplay(context, live.physicalDisplayId, aaosMapArea = true)
                 ?.confirmedMapBounds == area
     }
 
-    private fun watchAaosMapArea(context: Context, live: Session) {
+    private fun watchHdmiPanel(context: Context, live: Session) {
         Thread({
             while (isCurrent(live.generation, live.pkg) && session === live) {
-                if (!aaosMapAreaReady(context, live)) {
+                if (!hdmiPanelReady(context, live)) {
                     if (isCurrent(live.generation, live.pkg) && session === live) {
                         DiLink5HostedProjectionBridge.withdrawMapArea(live.hostedResourceGeneration)
                     }
@@ -3497,7 +3537,9 @@ object DiLink5ClusterCast {
         // for RECLAIMED_DISPLAY_MEMORY_MS, which bounds this to one migration
         // per surface instead of an endless ping-pong.
         var migrateTo: ProjectionTarget? = null
-        if (!live.factoryMiniMap && !live.aaosMapArea && !foreignPackage.isNullOrEmpty() && target != null) {
+        if (!live.factoryMiniMap && !live.usesHdmiPanel &&
+            !foreignPackage.isNullOrEmpty() && target != null
+        ) {
             markDisplayReclaimed(live.targetDisplayName)
             migrateTo = try {
                 val context = CameraDaemon.getAppContext()
@@ -3613,6 +3655,7 @@ object DiLink5ClusterCast {
         var rehomed = false
         var densityRestored = false
         var hostedReleased = false
+        var instrumentRestored = false
         var poweredDown = false
         var markerWritten = false
         try {
@@ -3621,6 +3664,7 @@ object DiLink5ClusterCast {
             } catch (_: Throwable) {
             }
             val live = session?.takeIf { it.generation == expectedGeneration }
+            instrumentRestored = releaseInstrumentMode(live)
             if (appMayBeMoved && failedKind == SessionKind.APP) {
                 try {
                     ClusterFreeformWindow.restoreFullscreen(
@@ -3683,7 +3727,7 @@ object DiLink5ClusterCast {
             }
         } finally {
             val cleanupComplete = rehomed && densityRestored && hostedReleased &&
-                poweredDown && markerWritten
+                poweredDown && markerWritten && instrumentRestored
             val finalReason = if (cleanupComplete) {
                 reason
             } else {
@@ -3759,6 +3803,7 @@ object DiLink5ClusterCast {
         }
         val persistedHostedCleanup = DiLink5ProjectionOwnership.loadAll()
             .any { it.transport == "hosted" }
+        val instrumentCleanup = Sealion7HdmiProjection.isTestedFirmware() && DiLink5InstrumentFullSession.hasPendingRestore()
         val orphanedCleanup = synchronized(stateLock) {
             if (hostedSurfaceLoss != null && hostedSurfaceLossScopeLocked(hostedSurfaceLoss) == null) {
                 return true
@@ -3770,7 +3815,7 @@ object DiLink5ClusterCast {
                             appMovedGeneration > 0L ||
                             cleanupUncertain ||
                             uncertainHostedResources.isNotEmpty() ||
-                            persistedHostedCleanup ||
+                            instrumentCleanup || persistedHostedCleanup ||
                             session != null)
         }
         if (orphanedCleanup && !scopedCustomStop) {
@@ -3847,6 +3892,7 @@ object DiLink5ClusterCast {
                         targetDisplayId = targetDisplayId
                     )
                 }
+                val instrumentRestored = releaseInstrumentMode(live)
                 if (stoppingKind == SessionKind.MAP || stoppingKind == SessionKind.CUSTOM) {
                     try {
                         Thread.sleep(
@@ -3928,7 +3974,7 @@ object DiLink5ClusterCast {
                         releaseHostedResources(stoppingGeneration, live?.hostedResourceGeneration ?: 0L)
                     }
                 val taskCleanupSatisfied = baseTaskCleanupSatisfied &&
-                    densityCleanupSatisfied && hostedCleanupSatisfied
+                    densityCleanupSatisfied && hostedCleanupSatisfied && instrumentRestored
                 val appStillMoved = appMayBeMoved && !rehomed
                 if (!cleanupStillOwned(
                         cleanupGeneration, cleanupAbandoned
@@ -4231,7 +4277,8 @@ object DiLink5ClusterCast {
                         densityRecovered,
                         ClusterAppDensity.hasLeaseFamily("di5:$stoppedGeneration"),
                     ) { releaseHostedResources(stoppedGeneration) }
-                    val markerCleared = recovered && densityRecovered && hostedRecovered && writeMarker(
+                    val instrumentRestored = recoverInstrumentModeIfIdle()
+                    val markerCleared = instrumentRestored && recovered && densityRecovered && hostedRecovered && writeMarker(
                         pending = false,
                         powered = false,
                         appMoved = false,
@@ -4320,6 +4367,17 @@ object DiLink5ClusterCast {
     ): ProjectionTarget {
         val manager = context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
         if (ClusterTransport.isAaosHdmi()) {
+            if (Sealion7HdmiProjection.isEnabled(context)) {
+                val panel = Sealion7HdmiProjection.findDisplay(context)
+                    ?: throw IllegalStateException("The Sealion 7 cluster display is unavailable")
+                check(DiLink5InstrumentFullSession.isSupportedSelection(context)) {
+                    "Select Off or Full in the vehicle instrument navigation settings"
+                }
+                val size = displaySize(panel)
+                val target = ProjectionTarget(panel.displayId, panel.name, size.x, size.y, sealion7Hdmi = true)
+                return configureHostedProjectionTarget(context, target, expectedGeneration, config)
+                    ?: throw IllegalStateException("Could not create the Sealion 7 cluster window")
+            }
             check(kind != SessionKind.CUSTOM) { "Custom Layouts cannot use the HDMI map area" }
             val panel = manager.displays.singleOrNull { AaosMapAreaCheck.isTarget(context, it) }
                 ?: throw IllegalStateException("The supported HDMI cluster display is unavailable")
@@ -4620,10 +4678,13 @@ object DiLink5ClusterCast {
             context,
             direct.displayId,
             aaosMapArea = direct.aaosMapArea,
+            sealion7Hdmi = direct.sealion7Hdmi,
         ) ?: if (direct.aaosMapArea) {
             throw IllegalStateException("Enable the overlay permission and confirm both parked map-area checks before projecting")
         } else return null
-        val geometry = if (direct.aaosMapArea) {
+        val geometry = if (direct.sealion7Hdmi) {
+            Sealion7HdmiProjection.geometry(appDisplay) ?: return null
+        } else if (direct.aaosMapArea) {
             val area = appDisplay.confirmedMapBounds ?: return null
             HostedProjectionGeometry(
                 appDisplay.width, appDisplay.height, appDisplay.densityDpi,
@@ -4657,6 +4718,7 @@ object DiLink5ClusterCast {
                 DiLink5HostedProjectionBridge.start(
                     context, expectedGeneration, direct.displayId, direct.name, geometry,
                     aaosMapArea = direct.aaosMapArea,
+                    sealion7Hdmi = direct.sealion7Hdmi,
                 )
             },
             current = { isCurrent(expectedGeneration, activePackage.orEmpty()) },
@@ -5488,6 +5550,29 @@ object DiLink5ClusterCast {
     private fun isCurrent(expectedGeneration: Long, pkg: String): Boolean =
         !stopping && generation == expectedGeneration && activePackage == pkg
 
+    private fun releaseInstrumentMode(live: Session?): Boolean {
+        if (live?.sealion7Hdmi != true) return true
+        val context = CameraDaemon.getAppContext() ?: return false
+        return DiLink5InstrumentFullSession.release(context, live.generation, readCurrentBootId())
+    }
+
+    private fun recoverInstrumentModeIfIdle(): Boolean {
+        if (!Sealion7HdmiProjection.isTestedFirmware()) return true
+        synchronized(taskMutationLock.lock) {
+            if (activePackage != null || !DiLink5InstrumentFullSession.hasPendingRestore()) return true
+            val context = CameraDaemon.getAppContext() ?: return false
+            return DiLink5InstrumentFullSession.recover(context, readCurrentBootId())
+        }
+    }
+
+    /** A same-boot ACC-off leaves the generation journal until vehicle communication is available. */
+    @JvmStatic
+    fun onInstrumentAccOn() {
+        operations.execute {
+            if (!recoverInstrumentModeIfIdle()) logger.warn("Sealion 7 instrument restoration remains pending")
+        }
+    }
+
     private fun prepareHostedOwnershipForAdmission(): Boolean {
         synchronized(stateLock) {
             if (activePackage != null) return true
@@ -5501,6 +5586,10 @@ object DiLink5ClusterCast {
         // Reattempt retained failures on every inactive admission, not only after daemon restart.
         recoverUnpublishedHostedResources()
         recoverPersistedHostedOwnership()
+        if (!recoverInstrumentModeIfIdle()) {
+            lastFailureReason = "Previous Sealion 7 instrument mode is awaiting restoration"
+            return false
+        }
         val currentBoot = readCurrentBootId()
         val unresolved = DiLink5ProjectionOwnership.loadAll().filter { ownership ->
             ownership.bootId.isEmpty() || currentBoot.isEmpty() || ownership.bootId == currentBoot

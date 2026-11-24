@@ -8,6 +8,7 @@ public final class ClusterCommContract {
     public static final String RECEIVER = "com.overdrive.app.navmap.cluster.ClusterCommReceiver";
     public static final String EXTRA_COMMANDS = "commands";
     public static final String EXTRA_DEADLINE = "deadline";
+    static final String EXTRA_INSTRUMENT_OWNER = "instrumentOwner";
     public static final String EXTRA_REPLY = "reply";
     public static final String REPLY_TOKEN = "token";
     public static final String REPLY_SENT = "sent";
@@ -21,6 +22,11 @@ public final class ClusterCommContract {
     public static final int RESULT_UNSUPPORTED_INTERFACE = 6;
     public static final int RESULT_SERVICE_DIED = 7;
     public static final int RESULT_FAILED = 8;
+    static final int RESULT_INSTRUMENT_ALREADY_FULL = 9;
+    static final int RESULT_INSTRUMENT_MODE_CHANGED = 10;
+    static final int RESULT_INSTRUMENT_GUARD_FAILED = 11;
+
+    static final String INSTRUMENT_MODE_SETTING = "moet_extension_navi_display_mode";
 
     static final String SERVICE_PACKAGE = "com.ts.appservice.cluster";
     static final String SERVICE_CLASS = "com.ts.appservice.cluster.service.ClusterCoreService";
@@ -39,6 +45,60 @@ public final class ClusterCommContract {
         }
     }
 
+    static Bundle message(int dataType, int subtype) {
+        Bundle bundle = new Bundle();
+        bundle.putInt("msgType", 3);
+        if (subtype >= 0) bundle.putInt("subtype", subtype);
+        bundle.putInt("DataType", dataType);
+        return bundle;
+    }
+
+    static Bundle displayMode(int mode) {
+        Bundle bundle = message(30, 3);
+        bundle.putInt("mode", mode);
+        return bundle;
+    }
+
+    /** Same mode through the QNX passthrough, which the settings observer cannot deduplicate. */
+    static Bundle displayModeDirect(int mode) {
+        Bundle bundle = message(31, 3);
+        bundle.putInt("mode", mode);
+        return bundle;
+    }
+
+    static Bundle requestMapFocus() {
+        Bundle bundle = message(33, -1);
+        bundle.putInt("mapType", 1);
+        return bundle;
+    }
+
+    static Bundle mapFocusDirect(int mapType) {
+        Bundle bundle = message(31, 14);
+        bundle.putInt("mapType", mapType);
+        return bundle;
+    }
+
+    static Bundle abandonMapFocus() {
+        Bundle bundle = message(34, -1);
+        bundle.putInt("mapType", 1);
+        return bundle;
+    }
+
+    static Bundle naviState(int state) {
+        Bundle bundle = message(35, 2);
+        bundle.putInt("mapType", 1);
+        bundle.putInt("naviState", state);
+        return bundle;
+    }
+
+    /** The QNX serializer reads the key "state". */
+    static Bundle presentation(int state) {
+        Bundle bundle = message(31, 15);
+        bundle.putInt("mapType", 1);
+        bundle.putInt("state", state);
+        return bundle;
+    }
+
     public static String resultName(int code) {
         switch (code) {
             case RESULT_SENT: return "sent";
@@ -49,6 +109,9 @@ public final class ClusterCommContract {
             case RESULT_BIND_DENIED: return "bind_denied";
             case RESULT_UNSUPPORTED_INTERFACE: return "unsupported_interface";
             case RESULT_SERVICE_DIED: return "service_died";
+            case RESULT_INSTRUMENT_ALREADY_FULL: return "instrument_already_full";
+            case RESULT_INSTRUMENT_MODE_CHANGED: return "instrument_mode_changed";
+            case RESULT_INSTRUMENT_GUARD_FAILED: return "instrument_guard_failed";
             default: return "failed";
         }
     }
