@@ -470,7 +470,7 @@ public class VehicleControlApiHandlerContractTest {
         // the transport ALSO stayed legacy — otherwise DiLink 5.0 units
         // without the QCarCam library could never cast.
         assertTrue(source.contains(
-                "com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5();"));
+                "com.overdrive.app.camera.dilink5.ClusterTransport.usesHostedProjectionService();"));
         assertTrue(source.contains(
                 "boolean modeRequired =\n"
                         + "                    installed && diLink5Hardware"

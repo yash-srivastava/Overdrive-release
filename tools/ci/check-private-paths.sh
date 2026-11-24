@@ -3,7 +3,7 @@
 # Public stand-ins under app/src/oss/ are allowed.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
-deny='^private/|^app/src/main/cpp/parked/|^app/src/main/cpp/secrets/|PrivilegedShellSetup\.kt$|cluster_carrier/|NavigatorMapDisplay|(^|/)\.agents/|(^|/)\.kiro/|(^|/)\.claude/|\.jks$|\.keystore$|safekeep-oauth\.properties$|firebase-service-account|official\.properties$'
+deny='^private/|^app/src/main/cpp/parked/|^app/src/main/cpp/secrets/|PrivilegedShellSetup\.kt$|cluster_carrier/|NavigatorMapDisplay|(^|/)\.agents/|(^|/)\.kiro/|(^|/)\.claude/|\.jks$|\.keystore$|safekeep-oauth\.properties$|signing\.properties$|firebase-service-account|official\.properties$'
 private_feature='customlayout|custom_layout|AaosNavigationPresentation|dashboard-builder|instrument_design|strings_dashboard_instruments'
 bad=$(git ls-files | grep -E "$deny" || true)
 bad+=$'\n'$(git ls-files | grep -iE "$private_feature" | grep -v '^app/src/oss/' || true)

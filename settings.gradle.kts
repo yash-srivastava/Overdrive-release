@@ -24,5 +24,10 @@ dependencyResolutionManagement {
 
 rootProject.name = "Overdrive"
 include(":app")
+// Official builds: the companion launcher lives in the private overlay.
+if (file("private/launcher/build.gradle.kts").isFile) {
+    include(":launcher")
+    project(":launcher").projectDir = file("private/launcher")
+}
 include(":dilink-probe")
  

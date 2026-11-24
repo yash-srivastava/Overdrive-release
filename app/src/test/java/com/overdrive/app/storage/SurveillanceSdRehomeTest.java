@@ -19,6 +19,25 @@ import java.util.stream.Collectors;
 public class SurveillanceSdRehomeTest {
     @Rule public TemporaryFolder temporary = new TemporaryFolder();
 
+    // hasPublishedSurveillanceMarker consults the process-wide StorageManager; an instance left
+    // by an earlier test points at another internal dir and hides these temp-folder markers.
+    private Object savedInstance;
+
+    @org.junit.Before
+    public void isolateStorageManager() throws Exception {
+        java.lang.reflect.Field field = StorageManager.class.getDeclaredField("instance");
+        field.setAccessible(true);
+        savedInstance = field.get(null);
+        field.set(null, null);
+    }
+
+    @org.junit.After
+    public void restoreStorageManager() throws Exception {
+        java.lang.reflect.Field field = StorageManager.class.getDeclaredField("instance");
+        field.setAccessible(true);
+        field.set(null, savedInstance);
+    }
+
     @Test
     public void eventSidecarsIncludeOnlyTheSelectedSegmentsThumbnails() throws Exception {
         File internal = temporary.newFolder("internal");

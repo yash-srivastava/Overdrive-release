@@ -227,7 +227,21 @@
     "changeDesign": "החלפת עיצוב",
     "newDashboard": "לוח מחוונים חדש",
     "create": "יצירה",
-    "limitReached": "הגעתם למספר המחוונים המרבי בלוח הזה."
+    "limitReached": "הגעתם למספר המחוונים המרבי בלוח הזה.",
+    "panelFullCluster": "720 · לוח מחוונים מלא",
+    "panelBandOnly": "480 · פס תצוגה (DiLink 5)",
+    "clusterSize": "גודל לוח המחוונים",
+    "sizeHint": "{size}″ · {pixels} · כ-{width} × {height} ס״מ",
+    "appliedSoon": "הוחל. לוח המחוונים יעבור אליו בתוך כמה שניות.",
+    "skippedSaved": "לא ניתן היה לקרוא {count} לוחות מחוונים שמורים והם מוסתרים: {names}",
+    "skippedCommunity": "{count} לוחות מחוונים מהקהילה מוסתרים כי גרסה זו אינה יכולה להציג אותם: {reasons}",
+    "thisTrip": "הנסיעה הזו",
+    "lateral": "רוחבי",
+    "longitudinal": "אורכי",
+    "outside": "בחוץ",
+    "now": "עכשיו",
+    "tripAverage": "ממוצע נסיעה",
+    "power": "הספק"
   },
   "tlview": {
     "tabList": "רשימה",

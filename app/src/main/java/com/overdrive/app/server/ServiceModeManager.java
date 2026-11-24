@@ -52,10 +52,11 @@ public final class ServiceModeManager {
     // Rescue instructions live outside OverDrive's APK/data, so an uninstall
     // does not erase the only record of the original package states.
     private static final String RESCUE_SCRIPT = "/sdcard/Download/OverDrive-ServiceMode-restore.sh";
-    private static final String PRIVATE_RESCUE_SCRIPT = "/data/local/tmp/overdrive-service-mode-rescue.sh";
-    private static final String GUARD_SCRIPT = "/data/local/tmp/overdrive-service-mode-guard.sh";
-    private static final String GUARD_MARKER = "/data/local/tmp/overdrive-service-mode-active";
-    private static final String GUARD_LOCK = "/data/local/tmp/overdrive-service-mode-guard.lock";
+    // Scratch-root files, resolved per call so a relocated root (ScratchRoot.ALT_DIR) is honoured.
+    private static String privateRescueScript() { return ScratchRoot.path("overdrive-service-mode-rescue.sh"); }
+    private static String guardScript() { return ScratchRoot.path("overdrive-service-mode-guard.sh"); }
+    private static String guardMarker() { return ScratchRoot.path("overdrive-service-mode-active"); }
+    private static String guardLock() { return ScratchRoot.path("overdrive-service-mode-guard.lock"); }
     // A live pid is only the guardian if its command line names the guard script.
     private static final String GUARD_ALIVE_TEST = "[ -n \"$1\" ] && kill -0 \"$1\" 2>/dev/null"
             + " && tr '\\000' ' ' < \"/proc/$1/cmdline\" 2>/dev/null"
@@ -135,7 +136,7 @@ public final class ServiceModeManager {
         result.put("lastError", state.optString("lastError", ""));
         result.put("serverLocalDate", formatServerLocalDate());
         result.put("timeZoneId", TimeZone.getDefault().getID());
-        result.put("rescueScriptPath", ScratchRoot.path(PRIVATE_RESCUE_SCRIPT));
+        result.put("rescueScriptPath", privateRescueScript());
         return result;
     }
 
@@ -411,9 +412,9 @@ public final class ServiceModeManager {
             guardInitialized = false;
             // Best-effort cleanup: an obsolete rescue file is safe (it can only
             // re-enable previously enabled apps) but need not stay in Downloads.
-            runShell("rm -f " + shellQuote(GUARD_MARKER) + " "
-                    + shellQuote(RESCUE_SCRIPT) + " " + shellQuote(GUARD_SCRIPT)
-                    + " " + shellQuote(PRIVATE_RESCUE_SCRIPT));
+            runShell("rm -f " + shellQuote(guardMarker()) + " "
+                    + shellQuote(RESCUE_SCRIPT) + " " + shellQuote(guardScript())
+                    + " " + shellQuote(privateRescueScript()));
             if (scheduler != null) { scheduler.shutdownNow(); scheduler = null; }
 
             JSONObject result = getStatus();
@@ -716,7 +717,7 @@ public final class ServiceModeManager {
         // concurrent launcher cannot remove a lock before the owner writes pid.
         String guardian = "#!/system/bin/sh\n"
                 + "umask 077\n"
-                + "lock=" + shellQuote(GUARD_LOCK) + "\n"
+                + "lock=" + shellQuote(guardLock()) + "\n"
                 + "guard_alive() { " + GUARD_ALIVE_TEST + "; }\n"
                 + "if ! mkdir \"$lock\" 2>/dev/null; then\n"
                 + "  n=0\n"
@@ -732,10 +733,10 @@ public final class ServiceModeManager {
                 + "fi\n"
                 + "echo $$ > \"$lock/pid\" || exit 1\n"
                 + "trap 'rm -f \"$lock/pid\"; rmdir \"$lock\" 2>/dev/null' EXIT\n"
-                + "while [ -e " + shellQuote(GUARD_MARKER) + " ]; do\n"
+                + "while [ -e " + shellQuote(guardMarker()) + " ]; do\n"
                 + "  if ! pm path " + APP_PACKAGE + " | grep -q '^package:'; then\n"
-                + "    if sh " + shellQuote(PRIVATE_RESCUE_SCRIPT) + "; then\n"
-                + "      rm -f " + shellQuote(GUARD_MARKER) + "\n"
+                + "    if sh " + shellQuote(privateRescueScript()) + "; then\n"
+                + "      rm -f " + shellQuote(guardMarker()) + "\n"
                 + "      exit 0\n"
                 + "    fi\n"
                 + "  fi\n"
@@ -747,20 +748,20 @@ public final class ServiceModeManager {
                 + "mv -f " + shellQuote(RESCUE_SCRIPT + ".new") + " "
                 + shellQuote(RESCUE_SCRIPT) + " && "
                 + "printf %s " + shellQuote(recovery.toString()) + " > "
-                + shellQuote(PRIVATE_RESCUE_SCRIPT + ".new") + " && "
-                + "mv -f " + shellQuote(PRIVATE_RESCUE_SCRIPT + ".new") + " "
-                + shellQuote(PRIVATE_RESCUE_SCRIPT) + " && "
+                + shellQuote(privateRescueScript() + ".new") + " && "
+                + "mv -f " + shellQuote(privateRescueScript() + ".new") + " "
+                + shellQuote(privateRescueScript()) + " && "
                 + "printf %s " + shellQuote(guardian) + " > "
-                + shellQuote(GUARD_SCRIPT + ".new") + " && "
-                + "mv -f " + shellQuote(GUARD_SCRIPT + ".new") + " "
-                + shellQuote(GUARD_SCRIPT) + " && "
-                + "touch " + shellQuote(GUARD_MARKER) + " && "
+                + shellQuote(guardScript() + ".new") + " && "
+                + "mv -f " + shellQuote(guardScript() + ".new") + " "
+                + shellQuote(guardScript()) + " && "
+                + "touch " + shellQuote(guardMarker()) + " && "
                 // A restarted daemon must not spawn a second live guardian.
                 // The guardian's atomic mkdir also protects simultaneous starts
                 // that both reach this check before either writes its pid.
                 + "if guard_alive() { " + GUARD_ALIVE_TEST + "; }; "
-                + "guard_alive \"$(cat " + shellQuote(GUARD_LOCK + "/pid") + " 2>/dev/null)\"; then :; else "
-                + "(nohup sh " + shellQuote(GUARD_SCRIPT)
+                + "guard_alive \"$(cat " + shellQuote(guardLock() + "/pid") + " 2>/dev/null)\"; then :; else "
+                + "(nohup sh " + shellQuote(guardScript())
                 + " </dev/null >/dev/null 2>&1 & ); fi";
         ShellResult result = runShell(command);
         if (!result.success) return result.output.isEmpty() ? "shell recovery setup failed" : result.output;
@@ -769,7 +770,7 @@ public final class ServiceModeManager {
     }
 
     private static boolean guardMarkerPresent() {
-        return ScratchRoot.file(GUARD_MARKER).exists();
+        return new java.io.File(guardMarker()).exists();
     }
 
     private static String shellQuote(String value) {

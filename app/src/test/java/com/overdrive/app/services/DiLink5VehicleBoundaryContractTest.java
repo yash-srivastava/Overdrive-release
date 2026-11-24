@@ -126,7 +126,7 @@ public class DiLink5VehicleBoundaryContractTest {
         // camera mode alone, which left DiLink 5.0 units without the QCarCam
         // library on the legacy AutoContainer protocol their firmware rejects.
         assertTrue(cast.contains(
-                "if (!ClusterTransport.isDiLink5()) return false"));
+                "if (!ClusterTransport.usesHostedProjectionService()) return false"));
         assertFalse(cast.contains("DiLink5Platform.isSelected()"));
         assertTrue(cast.contains(
                 "shared_fission_bg_XDJAScreenProjection_0"));
@@ -297,8 +297,12 @@ public class DiLink5VehicleBoundaryContractTest {
                 "DiLink5ProjectionConfig.from("));
         assertTrue(cast.contains(
                 "Target.FULL"));
-        assertTrue(cast.contains(
-                "Fresh and unreadable configuration uses the standard target."));
+        // An unreadable configuration falls back to a fresh one, which targets STANDARD.
+        assertTrue(cast.contains("DiLink5ProjectionConfig.from(null)"));
+        assertTrue(readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/launcher/dilink5/cluster/"
+                        + "DiLink5ProjectionConfig.kt").contains(
+                "Fresh configurations use the standard projection target."));
 
         String clusterCast = readRepositoryFile(
                 "app/src/main/java/com/overdrive/app/launcher/ClusterCast.java");

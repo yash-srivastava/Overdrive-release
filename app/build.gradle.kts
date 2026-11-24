@@ -26,6 +26,14 @@ val officialProps = Properties().apply {
 }
 fun officialProp(key: String): String =
     ((project.findProperty(key) as? String) ?: officialProps.getProperty(key, "")).trim()
+// Release signing: environment variables (CI), else private/signing.properties (local official
+// builds, gitignored in both repos). Neither present -> unsigned-key release config as before.
+val signingProps = Properties().apply {
+    val f = rootProject.file("private/signing.properties")
+    if (f.isFile) f.inputStream().use { load(it) }
+}
+fun signingValue(env: String, key: String, fallback: String): String =
+    System.getenv(env) ?: signingProps.getProperty(key) ?: fallback
 
 // Source provenance baked into every APK: public and private commits, plus whether either tree was dirty.
 fun gitOut(dir: File, vararg args: String): String? = try {
@@ -434,10 +442,10 @@ tasks.register("extractWebAssets") {
 android {
     signingConfigs {
         create("release") {
-            storeFile = file(System.getenv("KEYSTORE_FILE") ?: "release.jks")
-            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
-            keyPassword = System.getenv("KEY_PASSWORD") ?: ""
-            keyAlias = System.getenv("KEY_ALIAS") ?: "key0"
+            storeFile = file(signingValue("KEYSTORE_FILE", "storeFile", "release.jks"))
+            storePassword = signingValue("KEYSTORE_PASSWORD", "storePassword", "")
+            keyPassword = signingValue("KEY_PASSWORD", "keyPassword", "")
+            keyAlias = signingValue("KEY_ALIAS", "keyAlias", "key0")
         }
     }
     namespace = "com.overdrive.app"
