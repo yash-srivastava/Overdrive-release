@@ -348,6 +348,10 @@ public final class MicroFrontend {
         int p = factors[factorIndex];
         int m = factors[factorIndex + 1];
         int foutEnd = fout + p * m;
+        if (m == 1 && p == 4) {
+            bfly4Leaf(fout, f, fstride);
+            return;
+        }
         if (m == 1) {
             for (int o = fout; o != foutEnd; o++) {
                 tmpRe[o] = fftInput[2 * f];
@@ -365,6 +369,39 @@ public final class MicroFrontend {
         } else {
             bfly2(fout, fstride, m);
         }
+    }
+
+    /** Radix-4 leaf: fuse the input gather, fixed-point scaling and butterfly.
+     * All three twiddles are (32767, 0). After division by four, the
+     * scaled values are in [-8191, 8191], where sround(v * 32767) == v.
+     * Keep the original short narrowing at every butterfly boundary. */
+    private void bfly4Leaf(int fout, int f, int stride) {
+        int i = 2 * f;
+        int step = 2 * stride;
+        short aR = sround(fftInput[i] * (SAMP_MAX / 4));
+        short aI = sround(fftInput[i + 1] * (SAMP_MAX / 4));
+        i += step;
+        short bR = sround(fftInput[i] * (SAMP_MAX / 4));
+        short bI = sround(fftInput[i + 1] * (SAMP_MAX / 4));
+        i += step;
+        short cR = sround(fftInput[i] * (SAMP_MAX / 4));
+        short cI = sround(fftInput[i + 1] * (SAMP_MAX / 4));
+        i += step;
+        short dR = sround(fftInput[i] * (SAMP_MAX / 4));
+        short dI = sround(fftInput[i + 1] * (SAMP_MAX / 4));
+
+        short acSumR = (short) (aR + cR), acSumI = (short) (aI + cI);
+        short acDiffR = (short) (aR - cR), acDiffI = (short) (aI - cI);
+        short bdSumR = (short) (bR + dR), bdSumI = (short) (bI + dI);
+        short bdDiffR = (short) (bR - dR), bdDiffI = (short) (bI - dI);
+        tmpRe[fout] = (short) (acSumR + bdSumR);
+        tmpIm[fout] = (short) (acSumI + bdSumI);
+        tmpRe[fout + 1] = (short) (acDiffR + bdDiffI);
+        tmpIm[fout + 1] = (short) (acDiffI - bdDiffR);
+        tmpRe[fout + 2] = (short) (acSumR - bdSumR);
+        tmpIm[fout + 2] = (short) (acSumI - bdSumI);
+        tmpRe[fout + 3] = (short) (acDiffR - bdDiffI);
+        tmpIm[fout + 3] = (short) (acDiffI + bdDiffR);
     }
 
     private void bfly2(int fout, int fstride, int m) {
@@ -522,8 +559,25 @@ public final class MicroFrontend {
         return ((loge << LOG_SCALE_SHIFT) + round) >>> LOG_SCALE_LOG2;
     }
 
-    private static int sqrt64(long num) {
-        if ((num >>> 32) == 0) return sqrt32((int) num);
+    static int sqrt64(long num) {
+        // Normal filterbank energies fit exactly in a double. Use the
+        // hardware/JIT square root, then recover the exact integer result
+        // (including values whose floating-point root rounds up to an integer).
+        // The original unsigned algorithm covers larger or unsigned inputs.
+        if (num >= 0 && num <= (1L << 53)) {
+            long root = (long) Math.sqrt(num);
+            long square = root * root;
+            if (square > num) {
+                square -= 2 * root - 1;
+                root--;
+            }
+            // Round to nearest, as in the original remainder > root rule.
+            long rounded = num - square > root ? root + 1 : root;
+            // The original 32-bit path saturates at 0xffff.
+            if ((num >>> 32) == 0 && rounded > 0xffffL) return 0xffff;
+            return (int) rounded;
+        }
+
         long res = 0;
         int maxBitNumber = Long.numberOfLeadingZeros(num) | 1;
         long bit = 1L << (63 - maxBitNumber);
@@ -538,24 +592,6 @@ public final class MicroFrontend {
         }
         if (Long.compareUnsigned(num, res) > 0 && res != 0xFFFFFFFFL) res++;
         return (int) res;
-    }
-
-    private static int sqrt32(int num) {
-        if (num == 0) return 0;
-        int res = 0;
-        int maxBitNumber = Integer.numberOfLeadingZeros(num) | 1;
-        int bit = 1 << (31 - maxBitNumber);
-        for (int iterations = (31 - maxBitNumber) / 2 + 1; iterations > 0; iterations--) {
-            if (Integer.compareUnsigned(num, res + bit) >= 0) {
-                num -= res + bit;
-                res = (res >>> 1) + bit;
-            } else {
-                res >>>= 1;
-            }
-            bit >>>= 2;
-        }
-        if (Integer.compareUnsigned(num, res) > 0 && res != 0xFFFF) res++;
-        return res & 0xFFFF;
     }
 
     private static short sround(int x) {
