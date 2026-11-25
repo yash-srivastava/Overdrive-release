@@ -112,6 +112,37 @@ public final class Fmp4Writer {
         write(idx, src, skimPlan(idx, n, k), out);
     }
 
+    /** Prepare a normal media segment once, for both its length and its streamed body. */
+    public static PreparedSegment prepareMediaSegment(Mp4Index idx, int n, boolean silentAudio) {
+        return new PreparedSegment(idx, mediaPlan(idx, n, silentAudio));
+    }
+
+    /** Prepare a keyframe-only skim segment once. */
+    public static PreparedSegment prepareSkimSegment(Mp4Index idx, int n, int k) {
+        return new PreparedSegment(idx, skimPlan(idx, n, k));
+    }
+
+    /** Request-local metadata only; sample payloads are still streamed from the source file. */
+    public static final class PreparedSegment {
+        private final Mp4Index index;
+        private final Plan plan;
+
+        private PreparedSegment(Mp4Index index, Plan plan) {
+            this.index = index;
+            this.plan = plan;
+        }
+
+        /** Exact Content-Length of the prepared segment. */
+        public long length() {
+            return plan.length();
+        }
+
+        /** Write the prepared header and sample ranges, validating the source size again. */
+        public void writeTo(FileChannel src, OutputStream out) throws IOException {
+            write(index, src, plan, out);
+        }
+    }
+
     static void checkK(int k) {
         if (k < 1 || k > 64) throw new IllegalArgumentException("skim factor " + k);
     }
