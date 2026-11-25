@@ -1643,9 +1643,12 @@ BYD.recording = {
             : value === false
                 ? translate('recording.codec_capability_missing', 'preferred encoder does not advertise hardware support')
                 : translate('recording.codec_capability_unknown', 'support unknown');
-        const message = translate('recording.codec_capability_scope',
-            'Saved driving and parked GPU recording settings (not a recording test):')
-            + ' H.264: ' + status(availability.H264) + '; H.265: ' + status(availability.H265);
+        const scope = availability.stale === true
+            ? translate('recording.codec_capability_stale',
+                'Last known GPU recording capabilities (refresh pending; not a recording test):')
+            : translate('recording.codec_capability_scope',
+                'Saved driving and parked GPU recording settings (not a recording test):');
+        const message = scope + ' H.264: ' + status(availability.H264) + '; H.265: ' + status(availability.H265);
         if (note.textContent !== message) note.textContent = message;
     },
 
