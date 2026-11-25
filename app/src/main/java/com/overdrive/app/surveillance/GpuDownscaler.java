@@ -838,8 +838,8 @@ public class GpuDownscaler {
     private int directUFlipForLeft = -1;
     private int directURedMaskStrength = -1;
     private int directUApaCenterInset = -1;
-    private byte[] directRgbBuffer = null;
-    private byte[] directScratchRgba = null;  // bulk-copy RGBA scratch for Y-flip pack
+    private DirectRgbReadback directReadback;
+    private DirectReadbackDiagnostics directDiagnostics;
     private boolean directInitialized = false;
 
     // Tier 2 SOTA: PBO ring + fence-sync replaces the double-FBO ping-pong.
@@ -870,7 +870,7 @@ public class GpuDownscaler {
     private int syncTexture = -1;
     private ByteBuffer syncReadBuffer = null;
     private byte[] syncRgbBuffer = null;
-    private byte[] syncScratchRgba = null;
+    private final RgbaReadback syncReadback = new RgbaReadback(WIDTH, HEIGHT);
     private boolean syncInitialized = false;
     
     /**
@@ -880,7 +880,7 @@ public class GpuDownscaler {
      * driver queues a DMA into the PBO and returns immediately. Drop a
      * {@code glFenceSync} right after. On a future call, drain the OLDEST
      * fence with a zero-timeout {@code glClientWaitSync}; if signaled, map
-     * the PBO read-only and bulk-copy out. If not signaled, return null —
+     * the PBO read-only and pack RGB before unmapping. If not signaled, return null —
      * the AI lane falls back to mosaic for THIS tick. We never block this
      * GL thread on a glReadPixels stall; the readback latency lands as a
      * one-tick AI staleness, which is invisible at V2's 10 Hz.
@@ -895,10 +895,32 @@ public class GpuDownscaler {
     public byte[] readPixelsDirect(int cameraTextureId) {
         if (!directInitialized) initDirectFbo();
         if (!directInitialized) return null;
+        if (directDiagnostics == null) return readPixelsDirectFrame(cameraTextureId);
+        long start = System.nanoTime();
+        byte[] result = readPixelsDirectFrame(cameraTextureId);
+        long elapsed = System.nanoTime() - start;
+        directDiagnostics.record(elapsed, result != null, directReadback);
+        return result;
+    }
+
+    private byte[] readPixelsDirectFrame(int cameraTextureId) {
 
         int[] savedViewport = drawSavedViewport;
         GLES20.glGetIntegerv(GLES20.GL_VIEWPORT, savedViewport, 0);
+        try {
+            return renderAndReadPixelsDirect(cameraTextureId);
+        } catch (OutOfMemoryError e) {
+            // JNI may need a temporary array even with preallocated Java buffers.
+            directReadback.finish(false);
+            logger.warn("readPixelsDirect: insufficient memory; dropping frame");
+            return null;
+        } finally {
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+            GLES20.glViewport(savedViewport[0], savedViewport[1], savedViewport[2], savedViewport[3]);
+        }
+    }
 
+    private byte[] renderAndReadPixelsDirect(int cameraTextureId) {
         // ---- 1. Render the current camera frame into the FBO ----
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, directFbo);
         GLES20.glViewport(0, 0, WIDTH, HEIGHT);
@@ -960,23 +982,8 @@ public class GpuDownscaler {
             GLES20.glReadPixels(0, 0, WIDTH, HEIGHT, GLES20.GL_RGBA,
                     GLES20.GL_UNSIGNED_BYTE, directFallbackReadBuffer);
             directFallbackReadBuffer.rewind();
-            directFallbackReadBuffer.get(directScratchRgba, 0, DIRECT_PBO_BYTES);
-            byte[] src = directScratchRgba;
-            byte[] dst = directRgbBuffer;
-            final int rowRgbaBytes = WIDTH * 4;
-            int dstIdx = 0;
-            for (int y = HEIGHT - 1; y >= 0; y--) {
-                int srcRow = y * rowRgbaBytes;
-                for (int x = 0; x < WIDTH; x++) {
-                    int s = srcRow + (x << 2);
-                    dst[dstIdx++] = src[s];
-                    dst[dstIdx++] = src[s + 1];
-                    dst[dstIdx++] = src[s + 2];
-                }
-            }
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
-            GLES20.glViewport(savedViewport[0], savedViewport[1], savedViewport[2], savedViewport[3]);
-            return dst;
+            directReadback.prepare(directFallbackReadBuffer);
+            return directReadback.finish(true);
         }
 
         // ---- 2. Queue an async DMA into the head PBO ----
@@ -984,9 +991,12 @@ public class GpuDownscaler {
         boolean ringFull = (nextHead == directRingTail) && directFenceSyncs[directRingTail] != 0L;
         if (!ringFull) {
             GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, directPboIds[directRingHead]);
-            GLES30.glReadPixels(0, 0, WIDTH, HEIGHT,
-                    GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, 0);
-            GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0);
+            try {
+                GLES30.glReadPixels(0, 0, WIDTH, HEIGHT,
+                        GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, 0);
+            } finally {
+                GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0);
+            }
             directFenceSyncs[directRingHead] = GLES30.glFenceSync(
                     GLES30.GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
             directRingHead = nextHead;
@@ -999,80 +1009,68 @@ public class GpuDownscaler {
             boolean signaled = (sig == GLES30.GL_ALREADY_SIGNALED
                              || sig == GLES30.GL_CONDITION_SATISFIED);
             boolean waitFailed = (sig == GLES30.GL_WAIT_FAILED);
-            if (signaled) {
-                if (directScratchRgba == null || directScratchRgba.length != DIRECT_PBO_BYTES) {
-                    directScratchRgba = new byte[DIRECT_PBO_BYTES];
-                }
-                GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, directPboIds[directRingTail]);
-                java.nio.Buffer mapped = GLES30.glMapBufferRange(
-                        GLES30.GL_PIXEL_PACK_BUFFER, 0, DIRECT_PBO_BYTES,
-                        GLES30.GL_MAP_READ_BIT);
-                boolean mappingValid = false;
-                try {
-                    if (mapped instanceof ByteBuffer) {
-                        ByteBuffer bb = (ByteBuffer) mapped;
-                        bb.order(java.nio.ByteOrder.nativeOrder());
-                        bb.rewind();
-                        if (bb.remaining() >= DIRECT_PBO_BYTES) {
-                            bb.get(directScratchRgba, 0, DIRECT_PBO_BYTES);
-                            // GL_FALSE means the mapped data store became corrupt.
-                            mappingValid = GLES30.glUnmapBuffer(
-                                    GLES30.GL_PIXEL_PACK_BUFFER);
+            try {
+                if (signaled) {
+                    GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, directPboIds[directRingTail]);
+                    java.nio.Buffer mapped = null;
+                    boolean prepared = false;
+                    boolean mappingValid = false;
+                    try {
+                        mapped = GLES30.glMapBufferRange(
+                                GLES30.GL_PIXEL_PACK_BUFFER, 0, DIRECT_PBO_BYTES,
+                                GLES30.GL_MAP_READ_BIT);
+                        if (mapped instanceof ByteBuffer) {
+                            ByteBuffer bb = (ByteBuffer) mapped;
+                            bb.rewind();
+                            directReadback.prepare(bb);
+                            prepared = true;
                         } else {
-                            GLES30.glUnmapBuffer(GLES30.GL_PIXEL_PACK_BUFFER);
-                            logger.warn("readPixelsDirect: mapped PBO is smaller than expected");
+                            logger.warn("readPixelsDirect: no usable PBO mapping");
                         }
-                    } else if (mapped != null) {
-                        // A non-ByteBuffer mapping is still mapped and must be unmapped.
-                        GLES30.glUnmapBuffer(GLES30.GL_PIXEL_PACK_BUFFER);
-                        logger.warn("readPixelsDirect: glMapBufferRange returned unsupported buffer type");
-                    } else {
-                        logger.warn("readPixelsDirect: glMapBufferRange failed");
-                    }
-                } finally {
-                    GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0);
-                }
-
-                if (mappingValid) {
-                    byte[] src = directScratchRgba;
-                    byte[] dst = directRgbBuffer;
-                    final int rowRgbaBytes = WIDTH * 4;
-                    int dstIdx = 0;
-                    for (int y = HEIGHT - 1; y >= 0; y--) {
-                        int srcRow = y * rowRgbaBytes;
-                        for (int x = 0; x < WIDTH; x++) {
-                            int s = srcRow + (x << 2);
-                            dst[dstIdx++] = src[s];
-                            dst[dstIdx++] = src[s + 1];
-                            dst[dstIdx++] = src[s + 2];
+                    } catch (RuntimeException e) {
+                        logger.warn("readPixelsDirect: RGB pack failed: " + e.getMessage());
+                    } finally {
+                        try {
+                            // A non-ByteBuffer mapping still has to be unmapped.
+                            // GL_FALSE invalidates even a successfully packed frame.
+                            if (mapped != null) {
+                                mappingValid = GLES30.glUnmapBuffer(GLES30.GL_PIXEL_PACK_BUFFER);
+                            }
+                        } catch (RuntimeException e) {
+                            logger.warn("readPixelsDirect: PBO unmap failed: " + e.getMessage());
+                        } finally {
+                            GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0);
                         }
                     }
-                    result = dst;
-                } else {
-                    logger.warn("readPixelsDirect: discarding invalid PBO contents");
+                    result = directReadback.finish(prepared && mappingValid);
+                    if (result == null) {
+                        logger.warn("readPixelsDirect: discarding invalid PBO contents");
+                    }
+                } else if (waitFailed) {
+                    logger.warn("readPixelsDirect: glClientWaitSync failed; discarding PBO slot");
                 }
-            } else if (waitFailed) {
-                logger.warn("readPixelsDirect: glClientWaitSync failed; discarding PBO slot");
-            }
-
-            // Retire signaled and failed fences. A timeout remains queued for
-            // the next frame, but GL_WAIT_FAILED must not wedge the ring forever.
-            if (signaled || waitFailed) {
-                GLES30.glDeleteSync(directFenceSyncs[directRingTail]);
-                directFenceSyncs[directRingTail] = 0L;
-                directRingTail = (directRingTail + 1) % DIRECT_PBO_RING_SIZE;
+            } finally {
+                // Retire completed/failed slots even if mapping, JNI or unmap throws.
+                if (signaled || waitFailed) {
+                    try {
+                        GLES30.glDeleteSync(directFenceSyncs[directRingTail]);
+                    } finally {
+                        directFenceSyncs[directRingTail] = 0L;
+                        directRingTail = (directRingTail + 1) % DIRECT_PBO_RING_SIZE;
+                    }
+                }
             }
             // GL_TIMEOUT_EXPIRED — leave the fence in place and poll next call.
         }
-
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
-        GLES20.glViewport(savedViewport[0], savedViewport[1], savedViewport[2], savedViewport[3]);
 
         return result;
     }
     
     private void initDirectFbo() {
         try {
+            DirectRgbReadback.Mode mode = DirectReadbackDiagnostics.readMode();
+            // Reserve CPU arrays before creating or mapping any PBOs.
+            DirectRgbReadback readback = new DirectRgbReadback(WIDTH, HEIGHT, mode);
             // Reuse the program if initSyncFbo already compiled it. Both
             // paths use the same vertex+fragment shader source, so a second
             // compile here would just leak the first program object.
@@ -1142,8 +1140,9 @@ public class GpuDownscaler {
                 directFallbackReadBuffer.order(java.nio.ByteOrder.nativeOrder());
             }
 
-            directRgbBuffer = new byte[WIDTH * HEIGHT * 3];
-            directScratchRgba = new byte[DIRECT_PBO_BYTES];
+            directReadback = readback;
+            directDiagnostics = mode == null ? null : new DirectReadbackDiagnostics(mode,
+                    directGles3Available, WIDTH, HEIGHT);
 
             if (vertexBuffer == null) vertexBuffer = GlUtil.createFloatBuffer(VERTEX_COORDS);
             if (texCoordBuffer == null) texCoordBuffer = GlUtil.createFloatBuffer(TEX_COORDS);
@@ -1251,22 +1250,7 @@ public class GpuDownscaler {
             GLES20.glReadPixels(0, 0, WIDTH, HEIGHT, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, syncReadBuffer);
 
             syncReadBuffer.rewind();
-            syncReadBuffer.get(syncScratchRgba, 0, WIDTH * HEIGHT * 4);
-
-            byte[] src = syncScratchRgba;
-            byte[] dst = syncRgbBuffer;
-            final int rowRgbaBytes = WIDTH * 4;
-            int dstIdx = 0;
-            for (int y = HEIGHT - 1; y >= 0; y--) {
-                int srcRow = y * rowRgbaBytes;
-                for (int x = 0; x < WIDTH; x++) {
-                    int s = srcRow + (x << 2);
-                    dst[dstIdx++] = src[s];
-                    dst[dstIdx++] = src[s + 1];
-                    dst[dstIdx++] = src[s + 2];
-                }
-            }
-            return dst;
+            return syncReadback.pack(syncReadBuffer, syncRgbBuffer) ? syncRgbBuffer : null;
         } catch (Throwable t) {
             logger.warn("readPixelsSync failed: " + t.getClass().getSimpleName()
                     + ": " + t.getMessage());
@@ -1333,7 +1317,6 @@ public class GpuDownscaler {
             syncReadBuffer = ByteBuffer.allocateDirect(WIDTH * HEIGHT * 4);
             syncReadBuffer.order(java.nio.ByteOrder.nativeOrder());
             syncRgbBuffer = new byte[WIDTH * HEIGHT * 3];
-            syncScratchRgba = new byte[WIDTH * HEIGHT * 4];
 
             if (vertexBuffer == null) vertexBuffer = GlUtil.createFloatBuffer(VERTEX_COORDS);
             if (texCoordBuffer == null) texCoordBuffer = GlUtil.createFloatBuffer(TEX_COORDS);
@@ -1511,12 +1494,12 @@ public class GpuDownscaler {
         // Drop CPU-side scratch + readback buffers. Deleting the GL handles
         // alone leaves ~5 MB of byte[] / direct ByteBuffers retained for the
         // daemon's lifetime; lazy paths re-init these on next call.
-        directRgbBuffer = null;
-        directScratchRgba = null;
+        directReadback = null;
+        directDiagnostics = null;
         directFallbackReadBuffer = null;
         syncReadBuffer = null;
         syncRgbBuffer = null;
-        syncScratchRgba = null;
+        syncReadback.clear();
         reusableRgbBuffer = null;
         directInitialized = false;
         syncInitialized = false;

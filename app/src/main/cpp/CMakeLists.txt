@@ -55,6 +55,7 @@ endif()
 # ==================== Surveillance Library ====================
 set(SURVEILLANCE_SOURCES
     surveillance/native_motion.cpp
+    surveillance/rgba_readback.cpp
     surveillance/motion_pipeline_v2.cpp
     surveillance/texture_tracker.cpp
     # Camera/EGL: AHardwareBuffer → EGLImage → GL_TEXTURE_EXTERNAL_OES
