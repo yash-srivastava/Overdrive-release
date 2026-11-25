@@ -467,24 +467,33 @@ Developers can still send pull requests on the language files: `app/src/main/ass
 The latest release in full, then earlier highlights. APKs and per-release notes are on
 [GitHub Releases](https://github.com/yash-srivastava/Overdrive-release/releases).
 
-### v65.0: Take Control of Your Full Driver Cluster + Face ID Lock
+### v65.2: Lighter Surveillance, Smoother Live View & 60+ Fixes
 
-#### ✨ New Features
+#### ⚡ Optimizations
 
-- **Full-screen cluster** — On supported DiLink 3 cars (starting with the 10.25" Seal), BYD's header and footer bars disappear, so Custom Layouts, the RoadSense map and projected apps get all 1920×720 pixels. On by default; restart the cluster once, parked, to switch it on.
-- **Clean screen** — Status and driver-assist icons step aside. Fault and safety warnings, turn signals and high beam always stay.
-- **Every layout redrawn** — Presets, Studio designs and Originals are rebuilt for the full screen, in light and dark, and size their text to your cluster (8.8", 10.25" or 12.3").
-- **Face ID or fingerprint lock** — Turn it on in Vehicle Control → Safety, and remote unlock, opening the trunk or switching the car on or off asks for your phone's Face ID or fingerprint first. The car screen, automations and proximity unlock never ask.
-- **Works when the car doesn't** — The web app opens instantly with your last-known data, clearly marked, instead of a "bad gateway" page, and switches to live data by itself the moment the car answers. While the car is offline, commands aren't sent and say so straight away.
-- **Climate API: vents and more** — On DiLink 3 cars with electric vents, the climate API sets each side's vent mode and points each front vent. Airflow takes names such as "foot", and the vehicle state now reports SYNC, AUTO, defrost and the vents.
-- **Timeline fullscreen and share** — The Recordings Timeline goes fullscreen with one tap, in the car and the browser. Share sends the clip that's playing once it's saved: from your phone straight to another app, from the car through the share sheet.
+- **Lighter surveillance** — Motion analysis, object tracking and AI detection do less work per frame, so parked guarding uses less CPU.
+- **Smoother Live View** — The live stream reuses its buffers instead of allocating new ones for every frame.
+- **Faster recording and preview** — The recording compositor and the camera preview copy less data.
+- **Quicker playback** — Recordings start and seek faster in the browser.
+- **Faster everywhere else** — Wake word, navigation guidance, route hazards, the trip timeline and elevation all compute more efficiently.
 
-#### ⚡ Optimizations & Fixes
+#### 🛠️ Fixes
 
-- **SD card that stops answering while parked** — When the card refuses writes and can't be read either, OverDrive now remounts it, instead of saving to internal storage until the head unit restarts.
+- **No more stale screens** — When you change a filter or page quickly, a slow old answer no longer replaces the new one. Fixed across Search, Parking, Timeline, Data Usage, Sessions, Community, Backup, Factory DVR and more.
+- **Clock changes** — Caches, timers and update checks keep working when the car's clock jumps.
+- **GPS** — Positions at 0° latitude or longitude are no longer ignored.
+- **Phone languages** — Lookups that broke on some languages, such as Turkish, now work.
+- **Calendars** — Month-end navigation in Events, and full date pickers in Trips and Charging.
+- **Diagnostics** — Thermal sensors, late CPU cores, process lists and Wi-Fi details now show correctly.
+- **Data** — Bad battery or fuel readings no longer skew charging calibration or trip costs.
+
+#### ♿ Accessibility
+
+- Keyboard navigation in settings tabs and collapsible cards, keyboard Delete in Notifications, and screen-reader labels for widgets, audio files and the sidebar.
 
 ### Earlier releases
 
+- **v65.0** — Take Control of Your Full Driver Cluster + Face ID Lock
 - **v64.3** — Living Layouts & Drive-Start Fixes
 - **v64.0** — Pick Your Dashboard or Build Your Own
 - **v63.4.1** — Dashboard Builder
