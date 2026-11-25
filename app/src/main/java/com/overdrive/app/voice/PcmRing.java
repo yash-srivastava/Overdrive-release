@@ -24,8 +24,18 @@ final class PcmRing {
     /** Producer side (capture thread). */
     void write(short[] src, int off, int len) {
         long w = written;
-        for (int i = 0; i < len; i++) {
-            data[(int) ((w + i) % capacity)] = src[off + i];
+        if (len > 0) {
+            int index = (int) (w % capacity);
+            int remaining = len;
+            int source = off;
+            // Copy contiguous spans, including repeated wraps for an oversized write.
+            while (remaining > 0) {
+                int count = Math.min(remaining, capacity - index);
+                System.arraycopy(src, source, data, index, count);
+                remaining -= count;
+                source += count;
+                index = 0;
+            }
         }
         written = w + len;
         Thread c = consumer;
@@ -40,8 +50,14 @@ final class PcmRing {
             read = w - capacity;
         }
         int n = (int) Math.min(max, w - read);
-        for (int i = 0; i < n; i++) {
-            dst[off + i] = data[(int) ((read + i) % capacity)];
+        if (n > 0) {
+            int index = (int) (read % capacity);
+            // The lap check caps n at capacity, so a read needs at most two copies.
+            int first = Math.min(n, capacity - index);
+            System.arraycopy(data, index, dst, off, first);
+            if (first < n) {
+                System.arraycopy(data, 0, dst, off + first, n - first);
+            }
         }
         read += n;
         return n;
