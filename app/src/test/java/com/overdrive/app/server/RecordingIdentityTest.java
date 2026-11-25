@@ -7,6 +7,10 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
 import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.Locale;
+import java.util.Random;
 
 public class RecordingIdentityTest {
 
@@ -59,5 +63,43 @@ public class RecordingIdentityTest {
 
         assertEquals(publicPath.volumeId, mediaRwPath.volumeId);
         assertEquals(publicPath.recordingId, mediaRwPath.recordingId);
+    }
+
+    @Test
+    public void digestPrefixesMatchLegacyEncodingAcrossStoragePaths() throws Exception {
+        Random random = new Random(8421L);
+        for (int i = 0; i < 256; i++) {
+            String name = "cam_é_" + Long.toHexString(random.nextLong()) + ".mp4";
+            String relative = "Overdrive/recordings/" + name;
+            assertLegacyIdentity("/storage/emulated/0/" + relative, "internal", relative);
+            assertLegacyIdentity("/storage/ABCD-1234/" + relative, "portable:abcd-1234", relative);
+            assertLegacyIdentity("/mnt/media_rw/ABCD-1234/" + relative, "portable:abcd-1234", relative);
+            assertLegacyIdentity("/mnt/USB/" + relative, "mount:usb", relative);
+            assertLegacyIdentity("/data/" + relative, "data", "data/" + relative);
+            assertLegacyIdentity("/other/" + name, "path:" + legacyDigest("/other", 16), name);
+        }
+        assertLegacyIdentity("/storage//ABCD-1234\\recordings\\cam.mp4",
+                "portable:abcd-1234", "recordings/cam.mp4");
+        assertLegacyIdentity(null, "path:" + legacyDigest("/", 16), "unknown");
+        assertLegacyIdentity("", "path:" + legacyDigest("/", 16), "unknown");
+    }
+
+    private static void assertLegacyIdentity(String path, String volume, String relative)
+            throws Exception {
+        RecordingIdentity identity = RecordingIdentity.fromPath(path);
+        int slash = relative.lastIndexOf('/');
+        String root = slash < 0 ? "" : relative.substring(0, slash);
+        assertEquals(volume, identity.volumeId);
+        assertEquals(relative, identity.relativePath);
+        assertEquals(legacyDigest(volume + "|" + root, 24), identity.rootId);
+        assertEquals(legacyDigest(volume + "|" + relative, 32), identity.recordingId);
+    }
+
+    private static String legacyDigest(String value, int chars) throws Exception {
+        byte[] bytes = MessageDigest.getInstance("SHA-256")
+                .digest(value.getBytes(StandardCharsets.UTF_8));
+        StringBuilder hex = new StringBuilder();
+        for (byte b : bytes) hex.append(String.format(Locale.US, "%02x", b & 0xff));
+        return hex.substring(0, chars);
     }
 }

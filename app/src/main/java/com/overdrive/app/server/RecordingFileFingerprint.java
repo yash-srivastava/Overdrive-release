@@ -26,8 +26,12 @@ final class RecordingFileFingerprint {
     }
 
     static RecordingFileFingerprint from(File mp4) {
+        return from(mp4, RecordingIdentity.fromFile(mp4));
+    }
+
+    /** Reuse the identity already computed for this file by the root scan. */
+    static RecordingFileFingerprint from(File mp4, RecordingIdentity identity) {
         File sidecar = sidecarFor(mp4);
-        RecordingIdentity identity = RecordingIdentity.fromFile(mp4);
         return new RecordingFileFingerprint(
                 mp4,
                 identity.recordingId,
