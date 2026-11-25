@@ -488,6 +488,11 @@ public class GpuSurveillancePipeline {
         return encoderWidth;
     }
 
+    /** Current panoramic recording encoder, including the CPU-input recording lane. */
+    public HardwareEventRecorderGpu getRecordingEncoder() {
+        return encoder;
+    }
+
     /** Height passed to the panoramic recording encoder. */
     public int getEncoderHeight() {
         return encoderHeight;

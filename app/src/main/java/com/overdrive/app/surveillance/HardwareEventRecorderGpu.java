@@ -107,8 +107,11 @@ public class HardwareEventRecorderGpu {
     // Configuration
     private final int width;
     private final int height;
-    private int fps;
-    private int bitrate;
+    private volatile int fps;
+    private volatile int bitrate;
+    private volatile String activeOutputMimeType;
+    private volatile String activeEncoderName;
+    private volatile boolean hevcFallback;
     private String codecMimeType = MediaFormat.MIMETYPE_VIDEO_AVC;  // Default H.264
 
     // ── A/B TEST TOGGLE ──────────────────────────────────────────────────
@@ -1866,6 +1869,7 @@ public class HardwareEventRecorderGpu {
             return;
         }
         this.codecMimeType = mimeType;
+        hevcFallback = false;
         logger.info("Codec set to: " + (mimeType.equals(MediaFormat.MIMETYPE_VIDEO_HEVC) ? "H.265/HEVC" : "H.264/AVC"));
     }
     
@@ -1876,6 +1880,21 @@ public class HardwareEventRecorderGpu {
         return codecMimeType;
     }
     
+    /** Last output MIME from the active drainer, not the persisted codec preference. */
+    public String getActiveOutputMimeType() {
+        return drainerRunning && encoder != null ? activeOutputMimeType : null;
+    }
+
+    /** Name captured at codec creation, without a new native call. */
+    public String getActiveEncoderName() {
+        return activeEncoderName;
+    }
+
+    /** True only after the session-local HEVC retry successfully initialized AVC. */
+    public boolean hasHevcFallback() {
+        return hevcFallback;
+    }
+
     /**
      * Checks if using H.265/HEVC codec.
      */
@@ -1924,6 +1943,7 @@ public class HardwareEventRecorderGpu {
             encoder = null;
             codecMimeType = MediaFormat.MIMETYPE_VIDEO_AVC;
             initOnce();
+            hevcFallback = true;
             logger.info("DI5 session-local H.264 fallback active after HEVC failure");
         }
     }
@@ -1950,6 +1970,8 @@ public class HardwareEventRecorderGpu {
     }
 
     private void initOnce() throws Exception {
+        activeOutputMimeType = null;
+        activeEncoderName = null;
         // A pending interrupt would make the first join look like a codec timeout.
         if (Thread.currentThread().isInterrupted()) {
             throw new InterruptedException("Encoder initialization interrupted before worker start");
@@ -2139,6 +2161,7 @@ public class HardwareEventRecorderGpu {
         // file sizes.
         try {
             String negotiatedName = encoder.getName();
+            activeEncoderName = negotiatedName;
             logger.info("MediaCodec encoder created (codec=" + finalCodecMimeType
                     + ", impl=" + negotiatedName + ")");
         } catch (Exception ignored) {
@@ -6760,6 +6783,7 @@ public class HardwareEventRecorderGpu {
             } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                 // Format changed - add track to muxer and send SPS/PPS to stream
                 MediaFormat format = encoder.getOutputFormat();
+                activeOutputMimeType = format.getString(MediaFormat.KEY_MIME);
                 
                 // Save format for reuse in subsequent recordings
                 if (savedFormat == null) {

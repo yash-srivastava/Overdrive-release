@@ -314,7 +314,7 @@ public class GpuPipelineConfig {
     /** @deprecated mirrors recordingQuality, kept until call sites migrate. */
     @Deprecated
     private BitratePreset bitratePreset = BitratePreset.MEDIUM;
-    private int customBitrate = 0;  // 0 = derive from recordingQuality + codec; a 15 fps value like the tiers
+    private volatile int customBitrate = 0;  // 0 = derive from recordingQuality + codec; a 15 fps value like the tiers
     
     // AI configuration
     private boolean aiEnabled = true;
@@ -461,7 +461,7 @@ public class GpuPipelineConfig {
 
     /** {@link #getEffectiveBitrate()} scaled for a recording at {@code fps}. */
     public int getEffectiveBitrate(int fps) {
-        return scaleBitrateForFps(getEffectiveBitrate(), fps, videoCodec);
+        return getEffectiveBitrateForQuality(recordingQuality, fps);
     }
 
     /**
@@ -489,7 +489,8 @@ public class GpuPipelineConfig {
 
     /** {@link #getEffectiveBitrateForQuality(RecordingQuality)} scaled for {@code fps}. */
     public int getEffectiveBitrateForQuality(RecordingQuality quality, int fps) {
-        return scaleBitrateForFps(getEffectiveBitrateForQuality(quality), fps, videoCodec);
+        return resolveRecordingBitrate(quality != null ? quality : recordingQuality,
+                videoCodec, fps, customBitrate);
     }
     
     /**
@@ -501,6 +502,18 @@ public class GpuPipelineConfig {
         // Don't change the preset - just store the custom value
     }
     
+    /** The current 15 fps override, or zero when the quality tier controls bitrate. */
+    public int getCustomBitrate() {
+        return customBitrate;
+    }
+
+    /** Resolves a candidate codec using the same override precedence and FPS cap. */
+    public static int resolveRecordingBitrate(RecordingQuality quality, VideoCodec codec,
+            int fps, int customBitrate) {
+        return scaleBitrateForFps(customBitrate > 0 ? customBitrate
+                : quality.getBitrateForCodec(codec), fps, codec);
+    }
+
     /**
      * Gets the MIME type for the current codec.
      */

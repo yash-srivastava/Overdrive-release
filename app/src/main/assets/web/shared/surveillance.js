@@ -830,7 +830,7 @@ BYD.surveillance = {
             const resp = await fetch('/api/settings/quality');
             const data = await resp.json();
             if (data.success) {
-                this.renderCodecAvailability(data.codecAvailability);
+                this.renderCodecAvailability(data.codecAvailability, data.recordingCodecRuntime);
                 // Surveillance-specific fps + tier (fall back to the shared
                 // ACC-on value the server sends when the surveillance key is
                 // unset, so a fresh install shows the seeded default).
@@ -876,7 +876,7 @@ BYD.surveillance = {
             const r = await fetch('/api/settings/quality');
             if (!r.ok) return;
             const data = await r.json();
-            if (data && data.success) this.renderCodecAvailability(data.codecAvailability);
+            if (data && data.success) this.renderCodecAvailability(data.codecAvailability, data.recordingCodecRuntime);
             const opts = data && (data.surveillanceQualityOptions || data.recordingQualityOptions);
             if (opts) {
                 this.config.recordingQualityOptions = opts;
@@ -1453,6 +1453,7 @@ BYD.surveillance = {
             // dirty, refreshes only the overcommit banner (which writes no control).
             // Gating here as well would leave a dirty page's banner stale forever.
             this.reloadConfig();
+            this.refreshCodecAvailability();
             // Back off to every 3rd tick (10s → 30s) while the recordings
             // index is down, same rationale as recording.js.
             this._statsSkip = (this._statsSkip || 0) + 1;
@@ -1854,22 +1855,48 @@ BYD.surveillance = {
     },
 
     // Capability metadata is advisory and stays outside the editable config.
-    renderCodecAvailability(availability) {
+    async refreshCodecAvailability() {
+        if (document.hidden || !document.getElementById('codecAvailabilityNote') || this._codecRefreshPending) return;
+        this._codecRefreshPending = true;
+        try {
+            const response = await fetch('/api/settings/quality');
+            if (response.ok) {
+                const data = await response.json();
+                if (data.success) this.renderCodecAvailability(data.codecAvailability, data.recordingCodecRuntime);
+            }
+        } catch (e) { /* best-effort advisory */ }
+        finally { this._codecRefreshPending = false; }
+    },
+
+    renderCodecAvailability(availability, runtime) {
         const note = document.getElementById('codecAvailabilityNote');
         if (!note) return;
-        note.hidden = !availability;
-        if (!availability) {
-            note.textContent = '';
-            return;
-        }
         const translate = (key, fallback) => {
             const value = BYD.i18n && BYD.i18n.t && BYD.i18n.t(key);
             return value && value !== key ? value : fallback;
         };
+        const runtimeNote = document.getElementById('codecRuntimeNote');
+        if (runtimeNote) {
+            const codec = runtime && runtime.codec;
+            const message = codec === 'H264' && runtime.hevcFallback
+                ? translate('recording.codec_runtime_fallback', 'Current encoder output: H.264 (session fallback from H.265).')
+                : codec === 'H264' || codec === 'H265'
+                    ? translate('recording.codec_runtime_output', 'Current encoder output:')
+                        + ' ' + (codec === 'H264' ? 'H.264' : 'H.265')
+                    : '';
+            runtimeNote.hidden = !message;
+            if (runtimeNote.textContent !== message) runtimeNote.textContent = message;
+        }
+        const known = value => value === true || value === false;
+        note.hidden = !availability || (!known(availability.H264) && !known(availability.H265));
+        if (note.hidden) {
+            note.textContent = '';
+            return;
+        }
         const status = value => value === true
             ? translate('recording.codec_capability_advertised', 'hardware support advertised')
             : value === false
-                ? translate('recording.codec_capability_missing', 'no matching hardware encoder advertised')
+                ? translate('recording.codec_capability_missing', 'preferred encoder does not advertise hardware support')
                 : translate('recording.codec_capability_unknown', 'support unknown');
         const message = translate('recording.codec_capability_scope',
             'Saved driving and parked GPU recording settings (not a recording test):')

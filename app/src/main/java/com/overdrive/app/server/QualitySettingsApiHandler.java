@@ -1,8 +1,9 @@
 package com.overdrive.app.server;
 
 import com.overdrive.app.camera.CameraConfigResolver;
-import com.overdrive.app.camera.CameraProfile;
-import com.overdrive.app.camera.PassiveApaGeometry;
+import com.overdrive.app.surveillance.GpuPipelineFactory;
+import com.overdrive.app.surveillance.HardwareEventRecorderGpu;
+import com.overdrive.app.surveillance.GpuPipelineConfig.VideoCodec;
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.storage.StorageManager;
 import com.overdrive.app.storage.removable.RemovableStorageFs;
@@ -1432,18 +1433,37 @@ public class QualitySettingsApiHandler {
                 width = pipeline.getEncoderWidth();
                 height = pipeline.getEncoderHeight();
             } else {
-                // Mirror GpuPipelineFactory.createDefault before the pipeline exists.
-                CameraProfile profile = CameraConfigResolver.resolve().getProfile();
-                boolean passiveApa = CameraConfigResolver.isPassiveApaModeEnabled();
-                width = passiveApa ? PassiveApaGeometry.WIDTH : profile.getEncoderWidth();
-                height = passiveApa ? PassiveApaGeometry.HEIGHT : profile.getEncoderHeight();
+                int[] geometry = GpuPipelineFactory.resolveEncoderGeometry(
+                        CameraConfigResolver.resolve().getProfile(),
+                        CameraConfigResolver.isPassiveApaModeEnabled());
+                width = geometry[0];
+                height = geometry[1];
             }
+            int override = pipeline == null ? 0 : pipeline.getConfig().getCustomBitrate();
+            HardwareEventRecorderGpu live = pipeline == null ? null : pipeline.getRecordingEncoder();
+            String mime = live == null ? null : live.getActiveOutputMimeType();
+            String name = mime == null ? null : live.getActiveEncoderName();
             result = RecordingCodecAvailability.get(width, height, driveFps, parkedFps,
-                    driveTier, parkedTier);
+                    driveTier, parkedTier, override, mime, name);
+            String runtimeCodec = VideoCodec.H264.mimeType.equals(mime) ? "H264"
+                    : VideoCodec.H265.mimeType.equals(mime) ? "H265" : null;
+            JSONObject runtime = new JSONObject()
+                    .put("codec", runtimeCodec == null ? JSONObject.NULL : runtimeCodec)
+                    .put("hevcFallback", "H264".equals(runtimeCodec) && live.hasHevcFallback());
+            if (runtimeCodec != null) {
+                runtime.put("encoderName", name == null ? JSONObject.NULL : name)
+                        .put("bitrate", live.getBitrate()).put("fps", live.getFps());
+            }
+            response.put("recordingCodecRuntime", runtime);
             response.put("codecAvailabilityContext", new JSONObject()
                     .put("width", width).put("height", height)
                     .put("driveFps", driveFps).put("parkedFps", parkedFps)
-                    .put("driveQuality", driveTier.name()).put("parkedQuality", parkedTier.name()));
+                    .put("driveQuality", driveTier.name()).put("parkedQuality", parkedTier.name())
+                    .put("customBitrate", override)
+                    .put("H264DriveBitrate", RecordingCodecAvailability.bitrate(VideoCodec.H264, driveFps, driveTier, override))
+                    .put("H264ParkedBitrate", RecordingCodecAvailability.bitrate(VideoCodec.H264, parkedFps, parkedTier, override))
+                    .put("H265DriveBitrate", RecordingCodecAvailability.bitrate(VideoCodec.H265, driveFps, driveTier, override))
+                    .put("H265ParkedBitrate", RecordingCodecAvailability.bitrate(VideoCodec.H265, parkedFps, parkedTier, override)));
         } catch (RuntimeException | LinkageError e) {
             CameraDaemon.log("Could not resolve recording encoder capabilities: " + e.getMessage());
         }
