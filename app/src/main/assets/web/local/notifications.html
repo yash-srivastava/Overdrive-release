@@ -426,13 +426,6 @@
         .notif-range-sep { color: var(--on-surface-variant); font-size: var(--fs-label); }
         .notif-num-unit { min-width: 26px; color: var(--on-surface-variant); font-size: var(--fs-caption); text-align: left; }
         [dir="rtl"] .notif-num-unit { text-align: right; }
-        /* Live PSI echo under each axle label, so a user thinking in PSI can
-           sanity-check a kPa entry without leaving the page. */
-        .notif-row-conv {
-            margin-top: 3px;
-            color: var(--on-surface-variant);
-            font-family: var(--family-mono, monospace); font-size: var(--fs-caption);
-        }
         .notif-card-actions {
             display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end;
             padding: 8px 20px 14px;
@@ -1176,17 +1169,18 @@
                             </div>
                         </div>
                         <div class="notif-card" id="tyreLimitsCard">
-                            <!-- Display-unit picker. Presentation only: the
-                                 limit inputs below stay kPa (the canonical,
-                                 compared unit) — this drives how readings are
-                                 shown in Vehicle Control, the dashboard glance,
-                                 the conversion echoes here, and notification
-                                 text. Saves immediately on tap (no Save press
-                                 needed), same as the min-severity segments. -->
+                            <!-- Display-unit picker. Presentation only: limits
+                                 are stored and compared in kPa (the canonical
+                                 unit), but the inputs below are shown and typed
+                                 in this unit and converted on Save. It also drives
+                                 how readings are shown in Vehicle Control, the
+                                 dashboard glance and notification text. Saves
+                                 immediately on tap (no Save press needed), same
+                                 as the min-severity segments. -->
                             <div class="notif-row">
                                 <div class="notif-row-text setting-stack">
                                     <div class="notif-row-label" data-i18n="notif.tyre_unit">Display unit</div>
-                                    <div class="notif-row-note setting-desc" data-i18n="notif.tyre_unit_note">How pressure readings are shown across the dashboard and in alerts. Limits below are always set in kPa.</div>
+                                    <div class="notif-row-note setting-desc" data-i18n="notif.tyre_unit_limits_note">How pressure readings are shown across the dashboard, in alerts and in the limits below.</div>
                                 </div>
                                 <div class="notif-seg notif-seg-compact" id="tyreUnitSeg" role="radiogroup" aria-label="Pressure display unit" data-i18n-attr="aria-label:notif.tyre_unit_aria">
                                     <button type="button" class="notif-seg-btn" data-unit="kpa" role="radio" aria-checked="false">kPa</button>
@@ -1198,42 +1192,39 @@
                                 <div class="notif-row-text setting-stack">
                                     <div class="notif-row-label" data-i18n="notif.tyre_front">Front axle</div>
                                     <div class="notif-row-note setting-desc" data-i18n="notif.tyre_axle_note">Normal range — minimum and maximum.</div>
-                                    <div class="notif-row-conv" id="tyreFrontConv">&nbsp;</div>
                                 </div>
                                 <div class="notif-range">
-                                    <input class="notif-num" id="tyreFrontLow" type="number" inputmode="numeric"
-                                           min="80" max="600" step="1" aria-label="Front minimum pressure in kPa" data-i18n-attr="aria-label:notif.tyre_front_low_aria">
+                                    <input class="notif-num" id="tyreFrontLow" type="number" inputmode="decimal"
+                                           min="80" max="600" step="1" aria-label="Front minimum pressure" data-i18n-attr="aria-label:notif.tyre_front_low_limit_aria">
                                     <span class="notif-range-sep">–</span>
-                                    <input class="notif-num" id="tyreFrontHigh" type="number" inputmode="numeric"
-                                           min="80" max="600" step="1" aria-label="Front maximum pressure in kPa" data-i18n-attr="aria-label:notif.tyre_front_high_aria">
-                                    <span class="notif-num-unit">kPa</span>
+                                    <input class="notif-num" id="tyreFrontHigh" type="number" inputmode="decimal"
+                                           min="80" max="600" step="1" aria-label="Front maximum pressure" data-i18n-attr="aria-label:notif.tyre_front_high_limit_aria">
+                                    <span class="notif-num-unit tyre-limit-unit">kPa</span>
                                 </div>
                             </div>
                             <div class="notif-row">
                                 <div class="notif-row-text setting-stack">
                                     <div class="notif-row-label" data-i18n="notif.tyre_rear">Rear axle</div>
                                     <div class="notif-row-note setting-desc" data-i18n="notif.tyre_axle_note">Normal range — minimum and maximum.</div>
-                                    <div class="notif-row-conv" id="tyreRearConv">&nbsp;</div>
                                 </div>
                                 <div class="notif-range">
-                                    <input class="notif-num" id="tyreRearLow" type="number" inputmode="numeric"
-                                           min="80" max="600" step="1" aria-label="Rear minimum pressure in kPa" data-i18n-attr="aria-label:notif.tyre_rear_low_aria">
+                                    <input class="notif-num" id="tyreRearLow" type="number" inputmode="decimal"
+                                           min="80" max="600" step="1" aria-label="Rear minimum pressure" data-i18n-attr="aria-label:notif.tyre_rear_low_limit_aria">
                                     <span class="notif-range-sep">–</span>
-                                    <input class="notif-num" id="tyreRearHigh" type="number" inputmode="numeric"
-                                           min="80" max="600" step="1" aria-label="Rear maximum pressure in kPa" data-i18n-attr="aria-label:notif.tyre_rear_high_aria">
-                                    <span class="notif-num-unit">kPa</span>
+                                    <input class="notif-num" id="tyreRearHigh" type="number" inputmode="decimal"
+                                           min="80" max="600" step="1" aria-label="Rear maximum pressure" data-i18n-attr="aria-label:notif.tyre_rear_high_limit_aria">
+                                    <span class="notif-num-unit tyre-limit-unit">kPa</span>
                                 </div>
                             </div>
                             <div class="notif-row">
                                 <div class="notif-row-text setting-stack">
                                     <div class="notif-row-label" data-i18n="notif.tyre_critical">Critical (deflated)</div>
                                     <div class="notif-row-note setting-desc" data-i18n="notif.tyre_critical_note">At or below this, the alert is escalated to critical. Applies to all four tyres and cannot exceed either axle minimum.</div>
-                                    <div class="notif-row-conv" id="tyreCriticalConv">&nbsp;</div>
                                 </div>
                                 <div class="notif-range">
-                                    <input class="notif-num" id="tyreCriticalLow" type="number" inputmode="numeric"
-                                           min="80" max="600" step="1" aria-label="Critical low pressure in kPa" data-i18n-attr="aria-label:notif.tyre_critical_low_aria">
-                                    <span class="notif-num-unit">kPa</span>
+                                    <input class="notif-num" id="tyreCriticalLow" type="number" inputmode="decimal"
+                                           min="80" max="600" step="1" aria-label="Critical low pressure" data-i18n-attr="aria-label:notif.tyre_critical_low_limit_aria">
+                                    <span class="notif-num-unit tyre-limit-unit">kPa</span>
                                 </div>
                             </div>
                             <div class="notif-card-actions">
@@ -1940,8 +1931,10 @@
 
         // ===== Tyre pressure limits =====
         // Five kPa integers (per-axle min/max + a shared critical floor) over
-        // /api/tyres/limits. Explicit Save rather than save-on-change: these
-        // are four interdependent numbers, and persisting a half-typed value
+        // /api/tyres/limits. The inputs are shown and typed in the display unit
+        // and converted to whole kPa on read; kPa stays the only unit on the wire.
+        // Explicit Save rather than save-on-change: these are four
+        // interdependent numbers, and persisting a half-typed value
         // would briefly arm a nonsense threshold on the notification path.
         // The server clamps and enforces the invariants too — this module
         // validates locally only to give immediate feedback.
@@ -1983,39 +1976,55 @@
             var displayUnit = (window.BYD && BYD.units && BYD.units.pressureMode)
                 ? BYD.units.pressureMode : 'psi';
 
-            // Format a kPa value in the conversion-echo unit. The echo's job
-            // is a cross-check against the kPa inputs, so when the display
-            // unit IS kPa it echoes PSI (the historical behaviour) rather
-            // than repeating the same number.
-            function echoUnit() { return displayUnit === 'kpa' ? 'psi' : displayUnit; }
-            function conv(kPa) {
-                if (echoUnit() === 'bar') return (kPa / 100).toFixed(2);
-                return (kPa * 0.1450377).toFixed(1);
+            var KPA_TO_PSI = 0.1450377;
+            function unitLabel(unit) {
+                return unit === 'kpa' ? 'kPa' : (unit === 'bar' ? 'bar' : 'PSI');
             }
-            function convLabel() { return echoUnit() === 'bar' ? 'bar' : 'PSI'; }
+            // kPa -> input text in `unit`. Decimals match BYD.units.pressureVal:
+            // kPa integer, PSI one decimal, bar two. Both round-trip every
+            // whole kPa exactly (0.1 PSI ~ 0.69 kPa, 0.01 bar = 1 kPa), so
+            // switching units or saving untouched fields never moves a limit.
+            function fmt(kPa, unit) {
+                if (unit === 'kpa') return String(Math.round(kPa));
+                if (unit === 'bar') return (kPa / 100).toFixed(2);
+                return (kPa * KPA_TO_PSI).toFixed(1);
+            }
+            // Input text in `unit` -> whole kPa, or null when blank/malformed.
+            // kPa must be an integer, as before; PSI/bar accept a decimal
+            // point or comma.
+            function parseKpa(raw, unit) {
+                raw = (raw || '').trim();
+                if (unit === 'kpa') return /^-?\d+$/.test(raw) ? parseInt(raw, 10) : null;
+                if (!/^-?\d+(?:[.,]\d+)?$/.test(raw)) return null;
+                var n = parseFloat(raw.replace(',', '.'));
+                return Math.round(unit === 'bar' ? n * 100 : n / KPA_TO_PSI);
+            }
+            function inputStep(unit) {
+                return unit === 'kpa' ? '1' : (unit === 'bar' ? '0.01' : '0.1');
+            }
 
+            // Input attributes and unit labels for the current display unit.
+            function paintInputUnit() {
+                var lo = fmt(MIN, displayUnit), hi = fmt(MAX, displayUnit);
+                for (var key in FIELDS) {
+                    if (!FIELDS.hasOwnProperty(key)) continue;
+                    var el = $(FIELDS[key]);
+                    if (!el) continue;
+                    el.setAttribute('step', inputStep(displayUnit));
+                    el.setAttribute('min', lo);
+                    el.setAttribute('max', hi);
+                }
+                var labels = document.querySelectorAll('#tyreLimitsCard .tyre-limit-unit');
+                for (var i = 0; i < labels.length; i++) labels[i].textContent = unitLabel(displayUnit);
+            }
+
+            // vals are kPa; null entries (blank or half-typed) leave the field as it is.
             function paint(vals) {
                 for (var key in FIELDS) {
                     if (!FIELDS.hasOwnProperty(key)) continue;
                     var el = $(FIELDS[key]);
-                    if (el && typeof vals[key] === 'number') el.value = vals[key];
+                    if (el && typeof vals[key] === 'number') el.value = fmt(vals[key], displayUnit);
                 }
-                paintConversions();
-            }
-
-            // Echo the entered kPa in the display unit so a user working
-            // from a PSI/bar placard can verify the numbers without
-            // converting by hand. Reads the live inputs (not the saved
-            // state) so it tracks typing.
-            function paintConversions() {
-                var v = readInputs();
-                var f = $('tyreFrontConv'), r = $('tyreRearConv'), c = $('tyreCriticalConv');
-                if (f) f.textContent = (v.frontLow !== null && v.frontHigh !== null)
-                    ? conv(v.frontLow) + ' – ' + conv(v.frontHigh) + ' ' + convLabel() : ' ';
-                if (r) r.textContent = (v.rearLow !== null && v.rearHigh !== null)
-                    ? conv(v.rearLow) + ' – ' + conv(v.rearHigh) + ' ' + convLabel() : ' ';
-                if (c) c.textContent = (v.criticalLow !== null)
-                    ? conv(v.criticalLow) + ' ' + convLabel() : ' ';
             }
 
             function paintUnitSeg() {
@@ -2030,10 +2039,14 @@
 
             function applyUnit(unit, persist) {
                 var previous = displayUnit;
+                // Read the inputs in the unit they were typed in, then repaint
+                // them in the new one (blank or half-typed fields are kept).
+                var current = readInputs();
                 displayUnit = unit;
                 if (window.BYD && BYD.units) BYD.units.pressureMode = unit;
                 paintUnitSeg();
-                paintConversions();
+                paintInputUnit();
+                paint(current);
                 if (!persist) return;
                 // Revert the optimistic repaint if the POST fails — otherwise
                 // this page renders a unit the server never accepted and the
@@ -2061,16 +2074,14 @@
                 }).catch(revert);
             }
 
-            // null for a blank / non-integer field so validate() can tell
-            // "empty" from a real 0.
+            // Whole kPa per field, converted from the display unit; null for a
+            // blank / malformed field so validate() can tell "empty" from a real 0.
             function readInputs() {
                 var out = {};
                 for (var key in FIELDS) {
                     if (!FIELDS.hasOwnProperty(key)) continue;
                     var el = $(FIELDS[key]);
-                    var raw = el ? el.value.trim() : '';
-                    var n = /^-?\d+$/.test(raw) ? parseInt(raw, 10) : NaN;
-                    out[key] = isNaN(n) ? null : n;
+                    out[key] = parseKpa(el ? el.value : '', displayUnit);
                 }
                 return out;
             }
@@ -2094,9 +2105,10 @@
                         // retuning MIN/MAX can't leave every locale quoting stale
                         // numbers (the server's equivalent message is already
                         // placeholder-driven).
-                        err = tr('notif.tyre_err_range',
-                                 'Enter a whole number between {min} and {max} kPa.',
-                                 { min: MIN, max: MAX });
+                        err = tr('notif.tyre_err_range_unit',
+                                 'Enter a value between {min} and {max} {unit}.',
+                                 { min: fmt(MIN, displayUnit), max: fmt(MAX, displayUnit),
+                                   unit: unitLabel(displayUnit) });
                     }
                 }
                 if (err) return err;
@@ -2245,7 +2257,6 @@
                     if (!FIELDS.hasOwnProperty(key)) continue;
                     var el = $(FIELDS[key]);
                     if (!el) continue;
-                    el.addEventListener('input', paintConversions);
                     el.addEventListener('input', reflectValidity);
                 }
                 // Unit segments: delegated click, tap = apply + persist.
@@ -2260,6 +2271,7 @@
                     });
                 }
                 paintUnitSeg();
+                paintInputUnit();
             });
 
             return { load: load, save: save, reset: reset };
