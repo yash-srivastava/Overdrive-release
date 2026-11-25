@@ -28,11 +28,14 @@ final class TripPricing {
     }
 
     static double litresUsed(TripRecord trip, double tankLitres) {
-        if (trip.fuelConStart >= 0 && trip.fuelConEnd >= trip.fuelConStart) {
+        if (Double.isFinite(trip.fuelConStart) && Double.isFinite(trip.fuelConEnd)
+                && trip.fuelConStart >= 0 && trip.fuelConEnd >= trip.fuelConStart) {
             return trip.fuelConEnd - trip.fuelConStart;
         }
         double drop = trip.fuelPctStart - trip.fuelPctEnd;
-        if (trip.fuelPctStart >= 0 && trip.fuelPctEnd >= 0 && drop >= 1.0 && tankLitres > 0) {
+        if (trip.fuelPctStart >= 0 && trip.fuelPctStart <= 100
+                && trip.fuelPctEnd >= 0 && trip.fuelPctEnd <= 100
+                && drop >= 1.0 && Double.isFinite(tankLitres) && tankLitres > 0) {
             return drop / 100.0 * tankLitres;
         }
         return 0;
