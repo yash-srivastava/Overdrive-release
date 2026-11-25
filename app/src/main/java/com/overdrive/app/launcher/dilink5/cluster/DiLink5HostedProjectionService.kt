@@ -14,12 +14,17 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
 import android.view.WindowManager
+import com.overdrive.app.logging.DaemonLogger
 import com.overdrive.app.overlay.OverlayPermissionChecker
 import com.overdrive.app.ui.view.AaosMapAreaCheck
 import java.util.concurrent.Executors
 
 /** App-UID overlay owner used only through the DUMP-protected explicit service. */
 class DiLink5HostedProjectionService : Service() {
+    private companion object {
+        val logger by lazy { DaemonLogger.getInstance("HostedProjectionService") }
+    }
+
     private data class Overlay(
         val generation: Long,
         val windowManager: WindowManager,
@@ -36,7 +41,13 @@ class DiLink5HostedProjectionService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            DiLink5HostedProjectionBridge.ACTION_PROBE_DISPLAY -> probes.execute { probeDisplay(intent) }
+            DiLink5HostedProjectionBridge.ACTION_PROBE_DISPLAY -> {
+                if (intent.getBooleanExtra(DiLink5HostedProjectionBridge.EXTRA_SEALION7_HDMI, false)) {
+                    val displayId = intent.getIntExtra(DiLink5HostedProjectionBridge.EXTRA_PHYSICAL_DISPLAY, -1)
+                    logger.info("Sealion 7 hosted probe received display=$displayId")
+                }
+                probes.execute { probeDisplay(intent) }
+            }
             DiLink5HostedProjectionBridge.ACTION_CREATE -> create(intent)
             DiLink5HostedProjectionBridge.ACTION_RELEASE ->
                 release(
@@ -63,9 +74,13 @@ class DiLink5HostedProjectionService : Service() {
             DiLink5HostedProjectionBridge.EXTRA_PHYSICAL_DISPLAY,
             -1,
         )
+        val sealion7Hdmi = intent.getBooleanExtra(DiLink5HostedProjectionBridge.EXTRA_SEALION7_HDMI, false)
         val receiver = intent.getParcelableExtra<ResultReceiver>(
             DiLink5HostedProjectionBridge.EXTRA_RESULT_RECEIVER,
-        ) ?: return
+        ) ?: run {
+            if (sealion7Hdmi) logger.warn("Sealion 7 hosted probe display=$displayId missing result receiver")
+            return
+        }
         val display = (getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)
             ?.getDisplay(displayId)
         val metrics = android.util.DisplayMetrics()
@@ -73,26 +88,33 @@ class DiLink5HostedProjectionService : Service() {
             try {
                 @Suppress("DEPRECATION")
                 display.getRealMetrics(metrics)
-            } catch (_: Throwable) {
+            } catch (error: Throwable) {
+                if (sealion7Hdmi) logger.warn("Sealion 7 hosted probe display=$displayId metrics failed ${hostedProjectionFailure(error)}")
             }
         }
+        val observedId = display?.displayId ?: -1
+        val displayValid = display?.isValid == true
         val visible = HostedProjectionBoundary.appDisplayVisible(
             display != null,
-            display?.isValid == true,
-            display?.displayId ?: -1,
+            displayValid,
+            observedId,
             displayId,
         ) && HostedProjectionBoundary.appDisplayInfoValid(
-            display?.displayId ?: -1,
+            observedId,
             displayId,
             metrics.widthPixels,
             metrics.heightPixels,
             metrics.densityDpi,
         )
         val aaosMapArea = intent.getBooleanExtra(DiLink5HostedProjectionBridge.EXTRA_AAOS_MAP_AREA, false)
-        val sealion7Hdmi = intent.getBooleanExtra(DiLink5HostedProjectionBridge.EXTRA_SEALION7_HDMI, false)
         val area = if (aaosMapArea && visible && display != null) AaosMapAreaCheck.confirmedBounds(this, display) else null
         val admitted = visible && (!aaosMapArea || area != null) &&
-            (!sealion7Hdmi || (!aaosMapArea && canHostSealion7Hdmi(displayId)))
+            (!sealion7Hdmi || (!aaosMapArea && canHostSealion7Hdmi(displayId, logProbe = true)))
+        if (sealion7Hdmi) {
+            logger.info("Sealion 7 hosted probe display=$displayId observed=$observedId valid=$displayValid " +
+                "metrics=${metrics.widthPixels}x${metrics.heightPixels}@${metrics.densityDpi} " +
+                "visible=$visible mapArea=$aaosMapArea admitted=$admitted")
+        }
         receiver.send(if (admitted) 1 else 0, if (admitted) android.os.Bundle().apply {
             putInt(DiLink5HostedProjectionBridge.RESULT_DISPLAY_ID, displayId)
             putInt(DiLink5HostedProjectionBridge.RESULT_DISPLAY_WIDTH, metrics.widthPixels)
@@ -239,13 +261,24 @@ class DiLink5HostedProjectionService : Service() {
         overlays[generation] = Overlay(generation, windowManager, view, callback, bridge)
         try {
             windowManager.addView(view, params)
-        } catch (_: Throwable) {
+        } catch (error: Throwable) {
+            if (sealion7Hdmi) {
+                logger.warn("Sealion 7 hosted create generation=$generation display=$physicalId " +
+                    "addView failed ${hostedProjectionFailure(error)}")
+            }
             release(generation, bridge)
         }
     }
 
-    private fun canHostSealion7Hdmi(displayId: Int): Boolean = OverlayPermissionChecker.isGranted(this) &&
-        Sealion7HdmiProjection.findDisplay(this)?.displayId == displayId
+    private fun canHostSealion7Hdmi(displayId: Int, logProbe: Boolean = false): Boolean {
+        val overlayGranted = OverlayPermissionChecker.isGranted(this)
+        val eligibleId = if (overlayGranted) Sealion7HdmiProjection.findDisplay(this)?.displayId else null
+        if (logProbe) {
+            logger.info("Sealion 7 hosted probe display=$displayId overlayGranted=$overlayGranted " +
+                "eligibleDisplay=${eligibleId ?: if (overlayGranted) "unavailable" else "unchecked"}")
+        }
+        return overlayGranted && eligibleId == displayId
+    }
 
     private fun release(generation: Long, bridgeOverride: IBinder? = null): Boolean {
         val overlay = overlays[generation]

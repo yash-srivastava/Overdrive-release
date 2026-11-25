@@ -12,10 +12,21 @@ import android.os.RemoteException
 import android.os.ResultReceiver
 import android.view.Surface
 import com.overdrive.app.byd.dilink5.TrustedAppUidResolver
+import com.overdrive.app.logging.DaemonLogger
 import com.overdrive.app.monitor.BoundedShell
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+
+// Framework errors may include Intent, caller or window dumps. Retain only a bounded line
+// and redact dump bodies, paths, addresses, and opaque identifiers.
+private val frameworkErrorDetails = Regex("""\{.*}|\S*[/@]\S*|(?i:\b(?:token|password|secret|deviceid|vin)\s*[:=]\s*\S+)|\b[A-Za-z0-9_-]{16,}\b|\p{Cntrl}""")
+
+internal fun hostedProjectionFailure(error: Throwable): String {
+    val message = error.message?.lineSequence()?.firstOrNull()
+        ?.replace(frameworkErrorDetails, "[redacted]")?.take(200)?.takeIf { it.isNotBlank() }
+    return "${error.javaClass.simpleName}: ${message ?: "no message"}"
+}
 
 /** Daemon-side owner of hosted content displays. No service is published on a network. */
 object DiLink5HostedProjectionBridge {
@@ -52,6 +63,7 @@ object DiLink5HostedProjectionBridge {
     private const val SHELL_PACKAGE = "com.android.shell"
     internal const val FLAGS_PREFERRED = 323
     internal const val FLAGS_FALLBACK = 322
+    private val logger by lazy { DaemonLogger.getInstance("DiLink5ClusterCast") }
     private val lock = Any()
     private val sessions = HashMap<Long, Record>()
     private val creatingGenerations = HashSet<Long>()
@@ -206,9 +218,18 @@ object DiLink5HostedProjectionBridge {
         daemonContext: Context, physicalDisplayId: Int, aaosMapArea: Boolean = false,
         sealion7Hdmi: Boolean = false,
     ): AppDisplayInfo? {
-        if (physicalDisplayId <= 0) return null
-        if (sealion7Hdmi && (aaosMapArea ||
-                Sealion7HdmiProjection.findDisplay(daemonContext)?.displayId != physicalDisplayId)) return null
+        val diagnostic = if (sealion7Hdmi) "Sealion 7 hosted probe display=$physicalDisplayId" else null
+        if (physicalDisplayId <= 0) {
+            diagnostic?.let { logger.warn("$it rejected: invalid display ID") }
+            return null
+        }
+        if (diagnostic != null) {
+            val eligibleId = if (aaosMapArea) null else Sealion7HdmiProjection.findDisplay(daemonContext)?.displayId
+            if (eligibleId != physicalDisplayId) {
+                logger.warn("$diagnostic rejected: mapArea=$aaosMapArea eligibleDisplay=${eligibleId ?: "unavailable"}")
+                return null
+            }
+        }
         attachDaemonContext(daemonContext)
         // PROJECT_MEDIA may make the OEM display visible to the app UID. Probe the actual
         // app display even if the grant/readback failed; a shell-only decision needs that proof.
@@ -217,7 +238,7 @@ object DiLink5HostedProjectionBridge {
         val observed = AtomicReference<AppDisplayInfo?>()
         val receiver = object : ResultReceiver(null) {
             override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
-                if (resultCode == 1 && resultData != null) {
+                val details = if (resultCode == 1 && resultData != null) {
                     val width = resultData.getInt(RESULT_DISPLAY_WIDTH, 0)
                     val height = resultData.getInt(RESULT_DISPLAY_HEIGHT, 0)
                     val info = AppDisplayInfo(
@@ -229,7 +250,7 @@ object DiLink5HostedProjectionBridge {
                             resultData.getIntArray(RESULT_CONFIRMED_MAP_BOUNDS), width, height,
                         ),
                     )
-                    if ((!aaosMapArea || info.confirmedMapBounds != null) &&
+                    val accepted = (!aaosMapArea || info.confirmedMapBounds != null) &&
                         (!sealion7Hdmi || Sealion7HdmiProjection.geometry(info) != null) &&
                         HostedProjectionBoundary.appDisplayInfoValid(
                             info.displayId,
@@ -238,9 +259,15 @@ object DiLink5HostedProjectionBridge {
                             info.height,
                             info.densityDpi,
                         )
-                    ) observed.set(info)
+                    if (accepted) observed.set(info)
+                    diagnostic?.let {
+                        "display=${info.displayId} metrics=${width}x$height@${info.densityDpi} accepted=$accepted"
+                    }
+                } else {
+                    diagnostic?.let { "data=${resultData != null} accepted=false" }
                 }
                 complete.countDown()
+                if (details != null) logger.info("$diagnostic response code=$resultCode $details")
             }
         }
         return try {
@@ -250,14 +277,34 @@ object DiLink5HostedProjectionBridge {
                 .putExtra(EXTRA_AAOS_MAP_AREA, aaosMapArea)
                 .putExtra(EXTRA_SEALION7_HDMI, sealion7Hdmi)
                 .putExtra(EXTRA_RESULT_RECEIVER, receiver)
-            if (context?.startService(request) == null) return null
-            if (complete.await(WAIT_MS, TimeUnit.MILLISECONDS)) observed.get() else null
+            if (!dispatchService(request, diagnostic)) return null
+            if (complete.await(WAIT_MS, TimeUnit.MILLISECONDS)) observed.get() else {
+                diagnostic?.let { logger.warn("$it timed out waiting for app response") }
+                null
+            }
         } catch (interrupted: InterruptedException) {
+            diagnostic?.let { logger.warn("$it interrupted") }
             Thread.currentThread().interrupt()
             null
         } catch (_: Throwable) {
             null
         }
+    }
+
+    private fun dispatchService(request: Intent, diagnostic: String?): Boolean {
+        val component = try {
+            context?.startService(request)
+        } catch (error: Throwable) {
+            diagnostic?.let {
+                logger.warn("$it startService threw uid=${android.os.Process.myUid()} ${hostedProjectionFailure(error)}")
+            }
+            throw error
+        }
+        diagnostic?.let {
+            if (component == null) logger.warn("$it startService returned null uid=${android.os.Process.myUid()}")
+            else logger.info("$it startService accepted")
+        }
+        return component != null
     }
 
     @JvmStatic
@@ -275,6 +322,7 @@ object DiLink5HostedProjectionBridge {
         aaosMapArea: Boolean = false,
         sealion7Hdmi: Boolean = false,
     ): HostedSession? {
+        val diagnostic = if (sealion7Hdmi) "Sealion 7 hosted create generation=$generation display=$physicalDisplayId" else null
         if (generation <= 0 || physicalDisplayId <= 0) return null
         if (sealion7Hdmi && (aaosMapArea ||
                 Sealion7HdmiProjection.findDisplay(daemonContext)?.displayId != physicalDisplayId ||
@@ -309,8 +357,9 @@ object DiLink5HostedProjectionBridge {
             .putExtra(EXTRA_DENSITY, geometry.densityDpi)
         var accepted = false
         return try {
-            context?.startService(intent) ?: return null
+            if (!dispatchService(intent, diagnostic)) return null
             val result = if (!HostedProjectionBoundary.awaitSurface(ticket.complete, WAIT_MS)) {
+                diagnostic?.let { logger.warn("$it timed out waiting for the hosted surface") }
                 null
             } else {
                 synchronized(lock) {

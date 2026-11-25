@@ -4703,7 +4703,12 @@ object DiLink5ClusterCast {
             taskMayBeMoved = false,
             uncertain = true
         )
-        if (!DiLink5ProjectionOwnership.persist(pendingOwner)) return null
+        if (!DiLink5ProjectionOwnership.persist(pendingOwner)) {
+            if (direct.sealion7Hdmi) {
+                logger.warn("Sealion 7 hosted create generation=$expectedGeneration could not persist pending ownership")
+            }
+            return null
+        }
         val allocation = startHostedAllocation(
             register = {
                 synchronized(stateLock) {
@@ -4750,6 +4755,9 @@ object DiLink5ClusterCast {
         val hosted = allocation.value?.takeIf {
             DiLink5HostedProjectionBridge.isSurfaceAlive(expectedGeneration)
         } ?: run {
+            if (direct.sealion7Hdmi) {
+                logger.warn("Sealion 7 hosted create generation=$expectedGeneration could not obtain a live surface")
+            }
             val released = DiLink5HostedProjectionBridge.release(expectedGeneration) &&
                 DiLink5ProjectionOwnership.clear(expectedGeneration, true, readCurrentBootId())
             if (released) {
