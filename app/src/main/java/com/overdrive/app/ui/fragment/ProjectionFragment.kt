@@ -108,6 +108,7 @@ class ProjectionFragment : Fragment() {
     private var aaosMapCheck: AaosMapAreaCheck? = null
     private var sealion7HdmiRow: View? = null
     private var sealion7HdmiSwitch: MaterialSwitch? = null
+    private var sealion7HdmiSupported = false
     private var sealion7HdmiEnabled = false
     private var sealion7HdmiWriteInFlight = false
     private var projectionPathDescription: TextView? = null
@@ -447,6 +448,7 @@ class ProjectionFragment : Fragment() {
         aaosMapCheck = null
         sealion7HdmiRow = null
         sealion7HdmiSwitch = null
+        sealion7HdmiSupported = false
         sealion7HdmiWriteInFlight = false
         alive = false
         mirrorRequested = false
@@ -1646,9 +1648,10 @@ class ProjectionFragment : Fragment() {
         if (aaosHostedMap) adjusting = false
         daemonOwnsWindow = st.projectionPathActive == "hosted" || st.factoryMiniMap
         activeWindowBounds = st.activeWindowBounds
-        sealion7HdmiRow?.visibility = if (st.sealion7HdmiSupported) View.VISIBLE else View.GONE
+        sealion7HdmiSupported = st.sealion7HdmiSupported
+        updateSealion7HdmiVisibility()
         if (!sealion7HdmiWriteInFlight) {
-            sealion7HdmiEnabled = st.sealion7HdmiSupported && st.sealion7HdmiEnabled
+            sealion7HdmiEnabled = sealion7HdmiSupported && st.sealion7HdmiEnabled
             sealion7HdmiSwitch?.isChecked = sealion7HdmiEnabled
         }
         if (previousCastPackage != castPackage || previousCastGeneration != castSessionGeneration) {
@@ -1782,6 +1785,10 @@ class ProjectionFragment : Fragment() {
         scheduleMirrorRestart()
     }
 
+    private fun updateSealion7HdmiVisibility() {
+        sealion7HdmiRow?.visibility = if (sealion7HdmiSupported && !theater) View.VISIBLE else View.GONE
+    }
+
     /** Full screen: the rail, app bar and settings step aside and the stage takes the window. */
     private fun setTheater(on: Boolean) {
         if (theater == on) return
@@ -1792,6 +1799,7 @@ class ProjectionFragment : Fragment() {
         if (on && adjusting) toggleAdjust()
         (activity as? MainActivity)?.setContentImmersive(on)
         settings?.visibility = if (on) View.GONE else View.VISIBLE
+        updateSealion7HdmiVisibility()
         content?.let { c ->
             if (on) {
                 val pad = (THEATER_PADDING_DP * c.resources.displayMetrics.density).roundToInt()

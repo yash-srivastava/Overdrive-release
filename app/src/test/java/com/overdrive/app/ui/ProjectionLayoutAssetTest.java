@@ -45,14 +45,22 @@ public class ProjectionLayoutAssetTest {
     }
 
     @Test
-    public void bothOrientationsIncludeTheSealion7OptIn() throws IOException {
+    public void bothOrientationsHideTheSealion7OptInUntilSupportIsKnown() throws IOException {
         String resource = "projection_sealion7_hdmi_setting";
         String row = readRepositoryFile("app/src/main/res/layout/" + resource + ".xml");
-        assertTrue(row.contains("@+id/projectionSealion7HdmiRow"));
         assertTrue(row.contains("@+id/projectionSealion7HdmiSwitch"));
         for (String path : new String[] {PORTRAIT, LAND}) {
-            assertTrue(path, readRepositoryFile(path).contains("@layout/" + resource));
+            String xml = readRepositoryFile(path);
+            int setting = xml.indexOf("@+id/projectionSealion7HdmiRow");
+            assertTrue(path, setting >= 0);
+            assertTrue(path, xml.substring(setting, xml.indexOf('>', setting))
+                    .contains("android:visibility=\"gone\""));
+            assertTrue(path, xml.contains("@layout/" + resource));
         }
+        String fragment = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/ui/fragment/ProjectionFragment.kt");
+        assertTrue(fragment.contains("sealion7HdmiSupported = st.sealion7HdmiSupported"));
+        assertTrue(fragment.contains("if (sealion7HdmiSupported && !theater) View.VISIBLE else View.GONE"));
     }
 
     @Test

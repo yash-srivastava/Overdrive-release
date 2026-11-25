@@ -2,8 +2,8 @@
 <!--
   Projection screen — landscape. The mirror spans the page (ProjectionFragment sizes it to the
   panel aspect, short enough to keep the dock on screen), the dock sits under it, and the two
-  settings cards share one row below. Same view IDs as layout/fragment_projection.xml; the
-  fragment does not branch on orientation.
+  standard settings cards share one row below the optional Full HDMI card. Same view IDs as
+  layout/fragment_projection.xml; the fragment does not branch on orientation.
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -222,6 +222,21 @@
             </com.google.android.material.card.MaterialCardView>
 
             <!-- ================== SETTINGS ================== -->
+            <!-- Keep Full HDMI independent of the width available to the settings row. -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/projectionSealion7HdmiRow"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/dashboard_modern_gap"
+                android:visibility="gone"
+                app:cardBackgroundColor="?attr/colorSurfaceContainer"
+                app:cardCornerRadius="@dimen/dashboard_modern_radius"
+                app:cardElevation="0dp"
+                app:contentPadding="@dimen/dashboard_modern_card_padding">
+
+                <include layout="@layout/projection_sealion7_hdmi_setting" />
+            </com.google.android.material.card.MaterialCardView>
+
             <LinearLayout
                 android:id="@+id/projectionSettings"
                 android:layout_width="match_parent"
@@ -781,7 +796,6 @@
                             android:layout_marginTop="6dp"
                             android:textAppearance="@style/TextAppearance.Material3.BodySmall"
                             android:textColor="?attr/colorOnSurfaceVariant" />
-                        <include layout="@layout/projection_sealion7_hdmi_setting" />
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/projectionAaosMapCheck"
                             style="@style/Widget.Overdrive.M3.Button.Outlined"

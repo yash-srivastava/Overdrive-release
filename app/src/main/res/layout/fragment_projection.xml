@@ -787,7 +787,13 @@
                     android:layout_marginTop="6dp"
                     android:textAppearance="@style/TextAppearance.Material3.BodySmall"
                     android:textColor="?attr/colorOnSurfaceVariant" />
-                <include layout="@layout/projection_sealion7_hdmi_setting" />
+                <include
+                    android:id="@+id/projectionSealion7HdmiRow"
+                    layout="@layout/projection_sealion7_hdmi_setting"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dashboard_modern_card_padding"
+                    android:visibility="gone" />
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/projectionAaosMapCheck"
                     style="@style/Widget.Overdrive.M3.Button.Outlined"
