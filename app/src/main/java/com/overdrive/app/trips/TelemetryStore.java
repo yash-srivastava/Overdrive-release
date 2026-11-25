@@ -6,10 +6,9 @@ import com.overdrive.app.logging.DaemonLogger;
 
 import org.json.JSONObject;
 
-import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
@@ -37,7 +36,7 @@ public class TelemetryStore {
      *
      * The recorder appends a new gzip stream on each flush (every 60s or on stop),
      * so a single file may contain multiple concatenated gzip streams. We read them
-     * all from a compressed snapshot, decoding and parsing each line as it is inflated.
+     * up to the length of the opened file, decoding and parsing each line as it is inflated.
      *
      * @param file the .jsonl.gz file to read
      * @return list of TelemetrySample objects parsed from all gzip streams
@@ -47,11 +46,11 @@ public class TelemetryStore {
             return new ArrayList<>();
         }
 
-        try {
-            // Read entire file into memory (telemetry files are bounded by storage limits)
-            byte[] fileBytes = readAllBytes(file);
+        try (FileInputStream input = RemovableStorageFs.openInput(file)) {
+            // Capture the descriptor length once, so a live append cannot extend the read.
+            long length = input.getChannel().size();
             List<TelemetrySample> samples = new ArrayList<>();
-            GzipJsonLines.read(fileBytes, line -> appendSample(samples, line));
+            GzipJsonLines.read(input, length, line -> appendSample(samples, line));
             return samples;
         } catch (Exception e) {
             logger.error("Failed to read telemetry file: " + file.getName(), e);
@@ -130,22 +129,5 @@ public class TelemetryStore {
         } catch (Exception e) {
             logger.warn("Skipping malformed telemetry line: " + e.getMessage());
         }
-    }
-
-    // ==================== INTERNAL HELPERS ====================
-
-    /**
-     * Read all bytes from a file into a byte array.
-     */
-    private static byte[] readAllBytes(File file) throws IOException {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream((int) RemovableStorageFs.length(file));
-        try (BufferedInputStream bis = new BufferedInputStream(RemovableStorageFs.openInput(file))) {
-            byte[] buffer = new byte[8192];
-            int bytesRead;
-            while ((bytesRead = bis.read(buffer)) != -1) {
-                baos.write(buffer, 0, bytesRead);
-            }
-        }
-        return baos.toByteArray();
     }
 }

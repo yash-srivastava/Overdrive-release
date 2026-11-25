@@ -1,13 +1,21 @@
 package com.overdrive.app.trips;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertSame;
+import static org.junit.Assert.fail;
 
 import org.junit.Test;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -68,15 +76,99 @@ public class GzipJsonLinesTest {
         }
     }
 
+    @Test
+    public void ignoresBytesBeyondSnapshotAndDoesNotCloseCallerInput() throws IOException {
+        byte[] first = members(utf8("first\n"));
+        byte[] later = members(utf8("later\n"));
+        final boolean[] closed = {false};
+        ByteArrayInputStream input = new ByteArrayInputStream(concat(first, later)) {
+            @Override public void close() { closed[0] = true; }
+        };
+        List<String> rows = new ArrayList<>();
+        GzipJsonLines.read(input, first.length, line -> add(rows, line));
+        assertEquals(Arrays.asList("first"), rows);
+        assertFalse(closed[0]);
+        assertEquals(later.length, input.available());
+    }
+
+    @Test
+    public void readsCapturedFileLengthEvenWhenJournalGrows() throws IOException {
+        Path journal = Files.createTempFile("telemetry-snapshot", ".jsonl.gz");
+        try {
+            byte[] first = members(utf8("first\n"), utf8("second\n"));
+            Files.write(journal, first);
+            try (FileInputStream input = new FileInputStream(journal.toFile())) {
+                long length = input.getChannel().size();
+                Files.write(journal, members(utf8("appended\n")), StandardOpenOption.APPEND);
+                List<String> rows = new ArrayList<>();
+                GzipJsonLines.read(input, length, line -> add(rows, line));
+                assertEquals(Arrays.asList("first", "second"), rows);
+                assertEquals(length, input.getChannel().position());
+            }
+        } finally {
+            Files.deleteIfExists(journal);
+        }
+    }
+
+    @Test
+    public void handlesShortReadsAndUnhelpfulAvailable() throws IOException {
+        byte[] data = members(utf8("first\n"), utf8("second\n"), utf8("third"));
+        ByteArrayInputStream input = new ByteArrayInputStream(data) {
+            @Override public int available() { return 0; }
+            @Override public synchronized int read(byte[] b, int off, int len) {
+                return super.read(b, off, Math.min(3, len));
+            }
+        };
+        List<String> rows = new ArrayList<>();
+        GzipJsonLines.read(input, data.length, line -> add(rows, line));
+        assertEquals(Arrays.asList("first", "second", "third"), rows);
+    }
+
+    @Test
+    public void reportsStorageFailureInsteadOfTreatingItAsDamagedGzip() throws IOException {
+        byte[] data = members(utf8("first\n"));
+        IOException failure = new IOException("storage disappeared");
+        InputStream input = new InputStream() {
+            private int position;
+            @Override public int read() throws IOException {
+                if (position == data.length) throw failure;
+                return data[position++] & 0xff;
+            }
+            @Override public int read(byte[] b, int off, int len) throws IOException {
+                if (position == data.length) throw failure;
+                int count = Math.min(len, data.length - position);
+                System.arraycopy(data, position, b, off, count);
+                position += count;
+                return count;
+            }
+        };
+        try {
+            GzipJsonLines.read(input, data.length + 100, line -> {});
+            fail("Expected the underlying storage exception");
+        } catch (IOException e) {
+            assertSame(failure, e);
+        }
+    }
+
+    @Test
+    public void handlesEarlyEofWithoutLooping() throws IOException {
+        byte[] data = members(utf8("first\n"));
+        List<String> rows = new ArrayList<>();
+        GzipJsonLines.read(new ByteArrayInputStream(data), data.length + 100,
+                line -> add(rows, line));
+        assertEquals(Arrays.asList("first"), rows);
+    }
+
     // Compare what the JSON parser sees (trimmed, nonempty LF records) against
     // the original whole-file decompression and split implementation.
     private static void compare(byte[] data) throws IOException {
         assertEquals(reference(data), decoded(data));
     }
 
-    private static List<String> decoded(byte[] data) {
+    private static List<String> decoded(byte[] data) throws IOException {
         List<String> rows = new ArrayList<>();
-        GzipJsonLines.read(data, line -> add(rows, line));
+        if (data != null) GzipJsonLines.read(new ByteArrayInputStream(data), data.length,
+                line -> add(rows, line));
         return rows;
     }
 
