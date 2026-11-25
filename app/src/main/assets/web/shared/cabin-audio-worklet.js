@@ -26,11 +26,20 @@ class CabinAudioPlaybackProcessor extends AudioWorkletProcessor {
         const overflow = Math.max(0, this.size + incoming - capacity);
         this.readIndex = (this.readIndex + overflow) % capacity;
         this.size -= overflow;
-        for (let i = start; i < pcm.length; i++) {
-            this.buffer[this.writeIndex] = pcm[i] / 32768;
-            this.writeIndex = (this.writeIndex + 1) % capacity;
-            this.size++;
+        // Copy at most two contiguous spans; wrap and update counters once
+        // per packet rather than once per PCM sample.
+        const first = Math.min(incoming, capacity - this.writeIndex);
+        const write = this.writeIndex;
+        const buffer = this.buffer;
+        for (let i = 0; i < first; i++) {
+            buffer[write + i] = pcm[start + i] / 32768;
         }
+        const remaining = incoming - first;
+        for (let i = 0; i < remaining; i++) {
+            buffer[i] = pcm[start + first + i] / 32768;
+        }
+        this.writeIndex = (write + incoming) % capacity;
+        this.size += incoming;
     }
 
     process(inputs, outputs) {
@@ -38,15 +47,26 @@ class CabinAudioPlaybackProcessor extends AudioWorkletProcessor {
         if (!channels || !channels.length) return true;
         const output = channels[0];
         if (!this.primed && this.size >= 3840) this.primed = true;
-        for (let i = 0; i < output.length; i++) {
-            if (this.primed && this.size > 0) {
-                output[i] = this.buffer[this.readIndex];
-                this.readIndex = (this.readIndex + 1) % this.buffer.length;
-                this.size--;
-            } else {
-                output[i] = 0;
-                if (this.size === 0) this.primed = false;
+        const count = this.primed ? Math.min(this.size, output.length) : 0;
+        if (count > 0) {
+            const buffer = this.buffer;
+            const read = this.readIndex;
+            const first = Math.min(count, buffer.length - read);
+            // Avoid allocating temporary typed-array views in the audio callback.
+            for (let i = 0; i < first; i++) {
+                output[i] = buffer[read + i];
             }
+            for (let i = first; i < count; i++) {
+                output[i] = buffer[i - first];
+            }
+            this.readIndex = (read + count) % buffer.length;
+            this.size -= count;
+        }
+        if (count < output.length) {
+            output.fill(0, count);
+            // Preserve the exact-drain behaviour: a full quantum leaves the
+            // processor primed until a later quantum actually needs silence.
+            if (this.size === 0) this.primed = false;
         }
         for (let channel = 1; channel < channels.length; channel++) {
             channels[channel].set(output);
