@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Charging hover cache regression</title>
+<style>canvas { display:block; width:720px; }</style>
+<pre id="result">RUNNING</pre>
+<script src="../app/src/main/assets/web/shared/charging.js"></script>
+<script>
+// Open directly in a browser, or run Chromium headless with --dump-dom.
+window.BYD = { clock: { time: function (date) { return date.toISOString().slice(11, 16); } } };
+(function () {
+    var result = document.getElementById('result');
+    function check(condition, message) { if (!condition) throw new Error(message); }
+    function canvas(id) {
+        var el = document.createElement('canvas');
+        el.id = id;
+        document.body.appendChild(el);
+        return el;
+    }
+    function move(el, x) {
+        el.dispatchEvent(new MouseEvent('mousemove', { clientX: el.getBoundingClientRect().left + x }));
+    }
+    function leave(el) { el.dispatchEvent(new MouseEvent('mouseleave')); }
+    function pixels(el) { return el.getContext('2d').getImageData(0, 0, el.width, el.height).data; }
+    function equal(a, b, label) {
+        check(a.length === b.length, label + ': size');
+        for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) throw new Error(label + ': pixel byte ' + i + ' (' + a[i] + ' vs ' + b[i] + ')');
+    }
+    function touch(el, type, x) {
+        var event = new Event(type, { cancelable: true });
+        Object.defineProperty(event, 'touches', { value: [{ clientX: el.getBoundingClientRect().left + x }] });
+        el.dispatchEvent(event);
+        return event;
+    }
+    var c = CHARGING;
+    var n = 1000, rows = [], daily = [], trend = [], sessions = [];
+    var start = Date.UTC(2026, 0, 1);
+    for (var i = 0; i < n; i++) {
+        rows.push({ t: start + i * 12000, soc: 20 + i * 0.06, power: i % 31 ? 8 + i % 7 : null,
+            charging: i < 750, temp: 20 + i % 8, tempHigh: 24 + i % 8, tempLow: 18 + i % 8 });
+    }
+    for (var j = 0; j < 30; j++) {
+        daily.push({ day: start + j * 86400000, cost: 2 + j % 7, energy: 10 + j % 7 });
+        trend.push({ day: start + j * 86400000, soh: 99 - j / 10 });
+        sessions.unshift({ startTime: start + j * 86400000, energyAdded: 10 + j % 7, cost: 2, isDc: false });
+    }
+    c.socHistoryCache = rows;
+    c.samplesCache = rows;
+    c.summaryCache = { daily: daily, sohTrend: trend };
+    c.sessions = sessions;
+    var setups = 0;
+    var originalSetup = c._setupCanvas;
+    c._setupCanvas = function () { setups++; return originalSetup.apply(this, arguments); };
+    var soc = canvas('socChart'), power = canvas('detailPowerChart'), temp = canvas('detailTempChart');
+    var soh = canvas('sohTrendChart'), bars = canvas('monthlyCostChart'), energy = canvas('efficiencyChart');
+    var cases = [
+        [soc, function () { c.renderSocOverTime(soc, rows); }],
+        [power, function () { c.renderPowerCurve(power, c._powerCurvePoints(rows)); }],
+        [temp, function () { c.renderTempBand(temp, rows); }],
+        [soh, function () { c.renderSohTrend(soh, trend); }],
+        [bars, function () { c.renderCostBars(bars, daily); }],
+        [energy, function () { c.renderEfficiency(energy, sessions); }]
+    ];
+    try {
+        cases.forEach(function (entry) {
+            var el = entry[0], render = entry[1];
+            render();
+            var base = pixels(el), before = setups;
+            move(el, 140);
+            check(c._hoverBase && c._hoverBase.canvas === el, el.id + ': cache created');
+            var first = pixels(el);
+            for (var i = 0; i < 60; i++) move(el, 140);
+            equal(first, pixels(el), el.id + ': same selection');
+            for (var i = 0; i < 60; i++) move(el, 200 + i * 5);
+            check(setups === before, el.id + ': unexpected full render on hover');
+            move(el, 360);
+            var cached = pixels(el);
+            c._hoverBase = null; // force full-render fallback for a different selection
+            move(el, 500);
+            check(setups === before + 1, el.id + ': fallback render');
+            c._hoverBase = null;
+            move(el, 360);
+            equal(cached, pixels(el), el.id + ': cache vs full-render pixels');
+            var refreshed = setups;
+            render(); // external data/theme/resize repaint, with active crosshair
+            check(setups === refreshed + 1, el.id + ': duplicate external render');
+            equal(cached, pixels(el), el.id + ': external repaint');
+            leave(el);
+            check(c._hoverBase === null, el.id + ': cache retained after leave');
+            equal(base, pixels(el), el.id + ': leave restores base');
+        });
+        // Switching charts evicts the old base. Returning to its active hover
+        // must repaint rather than capturing an already annotated image.
+        move(soc, 200); move(power, 210);
+        check(c._hoverBase.canvas === power, 'single cache ownership');
+        var before = setups;
+        move(soc, 300);
+        check(setups === before + 1 && c._hoverBase.canvas === soc, 'evicted chart fallback');
+        leave(power); leave(soc);
+        // Touch cancel and cache invalidation when clearing a chart.
+        check(touch(temp, 'touchstart', 200).defaultPrevented, 'touch start');
+        touch(temp, 'touchmove', 300);
+        touch(temp, 'touchcancel', 300);
+        check(c._hoverBase === null && temp._chgHoverIdx === null, 'touch cancel');
+        move(temp, 200); c._clearCanvas(temp.id); before = setups;
+        move(temp, 300);
+        check(setups === before && c._hoverBase === null && temp._chgHoverSpec === null, 'cleared chart cannot revive');
+        // Failed cache allocation still permits the original repaint path.
+        var create = document.createElement;
+        document.createElement = function (tag) { if (tag === 'canvas') throw new Error('injected allocation failure'); return create.call(this, tag); };
+        before = setups; move(soc, 140); move(soc, 300);
+        document.createElement = create;
+        check(setups === before + 1 && c._hoverBase === null, 'allocation fallback');
+        leave(soc);
+        // Oversized backing store is never retained.
+        soc.style.width = '6000px'; c.renderSocOverTime(soc, rows); before = setups;
+        move(soc, 100); move(soc, 500);
+        check(c._hoverBase === null && setups === before + 1, 'oversized fallback');
+        leave(soc);
+        result.textContent = 'PASS: 6 chart types, pixel comparisons, 720 repeated/moving hover events, redraw and cache lifecycle, touch, failed/oversized cache; DPR=' + window.devicePixelRatio;
+    } catch (error) { result.textContent = 'FAIL: ' + (error.stack || error); }
+})();
+</script>
+</html>
