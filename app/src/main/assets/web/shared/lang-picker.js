@@ -73,9 +73,16 @@
 
     var sheet = null;
     var sheetVisible = false;
+    var removalTimer = null;
+    var focusTimer = null;
 
     function openSheet() {
         if (sheetVisible) return;
+        // Reopening during the exit animation must not remove the new sheet.
+        if (removalTimer !== null) {
+            clearTimeout(removalTimer);
+            removalTimer = null;
+        }
         sheetVisible = true;
         if (!sheet) sheet = buildSheet();
         // The sheet is built once: bring its header into the current language on every open.
@@ -96,15 +103,25 @@
             search.value = '';
             // Auto-focus on desktop only — mobile keyboards on a head unit
             // are jarring and cars don't have keyboards anyway
-            if (!('ontouchstart' in window)) setTimeout(function () { search.focus(); }, 250);
+            if (!('ontouchstart' in window)) {
+                focusTimer = setTimeout(function () {
+                    focusTimer = null;
+                    search.focus();
+                }, 250);
+            }
         }
     }
 
     function closeSheet() {
         if (!sheetVisible || !sheet) return;
         sheetVisible = false;
+        if (focusTimer !== null) {
+            clearTimeout(focusTimer);
+            focusTimer = null;
+        }
         sheet.classList.remove('open');
-        setTimeout(function () {
+        removalTimer = setTimeout(function () {
+            removalTimer = null;
             if (sheet && sheet.parentNode) sheet.parentNode.removeChild(sheet);
         }, 280);
     }
