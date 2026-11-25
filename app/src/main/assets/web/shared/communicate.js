@@ -8,7 +8,7 @@ var CommunicatePage = {
     MAX_SESSION_MS: 30000,
     AUDIO_INACTIVITY_MS: 3000,
     MAX_CAPTURE_AGE_MS: 250,
-    WORKLET_MODULE_URL: '/shared/communicate-worklet.js?v=1',
+    WORKLET_MODULE_URL: '/shared/communicate-worklet.js?v=2',
 
     tt: function (key, fallback) {
         var v = (window.BYD && BYD.i18n && BYD.i18n.t) ? BYD.i18n.t(key) : null;
