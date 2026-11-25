@@ -1,12 +1,13 @@
 package com.overdrive.app.server;
 
-import com.overdrive.app.storage.removable.RemovableStorageFs;
-
-import android.media.MediaCodecList;
-import android.media.MediaFormat;
-
+import com.overdrive.app.camera.CameraConfigResolver;
+import com.overdrive.app.camera.CameraProfile;
+import com.overdrive.app.camera.PassiveApaGeometry;
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.storage.StorageManager;
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+import com.overdrive.app.surveillance.GpuPipelineConfig.RecordingQuality;
+import com.overdrive.app.surveillance.GpuSurveillancePipeline;
 
 import org.json.JSONObject;
 
@@ -1403,14 +1404,9 @@ public class QualitySettingsApiHandler {
         codecInfo.put("H265", "H.265/HEVC (50% smaller)");
         response.put("codecOptions", codecInfo);
 
-        // Report runtime encoder availability instead of assuming every
-        // head unit exposes both recording formats. Keep this separate from
-        // codecOptions so existing clients retain their current labels.
-        JSONObject codecAvailability = new JSONObject();
-        codecAvailability.put("H264", hasVideoEncoder(MediaFormat.MIMETYPE_VIDEO_AVC));
-        codecAvailability.put("H265", hasVideoEncoder(MediaFormat.MIMETYPE_VIDEO_HEVC));
-        response.put("codecAvailability", codecAvailability);
-        
+        // Advisory hardware capabilities for the shared panoramic recording codec.
+        appendCodecAvailability(response, currentFps, currentSurveillanceFps, activeTier, survTier);
+
         // Add FPS options for UI. Range 10..30 — clamped server-side by
         // GpuSurveillancePipeline.applyFpsChange. The HAL on this device
         // tops out around 26 fps panoramic, so 30 will clamp gracefully.
@@ -1425,16 +1421,35 @@ public class QualitySettingsApiHandler {
         HttpResponse.sendJson(out, response.toString());
     }
 
-    private static boolean hasVideoEncoder(String mimeType) {
+    private static void appendCodecAvailability(JSONObject response, int driveFps, int parkedFps,
+            RecordingQuality driveTier, RecordingQuality parkedTier) throws Exception {
+        RecordingCodecAvailability.Result result = RecordingCodecAvailability.Result.UNKNOWN;
         try {
-            MediaFormat format = MediaFormat.createVideoFormat(mimeType, 1280, 720);
-            return new MediaCodecList(MediaCodecList.REGULAR_CODECS)
-                .findEncoderForFormat(format) != null;
-        } catch (Throwable t) {
-            CameraDaemon.log("Video encoder capability probe failed for " + mimeType
-                + ": " + t.getMessage());
-            return false;
+            GpuSurveillancePipeline pipeline = CameraDaemon.getGpuPipeline();
+            int width;
+            int height;
+            if (pipeline != null) {
+                width = pipeline.getEncoderWidth();
+                height = pipeline.getEncoderHeight();
+            } else {
+                // Mirror GpuPipelineFactory.createDefault before the pipeline exists.
+                CameraProfile profile = CameraConfigResolver.resolve().getProfile();
+                boolean passiveApa = CameraConfigResolver.isPassiveApaModeEnabled();
+                width = passiveApa ? PassiveApaGeometry.WIDTH : profile.getEncoderWidth();
+                height = passiveApa ? PassiveApaGeometry.HEIGHT : profile.getEncoderHeight();
+            }
+            result = RecordingCodecAvailability.get(width, height, driveFps, parkedFps,
+                    driveTier, parkedTier);
+            response.put("codecAvailabilityContext", new JSONObject()
+                    .put("width", width).put("height", height)
+                    .put("driveFps", driveFps).put("parkedFps", parkedFps)
+                    .put("driveQuality", driveTier.name()).put("parkedQuality", parkedTier.name()));
+        } catch (RuntimeException | LinkageError e) {
+            CameraDaemon.log("Could not resolve recording encoder capabilities: " + e.getMessage());
         }
+        response.put("codecAvailability", new JSONObject()
+                .put("H264", result.h264 == null ? JSONObject.NULL : result.h264)
+                .put("H265", result.h265 == null ? JSONObject.NULL : result.h265));
     }
 
     private static void handleQualitySettingsPost(OutputStream out, String body) throws Exception {

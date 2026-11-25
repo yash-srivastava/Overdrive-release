@@ -275,6 +275,7 @@ BYD.recording = {
             const resp = await fetch('/api/settings/quality');
             const data = await resp.json();
             if (data.success) {
+                this.renderCodecAvailability(data.codecAvailability);
                 // Check if config actually changed (via timestamp)
                 const newTimestamp = data.lastModified || 0;
                 // Mid-flight guard: this block writes config + re-baselines
@@ -443,6 +444,7 @@ BYD.recording = {
             const resp = await fetch('/api/settings/quality');
             const data = await resp.json();
             if (data.success) {
+                this.renderCodecAvailability(data.codecAvailability);
                 // New unified tier (ECONOMY/STANDARD/HIGH/PREMIUM/MAX).
                 // STANDARD is the post-migration default; legacy
                 // LOW/REDUCED/NORMAL silently map upstream.
@@ -1596,6 +1598,30 @@ BYD.recording = {
         this.markChanged();
     },
 
+    // Capability metadata is advisory and stays outside the editable config.
+    renderCodecAvailability(availability) {
+        const note = document.getElementById('codecAvailabilityNote');
+        if (!note) return;
+        note.hidden = !availability;
+        if (!availability) {
+            note.textContent = '';
+            return;
+        }
+        const translate = (key, fallback) => {
+            const value = BYD.i18n && BYD.i18n.t && BYD.i18n.t(key);
+            return value && value !== key ? value : fallback;
+        };
+        const status = value => value === true
+            ? translate('recording.codec_capability_advertised', 'hardware support advertised')
+            : value === false
+                ? translate('recording.codec_capability_missing', 'no matching hardware encoder advertised')
+                : translate('recording.codec_capability_unknown', 'support unknown');
+        const message = translate('recording.codec_capability_scope',
+            'Saved driving and parked GPU recording settings (not a recording test):')
+            + ' H.264: ' + status(availability.H264) + '; H.265: ' + status(availability.H265);
+        if (note.textContent !== message) note.textContent = message;
+    },
+
     setCodec(codec) {
         this.config.recordingCodec = codec;
         document.querySelectorAll('#codecBtns .btn-toggle').forEach(btn =>
@@ -1647,6 +1673,7 @@ BYD.recording = {
             const r = await fetch('/api/settings/quality');
             if (!r.ok) return;
             const data = await r.json();
+            if (data && data.success) this.renderCodecAvailability(data.codecAvailability);
             if (data && data.recordingQualityOptions) {
                 this.config.recordingQualityOptions = data.recordingQualityOptions;
                 this.config.qualityOptionsByFps = data.qualityOptionsByFps || null;

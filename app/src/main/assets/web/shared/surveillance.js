@@ -544,6 +544,7 @@ BYD.surveillance = {
                         this.config.sensitivity = 3;  // Default
                     }
                     this.lastConfigTimestamp = newTimestamp;
+                    this.refetchQualityOptions();
 
                     this.savedConfig = JSON.parse(JSON.stringify(this.config));
                     this.updateUI();
@@ -829,6 +830,7 @@ BYD.surveillance = {
             const resp = await fetch('/api/settings/quality');
             const data = await resp.json();
             if (data.success) {
+                this.renderCodecAvailability(data.codecAvailability);
                 // Surveillance-specific fps + tier (fall back to the shared
                 // ACC-on value the server sends when the surveillance key is
                 // unset, so a fresh install shows the seeded default).
@@ -874,6 +876,7 @@ BYD.surveillance = {
             const r = await fetch('/api/settings/quality');
             if (!r.ok) return;
             const data = await r.json();
+            if (data && data.success) this.renderCodecAvailability(data.codecAvailability);
             const opts = data && (data.surveillanceQualityOptions || data.recordingQualityOptions);
             if (opts) {
                 this.config.recordingQualityOptions = opts;
@@ -1848,6 +1851,30 @@ BYD.surveillance = {
             btn.classList.toggle('active', btn.dataset.value === tier));
         this.renderActiveEstimate();
         this.markChanged();
+    },
+
+    // Capability metadata is advisory and stays outside the editable config.
+    renderCodecAvailability(availability) {
+        const note = document.getElementById('codecAvailabilityNote');
+        if (!note) return;
+        note.hidden = !availability;
+        if (!availability) {
+            note.textContent = '';
+            return;
+        }
+        const translate = (key, fallback) => {
+            const value = BYD.i18n && BYD.i18n.t && BYD.i18n.t(key);
+            return value && value !== key ? value : fallback;
+        };
+        const status = value => value === true
+            ? translate('recording.codec_capability_advertised', 'hardware support advertised')
+            : value === false
+                ? translate('recording.codec_capability_missing', 'no matching hardware encoder advertised')
+                : translate('recording.codec_capability_unknown', 'support unknown');
+        const message = translate('recording.codec_capability_scope',
+            'Saved driving and parked GPU recording settings (not a recording test):')
+            + ' H.264: ' + status(availability.H264) + '; H.265: ' + status(availability.H265);
+        if (note.textContent !== message) note.textContent = message;
     },
 
     setCodec(codec) {
