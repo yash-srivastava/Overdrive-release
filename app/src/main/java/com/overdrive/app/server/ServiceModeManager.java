@@ -342,7 +342,7 @@ public final class ServiceModeManager {
                 if (findOriginalState(savedStates, pkg) < 0) continue;
 
                 ShellResult result = runShell(
-                        "pm disable-user --user 0 " + shellQuote(pkg));
+                        "pm disable-user " + com.overdrive.app.util.ShellUser.flag() + " " + shellQuote(pkg));
                 if (!result.success) {
                     failures.add(pkg + ": " + result.output);
                 } else {
@@ -602,7 +602,7 @@ public final class ServiceModeManager {
     private static String restoreCommand(String pkg, int previousState) {
         String operation = previousState == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
                 ? "default-state" : "enable";
-        return "pm " + operation + " --user 0 " + shellQuote(pkg);
+        return "pm " + operation + " " + com.overdrive.app.util.ShellUser.flag() + " " + shellQuote(pkg);
     }
 
     private static boolean isEnabledState(int state) {
@@ -635,7 +635,7 @@ public final class ServiceModeManager {
     }
 
     private static Context requireContext() {
-        Context context = CameraDaemon.getAppContext();
+        Context context = com.overdrive.app.util.ShellUser.context(CameraDaemon.getAppContext());
         if (context == null) {
             throw new IllegalStateException("The daemon package context is not ready.");
         }
@@ -707,7 +707,7 @@ public final class ServiceModeManager {
                     || APP_PACKAGE.equals(pkg) || !isEnabledState(enabledState)) continue;
             recovery.append(restoreCommand(pkg, enabledState))
                     .append(" || code=1\n")
-                    .append("pm list packages -d 2>/dev/null | grep -qx ")
+                    .append("pm list packages " + com.overdrive.app.util.ShellUser.flag() + " -d 2>/dev/null | grep -qx ")
                     .append(shellQuote("package:" + pkg)).append(" && code=1\n");
         }
         recovery.append("exit $code\n");

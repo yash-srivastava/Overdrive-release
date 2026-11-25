@@ -100,7 +100,12 @@ final class ClusterLayoutTaskLauncher implements ClusterLayoutTaskLaunch.Operati
     @Override public String stopPackage() {
         if (!current()) return "cancelled";
         if (LayoutPreset.MAP_PACKAGE.equals(pkg)) return "isolated RoadSense component";
-        return ClusterLayouts.shell(3000, this::current, "am", "force-stop", "--user", "0", pkg);
+        List<String> stop = new ArrayList<>();
+        Collections.addAll(stop, "am", "force-stop");
+        int user = com.overdrive.app.util.ShellUser.targetUserId();
+        if (user >= 0) Collections.addAll(stop, "--user", String.valueOf(user));
+        stop.add(pkg);
+        return ClusterLayouts.shell(3000, this::current, stop.toArray(new String[0]));
     }
 
     @Override public String start(boolean freeform, boolean explicitComponent) {
@@ -127,8 +132,10 @@ final class ClusterLayoutTaskLauncher implements ClusterLayoutTaskLaunch.Operati
         List<String> command = new ArrayList<>();
         Collections.addAll(command, "am", "start-activity");
         if (!LayoutPreset.MAP_PACKAGE.equals(pkg)) command.add("-S");
-        Collections.addAll(command, "-W", "--user", "0", "--display",
-                Integer.toString(displayId));
+        command.add("-W");
+        int user = com.overdrive.app.util.ShellUser.targetUserId();
+        if (user >= 0) Collections.addAll(command, "--user", String.valueOf(user));
+        Collections.addAll(command, "--display", Integer.toString(displayId));
         if (freeform) Collections.addAll(command, "--windowingMode", "5");
         command.add("--activity-no-animation");
         if (explicitComponent) Collections.addAll(command, "-n", component);

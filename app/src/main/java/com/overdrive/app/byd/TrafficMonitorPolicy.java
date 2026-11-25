@@ -58,15 +58,15 @@ public final class TrafficMonitorPolicy {
 
     /** Probe for "is the package currently in the disabled-user list". */
     public static String stateProbeCommand() {
-        return "pm list packages -d 2>/dev/null | grep -F " + PACKAGE
+        return "pm list packages " + com.overdrive.app.util.ShellUser.flag() + " -d 2>/dev/null | grep -F " + PACKAGE
                 + " || echo " + NOT_DISABLED;
     }
 
     /** The pm verb for the requested state. */
     public static String applyCommand(boolean disable) {
         return disable
-                ? "pm disable-user --user 0 " + PACKAGE + " 2>&1"
-                : "pm enable " + PACKAGE + " 2>&1";
+                ? "pm disable-user " + com.overdrive.app.util.ShellUser.flag() + " " + PACKAGE + " 2>&1"
+                : "pm enable " + com.overdrive.app.util.ShellUser.flag() + " " + PACKAGE + " 2>&1";
     }
 
     /**
@@ -151,7 +151,7 @@ public final class TrafficMonitorPolicy {
         if (probeSaysDisabled(execShell(stateProbeCommand()))) {
             return STATE_DISABLED;
         }
-        String path = execShell("pm path " + PACKAGE + " 2>/dev/null || echo " + NOT_INSTALLED);
+        String path = execShell("pm path " + com.overdrive.app.util.ShellUser.flag() + " " + PACKAGE + " 2>/dev/null || echo " + NOT_INSTALLED);
         if (!path.isEmpty() && !path.contains(NOT_INSTALLED)) {
             return STATE_ENABLED;
         }

@@ -48,7 +48,7 @@ object ServiceModeAppRecovery {
                     if (!PACKAGE_NAME.matches(name) || name == "com.overdrive.app"
                         || (previous != 0 && previous != 1)) continue
                     val operation = if (previous == 0) "default-state" else "enable"
-                    commands.add("pm $operation --user 0 '$name'")
+                    commands.add("pm $operation ${com.overdrive.app.util.ShellUser.flag()} '$name'")
                 }
                 if (commands.isEmpty()) {
                     inFlight.set(false)
