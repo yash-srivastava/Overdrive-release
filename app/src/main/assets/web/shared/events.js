@@ -1089,12 +1089,12 @@ BYD.events = {
     },
     
     prevMonth() {
-        this.currentDate.setMonth(this.currentDate.getMonth() - 1);
+        this.currentDate.setMonth(this.currentDate.getMonth() - 1, 1);
         this.renderCalendar();
     },
     
     nextMonth() {
-        this.currentDate.setMonth(this.currentDate.getMonth() + 1);
+        this.currentDate.setMonth(this.currentDate.getMonth() + 1, 1);
         this.renderCalendar();
     },
     
