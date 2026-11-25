@@ -3378,7 +3378,7 @@ object DiLink5ClusterCast {
             return if (phase == SessionPhase.ACTIVE) {
                 DiLink5InstrumentFullSession.isSelectionCurrent(context, live.generation)
             } else {
-                DiLink5InstrumentFullSession.isSupportedSelection(context)
+                DiLink5InstrumentFullSession.isSupportedSelection()
             }
         }
         val area = live.hostedGeometry?.overlay ?: return false
@@ -4370,7 +4370,7 @@ object DiLink5ClusterCast {
             if (Sealion7HdmiProjection.isEnabled(context)) {
                 val panel = Sealion7HdmiProjection.findDisplay(context)
                     ?: throw IllegalStateException("The Sealion 7 cluster display is unavailable")
-                check(DiLink5InstrumentFullSession.isSupportedSelection(context)) {
+                check(DiLink5InstrumentFullSession.isSupportedSelection()) {
                     "Select Off or Full in the vehicle instrument navigation settings"
                 }
                 val size = displaySize(panel)

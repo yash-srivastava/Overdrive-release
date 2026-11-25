@@ -7,6 +7,7 @@ import com.overdrive.app.config.UnifiedConfigManager
 import com.overdrive.app.launcher.dilink5.cluster.Sealion7HdmiProjection
 import com.overdrive.app.logging.DaemonLogger
 import com.overdrive.app.monitor.AccMonitor
+import com.overdrive.app.monitor.BoundedShell
 import com.overdrive.app.navmap.cluster.ClusterCommContract.RESULT_BAD_REQUEST
 import com.overdrive.app.navmap.cluster.ClusterCommContract.RESULT_BIND_TIMEOUT
 import com.overdrive.app.navmap.cluster.ClusterCommContract.RESULT_EXPIRED
@@ -117,9 +118,9 @@ internal object DiLink5InstrumentFullSession {
         }
     }
 
-    fun isSupportedSelection(context: Context): Boolean {
+    fun isSupportedSelection(): Boolean {
         if (!Sealion7HdmiProjection.isTestedFirmware()) return false
-        val mode = readSavedMode(context)
+        val mode = readDaemonSavedMode()
         return mode == OFF || mode == FULL
     }
 
@@ -174,7 +175,7 @@ internal object DiLink5InstrumentFullSession {
             "projection", mapOf(MARKER to (owner?.encode() ?: "")),
         )
 
-        override fun readMode(): Int = readSavedMode(context)
+        override fun readMode(): Int = readDaemonSavedMode()
 
         override fun accOn(): Boolean = AccMonitor.isAccStateAuthoritative() && AccMonitor.isAccOn()
 
@@ -194,7 +195,17 @@ internal object DiLink5InstrumentFullSession {
         return checkNotNull(Owner.decode(value)) { "Invalid Instrument Full owner" }
     }
 
-    private fun readSavedMode(context: Context): Int = try {
+    /** The shell tool can read this setting from the daemon's app_process identity. */
+    internal fun readDaemonSavedMode(
+        run: (String, Long) -> String? = { command, deadlineMs ->
+            BoundedShell.run(command, deadlineMs).takeIf { it.ok() }?.output
+        },
+    ): Int = run(
+        "exec /system/bin/settings get global ${ClusterCommContract.INSTRUMENT_MODE_SETTING}",
+        BoundedShell.DEFAULT_DEADLINE_MS,
+    )?.toIntOrNull() ?: UNKNOWN
+
+    private fun readAppSavedMode(context: Context): Int = try {
         Settings.Global.getInt(context.contentResolver, ClusterCommContract.INSTRUMENT_MODE_SETTING, UNKNOWN)
     } catch (_: RuntimeException) {
         UNKNOWN
@@ -208,14 +219,14 @@ internal object DiLink5InstrumentFullSession {
         ) {
             RESULT_INSTRUMENT_GUARD_FAILED
         } else {
-            savedModeDisposition(readSavedMode(context), owner.closing)
+            savedModeDisposition(readAppSavedMode(context), owner.closing)
         }
     } catch (_: Exception) {
         RESULT_INSTRUMENT_GUARD_FAILED
     }
 
     @JvmStatic
-    fun beforeOff(context: Context): Int? = savedModeDisposition(readSavedMode(context), closing = true)
+    fun beforeOff(context: Context): Int? = savedModeDisposition(readAppSavedMode(context), closing = true)
 
     internal fun savedModeDisposition(mode: Int, closing: Boolean): Int? = when {
         mode == OFF -> null

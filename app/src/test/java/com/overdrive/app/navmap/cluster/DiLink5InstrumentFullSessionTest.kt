@@ -1,5 +1,6 @@
 package com.overdrive.app.navmap.cluster
 
+import com.overdrive.app.monitor.BoundedShell
 import com.overdrive.app.navmap.cluster.ClusterCommContract.RESULT_EXPIRED
 import com.overdrive.app.navmap.cluster.ClusterCommContract.RESULT_INSTRUMENT_ALREADY_FULL
 import com.overdrive.app.navmap.cluster.ClusterCommContract.RESULT_INSTRUMENT_GUARD_FAILED
@@ -8,6 +9,7 @@ import com.overdrive.app.navmap.cluster.ClusterCommContract.RESULT_SENT
 import com.overdrive.app.navmap.cluster.ClusterCommDispatcher.Reply
 import com.overdrive.app.navmap.cluster.DiLink5InstrumentFullSession.Lifecycle
 import com.overdrive.app.navmap.cluster.DiLink5InstrumentFullSession.Owner
+import com.overdrive.app.navmap.cluster.DiLink5InstrumentFullSession.readDaemonSavedMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -34,15 +36,36 @@ class DiLink5InstrumentFullSessionTest {
 
     @Test
     fun alreadyFullNeedsNoCommandOrOwnershipEvenWithoutAccConfirmation() {
-        val io = FakeIo().apply { mode = 4; acc = false }
+        var output = "4"
+        val io = FakeIo {
+            readDaemonSavedMode { command, deadlineMs ->
+                assertEquals("exec /system/bin/settings get global moet_extension_navi_display_mode", command)
+                assertEquals(BoundedShell.DEFAULT_DEADLINE_MS, deadlineMs)
+                output
+            }
+        }.apply { acc = false }
         val lifecycle = Lifecycle(io)
         assertTrue(lifecycle.start(owner.generation, owner.bootId) { true })
         assertTrue(lifecycle.isSelectionCurrent(owner.generation))
-        io.mode = 1
+        output = "1"
         assertFalse(lifecycle.isSelectionCurrent(owner.generation))
         assertTrue(lifecycle.release(owner.generation, owner.bootId))
         assertTrue(io.commands.isEmpty())
         assertTrue(io.writes.isEmpty())
+    }
+
+    @Test
+    fun offFromShellCanOpenAndFailedReadInvalidatesActiveSelection() {
+        var output: String? = "1"
+        val io = FakeIo { readDaemonSavedMode { _, _ -> output } }
+        val lifecycle = Lifecycle(io)
+        assertTrue(lifecycle.start(owner.generation, owner.bootId) { true })
+        assertTrue(lifecycle.isSelectionCurrent(owner.generation))
+        assertEquals(owner, io.marker)
+        output = null
+        assertFalse(lifecycle.isSelectionCurrent(owner.generation))
+        assertEquals(owner, io.marker)
+        assertEquals(listOf(owner), io.commands)
     }
 
     @Test
@@ -54,10 +77,12 @@ class DiLink5InstrumentFullSessionTest {
     }
 
     @Test
-    fun unknownOrSimpleModeNeverStartsTemporaryFull() {
-        for (mode in listOf(-1, 0, 2)) {
-            val io = FakeIo().apply { this.mode = mode }
-            assertFalse(Lifecycle(io).start(owner.generation, owner.bootId) { true })
+    fun unavailableMalformedSimpleOrSmallShellModeNeverStartsTemporaryFull() {
+        for (output in listOf(null, "", "null", "-1", "0", "2", "3", "4\nsettings: error", "4294967300")) {
+            val io = FakeIo { readDaemonSavedMode { _, _ -> output } }
+            val lifecycle = Lifecycle(io)
+            assertFalse("Unexpected start for $output", lifecycle.start(owner.generation, owner.bootId) { true })
+            assertFalse(lifecycle.isSelectionCurrent(owner.generation))
             assertTrue(io.commands.isEmpty())
             assertTrue(io.writes.isEmpty())
         }
@@ -164,7 +189,7 @@ class DiLink5InstrumentFullSessionTest {
         assertNull(Owner.decode("""{"generation":42,"bootId":"boot-id"}"""))
     }
 
-    private class FakeIo : DiLink5InstrumentFullSession.Io {
+    private class FakeIo(private val shellMode: (() -> Int)? = null) : DiLink5InstrumentFullSession.Io {
         var marker: Owner? = null
         var mode = 1
         var acc = true
@@ -183,7 +208,7 @@ class DiLink5InstrumentFullSessionTest {
             return true
         }
 
-        override fun readMode() = mode
+        override fun readMode() = shellMode?.invoke() ?: mode
 
         override fun accOn() = acc
 
