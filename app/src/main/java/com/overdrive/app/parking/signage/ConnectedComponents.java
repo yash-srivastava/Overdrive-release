@@ -1,6 +1,7 @@
 package com.overdrive.app.parking.signage;
 
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.List;
 
 /**
@@ -34,19 +35,20 @@ public final class ConnectedComponents {
      */
     public static List<Component> label(float[] score, int w, int h, float thresh, int minArea) {
         List<Component> out = new ArrayList<>();
-        if (score == null || w <= 0 || h <= 0 || score.length < w * h) return out;
-        boolean[] visited = new boolean[w * h];
-        int[] queue = new int[w * h];
-        for (int start = 0; start < w * h; start++) {
-            if (visited[start] || score[start] < thresh) continue;
+        if (score == null || w <= 0 || h <= 0 || (long) w * h > score.length) return out;
+        int pixels = w * h;
+        BitSet visited = new BitSet(pixels);
+        // Only pending pixels need queue storage, not the entire component or map.
+        PixelQueue queue = new PixelQueue(pixels);
+        for (int start = 0; start < pixels; start++) {
+            if (visited.get(start) || score[start] < thresh) continue;
             Component c = new Component();
             c.minX = c.maxX = start % w;
             c.minY = c.maxY = start / w;
-            int head = 0, tail = 0;
-            queue[tail++] = start;
-            visited[start] = true;
-            while (head < tail) {
-                int idx = queue[head++];
+            queue.add(start);
+            visited.set(start);
+            while (!queue.isEmpty()) {
+                int idx = queue.remove();
                 int x = idx % w, y = idx / w;
                 c.area++;
                 c.scoreSum += score[idx];
@@ -62,15 +64,53 @@ public final class ConnectedComponents {
                         int nx = x + dx;
                         if (nx < 0 || nx >= w) continue;
                         int n = ny * w + nx;
-                        if (visited[n] || score[n] < thresh) continue;
-                        visited[n] = true;
-                        queue[tail++] = n;
+                        if (visited.get(n) || score[n] < thresh) continue;
+                        visited.set(n);
+                        queue.add(n);
                     }
                 }
             }
             if (c.area >= minArea) out.add(c);
         }
         return out;
+    }
+
+    /** FIFO ring, reused across components and grown only for the live frontier. */
+    private static final class PixelQueue {
+        private final int maxCapacity;
+        private int[] data;
+        private int head, tail, size;
+
+        PixelQueue(int maxCapacity) {
+            this.maxCapacity = maxCapacity;
+            data = new int[Math.min(256, maxCapacity)];
+        }
+
+        boolean isEmpty() { return size == 0; }
+
+        void add(int pixel) {
+            if (size == data.length) {
+                // Every pixel is enqueued at most once, so growth cannot exceed the map.
+                int capacity = (int) Math.min((long) data.length * 2, maxCapacity);
+                int[] grown = new int[capacity];
+                int first = data.length - head;
+                System.arraycopy(data, head, grown, 0, first);
+                System.arraycopy(data, 0, grown, first, head);
+                data = grown;
+                head = 0;
+                tail = size;
+            }
+            data[tail] = pixel;
+            if (++tail == data.length) tail = 0;
+            size++;
+        }
+
+        int remove() {
+            int pixel = data[head];
+            if (++head == data.length) head = 0;
+            size--;
+            return pixel;
+        }
     }
 
     /**
