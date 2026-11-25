@@ -768,7 +768,10 @@ public class TelemetryDataCollector {
         }
 
         // Gearbox: gear mode (every poll — changes on shift)
-        if (gearboxDevice != null
+        if (diLink5) {
+            applyDiLink5Gear();
+            gearMode = lastGearMode;
+        } else if (gearboxDevice != null
                 && getGearboxAutoModeTypeMethod != null) {
             try {
                 int candidate =
@@ -1085,6 +1088,27 @@ public class TelemetryDataCollector {
         if (speedSourceInvalidated) {
             lastAccelValid = false;
             lastBrakeValid = false;
+        }
+    }
+
+    /**
+     * DI5: the gearbox-device getter used on other platforms does not report a gear here (on a
+     * Sealion 7 the overlay stayed on its initial P through R, N and D while GearMonitor and the
+     * vehicle HAL saw every shift), so take GearMonitor's fresh DI5 sample, with the time its
+     * source observed it. No fresh sample means the gear is unknown, never the last value held.
+     */
+    private void applyDiLink5Gear() {
+        com.overdrive.app.monitor.GearMonitor.GearSample sample = null;
+        try {
+            sample = com.overdrive.app.monitor.GearMonitor.getInstance().getFreshSample();
+        } catch (Throwable ignored) {
+        }
+        if (sample != null && isValidGearMode(sample.gear)) {
+            lastGearMode = sample.gear;
+            lastGearValid = true;
+            lastGearReadElapsedRealtimeMs = sample.observedAtElapsedMs;
+        } else {
+            lastGearValid = false;
         }
     }
 

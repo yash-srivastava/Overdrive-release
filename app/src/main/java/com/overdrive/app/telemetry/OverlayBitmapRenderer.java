@@ -565,8 +565,15 @@ public class OverlayBitmapRenderer {
                 break;
             case GEAR:
                 if (canText) {
-                    gearPaint.setColor(getGearColorForDarkBg(snap.gearMode));
-                    c.drawText(String.valueOf(snap.getGearChar()), x, 54, gearPaint);
+                    // DI5: an unknown gear is drawn as a gray dash, like an unknown speed,
+                    // instead of burning in the collector's initial P.
+                    if (isUnknownOnDiLink5(snap.gearValid, snap.gearReadElapsedRealtimeMs, snap)) {
+                        gearPaint.setColor(STALE_COLOR);
+                        c.drawText("-", x, 54, gearPaint);
+                    } else {
+                        gearPaint.setColor(getGearColorForDarkBg(snap.gearMode));
+                        c.drawText(String.valueOf(snap.getGearChar()), x, 54, gearPaint);
+                    }
                 }
                 break;
             case BRAKE_PEDAL: {
