@@ -1068,9 +1068,6 @@ public class GpuDownscaler {
     
     private void initDirectFbo() {
         try {
-            DirectRgbReadback.Mode mode = DirectReadbackDiagnostics.readMode();
-            // Reserve CPU arrays before creating or mapping any PBOs.
-            DirectRgbReadback readback = new DirectRgbReadback(WIDTH, HEIGHT, mode);
             // Reuse the program if initSyncFbo already compiled it. Both
             // paths use the same vertex+fragment shader source, so a second
             // compile here would just leak the first program object.
@@ -1117,6 +1114,10 @@ public class GpuDownscaler {
                 logger.error("Direct FBO incomplete: " + status);
                 return;
             }
+
+            DirectRgbReadback.Mode mode = DirectReadbackDiagnostics.readMode();
+            // Reserve CPU arrays before creating or mapping any PBOs.
+            DirectRgbReadback readback = new DirectRgbReadback(WIDTH, HEIGHT, mode);
 
             // GL version probe (one-shot). PBO + fence-sync require GLES 3.
             String glVer = GLES20.glGetString(GLES20.GL_VERSION);
