@@ -31,6 +31,7 @@ class DiLink5HostedProjectionService : Service() {
         val view: SurfaceView,
         val callback: SurfaceHolder.Callback,
         val bridge: IBinder,
+        val sealion7Hdmi: Boolean,
     )
 
     private val overlays = HashMap<Long, Overlay>()
@@ -53,6 +54,7 @@ class DiLink5HostedProjectionService : Service() {
                 release(
                     intent.getLongExtra(DiLink5HostedProjectionBridge.EXTRA_GENERATION, -1L),
                     intent.extras?.getBinder(DiLink5HostedProjectionBridge.EXTRA_BRIDGE),
+                    intent.getBooleanExtra(DiLink5HostedProjectionBridge.EXTRA_SEALION7_HDMI, false),
                 )
         }
         if (overlays.isEmpty()) stopSelfResult(startId)
@@ -258,7 +260,7 @@ class DiLink5HostedProjectionService : Service() {
                 }
             }
         }
-        overlays[generation] = Overlay(generation, windowManager, view, callback, bridge)
+        overlays[generation] = Overlay(generation, windowManager, view, callback, bridge, sealion7Hdmi)
         try {
             windowManager.addView(view, params)
         } catch (error: Throwable) {
@@ -280,9 +282,21 @@ class DiLink5HostedProjectionService : Service() {
         return overlayGranted && eligibleId == displayId
     }
 
-    private fun release(generation: Long, bridgeOverride: IBinder? = null): Boolean {
+    private fun release(
+        generation: Long,
+        bridgeOverride: IBinder? = null,
+        sealion7Hdmi: Boolean = false,
+    ): Boolean {
         val overlay = overlays[generation]
-        val bridge = overlay?.bridge ?: bridgeOverride
+        // A restarted daemon can reclaim a Sealion overlay whose original bridge died.
+        // Only an explicit release delivered through the protected service supplies a new bridge.
+        val bridge = if (overlay == null ||
+            (sealion7Hdmi && overlay.sealion7Hdmi && !overlay.bridge.isBinderAlive)
+        ) {
+            bridgeOverride
+        } else {
+            overlay.bridge
+        }
         val overlayReleased = RetriableHostedResources.release(overlays, generation) { current ->
             try { current.view.holder.removeCallback(current.callback) } catch (_: Throwable) {}
             try {

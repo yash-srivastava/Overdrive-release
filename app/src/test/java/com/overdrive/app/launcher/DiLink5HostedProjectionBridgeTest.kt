@@ -18,6 +18,24 @@ import java.util.concurrent.atomic.AtomicReference
 
 class DiLink5HostedProjectionBridgeTest {
     @Test
+    fun onlyOptedInShellStartsThroughTheDaemonAndFallsBackOnceOnNull() {
+        fun check(optedIn: Boolean, uid: Int, shellResult: String?, expectedCalls: List<String>) {
+            val calls = mutableListOf<String>()
+            val result = HostedProjectionBoundary.startService(optedIn, uid,
+                asShell = { calls.add("shell"); shellResult },
+                fromContext = { calls.add("context"); "context" },
+            )
+            assertEquals(expectedCalls, calls)
+            assertEquals(expectedCalls.last(), result)
+        }
+        check(true, 2000, "shell", listOf("shell"))
+        check(true, 2000, null, listOf("shell", "context"))
+        check(false, 2000, "shell", listOf("context"))
+        check(true, 10001, "shell", listOf("context"))
+        check(true, 0, "shell", listOf("context"))
+    }
+
+    @Test
     fun confirmedProbeReturnsTheSelectedCoordinatesAndRejectsIncompleteOrOffPanelFrames() {
         fun decode(vararg coordinates: Int) = HostedProjectionBoundary.mapBoundsFromProbe(coordinates, 1920, 720)
         assertEquals(HostedProjectionGeometry.Bounds(640, 220, 1280, 500), decode(640, 220, 1280, 500))

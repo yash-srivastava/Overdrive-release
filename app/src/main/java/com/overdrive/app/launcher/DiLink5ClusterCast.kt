@@ -562,7 +562,9 @@ object DiLink5ClusterCast {
                 if (live?.usesHdmiPanel == true) {
                     val context = CameraDaemon.getAppContext()
                     if (context == null || !hdmiPanelReady(context, live)) {
-                        DiLink5HostedProjectionBridge.withdrawMapArea(live.hostedResourceGeneration)
+                        DiLink5HostedProjectionBridge.withdrawMapArea(
+                            live.hostedResourceGeneration, live.sealion7Hdmi,
+                        )
                         lastFailureReason = "The active cluster map area is no longer confirmed"
                         return null
                     }
@@ -1019,7 +1021,7 @@ object DiLink5ClusterCast {
         if (live.usesHdmiPanel) {
             val context = CameraDaemon.getAppContext() ?: return false
             if (!hdmiPanelReady(context, live)) {
-                DiLink5HostedProjectionBridge.withdrawMapArea(live.hostedResourceGeneration)
+                DiLink5HostedProjectionBridge.withdrawMapArea(live.hostedResourceGeneration, live.sealion7Hdmi)
                 return false
             }
             return commit && isLiveSession(live) &&
@@ -2426,7 +2428,9 @@ object DiLink5ClusterCast {
             }
             if (!isCurrent(expectedGeneration, pkg)) {
                 if (projectionTarget.hostedResourceGeneration > 0 &&
-                    DiLink5HostedProjectionBridge.release(projectionTarget.hostedResourceGeneration)) {
+                    DiLink5HostedProjectionBridge.release(
+                        projectionTarget.hostedResourceGeneration, projectionTarget.sealion7Hdmi,
+                    )) {
                     DiLink5ProjectionOwnership.clear(
                         projectionTarget.hostedResourceGeneration, true, readCurrentBootId()
                     )
@@ -3392,7 +3396,9 @@ object DiLink5ClusterCast {
             while (isCurrent(live.generation, live.pkg) && session === live) {
                 if (!hdmiPanelReady(context, live)) {
                     if (isCurrent(live.generation, live.pkg) && session === live) {
-                        DiLink5HostedProjectionBridge.withdrawMapArea(live.hostedResourceGeneration)
+                        DiLink5HostedProjectionBridge.withdrawMapArea(
+                            live.hostedResourceGeneration, live.sealion7Hdmi,
+                        )
                     }
                     return@Thread
                 }
@@ -4190,7 +4196,7 @@ object DiLink5ClusterCast {
     private fun releaseHostedResource(resourceGeneration: Long): Boolean {
         val owned = DiLink5ProjectionOwnership.load(resourceGeneration)
         if (owned != null && !ClusterAppDensity.restoreForOwnedHostedDisplay(owned)) return false
-        if (!DiLink5HostedProjectionBridge.release(resourceGeneration)) return false
+        if (!DiLink5HostedProjectionBridge.release(resourceGeneration, owned?.sealion7Hdmi == true)) return false
         return clearHostedOwnershipIfPresent(resourceGeneration)
     }
 
@@ -4740,7 +4746,7 @@ object DiLink5ClusterCast {
                     virtualDisplayName = late.virtualDisplayName,
                 ))
             }
-            val released = DiLink5HostedProjectionBridge.release(expectedGeneration) &&
+            val released = DiLink5HostedProjectionBridge.release(expectedGeneration, direct.sealion7Hdmi) &&
                 clearHostedOwnershipIfPresent(expectedGeneration)
             if (released) {
                 synchronized(stateLock) {
@@ -4758,7 +4764,7 @@ object DiLink5ClusterCast {
             if (direct.sealion7Hdmi) {
                 logger.warn("Sealion 7 hosted create generation=$expectedGeneration could not obtain a live surface")
             }
-            val released = DiLink5HostedProjectionBridge.release(expectedGeneration) &&
+            val released = DiLink5HostedProjectionBridge.release(expectedGeneration, direct.sealion7Hdmi) &&
                 DiLink5ProjectionOwnership.clear(expectedGeneration, true, readCurrentBootId())
             if (released) {
                 synchronized(stateLock) {
@@ -4775,7 +4781,7 @@ object DiLink5ClusterCast {
             virtualDisplayName = hosted.virtualDisplayName
         )
         if (!DiLink5ProjectionOwnership.persist(allocatedOwner)) {
-            val released = DiLink5HostedProjectionBridge.release(expectedGeneration) &&
+            val released = DiLink5HostedProjectionBridge.release(expectedGeneration, direct.sealion7Hdmi) &&
                 clearHostedOwnershipIfPresent(expectedGeneration)
             if (released) {
                 synchronized(stateLock) {
@@ -4836,7 +4842,8 @@ object DiLink5ClusterCast {
             densityOwned = false,
             freeformOwned = false,
             compositorOwned = poweredGeneration == generation || enableIndeterminateGeneration == generation,
-            uncertain = uncertain
+            uncertain = uncertain,
+            sealion7Hdmi = target.sealion7Hdmi,
         )
     }
 
