@@ -24,6 +24,7 @@ BYD.map = {
     userPosition: null,
     isInitialized: false,
     distanceLabel: null,
+    _routeState: null,
     
     // Default center (will be updated with car position)
     DEFAULT_ZOOM: 18,
@@ -273,8 +274,11 @@ BYD.map = {
         
         this.carPosition = { lat, lng, heading, speed };
         
-        // Update marker position
-        this.carMarker.setLatLng([lat, lng]);
+        // Leaflet fires move events and updates marker DOM even for identical fixes.
+        const markerPosition = this.carMarker.getLatLng();
+        if (markerPosition.lat !== lat || markerPosition.lng !== lng) {
+            this.carMarker.setLatLng([lat, lng]);
+        }
         
         // Rotate car icon based on heading and add glow class
         const wrapper = document.getElementById('carIconWrapper');
@@ -390,49 +394,62 @@ BYD.map = {
     drawRoute() {
         if (!this.map || !this.userPosition || !this._hasCarPosition()) return;
         
-        // Remove existing route and label
-        if (this.routeLine) {
-            this.map.removeLayer(this.routeLine);
+        const { lat: userLat, lng: userLng } = this.userPosition;
+        const { lat: carLat, lng: carLng } = this.carPosition;
+        const previous = this._routeState;
+        const moved = !previous || previous.userLat !== userLat || previous.userLng !== userLng
+            || previous.carLat !== carLat || previous.carLng !== carLng;
+
+        // Keep Leaflet layers attached. Rebuilding them on every status poll
+        // churns SVG/DOM nodes, even when the parked car has not moved.
+        if (!this.routeLine) {
+            this.routeLine = L.polyline([[userLat, userLng], [carLat, carLng]], {
+                color: '#00D4AA',
+                weight: 3,
+                opacity: 0.7,
+                dashArray: '10, 10'
+            }).addTo(this.map);
+        } else if (moved) {
+            this.routeLine.setLatLngs([[userLat, userLng], [carLat, carLng]]);
         }
-        if (this.distanceLabel) {
-            this.map.removeLayer(this.distanceLabel);
-        }
-        
-        // Draw simple line (for full routing, would need routing service)
-        this.routeLine = L.polyline([
-            [this.userPosition.lat, this.userPosition.lng],
-            [this.carPosition.lat, this.carPosition.lng]
-        ], {
-            color: '#00D4AA',
-            weight: 3,
-            opacity: 0.7,
-            dashArray: '10, 10'
-        }).addTo(this.map);
-        
-        // Calculate distance
-        const distance = this.calculateDistance(
-            this.userPosition.lat, this.userPosition.lng,
-            this.carPosition.lat, this.carPosition.lng
-        );
-        
-        // Calculate midpoint for label
-        const midLat = (this.userPosition.lat + this.carPosition.lat) / 2;
-        const midLng = (this.userPosition.lng + this.carPosition.lng) / 2;
-        
-        // Add distance label on the line
+
+        const distance = moved ? this.calculateDistance(userLat, userLng, carLat, carLng)
+            : previous.distance;
+        // Format even on an unchanged fix: the user's distance units can change.
         const distanceText = this.formatDistance(distance);
-        this.distanceLabel = L.marker([midLat, midLng], {
-            icon: L.divIcon({
+        const textChanged = !previous || previous.text !== distanceText;
+        const newLabel = !this.distanceLabel;
+        if (newLabel || textChanged) {
+            const icon = L.divIcon({
                 className: 'distance-label',
                 html: `<div class="distance-label-content">${distanceText}</div>`,
                 iconSize: [80, 24],
                 iconAnchor: [40, 12]
-            })
-        }).addTo(this.map);
-        
-        // Update distance display
+            });
+            if (newLabel) {
+                this.distanceLabel = L.marker([(userLat + carLat) / 2, (userLng + carLng) / 2], {
+                    icon: icon
+                }).addTo(this.map);
+            } else {
+                this.distanceLabel.setIcon(icon);
+            }
+        }
+        if (moved && !newLabel) {
+            // The marker's constructor already positions a newly created label.
+            // Compare the midpoint to avoid redundant marker moves.
+            const midLat = (userLat + carLat) / 2;
+            const midLng = (userLng + carLng) / 2;
+            const midpoint = this.distanceLabel.getLatLng();
+            if (midpoint.lat !== midLat || midpoint.lng !== midLng) {
+                this.distanceLabel.setLatLng([midLat, midLng]);
+            }
+        }
+        if (moved || textChanged) {
+            this._routeState = { userLat, userLng, carLat, carLng, distance, text: distanceText };
+        }
+
         const distanceEl = document.getElementById('distanceToCar');
-        if (distanceEl) {
+        if (distanceEl && distanceEl.textContent !== distanceText) {
             distanceEl.textContent = distanceText;
         }
     },
@@ -624,6 +641,9 @@ BYD.map = {
             this.map.remove();
             this.map = null;
         }
+        this.routeLine = null;
+        this.distanceLabel = null;
+        this._routeState = null;
         this.isInitialized = false;
     }
 };

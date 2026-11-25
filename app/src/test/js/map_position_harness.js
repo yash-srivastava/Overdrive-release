@@ -71,3 +71,113 @@ const cases = [
 ];
 cases.forEach(args => exercise(...args));
 console.log('map_position_harness: ' + cases.length + ' scenarios passed');
+
+// A stationary status stream must not churn Leaflet layers or recalculate
+// distance. Moving either endpoint must still update the existing layers.
+function exerciseRouteLifecycle() {
+    const counts = { lines: 0, labels: 0, icons: 0, adds: 0, removes: 0,
+        lineMoves: 0, labelMoves: 0, carMoves: 0, iconUpdates: 0, distances: 0, textWrites: 0 };
+    let text = '';
+    const distance = {
+        get textContent() { return text; },
+        set textContent(value) { counts.textWrites++; text = value; }
+    };
+    const wrapper = { style: {}, classList: { add() {} } };
+    function marker(point, options, moveCounter) {
+        let pos = { lat: point[0], lng: point[1] };
+        return {
+            options,
+            addTo() { counts.adds++; return this; },
+            getLatLng() { return pos; },
+            setLatLng(next) { counts[moveCounter]++; pos = { lat: next[0], lng: next[1] }; return this; },
+            setIcon(icon) { counts.iconUpdates++; this.options.icon = icon; return this; }
+        };
+    }
+    const BYD = { units: { mode: 'km', dist: km => (km / 1.609344).toFixed(1) + ' mi' } };
+    const sandbox = {
+        BYD, window: { BYD },
+        document: {
+            getElementById: id => id === 'distanceToCar' ? distance : id === 'carIconWrapper' ? wrapper : null,
+            querySelector: () => null
+        },
+        L: {
+            polyline(points, options) {
+                counts.lines++;
+                return { points, options, addTo() { counts.adds++; return this; },
+                    setLatLngs(next) { counts.lineMoves++; this.points = next; return this; } };
+            },
+            marker(point, options) { counts.labels++; return marker(point, options, 'labelMoves'); },
+            divIcon(options) { counts.icons++; return options; }
+        },
+        clearTimeout() {}
+    };
+    vm.runInNewContext(src, sandbox, { filename: 'map.js' });
+    const map = BYD.map;
+    const makeMap = () => ({ removeLayer() { counts.removes++; }, remove() {}, setView() {}, panTo() {} });
+    map.map = makeMap();
+    map.carMarker = marker([0, 0], {}, 'carMoves');
+    map.userPosition = { lat: 1, lng: 2 };
+    map.followCar = false;
+    const calculate = map.calculateDistance;
+    map.calculateDistance = function (...args) { counts.distances++; return calculate.apply(this, args); };
+    for (let i = 0; i < 720; i++) map.updateCarPosition(1.01, 2.01, i % 360, 0);
+    assert.deepStrictEqual(counts, { lines: 1, labels: 1, icons: 1, adds: 2, removes: 0,
+        lineMoves: 0, labelMoves: 0, carMoves: 1, iconUpdates: 0, distances: 1, textWrites: 1 });
+    assert.strictEqual(wrapper.style.transform, 'rotate(359deg)');
+    const line = map.routeLine, label = map.distanceLabel;
+    const metricText = text;
+    BYD.units.mode = 'mi';
+    map.drawRoute();
+    assert.notStrictEqual(text, metricText);
+    assert.strictEqual(counts.distances, 1);
+    assert.strictEqual(counts.iconUpdates, 1);
+    assert.strictEqual(counts.lineMoves, 0);
+    assert.strictEqual(counts.labelMoves, 0);
+    assert.ok(label.options.icon.html.includes(text));
+    map.updateCarPosition(1.02, 2.03, 42, 0);
+    assert.strictEqual(map.routeLine, line);
+    assert.strictEqual(map.distanceLabel, label);
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(line.points)), [[1, 2], [1.02, 2.03]]);
+    assert.deepStrictEqual(label.getLatLng(), { lat: (1 + 1.02) / 2, lng: (2 + 2.03) / 2 });
+    assert.strictEqual(counts.lineMoves, 1);
+    assert.strictEqual(counts.labelMoves, 1);
+    assert.strictEqual(counts.distances, 2);
+    assert.strictEqual(counts.carMoves, 2);
+    // User-only movement follows the same update path.
+    map.userPosition = { lat: 1.03, lng: 2.04 };
+    map.drawRoute();
+    assert.strictEqual(counts.lineMoves, 2);
+    assert.strictEqual(counts.labelMoves, 2);
+    assert.strictEqual(counts.distances, 3);
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(line.points)), [[1.03, 2.04], [1.02, 2.03]]);
+    // Same rounded text after a tiny movement should not rebuild the icon.
+    const iconsBefore = counts.icons, textBefore = text;
+    map.updateCarPosition(1.020000001, 2.03, 42, 0);
+    assert.strictEqual(text, textBefore);
+    assert.strictEqual(counts.icons, iconsBefore);
+    assert.strictEqual(counts.lineMoves, 3);
+    // Invalid position retains existing route (existing behavior).
+    map.carPosition = { lat: 0, lng: 0 };
+    map.drawRoute();
+    assert.strictEqual(counts.lineMoves, 3);
+    map.carPosition = { lat: 1.04, lng: 2.05 };
+    map.drawRoute();
+    assert.strictEqual(counts.lineMoves, 4);
+    assert.strictEqual(counts.removes, 0);
+    // Replacing the external distance element must still paint the current text.
+    text = '';
+    map.drawRoute();
+    assert.ok(text);
+    map.destroy();
+    assert.strictEqual(map.routeLine, null);
+    assert.strictEqual(map.distanceLabel, null);
+    assert.strictEqual(map._routeState, null);
+    map.map = makeMap();
+    map.drawRoute();
+    assert.notStrictEqual(map.routeLine, line);
+    assert.notStrictEqual(map.distanceLabel, label);
+    assert.strictEqual(counts.lines, 2);
+    assert.strictEqual(counts.labels, 2);
+    console.log('map_position_harness: route lifecycle and 720 stationary polls passed');
+}
+exerciseRouteLifecycle();
