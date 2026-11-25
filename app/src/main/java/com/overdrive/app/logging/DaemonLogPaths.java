@@ -1,6 +1,7 @@
 package com.overdrive.app.logging;
 
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -100,13 +101,13 @@ public final class DaemonLogPaths {
     /** @return diagnostic guidance for a daemon key, or null if unknown. */
     public static LogDescription descriptionFor(String key) {
         if (key == null) return null;
-        return DESCRIPTIONS.get(key.trim().toLowerCase());
+        return DESCRIPTIONS.get(key.trim().toLowerCase(Locale.ROOT));
     }
 
     /** @return the log path for a daemon key, or null if unknown. */
     public static String pathFor(String key) {
         if (key == null) return null;
-        return PATHS.get(key.trim().toLowerCase());
+        return PATHS.get(key.trim().toLowerCase(Locale.ROOT));
     }
 
     /** Stable, ordered set of known daemon keys. */
