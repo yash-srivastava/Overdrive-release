@@ -5107,6 +5107,25 @@ public class BydDataCollector {
         return BydVehicleData.UNAVAILABLE;
     }
 
+    /**
+     * The cluster's resettable trip meter ("since zeroing", BYD's second trip next to the current journey) in km,
+     * or NaN when the car does not answer. The register's live meaning is unverified on every platform, so callers
+     * must treat a value outside 0..odometer as absent.
+     */
+    public double readMileageAfterZeroingKmNow() {
+        if (statisticDevice == null || isDiLink5Vehicle() || isDiLink5BridgeConsumer()) return Double.NaN;
+        try {
+            Object raw = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_MILEAGE_AFTER_ZEROING, Double.class);
+            if (raw == null) return Double.NaN;
+            double v = BydDeviceHelper.getDoubleValue(raw);
+            if (Double.isNaN(v) || v < 0 || v > 2_000_000) return Double.NaN;
+            return v * distanceToKmFactor;
+        } catch (Throwable t) {
+            logger.debug("readMileageAfterZeroingKmNow error: " + t.getMessage());
+            return Double.NaN;
+        }
+    }
+
     private int readLegacyInt(Object device, String getter, int min, int max) {
         if (device == null || isDiLink5Vehicle() || isDiLink5BridgeConsumer()) {
             return BydVehicleData.UNAVAILABLE;
