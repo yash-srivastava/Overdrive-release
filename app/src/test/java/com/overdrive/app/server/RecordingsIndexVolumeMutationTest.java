@@ -91,6 +91,33 @@ public class RecordingsIndexVolumeMutationTest {
         }
     }
 
+    @Test
+    public void watchedStateIsSharedButDoesNotFollowAReplacement() throws Exception {
+        RecordingsIndex index = newIndex("watched");
+        Path dir = Files.createTempDirectory("recordings-watched");
+        File file = write(dir.resolve("event_20260810_120000.mp4"));
+        assertTrue(index.upsert(file));
+        RecordingsIndex.Filter filter = new RecordingsIndex.Filter();
+        JSONObject before = index.queryRecordings(filter, 10, 0).get(0);
+        String id = before.getString("id");
+        long size = before.getLong("size");
+        long mtime = before.getLong("mp4Mtime");
+        assertFalse(before.getBoolean("watched"));
+        assertTrue(index.markWatched(id, size, mtime));
+        assertTrue(index.queryRecordings(filter, 10, 0).get(0).getBoolean("watched"));
+
+        // Same path/id but a different physical clip must start unwatched.
+        Files.write(file.toPath(), "replacement video".getBytes(StandardCharsets.UTF_8));
+        assertTrue(index.upsert(file));
+        JSONObject replacement = index.queryRecordings(filter, 10, 0).get(0);
+        assertEquals(id, replacement.getString("id"));
+        assertFalse(replacement.getBoolean("watched"));
+        assertFalse(index.markWatched(id, size, mtime));
+        assertTrue(index.markWatched(id, replacement.getLong("size"),
+                replacement.getLong("mp4Mtime")));
+        assertTrue(index.queryRecordings(filter, 10, 0).get(0).getBoolean("watched"));
+    }
+
     private RecordingsIndex newIndex(String name) throws Exception {
         Class.forName("org.h2.Driver");
         connection = DriverManager.getConnection(
