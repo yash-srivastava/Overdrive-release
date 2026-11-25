@@ -70,6 +70,41 @@ public class SdCardFormatterBehaviorTest {
                         "SD card changed before format; operation blocked."));
     }
 
+    // Disk records read from a BYD100F (New E2): internal SD reader and a USB stick.
+    private static final String SD_READER = "/sys//devices/platform/soc/a800000.ssusb/a800000.dwc3/"
+            + "xhci-hcd.2.auto/usb3/3-1/3-1.4/3-1.4:1.0/host0/target0:0:0/0:0:0:0/block/sda";
+    private static final String USB_STICK = "/sys//devices/platform/soc/a600000.ssusb/a600000.dwc3/"
+            + "xhci-hcd.1.auto/usb1/1-1/1-1:1.0/host1/target1:0:0/1:0:0:0/block/sdb";
+
+    @Test public void voldSdDiskIsBoundToItsReaderPortAndExactSize() {
+        String sd = SdCardFormatter.voldSlotFingerprint(5, SD_READER, 256355860480L, "Generic- ");
+        assertEquals("vold-sd:/sys/devices/platform/soc/a800000.ssusb/a800000.dwc3/"
+                + "xhci-hcd.2.auto/usb3/3-1/3-1.4/3-1.4:1.0|256355860480|Generic-", sd);
+        // Detection order can rename sda to sdb; the reader port is what identifies the slot.
+        assertEquals(sd, SdCardFormatter.voldSlotFingerprint(5,
+                SD_READER.replace("host0/target0:0:0/0:0:0:0/block/sda", "host2/target2:0:0/2:0:0:0/block/sdb"),
+                256355860480L, "Generic-"));
+        // A different card in the same slot has a different size.
+        assertFalse(sd.equals(SdCardFormatter.voldSlotFingerprint(5, SD_READER, 63864569856L, "Generic-")));
+    }
+
+    @Test public void voldFallbackRefusesUsbDisksAndIncompleteRecords() {
+        assertNull(SdCardFormatter.voldSlotFingerprint(9, USB_STICK, 61920509952L, "Kingston"));
+        assertNull(SdCardFormatter.voldSlotFingerprint(4 | 8, SD_READER, 256355860480L, "Generic-"));
+        assertNull(SdCardFormatter.voldSlotFingerprint(5, SD_READER, 0L, "Generic-"));
+        assertNull(SdCardFormatter.voldSlotFingerprint(5, null, 256355860480L, "Generic-"));
+        assertNull(SdCardFormatter.voldSlotFingerprint(5, "/dev/block/sda", 256355860480L, "Generic-"));
+    }
+
+    @Test public void persistentFlagIsReadFromPkgFlagsOnly() {
+        assertTrue(SdCardFormatter.isPersistentPackage("  Package [com.byd.cdr]\n"
+                + "    flags=[ SYSTEM HAS_CODE PERSISTENT ALLOW_CLEAR_USER_DATA ]\n"
+                + "    pkgFlags=[ SYSTEM HAS_CODE PERSISTENT ALLOW_CLEAR_USER_DATA ]\n"));
+        assertFalse(SdCardFormatter.isPersistentPackage(
+                "    pkgFlags=[ SYSTEM HAS_CODE ALLOW_CLEAR_USER_DATA ]\n    persistent=true\n"));
+        assertFalse(SdCardFormatter.isPersistentPackage("Unable to find package: com.byd.cdr\n"));
+    }
+
     @Test public void refusalReasonCodesRemainStable() {
         assertEquals("dilink100_unsupported", SdCardFormatter.reasonCode(
                 "DiLink 100 multi-user removable storage cannot be formatted safely."));

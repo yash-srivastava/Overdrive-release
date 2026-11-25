@@ -91,16 +91,6 @@ public class ExternalStorageApiHandler {
         }
 
         if (path.equals("/api/storage/external/format/target") && method.equals("GET")) {
-            // BYD100F mounts the card for the driver (user 10), not shell/user 0.
-            // Do not report "no card" after attempting an inaccessible StatFs.
-            if (com.overdrive.app.storage.SdCardFormatter.isMultiUserRemovableStorage()) {
-                JSONObject unsupported = new JSONObject();
-                unsupported.put("success", false);
-                unsupported.put("reasonCode", "dilink100_unsupported");
-                unsupported.put("error", "DiLink 100 multi-user removable storage cannot be formatted safely.");
-                sendFormatJson(out, 409, unsupported);
-                return true;
-            }
             com.overdrive.app.storage.SdCardFormatter.Preview preview =
                     com.overdrive.app.storage.SdCardFormatter.getInstance().targetPreview();
             com.overdrive.app.storage.SdCardFormatter.Target target = preview.target;
@@ -152,15 +142,6 @@ public class ExternalStorageApiHandler {
     /** Queue once and answer immediately; the native bridge times out at 10 seconds. */
     private static void formatSdCard(String body, OutputStream out) throws Exception {
         JSONObject response = new JSONObject();
-        // Never parse or queue a format for the driver-user SD mount on BYD100F.
-        // In particular, do not probe StatFs, ps, pm or sm on this platform.
-        if (com.overdrive.app.storage.SdCardFormatter.isMultiUserRemovableStorage()) {
-            response.put("success", false);
-            response.put("reasonCode", "dilink100_unsupported");
-            response.put("error", "DiLink 100 multi-user removable storage cannot be formatted safely.");
-            sendFormatJson(out, 409, response);
-            return;
-        }
         try {
             JSONObject request = new JSONObject(body == null ? "{}" : body);
             if (!request.optBoolean("confirmed", false)

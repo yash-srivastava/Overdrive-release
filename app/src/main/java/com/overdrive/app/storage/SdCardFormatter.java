@@ -1,7 +1,7 @@
 package com.overdrive.app.storage;
 
-import android.os.StatFs;
 import com.overdrive.app.daemon.CameraDaemon;
+import com.overdrive.app.camera.DiLink100Platform;
 import com.overdrive.app.storage.removable.RemovableStorageFs;
 
 import com.overdrive.app.util.ScratchRoot;
@@ -55,11 +55,6 @@ public final class SdCardFormatter {
     // Survives a daemon death after vold unmounted the card or the OEM package was disabled.
     private static final String RECOVERY_MARKER = "overdrive-sd-format-pending";
 
-    /** BYD100F: the card belongs to another Android user; user-0 StatFs, CDR, pm and vold checks are blind. */
-    public static boolean isMultiUserRemovableStorage() {
-        return RemovableStorageFs.isActive();
-    }
-
     public static SdCardFormatter getInstance() { return INSTANCE; }
     private SdCardFormatter() {}
 
@@ -71,8 +66,6 @@ public final class SdCardFormatter {
 
     /** Atomic reservation: two overlapping POSTs cannot queue concurrent erases. */
     public synchronized Job submit(String expectedUuid, String expectedIdentityToken, boolean stopFactoryDvr) {
-        if (isMultiUserRemovableStorage()) return new Job("", "failed",
-                "DiLink 100 multi-user removable storage cannot be formatted safely.");
         if ("running".equals(job.state) || "recovering".equals(job.state)) return job;
         if (marker().exists()) return new Job("", "failed",
                 "Previous format needs mount/DVR recovery. Restart the daemon or inspect the card.");
@@ -117,7 +110,6 @@ public final class SdCardFormatter {
     /** Read-only preview: never takes mountLock (a slow sm would stall mounts). Cached
      *  30 s per card path; the format worker re-identifies under the mount lock. */
     public Preview targetPreview() {
-        if (isMultiUserRemovableStorage()) return new Preview(null, "dilink100_unsupported");
         if (marker().exists()) return new Preview(null, "recovery");
         if ("running".equals(job.state) || "recovering".equals(job.state))
             return new Preview(null, "storage_busy");
@@ -163,8 +155,6 @@ public final class SdCardFormatter {
     }
 
     private Result format(String expectedUuid, String expectedIdentityToken, boolean stopFactoryDvr) {
-        if (isMultiUserRemovableStorage()) return new Result(false,
-                "DiLink 100 multi-user removable storage cannot be formatted safely.");
         StorageManager storage = StorageManager.getInstance();
         if (!storage.acquireSdCardFormatLock())
             return new Result(false, "Storage is busy. Try again when SD activity has stopped.");
@@ -215,16 +205,16 @@ public final class SdCardFormatter {
                 return new Result(false, "Cannot save format recovery intent; format blocked.");
             markerSaved = true;
             if (restoreDvr) {
-                Result disabled = command(COMMAND_TIMEOUT_MS, "pm", "disable-user", "--user", "0", "com.byd.cdr");
+                Result disabled = command(COMMAND_TIMEOUT_MS, "sh", "-c", "pm disable-user " + com.overdrive.app.util.ShellUser.flag() + " com.byd.cdr");
                 if (!disabled.success) return new Result(false, "Could not temporarily disable factory DVR: " + disabled.message);
                 // Check the package state as well as the process table. A successful pm
                 // exit alone is not proof that the recorder has been stopped.
-                Result packages = command(COMMAND_TIMEOUT_MS, "pm", "list", "packages", "-d");
+                Result packages = command(COMMAND_TIMEOUT_MS, "sh", "-c", "pm list packages " + com.overdrive.app.util.ShellUser.flag() + " -d");
                 if (!packages.success || !packageListed(packages.message, "com.byd.cdr"))
                     return new Result(false, "Factory DVR disable could not be verified.");
             }
             cdr = checkCdrStopped();
-            if (!cdr.success) return cdr;
+            if (!cdr.success && !(restoreDvr && persistentDvrSurvivesDisable())) return cdr;
             // Best-effort additional coverage for processes readable as shell:
             // descriptors, working dirs, mmaps, and Android's alternate mount roots.
             Result busy = scanAccessibleCardUse(target.uuid);
@@ -341,8 +331,6 @@ public final class SdCardFormatter {
     }
 
     private Preview inspectTarget(StorageManager storage, long timeoutMs) {
-        // Reject before raw StatFs(path), which throws for user-10-only mounts.
-        if (isMultiUserRemovableStorage()) return new Preview(null, "dilink100_unsupported");
         String path = storage.getSdCardPath();
         if (!storage.isSdCardAvailable() || path == null || !path.startsWith("/storage/"))
             return new Preview(null, "no_card");
@@ -361,9 +349,9 @@ public final class SdCardFormatter {
         }
         if (found == null) return new Preview(null, "no_card");
         try {
-            StatFs stat = new StatFs(path);
-            long total = stat.getTotalBytes();
-            long free = stat.getFreeBytes();
+            // A card mounted for another user (BYD100F) is reached through MediaStore.
+            long total = RemovableStorageFs.statFsTotalBytes(path);
+            long free = RemovableStorageFs.statFsFreeBytes(path);
             if (total <= 0 || free < 0 || free > total)
                 return new Preview(null, "storage_busy");
             Target target = new Target(uuid, found.volumeId, total, total - free,
@@ -515,10 +503,16 @@ public final class SdCardFormatter {
         }
     }
 
-    /** Only a kernel MMC CID (32 hex) on an SD-type device authorizes formatting. Shark 6
-     *  labels a lone USB stick SD via sys.byd.isSDExist, and diskseq also identifies USB
-     *  disks, so neither may be a fallback. */
+    /** A kernel MMC CID (32 hex) on an SD-type device authorizes formatting. Shark 6 labels a
+     *  lone USB stick SD via sys.byd.isSDExist, and diskseq also identifies USB disks, so neither
+     *  may be a fallback; only BYD100F falls back to vold's SD disk record (no BYD property). */
     private static String mediaFingerprint(String volumeId) {
+        String cid = mmcFingerprint(volumeId);
+        if (cid != null || !DiLink100Platform.isByd100f()) return cid;
+        return voldSlotFingerprint(volumeId);
+    }
+
+    private static String mmcFingerprint(String volumeId) {
         int[] dev = StorageManager.parsePublicVolumeDevice(volumeId);
         if (dev == null) return null;
         try {
@@ -541,6 +535,55 @@ public final class SdCardFormatter {
             }
         } catch (Exception ignored) { }
         return null;
+    }
+
+    /**
+     * BYD100F: the SD slot is an internal USB card reader, so the kernel has no SD CID. vold
+     * still flags that disk SD (a USB stick is flagged USB). Bind to the only such disk by its
+     * reader port and exact size; a swap mid-format to an identical card is out of scope.
+     */
+    private static String voldSlotFingerprint(String volumeId) {
+        try {
+            android.os.IBinder binder = (android.os.IBinder) Class.forName("android.os.ServiceManager")
+                    .getMethod("getService", String.class).invoke(null, "mount");
+            Object sm = Class.forName("android.os.storage.IStorageManager$Stub")
+                    .getMethod("asInterface", android.os.IBinder.class).invoke(null, binder);
+            String diskId = null;
+            for (Object v : (Object[]) sm.getClass().getMethod("getVolumes", int.class).invoke(sm, 0)) {
+                if (!volumeId.equals(v.getClass().getField("id").get(v))) continue;
+                // VolumeInfo keeps the whole DiskInfo, not its id.
+                Object disk = v.getClass().getMethod("getDisk").invoke(v);
+                if (disk != null) diskId = (String) disk.getClass().getField("id").get(disk);
+            }
+            if (diskId == null) return null;
+            String found = null;
+            int sdDisks = 0;
+            for (Object d : (Object[]) sm.getClass().getMethod("getDisks").invoke(sm)) {
+                Class<?> c = d.getClass();
+                int flags = c.getField("flags").getInt(d);
+                String fingerprint = voldSlotFingerprint(flags, (String) c.getField("sysPath").get(d),
+                        c.getField("size").getLong(d), (String) c.getField("label").get(d));
+                if (fingerprint == null) continue;
+                sdDisks++;
+                if (diskId.equals(c.getField("id").get(d))) found = fingerprint;
+            }
+            if (sdDisks != 1) log("vold reports " + sdDisks + " SD disks; media identity refused");
+            return sdDisks == 1 ? found : null;
+        } catch (Throwable e) {
+            log("vold disk identity unavailable: " + e);
+            return null;
+        }
+    }
+
+    /** DiskInfo FLAG_SD (4) without FLAG_USB (8), on a real device path, with a known size. */
+    static String voldSlotFingerprint(int flags, String sysPath, long size, String label) {
+        if ((flags & 4) == 0 || (flags & 8) != 0 || size <= 0 || sysPath == null) return null;
+        String path = sysPath.replaceAll("/+", "/");
+        if (!path.startsWith("/sys/devices/")) return null;
+        // The block name (sda/sdb) follows detection order; the reader's port does not.
+        int host = path.indexOf("/host");
+        String port = host > 0 ? path.substring(0, host) : path;
+        return "vold-sd:" + port + "|" + size + "|" + (label == null ? "" : label.trim());
     }
 
     static boolean isValidMmcCid(String cid) {
@@ -567,13 +610,33 @@ public final class SdCardFormatter {
         if (!marker().delete() && marker().exists()) log("could not clear format recovery journal");
     }
 
+    /**
+     * BYD100F runs com.byd.cdr as a persistent system app, which Android keeps alive after a
+     * disable. Disabled, it starts no new recording, and vold's unmount closes its card files.
+     */
+    private boolean persistentDvrSurvivesDisable() {
+        if (!DiLink100Platform.isByd100f()) return false;
+        Result info = command(COMMAND_TIMEOUT_MS, "dumpsys", "package", "com.byd.cdr");
+        boolean persistent = info.success && isPersistentPackage(info.message);
+        log("factory DVR still running after disable; persistent=" + persistent);
+        return persistent;
+    }
+
+    static boolean isPersistentPackage(String dumpsys) {
+        for (String line : dumpsys.split("\n")) {
+            String t = line.trim();
+            if (t.startsWith("pkgFlags=[") && t.contains(" PERSISTENT ")) return true;
+        }
+        return false;
+    }
+
     private boolean restoreFactoryDvr() {
-        Result enabled = command(COMMAND_TIMEOUT_MS, "pm", "enable", "com.byd.cdr");
-        Result listed = command(COMMAND_TIMEOUT_MS, "pm", "list", "packages", "-d");
+        Result enabled = command(COMMAND_TIMEOUT_MS, "sh", "-c", "pm enable " + com.overdrive.app.util.ShellUser.flag() + " com.byd.cdr");
+        Result listed = command(COMMAND_TIMEOUT_MS, "sh", "-c", "pm list packages " + com.overdrive.app.util.ShellUser.flag() + " -d");
         // Older DiLink builds reject `pm list packages -a`. A successful
         // `pm path` proves the enabled APK remains installed; -d proves the
         // package is no longer disabled for the current user.
-        Result path = command(COMMAND_TIMEOUT_MS, "pm", "path", "com.byd.cdr");
+        Result path = command(COMMAND_TIMEOUT_MS, "sh", "-c", "pm path " + com.overdrive.app.util.ShellUser.flag() + " com.byd.cdr");
         return enabled.success && listed.success && path.success
                 && isFactoryDvrRestored(listed.message, path.message);
     }
@@ -601,12 +664,6 @@ public final class SdCardFormatter {
 
     /** Called at daemon boot irrespective of which categories use SD. Never repeats format. */
     public synchronized void recoverAtDaemonStart() {
-        if (isMultiUserRemovableStorage()) {
-            // A journal from an older version needs manual inspection: user-0
-            // sm mount and CDR control cannot recover the driver user's card.
-            if (marker().exists()) log("DiLink 100 journal requires manual recovery; no user-0 mount attempted");
-            return;
-        }
         if ("running".equals(job.state) || !marker().exists()) return;
         job = new Job("", "recovering", "Recovering mount after interrupted SD format.");
         worker.execute(() -> {
