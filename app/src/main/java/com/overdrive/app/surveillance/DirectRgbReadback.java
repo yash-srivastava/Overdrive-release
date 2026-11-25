@@ -7,6 +7,9 @@ import java.util.Arrays;
 final class DirectRgbReadback {
     enum Mode { JAVA, NATIVE, VERIFY }
 
+    // NATIVE compares its first frames with Java; a mismatch falls back for this lane.
+    static final int NATIVE_SELF_CHECK_FRAMES = 30;
+
     interface NativePacker {
         boolean pack(ByteBuffer rgba, byte[] rgb);
     }
@@ -19,6 +22,7 @@ final class DirectRgbReadback {
     private boolean copied;
     private boolean packed;
     private boolean nativeDisabled;
+    private int selfCheckFrames;
     private boolean lastNative;
     private boolean lastCompared;
     private boolean lastMismatch;
@@ -31,8 +35,8 @@ final class DirectRgbReadback {
     DirectRgbReadback(int width, int height, Mode mode, NativePacker nativePacker) {
         packer = new RgbaReadback(width, height);
         this.nativePacker = nativePacker == null ? packer::tryNativePack : nativePacker;
-        // Native is opt-in until the on-device comparison is available.
         this.mode = mode == null ? Mode.JAVA : mode;
+        selfCheckFrames = this.mode == Mode.NATIVE ? NATIVE_SELF_CHECK_FRAMES : 0;
         published = new byte[width * height * 3];
         packer.reserveScratch();
         if (this.mode != Mode.JAVA) staging = new byte[published.length];
@@ -41,7 +45,7 @@ final class DirectRgbReadback {
     void prepare(ByteBuffer rgba) {
         copied = false;
         packed = false;
-        if (mode == Mode.VERIFY && !nativeDisabled) {
+        if ((mode == Mode.VERIFY || selfCheckFrames > 0) && !nativeDisabled) {
             copied = packer.copyRgba(rgba);
             if (!copied) return;
         }
@@ -62,6 +66,7 @@ final class DirectRgbReadback {
                 if (copied) {
                     packer.packCopied(published);
                     lastCompared = true;
+                    if (selfCheckFrames > 0) selfCheckFrames--;
                     if (!Arrays.equals(published, staging)) {
                         // Publish the reference, not the bad native result.
                         lastMismatch = true;

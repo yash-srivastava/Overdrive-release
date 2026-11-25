@@ -895,7 +895,13 @@ public class GpuDownscaler {
     public byte[] readPixelsDirect(int cameraTextureId) {
         if (!directInitialized) initDirectFbo();
         if (!directInitialized) return null;
-        if (directDiagnostics == null) return readPixelsDirectFrame(cameraTextureId);
+        if (directDiagnostics == null) {
+            byte[] frame = readPixelsDirectFrame(cameraTextureId);
+            if (frame != null && directReadback != null && directReadback.lastMismatch()) {
+                logger.warn("Fast AI frame copy differed from the standard copy; using the standard copy");
+            }
+            return frame;
+        }
         long start = System.nanoTime();
         byte[] result = readPixelsDirectFrame(cameraTextureId);
         long elapsed = System.nanoTime() - start;
@@ -1115,7 +1121,10 @@ public class GpuDownscaler {
                 return;
             }
 
-            DirectRgbReadback.Mode mode = DirectReadbackDiagnostics.readMode();
+            // The debug property overrides the Camera probe setting and adds timing logs.
+            DirectRgbReadback.Mode override = DirectReadbackDiagnostics.readMode();
+            DirectRgbReadback.Mode mode = override != null ? override
+                    : DirectReadbackDiagnostics.configuredMode();
             // Reserve CPU arrays before creating or mapping any PBOs.
             DirectRgbReadback readback = new DirectRgbReadback(WIDTH, HEIGHT, mode);
 
@@ -1142,8 +1151,9 @@ public class GpuDownscaler {
             }
 
             directReadback = readback;
-            directDiagnostics = mode == null ? null : new DirectReadbackDiagnostics(mode,
+            directDiagnostics = override == null ? null : new DirectReadbackDiagnostics(override,
                     directGles3Available, WIDTH, HEIGHT);
+            logger.info("AI frame copy: " + mode + (override != null ? " (debug property)" : ""));
 
             if (vertexBuffer == null) vertexBuffer = GlUtil.createFloatBuffer(VERTEX_COORDS);
             if (texCoordBuffer == null) texCoordBuffer = GlUtil.createFloatBuffer(TEX_COORDS);

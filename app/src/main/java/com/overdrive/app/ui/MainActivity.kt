@@ -2947,7 +2947,9 @@ open class MainActivity : AppCompatActivity() {
         // DiLink 3) and what the running pipeline uses ("cpu"/"gpu"/"") + why.
         val recordingEngineCpu: Boolean,
         val recordingEngineActive: String,
-        val recordingEngineWhy: String
+        val recordingEngineWhy: String,
+        // camera.fastAiFrameCopy (default on): native copy of the AI lane's frames.
+        val fastAiFrameCopy: Boolean
     )
 
     /**
@@ -3098,7 +3100,9 @@ open class MainActivity : AppCompatActivity() {
                 decoupledEncoderLaneEnabled = decoupledEncoderLaneEnabled,
                 recordingEngineCpu = recordingEngineCpu,
                 recordingEngineActive = config.optString("recordingEngineActive", ""),
-                recordingEngineWhy = config.optString("recordingEngineWhy", "")
+                recordingEngineWhy = config.optString("recordingEngineWhy", ""),
+                fastAiFrameCopy = com.overdrive.app.camera.CameraConfigResolver
+                    .isFastAiFrameCopyEnabled()
             )
         } catch (e: Exception) {
             logsViewModel.error("Camera", "Failed to load camera mapping state: ${e.message}")
@@ -3893,6 +3897,43 @@ open class MainActivity : AppCompatActivity() {
                             (switchView as? android.widget.CompoundButton)?.isChecked = !checked
                         } finally {
                             recordingEngineReverting.set(false)
+                        }
+                        Toast.makeText(
+                            this,
+                            getString(R.string.toast_failed_to_save_short),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+            }.start()
+        }
+
+        // AI frame copy: same write-through and camera restart as the engine switch.
+        val fastAiCopySwitch = dialogView.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(R.id.swFastAiFrameCopy)
+        fastAiCopySwitch?.isChecked = state.fastAiFrameCopy
+        val fastAiCopyReverting = java.util.concurrent.atomic.AtomicBoolean(false)
+        fastAiCopySwitch?.setOnCheckedChangeListener { switchView, checked ->
+            if (fastAiCopyReverting.get()) return@setOnCheckedChangeListener
+            switchView.isEnabled = false
+            Thread {
+                val ok = try {
+                    com.overdrive.app.camera.CameraConfigResolver.saveFastAiFrameCopy(checked)
+                } catch (e: Exception) {
+                    logsViewModel.error("Camera", "Failed to save fastAiFrameCopy: ${e.message}")
+                    false
+                }
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    if (ok) {
+                        restartCameraDaemonForCameraSettings()
+                        dialog.dismiss()
+                    } else {
+                        switchView.isEnabled = true
+                        fastAiCopyReverting.set(true)
+                        try {
+                            (switchView as? android.widget.CompoundButton)?.isChecked = !checked
+                        } finally {
+                            fastAiCopyReverting.set(false)
                         }
                         Toast.makeText(
                             this,

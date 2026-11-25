@@ -43,6 +43,12 @@ final class DirectReadbackDiagnostics {
         }
     }
 
+    /** The Camera probe setting: NATIVE unless the user switched fast copy off. */
+    static DirectRgbReadback.Mode configuredMode() {
+        return com.overdrive.app.camera.CameraConfigResolver.isFastAiFrameCopyEnabled()
+                ? DirectRgbReadback.Mode.NATIVE : DirectRgbReadback.Mode.JAVA;
+    }
+
     DirectReadbackDiagnostics(DirectRgbReadback.Mode mode, boolean pbo, int width, int height) {
         this.mode = mode;
         this.pbo = pbo;
