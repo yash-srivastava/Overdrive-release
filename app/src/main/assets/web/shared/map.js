@@ -376,11 +376,19 @@ BYD.map = {
         );
     },
     
+    // Match the GPS no-location sentinel without rejecting valid zero-degree coordinates.
+    _hasCarPosition() {
+        const { lat, lng } = this.carPosition;
+        return Number.isFinite(lat) && Number.isFinite(lng)
+            && Math.abs(lat) <= 90 && Math.abs(lng) <= 180
+            && (lat !== 0 || lng !== 0);
+    },
+
     /**
      * Draw route line from user to car
      */
     drawRoute() {
-        if (!this.map || !this.userPosition || !this.carPosition.lat) return;
+        if (!this.map || !this.userPosition || !this._hasCarPosition()) return;
         
         // Remove existing route and label
         if (this.routeLine) {
@@ -437,7 +445,7 @@ BYD.map = {
         
         const bounds = [];
         
-        if (this.carPosition.lat) {
+        if (this._hasCarPosition()) {
             bounds.push([this.carPosition.lat, this.carPosition.lng]);
         }
         
@@ -456,7 +464,7 @@ BYD.map = {
      * Center map on car
      */
     centerOnCar() {
-        if (!this.map || !this.carPosition.lat) return;
+        if (!this.map || !this._hasCarPosition()) return;
         this.map.setView([this.carPosition.lat, this.carPosition.lng], this.DEFAULT_ZOOM);
         this._setFollow(true);
     },
@@ -483,7 +491,7 @@ BYD.map = {
     resumeFollow(panNow = true) {
         this._clearFollowTimer();
         this._setFollow(true);
-        if (!this.map || !this.carPosition.lat) return;
+        if (!this.map || !this._hasCarPosition()) return;
         this._lastFollowLatLng = [this.carPosition.lat, this.carPosition.lng];
         if (panNow) this.map.panTo(this._lastFollowLatLng);
     },
@@ -559,7 +567,7 @@ BYD.map = {
      * Open Google Maps with directions to car
      */
     openDirections() {
-        if (!this.carPosition.lat) {
+        if (!this._hasCarPosition()) {
             BYD.utils && BYD.utils.toast(
                 BYD.i18n.t('map.car_location_unavailable') || 'Car location not available', 'error');
             return;
