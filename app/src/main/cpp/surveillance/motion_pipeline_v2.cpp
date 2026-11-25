@@ -5,6 +5,7 @@
  */
 
 #include "motion_pipeline_v2.h"
+#include "motion_flow_sad.h"
 #include <jni.h>
 #include <android/log.h>
 
@@ -649,7 +650,7 @@ static float stage4b_flowCoherence(
         // invariant across the ~169 search positions below, so recomputing them
         // each time would 169× the luma loads. 8×8 = 64 samples max.
         const int SPB = V2_BLOCK_SIZE / 4;  // samples per block axis (8)
-        int curSamp[SPB * SPB];
+        uint8_t curSamp[SPB * SPB];
         int n = 0, sampleSum = 0;
         for (int y = 0; y < patchHeight; y += 4) {
             for (int x = 0; x < V2_BLOCK_SIZE; x += 4) {
@@ -669,50 +670,15 @@ static float stage4b_flowCoherence(
         // ~64 samples; require average per-sample deviation ≥ 6 luma.
         if (texture < sampleCount * 6) continue;
 
-        // Lazy per-block reference-luma cache (stored as luma+1; 0 = unsampled).
-        // SAD values and scan/tie order are unchanged.
-        const int CACHE_STRIDE = V2_BLOCK_SIZE + 2 * V2_FLOW_SEARCH_RADIUS;
-        uint16_t referenceLumaCache[CACHE_STRIDE * CACHE_STRIDE] = {};
-
-        // Integer SAD block-match over the ±R window (stride-4 grayscale),
-        // matching the cached current samples against the N-3 reference.
-        long bestSad = -1;
-        int bestDx = 0, bestDy = 0;
-        // SAD is a sum of nonnegative differences. Once a candidate reaches
-        // the current best, the remaining samples cannot improve it. Preserve
-        // the strict-less-than tie rule and original scan order so the flow
-        // vector and downstream threat decisions remain unchanged.
-        for (int dy = -V2_FLOW_SEARCH_RADIUS;
-                dy <= V2_FLOW_SEARCH_RADIUS && bestSad != 0; dy++) {
-            for (int dx = -V2_FLOW_SEARCH_RADIUS;
-                    dx <= V2_FLOW_SEARCH_RADIUS && bestSad != 0; dx++) {
-                long sad = 0;
-                int si = 0;
-                bool canImprove = true;
-                for (int y = 0; y < patchHeight && canImprove; y += 4) {
-                    for (int x = 0; x < V2_BLOCK_SIZE; x += 4) {
-                        int cacheIdx = (y + dy + V2_FLOW_SEARCH_RADIUS) * CACHE_STRIDE
-                                + x + dx + V2_FLOW_SEARCH_RADIUS;
-                        uint16_t refPlusOne = referenceLumaCache[cacheIdx];
-                        if (refPlusOne == 0) {
-                            refPlusOne = static_cast<uint16_t>(1 + lumaAt(
-                                    reference, x0 + x + dx, y0 + y + dy));
-                            referenceLumaCache[cacheIdx] = refPlusOne;
-                        }
-                        sad += std::abs(curSamp[si++] - (static_cast<int>(refPlusOne) - 1));
-                        if (bestSad >= 0 && sad >= bestSad) {
-                            canImprove = false;
-                            break;
-                        }
-                    }
-                }
-                if (canImprove && (bestSad < 0 || sad < bestSad)) {
-                    bestSad = sad;
-                    bestDx = dx;
-                    bestDy = dy;
-                }
-            }
-        }
+        // Search the same candidates with the same luma samples, batching
+        // eight SAD terms at a time and caching complete reference rows.
+        static_assert(V2_BLOCK_SIZE == 32, "Flow SAD expects eight stride-4 samples");
+        const uint8_t* searchOrigin = reference +
+                ((y0 - V2_FLOW_SEARCH_RADIUS) * V2_QUADRANT_WIDTH +
+                 x0 - V2_FLOW_SEARCH_RADIUS) * V2_BYTES_PER_PIXEL;
+        int bestDx, bestDy;
+        motion_flow::bestDisplacement<V2_FLOW_SEARCH_RADIUS>(curSamp, searchOrigin,
+                V2_QUADRANT_WIDTH * V2_BYTES_PER_PIXEL, patchHeight, bestDx, bestDy);
 
         netX += bestDx;
         netY += bestDy;
@@ -834,7 +800,7 @@ static int stage5_behaviorClassification(
 
 static void processQuadrant(
     QuadrantState* qs,
-    const uint8_t* quadrantRgb,
+    const uint8_t* mosaic, int mosaicW, int mosaicH,
     const PipelineConfigV2* config,
     QuadrantResultV2* result,
     int quadrantIdx,
@@ -850,15 +816,19 @@ static void processQuadrant(
 
     if (!qs->enabled) return;
 
+    // Extract straight into the next history slot. It is distinct from the
+    // N-3 reference and stays immutable throughout this quadrant's processing.
+    static_assert(V2_COMPARE_OFFSET > 0 && V2_COMPARE_OFFSET < V2_FRAME_HISTORY,
+                  "Current and reference history slots must be distinct");
+    int histIdx = qs->historyIndex;
+    uint8_t* quadrantRgb = qs->frameHistory[histIdx];
+    extractQuadrant(mosaic, mosaicW, mosaicH, quadrantIdx, quadrantRgb);
+
     // --- Stage 1: Brightness check ---
     float meanLuma = 0;
     bool suppressed = stage1_brightnessCheck(qs, quadrantRgb, config, &meanLuma);
     result->meanLuma = meanLuma;
     result->brightnessSuppressed = suppressed;
-    
-    // Store current frame in ring buffer
-    int histIdx = qs->historyIndex;
-    memcpy(qs->frameHistory[histIdx], quadrantRgb, V2_QUADRANT_SIZE);
     
     // First few frames: fill history, skip detection
     if (qs->historyCount < V2_FRAME_HISTORY) {
@@ -1317,9 +1287,6 @@ void v2_processFrame(
     
     state->frameCount++;
     
-    // Temporary buffer for extracted quadrant
-    uint8_t quadrantBuf[V2_QUADRANT_SIZE];
-    
     // ========================================================================
     // PASS 1: Global Illumination Sync (Spillover Hallucination Prevention)
     //
@@ -1392,11 +1359,9 @@ void v2_processFrame(
             continue;
         }
         
-        // Extract quadrant from mosaic
-        extractQuadrant(frame, width, height, q, quadrantBuf);
-        
-        // Process through all stages
-        processQuadrant(&state->quadrants[q], quadrantBuf, config, &results[q], q, state->frameCount);
+        // Process through all stages, extracting directly into history.
+        processQuadrant(&state->quadrants[q], frame, width, height,
+                        config, &results[q], q, state->frameCount);
     }
     
     // Periodic stats log
