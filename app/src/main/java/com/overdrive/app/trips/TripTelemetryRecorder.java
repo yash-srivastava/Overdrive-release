@@ -25,7 +25,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.zip.GZIPOutputStream;
 
 /**
  * Captures 5Hz telemetry by reading from existing singleton monitors.
@@ -1371,17 +1370,10 @@ public class TripTelemetryRecorder {
     private void writeGzippedChunk(List<TelemetrySample> samples) throws IOException {
         if (outputFile == null) return;
 
-        // Build JSON-lines content
-        StringBuilder sb = new StringBuilder();
-        for (TelemetrySample sample : samples) {
-            sb.append(sample.toJson().toString()).append('\n');
-        }
-
-        // Gzip the content
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        try (GZIPOutputStream gzos = new GZIPOutputStream(baos)) {
-            gzos.write(sb.toString().getBytes("UTF-8"));
-        }
+        // Finish one compressed member before touching the journal, without
+        // staging the complete uncompressed JSON or UTF-8 byte array for large chunks.
+        ByteArrayOutputStream baos = TripJournalChunk.encode(samples,
+                sample -> sample.toJson().toString());
 
         // Re-resolve target file if its directory has gone away mid-trip.
         // We migrate any partial bytes from the stale path to the live one so
