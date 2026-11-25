@@ -79,12 +79,19 @@ object UnifiedConfigManager {
     //                    snapshot — even with ext4 second-granular mtime or a
     //                    skewed RTC (BYD head units boot with a wrong clock).
     //
-    // Hardcoded app-private path (UCM is a Context-free singleton object). Must
-    // match the application's package — Context.filesDir resolves here.
+    // App-private path without a Context (UCM is a singleton object): Context.filesDir
+    // of the user the app runs in. /data/data is user 0's, which DiLink 100 (app in
+    // user 10) cannot reach.
     private const val APP_PACKAGE = "com.overdrive.app"
-    private const val APP_PRIVATE_DIR = "/data/data/$APP_PACKAGE/files"
-    private const val APP_PRIVATE_BAK_PATH = "$APP_PRIVATE_DIR/overdrive_config.json.bak"
-    private const val APP_PRIVATE_BAK_LOCK_PATH = "$APP_PRIVATE_BAK_PATH.lock"
+    private val APP_PRIVATE_DIR = appPrivateDir()
+    private val APP_PRIVATE_BAK_PATH = "$APP_PRIVATE_DIR/overdrive_config.json.bak"
+    private val APP_PRIVATE_BAK_LOCK_PATH = "$APP_PRIVATE_BAK_PATH.lock"
+
+    private fun appPrivateDir(): String = try {
+        "/data/user/${android.os.Process.myUid() / 100000}/$APP_PACKAGE/files"
+    } catch (_: Throwable) {
+        "/data/data/$APP_PACKAGE/files"
+    }
     private const val DIRECTORY_SYNC_ATTEMPTS = 3
     // Monotonic write sequence. Absent (legacy configs) reads as 0; saveConfig
     // bumps it. Stripped from backup bundles (see ConfigBackupService) so an
