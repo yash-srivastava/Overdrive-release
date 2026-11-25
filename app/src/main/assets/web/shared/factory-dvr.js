@@ -3,6 +3,7 @@
     'use strict';
     var list, status, player, panel, playing, refresh;
     var busy = false;
+    var playbackGeneration = 0;
     function t(key, fallback, vars) {
         var value = BYD.i18n.t('factory_dvr.' + key, vars);
         return value === 'factory_dvr.' + key ? fallback : value;
@@ -13,6 +14,8 @@
         return '/api/factory-dvr/file?id=' + encodeURIComponent(id) + (download ? '&download=1' : '');
     }
     function stopPlayer() {
+        // Stopping or replacing a clip invalidates any pending play promise.
+        playbackGeneration++;
         player.pause();
         player.removeAttribute('src');
         player.load();
@@ -20,11 +23,13 @@
     }
     function play(clip) {
         stopPlayer();
+        var generation = playbackGeneration;
         playing.textContent = clip.relativePath;
         panel.style.display = 'block';
         player.src = url(clip.id, false);
         var started = player.play();
         if (started && typeof started.catch === 'function') started.catch(function () {
+            if (generation !== playbackGeneration) return;
             setStatus(t('play_failed', 'Playback failed or the format is unsupported.'));
         });
         panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
