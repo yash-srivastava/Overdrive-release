@@ -308,6 +308,30 @@ class DiLink5HostedProjectionBridgeTest {
             10001, "com.android.shell", 2000, 2000, "com.android.shell"))
     }
 
+    @Test fun frameworkAttributionIsSpecificToTheSealion7ShellDisplayContext() {
+        fun accepted(
+            opPackage: String?,
+            sealion7Hdmi: Boolean = true,
+            processUid: Int = 2000,
+            packageName: String = "com.android.shell",
+            contextUid: Int = 2000,
+            installedUid: Int = 2000,
+        ) = HostedProjectionBoundary.shellIdentityAccepted(
+            processUid, packageName, contextUid, installedUid, opPackage, sealion7Hdmi,
+        )
+
+        assertTrue(accepted("android"))
+        assertFalse(accepted("android", sealion7Hdmi = false))
+        assertTrue(accepted("com.android.shell"))
+        assertTrue(accepted("com.android.shell", sealion7Hdmi = false))
+        assertFalse(accepted(null))
+        assertFalse(accepted("com.overdrive.app"))
+        assertFalse(accepted("android", processUid = 1000))
+        assertFalse(accepted("android", packageName = "android"))
+        assertFalse(accepted("android", contextUid = 1000))
+        assertFalse(accepted("android", installedUid = 1000))
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun permissionCommandRefusesAUserSuppliedPackage() {
         HostedProjectionBoundary.projectionAppOpCommand(

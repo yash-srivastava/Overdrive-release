@@ -511,7 +511,7 @@ object DiLink5HostedProjectionBridge {
         )
 
     /**
-     * Only the exact private display created by our verified shell identity qualifies. A failed
+     * Only the exact hosted display created by our verified shell identity qualifies. A failed
      * query or an inventory without the default display cannot be used as disappearance proof.
      */
     @JvmStatic
@@ -523,7 +523,10 @@ object DiLink5HostedProjectionBridge {
             ownership.bootId.isEmpty()
         ) return null
         val daemonContext = context ?: return null
-        val shell = shellDisplayContext(daemonContext) ?: return null
+        val shell = shellDisplayContext(
+            daemonContext,
+            sealion7Hdmi = ownership.sealion7Hdmi && Sealion7HdmiProjection.isTestedFirmware(),
+        ) ?: return null
         return try {
             val manager = shell.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
                 ?: return null
@@ -566,8 +569,8 @@ object DiLink5HostedProjectionBridge {
                 return null
             }
         }
-        val displayContext = shellDisplayContext(daemonContext)
-        val manager = displayContext?.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
+        val displayContext = shellDisplayContext(daemonContext, ticket.sealion7Geometry != null, diagnostic) ?: return null
+        val manager = displayContext.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
         if (manager == null) {
             diagnostic?.let { logger.warn("$it could not obtain the shell display manager") }
             return null
@@ -633,8 +636,12 @@ object DiLink5HostedProjectionBridge {
         }
     }
 
-    private fun shellDisplayContext(base: Context): Context? {
-        if (android.os.Process.myUid() != SHELL_UID) return null
+    private fun shellDisplayContext(base: Context, sealion7Hdmi: Boolean, diagnostic: String? = null): Context? {
+        val uid = android.os.Process.myUid()
+        if (uid != SHELL_UID) {
+            diagnostic?.let { logger.warn("$it rejected display context: process UID=$uid") }
+            return null
+        }
         return try {
             val shell = base.createPackageContext(
                 SHELL_PACKAGE,
@@ -643,16 +650,22 @@ object DiLink5HostedProjectionBridge {
             val app = shell.applicationInfo
             val installed = shell.packageManager.getApplicationInfo(SHELL_PACKAGE, 0)
             val opPackage = Context::class.java.getMethod("getOpPackageName").invoke(shell) as? String
-            shell.takeIf {
-                HostedProjectionBoundary.shellIdentityAccepted(
-                    android.os.Process.myUid(),
-                    it.packageName,
-                    app.uid,
-                    installed.uid,
-                    opPackage,
-                )
+            val packageName = shell.packageName
+            val accepted = HostedProjectionBoundary.shellIdentityAccepted(
+                uid, packageName, app.uid, installed.uid, opPackage, sealion7Hdmi,
+            )
+            diagnostic?.let {
+                val attribution = when (opPackage) {
+                    SHELL_PACKAGE, "android" -> opPackage
+                    null -> "missing"
+                    else -> "other"
+                }
+                logger.info("$it display context accepted=$accepted shellPackage=${packageName == SHELL_PACKAGE} " +
+                    "contextUid=${app.uid} installedUid=${installed.uid} opPackage=$attribution")
             }
-        } catch (_: Throwable) {
+            shell.takeIf { accepted }
+        } catch (error: Throwable) {
+            diagnostic?.let { logger.warn("$it display context lookup failed: ${hostedProjectionFailure(error)}") }
             null
         }
     }
@@ -902,8 +915,11 @@ internal object HostedProjectionBoundary {
         applicationUid: Int,
         installedUid: Int,
         opPackageName: String?,
+        sealion7Hdmi: Boolean = false,
     ): Boolean = processUid == 2000 && packageName == "com.android.shell" &&
-        applicationUid == 2000 && installedUid == 2000 && opPackageName == "com.android.shell"
+        applicationUid == 2000 && installedUid == 2000 &&
+        // The tested Sealion 7 firmware attributes this shell display context to the framework.
+        (opPackageName == "com.android.shell" || (sealion7Hdmi && opPackageName == "android"))
 }
 
 /** Removes a resource from its owner map only after release is confirmed. */
