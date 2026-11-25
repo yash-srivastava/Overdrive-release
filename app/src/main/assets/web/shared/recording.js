@@ -181,6 +181,7 @@ BYD.recording = {
             // dirty, refreshes only the overcommit banner (which writes no control).
             // Gating here as well would leave a dirty page's banner stale forever.
             this.reloadConfig();
+            if (this.hasUnsavedChanges) this.refreshCodecAvailability();
             // Skip 2 of every 3 ticks while the recordings index is down
             // (10s → 30s effective) so a permanently-down index doesn't get
             // polled 6×/min for as long as the page stays open.
@@ -275,6 +276,7 @@ BYD.recording = {
             const resp = await fetch('/api/settings/quality');
             const data = await resp.json();
             if (data.success) {
+                this.renderCodecAvailability(data.codecAvailability, data.recordingCodecRuntime);
                 // Check if config actually changed (via timestamp)
                 const newTimestamp = data.lastModified || 0;
                 // Mid-flight guard: this block writes config + re-baselines
@@ -443,6 +445,7 @@ BYD.recording = {
             const resp = await fetch('/api/settings/quality');
             const data = await resp.json();
             if (data.success) {
+                this.renderCodecAvailability(data.codecAvailability, data.recordingCodecRuntime);
                 // New unified tier (ECONOMY/STANDARD/HIGH/PREMIUM/MAX).
                 // STANDARD is the post-migration default; legacy
                 // LOW/REDUCED/NORMAL silently map upstream.
@@ -1596,6 +1599,56 @@ BYD.recording = {
         this.markChanged();
     },
 
+    // Capability metadata is advisory and stays outside the editable config.
+    async refreshCodecAvailability() {
+        if (document.hidden || !document.getElementById('codecAvailabilityNote') || this._codecRefreshPending) return;
+        this._codecRefreshPending = true;
+        try {
+            const response = await fetch('/api/settings/quality');
+            if (response.ok) {
+                const data = await response.json();
+                if (data.success) this.renderCodecAvailability(data.codecAvailability, data.recordingCodecRuntime);
+            }
+        } catch (e) { /* best-effort advisory */ }
+        finally { this._codecRefreshPending = false; }
+    },
+
+    renderCodecAvailability(availability, runtime) {
+        const note = document.getElementById('codecAvailabilityNote');
+        if (!note) return;
+        const translate = (key, fallback) => {
+            const value = BYD.i18n && BYD.i18n.t && BYD.i18n.t(key);
+            return value && value !== key ? value : fallback;
+        };
+        const runtimeNote = document.getElementById('codecRuntimeNote');
+        if (runtimeNote) {
+            const codec = runtime && runtime.codec;
+            const message = codec === 'H264' && runtime.hevcFallback
+                ? translate('recording.codec_runtime_fallback', 'Current encoder output: H.264 (session fallback from H.265).')
+                : codec === 'H264' || codec === 'H265'
+                    ? translate('recording.codec_runtime_output', 'Current encoder output:')
+                        + ' ' + (codec === 'H264' ? 'H.264' : 'H.265')
+                    : '';
+            runtimeNote.hidden = !message;
+            if (runtimeNote.textContent !== message) runtimeNote.textContent = message;
+        }
+        const known = value => value === true || value === false;
+        note.hidden = !availability || (!known(availability.H264) && !known(availability.H265));
+        if (note.hidden) {
+            note.textContent = '';
+            return;
+        }
+        const status = value => value === true
+            ? translate('recording.codec_capability_advertised', 'hardware support advertised')
+            : value === false
+                ? translate('recording.codec_capability_missing', 'preferred encoder does not advertise hardware support')
+                : translate('recording.codec_capability_unknown', 'support unknown');
+        const message = translate('recording.codec_capability_scope',
+            'Saved driving and parked GPU recording settings (not a recording test):')
+            + ' H.264: ' + status(availability.H264) + '; H.265: ' + status(availability.H265);
+        if (note.textContent !== message) note.textContent = message;
+    },
+
     setCodec(codec) {
         this.config.recordingCodec = codec;
         document.querySelectorAll('#codecBtns .btn-toggle').forEach(btn =>
@@ -1647,6 +1700,7 @@ BYD.recording = {
             const r = await fetch('/api/settings/quality');
             if (!r.ok) return;
             const data = await r.json();
+            if (data && data.success) this.renderCodecAvailability(data.codecAvailability, data.recordingCodecRuntime);
             if (data && data.recordingQualityOptions) {
                 this.config.recordingQualityOptions = data.recordingQualityOptions;
                 this.config.qualityOptionsByFps = data.qualityOptionsByFps || null;
