@@ -1874,8 +1874,9 @@ public final class ClusterCast {
             java.util.List<String> cmd = new java.util.ArrayList<>();
             java.util.Collections.addAll(cmd, "am", "start");
             if (restart) cmd.add("-S");
+            int user = com.overdrive.app.util.ShellUser.targetUserId();
+            if (user >= 0) java.util.Collections.addAll(cmd, "--user", String.valueOf(user));
             java.util.Collections.addAll(cmd,
-                "--user", "0",
                 "--display", String.valueOf(displayId),
                 "--windowingMode", WINDOWING_MODE_FULLSCREEN,
                 "-f", LAUNCH_FLAGS,

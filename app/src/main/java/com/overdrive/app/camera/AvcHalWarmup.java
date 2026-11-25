@@ -82,9 +82,7 @@ public class AvcHalWarmup {
      * firmware-specific class. Known BYD images expose AutoVideoActivity;
      * older code incorrectly targeted a non-existent .MainActivity.
      */
-    private static final String[] AVC_LAUNCH_CMD = new String[]{
-        "am", "start",
-        "--user", "0",
+    private static final String[] AVC_LAUNCH_ARGS = new String[]{
         "-a", "android.intent.action.MAIN",
         "-c", "android.intent.category.LAUNCHER",
         "-p", "com.byd.avc",
@@ -95,6 +93,15 @@ public class AvcHalWarmup {
         // tick, and with no NO_ANIMATION it does so with the full window animation.
         "-f", "0x10010000"
     };
+
+    /** {@code am start} for the user that has com.byd.avc (user 10 on BYD100F). */
+    private static String[] avcLaunchCmd() {
+        java.util.List<String> cmd = new java.util.ArrayList<>(java.util.Arrays.asList("am", "start"));
+        int user = com.overdrive.app.util.ShellUser.targetUserId();
+        if (user >= 0) java.util.Collections.addAll(cmd, "--user", String.valueOf(user));
+        cmd.addAll(java.util.Arrays.asList(AVC_LAUNCH_ARGS));
+        return cmd.toArray(new String[0]);
+    }
 
     private volatile Thread keepAliveThread;
     private boolean keepAliveDesired;
@@ -899,7 +906,7 @@ public class AvcHalWarmup {
         // triggers the legacy force-restart escalation a few ticks later).
         Process process = null;
         try {
-            process = Runtime.getRuntime().exec(AVC_LAUNCH_CMD);
+            process = Runtime.getRuntime().exec(avcLaunchCmd());
             boolean finished = process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
             if (!finished) {
                 logger.warn("am start com.byd.avc did not exit within 5s — "
@@ -1062,7 +1069,7 @@ public class AvcHalWarmup {
         }
         Process relaunch = null;
         try {
-            relaunch = Runtime.getRuntime().exec(AVC_LAUNCH_CMD);
+            relaunch = Runtime.getRuntime().exec(avcLaunchCmd());
             if (!relaunch.waitFor(
                     AVC_COMMAND_TIMEOUT_SECONDS,
                     java.util.concurrent.TimeUnit.SECONDS)) {
@@ -1294,7 +1301,7 @@ public class AvcHalWarmup {
         boolean launched = false;
         Process launch = null;
         try {
-            launch = Runtime.getRuntime().exec(AVC_LAUNCH_CMD);
+            launch = Runtime.getRuntime().exec(avcLaunchCmd());
             if (!launch.waitFor(
                     AVC_COMMAND_TIMEOUT_SECONDS,
                     java.util.concurrent.TimeUnit.SECONDS)) {

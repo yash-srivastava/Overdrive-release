@@ -127,7 +127,7 @@ public final class AppLauncher {
             logger.warn("launchOnDisplay: could not resolve component for " + pkg);
             return false;
         }
-        boolean ok = runShell("am start-activity --user 0 --display " + displayId
+        boolean ok = runShell("am start-activity " + com.overdrive.app.util.ShellUser.flag() + " --display " + displayId
                 + " -n " + shellQuote(component));
         logger.info("launchOnDisplay: " + pkg + " → display " + displayId + " (" + component + ") ok=" + ok);
         return ok;
@@ -144,7 +144,7 @@ public final class AppLauncher {
             if (pkg == null || !isValidPackageName(pkg.trim())) return false;
             String normalized = pkg.trim();
             boolean stopped = runShell(
-                    "am force-stop --user 0 " + shellQuote(normalized));
+                    "am force-stop " + com.overdrive.app.util.ShellUser.flag() + " " + shellQuote(normalized));
             logger.info("forceStopPackage: " + normalized + " ok=" + stopped);
             return stopped;
         }
@@ -191,7 +191,7 @@ public final class AppLauncher {
         }
 
         // 1) Intent path via the daemon's app Context (cleanest; no shell).
-        Context ctx = CameraDaemon.getAppContext();
+        Context ctx = com.overdrive.app.util.ShellUser.context(CameraDaemon.getAppContext());
         if (ctx != null) {
             try {
                 PackageManager pm = ctx.getPackageManager();
@@ -306,7 +306,7 @@ public final class AppLauncher {
         // the ONLY thing that works for a cold app. Component is trusted + shell-quoted.
         int existingTask = findTaskId(pkg);
         if (existingTask < 0) {
-            return runShell("am start --user 0 --display 0 --windowingMode "
+            return runShell("am start " + com.overdrive.app.util.ShellUser.flag() + " --display 0 --windowingMode "
                     + WINDOWING_MODE_SPLIT_SCREEN_PRIMARY + " -n " + shellQuote(component));
         }
 
@@ -314,7 +314,7 @@ public final class AppLauncher {
         // then move the app's existing task onto it.
         logger.info("openApp: " + pkg + " already running (task " + existingTask
                 + ") — re-docking via ghost split stack");
-        if (!runShell("am start --user 0 --display 0 --windowingMode "
+        if (!runShell("am start " + com.overdrive.app.util.ShellUser.flag() + " --display 0 --windowingMode "
                 + WINDOWING_MODE_SPLIT_SCREEN_PRIMARY + " -n "
                 + shellQuote(GHOST_COMPONENT))) {
             logger.warn("openApp: ghost split-stack launch failed");
@@ -354,7 +354,7 @@ public final class AppLauncher {
      * stack, so verify the secondary stack and reparent that task when necessary.
      */
     private static boolean dockSplitScreenSecondary(String pkg, String component) {
-        if (!runShell("am start --user 0 --display 0 --windowingMode "
+        if (!runShell("am start " + com.overdrive.app.util.ShellUser.flag() + " --display 0 --windowingMode "
                 + WINDOWING_MODE_SPLIT_SCREEN_SECONDARY + " -n " + shellQuote(component))) {
             return false;
         }
@@ -383,7 +383,7 @@ public final class AppLauncher {
     }
 
     private static int seedSecondarySplitStack() {
-        if (!runShell("am start --user 0 --display 0 --windowingMode "
+        if (!runShell("am start " + com.overdrive.app.util.ShellUser.flag() + " --display 0 --windowingMode "
                 + WINDOWING_MODE_SPLIT_SCREEN_SECONDARY + " -n "
                 + shellQuote(SECONDARY_GHOST_COMPONENT))) {
             return -1;
@@ -799,7 +799,7 @@ public final class AppLauncher {
      */
     public static JSONArray listLaunchableApps() {
         List<JSONObject> apps = new ArrayList<>();
-        Context ctx = CameraDaemon.getAppContext();
+        Context ctx = com.overdrive.app.util.ShellUser.context(CameraDaemon.getAppContext());
         if (ctx != null) {
             try {
                 PackageManager pm = ctx.getPackageManager();
@@ -860,7 +860,7 @@ public final class AppLauncher {
      */
     public static JSONArray listUserLaunchableApps() {
         JSONArray result = new JSONArray();
-        Context context = CameraDaemon.getAppContext();
+        Context context = com.overdrive.app.util.ShellUser.context(CameraDaemon.getAppContext());
         if (context == null) return result;
 
         PackageManager pm = context.getPackageManager();
@@ -912,7 +912,7 @@ public final class AppLauncher {
         if (pkg == null || !pkg.matches("[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+")
                 || "com.overdrive.app".equals(pkg)) return false;
 
-        Context context = CameraDaemon.getAppContext();
+        Context context = com.overdrive.app.util.ShellUser.context(CameraDaemon.getAppContext());
         if (context == null) return false;
 
         PackageManager pm = context.getPackageManager();
@@ -1164,7 +1164,7 @@ public final class AppLauncher {
      * trusted resolver for the projection-aware driver-cluster launch.
      */
     static String resolveLauncherComponent(String pkg) {
-        Context ctx = CameraDaemon.getAppContext();
+        Context ctx = com.overdrive.app.util.ShellUser.context(CameraDaemon.getAppContext());
         if (ctx != null) {
             try {
                 PackageManager pm = ctx.getPackageManager();
