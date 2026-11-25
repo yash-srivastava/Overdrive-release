@@ -97,6 +97,7 @@
                 + ' class="bottom-tab' + (isActive ? ' is-active' : '') + '"'
                 + ' role="tab"'
                 + ' aria-selected="' + (isActive ? 'true' : 'false') + '"'
+                + ' tabindex="' + (isActive ? '0' : '-1') + '"'
                 + ' data-tab-target="' + t.id + '">'
                 +   '<svg class="bottom-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
                 +     (t.svg || '')
@@ -158,6 +159,7 @@
                 for (var k = 0; k < btns.length; k++) {
                     var on = btns[k] === btn;
                     btns[k].setAttribute('aria-selected', on ? 'true' : 'false');
+                    btns[k].tabIndex = on ? 0 : -1;
                     if (on) btns[k].classList.add('is-active');
                     else btns[k].classList.remove('is-active');
                 }
@@ -196,6 +198,23 @@
                 if (document.body) document.body.scrollTop = 0;
                 var pageBody = document.querySelector('.page-body');
                 if (pageBody) pageBody.scrollTop = 0;
+            });
+            btns[i].addEventListener('keydown', function (ev) {
+                if (ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
+                var index = Array.prototype.indexOf.call(btns, ev.currentTarget);
+                var next;
+                if (ev.key === 'Home') next = 0;
+                else if (ev.key === 'End') next = btns.length - 1;
+                else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight') {
+                    // DOM order is visually reversed in RTL layouts.
+                    var step = ev.key === 'ArrowRight' ? 1 : -1;
+                    if (window.getComputedStyle(nav).direction === 'rtl') step = -step;
+                    next = (index + step + btns.length) % btns.length;
+                } else return;
+                ev.preventDefault();
+                // Reuse the click path for visibility, persistence and notifications.
+                btns[next].click();
+                btns[next].focus();
             });
         }
     }
