@@ -255,6 +255,9 @@
         });
     }
 
+    // Relative deadlines must not move when the system clock is corrected.
+    function elapsedNow() { return window.performance.now(); }
+
     function delay(ms) {
         return new Promise(function (resolve) { window.setTimeout(resolve, ms); });
     }
@@ -343,7 +346,7 @@
         listData: null,
         noticeKey: '',
         resultKey: '',
-        readySince: 0,
+        readySince: null,
         notReady: false,
         readyTimer: null,
         recheckTimer: null,
@@ -417,7 +420,7 @@
 
         onShown: function () {
             if (!this.isVisible() || this.loading || this.learning || this.busy || this.readyTimer) return;
-            if (this.data && this.data.ready !== false && Date.now() - this.loadedAt < STALE_MS) return;
+            if (this.data && this.data.ready !== false && elapsedNow() - this.loadedAt < STALE_MS) return;
             this.load();
         },
 
@@ -454,7 +457,7 @@
             }).then(function (data) {
                 // A write that landed meanwhile already applied newer state.
                 if (seq === self.writeSeq || !self.data) self.apply(data);
-                else self.loadedAt = Date.now();
+                else self.loadedAt = elapsedNow();
             }, function () {
                 self.failed = true;
             }).then(function () {
@@ -468,12 +471,12 @@
         waitReady: function () {
             var self = this;
             if (!this.data || this.data.ready !== false) {
-                this.readySince = 0;
+                this.readySince = null;
                 this.notReady = false;
                 return;
             }
-            if (!this.readySince) this.readySince = Date.now();
-            if (Date.now() - this.readySince >= READY_WAIT_MS) {
+            if (this.readySince === null) this.readySince = elapsedNow();
+            if (elapsedNow() - this.readySince >= READY_WAIT_MS) {
                 this.notReady = true;
                 return;
             }
@@ -485,7 +488,7 @@
         },
 
         retryReady: function () {
-            this.readySince = 0;
+            this.readySince = null;
             this.notReady = false;
             this.load();
         },
@@ -501,7 +504,7 @@
 
         apply: function (data, fromLearn) {
             this.data = data;
-            this.loadedAt = Date.now();
+            this.loadedAt = elapsedNow();
             this.failed = false;
             if (typeof data.trips === 'number') {
                 this.tripCount = data.trips;
@@ -614,7 +617,7 @@
             var seq = ++this.writeSeq;
             this.learning = true;
             this.render();
-            var deadline = Date.now() + LEARN_WAIT_MS;
+            var deadline = elapsedNow() + LEARN_WAIT_MS;
             var reload = false;
             request(API + '/learn', {}).then(function (data) {
                 // 202 {learning:true}: still running, so wait for a newer learnedMs.
@@ -644,12 +647,12 @@
             var self = this;
             return delay(LEARN_POLL_MS).then(function () {
                 return self.fetchPayload().then(null, function (error) {
-                    if (Date.now() >= deadline) throw error;
+                    if (elapsedNow() >= deadline) throw error;
                     return null;
                 });
             }).then(function (data) {
                 if (data && (Number(data.learnedMs) || 0) > before) return data;
-                if (Date.now() >= deadline) throw new Error('Not learned');
+                if (elapsedNow() >= deadline) throw new Error('Not learned');
                 return self.awaitLearned(before, deadline);
             });
         },
