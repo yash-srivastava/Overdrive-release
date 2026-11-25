@@ -7,6 +7,7 @@ import android.media.MediaMetadataRetriever;
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.storage.RecordingDirectoryRegistry;
 import com.overdrive.app.storage.StorageManager;
+import com.overdrive.app.util.ScaledVideoFrame;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -641,7 +642,7 @@ public class RecordingsApiHandler {
     
     /**
      * Generate a thumbnail from a video file using MediaMetadataRetriever.
-     * Extracts frame at 1 second mark, scales to 160x90 for efficiency.
+     * Extracts a small still at the 1 second mark, with a 320x180 output.
      */
     private static byte[] generateThumbnail(File videoFile) {
         MediaMetadataRetriever retriever = new MediaMetadataRetriever();
@@ -653,20 +654,22 @@ public class RecordingsApiHandler {
             if (RemovableStorageFs.needsMediaDataSource(videoFile)) RemovableStorageFs.setDataSource(retriever, videoFile);
             else retriever.setDataSource(fis.getFD());
 
-            // Get frame at 1 second (1000000 microseconds)
-            frame = retriever.getFrameAtTime(1000000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+            // Avoid materializing the full-resolution Java bitmap when the decoder
+            // can return a thumbnail directly. Keep the existing zero-time retry.
+            frame = ScaledVideoFrame.get(retriever, 1000000,
+                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 320, 180);
             if (frame == null) {
-                // Try frame at 0 if 1 second fails
-                frame = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+                frame = ScaledVideoFrame.get(retriever, 0,
+                        MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 320, 180);
             }
 
             if (frame == null) {
                 return null;
             }
 
-            // Scale down to thumbnail size (320x180 for 16:9 aspect).
+            // Preserve the existing fixed output dimensions, including non-16:9 clips.
+            // createScaledBitmap returns frame itself when no resize is necessary.
             scaled = Bitmap.createScaledBitmap(frame, 320, 180, true);
-            if (scaled == frame) scaled = scaled.copy(Bitmap.Config.ARGB_8888, false);
             // Raw (player-dewarped) clips get the same lens correction as playback.
             if (scaled != null) {
                 scaled = com.overdrive.app.surveillance.LensTag.dewarpFrameForClip(scaled, videoFile);

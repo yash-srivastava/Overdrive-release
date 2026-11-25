@@ -8,6 +8,7 @@ import android.media.MediaMetadataRetriever;
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.storage.StorageManager;
 import com.overdrive.app.surveillance.LensTag;
+import com.overdrive.app.util.ScaledVideoFrame;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -265,8 +266,8 @@ public final class FrameService {
                 fail(job.clipKey);
                 return FAILED_FRAME;
             }
-            frame = retriever.getFrameAtTime(job.atMs * 1000L,
-                    MediaMetadataRetriever.OPTION_PREVIOUS_SYNC);
+            frame = ScaledVideoFrame.getForWidth(retriever, job.atMs * 1000L,
+                    MediaMetadataRetriever.OPTION_PREVIOUS_SYNC, job.width);
             if (frame == null || frame.getWidth() <= 0 || frame.getHeight() <= 0) {
                 fail(job.key);
                 return FAILED_FRAME;
