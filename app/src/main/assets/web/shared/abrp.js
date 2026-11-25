@@ -118,7 +118,7 @@ const ABRP = {
                 set('abrpMaxInterval', cfg.max_interval_seconds || 120);
                 chk('abrpGateOnApp', cfg.gate_on_app || false);
                 set('abrpAppMode', cfg.app_active_mode || 'foreground');
-                set('abrpAppGrace', cfg.app_grace_seconds || 90);
+                set('abrpAppGrace', this.parseGraceSeconds(cfg.app_grace_seconds));
                 this.onSlider();
                 this.onGateToggle();
                 return true;
@@ -127,6 +127,12 @@ const ABRP = {
             console.warn('[ABRP] Failed to load config:', e);
         }
         return false;
+    },
+
+    // Zero is a valid grace period, not a missing value.
+    parseGraceSeconds(value) {
+        const seconds = parseInt(value, 10);
+        return Number.isNaN(seconds) ? 90 : seconds;
     },
 
     // Human-friendly interval label: 45 -> "45s", 120 -> "2m".
@@ -159,7 +165,7 @@ const ABRP = {
             max_interval_seconds: parseInt(document.getElementById('abrpMaxInterval').value) || 120,
             gate_on_app: document.getElementById('abrpGateOnApp').checked,
             app_active_mode: document.getElementById('abrpAppMode').value,
-            app_grace_seconds: parseInt(document.getElementById('abrpAppGrace').value) || 90
+            app_grace_seconds: this.parseGraceSeconds(document.getElementById('abrpAppGrace').value)
         };
         if (data.max_interval_seconds < data.min_interval_seconds) {
             data.max_interval_seconds = data.min_interval_seconds;
