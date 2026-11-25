@@ -153,7 +153,8 @@
             // aria-label doubles as the tooltip text in the collapsed-rail
             // state (see app-shell.css `.nav-link:hover::after`).
             html += '<a href="' + item.href + '" class="' + cls + '"' + aria
-                +     ' aria-label="' + item.label + '">'
+                +     ' aria-label="' + item.label + '"'
+                +     (item.i18n ? ' data-i18n-attr="aria-label:' + item.i18n + '"' : '') + '>'
                 +   '<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ' + extra + '>'
                 +     item.svg
                 +   '</svg>'
