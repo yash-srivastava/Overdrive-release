@@ -20,12 +20,18 @@ import java.util.concurrent.atomic.AtomicReference
 
 // Framework errors may include Intent, caller or window dumps. Retain only a bounded line
 // and redact dump bodies, paths, addresses, and opaque identifiers.
-private val frameworkErrorDetails = Regex("""\{.*}|\S*[/@]\S*|(?i:\b(?:token|password|secret|deviceid|vin)\s*[:=]\s*\S+)|\b[A-Za-z0-9_-]{16,}\b|\p{Cntrl}""")
+private val frameworkErrorDetails by lazy { Regex("""\{.*\}|\S*[/@]\S*|(?i:\b(?:token|password|secret|deviceid|vin)\s*[:=]\s*\S+)|\b[A-Za-z0-9_-]{16,}\b|\p{Cntrl}""") }
 
 internal fun hostedProjectionFailure(error: Throwable): String {
-    val message = error.message?.lineSequence()?.firstOrNull()
-        ?.replace(frameworkErrorDetails, "[redacted]")?.take(200)?.takeIf { it.isNotBlank() }
-    return "${error.javaClass.simpleName}: ${message ?: "no message"}"
+    val type = error.javaClass.simpleName
+    return try {
+        val message = error.message?.lineSequence()?.firstOrNull()
+            ?.replace(frameworkErrorDetails, "[redacted]")?.take(200)?.takeIf { it.isNotBlank() }
+        "$type: ${message ?: "no message"}"
+    } catch (_: RuntimeException) {
+        // Keep the original failure type even when the platform formatter fails.
+        type
+    }
 }
 
 /** Daemon-side owner of hosted content displays. No service is published on a network. */
@@ -270,6 +276,7 @@ object DiLink5HostedProjectionBridge {
                 if (details != null) logger.info("$diagnostic response code=$resultCode $details")
             }
         }
+        diagnostic?.let { logger.info("$it preparing service request") }
         return try {
             val request = Intent(context, DiLink5HostedProjectionService::class.java)
                 .setAction(ACTION_PROBE_DISPLAY)
@@ -286,7 +293,8 @@ object DiLink5HostedProjectionBridge {
             diagnostic?.let { logger.warn("$it interrupted") }
             Thread.currentThread().interrupt()
             null
-        } catch (_: Throwable) {
+        } catch (error: Throwable) {
+            diagnostic?.let { logger.warn("$it probe failed ${hostedProjectionFailure(error)}") }
             null
         }
     }
@@ -294,11 +302,13 @@ object DiLink5HostedProjectionBridge {
     private fun dispatchService(request: Intent, diagnostic: String?): Boolean {
         val component = try {
             context?.startService(request)
+        } catch (interrupted: InterruptedException) {
+            throw interrupted
         } catch (error: Throwable) {
             diagnostic?.let {
                 logger.warn("$it startService threw uid=${android.os.Process.myUid()} ${hostedProjectionFailure(error)}")
             }
-            throw error
+            return false
         }
         diagnostic?.let {
             if (component == null) logger.warn("$it startService returned null uid=${android.os.Process.myUid()}")
