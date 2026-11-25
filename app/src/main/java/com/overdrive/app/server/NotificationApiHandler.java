@@ -150,11 +150,10 @@ public final class NotificationApiHandler {
         String group = emptyToNull(q.get("group"));
         String severity = emptyToNull(q.get("severity"));
 
-        int pageSize = (int) parseLong(q.get("pageSize"), 20);
-        pageSize = Math.max(1, Math.min(pageSize, 200));
-        int page = (int) parseLong(q.get("page"), 1);
-        page = Math.max(1, page);
-        int offset = (page - 1) * pageSize;
+        LogPagination pagination = new LogPagination(q.get("page"), q.get("pageSize"));
+        int pageSize = pagination.pageSize;
+        int page = pagination.page;
+        int offset = pagination.offset;
 
         // Atomic page+count in one lock acquisition so totalPages can't disagree
         // with the returned rows under a concurrent insert/prune.
@@ -259,6 +258,20 @@ public final class NotificationApiHandler {
     private static long parseLong(String s, long dflt) {
         if (s == null || s.isEmpty()) return dflt;
         try { return Long.parseLong(s.trim()); } catch (Exception e) { return dflt; }
+    }
+
+    /** Normalize the log query before narrowing values to the store's integer API. */
+    static final class LogPagination {
+        final int page;
+        final int pageSize;
+        final int offset;
+
+        LogPagination(String rawPage, String rawPageSize) {
+            pageSize = (int) Math.max(1L, Math.min(parseLong(rawPageSize, 20), 200L));
+            page = (int) Math.max(1L, Math.min(parseLong(rawPage, 1), Integer.MAX_VALUE));
+            // An out-of-range page must remain out of range, not wrap back to recent rows.
+            offset = (int) Math.min((page - 1L) * pageSize, Integer.MAX_VALUE);
+        }
     }
 
     private static String emptyToNull(String s) {
