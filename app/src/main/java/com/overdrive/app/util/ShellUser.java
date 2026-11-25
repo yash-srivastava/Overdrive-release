@@ -29,7 +29,11 @@ public final class ShellUser {
      * daemon on DiLink 100), so package queries see that user's apps. Otherwise unchanged.
      */
     public static android.content.Context context(android.content.Context context) {
-        int user = targetUserId();
+        return context(context, targetUserId());
+    }
+
+    /** {@link #context(android.content.Context)} for a given user, e.g. one recorded earlier. */
+    public static android.content.Context context(android.content.Context context, int user) {
         if (context == null || user < 0 || android.os.Build.VERSION.SDK_INT < 30
                 || user == android.os.Process.myUid() / PER_USER_RANGE) return context;
         try {
