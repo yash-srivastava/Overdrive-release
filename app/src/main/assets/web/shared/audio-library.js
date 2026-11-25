@@ -80,12 +80,15 @@ window.AudioLibrary = (function () {
                 var play = document.createElement('button');
                 play.className = 'btn btn-secondary';
                 play.textContent = tr('automation.audio_preview', 'Preview');
+                // Include the filename when a screen reader announces the action out of row context.
+                play.setAttribute('aria-label', play.textContent + ': ' + s.name);
                 play.onclick = function () { preview(s.name); };
                 ctl.appendChild(play);
 
                 var del = document.createElement('button');
                 del.className = 'btn btn-danger-ghost';
                 del.textContent = tr('automation.audio_delete', 'Delete');
+                del.setAttribute('aria-label', del.textContent + ': ' + s.name);
                 del.onclick = function () { remove(s.name); };
                 ctl.appendChild(del);
 
