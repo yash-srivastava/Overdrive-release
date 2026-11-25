@@ -5267,7 +5267,7 @@ public class AccSentryDaemon {
     private static void saveDriverBrightness(ShellOwnership ownership) {
         java.io.File file = com.overdrive.app.util.ScratchRoot.file(DRIVER_BRIGHTNESS_FILE);
         if (file.exists()) return;
-        ShellResult current = execShellResult("settings get system screen_brightness",
+        ShellResult current = execShellResult("settings " + com.overdrive.app.util.ShellUser.flag() + " get system screen_brightness",
                 DEFAULT_SHELL_TIMEOUT_MS, ownership);
         int value = parseBrightness(current.success ? current.output : null);
         if (value <= 0) return;
@@ -5278,7 +5278,7 @@ public class AccSentryDaemon {
         }
     }
 
-    /** The saved slider level (taken once), 128 only if the panel was left at 0, else no write. */
+    /** The saved slider level, 128 only if the panel was left at 0, else no write. */
     private static Integer brightnessForWake(ShellOwnership ownership) {
         java.io.File file = com.overdrive.app.util.ScratchRoot.file(DRIVER_BRIGHTNESS_FILE);
         if (file.exists()) {
@@ -5287,12 +5287,18 @@ public class AccSentryDaemon {
                 saved = parseBrightness(new String(java.nio.file.Files.readAllBytes(file.toPath()),
                         java.nio.charset.StandardCharsets.UTF_8));
             } catch (Exception ignored) { }
-            if (!file.delete()) log("Could not clear saved driver brightness");
+            // Kept until written back, so a failed restore can retry on the next wake.
             if (saved > 0) return saved;
+            clearSavedDriverBrightness();
         }
-        ShellResult current = execShellResult("settings get system screen_brightness",
+        ShellResult current = execShellResult("settings " + com.overdrive.app.util.ShellUser.flag() + " get system screen_brightness",
                 DEFAULT_SHELL_TIMEOUT_MS, ownership);
         return current.success && parseBrightness(current.output) == 0 ? 128 : null;
+    }
+
+    private static void clearSavedDriverBrightness() {
+        java.io.File file = com.overdrive.app.util.ScratchRoot.file(DRIVER_BRIGHTNESS_FILE);
+        if (file.exists() && !file.delete()) log("Could not clear saved driver brightness");
     }
 
     static int parseBrightness(String text) {
@@ -5456,11 +5462,12 @@ public class AccSentryDaemon {
         if (!on) saveDriverBrightness(ownership);
         if (brightness != null) {
             ShellResult brightnessResult = execShellResult(
-                    "settings put system screen_brightness " + brightness,
+                    "settings " + com.overdrive.app.util.ShellUser.flag() + " put system screen_brightness " + brightness,
                     DEFAULT_SHELL_TIMEOUT_MS, ownership);
             if (!brightnessResult.success) {
                 return false;
             }
+            if (on) clearSavedDriverBrightness();
         }
         if (on) {
             ShellResult keyResult = execShellResult(
