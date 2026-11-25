@@ -24,6 +24,7 @@
     'use strict';
     var STORAGE_KEY = 'overdrive_theme';
     var DEFAULT_THEME = 'dark';
+    var themeSelectedLocally = false;
 
     // Direction has to be on <html> before the stylesheet, same as the theme.
     // core.js only sets dir after the language file arrives, so every Hebrew
@@ -249,12 +250,13 @@
     // truth there; syncing the web preference would let it flicker over
     // the app's value on the next data-theme stamp).
     function syncWithServer() {
-        if (IN_APP_WEBVIEW) return;
+        if (IN_APP_WEBVIEW || themeSelectedLocally) return;
         try {
             fetch('/api/settings/appearance', { credentials: 'same-origin' })
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (j) {
-                    if (!j || !j.theme) return;
+                    // A late bootstrap response must not undo an explicit local choice.
+                    if (themeSelectedLocally || !j || !j.theme) return;
                     var serverTheme = j.theme;
                     var local = readStoredTheme();
                     if (serverTheme !== local) {
@@ -299,6 +301,7 @@
          */
         set: function (value) {
             if (value !== 'dark' && value !== 'light' && value !== 'auto') return;
+            themeSelectedLocally = true;
             try { localStorage.setItem(STORAGE_KEY, value); } catch (e) {}
             stamp(resolveEffective(value));
             try {
