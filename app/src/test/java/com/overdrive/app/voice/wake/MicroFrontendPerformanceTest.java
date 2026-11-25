@@ -91,6 +91,56 @@ public class MicroFrontendPerformanceTest {
         }
     }
 
+    @Test
+    public void silentWindowsPreserveStreamingNoiseHistory() throws Exception {
+        // Captured from the unmodified frontend at 08a4cce5. Alternate noise,
+        // full-scale PCM, sustained zeros, impulses and low-level samples.
+        int[] steps = {1, 3, 10, 20, 30};
+        String[] expected = {
+                "9969b495c2524a784fc105fc26584e9e6acc5c931caf8727063a1ebff0218af5",
+                "abd9a2a985b910356d273a1647fc3f1e7f329ad2ecd601e7a77fdbd60dc1fb95",
+                "5395ea9a318bea056c495960211a8923e2d01122bcb46795eaab12f12dd85479",
+                "9b0d681b2c93913247a91659ba7febe948c9a12c010141b33a1cd0a50b12cd46",
+                "27cfdeb0e56b3c77cb82bc3f86164352a2d5eea816e860173aaa72834e2df9b2"
+        };
+        for (int s = 0; s < steps.length; s++) {
+            MicroFrontend frontend = new MicroFrontend(steps[s]);
+            Random random = new Random(8821 + steps[s]);
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            for (int block = 0; block < 60; block++) {
+                if (block == 30) frontend.reset();
+                short[] pcm = new short[2048 + block * 7];
+                for (int i = 0; i < pcm.length; i++) {
+                    switch (block % 6) {
+                        case 0: pcm[i] = (short) random.nextInt(); break;
+                        case 1: pcm[i] = i % 2 == 0 ? Short.MIN_VALUE : Short.MAX_VALUE; break;
+                        case 4: pcm[i] = i % 181 == 0 ? Short.MIN_VALUE : 0; break;
+                        case 5: pcm[i] = (short) (random.nextInt(5) - 2); break;
+                        default: break;
+                    }
+                }
+                for (int pos = 0; pos < pcm.length;) {
+                    int len = Math.min(pcm.length - pos, 1 + random.nextInt(503));
+                    int used = frontend.process(pcm, pos, len);
+                    assertTrue(used > 0 && used <= len);
+                    pos += used;
+                    if (frontend.frameReady()) {
+                        for (int value : frontend.features()) {
+                            digest.update((byte) (value >>> 8));
+                            digest.update((byte) value);
+                        }
+                    }
+                }
+            }
+            StringBuilder hex = new StringBuilder();
+            for (byte b : digest.digest()) {
+                hex.append(Character.forDigit((b >>> 4) & 15, 16));
+                hex.append(Character.forDigit(b & 15, 16));
+            }
+            assertEquals("step " + steps[s], expected[s], hex.toString());
+        }
+    }
+
     private static short[] input(int kind) {
         short[] pcm = new short[16384];
         Random random = new Random(58491L + kind);
