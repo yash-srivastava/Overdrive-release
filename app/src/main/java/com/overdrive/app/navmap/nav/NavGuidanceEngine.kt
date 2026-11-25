@@ -400,10 +400,7 @@ class NavGuidanceEngine {
             pts[bestSegStart].lat, pts[bestSegStart].lng,
             pts[bestSegStart + 1].lat, pts[bestSegStart + 1].lng
         )
-        var remaining = segLen * (1.0 - bestT)
-        for (i in bestSegStart + 1 until pts.size - 1) {
-            remaining += haversineMeters(pts[i].lat, pts[i].lng, pts[i + 1].lat, pts[i + 1].lng)
-        }
+        val remaining = addFullSegments(pts, bestSegStart + 1, pts.lastIndex, segLen * (1.0 - bestT))
 
         // A car standing still isn't leaving the route (GPS drifts under a canopy, at a pump).
         if (speedMps < STOPPED_MPS) {
@@ -450,7 +447,7 @@ class NavGuidanceEngine {
         //    segment, or on the current segment but ahead of our progress.
         val maneuver = nextManeuver(r, bestSegStart, bestT)
         val distanceToManeuver = if (maneuver != null) {
-            distanceAlongTo(pts, bestSegStart, bestT, bestLat, bestLng, maneuver.beginShapeIndex)
+            distanceAlongTo(pts, bestSegStart, bestLat, bestLng, maneuver.beginShapeIndex)
         } else {
             0.0
         }
@@ -603,7 +600,6 @@ class NavGuidanceEngine {
     private fun distanceAlongTo(
         pts: List<GeoPoint>,
         segStart: Int,
-        t: Double,
         snapLat: Double,
         snapLng: Double,
         targetIndex: Int
@@ -613,13 +609,28 @@ class NavGuidanceEngine {
             return 0.0
         }
         // Remainder of the current segment from the snap point to vertex segStart+1.
-        var dist = haversineMeters(snapLat, snapLng, pts[segStart + 1].lat, pts[segStart + 1].lng)
-        var i = segStart + 1
-        while (i < targetIndex && i < pts.size - 1) {
-            dist += haversineMeters(pts[i].lat, pts[i].lng, pts[i + 1].lat, pts[i + 1].lng)
-            i++
+        val partial = haversineMeters(snapLat, snapLng, pts[segStart + 1].lat, pts[segStart + 1].lng)
+        return addFullSegments(pts, segStart + 1, targetIndex.coerceAtMost(pts.lastIndex), partial)
+    }
+
+    /**
+     * Add the full segments between two vertices using the route's existing arc-length
+     * prefix sums. Keep the caller's partial-segment calculation unchanged: remaining
+     * distance uses the match fraction, whereas maneuver distance uses haversine from
+     * the snapped coordinate. Summing in a different order can change rounding slightly.
+     */
+    private fun addFullSegments(pts: List<GeoPoint>, from: Int, to: Int, partial: Double): Double {
+        if (from >= to) return partial
+        val arc = cumArcM[to] - cumArcM[from]
+        if (arc.isFinite()) return partial + arc
+
+        // An invalid coordinate earlier in the route can poison the cumulative
+        // table. Preserve the old result for a finite range after that vertex.
+        var distance = partial
+        for (i in from until to) {
+            distance += haversineMeters(pts[i].lat, pts[i].lng, pts[i + 1].lat, pts[i + 1].lng)
         }
-        return dist
+        return distance
     }
 
     // ---- Geometry helpers (pure, unit-testable) ----
