@@ -646,6 +646,15 @@
             android:exported="true"
             android:permission="android.permission.DUMP" />
 
+        <!-- Parked proximity collector keep-alive. The shell daemon's
+             ProximityCollectorWatchdog starts it at switch-off and restarts it
+             if the head unit kills this process. DUMP limits starts to shell/system. -->
+        <service
+            android:name="com.overdrive.app.services.ProximityCollectorService"
+            android:foregroundServiceType="dataSync"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+
         <!-- RoadSense floating overlay (app-side renderer, D-024). Reads
              daemon-published roadSense.overlayState from UCM and draws the
              pill/card. specialUse FGS like StatusOverlayService.
