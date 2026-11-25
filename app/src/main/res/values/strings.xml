@@ -224,6 +224,10 @@
     <string name="camera_recording_engine_label">Record on the CPU while the car is on</string>
     <string name="camera_recording_engine_hint">CPU: the smoothest screen while you drive.\nGPU: the best recordings. Lens correction and the speed/time overlay are always saved in the clip.</string>
     <string name="camera_recording_engine_subtitle">On the CPU with lens correction on, clips have no speed/time overlay and are corrected only when you play them in OverDrive. Copies sent to Telegram, backed up to the cloud or downloaded stay uncorrected. When the car is off, Sentry records on the GPU so its AI keeps the CPU. On by default on DiLink 3. Changing it restarts the camera service.</string>
+    <string name="camera_fast_ai_copy_title">AI frame copy</string>
+    <string name="camera_fast_ai_copy_label">Fast frame copy for AI detection</string>
+    <string name="camera_fast_ai_copy_hint">Passes camera frames to the AI detector about twice as fast, so Sentry uses less CPU while it watches the car. Recordings are not affected.</string>
+    <string name="camera_fast_ai_copy_subtitle">The first frames are checked against the standard copy, and it switches back on its own if they ever differ. Turn it off only if detection misbehaves. On by default. Changing it restarts the camera service.</string>
     <string name="camera_recording_engine_in_use_cpu">In use: CPU</string>
     <string name="camera_recording_engine_in_use_gpu">In use: GPU</string>
     <string name="camera_recording_engine_in_use_gpu_reason">In use: GPU (%1$s)</string>
