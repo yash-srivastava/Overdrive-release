@@ -20,6 +20,7 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.EnumSet;
+import java.util.Locale;
 import java.util.Properties;
 import java.util.Set;
 
@@ -3651,7 +3652,7 @@ public class SohEstimator {
     // ORDERING: the DM-i branches must precede their BEV namesakes, and adding one must not
     // change any BEV outcome. That is an ordering invariant no caller can express.
     static double mapCarTypeToCapacity(String carType) {
-        String ct = carType.toUpperCase();
+        String ct = carType.toUpperCase(Locale.ROOT);
         // PHEV / DM-i marketing strings FIRST — otherwise "Seal U DM-i" falls into
         // the BEV "SEAL U" branch (71.8) and "Destroyer 05" matches nothing. These
         // return the GROSS nameplate (18.3), which is exactly what the SOH formula
