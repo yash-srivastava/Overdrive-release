@@ -3070,7 +3070,10 @@
                 // Show the layout wherever DVR is configured, but only route view 9
                 // after the backend has confirmed simultaneous capture support.
                 const combined = document.querySelector('.cam-view-chip[data-cam="9"]');
-                if (combined && camId >= 0) {
+                // An unverified result the check can never update (Camera2 mode) stays hidden.
+                const canVerify = oem.concurrentAvmSupported !== -1
+                    || oem.concurrentAvmProbeAvailable !== false;
+                if (combined && camId >= 0 && canVerify) {
                     await liveViewI18nReady;
                     const combinedSupported = oem.concurrentAvmSupported === 1;
                     const reason = oem.concurrentAvmSupported === -1

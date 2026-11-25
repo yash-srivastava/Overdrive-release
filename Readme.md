@@ -91,7 +91,7 @@ information icon, tap it to see why the combined view is unavailable.
 
 On legacy AVMCamera vehicles such as DiLink 3, an unverified result can be
 checked by enabling **Test dual-camera support on next boot** in
-Diagnostics > Camera Mapping and saving the OEM dashcam settings. Restart
+Diagnostics > Camera probe and saving the OEM dashcam settings. Restart
 while parked with ACC confirmed off and reload Live View after the check.
 The check is optional and can interrupt recording; it may be deferred if a
 camera pipeline is already active or ACC-off cannot be confirmed. If only
