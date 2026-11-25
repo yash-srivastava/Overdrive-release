@@ -26,6 +26,12 @@ object GapReasons {
 
     /** Writes, per gap, the winning tier and the index of its most-overlapping entry in that tier's list. */
     fun classify(d: StripData, gapStart: LongArray, gapEnd: LongArray, n: Int, outSource: IntArray, outIndex: IntArray) {
+        if (n == 0) return
+        // Build a tier only if a gap actually reaches it; small windows keep the linear path.
+        val indexWindow = n >= 8
+        var stateIndex: IntervalIndex? = null
+        var sessionIndex: IntervalIndex? = null
+        var tripIndex: IntervalIndex? = null
         val order = d.reaped.indices.sortedBy { d.reaped[it].start }
         val rStart = LongArray(order.size) { d.reaped[order[it]].start }
         var maxReap = 0L
@@ -52,39 +58,100 @@ object GapReasons {
             }
             if (best >= 0 && sum >= need) { outSource[g] = REAPED; outIndex[g] = best; continue }
 
-            sum = 0L; best = -1; bestOv = 0L
-            for (k in d.states.indices) {
-                val s = d.states[k]
-                val ov = overlap(gs, ge, s.start, s.end ?: d.now)
-                if (ov > 0) {
-                    sum += ov
-                    if (ov > bestOv) { bestOv = ov; best = k }
-                }
+            if (stateIndex == null && indexWindow && d.states.size >= 32) {
+                stateIndex = buildIndex(d.states, { it.start }, { it.end ?: d.now })
             }
-            if (best >= 0 && sum >= need) { outSource[g] = STATE; outIndex[g] = best; continue }
+            best = findTier(d.states, stateIndex, gs, ge, need, { it.start }, { it.end ?: d.now })
+            if (best >= 0) { outSource[g] = STATE; outIndex[g] = best; continue }
 
-            sum = 0L; best = -1; bestOv = 0L
-            for (k in d.sessions.indices) {
-                val s = d.sessions[k]
-                if (s.sentry !in UNARMED) continue
-                val ov = overlap(gs, ge, s.start, s.end ?: d.now)
-                if (ov > 0) {
-                    sum += ov
-                    if (ov > bestOv) { bestOv = ov; best = k }
-                }
+            if (sessionIndex == null && indexWindow && d.sessions.size >= 32) {
+                sessionIndex = buildIndex(d.sessions, { it.start }, { it.end ?: d.now }) { it.sentry in UNARMED }
             }
-            if (best >= 0 && sum >= need) { outSource[g] = SESSION; outIndex[g] = best; continue }
+            best = findTier(d.sessions, sessionIndex, gs, ge, need, { it.start }, { it.end ?: d.now }) { it.sentry in UNARMED }
+            if (best >= 0) { outSource[g] = SESSION; outIndex[g] = best; continue }
 
-            sum = 0L; best = -1; bestOv = 0L
-            for (k in d.trips.indices) {
-                val t = d.trips[k]
-                val ov = overlap(gs, ge, t.start, t.end ?: d.now)
+            if (tripIndex == null && indexWindow && d.trips.size >= 32) {
+                tripIndex = buildIndex(d.trips, { it.start }, { it.end ?: d.now })
+            }
+            best = findTier(d.trips, tripIndex, gs, ge, need, { it.start }, { it.end ?: d.now })
+            if (best >= 0) { outSource[g] = TRIP; outIndex[g] = best }
+        }
+    }
+
+    private fun <T> buildIndex(
+        entries: List<T>, start: (T) -> Long, end: (T) -> Long,
+        include: (T) -> Boolean = { true },
+    ): IntervalIndex {
+        val order = entries.indices.filter { include(entries[it]) }.sortedBy { start(entries[it]) }
+        return IntervalIndex(
+            order.toIntArray(),
+            LongArray(order.size) { start(entries[order[it]]) },
+            LongArray(order.size) { end(entries[order[it]]) },
+        )
+    }
+
+    private inline fun <T> findTier(
+        entries: List<T>, index: IntervalIndex?, gs: Long, ge: Long, need: Double,
+        start: (T) -> Long, end: (T) -> Long, include: (T) -> Boolean = { true },
+    ): Int {
+        if (index != null) return index.find(gs, ge, need)
+        var sum = 0L
+        var best = -1
+        var bestOv = 0L
+        for (k in entries.indices) {
+            val entry = entries[k]
+            if (!include(entry)) continue
+            val ov = overlap(gs, ge, start(entry), end(entry))
+            if (ov > 0) {
+                sum += ov
+                if (ov > bestOv) { bestOv = ov; best = k }
+            }
+        }
+        return if (sum >= need) best else -1
+    }
+
+    /** Start-sorted intervals, with prefix maximum ends to retain nested/overlapping entries. */
+    private class IntervalIndex(
+        private val order: IntArray,
+        private val starts: LongArray,
+        private val ends: LongArray,
+    ) {
+        private val maxEnd = LongArray(ends.size)
+
+        init {
+            var latest = Long.MIN_VALUE
+            for (i in ends.indices) {
+                latest = maxOf(latest, ends[i])
+                maxEnd[i] = latest
+            }
+        }
+
+        fun find(gs: Long, ge: Long, need: Double): Int {
+            // No interval before lo can end after the gap starts.
+            var lo = 0
+            var hi = maxEnd.size
+            while (lo < hi) {
+                val mid = (lo + hi) ushr 1
+                if (maxEnd[mid] <= gs) lo = mid + 1 else hi = mid
+            }
+            var sum = 0L
+            var best = -1
+            var bestOv = 0L
+            var i = lo
+            while (i < starts.size && starts[i] < ge) {
+                val ov = overlap(gs, ge, starts[i], ends[i])
                 if (ov > 0) {
                     sum += ov
-                    if (ov > bestOv) { bestOv = ov; best = k }
+                    val k = order[i]
+                    // Sorting must not change the original list-order tie break.
+                    if (ov > bestOv || (ov == bestOv && k < best)) {
+                        bestOv = ov
+                        best = k
+                    }
                 }
+                i++
             }
-            if (best >= 0 && sum >= need) { outSource[g] = TRIP; outIndex[g] = best }
+            return if (sum >= need) best else -1
         }
     }
 
