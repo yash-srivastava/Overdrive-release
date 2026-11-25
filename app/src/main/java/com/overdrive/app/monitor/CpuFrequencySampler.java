@@ -5,6 +5,8 @@ import java.io.File;
 import java.io.FileReader;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.concurrent.TimeUnit;
+import java.util.function.LongSupplier;
 
 /**
  * Reads CPU clocks across the available cpufreq policies, not just cpu0.
@@ -12,12 +14,17 @@ import java.util.Comparator;
  * Android 10 Qualcomm parts such as the BYD Dolphin's trinket expose separate
  * silver/gold policies (1804.8/2016 MHz ceilings) — not one CPU0 clock.
  * Reading only cpu0 silently understates the head unit's peak CPU frequency.
- * Enumerate the stable sysfs topology once; only cheap value reads run on the
- * on-demand Performance page's sampler. No governor or affinity is changed.
+ * Cache the sysfs topology and refresh it periodically while the Performance
+ * page is sampling, so initially missing domains can be discovered later.
+ * No governor or affinity is changed.
  */
 final class CpuFrequencySampler {
+    private static final long TOPOLOGY_REFRESH_NANOS = TimeUnit.SECONDS.toNanos(30);
+
     private final File cpuRoot;
+    private final LongSupplier nanoTime;
     private File[] frequencyRoots;
+    private long lastTopologyScanNanos;
     private int cachedHardwareMaxMhz;
     private boolean hardwareMaxSettled;
 
@@ -27,7 +34,12 @@ final class CpuFrequencySampler {
 
     // Package-private injection point for source-level regression fixtures.
     CpuFrequencySampler(File cpuRoot) {
+        this(cpuRoot, System::nanoTime);
+    }
+
+    CpuFrequencySampler(File cpuRoot, LongSupplier nanoTime) {
         this.cpuRoot = cpuRoot;
+        this.nanoTime = nanoTime;
     }
 
     int currentPeakMhz() {
@@ -35,12 +47,13 @@ final class CpuFrequencySampler {
     }
 
     int hardwarePeakMhz() {
+        File[] roots = frequencyRoots();
         if (hardwareMaxSettled) return cachedHardwareMaxMhz;
         // An offline cluster has no readable ceiling yet: keep the highest seen and
         // re-read until every frequency domain reports cpuinfo_max_freq.
         boolean settled = true;
         long peakKhz = 0;
-        for (File root : frequencyRoots()) {
+        for (File root : roots) {
             long khz = readPositiveKhz(new File(root, "cpuinfo_max_freq"));
             if (khz <= 0) {
                 settled = false;
@@ -68,28 +81,41 @@ final class CpuFrequencySampler {
     }
 
     private File[] frequencyRoots() {
-        if (frequencyRoots != null) return frequencyRoots;
+        long now = nanoTime.getAsLong();
+        if (frequencyRoots != null && now - lastTopologyScanNanos < TOPOLOGY_REFRESH_NANOS) {
+            return frequencyRoots;
+        }
+        lastTopologyScanNanos = now;
+        File[] discovered;
         // A policy corresponds to a frequency domain, so reading policy0 and
         // policy4 avoids eight duplicate per-core sysfs reads on the Dolphin.
         File[] policies = new File(cpuRoot, "cpufreq").listFiles(file ->
                 file.isDirectory() && file.getName().matches("policy[0-9]+"));
         if (policies != null && policies.length > 0) {
-            frequencyRoots = policies;
+            discovered = policies;
         } else {
             // Older vendor kernels expose only per-core cpufreq paths, and only
             // while the core is online, so keep every core.
             File[] cores = cpuRoot.listFiles(file ->
                     file.isDirectory() && file.getName().matches("cpu[0-9]+"));
             if (cores == null || cores.length == 0) {
-                frequencyRoots = new File[]{new File(cpuRoot, "cpu0/cpufreq")};
+                discovered = new File[]{new File(cpuRoot, "cpu0/cpufreq")};
             } else {
-                frequencyRoots = new File[cores.length];
+                discovered = new File[cores.length];
                 for (int i = 0; i < cores.length; i++) {
-                    frequencyRoots[i] = new File(cores[i], "cpufreq");
+                    discovered[i] = new File(cores[i], "cpufreq");
                 }
             }
         }
-        Arrays.sort(frequencyRoots, Comparator.comparing(File::getName));
+        // Per-core directories all end in "cpufreq"; sort by full path so
+        // filesystem enumeration order cannot invalidate the cached ceiling.
+        Arrays.sort(discovered, Comparator.comparing(File::getPath));
+        if (!Arrays.equals(frequencyRoots, discovered)) {
+            frequencyRoots = discovered;
+            // A newly visible domain may have a higher hardware ceiling.
+            // Keep the highest previously observed ceiling across hotplug.
+            hardwareMaxSettled = false;
+        }
         return frequencyRoots;
     }
 
