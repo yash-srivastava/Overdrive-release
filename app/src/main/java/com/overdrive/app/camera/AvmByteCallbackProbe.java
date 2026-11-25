@@ -4,8 +4,8 @@ import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaCodecList;
 import android.media.MediaFormat;
-import android.os.Build;
 import android.media.MediaMuxer;
+import android.os.Build;
 
 import com.overdrive.app.logging.DaemonLogger;
 
@@ -450,7 +450,10 @@ public final class AvmByteCallbackProbe {
         }
     }
 
-    /** Keep the selected color format paired with the codec that advertises it. */
+    /**
+     * Keep the selected color format paired with the codec that advertises it.
+     * Return null if no named candidate advertises a preferred probe format.
+     */
     static EncoderChoice chooseEncoder(List<EncoderCandidate> candidates) {
         if (candidates == null) return null;
         int[] preferredFormats = {

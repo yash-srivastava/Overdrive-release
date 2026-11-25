@@ -55,10 +55,29 @@ public class AvmByteCallbackProbeEncoderSelectionTest {
     }
 
     @Test
+    public void prefersSemiPlanarEvenWhenFlexibleCodecIsHardwareAccelerated() {
+        AvmByteCallbackProbe.EncoderChoice choice = AvmByteCallbackProbe.chooseEncoder(Arrays.asList(
+                new AvmByteCallbackProbe.EncoderCandidate("hardware-flexible",
+                        new int[] {MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible}, true),
+                new AvmByteCallbackProbe.EncoderCandidate("software-semi-planar",
+                        new int[] {MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar}, false)));
+
+        assertNotNull(choice);
+        assertEquals("software-semi-planar", choice.codecName);
+        assertEquals(MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar,
+                choice.colorFormat);
+    }
+
+    @Test
     public void returnsNullWhenNoCodecSupportsTheProbeFormats() {
         assertNull(AvmByteCallbackProbe.chooseEncoder(Arrays.asList(
-                new AvmByteCallbackProbe.EncoderCandidate("unsupported", new int[] {0, 21}, true))));
-        assertNull(AvmByteCallbackProbe.chooseEncoder(Collections.<AvmByteCallbackProbe.EncoderCandidate>emptyList()));
+                new AvmByteCallbackProbe.EncoderCandidate("planar-only",
+                        new int[] {MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar}, true),
+                new AvmByteCallbackProbe.EncoderCandidate("surface-only",
+                        new int[] {MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface}, false),
+                new AvmByteCallbackProbe.EncoderCandidate("no-formats", new int[0], true),
+                new AvmByteCallbackProbe.EncoderCandidate("null-formats", null, false))));
+        assertNull(AvmByteCallbackProbe.chooseEncoder(Collections.emptyList()));
         assertNull(AvmByteCallbackProbe.chooseEncoder(null));
     }
 }
