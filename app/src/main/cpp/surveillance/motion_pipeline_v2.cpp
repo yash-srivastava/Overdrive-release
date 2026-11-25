@@ -1617,6 +1617,39 @@ Java_com_overdrive_app_surveillance_NativeMotion_trackerUpdate(
     env->ReleaseByteArrayElements(frameRgb, frameData, JNI_ABORT);
 }
 
+// Read the same direct mosaic already submitted to the V2 pipeline. No
+// Java quadrant copy, GetByteArrayElements staging, or retained frame pointer.
+extern "C" JNIEXPORT void JNICALL
+Java_com_overdrive_app_surveillance_NativeMotion_trackerUpdateMosaic(
+    JNIEnv* env, jclass clazz,
+    jobject mosaicRgb, jint quadrant, jlong nowMs)
+{
+    const int stride = V2_QUADRANT_WIDTH * 2 * V2_BYTES_PER_PIXEL;
+    const jlong frameBytes = (jlong)stride * V2_QUADRANT_HEIGHT * 2;
+    if (!mosaicRgb || quadrant < 0 || quadrant >= V2_NUM_QUADRANTS
+            || env->GetDirectBufferCapacity(mosaicRgb) < frameBytes) {
+        jclass error = env->FindClass("java/lang/IllegalArgumentException");
+        if (error) env->ThrowNew(error, "Invalid tracker mosaic or quadrant");
+        return;
+    }
+    const uint8_t* frame = (const uint8_t*)env->GetDirectBufferAddress(mosaicRgb);
+    if (!frame) return;
+    const int offset = (quadrant / 2) * V2_QUADRANT_HEIGHT * stride
+            + (quadrant % 2) * V2_QUADRANT_WIDTH * V2_BYTES_PER_PIXEL;
+    try {
+        std::lock_guard<std::mutex> lock(g_tracker_mutex);
+        if (g_trackerInitialized) {
+            tracker_update(&g_trackerState, frame + offset,
+                           V2_QUADRANT_WIDTH, V2_QUADRANT_HEIGHT,
+                           quadrant, (long long)nowMs, stride);
+        }
+    } catch (...) {
+        // Do not let an OpenCV exception unwind through JNI and abort the daemon.
+        jclass error = env->FindClass("java/lang/RuntimeException");
+        if (error) env->ThrowNew(error, "Native mosaic tracker update failed");
+    }
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_overdrive_app_surveillance_NativeMotion_trackerHasActiveTrack(
     JNIEnv* env, jclass clazz, jint quadrant)

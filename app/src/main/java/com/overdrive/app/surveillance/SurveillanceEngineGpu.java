@@ -27,6 +27,8 @@ public class SurveillanceEngineGpu {
     
     // Motion detection buffers
     private ByteBuffer currentFrame;
+    // Motion-lane only; older native libraries retain the packed-crop JNI path.
+    private boolean trackerMosaicAvailable = true;
     private long lastMotionTime = 0;
     // volatile: read cross-thread by hasActiveMotion() (RMM control thread) to
     // drive the parked-idle fps ramp. Written only on the motion thread.
@@ -187,7 +189,6 @@ public class SurveillanceEngineGpu {
 
     private boolean mog2ChannelEnabled = false;  // config kill switch, read in enable()
     private boolean mog2Available = false;       // native OpenCV probe, set in enable()
-    private java.nio.ByteBuffer mog2Frame = null;
     private int mog2CallCount = 0;
     private long lastMog2SampleMs = 0;
     private final float[] mog2QuadFrac = new float[MotionPipelineV2.NUM_QUADRANTS];
@@ -2553,10 +2554,12 @@ public class SurveillanceEngineGpu {
             lastMotionActiveWallMs = 0;       // re-seed the quiet baseline on re-enable
         }
 
-        // Copy frame data into a direct ByteBuffer for JNI
-        currentFrame.clear();
-        currentFrame.put(smallRgbFrame);
-        currentFrame.flip();
+        // All native motion consumers synchronously read this same frame on the
+        // motion lane. Keep a local reference even if teardown clears the field.
+        final ByteBuffer motionFrame = currentFrame;
+        motionFrame.clear();
+        motionFrame.put(smallRgbFrame);
+        motionFrame.flip();
         
         // DIAGNOSTIC: Every 100 frames, check frame validity and inter-frame diff.
         // Only in debug builds — this is pure development tooling.
@@ -2662,7 +2665,7 @@ public class SurveillanceEngineGpu {
         
         // Run V2 pipeline (includes C++ Global Illumination Sync)
         MotionPipelineV2.QuadrantResult[] results = pipelineV2.processFrame(
-                currentFrame, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT);
+                motionFrame, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT);
         
         // SOTA: Seed detection baseline once after camera warmup (frame 30 = ~3s at 10 FPS).
         // Runs YOLO on each quadrant to catalog what's already in the scene (parked cars,
@@ -2868,9 +2871,6 @@ public class SurveillanceEngineGpu {
                 && (lastMog2SampleMs == 0 || (nowElapsed - lastMog2SampleMs) >= MOG2_SAMPLE_PERIOD_MS)) {
             lastMog2SampleMs = nowElapsed;
             try {
-                if (mog2Frame == null || mog2Frame.capacity() < smallRgbFrame.length) {
-                    mog2Frame = java.nio.ByteBuffer.allocateDirect(smallRgbFrame.length);
-                }
                 // Shadow the OUTGOING sample before this apply() overwrites
                 // it (audit R5 — ambient source, see mog2QuadFracPrev doc).
                 if (mog2FracAtMs > 0) {
@@ -2878,8 +2878,6 @@ public class SurveillanceEngineGpu {
                             MotionPipelineV2.NUM_QUADRANTS);
                     mog2FracPrevAtMs = mog2FracAtMs;
                 }
-                mog2Frame.clear();
-                mog2Frame.put(smallRgbFrame, 0, smallRgbFrame.length);
                 // LEARNING-RATE SCHEDULE (audit R3b Ext-5). Call 0: lr=1.0
                 // reseeds the background from the live frame. Warmup: auto
                 // (1/min(2n,history)) learns the scene fast. AFTER warmup:
@@ -2898,7 +2896,7 @@ public class SurveillanceEngineGpu {
                 float lr = (mog2CallCount == 0) ? 1.0f
                         : (mog2CallCount <= MOG2_WARMUP_CALLS ? -1.0f : 0.001f);
                 float total = NativeMotion.computeMOG2Quadrants(
-                        mog2Frame, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT, lr, mog2QuadFrac);
+                        motionFrame, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT, lr, mog2QuadFrac);
                 if (total >= 0f) {
                     mog2CallCount++;
                     mog2FracAtMs = nowElapsed;  // monotonic domain (R3b Ext-13)
@@ -3199,12 +3197,7 @@ public class SurveillanceEngineGpu {
                         // TRACKER_LOST_FRAMES_MAX, so the lock below is only granted
                         // while the person is actually still there. A genuinely
                         // present standing person keeps a high NCC score and holds.
-                        byte[] qc = (smallRgbFrame != null)
-                                ? cropFromMosaic(smallRgbFrame, q, THUMBNAIL_WIDTH / 2, THUMBNAIL_HEIGHT / 2)
-                                : null;
-                        if (qc != null) {
-                            NativeMotion.trackerUpdate(qc, THUMBNAIL_WIDTH / 2, THUMBNAIL_HEIGHT / 2, q, now);
-                        }
+                        updateTrackerFromMosaic(motionFrame, smallRgbFrame, q, now);
                         if (!NativeMotion.trackerHasActiveTrack(q)) continue; // aged out → person gone
                         float[] trackBox = NativeMotion.trackerGetTrackBox(q);
                         if (trackBox != null && (int) trackBox[5] == 0   // person only
@@ -5196,13 +5189,7 @@ public class SurveillanceEngineGpu {
             for (int q = 0; q < MotionPipelineV2.NUM_QUADRANTS; q++) {
                 try {
                     if (NativeMotion.trackerHasActiveTrack(q)) {
-                        // Feed the quadrant crop to the tracker
-                        int qW = THUMBNAIL_WIDTH / 2;
-                        int qH = THUMBNAIL_HEIGHT / 2;
-                        byte[] quadCrop = cropFromMosaic(smallRgbFrame, q, qW, qH);
-                        if (quadCrop != null) {
-                            NativeMotion.trackerUpdate(quadCrop, qW, qH, q, now);
-                        }
+                        updateTrackerFromMosaic(motionFrame, smallRgbFrame, q, now);
                         
                         // Check if tracker wants YOLO heartbeat (NCC score dropped or timer expired).
                         // FIX: Enforce a hard 2-second cooldown per quadrant to prevent heartbeat spam.
@@ -7104,6 +7091,23 @@ public class SurveillanceEngineGpu {
                 + "repairs=%d dispatches=%d detects=%d",
                 heldMs / 1000.0, AI_LANE_STUCK_MS / 1000.0,
                 repairs, aiDispatchCount.get(), aiDetectCompletedCount.get()));
+    }
+
+    /** Motion-lane only: use the staged mosaic directly, with legacy JNI fallback. */
+    private void updateTrackerFromMosaic(ByteBuffer motionFrame, byte[] mosaicRgb,
+                                         int quadrant, long now) {
+        if (trackerMosaicAvailable) {
+            try {
+                NativeMotion.trackerUpdateMosaic(motionFrame, quadrant, now);
+                return;
+            } catch (UnsatisfiedLinkError e) {
+                trackerMosaicAvailable = false;
+            }
+        }
+        int qW = THUMBNAIL_WIDTH / 2;
+        int qH = THUMBNAIL_HEIGHT / 2;
+        byte[] crop = cropFromMosaic(mosaicRgb, quadrant, qW, qH);
+        NativeMotion.trackerUpdate(crop, qW, qH, quadrant, now);
     }
 
     /**
@@ -13054,11 +13058,10 @@ public class SurveillanceEngineGpu {
         baselineSeeded = false;
 
         // MOG2 teardown (audit R3b Ext-14): release the ~18.7MB native
-        // background model + the 0.92MB direct frame buffer — they stayed
-        // resident across disarm (the driving majority of runtime) and
-        // bought nothing, since enable() reseeds via resetMOG2() anyway.
+        // background model across disarm. MOG2 now borrows the V2 frame
+        // buffer synchronously, so there is no separate staging allocation.
         // Mutex-guarded natively against a straggler apply(); active=false
-        // above stops new samples, and enable() reallocates mog2Frame.
+        // above stops new samples.
         // Final epoch re-check (audit R11-3 / ExtD-4): releasing the model a
         // racing enable() just reseeded would silently kill the new
         // session's revival channel (native calls fail closed on a released
@@ -13073,7 +13076,6 @@ public class SurveillanceEngineGpu {
             // Adding-only channel — a failed release just leaves the model
             // resident until the next session replaces it.
         }
-        mog2Frame = null;
 
         logger.info("Surveillance disabled");
     }
