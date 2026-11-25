@@ -3,8 +3,10 @@ package com.overdrive.app.trips;
 import com.overdrive.app.storage.removable.RemovableStorageFs;
 
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.monitor.BatterySocData;
 import com.overdrive.app.monitor.GearMonitor;
 import com.overdrive.app.monitor.GpsMonitor;
+import com.overdrive.app.monitor.VehicleDataMonitor;
 import com.overdrive.app.storage.StorageManager;
 import com.overdrive.app.telemetry.TelemetryDataCollector;
 import com.overdrive.app.telemetry.TelemetrySnapshot;
@@ -871,6 +873,33 @@ public class TripTelemetryRecorder {
 
     // ==================== PRIVATE: Sampling ====================
 
+    // Sampler thread only. SoC moves far slower than 5 Hz and the file keeps 1 Hz, so it is read
+    // once a second rather than taking a full vehicle snapshot on every tick.
+    private long lastSocReadAtMs = 0L;
+    private double lastSocPercent = Double.NaN;
+
+    /**
+     * The battery SoC for this tick, from the same reading the trip's start and end SoC use;
+     * NaN when there is none. Recorded per row so the timeline plots what the battery really did
+     * (a PHEV holding charge in HEV mode stays flat) instead of a line from start to end.
+     */
+    private double currentSocPercent(long now) {
+        if (now - lastSocReadAtMs >= 1_000L || now < lastSocReadAtMs) {
+            lastSocPercent = readSocPercent();
+            lastSocReadAtMs = now;
+        }
+        return lastSocPercent;
+    }
+
+    private static double readSocPercent() {
+        try {
+            BatterySocData soc = VehicleDataMonitor.getInstance().getBatterySoc();
+            return soc != null ? soc.socPercent : Double.NaN;
+        } catch (Throwable t) {
+            return Double.NaN;
+        }
+    }
+
     /**
      * Called at 5Hz. Reads from existing singleton monitors and buffers a sample.
      */
@@ -982,7 +1011,7 @@ public class TripTelemetryRecorder {
                     diLink5 && (lat != 0 || lon != 0) && !isLiveFix(fix, now, GPS_ACCURACY_GATE_M),
                     diLink5 && !dynamicsStale && speedKmh == 0, peakSpeedKmh,
                     diLink5 && (lat != 0 || lon != 0) ? wholeMetres(fix.accuracy) : 0f, landedM,
-                    fix.fixTimeUtc);
+                    fix.fixTimeUtc, currentSocPercent(now));
 
             // ── Distance fusion (CAN-speed primary, accuracy-gated GPS fallback) ──
             // dt since the previous sample, clamped so a scheduler stall or a

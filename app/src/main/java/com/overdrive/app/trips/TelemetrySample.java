@@ -52,6 +52,9 @@ public class TelemetrySample {
      *  already ~0.7s old, and seconds old through turns, so anything aligning this
      *  track against another recording needs when the position was TAKEN. */
     public final long gpsFixTimeUtc;
+    /** The battery SoC (%) the car reported at this tick; NaN = not recorded (older files, or no
+     *  reading). The trip timeline plots it, so a PHEV holding charge in HEV mode shows a flat line. */
+    public final double socPercent;
 
     public TelemetrySample(long timestampMs, int speedKmh, int accelPedalPercent,
                            int brakePedalPercent, boolean brakePedalPressed,
@@ -103,6 +106,19 @@ public class TelemetrySample {
                            int speedSource, boolean pedalsUnknown, boolean gpsNotLive,
                            boolean stopConfirmed, int peakSpeedKmh, float horizontalAccuracyM,
                            float distanceLandedM, long gpsFixTimeUtc) {
+        this(timestampMs, speedKmh, accelPedalPercent, brakePedalPercent, brakePedalPressed,
+                gearMode, lat, lon, altitude, verticalAccuracyM, altitudeIsMsl,
+                speedSource, pedalsUnknown, gpsNotLive, stopConfirmed, peakSpeedKmh, horizontalAccuracyM,
+                distanceLandedM, gpsFixTimeUtc, Double.NaN);
+    }
+
+    public TelemetrySample(long timestampMs, int speedKmh, int accelPedalPercent,
+                           int brakePedalPercent, boolean brakePedalPressed,
+                           int gearMode, double lat, double lon, double altitude,
+                           double verticalAccuracyM, boolean altitudeIsMsl,
+                           int speedSource, boolean pedalsUnknown, boolean gpsNotLive,
+                           boolean stopConfirmed, int peakSpeedKmh, float horizontalAccuracyM,
+                           float distanceLandedM, long gpsFixTimeUtc, double socPercent) {
         this.timestampMs = timestampMs;
         this.speedKmh = speedKmh;
         this.accelPedalPercent = accelPedalPercent;
@@ -122,6 +138,12 @@ public class TelemetrySample {
         this.horizontalAccuracyM = horizontalAccuracyM;
         this.distanceLandedM = distanceLandedM;
         this.gpsFixTimeUtc = gpsFixTimeUtc;
+        this.socPercent = isRecordedSoc(socPercent) ? socPercent : Double.NaN;
+    }
+
+    /** A SoC the trip pages treat as a reading: 0 is "no reading", as it is for a trip's start/end SoC. */
+    public static boolean isRecordedSoc(double socPercent) {
+        return Double.isFinite(socPercent) && socPercent > 0 && socPercent <= 100;
     }
 
     /** DI5: the row's speed is a reading, vehicle or GPS. A vehicle 0 without {@link #stopConfirmed}
@@ -153,7 +175,7 @@ public class TelemetrySample {
         return new TelemetrySample(timestampMs, speedKmh, accelPedalPercent, brakePedalPercent,
                 brakePedalPressed, gearMode, lat, lon, altitude, verticalAccuracyM, altitudeIsMsl,
                 speedSource, pedalsUnknown, gpsNotLive, stopConfirmed, peakSpeedKmh, horizontalAccuracyM, 0f,
-                gpsFixTimeUtc);
+                gpsFixTimeUtc, socPercent);
     }
 
     /** The same row with another landed distance. */
@@ -161,7 +183,7 @@ public class TelemetrySample {
         return new TelemetrySample(timestampMs, speedKmh, accelPedalPercent, brakePedalPercent,
                 brakePedalPressed, gearMode, lat, lon, altitude, verticalAccuracyM, altitudeIsMsl,
                 speedSource, pedalsUnknown, gpsNotLive, stopConfirmed, peakSpeedKmh, horizontalAccuracyM,
-                landedM, gpsFixTimeUtc);
+                landedM, gpsFixTimeUtc, socPercent);
     }
 
     /** DI5: the row shows the car standing: a valid vehicle 0 or a GPS 0 the positions confirmed. */
@@ -197,9 +219,9 @@ public class TelemetrySample {
 
     /**
      * Serialize to JSON with compact keys for storage.
-     * Keys: t, s, a, b, bp, g, la, lo, al, va, am, ss, pu, nl, sz, sp, ha, dl
-     * "va"/"am"/"ss"/"pu"/"nl"/"sz"/"sp"/"ha"/"dl" are written only when informative (va, ha, dl > 0 /
-     * ss != 0 / sp >= 0 / the rest true)
+     * Keys: t, s, a, b, bp, g, la, lo, al, va, gt, am, ss, pu, nl, sz, sp, ha, dl, so
+     * "va"/"gt"/"am"/"ss"/"pu"/"nl"/"sz"/"sp"/"ha"/"dl"/"so" are written only when informative (va, gt,
+     * ha, dl > 0 / ss != 0 / sp >= 0 / so a recorded SoC / the rest true)
      * to keep the common-case line size unchanged; fromJson() defaults cover absence.
      */
     public JSONObject toJson() {
@@ -225,6 +247,7 @@ public class TelemetrySample {
             if (peakSpeedKmh >= 0) json.put("sp", peakSpeedKmh);
             if (horizontalAccuracyM > 0) json.put("ha", horizontalAccuracyM);
             if (distanceLandedM > 0) json.put("dl", distanceLandedM);
+            if (isRecordedSoc(socPercent)) json.put("so", Math.round(socPercent * 100.0) / 100.0);
         } catch (Exception e) {
             // JSONObject.put only throws on null key, which won't happen here
         }
@@ -261,7 +284,8 @@ public class TelemetrySample {
                 json.optInt("sp", -1),
                 (float) json.optDouble("ha", 0.0),
                 (float) json.optDouble("dl", 0.0),
-                json.optLong("gt", 0L)
+                json.optLong("gt", 0L),
+                json.optDouble("so", Double.NaN)
         );
     }
 }

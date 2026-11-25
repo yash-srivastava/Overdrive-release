@@ -2451,7 +2451,7 @@
                             <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:3px;background:var(--brand-primary);border-radius:2px;display:inline-block;"></span> <span data-i18n="trip.timeline.legend_speed">Speed</span></span>
                             <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:8px;background:rgba(14,165,233,0.3);border-radius:2px;display:inline-block;"></span> <span data-i18n="trip.timeline.legend_accel">Accel</span></span>
                             <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:8px;background:rgba(239,68,68,0.3);border-radius:2px;display:inline-block;"></span> <span data-i18n="trip.timeline.legend_brake">Brake</span></span>
-                            <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:0;border-top:2px dashed rgba(245,158,11,0.5);display:inline-block;"></span> <span data-i18n="trip.timeline.legend_soc">SoC%</span></span>
+                            <span id="tlLegendSoc" style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:0;border-top:2px dashed rgba(245,158,11,0.5);display:inline-block;"></span> <span data-i18n="trip.timeline.legend_soc">SoC%</span></span>
                         </div>
                         <div class="chart-canvas-wrap">
                             <canvas id="timelineChart"></canvas>
@@ -2615,7 +2615,7 @@
     <script src="../shared/settings-hydration.js?v=1"></script>
     <script src="../shared/update-flow.js?v=6"></script>
     <script src="../shared/storage-budget.js?v=9"></script>
-    <script src="../shared/trips.js?v=rangecal6"></script>
+    <script src="../shared/trips.js?v=socline1"></script>
     <script>
         // ES5-only — Chrome 58 / Android 7.1 head-unit floor.
         // Per-trip GPX / KML / CSV download (served on demand; no background work).

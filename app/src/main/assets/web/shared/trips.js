@@ -29,6 +29,10 @@ const TRIPS = {
     routeLayer: null,
     sliderMarker: null,
     telemetryCache: null,
+    _socTrack: null,
+    // A row without a SoC reading keeps the previous one for this long (ms); past it the
+    // timeline breaks the SoC line and the readouts show '--' instead of a stale value.
+    _socHoldMs: 120000,
     radarScoresCache: null,
     rangeCache: null,
     pendingStorageType: null,
@@ -3523,6 +3527,7 @@ const TRIPS = {
         this.telemetryCache = null;
         this.currentTripData = null;
         this._timelineAxis = null;
+        this._socTrack = null;
         this.routeLayer = null;
         this.sliderMarker = null;
         this._mapRetries = 0;
@@ -4045,6 +4050,47 @@ const TRIPS = {
         return this._timelineAxis;
     },
 
+    /** A telemetry row's recorded battery SoC ('so'), or NaN. 0 is "no reading", as for a trip's SoC. */
+    _socReading(sample) {
+        const so = sample ? Number(sample.so) : NaN;
+        return isFinite(so) && so > 0 && so <= 100 ? so : NaN;
+    },
+
+    /**
+     * The battery SoC the car reported along the trip, or null when no row carries one (trips
+     * recorded before rows carried SoC). at[i] is row i's reading, or the previous one held for
+     * up to _socHoldMs. Those older trips get no SoC line: the straight line from start to end
+     * SoC drawn before misread any trip whose charge was held (a PHEV in HEV mode) or rose.
+     */
+    _socTrackFor(samples) {
+        if (this._socTrack && this._socTrack.samples === samples) return this._socTrack.track;
+        const axisKey = this._timelineAxisFor(samples).key;
+        let track = null;
+        if (samples && samples.length) {
+            const at = new Array(samples.length);
+            let heldSoc = NaN, heldAt = NaN;
+            let first = NaN, last = NaN, min = Infinity, max = -Infinity;
+            for (let i = 0; i < samples.length; i++) {
+                const soc = this._socReading(samples[i]);
+                const t = samples[i] ? samples[i][axisKey] : NaN;
+                if (isFinite(soc)) {
+                    heldSoc = soc;
+                    heldAt = t;
+                    if (!isFinite(first)) first = soc;
+                    last = soc;
+                    if (soc < min) min = soc;
+                    if (soc > max) max = soc;
+                    at[i] = soc;
+                } else {
+                    at[i] = t - heldAt <= this._socHoldMs ? heldSoc : NaN;
+                }
+            }
+            if (isFinite(first)) track = { at: at, first: first, last: last, min: min, max: max };
+        }
+        this._socTrack = { samples: samples, track: track };
+        return track;
+    },
+
     setupTimelineSlider(samples) {
         const card = document.getElementById('timelineSliderCard');
         if (!card || samples.length < 2) return;
@@ -4140,15 +4186,10 @@ const TRIPS = {
         this.setEl('sliderBrake', s.b || 0);
         this.setEl('sliderCurrentTime', min + ':' + (sec < 10 ? '0' : '') + sec);
 
-        // SoC interpolated
-        const tripData = this.currentTripData;
-        if (tripData) {
-            const socS = parseFloat(tripData.socStart || tripData.soc_start || 0);
-            const socE = parseFloat(tripData.socEnd || tripData.soc_end || 0);
-            const totalSamples = samples.length - 1;
-            const socAtIdx = totalSamples > 0 ? socS + (socE - socS) * (idx / totalSamples) : socS;
-            this.setEl('sliderSoc', socAtIdx.toFixed(1));
-        }
+        // SoC the car reported at this row ('--' on trips recorded without per-row SoC)
+        const socTrack = this._socTrackFor(samples);
+        const socAtIdx = socTrack ? socTrack.at[idx] : NaN;
+        this.setEl('sliderSoc', isFinite(socAtIdx) ? socAtIdx.toFixed(1) : '--');
 
         // 2. Sync Map Marker with heading rotation
         if (this.leafletMap && this.sliderMarker && this._telemetryHasGps(s)) {
@@ -5232,33 +5273,39 @@ const TRIPS = {
         ctx.fillText(Math.round(durMin / 2) + minSuf, pad.left + cw / 2, h - 5);
         ctx.fillText(Math.round(durMin) + minSuf, w - pad.right, h - 5);
 
-        // SoC% interpolated line (right Y-axis, zoomed to actual range)
-        const tripData = this.currentTripData;
-        const socStart = tripData ? parseFloat(tripData.socStart || tripData.soc_start || 0) : 0;
-        const socEnd = tripData ? parseFloat(tripData.socEnd || tripData.soc_end || 0) : 0;
-        const hasSoc = socStart > 0 || socEnd > 0;
+        // SoC% line (right Y-axis, zoomed to the recorded range): the SoC the car reported
+        // along the trip, so a charge held in HEV mode reads flat. Trips recorded without
+        // per-row SoC draw no line (and hide its legend entry) rather than a made-up one.
+        const socTrack = this._socTrackFor(telemetry);
+        const socLegend = document.getElementById('tlLegendSoc');
+        if (socLegend) socLegend.style.display = socTrack ? 'flex' : 'none';
 
-        if (hasSoc) {
-            // Use a zoomed Y range: pad 5% above and below the actual SoC range
-            const socMin = Math.max(0, Math.min(socStart, socEnd) - 5);
-            const socMax = Math.min(100, Math.max(socStart, socEnd) + 5);
+        if (socTrack) {
+            // Use a zoomed Y range: pad 5% above and below the recorded SoC range
+            const socMin = Math.max(0, socTrack.min - 5);
+            const socMax = Math.min(100, socTrack.max + 5);
             const socRange = socMax - socMin || 1;
+            const socY = soc => pad.top + ch - ((soc - socMin) / socRange) * ch;
 
-            // Right Y-axis labels
+            // Right Y-axis labels: first and last reading (one label when they would overlap)
             ctx.fillStyle = 'rgba(245,158,11,0.7)';
             ctx.font = '10px Inter, sans-serif';
             ctx.textAlign = 'right';
-            ctx.fillText(socStart.toFixed(1) + '%', w - 2, pad.top + ch - ((socStart - socMin) / socRange) * ch + 3);
-            ctx.fillText(socEnd.toFixed(1) + '%', w - 2, pad.top + ch - ((socEnd - socMin) / socRange) * ch + 3);
+            if (Math.abs(socY(socTrack.first) - socY(socTrack.last)) >= 11) {
+                ctx.fillText(socTrack.first.toFixed(1) + '%', w - 2, socY(socTrack.first) + 3);
+            }
+            ctx.fillText(socTrack.last.toFixed(1) + '%', w - 2, socY(socTrack.last) + 3);
 
-            // SoC line
+            // SoC line through the readings, broken where they stop for longer than _socHoldMs
             ctx.beginPath();
-            telemetry.forEach((s, i) => {
+            let prevAt = NaN;
+            telemetry.forEach(s => {
+                const soc = this._socReading(s);
+                if (!isFinite(soc)) return;
                 const x = pad.left + ((s[axisKey] - tStart) / tRange) * cw;
-                const progress = (s[axisKey] - tStart) / tRange;
-                const soc = socStart + (socEnd - socStart) * progress;
-                const y = pad.top + ch - ((soc - socMin) / socRange) * ch;
-                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                if (s[axisKey] - prevAt <= this._socHoldMs) ctx.lineTo(x, socY(soc));
+                else ctx.moveTo(x, socY(soc));
+                prevAt = s[axisKey];
             });
             ctx.strokeStyle = 'rgba(245,158,11,0.6)';
             ctx.lineWidth = 1.5;
@@ -5329,10 +5376,9 @@ const TRIPS = {
                     + ' ' + BYD.units.speedLabel(), tx + 8, ty + 15);
             ctx.fillText('Accel: ' + (s.a || 0) + '%', tx + 8, ty + 30);
             ctx.fillText('Brake: ' + (s.b || 0) + '%', tx + 8, ty + 45);
-            // SoC interpolated
-            if (hasSoc) {
-                const progress = (s[axisKey] - tStart) / tRange;
-                const socAtPoint = socStart + (socEnd - socStart) * progress;
+            // SoC the car reported at this row
+            const socAtPoint = socTrack ? socTrack.at[highlightIdx] : NaN;
+            if (isFinite(socAtPoint)) {
                 ctx.fillStyle = 'rgba(245,158,11,0.8)';
                 ctx.fillText('SoC: ' + socAtPoint.toFixed(1) + '%', tx + 8, ty + 60);
             }
