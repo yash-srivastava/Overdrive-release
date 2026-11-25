@@ -1789,7 +1789,8 @@ const TRIPS = {
         const todayKey = this._dateKey(new Date());
         for (let i = firstDay - 1; i >= 0; i--) this._calDayCell(grid, daysInPrev - i, this._dateKey(new Date(year, month - 1, daysInPrev - i)), true, todayKey);
         for (let day = 1; day <= daysInMonth; day++) this._calDayCell(grid, day, this._dateKey(new Date(year, month, day)), false, todayKey);
-        for (let d2 = 1; grid.children.length - 7 + d2 <= 42; d2++) this._calDayCell(grid, d2, this._dateKey(new Date(year, month + 1, d2)), true, todayKey);
+        const trailingDays = 42 - firstDay - daysInMonth;
+        for (let d2 = 1; d2 <= trailingDays; d2++) this._calDayCell(grid, d2, this._dateKey(new Date(year, month + 1, d2)), true, todayKey);
 
         // Overlay dots on days that have trips (trips-specific enhancement).
         this.loadCalendarDots();
