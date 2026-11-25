@@ -217,7 +217,7 @@
     <string name="camera_oem_dashcam_auto_unavailable">Auto — pano id is %1$d, can\'t infer dashcam</string>
     <string name="camera_oem_dashcam_save">Save</string>
     <string name="camera_concurrent_probe_label">Test dual-camera support on next boot</string>
-    <string name="camera_concurrent_probe_subtitle">One-time check that opens both cameras at once to confirm this vehicle can run pano + dashcam concurrently. Runs once on the next restart while parked. Leave OFF unless recordings look wrong — it is not required and may briefly interrupt a recording if one is active when it runs.</string>
+    <string name="camera_concurrent_probe_subtitle">One-time check that opens both cameras at once to confirm this vehicle can run pano + dashcam concurrently. Runs once on the next restart while parked. Required to verify All + DVR in Live View, but not for separate camera views or normal recording. Leave OFF unless you need to verify dual-camera support. The check may briefly interrupt recording.</string>
     <string name="camera_decoupled_lane_label">Decoupled encoder pipeline (reverse-camera fix)</string>
     <string name="camera_decoupled_lane_subtitle">Copies each camera frame before encoding so a recording stall can never starve the car\'s own reverse-camera view. Legacy camera mode only; costs ~60 MB GPU memory and one extra GPU pass per frame. Takes effect on the next camera restart (ACC cycle or daemon restart).</string>
     <string name="camera_recording_engine_title">Recording engine</string>

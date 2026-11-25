@@ -789,6 +789,14 @@
             color: var(--lv-hotspot-active-text);
         }
         [dir="rtl"] .cam-view-chip svg { margin-right: 0; margin-left: 6px; }
+        /* When unavailable the chip is an explanation action, not a stream route. */
+        .cam-view-chip.is-unavailable svg { color: inherit; }
+        .cam-view-chip.is-unavailable::after {
+            content: "ⓘ";
+            margin: 0 0 0 5px;
+            font-size: 12px;
+        }
+        [dir="rtl"] .cam-view-chip.is-unavailable::after { margin: 0 5px 0 0; }
         .cam-view-chip.active {
             color: var(--lv-hotspot-active-text);
             background: rgba(0,35,31,0.96);
@@ -1801,9 +1809,9 @@
                             <div class="selector-card-header">
                                 <h2 data-i18n="liveview.cameras">Cameras</h2>
                                 <!-- Combined view 9 is a layout, not a camera position, so it sits in
-                                     the card header instead of on the car. Shown only where the car
-                                     can stream the 360 cameras and the DVR together. -->
-                                <button type="button" class="cam-view-chip" data-cam="9" style="display:none;" onclick="BYD.stream.selectCamera(9)">
+                                     the card header instead of on the car. With a configured DVR,
+                                     it either selects the combined view or explains its unavailability. -->
+                                <button type="button" class="cam-view-chip" data-cam="9" style="display:none;">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="6" rx="1.5"/><rect x="3" y="11.5" width="8" height="4" rx="1"/><rect x="13" y="11.5" width="8" height="4" rx="1"/><rect x="3" y="17.5" width="8" height="3.5" rx="1"/><rect x="13" y="17.5" width="8" height="3.5" rx="1"/></svg>
                                     <span data-i18n="stream.combined_view_label">All + DVR</span>
                                 </button>
@@ -3021,7 +3029,8 @@
         // i18n must load before first paint. Once the shared modules and the
         // saved quality are ready, start the useful view immediately instead
         // of presenting an empty "select camera" state.
-        BYD.i18n.init().then(async function () {
+        const liveViewI18nReady = BYD.i18n.init();
+        liveViewI18nReady.then(async function () {
             BYD.stream.updateBroadwayAbButton();
             BYD.core.init();
             BYD.cabinListener.init();
@@ -3048,6 +3057,7 @@
         (async function () {
             try {
                 const res = await fetch('/api/settings/quality');
+                if (!res.ok) throw new Error('quality settings request failed: ' + res.status);
                 const data = await res.json();
                 const oem = data && data.oemDashcam;
                 const camId = oem && typeof oem.oemDashcamCameraId === 'number'
@@ -3057,18 +3067,38 @@
                 if (hotspot) {
                     hotspot.style.display = camId >= 0 ? '' : 'none';
                 }
-                // All + DVR follows capability; selecting it starts the DVR when needed.
+                // Show the layout wherever DVR is configured, but only route view 9
+                // after the backend has confirmed simultaneous capture support.
                 const combined = document.querySelector('.cam-view-chip[data-cam="9"]');
-                if (combined) {
-                    const combinedSupported = camId >= 0 && oem.concurrentAvmSupported === 1;
-                    combined.style.display = combinedSupported ? '' : 'none';
+                if (combined && camId >= 0) {
+                    await liveViewI18nReady;
+                    const combinedSupported = oem.concurrentAvmSupported === 1;
+                    const reason = oem.concurrentAvmSupported === -1
+                        ? 'stream.combined_view_unverified'
+                        : oem.concurrentAvmSupported === 0
+                            ? 'stream.combined_view_single_client'
+                            : 'stream.combined_view_unsupported';
+                    combined.classList.toggle('is-unavailable', !combinedSupported);
+                    if (!combinedSupported) {
+                        combined.setAttribute('data-i18n-attr', 'title:' + reason + ';aria-label:' + reason);
+                    }
+                    combined.addEventListener('click', function () {
+                        if (combinedSupported) {
+                            BYD.stream.selectCamera(9);
+                        } else {
+                            BYD.core.toast(BYD.i18n.t(reason), 'info', 7000);
+                        }
+                    });
+                    combined.style.display = '';
                     const selectorCard = combined.closest('.camera-selector-card');
-                    if (selectorCard) selectorCard.classList.toggle('has-view-chip', combinedSupported);
+                    if (selectorCard) {
+                        selectorCard.classList.add('has-view-chip');
+                        BYD.i18n.hydrate(selectorCard);
+                    }
                 }
             } catch (e) {
-                // Backend unreachable or response shape changed — leave
-                // the hotspot hidden (its inline default). The feature
-                // is opt-in; silent suppression is the safe fallback.
+                // Without a valid settings response, leave both controls
+                // hidden rather than infer camera capability.
                 console.log('[Init] OEM dashcam gating skipped:', e && e.message);
             }
         })();

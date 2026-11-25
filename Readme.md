@@ -82,6 +82,22 @@ Enable your preferred tunnel (Zrok, Cloudflared or Tailscale).
 - **Telegram Notifications** — Instant alerts for motion detection, recording events, and low battery
 - **Recording Library** — Calendar view for browsing and managing recordings
 
+### Combined Live View (All + DVR)
+
+On vehicles with an OEM DVR camera configured, the Cameras card in Live View
+shows **All + DVR** (view 9). It combines the DVR with the four AVM cameras
+when simultaneous camera access has been confirmed. If the chip shows an
+information icon, tap it to see why the combined view is unavailable.
+
+On legacy AVMCamera vehicles such as DiLink 3, an unverified result can be
+checked by enabling **Test dual-camera support on next boot** in
+Diagnostics > Camera Mapping and saving the OEM dashcam settings. Restart
+while parked with ACC confirmed off and reload Live View after the check.
+The check is optional and can interrupt recording; it may be deferred if a
+camera pipeline is already active or ACC-off cannot be confirmed. If only
+single-client support is detected, continue using All Cameras and DVR
+separately. Working individual feeds do not establish simultaneous support.
+
 ## Remote Access
 
 OverDrive offers four ways to reach the dashboard: locally over LAN, or
