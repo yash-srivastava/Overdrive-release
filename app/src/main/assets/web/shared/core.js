@@ -2345,16 +2345,30 @@ BYD.core = {
 
         var now = Date.now();
         var TTL_MS = 60000;
-        if (this._personalizedRangeFetched
+        if (this._personalizedRangeInFlight || (this._personalizedRangeFetched
                 && this._personalizedRangeFetchedAt
-                && (now - this._personalizedRangeFetchedAt) < TTL_MS) {
+                && (now - this._personalizedRangeFetchedAt) < TTL_MS)) {
             this._renderPersonalizedRange();
             return;
         }
 
+        // Status ticks do not await this secondary request. Bound its lifetime
+        // so a stalled response cannot wedge the single-flight guard.
+        this._personalizedRangeInFlight = true;
+        let timer;
         try {
-            const resp = await fetch('/api/trips/range');
-            const data = await resp.json();
+            const abort = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            const deadline = new Promise(function (resolve, reject) {
+                timer = setTimeout(function () {
+                    if (abort) { try { abort.abort(); } catch (ignored) {} }
+                    reject(new Error('range request timed out'));
+                }, 15000);
+            });
+            const resp = await Promise.race([
+                abort ? fetch('/api/trips/range', { signal: abort.signal }) : fetch('/api/trips/range'),
+                deadline
+            ]);
+            const data = await Promise.race([resp.json(), deadline]);
             this._personalizedRangeFetched = true;
             this._personalizedRangeFetchedAt = now;
             this._personalizedRangeKm = 0;
@@ -2380,6 +2394,9 @@ BYD.core = {
             this._personalizedRangeFetched = true;
             this._personalizedRangeFetchedAt = now;
             this._renderPersonalizedRange();
+        } finally {
+            clearTimeout(timer);
+            this._personalizedRangeInFlight = false;
         }
     },
 
