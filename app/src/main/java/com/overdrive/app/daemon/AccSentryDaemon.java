@@ -5261,6 +5261,50 @@ public class AccSentryDaemon {
         }
     }
 
+    private static final String DRIVER_BRIGHTNESS_FILE = "overdrive_driver_brightness";
+
+    /** Saves the slider once before the panel is darkened; a saved level is never replaced by 0. */
+    private static void saveDriverBrightness(ShellOwnership ownership) {
+        java.io.File file = com.overdrive.app.util.ScratchRoot.file(DRIVER_BRIGHTNESS_FILE);
+        if (file.exists()) return;
+        ShellResult current = execShellResult("settings get system screen_brightness",
+                DEFAULT_SHELL_TIMEOUT_MS, ownership);
+        int value = parseBrightness(current.success ? current.output : null);
+        if (value <= 0) return;
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(file)) {
+            out.write(String.valueOf(value).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            log("Could not save driver brightness: " + e.getMessage());
+        }
+    }
+
+    /** The saved slider level (taken once), 128 only if the panel was left at 0, else no write. */
+    private static Integer brightnessForWake(ShellOwnership ownership) {
+        java.io.File file = com.overdrive.app.util.ScratchRoot.file(DRIVER_BRIGHTNESS_FILE);
+        if (file.exists()) {
+            int saved = -1;
+            try {
+                saved = parseBrightness(new String(java.nio.file.Files.readAllBytes(file.toPath()),
+                        java.nio.charset.StandardCharsets.UTF_8));
+            } catch (Exception ignored) { }
+            if (!file.delete()) log("Could not clear saved driver brightness");
+            if (saved > 0) return saved;
+        }
+        ShellResult current = execShellResult("settings get system screen_brightness",
+                DEFAULT_SHELL_TIMEOUT_MS, ownership);
+        return current.success && parseBrightness(current.output) == 0 ? 128 : null;
+    }
+
+    static int parseBrightness(String text) {
+        if (text == null) return -1;
+        try {
+            int value = Integer.parseInt(text.trim());
+            return value >= 0 && value <= 255 ? value : -1;
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
     private static boolean setBacklightState(boolean on) {
         return setBacklightState(on, null, false);
     }
@@ -5406,12 +5450,17 @@ public class AccSentryDaemon {
         }
 
         // Legacy fallback: Settings brightness
-        int brightness = on ? 128 : 0;
-        ShellResult brightnessResult = execShellResult(
-                "settings put system screen_brightness " + brightness,
-                DEFAULT_SHELL_TIMEOUT_MS, ownership);
-        if (!brightnessResult.success) {
-            return false;
+        // The value is the driver's slider: save it before the first 0 and put that back on
+        // wake instead of a fixed level (BYD100F applies the stored value when the panel wakes).
+        Integer brightness = on ? brightnessForWake(ownership) : 0;
+        if (!on) saveDriverBrightness(ownership);
+        if (brightness != null) {
+            ShellResult brightnessResult = execShellResult(
+                    "settings put system screen_brightness " + brightness,
+                    DEFAULT_SHELL_TIMEOUT_MS, ownership);
+            if (!brightnessResult.success) {
+                return false;
+            }
         }
         if (on) {
             ShellResult keyResult = execShellResult(
