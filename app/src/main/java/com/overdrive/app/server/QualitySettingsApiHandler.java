@@ -1469,7 +1469,8 @@ public class QualitySettingsApiHandler {
         }
         response.put("codecAvailability", new JSONObject()
                 .put("H264", result.h264 == null ? JSONObject.NULL : result.h264)
-                .put("H265", result.h265 == null ? JSONObject.NULL : result.h265));
+                .put("H265", result.h265 == null ? JSONObject.NULL : result.h265)
+                .put("stale", result.stale));
     }
 
     private static void handleQualitySettingsPost(OutputStream out, String body) throws Exception {

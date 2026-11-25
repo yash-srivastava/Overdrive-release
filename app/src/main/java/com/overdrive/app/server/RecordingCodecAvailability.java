@@ -28,10 +28,20 @@ final class RecordingCodecAvailability {
         static final Result UNKNOWN = new Result(null, null);
         final Boolean h264;
         final Boolean h265;
+        final boolean stale;
 
         Result(Boolean h264, Boolean h265) {
+            this(h264, h265, false);
+        }
+
+        private Result(Boolean h264, Boolean h265, boolean stale) {
             this.h264 = h264;
             this.h265 = h265;
+            this.stale = stale;
+        }
+
+        private Result asStale() {
+            return h264 == null && h265 == null ? UNKNOWN : new Result(h264, h265, true);
         }
     }
 
@@ -41,6 +51,7 @@ final class RecordingCodecAvailability {
         private final Executor executor;
         private String key;
         private Result result;
+        private Result previous = Result.UNKNOWN;
         private boolean running;
 
         Cache(Executor executor) {
@@ -49,6 +60,9 @@ final class RecordingCodecAvailability {
 
         synchronized Result get(String requestedKey, Supplier<Result> probe) {
             if (!requestedKey.equals(key)) {
+                // Preserve the last accepted snapshot across key changes until a new
+                // result is available. Never promote a superseded probe to this fallback.
+                if (result != null) previous = result.asStale();
                 key = requestedKey;
                 result = null;
             }
@@ -72,7 +86,7 @@ final class RecordingCodecAvailability {
                     result = Result.UNKNOWN;
                 }
             }
-            return Result.UNKNOWN;
+            return result != null ? result : previous;
         }
     }
 
