@@ -1357,6 +1357,9 @@ public class QualitySettingsApiHandler {
             int headroom = Math.max(2_000_000, budget - panoBps);
             oem.put("oemDashcamCameraId", oemId);
             oem.put("concurrentAvmSupported", concurrent);
+            // The dual-camera check never runs in Camera2 mode (ConcurrentAvmProbe.runIfNeeded).
+            oem.put("concurrentAvmProbeAvailable",
+                !com.overdrive.app.camera.camera2.Camera2Platform.isSelected());
             oem.put("bitrateBudget", budget);
             oem.put("panoBitrateBps", panoBps);
             oem.put("oemHeadroomBps", headroom);

@@ -4230,6 +4230,8 @@
     "view_name_9": "All cameras + DVR",
     "combined_view_label": "All + DVR",
     "combined_view_unsupported": "Combined AVM + DVR unavailable",
+    "combined_view_unverified": "All + DVR is unverified. In Diagnostics > Camera probe, enable Test dual-camera support on next boot, save the OEM dashcam settings, restart while parked, then reload Live View after the check.",
+    "combined_view_single_client": "All + DVR is unavailable: this vehicle's camera check found only single-client support. Use All Cameras or DVR separately.",
     "combined_view_dvr_not_live": "DVR feed not live"
   },
   "auth": {
