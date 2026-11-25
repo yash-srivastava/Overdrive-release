@@ -3502,6 +3502,7 @@ const TRIPS = {
     },
 
     _clearDetailCanvas(id) {
+        if (id === 'timelineChart') this._releaseTimelineBase();
         const canvas = document.getElementById(id);
         if (!canvas) return;
         canvas.onmousemove = null;
@@ -4032,11 +4033,27 @@ const TRIPS = {
         }
 
         const key = useElapsed ? 'e' : 't';
+        // Wall-clock corrections can make legacy timestamps run backwards.
+        // Only use binary search when the chosen axis is actually ordered.
+        let ordered = useElapsed;
+        if (!useElapsed && samples && samples.length) {
+            ordered = true;
+            let previous = -Infinity;
+            for (let i = 0; i < samples.length; i++) {
+                const t = samples[i] && samples[i].t;
+                if (typeof t !== 'number' || !isFinite(t) || t < previous) {
+                    ordered = false;
+                    break;
+                }
+                previous = t;
+            }
+        }
         const start = samples && samples.length ? samples[0][key] : 0;
         const end = samples && samples.length ? samples[samples.length - 1][key] : start;
         return {
             samples: samples,
             key: key,
+            ordered: ordered,
             start: start,
             end: end,
             range: end - start || 1
@@ -4048,6 +4065,36 @@ const TRIPS = {
             this._timelineAxis = this._selectTimelineAxis(samples);
         }
         return this._timelineAxis;
+    },
+
+    _closestTimelineSample(samples, axisKey, target) {
+        const axis = this._timelineAxisFor(samples);
+        if (axis.ordered && axis.key === axisKey && isFinite(target)) {
+            const lowerBound = value => {
+                let lo = 0, hi = samples.length;
+                while (lo < hi) {
+                    const mid = lo + Math.floor((hi - lo) / 2);
+                    if (samples[mid][axisKey] < value) lo = mid + 1;
+                    else hi = mid;
+                }
+                return lo;
+            };
+            const right = lowerBound(target);
+            if (right === 0) return 0;
+            const leftValue = samples[right - 1][axisKey];
+            if (right < samples.length && samples[right][axisKey] - target < target - leftValue) {
+                return right;
+            }
+            // Match the old strict-less-than scan: earliest row wins ties,
+            // including duplicate timestamps on the left of the target.
+            return isFinite(target - leftValue) ? lowerBound(leftValue) : 0;
+        }
+        let closest = 0, minDiff = Infinity;
+        for (let i = 0; i < samples.length; i++) {
+            const diff = Math.abs(samples[i][axisKey] - target);
+            if (diff < minDiff) { minDiff = diff; closest = i; }
+        }
+        return closest;
     },
 
     /** A telemetry row's recorded battery SoC ('so'), or NaN. 0 is "no reading", as for a trip's SoC. */
@@ -4171,7 +4218,7 @@ const TRIPS = {
         return Math.atan2(sumSin / pairs, sumCos / pairs) * 180 / Math.PI;
     },
 
-    updateSliderDisplay(idx) {
+    updateSliderDisplay(idx, skipTimeline) {
         const samples = this.telemetryCache;
         if (!samples || idx >= samples.length) return;
         const s = samples[idx];
@@ -4239,7 +4286,7 @@ const TRIPS = {
 
         // 3. Sync Timeline chart scrubber
         const tlCanvas = document.getElementById('timelineChart');
-        if (tlCanvas && samples.length > 1) {
+        if (!skipTimeline && tlCanvas && samples.length > 1) {
             this.renderTimeline(tlCanvas, samples, idx);
         }
     },
@@ -5185,134 +5232,95 @@ const TRIPS = {
 
     // ==================== TIMELINE CHART ====================
 
+    _releaseTimelineBase() {
+        if (this._timelineBase) {
+            // Release the extra backing store rather than retaining the last trip.
+            this._timelineBase.image.width = 0;
+            this._timelineBase = null;
+        }
+    },
+
     renderTimeline(canvas, telemetry, highlightIdx) {
         const dpr = window.devicePixelRatio || 1;
         const rect = canvas.getBoundingClientRect();
-        // Fallback for zero-height containers on old WebView without aspect-ratio
+        // Fallback for zero-height containers on old WebView without aspect-ratio.
         const w = rect.width || 300;
         const h = rect.height > 0 ? rect.height : 160;
-        canvas.width = w * dpr;
-        canvas.height = h * dpr;
-        canvas.style.width = w + 'px';
-        canvas.style.height = h + 'px';
-        const ctx = canvas.getContext('2d');
-        ctx.scale(dpr, dpr);
-
         const pad = { top: 10, right: 40, bottom: 25, left: 50 };
         const cw = w - pad.left - pad.right;
         const ch = h - pad.top - pad.bottom;
-
-        ctx.clearRect(0, 0, w, h);
-        if (!telemetry || telemetry.length < 2) return;
+        if (!telemetry || telemetry.length < 2) {
+            this._releaseTimelineBase();
+            canvas.width = w * dpr;
+            canvas.height = h * dpr;
+            canvas.style.width = w + 'px';
+            canvas.style.height = h + 'px';
+            return;
+        }
 
         const axis = this._timelineAxisFor(telemetry);
         const axisKey = axis.key;
         const tStart = axis.start;
         const tRange = axis.range;
-        const maxSpeed = Math.max(10, ...telemetry.map(s => s.s || 0));
-
-        // Grid lines
-        ctx.strokeStyle = this.colors.grid;
-        ctx.lineWidth = 1;
-        for (let i = 0; i <= 4; i++) {
-            const y = pad.top + (ch * i / 4);
-            ctx.beginPath();
-            ctx.moveTo(pad.left, y);
-            ctx.lineTo(w - pad.right, y);
-            ctx.stroke();
-            ctx.fillStyle = this.colors.text;
-            ctx.font = '10px Inter, sans-serif';
-            ctx.textAlign = 'right';
-            ctx.fillText(Math.round(maxSpeed * (1 - i / 4)), pad.left - 6, y + 3);
-        }
-
-        // Brake area (red, from bottom)
-        ctx.beginPath();
-        ctx.moveTo(pad.left, pad.top + ch);
-        telemetry.forEach((s, i) => {
-            const x = pad.left + ((s[axisKey] - tStart) / tRange) * cw;
-            const y = pad.top + ch - ((s.b || 0) / 100) * ch;
-            ctx.lineTo(x, y);
-        });
-        ctx.lineTo(pad.left + cw, pad.top + ch);
-        ctx.closePath();
-        ctx.fillStyle = 'rgba(239, 68, 68, 0.2)';
-        ctx.fill();
-
-        // Accel pedal area (blue, from bottom)
-        ctx.beginPath();
-        ctx.moveTo(pad.left, pad.top + ch);
-        telemetry.forEach((s, i) => {
-            const x = pad.left + ((s[axisKey] - tStart) / tRange) * cw;
-            const y = pad.top + ch - ((s.a || 0) / 100) * ch;
-            ctx.lineTo(x, y);
-        });
-        ctx.lineTo(pad.left + cw, pad.top + ch);
-        ctx.closePath();
-        ctx.fillStyle = 'rgba(14, 165, 233, 0.15)';
-        ctx.fill();
-
-        // Speed line
-        ctx.beginPath();
-        telemetry.forEach((s, i) => {
-            const x = pad.left + ((s[axisKey] - tStart) / tRange) * cw;
-            const y = pad.top + ch - ((s.s || 0) / maxSpeed) * ch;
-            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        });
-        ctx.strokeStyle = this.colors.brand;
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-
-        // X-axis labels
-        ctx.fillStyle = this.colors.text;
-        ctx.font = '10px Inter, sans-serif';
-        ctx.textAlign = 'center';
-        const durMin = tRange / 60000;
-        const minSuf = BYD.units.minuteSuffix(false, false);
-        ctx.fillText('0' + minSuf, pad.left, h - 5);
-        ctx.fillText(Math.round(durMin / 2) + minSuf, pad.left + cw / 2, h - 5);
-        ctx.fillText(Math.round(durMin) + minSuf, w - pad.right, h - 5);
-
-        // SoC% line (right Y-axis, zoomed to the recorded range): the SoC the car reported
-        // along the trip, so a charge held in HEV mode reads flat. Trips recorded without
-        // per-row SoC draw no line (and hide its legend entry) rather than a made-up one.
         const socTrack = this._socTrackFor(telemetry);
+        const minSuf = BYD.units.minuteSuffix(false, false);
+        const palette = [this.colors.grid, this.colors.text, this.colors.brand].join('|');
+        let ctx = canvas.getContext('2d');
+        const cached = this._timelineBase;
+        const fontsReady = !document.fonts || document.fonts.status !== 'loading';
+        let reused = false;
+        // Telemetry arrays are replaced on detail loads, never edited in place.
+        if (fontsReady && cached && cached.canvas === canvas && cached.samples === telemetry
+                && cached.w === w && cached.h === h && cached.dpr === dpr
+                && cached.palette === palette && cached.minSuf === minSuf
+                && canvas.width === cached.image.width && canvas.height === cached.image.height) {
+            try {
+                // Copy at backing-store resolution; avoid fractional-DPR resampling.
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(cached.image, 0, 0);
+                ctx.scale(dpr, dpr);
+                reused = true;
+            } catch (e) { /* fall back to the original full draw */ }
+        }
+        let maxSpeed;
+        if (reused) {
+            maxSpeed = cached.maxSpeed;
+        } else {
+            this._releaseTimelineBase();
+            canvas.width = w * dpr;
+            canvas.height = h * dpr;
+            canvas.style.width = w + 'px';
+            canvas.style.height = h + 'px';
+            ctx = canvas.getContext('2d');
+            ctx.scale(dpr, dpr);
+            ctx.clearRect(0, 0, w, h);
+            // Avoid a temporary array and the argument-count limit of Math.max(...samples).
+            maxSpeed = 10;
+            for (let i = 0; i < telemetry.length; i++) {
+                maxSpeed = Math.max(maxSpeed, telemetry[i].s || 0);
+            }
+            this._drawTimelineBase(ctx, telemetry, axis, w, h, pad, cw, ch, maxSpeed, socTrack, minSuf);
+            // One ordinary detached Canvas2D (Chrome 58 compatible), at most 4 MiB
+            // of nominal RGBA pixels. Large canvases keep the full redraw path.
+            if (fontsReady && (!document.fonts || document.fonts.status !== 'loading')
+                    && canvas.width > 0 && canvas.height > 0 && canvas.width * canvas.height <= 1048576
+                    && typeof ctx.setTransform === 'function' && typeof ctx.drawImage === 'function') {
+                let image;
+                try {
+                    image = document.createElement('canvas');
+                    image.width = canvas.width;
+                    image.height = canvas.height;
+                    image.getContext('2d').drawImage(canvas, 0, 0);
+                    this._timelineBase = { canvas, samples: telemetry, w, h, dpr, palette, minSuf, maxSpeed, image };
+                } catch (e) {
+                    if (image) image.width = 0;
+                    // No cache is needed for correctness on older/limited renderers.
+                }
+            }
+        }
         const socLegend = document.getElementById('tlLegendSoc');
         if (socLegend) socLegend.style.display = socTrack ? 'flex' : 'none';
-
-        if (socTrack) {
-            // Use a zoomed Y range: pad 5% above and below the recorded SoC range
-            const socMin = Math.max(0, socTrack.min - 5);
-            const socMax = Math.min(100, socTrack.max + 5);
-            const socRange = socMax - socMin || 1;
-            const socY = soc => pad.top + ch - ((soc - socMin) / socRange) * ch;
-
-            // Right Y-axis labels: first and last reading (one label when they would overlap)
-            ctx.fillStyle = 'rgba(245,158,11,0.7)';
-            ctx.font = '10px Inter, sans-serif';
-            ctx.textAlign = 'right';
-            if (Math.abs(socY(socTrack.first) - socY(socTrack.last)) >= 11) {
-                ctx.fillText(socTrack.first.toFixed(1) + '%', w - 2, socY(socTrack.first) + 3);
-            }
-            ctx.fillText(socTrack.last.toFixed(1) + '%', w - 2, socY(socTrack.last) + 3);
-
-            // SoC line through the readings, broken where they stop for longer than _socHoldMs
-            ctx.beginPath();
-            let prevAt = NaN;
-            telemetry.forEach(s => {
-                const soc = this._socReading(s);
-                if (!isFinite(soc)) return;
-                const x = pad.left + ((s[axisKey] - tStart) / tRange) * cw;
-                if (s[axisKey] - prevAt <= this._socHoldMs) ctx.lineTo(x, socY(soc));
-                else ctx.moveTo(x, socY(soc));
-                prevAt = s[axisKey];
-            });
-            ctx.strokeStyle = 'rgba(245,158,11,0.6)';
-            ctx.lineWidth = 1.5;
-            ctx.setLineDash([6, 4]);
-            ctx.stroke();
-            ctx.setLineDash([]);
-        }
 
         // Compute pedal stats on first render
         if (highlightIdx === undefined) {
@@ -5382,8 +5390,112 @@ const TRIPS = {
                 ctx.fillStyle = 'rgba(245,158,11,0.8)';
                 ctx.fillText('SoC: ' + socAtPoint.toFixed(1) + '%', tx + 8, ty + 60);
             }
-        } else {
+        }
+        if (!reused || highlightIdx === undefined) {
             this.setupChartHover(canvas, telemetry, axisKey, tStart, tRange, cw, pad);
+        }
+    },
+
+    _drawTimelineBase(ctx, telemetry, axis, w, h, pad, cw, ch, maxSpeed, socTrack, minSuf) {
+        const axisKey = axis.key;
+        const tStart = axis.start;
+        const tRange = axis.range;
+        // Grid lines
+        ctx.strokeStyle = this.colors.grid;
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 4; i++) {
+            const y = pad.top + (ch * i / 4);
+            ctx.beginPath();
+            ctx.moveTo(pad.left, y);
+            ctx.lineTo(w - pad.right, y);
+            ctx.stroke();
+            ctx.fillStyle = this.colors.text;
+            ctx.font = '10px Inter, sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText(Math.round(maxSpeed * (1 - i / 4)), pad.left - 6, y + 3);
+        }
+
+        // Brake area (red, from bottom)
+        ctx.beginPath();
+        ctx.moveTo(pad.left, pad.top + ch);
+        telemetry.forEach((s, i) => {
+            const x = pad.left + ((s[axisKey] - tStart) / tRange) * cw;
+            const y = pad.top + ch - ((s.b || 0) / 100) * ch;
+            ctx.lineTo(x, y);
+        });
+        ctx.lineTo(pad.left + cw, pad.top + ch);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.2)';
+        ctx.fill();
+
+        // Accel pedal area (blue, from bottom)
+        ctx.beginPath();
+        ctx.moveTo(pad.left, pad.top + ch);
+        telemetry.forEach((s, i) => {
+            const x = pad.left + ((s[axisKey] - tStart) / tRange) * cw;
+            const y = pad.top + ch - ((s.a || 0) / 100) * ch;
+            ctx.lineTo(x, y);
+        });
+        ctx.lineTo(pad.left + cw, pad.top + ch);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(14, 165, 233, 0.15)';
+        ctx.fill();
+
+        // Speed line
+        ctx.beginPath();
+        telemetry.forEach((s, i) => {
+            const x = pad.left + ((s[axisKey] - tStart) / tRange) * cw;
+            const y = pad.top + ch - ((s.s || 0) / maxSpeed) * ch;
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.strokeStyle = this.colors.brand;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // X-axis labels
+        ctx.fillStyle = this.colors.text;
+        ctx.font = '10px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        const durMin = tRange / 60000;
+        ctx.fillText('0' + minSuf, pad.left, h - 5);
+        ctx.fillText(Math.round(durMin / 2) + minSuf, pad.left + cw / 2, h - 5);
+        ctx.fillText(Math.round(durMin) + minSuf, w - pad.right, h - 5);
+
+        // SoC% line (right Y-axis, zoomed to the recorded range): the SoC the car reported
+        // along the trip, so a charge held in HEV mode reads flat. Trips recorded without
+        // per-row SoC draw no line (and hide its legend entry) rather than a made-up one.
+        if (socTrack) {
+            // Use a zoomed Y range: pad 5% above and below the recorded SoC range
+            const socMin = Math.max(0, socTrack.min - 5);
+            const socMax = Math.min(100, socTrack.max + 5);
+            const socRange = socMax - socMin || 1;
+            const socY = soc => pad.top + ch - ((soc - socMin) / socRange) * ch;
+
+            // Right Y-axis labels: first and last reading (one label when they would overlap)
+            ctx.fillStyle = 'rgba(245,158,11,0.7)';
+            ctx.font = '10px Inter, sans-serif';
+            ctx.textAlign = 'right';
+            if (Math.abs(socY(socTrack.first) - socY(socTrack.last)) >= 11) {
+                ctx.fillText(socTrack.first.toFixed(1) + '%', w - 2, socY(socTrack.first) + 3);
+            }
+            ctx.fillText(socTrack.last.toFixed(1) + '%', w - 2, socY(socTrack.last) + 3);
+
+            // SoC line through the readings, broken where they stop for longer than _socHoldMs
+            ctx.beginPath();
+            let prevAt = NaN;
+            telemetry.forEach(s => {
+                const soc = this._socReading(s);
+                if (!isFinite(soc)) return;
+                const x = pad.left + ((s[axisKey] - tStart) / tRange) * cw;
+                if (s[axisKey] - prevAt <= this._socHoldMs) ctx.lineTo(x, socY(soc));
+                else ctx.moveTo(x, socY(soc));
+                prevAt = s[axisKey];
+            });
+            ctx.strokeStyle = 'rgba(245,158,11,0.6)';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([6, 4]);
+            ctx.stroke();
+            ctx.setLineDash([]);
         }
     },
 
@@ -5398,14 +5510,10 @@ const TRIPS = {
             if (mx < pad.left || mx > pad.left + cw) return;
             const relX = mx - pad.left;
             const targetT = tStart + (relX / cw) * tRange;
-            let closest = 0, minDiff = Infinity;
-            for (let i = 0; i < telemetry.length; i++) {
-                const diff = Math.abs(telemetry[i][axisKey] - targetT);
-                if (diff < minDiff) { minDiff = diff; closest = i; }
-            }
+            const closest = self._closestTimelineSample(telemetry, axisKey, targetT);
             self.renderTimeline(canvas, telemetry, closest);
             const slider = document.getElementById('timelineSlider');
-            if (slider) { slider.value = closest; self.updateSliderDisplay(closest); }
+            if (slider) { slider.value = closest; self.updateSliderDisplay(closest, true); }
         };
         canvas.onmouseleave = function() {
             self.renderTimeline(canvas, telemetry);
@@ -5432,14 +5540,10 @@ const TRIPS = {
                 if (mx < pad.left || mx > pad.left + cw) return;
                 const relX = mx - pad.left;
                 const targetT = tStart + (relX / cw) * tRange;
-                let closest = 0, minDiff = Infinity;
-                for (let i = 0; i < telemetry.length; i++) {
-                    const diff = Math.abs(telemetry[i][axisKey] - targetT);
-                    if (diff < minDiff) { minDiff = diff; closest = i; }
-                }
+                const closest = self._closestTimelineSample(telemetry, axisKey, targetT);
                 self.renderTimeline(canvas, telemetry, closest);
                 const slider = document.getElementById('timelineSlider');
-                if (slider) { slider.value = closest; self.updateSliderDisplay(closest); }
+                if (slider) { slider.value = closest; self.updateSliderDisplay(closest, true); }
             }
         };
         canvas.ontouchend = function() {
