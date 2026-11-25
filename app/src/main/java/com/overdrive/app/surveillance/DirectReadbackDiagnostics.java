@@ -5,7 +5,10 @@ import com.overdrive.app.logging.DaemonLogger;
 import java.util.Arrays;
 import java.util.Locale;
 
-/** Opt-in, per-lane timings; no frame bytes or per-frame timing logs. */
+/**
+ * Opt-in, per-lane timings; no frame bytes or per-frame timing logs.
+ * DaemonLogger output is retained in debug/Braveheart builds, not normal release builds.
+ */
 final class DirectReadbackDiagnostics {
     private static final DaemonLogger logger = DaemonLogger.getInstance("GpuDownscaler");
     private static final String PROPERTY = "debug.overdrive.rgb_readback";

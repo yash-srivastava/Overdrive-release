@@ -9,7 +9,7 @@ final class RgbaReadback {
     private final int height;
     private final int rgbaBytes;
     private final int rgbBytes;
-    // Owned by one readback lane; allocated only when Java packing is needed.
+    // Owned by one readback lane; direct readback reserves it before mapping.
     private byte[] scratch;
 
     RgbaReadback(int width, int height) {
@@ -27,9 +27,9 @@ final class RgbaReadback {
         return rgba != null && rgba.position() == 0 && rgba.remaining() >= rgbaBytes;
     }
 
+    // Synchronous snapshots stay on Java until native readback is validated.
     boolean pack(ByteBuffer rgba, byte[] rgb) {
         if (rgb == null || rgb.length != rgbBytes || !validSource(rgba)) return false;
-        if (tryNativePack(rgba, rgb)) return true;
         if (!copyRgba(rgba)) return false;
         packCopied(rgb);
         return true;
@@ -48,10 +48,14 @@ final class RgbaReadback {
         return false;
     }
 
+    void reserveScratch() {
+        if (scratch == null) scratch = new byte[rgbaBytes];
+    }
+
     // Copy while the PBO is mapped; the Java path can pack after unmapping.
     boolean copyRgba(ByteBuffer rgba) {
         if (!validSource(rgba)) return false;
-        if (scratch == null) scratch = new byte[rgbaBytes];
+        reserveScratch();
         rgba.get(scratch, 0, rgbaBytes);
         rgba.position(0);
         return true;

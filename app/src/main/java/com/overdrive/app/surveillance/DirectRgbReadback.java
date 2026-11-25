@@ -31,8 +31,11 @@ final class DirectRgbReadback {
     DirectRgbReadback(int width, int height, Mode mode, NativePacker nativePacker) {
         packer = new RgbaReadback(width, height);
         this.nativePacker = nativePacker == null ? packer::tryNativePack : nativePacker;
-        this.mode = mode;
+        // Native is opt-in until the on-device comparison is available.
+        this.mode = mode == null ? Mode.JAVA : mode;
         published = new byte[width * height * 3];
+        packer.reserveScratch();
+        if (this.mode != Mode.JAVA) staging = new byte[published.length];
     }
 
     void prepare(ByteBuffer rgba) {
@@ -43,7 +46,6 @@ final class DirectRgbReadback {
             if (!copied) return;
         }
         if (mode != Mode.JAVA && !nativeDisabled) {
-            if (staging == null) staging = new byte[published.length];
             packed = nativePacker.pack(rgba, staging);
         }
         if (!packed && !copied) copied = packer.copyRgba(rgba);

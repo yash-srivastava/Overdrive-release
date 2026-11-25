@@ -34,6 +34,43 @@ public class DirectRgbReadbackTest {
         }
     }
 
+    @Test public void defaultAndExplicitJavaNeverInvokeNative() {
+        for (DirectRgbReadback.Mode mode : new DirectRgbReadback.Mode[]{
+                null, DirectRgbReadback.Mode.JAVA}) {
+            DirectRgbReadback readback = new DirectRgbReadback(1, 1, mode,
+                    (source, target) -> { throw new AssertionError("Unexpected native call"); });
+            readback.prepare(rgba(10));
+            assertArrayEquals(new byte[]{10, 2, 3}, readback.finish(true));
+            assertFalse(readback.lastNative());
+            assertFalse(readback.lastCompared());
+        }
+    }
+
+    @Test public void abortedNativePackPreservesFrameAndAllowsNextFrame() {
+        for (DirectRgbReadback.Mode mode : new DirectRgbReadback.Mode[]{
+                DirectRgbReadback.Mode.NATIVE, DirectRgbReadback.Mode.VERIFY}) {
+            DirectRgbReadback readback = new DirectRgbReadback(1, 1, mode,
+                    (source, target) -> {
+                        nativeCopy(source, target);
+                        if (source.get(0) == 20) throw new OutOfMemoryError("Injected JNI failure");
+                        return true;
+                    });
+            readback.prepare(rgba(10));
+            byte[] previous = readback.finish(true);
+            try {
+                readback.prepare(rgba(20));
+                fail("Expected injected allocation failure");
+            } catch (OutOfMemoryError expected) {
+                // Same abort as GpuDownscaler after retiring the mapped slot.
+                assertNull(readback.finish(false));
+            }
+            assertArrayEquals(new byte[]{10, 2, 3}, previous);
+            assertNull(readback.finish(true));
+            readback.prepare(rgba(30));
+            assertArrayEquals(new byte[]{30, 2, 3}, readback.finish(true));
+        }
+    }
+
     @Test public void successfulVerificationCountsActualNativeComparison() {
         DirectRgbReadback readback = new DirectRgbReadback(1, 1, DirectRgbReadback.Mode.VERIFY,
                 DirectRgbReadbackTest::nativeCopy);
