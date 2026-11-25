@@ -479,6 +479,7 @@
 
     var dom = null;
     var currentResults = [];
+    var renderedQuery = null;
     var activeIndex = -1;
     var prevFocus = null;
     var openRequested = false;
@@ -651,11 +652,14 @@
 
     function runQuery(raw) {
         var q = norm(trim(raw));
+        var request = openRequest;
         if (dom) {
             if (q) dom.panel.classList.add('has-query');
             else dom.panel.classList.remove('has-query');
         }
         ensureIndex(function (entries) {
+            // The input may have changed while the index was being built.
+            if (!openRequested || request !== openRequest || q !== norm(trim(dom.input.value))) return;
             var list, i;
             if (!q) {
                 list = [];
@@ -678,7 +682,12 @@
                 for (i = 0; i < scored.length && i < MAX_RESULTS; i++) list.push(scored[i].e);
             }
             render(list);
+            renderedQuery = q;
         });
+    }
+
+    function hasCurrentResults() {
+        return isOpen() && renderedQuery === norm(trim(dom.input.value));
     }
 
     function updateActive() {
@@ -694,7 +703,7 @@
     }
 
     function move(delta) {
-        if (!currentResults.length) return;
+        if (!hasCurrentResults() || !currentResults.length) return;
         activeIndex += delta;
         if (activeIndex < 0) activeIndex = currentResults.length - 1;
         if (activeIndex >= currentResults.length) activeIndex = 0;
@@ -702,13 +711,17 @@
     }
 
     var queryTimer = null;
+    function cancelQuery() {
+        if (queryTimer !== null) clearTimeout(queryTimer);
+        queryTimer = null;
+    }
     function wireOverlay() {
         // Debounce keystrokes: scoring resolves i18n labels for every entry, so
         // re-running on each keypress lags fast typing on the head-unit WebView.
         dom.input.addEventListener('input', function () {
             var v = dom.input.value;
-            if (queryTimer) clearTimeout(queryTimer);
-            queryTimer = setTimeout(function () { runQuery(v); }, 110);
+            cancelQuery();
+            queryTimer = setTimeout(function () { queryTimer = null; runQuery(v); }, 110);
         });
         dom.input.addEventListener('keydown', function (ev) {
             var k = ev.key;
@@ -716,19 +729,20 @@
             else if (k === 'ArrowUp' || ev.keyCode === 38) { ev.preventDefault(); move(-1); }
             else if (k === 'Enter' || ev.keyCode === 13) {
                 ev.preventDefault();
-                if (activeIndex >= 0 && currentResults[activeIndex]) go(currentResults[activeIndex]);
+                if (hasCurrentResults() && activeIndex >= 0 && currentResults[activeIndex]) go(currentResults[activeIndex]);
             } else if (k === 'Escape' || ev.keyCode === 27) {
                 ev.preventDefault(); close();
             }
         });
         dom.clear.addEventListener('click', function () {
-            if (queryTimer) clearTimeout(queryTimer);
+            cancelQuery();
             dom.input.value = ''; runQuery(''); try { dom.input.focus(); } catch (e) {}
         });
         dom.backdrop.addEventListener('click', function (ev) {
             if (ev.target === dom.backdrop) close();
         });
         dom.results.addEventListener('click', function (ev) {
+            if (!hasCurrentResults()) return;
             // Walk up to the <li> carrying data-i. We key on the attribute, not
             // the class name: the child spans are od-search-item-icon/-label/
             // -text/-crumb, which all CONTAIN the substring "od-search-item", so
@@ -762,6 +776,8 @@
         openRequest++;
         fullscreenExit = null;
         cancelFocus();
+        cancelQuery();
+        renderedQuery = null;
         dom.backdrop.setAttribute('hidden', '');
         if (dom.backdrop.parentNode !== document.body) document.body.appendChild(dom.backdrop);
         var fullscreen = fullscreenElement();
