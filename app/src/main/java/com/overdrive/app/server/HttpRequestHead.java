@@ -5,7 +5,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.SocketTimeoutException;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Locale;
 
 /**
@@ -30,6 +32,7 @@ final class HttpRequestHead {
 
     private final InputStream input;
     private final long startedNanos;
+    private LineBuffer headLine = new LineBuffer(128);
     private int bytesRead;
     private int requestLineCount;
     private int headerCount;
@@ -59,6 +62,7 @@ final class HttpRequestHead {
         if (line == null) throw new HeadException(400, "Incomplete request headers");
         if (line.isEmpty()) {
             headersComplete = true;
+            headLine = null; // Do not retain a large header buffer during response streaming.
             return line;
         }
         if (++headerCount > MAX_HEADER_FIELDS) {
@@ -68,7 +72,8 @@ final class HttpRequestHead {
     }
 
     private String readLine(int lineLimit, int oversizedStatus) throws IOException {
-        ByteArrayOutputStream line = new ByteArrayOutputStream(128);
+        LineBuffer line = headLine;
+        line.reset();
         while (true) {
             // Socket SO_TIMEOUT bounds a single blocked read. This independent
             // elapsed budget also stops a peer that trickles one byte per read.
@@ -89,19 +94,8 @@ final class HttpRequestHead {
                 throw new HeadException(431, "Request headers too large");
             }
             if (b == '\n') {
-                byte[] data = line.toByteArray();
-                int length = data.length;
-                // Support CRLF and the existing LF-only request compatibility.
-                if (length > 0 && data[length - 1] == '\r') length--;
-                for (int i = 0; i < length; i++) {
-                    // Reject embedded CR, NUL, DEL and other control bytes.
-                    // A tab is legal within a header field value.
-                    int c = data[i] & 0xff;
-                    if ((c < 0x20 && c != '\t') || c == 0x7f) {
-                        throw new HeadException(400, "Invalid request header characters");
-                    }
-                }
-                return new String(data, 0, length, StandardCharsets.UTF_8);
+                // Decode directly from the reusable request-local buffer.
+                return line.decodeLine(StandardCharsets.UTF_8, "Invalid request header characters");
             }
             if (line.size() >= lineLimit) {
                 throw new HeadException(oversizedStatus, "Request line or header too long");
@@ -139,11 +133,12 @@ final class HttpRequestHead {
      * empty body, as {@link #readUtf8Body} does for Content-Length 0.
      */
     static String readChunkedUtf8Body(InputStream input, int maxBytes) throws IOException {
-        ByteArrayOutputStream body = new ByteArrayOutputStream();
-        byte[] buffer = new byte[8192];
+        RequestBuffer body = null;
+        LineBuffer line = new LineBuffer(16);
+        byte[] buffer = null;
         long total = 0;
         while (true) {
-            String sizeLine = readBodyLine(input, MAX_REQUEST_LINE_BYTES);
+            String sizeLine = readBodyLine(input, MAX_REQUEST_LINE_BYTES, line);
             if (sizeLine == null) throw new HeadException(400, "Incomplete request body");
             int semicolon = sizeLine.indexOf(';');
             String hex = (semicolon >= 0 ? sizeLine.substring(0, semicolon) : sizeLine).trim();
@@ -156,6 +151,12 @@ final class HttpRequestHead {
                 if (total + size > maxBytes) throw new HeadException(413, "Payload too large");
             }
             if (size == 0) break;
+            // Tunnels can send body-less POSTs as chunked requests. Do not
+            // allocate the payload buffers until a nonempty chunk arrives.
+            if (body == null) {
+                body = new RequestBuffer(32);
+                buffer = new byte[8192];
+            }
             long remaining = size;
             while (remaining > 0) {
                 int count = input.read(buffer, 0, (int) Math.min(buffer.length, remaining));
@@ -164,24 +165,25 @@ final class HttpRequestHead {
                 remaining -= count;
             }
             total += size;
-            String terminator = readBodyLine(input, 1);
+            String terminator = readBodyLine(input, 1, line);
             if (terminator == null || !terminator.isEmpty()) {
                 throw new HeadException(400, "Invalid chunk terminator");
             }
         }
         int trailers = 0;
         while (true) {
-            String trailer = readBodyLine(input, MAX_HEADER_LINE_BYTES);
+            String trailer = readBodyLine(input, MAX_HEADER_LINE_BYTES, line);
             if (trailer == null) throw new HeadException(400, "Incomplete request body");
             if (trailer.isEmpty()) break;
             if (++trailers > MAX_HEADER_FIELDS) throw new HeadException(431, "Too many trailer fields");
         }
-        return total == 0 ? null : new String(body.toByteArray(), StandardCharsets.UTF_8);
+        return total == 0 ? null : body.decode(StandardCharsets.UTF_8);
     }
 
     /** One CRLF- or LF-terminated line of at most {@code limit} bytes; null at EOF before any byte. */
-    private static String readBodyLine(InputStream input, int limit) throws IOException {
-        ByteArrayOutputStream line = new ByteArrayOutputStream(16);
+    private static String readBodyLine(InputStream input, int limit, LineBuffer line)
+            throws IOException {
+        line.reset();
         while (true) {
             int b = input.read();
             if (b < 0) {
@@ -189,19 +191,55 @@ final class HttpRequestHead {
                 throw new HeadException(400, "Incomplete request body");
             }
             if (b == '\n') {
-                byte[] data = line.toByteArray();
-                int length = data.length;
-                if (length > 0 && data[length - 1] == '\r') length--;
-                for (int i = 0; i < length; i++) {
-                    int c = data[i] & 0xff;
-                    if ((c < 0x20 && c != '\t') || c == 0x7f) {
-                        throw new HeadException(400, "Invalid chunk framing");
-                    }
-                }
-                return new String(data, 0, length, StandardCharsets.US_ASCII);
+                return line.decodeLine(StandardCharsets.US_ASCII, "Invalid chunk framing");
             }
             if (line.size() > limit) throw new HeadException(400, "Chunk line too long");
             line.write(b);
+        }
+    }
+
+    /** Payload accumulator that decodes its used range without a full byte[] copy. */
+    private static final class RequestBuffer extends ByteArrayOutputStream {
+        RequestBuffer(int initialCapacity) {
+            super(initialCapacity);
+        }
+
+        String decode(Charset charset) {
+            // String owns the decoded content; no intermediate full-payload byte[] copy.
+            return new String(buf, 0, count, charset);
+        }
+    }
+
+    /** Request-local scratch. The caller checks its line limit before every write. */
+    private static final class LineBuffer {
+        private byte[] buf;
+        private int count;
+
+        LineBuffer(int initialCapacity) {
+            buf = new byte[initialCapacity];
+        }
+
+        void reset() { count = 0; }
+        int size() { return count; }
+
+        void write(int b) {
+            if (count == buf.length) buf = Arrays.copyOf(buf, buf.length * 2);
+            buf[count++] = (byte) b;
+        }
+
+        String decodeLine(Charset charset, String invalidMessage) throws HeadException {
+            int length = count;
+            // Support CRLF and the existing LF-only request compatibility.
+            if (length > 0 && buf[length - 1] == '\r') length--;
+            for (int i = 0; i < length; i++) {
+                // Reject embedded CR, NUL, DEL and other control bytes.
+                // A tab is legal within a header field value.
+                int c = buf[i] & 0xff;
+                if ((c < 0x20 && c != '\t') || c == 0x7f) {
+                    throw new HeadException(400, invalidMessage);
+                }
+            }
+            return new String(buf, 0, length, charset);
         }
     }
 
