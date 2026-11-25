@@ -118,9 +118,9 @@ internal object DiLink5InstrumentFullSession {
         }
     }
 
-    fun isSupportedSelection(): Boolean {
+    fun isSupportedSelection(startGeneration: Long? = null): Boolean {
         if (!Sealion7HdmiProjection.isTestedFirmware()) return false
-        val mode = readDaemonSavedMode()
+        val mode = readDaemonSavedMode(startGeneration)
         return mode == OFF || mode == FULL
     }
 
@@ -197,8 +197,15 @@ internal object DiLink5InstrumentFullSession {
 
     /** The shell tool can read this setting from the daemon's app_process identity. */
     internal fun readDaemonSavedMode(
+        startGeneration: Long? = null,
         run: (String, Long) -> String? = { command, deadlineMs ->
-            BoundedShell.run(command, deadlineMs).takeIf { it.ok() }?.output
+            val result = BoundedShell.run(command, deadlineMs)
+            if (startGeneration != null) {
+                val raw = result.output.takeIf { it == "null" || it.toIntOrNull() != null } ?: "<unavailable>"
+                logger.info("Sealion 7 instrument mode at start generation=$startGeneration raw=$raw " +
+                    "exit=${result.exitCode} timeout=${result.timedOut}")
+            }
+            result.takeIf { it.ok() }?.output
         },
     ): Int = run(
         "exec /system/bin/settings get global ${ClusterCommContract.INSTRUMENT_MODE_SETTING}",

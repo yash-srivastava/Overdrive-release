@@ -4370,7 +4370,7 @@ object DiLink5ClusterCast {
             if (Sealion7HdmiProjection.isEnabled(context)) {
                 val panel = Sealion7HdmiProjection.findDisplay(context)
                     ?: throw IllegalStateException("The Sealion 7 cluster display is unavailable")
-                check(DiLink5InstrumentFullSession.isSupportedSelection()) {
+                check(DiLink5InstrumentFullSession.isSupportedSelection(expectedGeneration)) {
                     "Select Off or Full in the vehicle instrument navigation settings"
                 }
                 val size = displaySize(panel)
