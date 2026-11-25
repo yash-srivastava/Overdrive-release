@@ -25,8 +25,8 @@ import java.util.Set;
  */
 public class TelemetryDiffer {
 
-    /** key -> stable quantized representation of the last sent value. */
-    private final Map<String, String> lastSent = new HashMap<>();
+    /** key -> numeric bucket or stable text representation of the last sent value. */
+    private final Map<String, Object> lastSent = new HashMap<>();
     private long lastSendTimeMs = 0;
     // Time of the last FULL resync (every discoverable key sent), tracked separately from
     // lastSendTimeMs so the heartbeat can fire on its own fixed cadence without being reset
@@ -61,9 +61,7 @@ public class TelemetryDiffer {
         while (it.hasNext()) {
             String k = it.next();
             if (TelemetryFieldCatalog.EXCLUDED.contains(k)) continue;
-            String now = repr(k, snapshot.opt(k));
-            String prev = lastSent.get(k);
-            if (prev == null || !prev.equals(now)) changed.add(k);
+            if (!matches(k, lastSent.get(k), snapshot.opt(k))) changed.add(k);
         }
         return changed;
     }
@@ -89,7 +87,7 @@ public class TelemetryDiffer {
         Iterator<String> it = snapshot.keys();
         while (it.hasNext()) {
             String k = it.next();
-            lastSent.put(k, repr(k, snapshot.opt(k)));
+            lastSent.put(k, rememberedValue(k, snapshot.opt(k)));
         }
         lastSendTimeMs = nowMs;
     }
@@ -97,9 +95,61 @@ public class TelemetryDiffer {
     /** Record that a specific subset of keys was just transmitted (per-field mode). */
     public void markKeysSent(JSONObject snapshot, Set<String> keys, long nowMs) {
         for (String k : keys) {
-            lastSent.put(k, repr(k, snapshot.opt(k)));
+            lastSent.put(k, rememberedValue(k, snapshot.opt(k)));
         }
         lastSendTimeMs = nowMs;
+    }
+
+    // Compare numeric deadband buckets without formatting a new String for every
+    // field on every poll. Text (including null and arrays) keeps the original
+    // representation semantics; cross-type comparisons still use the old text
+    // representation so, for example, a string "q10" matches numeric bucket 10.
+    private static boolean matches(String key, Object previous, Object value) {
+        if (previous == null) return false;
+        if (previous instanceof NumericBucket && value instanceof Number) {
+            NumericBucket bucket = (NumericBucket) previous;
+            Number number = (Number) value;
+            double step = TelemetryFieldCatalog.precisionFor(key);
+            return bucket.quantized == isQuantized(number, step)
+                    && bucket.value == numericValue(number, step);
+        }
+        return previous.toString().equals(repr(key, value));
+    }
+
+    private static Object rememberedValue(String key, Object value) {
+        if (!(value instanceof Number)) return repr(key, value);
+        Number number = (Number) value;
+        double step = TelemetryFieldCatalog.precisionFor(key);
+        return new NumericBucket(numericValue(number, step), isQuantized(number, step));
+    }
+
+    private static boolean isQuantized(Number number, double step) {
+        return step > 0 || !(number instanceof Integer || number instanceof Long
+                || number instanceof Short || number instanceof Byte);
+    }
+
+    private static long numericValue(Number number, double step) {
+        if (step > 0) return Math.round(number.doubleValue() / step);
+        return isQuantized(number, step) ? Math.round(number.doubleValue() * 100)
+                : number.longValue();
+    }
+
+    private static String numericText(long value, boolean quantized) {
+        return quantized ? "q" + value : Long.toString(value);
+    }
+
+    private static final class NumericBucket {
+        final long value;
+        final boolean quantized;
+
+        NumericBucket(long value, boolean quantized) {
+            this.value = value;
+            this.quantized = quantized;
+        }
+
+        @Override public String toString() {
+            return numericText(value, quantized);
+        }
     }
 
     /**
@@ -110,15 +160,9 @@ public class TelemetryDiffer {
     static String repr(String key, Object v) {
         if (v == null || v == JSONObject.NULL) return "∅";
         if (v instanceof Number) {
-            double d = ((Number) v).doubleValue();
+            Number number = (Number) v;
             double step = TelemetryFieldCatalog.precisionFor(key);
-            if (step > 0) {
-                return "q" + Math.round(d / step);
-            }
-            if (v instanceof Integer || v instanceof Long || v instanceof Short || v instanceof Byte) {
-                return Long.toString(((Number) v).longValue());
-            }
-            return "q" + Math.round(d * 100); // default 2-decimal deadband for untyped doubles
+            return numericText(numericValue(number, step), isQuantized(number, step));
         }
         return v.toString(); // boolean / string / JSONArray
     }
