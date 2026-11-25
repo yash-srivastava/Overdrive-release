@@ -1,6 +1,5 @@
 package com.overdrive.app.trips;
 
-import java.util.ArrayDeque;
 import java.util.Arrays;
 
 /**
@@ -68,7 +67,7 @@ public final class ElevationEstimator {
 
     // ==================== Filter state ====================
 
-    private final ArrayDeque<long[]> window = new ArrayDeque<>(); // {timestampMs, altBits, vAccBits}
+    private final MedianWindow window = new MedianWindow();
     private long lastAcceptedTs = Long.MIN_VALUE;
     private boolean lastSourceMsl = false;
     private boolean haveSource = false;
@@ -131,17 +130,9 @@ public final class ElevationEstimator {
         lastAcceptedTs = timestampMs;
 
         // Smoothing window (time-based).
-        window.addLast(new long[]{
-                timestampMs,
-                Double.doubleToRawLongBits(altitudeM),
-                Double.doubleToRawLongBits(vAccReported ? verticalAccuracyM : 0.0)});
-        while (!window.isEmpty()
-                && timestampMs - window.peekFirst()[0] > SMOOTHING_WINDOW_MS) {
-            window.removeFirst();
-        }
-
-        double smoothed = medianAltitude();
-        double threshold = Math.max(ALT_NOISE_THRESHOLD_M, medianVerticalAccuracy());
+        window.add(timestampMs, altitudeM, vAccReported ? verticalAccuracyM : 0.0);
+        double smoothed = window.medianAltitude();
+        double threshold = Math.max(ALT_NOISE_THRESHOLD_M, window.medianVerticalAccuracy());
 
         // Hysteresis direction-change counting on the smoothed signal.
         if (Double.isNaN(extremum)) {
@@ -191,28 +182,100 @@ public final class ElevationEstimator {
         direction = 0;
     }
 
-    private double medianAltitude() {
-        double[] v = new double[window.size()];
-        int i = 0;
-        for (long[] e : window) v[i++] = Double.longBitsToDouble(e[1]);
-        return median(v);
-    }
+    /** FIFO expiry plus two sorted primitive windows. Typical 5 Hz input holds 51 rows;
+     * grow for denser or non-monotonic input rather than imposing a sample-count cap. */
+    static final class MedianWindow {
+        private long[] timestamps = new long[16];
+        private double[] altitudes = new double[16];
+        private double[] accuracies = new double[16];
+        private double[] sortedAltitudes = new double[16];
+        private double[] sortedAccuracies = new double[16];
+        private int head;
+        private int size;
+        private int accuracyCount;
 
-    /** Median of the REPORTED vertical accuracies in the window; 0 if none reported. */
-    private double medianVerticalAccuracy() {
-        double[] v = new double[window.size()];
-        int n = 0;
-        for (long[] e : window) {
-            double a = Double.longBitsToDouble(e[2]);
-            if (a > 0) v[n++] = a;
+        void add(long timestamp, double altitude, double accuracy) {
+            // Expire exactly the same FIFO prefix as the original time-based deque.
+            while (size > 0 && timestamp - timestamps[head] > SMOOTHING_WINDOW_MS) {
+                remove(sortedAltitudes, size, altitudes[head]);
+                double expiredAccuracy = accuracies[head];
+                if (expiredAccuracy > 0) {
+                    remove(sortedAccuracies, accuracyCount, expiredAccuracy);
+                    accuracyCount--;
+                }
+                head = (head + 1) & (timestamps.length - 1);
+                size--;
+            }
+            if (size == timestamps.length) grow();
+            int tail = (head + size) & (timestamps.length - 1);
+            timestamps[tail] = timestamp;
+            altitudes[tail] = altitude;
+            accuracies[tail] = accuracy;
+            insert(sortedAltitudes, size, altitude);
+            size++;
+            if (accuracy > 0) {
+                insert(sortedAccuracies, accuracyCount, accuracy);
+                accuracyCount++;
+            }
         }
-        if (n == 0) return 0;
-        return median(Arrays.copyOf(v, n));
-    }
 
-    private static double median(double[] v) {
-        Arrays.sort(v);
-        int n = v.length;
-        return (n % 2 == 1) ? v[n / 2] : (v[n / 2 - 1] + v[n / 2]) / 2.0;
+        void clear() {
+            head = size = accuracyCount = 0;
+        }
+
+        double medianAltitude() {
+            return median(sortedAltitudes, size);
+        }
+
+        double medianVerticalAccuracy() {
+            return accuracyCount == 0 ? 0 : median(sortedAccuracies, accuracyCount);
+        }
+
+        private void grow() {
+            int oldCapacity = timestamps.length;
+            int capacity = oldCapacity * 2;
+            long[] newTimestamps = new long[capacity];
+            double[] newAltitudes = new double[capacity];
+            double[] newAccuracies = new double[capacity];
+            for (int i = 0; i < size; i++) {
+                int old = (head + i) & (oldCapacity - 1);
+                newTimestamps[i] = timestamps[old];
+                newAltitudes[i] = altitudes[old];
+                newAccuracies[i] = accuracies[old];
+            }
+            timestamps = newTimestamps;
+            altitudes = newAltitudes;
+            accuracies = newAccuracies;
+            sortedAltitudes = Arrays.copyOf(sortedAltitudes, capacity);
+            sortedAccuracies = Arrays.copyOf(sortedAccuracies, capacity);
+            head = 0;
+        }
+
+        private static int lowerBound(double[] values, int count, double value) {
+            int lo = 0, hi = count;
+            while (lo < hi) {
+                int mid = (lo + hi) >>> 1;
+                if (Double.compare(values[mid], value) < 0) lo = mid + 1;
+                else hi = mid;
+            }
+            return lo;
+        }
+
+        private static void insert(double[] values, int count, double value) {
+            int at = lowerBound(values, count, value);
+            System.arraycopy(values, at, values, at + 1, count - at);
+            values[at] = value;
+        }
+
+        private static void remove(double[] values, int count, double value) {
+            // Every expired FIFO value has exactly one matching sorted entry.
+            int at = lowerBound(values, count, value);
+            System.arraycopy(values, at + 1, values, at, count - at - 1);
+        }
+
+        private static double median(double[] values, int count) {
+            return (count % 2 == 1) ? values[count / 2]
+                    : (values[count / 2 - 1] + values[count / 2]) / 2.0;
+        }
     }
 }
