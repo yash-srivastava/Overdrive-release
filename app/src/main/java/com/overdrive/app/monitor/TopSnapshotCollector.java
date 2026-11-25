@@ -69,39 +69,28 @@ public final class TopSnapshotCollector {
             try {
                 boolean useLimit = !limitedTopUnsupported;
                 CommandResult result = runTop(useLimit);
-                JSONObject parsed = parseSnapshot(
-                        result.output,
-                        MAX_ROWS,
+                JSONObject parsed = parseCommandResult(
+                        result,
                         Process.myPid(),
                         now,
                         android.os.SystemClock.elapsedRealtime() - startedAt,
                         useLimit ? "top -b -n 1 -m " + COMMAND_ROWS : "top -b -n 1");
 
-                // Older Toybox builds reject -m. Remember this only when the
-                // portable command succeeds, avoiding a failed subprocess on
-                // every subsequent request. Other failures remain retryable.
-                if (useLimit && !parsed.optBoolean("available", false)
-                        && result.exitCode != 0) {
+                // Older Toybox builds reject -m. Retry only after a completed
+                // command fails, not after a timeout. Remember the fallback only
+                // when the portable command produces a successful snapshot.
+                if (result.shouldRetryWithoutLimit(useLimit)) {
                     startedAt = android.os.SystemClock.elapsedRealtime();
                     CommandResult fallback = runTop(false);
-                    JSONObject fallbackParsed = parseSnapshot(
-                            fallback.output,
-                            MAX_ROWS,
+                    parsed = parseCommandResult(
+                            fallback,
                             Process.myPid(),
                             now,
                             android.os.SystemClock.elapsedRealtime() - startedAt,
                             "top -b -n 1");
-                    if (fallbackParsed.optBoolean("available", false) && !result.timedOut) {
+                    if (parsed.optBoolean("available", false)) {
                         limitedTopUnsupported = true;
                     }
-                    result = fallback;
-                    parsed = fallbackParsed;
-                }
-
-                if (!parsed.optBoolean("available", false) && result.timedOut) {
-                    parsed.put("error", "top timed out");
-                } else if (!parsed.optBoolean("available", false) && result.exitCode != 0) {
-                    parsed.put("error", "top exited with code " + result.exitCode);
                 }
                 cachedSnapshot = parsed;
                 // Start the short reuse window when the capture completes. A
@@ -127,6 +116,21 @@ public final class TopSnapshotCollector {
     static boolean isCacheFresh(long cachedAtElapsedMs, long elapsedNowMs) {
         return elapsedNowMs >= cachedAtElapsedMs
                 && elapsedNowMs - cachedAtElapsedMs <= CACHE_MS;
+    }
+
+    /** Failed commands can contain valid-looking but incomplete process rows. */
+    static JSONObject parseCommandResult(
+            CommandResult result, int selfPid, long timestamp, long durationMs, String source)
+            throws Exception {
+        boolean succeeded = !result.timedOut && result.exitCode == 0;
+        JSONObject parsed = parseSnapshot(succeeded ? result.output : "",
+                MAX_ROWS, selfPid, timestamp, durationMs, source);
+        if (result.timedOut) {
+            parsed.put("error", "top timed out");
+        } else if (result.exitCode != 0) {
+            parsed.put("error", "top exited with code " + result.exitCode);
+        }
+        return parsed;
     }
 
     static JSONObject parseSnapshot(
@@ -367,7 +371,7 @@ public final class TopSnapshotCollector {
         }
     }
 
-    private static final class CommandResult {
+    static final class CommandResult {
         final String output;
         final int exitCode;
         final boolean timedOut;
@@ -376,6 +380,10 @@ public final class TopSnapshotCollector {
             this.output = output;
             this.exitCode = exitCode;
             this.timedOut = timedOut;
+        }
+
+        boolean shouldRetryWithoutLimit(boolean usedLimit) {
+            return usedLimit && !timedOut && exitCode != 0;
         }
     }
 }
