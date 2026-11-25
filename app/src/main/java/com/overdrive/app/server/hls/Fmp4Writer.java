@@ -305,21 +305,6 @@ public final class Fmp4Writer {
         return d[n / 2];
     }
 
-    /** The whole clip's audio as Chromium plays it, back to back: real samples and silent frames (-1). */
-    private static final class ClipAudio {
-        final long f;
-        final long[] start;
-        final int[] sample;
-        final int n;
-
-        ClipAudio(long f, long[] start, int[] sample, int n) {
-            this.f = f;
-            this.start = start;
-            this.sample = sample;
-            this.n = n;
-        }
-    }
-
     private static final Object NO_FILL = new Object();
     // Clips run minutes; a span past this is a corrupt timestamp, not hours of silence to build.
     private static final long MAX_FILL_SECONDS = 3L * 3600L;
@@ -327,14 +312,14 @@ public final class Fmp4Writer {
             java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Mp4Index, Object>());
 
     /** Null when every sample already plays where its timestamp says (the plain traf path is exact). */
-    static ClipAudio clipAudio(Mp4Index idx) {
+    static ClipAudioTimeline clipAudio(Mp4Index idx) {
         Object cached = CLIP_AUDIO.get(idx);
         if (cached == null) {
-            ClipAudio built = buildClipAudio(idx);
+            ClipAudioTimeline built = buildClipAudio(idx);
             cached = built != null ? built : NO_FILL;
             CLIP_AUDIO.put(idx, cached);
         }
-        return cached instanceof ClipAudio ? (ClipAudio) cached : null;
+        return cached instanceof ClipAudioTimeline ? (ClipAudioTimeline) cached : null;
     }
 
     /**
@@ -342,95 +327,40 @@ public final class Fmp4Writer {
      * sample stretched over a late start, holes and an early end. A hole counts only when the lag
      * persists to the next sample, so timestamp jitter never shifts later audio.
      */
-    private static ClipAudio buildClipAudio(Mp4Index idx) {
+    private static ClipAudioTimeline buildClipAudio(Mp4Index idx) {
         Mp4Track a = idx.audio;
         long f = silenceFrameTicks(a);
         if (f <= 0) return null;
-        int gops = idx.gopCount();
         long clipStart = idx.silentTicks(0, a.timescale);
-        long clipEnd = idx.silentTicks(gops, a.timescale);
+        long clipEnd = idx.silentTicks(idx.gopCount(), a.timescale);
         if (clipEnd - clipStart > MAX_FILL_SECONDS * a.timescale) return null;
-        long em = a.editMediaTime;
-        int count = a.count;
-        long half = f / 2;
-        long[] start = new long[count + 64];
-        int[] sample = new int[count + 64];
-        int n = 0;
-        boolean filled = false;
-        // A stretched first sample decodes as one frame: its content is the frame just before sample 1.
-        long s0 = a.time[0] - em;
-        if (count > 1 && a.duration(0) > f + half) {
-            s0 = a.time[1] - em - f;
-            filled = true;
-        }
-        if (s0 - clipStart >= f && s0 <= clipEnd) {
-            for (long k = (s0 - clipStart) / f; k >= 1; k--) {
-                if (n == start.length) { start = java.util.Arrays.copyOf(start, n * 2); sample = java.util.Arrays.copyOf(sample, n * 2); }
-                start[n] = s0 - k * f;
-                sample[n++] = -1;
-            }
-            filled = true;
-        }
-        long cursor = s0;
-        for (int i = 0; i < count; i++) {
-            if (i > 0) {
-                long lag = a.time[i] - em - cursor;
-                long nextLag = i + 1 < count ? a.time[i + 1] - em - (cursor + f) : lag;
-                if (lag >= half && nextLag >= half) {
-                    // Silence never runs past the picture: a corrupt jump can't make millions of frames.
-                    long room = Math.max(0L, (clipEnd - cursor) / f);
-                    for (long k = Math.min((Math.min(lag, nextLag) + half) / f, room); k >= 1; k--) {
-                        if (n == start.length) { start = java.util.Arrays.copyOf(start, n * 2); sample = java.util.Arrays.copyOf(sample, n * 2); }
-                        start[n] = cursor;
-                        sample[n++] = -1;
-                        cursor += f;
-                    }
-                    filled = true;
-                }
-            }
-            if (n == start.length) { start = java.util.Arrays.copyOf(start, n * 2); sample = java.util.Arrays.copyOf(sample, n * 2); }
-            start[n] = cursor;
-            sample[n++] = i;
-            cursor += f;
-        }
-        if (clipEnd - cursor >= f) {
-            for (long k = (clipEnd - cursor) / f; k >= 1; k--) {
-                if (n == start.length) { start = java.util.Arrays.copyOf(start, n * 2); sample = java.util.Arrays.copyOf(sample, n * 2); }
-                start[n] = cursor;
-                sample[n++] = -1;
-                cursor += f;
-            }
-            filled = true;
-        }
-        if (!filled) return null;
-        return new ClipAudio(f, java.util.Arrays.copyOf(start, n), java.util.Arrays.copyOf(sample, n), n);
+        return ClipAudioTimeline.build(a.time, a.editMediaTime, f, clipStart, clipEnd);
     }
 
     /** GOP n's share of the clip's back-to-back audio, by entry start time; null when no fill is needed. */
     private static AudioRun filledRun(Mp4Index idx, int n) {
-        ClipAudio ca = clipAudio(idx);
+        ClipAudioTimeline ca = clipAudio(idx);
         if (ca == null) return null;
         Mp4Track a = idx.audio;
         int gops = idx.gopCount();
-        int from = n == 0 ? 0 : firstAtOrAfter(ca, idx.silentTicks(n, a.timescale));
-        int to = n + 1 >= gops ? ca.n : firstAtOrAfter(ca, idx.silentTicks(n + 1, a.timescale));
+        int from = n == 0 ? 0 : ca.firstAtOrAfter(idx.silentTicks(n, a.timescale));
+        int to = n + 1 >= gops ? ca.n : ca.firstAtOrAfter(idx.silentTicks(n + 1, a.timescale));
         RunBuilder b = new RunBuilder();
-        for (int e = from; e < to; e++) {
-            int smp = ca.sample[e];
-            b.add(smp, ca.f, smp < 0 ? SILENT_FRAME.length : a.size[smp], ca.start[e] + a.editMediaTime);
+        int e = from;
+        if (e < to) {
+            int run = ca.runAt(e);
+            while (e < to) {
+                int end = Math.min(to, ca.runEnd(run));
+                for (; e < end; e++) {
+                    int smp = ca.sampleAt(e, run);
+                    b.add(smp, ca.f, smp < 0 ? SILENT_FRAME.length : a.size[smp],
+                            ca.startAt(e) + a.editMediaTime);
+                }
+                run++;
+            }
         }
         if (b.n == 0) return new AudioRun(0, new int[0], new long[0], new int[0]);
         return b.build();
-    }
-
-    private static int firstAtOrAfter(ClipAudio ca, long t) {
-        int lo = 0;
-        int hi = ca.n;
-        while (lo < hi) {
-            int mid = (lo + hi) >>> 1;
-            if (ca.start[mid] < t) lo = mid + 1; else hi = mid;
-        }
-        return lo;
     }
 
     /** Silent 16 kHz frames on one 1024-tick grid from the clip's first picture; none overhang its end. */
