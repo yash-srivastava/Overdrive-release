@@ -2,10 +2,8 @@ package com.overdrive.app.server.hls;
 
 import static com.overdrive.app.server.hls.Boxes.fourcc;
 
-import java.io.EOFException;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 
 /**
@@ -15,7 +13,6 @@ import java.nio.channels.FileChannel;
 public final class Fmp4Writer {
     static final int VIDEO_ID = 1;
     static final int AUDIO_ID = 2;
-    private static final int COPY_BUFFER = 64 * 1024;
     private static final int SYNC = 0x02000000;
     private static final int NON_SYNC = 0x01010000;
     private static final int[] IDENTITY = {0x00010000, 0, 0, 0, 0x00010000, 0, 0, 0, 0x40000000};
@@ -405,60 +402,31 @@ public final class Fmp4Writer {
         // A changed file means the index (and the advertised length) is stale.
         if (src.size() != idx.fileLength()) throw new IOException("source changed since indexing");
         out.write(p.head);
-        ByteBuffer buf = ByteBuffer.allocate(COPY_BUFFER);
-        copySamples(idx.video, p.vFrom, p.vTo, src, out, buf);
+        SampleRangeCopier copier = new SampleRangeCopier(src::read, out);
+        copier.copySamples(idx.video.offset, idx.video.size, p.vFrom, p.vTo);
         if (p.run != null) {
-            writeRun(idx.audio, p.run, src, out, buf);
+            writeRun(idx.audio, p.run, out, copier);
             return;
         }
-        if (p.aTo > p.aFrom) copySamples(idx.audio, p.aFrom, p.aTo, src, out, buf);
+        if (p.aTo > p.aFrom) copier.copySamples(idx.audio.offset, idx.audio.size, p.aFrom, p.aTo);
         for (int i = 0; i < p.silentFrames; i++) out.write(SILENT_FRAME);
     }
 
-    private static void writeRun(Mp4Track a, AudioRun run, FileChannel src, OutputStream out,
-                                 ByteBuffer buf) throws IOException {
+    private static void writeRun(Mp4Track a, AudioRun run, OutputStream out,
+                                 SampleRangeCopier copier) throws IOException {
         int i = 0;
         while (i < run.count()) {
-            int s = run.sample[i];
-            if (s < 0) {
+            int first = run.sample[i++];
+            if (first < 0) {
                 out.write(SILENT_FRAME);
-                i++;
                 continue;
             }
-            long start = a.offset[s];
-            long end = start + a.size[s];
-            i++;
-            while (i < run.count() && run.sample[i] == s + 1 && a.offset[s + 1] == end) {
-                s++;
-                end += a.size[s];
+            int end = first + 1;
+            while (i < run.count() && run.sample[i] == end) {
+                end++;
                 i++;
             }
-            copyRange(src, start, end - start, out, buf);
-        }
-    }
-
-    private static void copySamples(Mp4Track t, int from, int to, FileChannel src, OutputStream out,
-                                    ByteBuffer buf) throws IOException {
-        int i = from;
-        while (i < to) {
-            long start = t.offset[i];
-            long end = start + t.size[i++];
-            while (i < to && t.offset[i] == end) end += t.size[i++];
-            copyRange(src, start, end - start, out, buf);
-        }
-    }
-
-    private static void copyRange(FileChannel src, long pos, long len, OutputStream out, ByteBuffer buf)
-            throws IOException {
-        byte[] a = buf.array();
-        while (len > 0) {
-            buf.clear();
-            if (len < buf.capacity()) buf.limit((int) len);
-            int r = src.read(buf, pos);
-            if (r <= 0) throw new EOFException("source truncated at " + pos);
-            out.write(a, 0, r);
-            pos += r;
-            len -= r;
+            copier.copySamples(a.offset, a.size, first, end);
         }
     }
 
