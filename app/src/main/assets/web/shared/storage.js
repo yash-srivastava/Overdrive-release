@@ -438,6 +438,12 @@ BYD.storagePage = {
         // and let the poller back off.
         if (data.indexUnavailable) {
             this._indexDown = true;
+            // Stop the obsolete warming retry; the regular tick handles recovery.
+            if (this._warmingPollTimer) {
+                clearTimeout(this._warmingPollTimer);
+                this._warmingPollTimer = null;
+            }
+            this._warmingPollAttempt = 0;
             this.stats = null;
             ['survStorageUsed', 'survStorageLimit', 'storageUsed', 'storageLimit'].forEach(id => this._setText(id, '--'));
             this._setFill('survStorageFill', 0);
