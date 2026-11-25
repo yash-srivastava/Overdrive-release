@@ -1215,6 +1215,14 @@ public class CameraDaemon {
             log("Parked impact attach failed: " + t.getMessage());
         }
 
+        // Proximity collector: the head unit can kill the app process at switch-off, taking
+        // the phone collector with it. Same posture: a disabled feature costs a config read per tick.
+        try {
+            com.overdrive.app.remoteaccess.ProximityCollectorWatchdog.attach();
+        } catch (Throwable t) {
+            log("Proximity collector watchdog attach failed: " + t.getMessage());
+        }
+
         // Parking Intelligence: same posture. attach() reads parking.enabled and
         // only then opens its store / worker / hooks; a disabled feature costs a
         // config read here and a null check at each hook site afterwards.

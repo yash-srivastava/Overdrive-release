@@ -10,6 +10,9 @@
     <string name="notif_channel_parked_impact">Parked impact watch</string>
     <string name="notif_parked_impact_title">Sentry</string>
     <string name="notif_parked_impact_text">Watching for impacts while parked</string>
+    <string name="notif_channel_proximity_collector">Proximity lock</string>
+    <string name="notif_proximity_collector_title">Proximity</string>
+    <string name="notif_proximity_collector_text">Watching for your phone while parked</string>
     <string name="notif_network_hotspot">Network &amp; Hotspot</string>
     <string name="notif_channel_media_playback">Media Playback</string>
     <string name="notif_roadsense_chime_title">RoadSense warning</string>
