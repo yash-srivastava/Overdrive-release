@@ -1,6 +1,8 @@
 package com.overdrive.app.monitor;
 
 import com.overdrive.app.daemon.CameraDaemon;
+import com.overdrive.app.launcher.dilink5.cluster.Sealion7HdmiProjection;
+import com.overdrive.app.ui.model.ParkedShutdown;
 
 /**
  * ACC Monitor - State holder for ACC status with direct hardware query.
@@ -36,6 +38,50 @@ public class AccMonitor {
     private static volatile long accStateUpdatedAtElapsedMs;
     private static volatile long lastAccOnElapsedMs;
     private static volatile long lastAccOffEdgeElapsedMs;
+    private static final IgnitionEdges ignitionEdges = new IgnitionEdges();
+
+    // The two daemons have separate VMs. CameraDaemon receives admitted IPCs and
+    // AccSentryDaemon admits its own heartbeat before it sends that IPC.
+    static final class IgnitionEdges {
+        private Boolean lastState;
+        private long onStartedMs;
+        private long offStartedMs;
+        private long parkMarkerFloorMs;
+
+        synchronized void admit(boolean on, long nowMs) {
+            if (lastState != null && (lastState == on || nowMs < Math.max(onStartedMs, offStartedMs))) return;
+            lastState = on;
+            if (on) onStartedMs = nowMs;
+            else offStartedMs = nowMs;
+        }
+
+        synchronized long since(boolean on) {
+            return on ? onStartedMs : offStartedMs;
+        }
+
+        synchronized long opposingEdge(boolean on, boolean parkedMarkerPresent, long nowMs) {
+            if (!parkedMarkerPresent) {
+                parkMarkerFloorMs = 0L;
+            } else if (Boolean.FALSE.equals(lastState)) {
+                // This may be the surviving judge's old OFF, replayed after our restart.
+                parkMarkerFloorMs = offStartedMs;
+            } else if (parkMarkerFloorMs == 0L) {
+                // Both processes may have restarted. The marker has no boot-clock time.
+                // Freeze the first observation so a subsequent real READY can pass.
+                parkMarkerFloorMs = nowMs;
+            }
+            return on ? Math.max(offStartedMs, parkMarkerFloorMs) : onStartedMs;
+        }
+    }
+
+    public static void noteDiLink5IgnitionAdmission(boolean on, long sinceElapsedMs) {
+        if (Sealion7HdmiProjection.isTestedFirmware()) ignitionEdges.admit(on, sinceElapsedMs);
+    }
+
+    public static long diLink5IgnitionSince(boolean on) {
+        return ignitionEdges.since(on);
+    }
+
     private static final long DILINK5_SAFETY_STATE_MAX_AGE_MS = 15_000L;
 
     // DiLink 5 car_service power-mode dump source: ACC-OFF admission dampener.
@@ -504,11 +550,11 @@ public class AccMonitor {
         // On DiLink 5.0, BYDAutoBodyworkDevice is virtualized/missing or returns sentinel 4/255.
         // We probe the local Automotive power mode and shutdown-animation state.
         if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            java.util.concurrent.atomic.AtomicLong since = new java.util.concurrent.atomic.AtomicLong();
             Boolean isOn = probeDiLink5AccOnForTransition(
-                    context,
-                    accOnAuthoritative && accOn);
+                    context, accOnAuthoritative && accOn, false, since);
             if (isOn != null) {
-                return publishDiLink5State(isOn, "local power probe");
+                return publishDiLink5State(isOn, "local power probe", since.get());
             }
             lastProbeTrustworthy = false;
             // UNKNOWN/weak IVI-awake is not an ACC-ON edge. Preserve a state
@@ -692,9 +738,17 @@ public class AccMonitor {
     public static Boolean probeDiLink5AccOnForTransition(
             android.content.Context context, boolean currentlyAccOn,
             boolean independentIgnitionEvidence) {
-        return admitDiLink5AccObservation(
-                probeDiLink5AccObservation(context),
-                currentlyAccOn || independentIgnitionEvidence);
+        return probeDiLink5AccOnForTransition(context, currentlyAccOn, independentIgnitionEvidence, null);
+    }
+
+    public static Boolean probeDiLink5AccOnForTransition(android.content.Context context,
+            boolean currentlyAccOn, boolean independentIgnitionEvidence,
+            java.util.concurrent.atomic.AtomicLong sourceElapsedMs) {
+        long readStarted = sourceElapsedMs != null ? android.os.SystemClock.elapsedRealtime() : 0L;
+        DiLink5AccObservation observation = probeDiLink5AccObservation(context);
+        if (sourceElapsedMs != null) sourceElapsedMs.set(observation.vehicleEventMs > 0L
+                ? observation.vehicleEventMs : readStarted);
+        return admitDiLink5AccObservation(observation, currentlyAccOn || independentIgnitionEvidence);
     }
 
     /**
@@ -745,8 +799,10 @@ public class AccMonitor {
             int systemPowerKind =
                     classifyDiLink5PowerModeKind(systemPowerRaw);
 
-            String dumpPowerRaw =
-                    com.overdrive.app.byd.CarSvcTelemetry.powerModeLine();
+            DiLink5IgnitionEvidence.Sample ignition = Sealion7HdmiProjection.isIgnitionEvidenceEnabled()
+                    ? DiLink5IgnitionEvidence.read() : null;
+            String dumpPowerRaw = ignition == null
+                    ? com.overdrive.app.byd.CarSvcTelemetry.powerModeLine() : ignition.powerModeLine;
             int dumpPowerKind =
                     classifyDiLink5PowerModeKind(dumpPowerRaw);
             Boolean dumpOffAdmitted = null;
@@ -779,13 +835,14 @@ public class AccMonitor {
                     systemPowerKind == DILINK5_POWER_MODE_OFF
                     || Boolean.FALSE.equals(dumpOffAdmitted);
 
-            return rememberDiLink5Observation(
-                    resolveDiLink5AccObservation(
-                            accAnim,
-                            startupOn,
-                            iviAwake,
-                            powerOff,
-                            diagnostics));
+            DiLink5AccObservation legacy = resolveDiLink5AccObservation(
+                    accAnim, startupOn, iviAwake, powerOff, diagnostics);
+            if (ignition == null) return rememberDiLink5Observation(legacy);
+
+            long opposingEdge = ignitionEdges.opposingEdge(Boolean.TRUE.equals(ignition.accOn),
+                    new java.io.File(ParkedShutdown.MARKER_PATH).isFile(), android.os.SystemClock.elapsedRealtime());
+            return rememberDiLink5Observation(resolveSealion7Ignition(
+                    legacy, ignition, opposingEdge, accAnim == 0 || powerOff));
         } catch (Throwable t) {
             return rememberDiLink5Observation(
                     DiLink5AccObservation.unknown(
@@ -793,6 +850,21 @@ public class AccMonitor {
                             t.getClass().getSimpleName() + ": "
                                     + t.getMessage()));
         }
+    }
+
+    static DiLink5AccObservation resolveSealion7Ignition(
+            DiLink5AccObservation legacy, DiLink5IgnitionEvidence.Sample ignition,
+            long opposingEdge, boolean hasIndependentOff) {
+        // Strong sources and unresolved OFF conflicts retain their existing precedence.
+        if (legacy.strong || hasIndependentOff) return legacy;
+        Boolean on = ignition.accOnAfter(opposingEdge);
+        String detail = ignition.detail + ", " + legacy.detail;
+        if (on == null) {
+            // Preserve weak IVI + independent broadcast corroboration at the admission layer.
+            // A stale/mixed tuple contributes no ignition evidence of its own.
+            return new DiLink5AccObservation(legacy.accOn, legacy.strong, legacy.source, detail);
+        }
+        return new DiLink5AccObservation(on, true, "Sealion 7 ignition", detail, ignition.newestEventNanos / 1_000_000L);
     }
 
     static DiLink5AccObservation resolveDiLink5AccObservation(
@@ -911,10 +983,16 @@ public class AccMonitor {
         public final boolean strong;
         public final String source;
         public final String detail;
+        final long vehicleEventMs;
+
+        private DiLink5AccObservation(Boolean accOn, boolean strong, String source, String detail) {
+            this(accOn, strong, source, detail, 0L);
+        }
 
         private DiLink5AccObservation(
                 Boolean accOn, boolean strong,
-                String source, String detail) {
+                String source, String detail, long vehicleEventMs) {
+            this.vehicleEventMs = vehicleEventMs;
             this.accOn = accOn;
             this.strong = strong;
             this.source = source == null ? "unknown" : source;
@@ -1005,13 +1083,14 @@ public class AccMonitor {
         }
     }
 
-    private static boolean publishDiLink5State(boolean isOn, String source) {
+    private static boolean publishDiLink5State(boolean isOn, String source, long sourceElapsedMs) {
         synchronized (AccMonitor.class) {
             accOn = isOn;
             inSentryMode = !isOn;
             lastProbeTrustworthy = true;
             accOnAuthoritative = true;
             accStateUpdatedAtElapsedMs = android.os.SystemClock.elapsedRealtime();
+            noteDiLink5IgnitionAdmission(isOn, sourceElapsedMs);
             if (isOn) lastAccOnElapsedMs = accStateUpdatedAtElapsedMs;
         }
         notifyAccEdge(isOn);

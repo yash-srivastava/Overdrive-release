@@ -8220,14 +8220,14 @@ public class AccSentryDaemon {
                 level,
                 callbackSequenceBeforeRead,
                 HEARTBEAT_FORCE_REPUBLISH_TICKS,
-                "~1min");
+                "~1min", 0L);
     }
 
     private static void applyHeartbeatPowerLevel(
             int level,
             long callbackSequenceBeforeRead,
             int forceRepublishTicks,
-            String forceRepublishWindow) {
+            String forceRepublishWindow, long sourceElapsedMs) {
         if (level == POWER_LEVEL_ACC) {
             log("ACC heartbeat: level=ACC (1) is a transient; "
                     + "skipping publish");
@@ -8257,8 +8257,11 @@ public class AccSentryDaemon {
 
             SentryTransitionState latest =
                     latestSentryTransition;
+            if (latest.sentryMode && !isAccOff && holdOnEdgeDuringDeterrentActuation(level)) return;
+            if (sourceElapsedMs > 0L) {
+                com.overdrive.app.monitor.AccMonitor.noteDiLink5IgnitionAdmission(!isAccOff, sourceElapsedMs);
+            }
             if (latest.sentryMode != isAccOff) {
-                if (!isAccOff && holdOnEdgeDuringDeterrentActuation(level)) return;
                 log("ACC heartbeat: HAL state disagrees with "
                         + "generation " + latest.generation
                         + "; reconciling full transition");
@@ -8405,12 +8408,13 @@ public class AccSentryDaemon {
                     boolean ignitionBroadcast =
                             com.overdrive.app.power.IgnitionBroadcastHint
                                     .isFresh(sentryEnteredAtElapsedMs);
+                    java.util.concurrent.atomic.AtomicLong sourceElapsedMs = new java.util.concurrent.atomic.AtomicLong();
                     Boolean isOn = com.overdrive.app.monitor.AccMonitor
                             .probeDiLink5AccOnForTransition(
                                     appContext,
                                     current.generation > 0L
                                             && !current.sentryMode,
-                                    ignitionBroadcast);
+                                    ignitionBroadcast, sourceElapsedMs);
                     if (isOn != null) {
                         if (ignitionBroadcast
                                 && isOn.booleanValue()
@@ -8431,7 +8435,7 @@ public class AccSentryDaemon {
                                 isOn ? POWER_LEVEL_ON : POWER_LEVEL_OFF,
                                 observationSequence,
                                 DILINK5_FORCE_REPUBLISH_TICKS,
-                                "~10s");
+                                "~10s", sourceElapsedMs.get());
                         if (isOn.booleanValue()) {
                             // Judge duty (already on a background thread): a
                             // definitive ON with the parked marker still on disk
@@ -8588,6 +8592,11 @@ public class AccSentryDaemon {
             cmd.put("command", "SET_CONFIG");
             JSONObject config = new JSONObject();
             config.put("accOff", accOff);
+            if (isDilink5CameraMode()
+                    && com.overdrive.app.launcher.dilink5.cluster.Sealion7HdmiProjection.isIgnitionEvidenceEnabled()) {
+                // A held-state replay after a camera restart still belongs to the original edge.
+                config.put("accEdgeElapsedMs", com.overdrive.app.monitor.AccMonitor.diLink5IgnitionSince(!accOff));
+            }
             cmd.put("config", config);
 
             JSONObject response = sendSurveillanceCommandRaw(cmd);

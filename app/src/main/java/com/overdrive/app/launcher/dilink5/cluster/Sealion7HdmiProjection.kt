@@ -30,16 +30,27 @@ object Sealion7HdmiProjection {
     /** Returns the only eligible display, with the opt-in checked against the durable config. */
     fun findDisplay(context: Context): Display? = findDisplay(context, requireOptIn = true)
 
+    // The HDMI sink may disappear during shutdown. Ignition observation only needs
+    // the same explicit model, build and switch that authorize this transport.
+    @JvmStatic
+    fun isIgnitionEvidenceEnabled(): Boolean = isVehicleConfigured(requireOptIn = true)
+
+    private fun isVehicleConfigured(requireOptIn: Boolean): Boolean = try {
+        isTestedFirmware() && matchesVehicleConfig(UnifiedConfigManager.readDurableConfigStrict(), requireOptIn)
+    } catch (_: Exception) {
+        false
+    }
+
+    internal fun matchesVehicleConfig(config: JSONObject, requireOptIn: Boolean): Boolean {
+        val vehicle = config.optJSONObject("vehicle")
+        return isUserSelected(vehicle?.opt("modelId"), vehicle?.opt("modelSource")) &&
+            (!requireOptIn || isOptedIn(config.optJSONObject("projection")))
+    }
+
     private fun findDisplay(context: Context, requireOptIn: Boolean): Display? = try {
-        if (isTestedFirmware()) {
-            val config = UnifiedConfigManager.readDurableConfigStrict()
-            val vehicle = config.optJSONObject("vehicle")
-            val optedIn = isOptedIn(config.optJSONObject("projection"))
-            if (isUserSelected(vehicle?.opt("modelId"), vehicle?.opt("modelSource")) &&
-                (!requireOptIn || optedIn)) {
-                context.getSystemService(DisplayManager::class.java)?.displays
-                    ?.singleOrNull { AaosMapAreaCheck.isTarget(context, it) }
-            } else null
+        if (isVehicleConfigured(requireOptIn)) {
+            context.getSystemService(DisplayManager::class.java)?.displays
+                ?.singleOrNull { AaosMapAreaCheck.isTarget(context, it) }
         } else null
     } catch (_: Exception) {
         null

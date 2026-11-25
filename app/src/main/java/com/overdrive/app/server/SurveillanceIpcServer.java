@@ -1256,7 +1256,7 @@ public class SurveillanceIpcServer implements Runnable {
             // Handle ACC state if provided
             if (config.has("accOff")) {
                 boolean accOff = config.getBoolean("accOff");
-                CameraDaemon.onAccStateChanged(accOff);
+                CameraDaemon.onSentryAccStateChanged(accOff, config.optLong("accEdgeElapsedMs", 0L));
                 logger.info("ACC state changed via IPC: " + (accOff ? "OFF" : "ON"));
             }
             

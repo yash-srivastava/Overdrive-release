@@ -47,6 +47,20 @@ class Sealion7HdmiProjectionTest {
     }
 
     @Test
+    fun ignitionEligibilityUsesTheExplicitVehicleAndSwitchWithoutAConnectedPanel() {
+        val selection = JSONObject().put("modelId", "sealion7").put("modelSource", "user")
+        val projection = JSONObject()
+        val config = JSONObject().put("vehicle", selection).put("projection", projection)
+        assertFalse(Sealion7HdmiProjection.matchesVehicleConfig(config, true))
+        projection.put(Sealion7HdmiProjection.CONFIG_KEY, true)
+        assertTrue(Sealion7HdmiProjection.matchesVehicleConfig(config, true))
+        selection.put("modelSource", "auto")
+        assertFalse(Sealion7HdmiProjection.matchesVehicleConfig(config, true))
+        selection.put("modelSource", "user").put("modelId", "seal")
+        assertFalse(Sealion7HdmiProjection.matchesVehicleConfig(config, true))
+    }
+
+    @Test
     fun fullWindowAndContentBufferMatchThePanelWithoutAnApprovedMapRectangle() {
         val display = AppDisplayInfo(2, 1920, 720, 160)
         val expected = HostedProjectionGeometry(
