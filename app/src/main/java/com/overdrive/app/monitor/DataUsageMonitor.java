@@ -652,51 +652,61 @@ public class DataUsageMonitor {
             }
             if (days <= 0) days = 30;
             long now = System.currentTimeMillis();
-            // Calendar days are not always 24 hours long across DST changes.
-            // Use the same local-day convention as writes, not fixed milliseconds.
-            String from = DataUsageDayKeys.firstDay(now, days, TimeZone.getDefault());
-
-            JSONArray arr = new JSONArray();
-            long tW = 0, tM = 0, tO = 0, tA = 0, tS = 0;
+            TimeZone zone = TimeZone.getDefault();
             synchronized (lock) {
-                try (PreparedStatement ps = connection.prepareStatement(
-                        "SELECT day_key, wifi_bytes, mobile_bytes, other_bytes, app_bytes, system_bytes FROM "
-                                + TABLE_DAILY + " WHERE day_key >= ? ORDER BY day_key ASC")) {
-                    ps.setString(1, from);
-                    try (ResultSet rs = ps.executeQuery()) {
-                        while (rs.next()) {
-                            long w = rs.getLong(2), m = rs.getLong(3), o = rs.getLong(4);
-                            long a = rs.getLong(5), s = rs.getLong(6);
-                            JSONObject d = new JSONObject();
-                            d.put("date", rs.getString(1));
-                            d.put("wifi", w);
-                            d.put("mobile", m);
-                            d.put("other", o);
-                            d.put("app", a);
-                            d.put("system", s);
-                            d.put("total", w + m + o);
-                            arr.put(d);
-                            tW += w; tM += m; tO += o; tA += a; tS += s;
-                        }
-                    }
+                try {
+                    readUsageWindow(connection, out, now, days, zone);
                 } catch (Exception e) {
                     final int requestedDays = days;
                     if (healDeadStore(e)) return retryAfterHeal(() -> getUsage(requestedDays));
                     throw e;
                 }
             }
-            out.put("days", arr);
-            out.put("totalWifi", tW);
-            out.put("totalMobile", tM);
-            out.put("totalOther", tO);
-            out.put("totalApp", tA);
-            out.put("totalSystem", tS);
-            out.put("total", tW + tM + tO);
         } catch (Throwable t) {
             logger.warn("DataUsageMonitor.getUsage failed: " + t.getMessage());
             try { out.put("error", String.valueOf(t.getMessage())); } catch (Exception ignored) {}
         }
         return out;
+    }
+
+    /** Read the inclusive local-calendar window, excluding future-dated rows.
+     * Caller holds the store lock; the explicit instant and zone keep both bounds consistent. */
+    static void readUsageWindow(Connection connection, JSONObject out, long now,
+            int days, TimeZone zone) throws Exception {
+        // Calendar days are not always 24 hours long across DST changes.
+        String from = DataUsageDayKeys.firstDay(now, days, zone);
+        String through = DataUsageDayKeys.format(now, zone);
+        JSONArray arr = new JSONArray();
+        long tW = 0, tM = 0, tO = 0, tA = 0, tS = 0;
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT day_key, wifi_bytes, mobile_bytes, other_bytes, app_bytes, system_bytes FROM "
+                        + TABLE_DAILY + " WHERE day_key >= ? AND day_key <= ? ORDER BY day_key ASC")) {
+            ps.setString(1, from);
+            ps.setString(2, through);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    long w = rs.getLong(2), m = rs.getLong(3), o = rs.getLong(4);
+                    long a = rs.getLong(5), s = rs.getLong(6);
+                    JSONObject d = new JSONObject();
+                    d.put("date", rs.getString(1));
+                    d.put("wifi", w);
+                    d.put("mobile", m);
+                    d.put("other", o);
+                    d.put("app", a);
+                    d.put("system", s);
+                    d.put("total", w + m + o);
+                    arr.put(d);
+                    tW += w; tM += m; tO += o; tA += a; tS += s;
+                }
+            }
+        }
+        out.put("days", arr);
+        out.put("totalWifi", tW);
+        out.put("totalMobile", tM);
+        out.put("totalOther", tO);
+        out.put("totalApp", tA);
+        out.put("totalSystem", tS);
+        out.put("total", tW + tM + tO);
     }
 
     /** Clear all recorded history (both the daily rows and the delta baseline).
