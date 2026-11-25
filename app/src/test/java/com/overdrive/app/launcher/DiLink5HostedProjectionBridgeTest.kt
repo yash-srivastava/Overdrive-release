@@ -214,14 +214,40 @@ class DiLink5HostedProjectionBridgeTest {
 
     @Test fun virtualDisplayUsesPreferredThenFallbackFlags() {
         val attempts = mutableListOf<Int>()
-        val allocation = HostedProjectionBoundary.preferredThenFallback<String> { flags ->
+        val preferred = HostedProjectionBoundary.allocateDisplay(sealion7Hdmi = false) { flags ->
+            attempts += flags
+            "preferred display"
+        }
+        assertEquals(listOf(323), attempts)
+        assertEquals(323, preferred?.flags)
+
+        attempts.clear()
+        val allocation = HostedProjectionBoundary.allocateDisplay<String>(sealion7Hdmi = false) { flags ->
             attempts += flags
             if (flags == DiLink5HostedProjectionBridge.FLAGS_FALLBACK) "display" else null
         }
         assertEquals(listOf(323, 322), attempts)
         assertEquals("display", allocation?.value)
         assertEquals(322, allocation?.flags)
-        assertNull(HostedProjectionBoundary.preferredThenFallback<String> { null })
+        assertNull(HostedProjectionBoundary.allocateDisplay<String>(sealion7Hdmi = false) { null })
+    }
+
+    @Test fun sealion7AllocatesOnlyThePublicOwnContentDisplay() {
+        val attempts = mutableListOf<Int>()
+        val success = HostedProjectionBoundary.allocateDisplay(sealion7Hdmi = true) { flags ->
+            attempts += flags
+            "display"
+        }
+        assertEquals(listOf(331), attempts)
+        assertEquals("display", success?.value)
+        assertEquals(331, success?.flags)
+
+        attempts.clear()
+        assertNull(HostedProjectionBoundary.allocateDisplay<String>(sealion7Hdmi = true) { flags ->
+            attempts += flags
+            null
+        })
+        assertEquals(listOf(331), attempts)
     }
 
     @Test fun failedReleaseRemainsOwnedAndCanBeRetried() {

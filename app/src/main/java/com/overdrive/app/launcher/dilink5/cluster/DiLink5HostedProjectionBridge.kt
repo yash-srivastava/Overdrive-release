@@ -10,6 +10,7 @@ import android.os.IBinder
 import android.os.Parcel
 import android.os.RemoteException
 import android.os.ResultReceiver
+import android.view.Display
 import android.view.Surface
 import com.overdrive.app.byd.VehicleActuatorBridge
 import com.overdrive.app.byd.dilink5.TrustedAppUidResolver
@@ -70,6 +71,7 @@ object DiLink5HostedProjectionBridge {
     private const val SHELL_PACKAGE = "com.android.shell"
     internal const val FLAGS_PREFERRED = 323
     internal const val FLAGS_FALLBACK = 322
+    internal const val FLAGS_SEALION7 = FLAGS_PREFERRED or DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY
     private val logger by lazy { DaemonLogger.getInstance("DiLink5ClusterCast") }
     private val lock = Any()
     private val sessions = HashMap<Long, Record>()
@@ -555,25 +557,37 @@ object DiLink5HostedProjectionBridge {
             }
         } ?: return null
         try {
+        val diagnostic = ticket.sealion7Geometry?.let { "Sealion 7 hosted allocation generation=$generation" }
         ticket.sealion7Geometry?.let {
             if (physicalId != ticket.physicalDisplayId || width != it.bufferWidth ||
                 height != it.bufferHeight || density != it.densityDpi ||
-                Sealion7HdmiProjection.findDisplay(daemonContext)?.displayId != physicalId) return null
+                Sealion7HdmiProjection.findDisplay(daemonContext)?.displayId != physicalId) {
+                logger.warn("$diagnostic declined: HDMI display or geometry changed")
+                return null
+            }
         }
-        val displayContext = shellDisplayContext(daemonContext) ?: return null
-        val manager = displayContext.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
-            ?: return null
+        val displayContext = shellDisplayContext(daemonContext)
+        val manager = displayContext?.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
+        if (manager == null) {
+            diagnostic?.let { logger.warn("$it could not obtain the shell display manager") }
+            return null
+        }
         val name = "OverDriveCluster-$generation"
         fun create(flags: Int): VirtualDisplay? = try {
             manager.createVirtualDisplay(name, width, height, density, surface, flags)
-        } catch (_: Throwable) { null }
-        val allocation = HostedProjectionBoundary.preferredThenFallback(::create) ?: return null
-        val display = allocation.value
-        val id = display.display?.displayId ?: run {
-            releaseOrRetain(generation, display)
+        } catch (error: Throwable) {
+            diagnostic?.let { logger.warn("$it flags=$flags failed: ${hostedProjectionFailure(error)}") }
+            null
+        }
+        val allocation = HostedProjectionBoundary.allocateDisplay(ticket.sealion7Geometry != null, ::create)
+        if (allocation == null) {
+            diagnostic?.let { logger.warn("$it produced no virtual display") }
             return null
         }
+        val display = allocation.value
+        val id = display.display?.displayId ?: Display.INVALID_DISPLAY
         if (id <= 0) {
+            diagnostic?.let { logger.warn("$it flags=${allocation.flags} returned no usable display ID") }
             releaseOrRetain(generation, display)
             return null
         }
@@ -612,6 +626,7 @@ object DiLink5HostedProjectionBridge {
             releaseOrRetain(generation, display)
             return null
         }
+        diagnostic?.let { logger.info("$it published content display $id flags=${allocation.flags}") }
         return session
         } finally {
             synchronized(lock) { creatingGenerations.remove(generation) }
@@ -738,7 +753,13 @@ internal object HostedProjectionBoundary {
         width.toLong() * height <= 33_554_432L && ownerPresent && surfacePresent == 1 &&
         remainingSurfaceBytes > 0
 
-    fun <T> preferredThenFallback(create: (Int) -> T?): Allocation<T>? {
+    fun <T> allocateDisplay(sealion7Hdmi: Boolean, create: (Int) -> T?): Allocation<T>? {
+        // The Sealion app needs a public display for its own content. The private fallback
+        // can allocate successfully while remaining invisible to the app on this firmware.
+        if (sealion7Hdmi) {
+            val flags = DiLink5HostedProjectionBridge.FLAGS_SEALION7
+            return create(flags)?.let { Allocation(it, flags) }
+        }
         create(DiLink5HostedProjectionBridge.FLAGS_PREFERRED)?.let {
             return Allocation(it, DiLink5HostedProjectionBridge.FLAGS_PREFERRED)
         }

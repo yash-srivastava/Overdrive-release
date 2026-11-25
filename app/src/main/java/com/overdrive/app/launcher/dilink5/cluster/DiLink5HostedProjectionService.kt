@@ -110,8 +110,8 @@ class DiLink5HostedProjectionService : Service() {
         )
         val aaosMapArea = intent.getBooleanExtra(DiLink5HostedProjectionBridge.EXTRA_AAOS_MAP_AREA, false)
         val area = if (aaosMapArea && visible && display != null) AaosMapAreaCheck.confirmedBounds(this, display) else null
-        val admitted = visible && (!aaosMapArea || area != null) &&
-            (!sealion7Hdmi || (!aaosMapArea && canHostSealion7Hdmi(displayId, logProbe = true)))
+        val admitted = visible && (!aaosMapArea || area != null) && (!sealion7Hdmi ||
+            (!aaosMapArea && canHostSealion7Hdmi(displayId, "Sealion 7 hosted probe display=$displayId")))
         if (sealion7Hdmi) {
             logger.info("Sealion 7 hosted probe display=$displayId observed=$observedId valid=$displayValid " +
                 "metrics=${metrics.widthPixels}x${metrics.heightPixels}@${metrics.densityDpi} " +
@@ -140,17 +140,40 @@ class DiLink5HostedProjectionService : Service() {
             DiLink5HostedProjectionBridge.EXTRA_BUFFER_HEIGHT, 0)
         val density = intent.getIntExtra(DiLink5HostedProjectionBridge.EXTRA_DENSITY, 0)
         if (generation <= 0 || physicalId <= 0 || bridge == null || width <= 0 || height <= 0 ||
-            bufferWidth <= 0 || bufferHeight <= 0 || density <= 0 || overlays.containsKey(generation)) {
+            bufferWidth <= 0 || bufferHeight <= 0 || density <= 0) {
             return
         }
-        val manager = getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager ?: return
-        val display = manager.getDisplay(physicalId)?.takeIf { it.isValid } ?: return
-        val aaosMapArea = intent.getBooleanExtra(DiLink5HostedProjectionBridge.EXTRA_AAOS_MAP_AREA, false)
         val sealion7Hdmi = intent.getBooleanExtra(DiLink5HostedProjectionBridge.EXTRA_SEALION7_HDMI, false)
+        val diagnostic = if (sealion7Hdmi) "Sealion 7 hosted create generation=$generation display=$physicalId" else null
+        diagnostic?.let { logger.info("$it received") }
+        if (overlays.containsKey(generation)) {
+            diagnostic?.let { logger.warn("$it rejected duplicate generation") }
+            return
+        }
+        val manager = getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager ?: run {
+            diagnostic?.let { logger.warn("$it rejected display manager unavailable") }
+            return
+        }
+        val display = manager.getDisplay(physicalId)?.takeIf { it.isValid } ?: run {
+            diagnostic?.let { logger.warn("$it rejected physical display missing or invalid") }
+            return
+        }
+        val aaosMapArea = intent.getBooleanExtra(DiLink5HostedProjectionBridge.EXTRA_AAOS_MAP_AREA, false)
         val left = intent.getIntExtra(DiLink5HostedProjectionBridge.EXTRA_LEFT, 0)
         val top = intent.getIntExtra(DiLink5HostedProjectionBridge.EXTRA_TOP, 0)
-        if (sealion7Hdmi && (aaosMapArea || !canHostSealion7Hdmi(physicalId) ||
-                !Sealion7HdmiProjection.matchesGeometry(left, top, width, height, bufferWidth, bufferHeight))) return
+        if (diagnostic != null) {
+            if (aaosMapArea) {
+                logger.warn("$diagnostic rejected conflicting map area request")
+                return
+            }
+            if (!canHostSealion7Hdmi(physicalId, diagnostic)) return
+            if (!Sealion7HdmiProjection.matchesGeometry(left, top, width, height, bufferWidth, bufferHeight)) {
+                val expected = "${Sealion7HdmiProjection.WIDTH}x${Sealion7HdmiProjection.HEIGHT}"
+                logger.warn("$diagnostic rejected requested geometry bounds=$left,$top ${width}x$height " +
+                    "buffer=${bufferWidth}x$bufferHeight expectedBounds=0,0 $expected expectedBuffer=$expected")
+                return
+            }
+        }
         val area = if (aaosMapArea) {
             AaosMapAreaCheck.confirmedBounds(this, display)?.takeIf {
                 it.left == left && it.top == top && it.width() == width && it.height() == height &&
@@ -163,30 +186,56 @@ class DiLink5HostedProjectionService : Service() {
             displayContext.createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null)
         } else displayContext
         val windowManager = windowContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
-            ?: return
+            ?: run {
+                diagnostic?.let { logger.warn("$it rejected window manager unavailable") }
+                return
+            }
         val view = SurfaceView(windowContext)
         view.holder.setFixedSize(bufferWidth, bufferHeight)
+        var reportedWindowMatch: Boolean? = null
         fun sealion7WindowMatches(): Boolean {
             val position = IntArray(2)
             view.getLocationOnScreen(position)
-            val currentDisplay = view.display ?: return false
-            return currentDisplay.displayId == physicalId && AaosMapAreaCheck.isTarget(this, currentDisplay) &&
+            val currentDisplay = view.display
+            val displayMatches = currentDisplay != null && currentDisplay.displayId == physicalId &&
+                AaosMapAreaCheck.isTarget(this, currentDisplay)
+            val matches = displayMatches &&
                 Sealion7HdmiProjection.matchesGeometry(position[0], position[1], view.width, view.height,
                     bufferWidth, bufferHeight)
+            // Report the first layout and the first later mismatch, even if relayout repeats.
+            if (reportedWindowMatch == null || reportedWindowMatch == true && !matches) {
+                reportedWindowMatch = matches
+                val message = "$diagnostic layout matches=$matches actualDisplay=${currentDisplay?.displayId} " +
+                    "displayMatches=$displayMatches bounds=${position[0]},${position[1]} ${view.width}x${view.height} " +
+                    "expectedBounds=$left,$top ${width}x$height"
+                if (matches) logger.info(message) else logger.warn(message)
+            }
+            return matches
         }
         val callback = object : SurfaceHolder.Callback {
+            private var reportedSurface = false
+
             override fun surfaceCreated(holder: SurfaceHolder) {
-                if (sealion7Hdmi) {
+                if (diagnostic != null) {
                     // A surface alone does not establish where WindowManager put the overlay.
                     view.post {
                         if (overlays[generation]?.view !== view) return@post
-                        if (sealion7WindowMatches() && holder.surface.isValid) publishSurface(holder)
+                        val windowMatches = sealion7WindowMatches()
+                        val handoffDiagnostic = diagnostic.takeUnless { reportedSurface }
+                        val surfaceValid = (windowMatches || handoffDiagnostic != null) && holder.surface.isValid
+                        if (handoffDiagnostic != null) {
+                            reportedSurface = true
+                            val frame = holder.surfaceFrame
+                            logger.info("$handoffDiagnostic surface valid=$surfaceValid " +
+                                "buffer=${frame.width()}x${frame.height()} expectedBuffer=${bufferWidth}x$bufferHeight")
+                        }
+                        if (windowMatches && surfaceValid) publishSurface(holder, handoffDiagnostic)
                         else release(generation, bridge)
                     }
                 } else publishSurface(holder)
             }
 
-            private fun publishSurface(holder: SurfaceHolder) {
+            private fun publishSurface(holder: SurfaceHolder, handoffDiagnostic: String? = null) {
                 val data = Parcel.obtain()
                 val reply = Parcel.obtain()
                 try {
@@ -201,14 +250,23 @@ class DiLink5HostedProjectionService : Service() {
                     data.writeInt(1)
                     holder.surface.writeToParcel(data, 0)
                     if (!bridge.transact(IBinder.FIRST_CALL_TRANSACTION, data, reply, 0)) {
+                        handoffDiagnostic?.let { logger.warn("$it surface Binder transaction unhandled") }
                         release(generation, bridge)
                         return
                     }
                     reply.readException()
-                    if (reply.readInt() != 1 || reply.readInt() <= 0) {
+                    val accepted = reply.readInt() == 1
+                    val contentDisplayId = if (accepted) reply.readInt() else null
+                    if (contentDisplayId == null || contentDisplayId <= 0) {
+                        handoffDiagnostic?.let {
+                            logger.warn("$it surface Binder rejected accepted=$accepted contentDisplay=$contentDisplayId")
+                        }
                         release(generation, bridge)
+                    } else {
+                        handoffDiagnostic?.let { logger.info("$it surface Binder accepted contentDisplay=$contentDisplayId") }
                     }
-                } catch (_: Throwable) {
+                } catch (error: Throwable) {
+                    handoffDiagnostic?.let { logger.warn("$it surface Binder handoff failed ${hostedProjectionFailure(error)}") }
                     release(generation, bridge)
                 } finally {
                     data.recycle()
@@ -264,22 +322,18 @@ class DiLink5HostedProjectionService : Service() {
         try {
             windowManager.addView(view, params)
         } catch (error: Throwable) {
-            if (sealion7Hdmi) {
-                logger.warn("Sealion 7 hosted create generation=$generation display=$physicalId " +
-                    "addView failed ${hostedProjectionFailure(error)}")
-            }
+            diagnostic?.let { logger.warn("$it addView failed ${hostedProjectionFailure(error)}") }
             release(generation, bridge)
         }
     }
 
-    private fun canHostSealion7Hdmi(displayId: Int, logProbe: Boolean = false): Boolean {
+    private fun canHostSealion7Hdmi(displayId: Int, diagnostic: String): Boolean {
         val overlayGranted = OverlayPermissionChecker.isGranted(this)
         val eligibleId = if (overlayGranted) Sealion7HdmiProjection.findDisplay(this)?.displayId else null
-        if (logProbe) {
-            logger.info("Sealion 7 hosted probe display=$displayId overlayGranted=$overlayGranted " +
-                "eligibleDisplay=${eligibleId ?: if (overlayGranted) "unavailable" else "unchecked"}")
-        }
-        return overlayGranted && eligibleId == displayId
+        val admitted = overlayGranted && eligibleId == displayId
+        logger.info("$diagnostic overlayGranted=$overlayGranted " +
+            "eligibleDisplay=${eligibleId ?: if (overlayGranted) "unavailable" else "unchecked"} admitted=$admitted")
+        return admitted
     }
 
     private fun release(
