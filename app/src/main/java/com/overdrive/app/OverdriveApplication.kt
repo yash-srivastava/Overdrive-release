@@ -119,6 +119,8 @@ class OverdriveApplication : Application() {
             com.overdrive.app.remoteaccess.SharedBluetoothKeepAliveController.resume(this)
             com.overdrive.app.remoteaccess.KeyFobAccessMonitor.resumeIfEnabled(this)
             com.overdrive.app.remoteaccess.BluetoothAccessMonitor.resumeIfEnabled(this)
+            // A crash or kill while parked must not leave call audio refused on the next drive.
+            com.overdrive.app.remoteaccess.BluetoothAccessMonitor.restoreParkedPhoneAudioOnStartup(this)
             try {
                 com.overdrive.app.services.CallStateMonitor.start(this)
             } catch (ignored: Throwable) {

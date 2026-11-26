@@ -112,13 +112,18 @@ public final class RemoteAccessSettings {
     public static final String PHONE_PRIORITY_KEY = "phonePriority";
     /** Opt-in: a phone departure may lock with the key detected inside; the key then cannot unlock. */
     public static final String LOCK_WITH_KEY_INSIDE_KEY = "lockWithKeyInside";
+    /**
+     * Opt-in: while the car is off, the link kept up for phone proximity refuses call audio and
+     * drops media audio, so calls and music stay on the phone. Restored at power-on.
+     */
+    public static final String PARKED_PHONE_AUDIO_OFF_KEY = "parkedPhoneAudioOff";
     private static final String[] BOOLEAN_KEYS = {
             "enabled", "unlockEnabled", "lockEnabled", "dryRun", "keepBluetoothOn", "notifyPush", "notifyTelegram",
             "advancedMode", "keyFobEnabled", "keyFobLockEnabled",
             "restrictLockToOutsideSafeZones", "restrictUnlockToOutsideSafeZones", "parkedBluetoothSafeZoneEnabled", CLOUD_FALLBACK_KEY,
             DI5_LOCK_SETTINGS_EXPLICIT_KEY, CONFIRM_WITH_VEHICLE_KEY, TIMING_EXPLICIT_KEY,
             UNLOCK_TRIGGER_EXPLICIT_KEY, LOCK_WAITS_FOR_KEY_ABSENCE_KEY, KEY_FOB_LOCK_EXPLICIT_KEY,
-            PHONE_PRIORITY_KEY, LOCK_WITH_KEY_INSIDE_KEY
+            PHONE_PRIORITY_KEY, LOCK_WITH_KEY_INSIDE_KEY, PARKED_PHONE_AUDIO_OFF_KEY
     };
     private static final String[] NUMBER_KEYS = {
             "nearThreshold", "awayThreshold", "windowMs", "dwellMs", "nearWindowMs", "nearDwellMs",
@@ -143,6 +148,7 @@ public final class RemoteAccessSettings {
                     .put(KEY_FOB_LOCK_SAMPLES_KEY, KEY_FOB_LOCK_SAMPLES_DEFAULT)
                     .put(LOCK_WAITS_FOR_KEY_ABSENCE_KEY, LOCK_WAITS_FOR_KEY_ABSENCE_DEFAULT)
                     .put(PHONE_PRIORITY_KEY, false).put(LOCK_WITH_KEY_INSIDE_KEY, false)
+                    .put(PARKED_PHONE_AUDIO_OFF_KEY, false)
                     .put("nearThreshold", -12).put("awayThreshold", -24)
                     // 18 Oct snappy defaults: a 1 Hz collector delivers the two confirming readings
                     // (ProximityEvaluator.MIN_CONFIRMING_SAMPLES) inside these windows.
@@ -203,6 +209,11 @@ public final class RemoteAccessSettings {
     public static boolean phonePriority(JSONObject settings) {
         return settings != null && settings.optBoolean("keyFobEnabled")
                 && settings.optBoolean(PHONE_PRIORITY_KEY, false);
+    }
+
+    /** Parked call and media audio stay on the phone; needs the parked Bluetooth link to matter. */
+    public static boolean parkedPhoneAudioOff(JSONObject settings) {
+        return settings != null && settings.optBoolean(PARKED_PHONE_AUDIO_OFF_KEY, false);
     }
 
     /** Lock-with-key-inside consent; only with keyfob detection on. */

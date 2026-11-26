@@ -712,6 +712,8 @@ public final class RemoteAccessApiHandler {
                 stored.remove("errorDetail");
                 phone.signal.put("reconnect", stored);
             }
+            JSONObject parkedAudio = sample.optJSONObject("parkedAudio");
+            if (parkedAudio != null) phone.signal.put("parkedAudio", new JSONObject(parkedAudio.toString()));
             if (evaluated.rawRssi == null || !connected) {
                 if ("missing_signal".equals(evaluated.reason)
                         || !nativeProof && "disconnected".equals(evaluated.reason))

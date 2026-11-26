@@ -50,7 +50,7 @@ public class RemoteAccessSnappyProximityAssetTest {
         assertFalse(html.contains("three consecutive"));
         assertTrue(html.contains("data-i18n=\"remote_access.timing_defaults_hint\">Defaults: 2 s unlock window, 1 s unlock confirmation, 6 s departure window, 2 s lock confirmation, 10 s cooldown."));
         assertTrue(html.contains("data-i18n=\"remote_access.grace_quiet_hint\">"));
-        assertEquals(1, count(html, "remote-access.js?v=31")); // 18 Oct bumped to 24; 19 Oct (fob trigger switch) to 25; 20 Oct (snappy locks) to 26; 22 Oct (car-on pause) to 27; 2 Nov (fob car-on pause; Hebrew i18n) to 28; 7 Nov (roster awaiting connection) to 29; 15 Nov (phone priority, key inside) to 30; 18 Nov (parked Bluetooth safe zones) to 31
+        assertEquals(1, count(html, "remote-access.js?v=32")); // 18 Oct bumped to 24; 19 Oct (fob trigger switch) to 25; 20 Oct (snappy locks) to 26; 22 Oct (car-on pause) to 27; 2 Nov (fob car-on pause; Hebrew i18n) to 28; 7 Nov (roster awaiting connection) to 29; 15 Nov (phone priority, key inside) to 30; 18 Nov (parked Bluetooth safe zones) to 31; 26 Nov (parked phone audio, #1084) to 32
     }
 
     @Test
