@@ -105,9 +105,51 @@ public class SdCardFormatterBehaviorTest {
         assertFalse(SdCardFormatter.isPersistentPackage("Unable to find package: com.byd.cdr\n"));
     }
 
+    private static Object[] disk(String id, int flags, String sysPath, long size, String label) {
+        return new Object[]{id, flags, sysPath, size, label};
+    }
+
+    @Test public void voldFallbackNeedsExactlyOneSdDisk() {
+        Object[] sd = disk("disk:8,0", 5, SD_READER, 256355860480L, "Generic-");
+        Object[] stick = disk("disk:8,16", 9, USB_STICK, 61920509952L, "Kingston");
+        Object[] secondSd = disk("disk:8,32", 5, SD_READER.replace("3-1.4", "3-1.3"), 31914983424L, "Generic-");
+        assertNotNull(SdCardFormatter.onlySdDisk("disk:8,0", java.util.Arrays.asList(sd, stick)));
+        // Zero SD disks: the USB stick alone never qualifies.
+        assertNull(SdCardFormatter.onlySdDisk("disk:8,16", java.util.Collections.singletonList(stick)));
+        // Two SD disks: ambiguous, so neither is a target.
+        assertNull(SdCardFormatter.onlySdDisk("disk:8,0", java.util.Arrays.asList(sd, secondSd)));
+    }
+
+    @Test public void readerAnchorNeedsAKnownReaderAloneOnTheSdBus() {
+        String[] reader = {"/dev/bus/usb/003/005", "0bda:0177", "1"};
+        String[] hub = {"/dev/bus/usb/003/003", "2fd0:0000", "0"};
+        String[] stickOnBus1 = {"/dev/bus/usb/001/012", "0951:1666", "1"};
+        assertEquals("0bda:0177", SdCardFormatter.readerAnchor(SD_READER,
+                java.util.Arrays.asList(reader, hub, stickOnBus1)));
+        // A stick on the reader's own bus makes the slot ambiguous.
+        assertNull(SdCardFormatter.readerAnchor(SD_READER, java.util.Arrays.asList(reader,
+                new String[]{"/dev/bus/usb/003/006", "0951:1666", "1"})));
+        // Unknown reader, no reader, or a path without a USB bus: refused.
+        assertNull(SdCardFormatter.readerAnchor(SD_READER, java.util.Collections.singletonList(
+                new String[]{"/dev/bus/usb/003/005", "1234:5678", "1"})));
+        assertNull(SdCardFormatter.readerAnchor(SD_READER, java.util.Arrays.asList(hub, stickOnBus1)));
+        assertNull(SdCardFormatter.readerAnchor("/sys/devices/platform/soc/8804000.sdhci/mmc_host/mmc1",
+                java.util.Collections.singletonList(reader)));
+    }
+
+    @Test public void dvrCommandsCarryTheJournalUser() {
+        assertEquals("pm list packages --user 10 -d", SdCardFormatter.disabledPackagesCommand(10));
+        assertEquals("pm list packages -d", SdCardFormatter.disabledPackagesCommand(-1));
+        assertEquals(" --user 10", SdCardFormatter.pmUser(10));
+        assertEquals(10, SdCardFormatter.parseJournalUser("10"));
+        // A journal written before the user was recorded has no fourth line.
+        assertEquals(-1, SdCardFormatter.parseJournalUser(null));
+        assertEquals(-1, SdCardFormatter.parseJournalUser("-1"));
+    }
+
     @Test public void refusalReasonCodesRemainStable() {
-        assertEquals("dilink100_unsupported", SdCardFormatter.reasonCode(
-                "DiLink 100 multi-user removable storage cannot be formatted safely."));
+        assertEquals("dvr_restart", SdCardFormatter.reasonCode(
+                "Format outcome unverified: factory DVR has not restarted; restart the car to resume DVR recording."));
         assertEquals("media_identity", SdCardFormatter.reasonCode(
                 "Cannot verify SD media identity on this firmware; format blocked."));
         assertEquals("cdr_running", SdCardFormatter.reasonCode(
