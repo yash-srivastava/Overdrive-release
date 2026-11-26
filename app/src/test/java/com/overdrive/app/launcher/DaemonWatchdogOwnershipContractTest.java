@@ -83,6 +83,11 @@ public class DaemonWatchdogOwnershipContractTest {
                     + "  sleep 1\n"
                     + "  i=$((i + 1))\n"
                     + "done\n";
+            // Another test's scratch-root override would leave the real paths in place.
+            for (Path expected : new Path[] {scriptPath, pidFile, lockDir}) {
+                assertTrue("protocol does not use " + expected + ":\n" + protocol,
+                        protocol.contains(expected.toString()));
+            }
             Files.write(scriptPath,
                     protocol.getBytes(StandardCharsets.UTF_8));
 
@@ -107,7 +112,12 @@ public class DaemonWatchdogOwnershipContractTest {
             assertEquals(new String(secondOutput, StandardCharsets.UTF_8),
                     0, second.waitFor());
 
-            assertEquals(1, Files.readAllLines(owners).size());
+            List<String> ownerLines = Files.exists(owners)
+                    ? Files.readAllLines(owners) : java.util.Collections.emptyList();
+            assertEquals("owners=" + ownerLines
+                            + " first=[" + new String(firstOutput, StandardCharsets.UTF_8)
+                            + "] second=[" + new String(secondOutput, StandardCharsets.UTF_8) + "]",
+                    1, ownerLines.size());
             assertFalse(Files.exists(pidFile));
             assertFalse(Files.exists(lockDir));
         } finally {
