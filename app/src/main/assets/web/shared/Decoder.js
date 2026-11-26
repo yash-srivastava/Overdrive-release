@@ -854,13 +854,10 @@ var Module=typeof Module!=="undefined"?Module:{};var moduleOverrides={};var key;
 
           }else{
             decoder.onPictureDecoded = function (buffer, width, height, infos) {
-              if (buffer) {
-                buffer = new Uint8Array(buffer);
-              };
-
-              // buffer needs to be copied because we give up ownership
-              var copyU8 = new Uint8Array(buffer.length);
-              copyU8.set( buffer, 0, buffer.length );
+              // Decoder callbacks supply Uint8Array views (or owned RGB arrays).
+              // One typed-array copy gives the worker message independent storage
+              // without transferring the decoder's backing memory.
+              var copyU8 = new Uint8Array(buffer);
 
               postMessage({
                 buf: copyU8.buffer,

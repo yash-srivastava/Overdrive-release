@@ -3,7 +3,6 @@ package com.overdrive.app.ui.timeline.player
 import com.overdrive.app.ui.timeline.TlMark
 import com.overdrive.app.ui.timeline.TlRoad
 import com.overdrive.app.ui.timeline.TlSegment
-import java.util.TreeSet
 
 /** Wall range [playFrom, playTo) of the timeline that is shown from [seg]. */
 data class PlanItem(val seg: TlSegment, val playFrom: Long, val playTo: Long) {
@@ -199,37 +198,54 @@ class PlaybackPlan private constructor(
             if (clips.isEmpty()) return PlaybackPlan(emptyList(), emptyList(), pref)
             val ranks = IntArray(clips.size) { rank(clips[it], pref) }
             val ends = LongArray(clips.size) { clips[it].end ?: clips[it].start }
-            val points = TreeSet<Long>()
+            // Sort primitive boundaries once rather than inserting boxed times into a tree.
+            val points = LongArray(clips.size * 2)
             for (i in clips.indices) {
-                points.add(clips[i].start)
-                points.add(ends[i])
+                points[2 * i] = clips[i].start
+                points[2 * i + 1] = ends[i]
             }
+            points.sort()
             val out = ArrayList<PlanItem>()
-            val active = ArrayList<Int>()
+            var active = IntArray(minOf(16, clips.size))
+            var activeCount = 0
             var next = 0
             var current = -1
             var curFrom = 0L
             var curTo = 0L
-            var previous: Long? = null
-            for (point in points) {
-                val a = previous
-                if (a != null) {
-                    while (next < clips.size && clips[next].start <= a) active.add(next++)
-                    active.removeAll { ends[it] <= a }
-                    val w = winner(clips, ends, ranks, active)
-                    if (w < 0) {
-                        if (current >= 0) out.add(PlanItem(clips[current], curFrom, curTo))
-                        current = -1
-                    } else if (w == current && curTo == a) {
-                        curTo = point
-                    } else {
-                        if (current >= 0) out.add(PlanItem(clips[current], curFrom, curTo))
-                        current = w
-                        curFrom = a
-                        curTo = point
-                    }
+            var a = points[0]
+            for (i in 1 until points.size) {
+                val point = points[i]
+                if (point == a) continue // shared boundary: no zero-length slice
+                // Stable in-place compaction preserves the original active order.
+                var kept = 0
+                for (j in 0 until activeCount) {
+                    val c = active[j]
+                    if (ends[c] > a) active[kept++] = c
                 }
-                previous = point
+                activeCount = kept
+                while (next < clips.size && clips[next].start <= a) {
+                    // A clip ending at this boundary never enters the active set.
+                    if (ends[next] > a) {
+                        if (activeCount == active.size) {
+                            active = active.copyOf(active.size + minOf(active.size, clips.size - active.size))
+                        }
+                        active[activeCount++] = next
+                    }
+                    next++
+                }
+                val w = winner(clips, ends, ranks, active, activeCount)
+                if (w < 0) {
+                    if (current >= 0) out.add(PlanItem(clips[current], curFrom, curTo))
+                    current = -1
+                } else if (w == current && curTo == a) {
+                    curTo = point
+                } else {
+                    if (current >= 0) out.add(PlanItem(clips[current], curFrom, curTo))
+                    current = w
+                    curFrom = a
+                    curTo = point
+                }
+                a = point
             }
             if (current >= 0) out.add(PlanItem(clips[current], curFrom, curTo))
             return PlaybackPlan(dropSlivers(out), clips, pref)
@@ -266,13 +282,17 @@ class PlaybackPlan private constructor(
             return ca.id < cb.id
         }
 
-        private fun winner(clips: List<TlSegment>, ends: LongArray, ranks: IntArray, active: List<Int>): Int {
+        private fun winner(clips: List<TlSegment>, ends: LongArray, ranks: IntArray, active: IntArray, count: Int): Int {
             var best = -1
-            for (c in active) if (best < 0 || better(clips, ranks, c, best)) best = c
+            for (i in 0 until count) {
+                val c = active[i]
+                if (best < 0 || better(clips, ranks, c, best)) best = c
+            }
             if (best < 0) return -1
             val bestStart = clips[best].start
             var seam = -1
-            for (c in active) {
+            for (i in 0 until count) {
+                val c = active[i]
                 if (c == best) continue
                 val cs = clips[c].start
                 val ce = ends[c]

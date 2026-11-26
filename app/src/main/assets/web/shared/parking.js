@@ -88,7 +88,13 @@
         return m + s;
     }
     function fmtTime(ms) { return ms ? BYD.clock.time(ms, lang()) : ''; }
-    function fmtDay(ms) { return new Date(ms).toLocaleDateString(lang(), { weekday: 'long', month: 'short', day: 'numeric' }); }
+    var DAY_FORMAT = { weekday: 'long', month: 'short', day: 'numeric' };
+    function fmtDay(ms, formatter) {
+        var date = new Date(ms);
+        // Intl.format throws for invalid dates; keep the original Date fallback.
+        if (formatter && !isNaN(date.getTime())) return formatter.format(date);
+        return date.toLocaleDateString(lang(), DAY_FORMAT);
+    }
     function fmtDate(ms) { return new Date(ms).toLocaleDateString(lang(), { weekday: 'long', month: 'long', day: 'numeric' }); }
 
     function placeOf(s) {
@@ -308,8 +314,16 @@
         if (!append) box.innerHTML = '';
         var current = state.status && state.status.current ? state.status.current : null;
         var lastDay = append ? box.getAttribute('data-last-day') : null;
+        // Date.toLocaleDateString builds a formatter for each row. A render is
+        // synchronous, so reuse one with the current locale/time zone for this
+        // page only; the next render picks up any locale or zone change.
+        var dayFormatter = null;
+        if (sessions.length > 1 && typeof Intl !== 'undefined' && typeof Intl.DateTimeFormat === 'function') {
+            try { dayFormatter = new Intl.DateTimeFormat(lang(), DAY_FORMAT); }
+            catch (e) { /* Older engines: retain the original Date path. */ }
+        }
         sessions.forEach(function (s) {
-            var day = fmtDay(s.startedMs);
+            var day = fmtDay(s.startedMs, dayFormatter);
             if (day !== lastDay) {
                 var h = document.createElement('h2');
                 h.className = 'day-header';

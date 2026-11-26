@@ -295,6 +295,9 @@
         }
 
         splitNALUnits(data) {
+            // NALs are consumed synchronously by ingest(). Keep views into the
+            // received message instead of copying the encoded payload here.
+            // EncodedVideoChunk copies its BufferSource (no transfer requested).
             const units = [];
             let i = 0, lastStart = -1;
 
@@ -305,7 +308,7 @@
                     else if (data[i+2] === 1) startCodeLen = 3;
 
                     if (startCodeLen > 0) {
-                        if (lastStart >= 0) units.push(data.slice(lastStart, i));
+                        if (lastStart >= 0) units.push(data.subarray(lastStart, i));
                         lastStart = i;
                         i += startCodeLen;
                         continue;
@@ -314,7 +317,7 @@
                 i++;
             }
 
-            if (lastStart >= 0) units.push(data.slice(lastStart));
+            if (lastStart >= 0) units.push(data.subarray(lastStart));
             else if (data.length > 0) units.push(data);
             return units;
         }
@@ -329,11 +332,12 @@
                 return;
             }
 
-            // Capture SPS/PPS — reconfigure decoder if SPS changes (quality switch)
+            // Capture owned SPS/PPS copies — reconfigure decoder if SPS changes
+            // (quality switch). Never retain a view of the whole message.
             if (nalType === 7) {
                 if (this.sps && !this.arraysEqual(this.sps, data)) {
                     // SPS changed (quality/resolution change) — reset decoder state
-                    this.sps = data;
+                    this.sps = data.slice();
                     this.hasReceivedKeyframe = false;
                     if (this.decoder) {
                         try {
@@ -351,7 +355,7 @@
                 // some phones and not others: lenient desktop/WebView decoders
                 // ignore the mismatch, stricter mobile ones reject every frame.
                 if (!this.sps) {
-                    this.sps = data;
+                    this.sps = data.slice();
                     const realCodec = this.extractCodecFromSPS(data);
                     if (this.decoder && realCodec !== this.codecString) {
                         try {
@@ -362,10 +366,17 @@
                     }
                     return;
                 }
-                this.sps = data;
+                // Equal SPS: retain the existing compact owned copy.
                 return;
             }
-            if (nalType === 8) { this.pps = data; return; }
+            if (nalType === 8) {
+                if (!this.pps || !this.arraysEqual(this.pps, data)) {
+                    // Like SPS, PPS outlives this message. Do not pin a large
+                    // WebSocket buffer (e.g. a bundled keyframe) via a view.
+                    this.pps = data.slice();
+                }
+                return;
+            }
 
             // Handle video frames
             if (nalType === 5 || nalType === 1) {

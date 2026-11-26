@@ -256,7 +256,10 @@ public class TripScoreEngine {
 
         // ── Accumulators: elevation (gradient profile) ──
         // Shared gated/smoothed/hysteresis pipeline — see ElevationEstimator.
-        final ElevationEstimator elevation = new ElevationEstimator();
+        // A supplied whole-journal gain is authoritative (including zero). Do not
+        // rebuild a second median window from the filtered scoring stream.
+        final ElevationEstimator elevation = Double.isNaN(presetGainM)
+                ? new ElevationEstimator() : null;
 
         // ── Accumulators: pedal jerk (smoothness score) ──
         // Only sums jerk between two consecutive DRIVING samples, each sample's
@@ -346,15 +349,17 @@ public class TripScoreEngine {
             }
 
             // ── 3b. Elevation tracking (gradient profile) ──
-            // Every sample feeds the shared estimator: it gates on movement
+            // Without journal totals, every sample feeds the shared estimator: it gates on movement
             // (gear P / unknown-at-standstill excluded, so the park-debounce
             // tail and idle noise can't accumulate), gates on reported vertical
             // accuracy, median-smooths over 10 s, resets on MSL/ellipsoid source
             // flips and long gaps, and banks movement through a hysteresis band
             // so sub-threshold noise contributes exactly zero.
-            elevation.addSample(s.timestampMs, s.altitude, s.verticalAccuracyM,
-                    s.altitudeIsMsl,
-                    ElevationEstimator.isElevationEligible(s.gearMode, speed));
+            if (elevation != null) {
+                elevation.addSample(s.timestampMs, s.altitude, s.verticalAccuracyM,
+                        s.altitudeIsMsl,
+                        ElevationEstimator.isElevationEligible(s.gearMode, speed));
+            }
 
             final boolean driving = speed > MIN_DRIVING_SPEED;
             final boolean wasDriving = lastSpeed > MIN_DRIVING_SPEED;
@@ -579,7 +584,7 @@ public class TripScoreEngine {
         // Elevation gain/loss per km — standard metric for terrain difficulty.
         // Climb and descent are separate profiles because the physics and
         // optimal driving behavior are fundamentally different.
-        GradientProfile gradProfile = Double.isNaN(presetGainM)
+        GradientProfile gradProfile = elevation != null
                 ? applyElevation(trip, elevation.getGainM(), elevation.getLossM())
                 : applyElevation(trip, presetGainM, presetLossM);
         final double elevationGain = trip.elevationGainM;

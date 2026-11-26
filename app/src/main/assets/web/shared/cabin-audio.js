@@ -3,7 +3,7 @@
     'use strict';
 
     var SOURCE_RATE = 48000;
-    var WORKLET_URL = '/shared/cabin-audio-worklet.js?v=1';
+    var WORKLET_URL = '/shared/cabin-audio-worklet.js?v=2';
     var listeners = [];
     var socket = null;
     var context = null;

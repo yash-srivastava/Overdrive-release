@@ -6,9 +6,12 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -108,4 +111,46 @@ public class CpuFrequencySamplerTest {
         assertEquals(1804, sampler.currentPeakMhz());
         assertEquals(2016, sampler.hardwarePeakMhz());
     }
+
+    @Test public void shortAsciiReadsAndLegacyTextFallbackAgree() throws Exception {
+        File policy = new File(temp.newFolder("cpufreq"), "policy0");
+        policy.mkdir();
+        File current = new File(policy, "scaling_cur_freq");
+        write(policy, "cpuinfo_cur_freq", "1234000\n");
+        CpuFrequencySampler sampler = new CpuFrequencySampler(temp.getRoot());
+        String[] cases = {
+                "2016000\n", "0001804800\r\n", "1804800\rgarbage",
+                "465000", " +1056000 \n", "0\n", "-1000\n", "\n", "",
+                "1234x\n", "1234\n9999", "9223372036854775807\n",
+                "9223372036854775808\n", "99999999999999999999999999999999\n",
+                "000000000000000000000000000000000000000000001056000\n",
+                "                                1056000\n", "１２３４０００\n",
+                "1234000\u0000\n", "1234\t5678\n"
+        };
+        for (String value : cases) {
+            Files.write(current.toPath(), value.getBytes(StandardCharsets.UTF_8));
+            assertEquals(value, referencePeak(current), sampler.currentPeakMhz());
+        }
+        Random random = new Random(4801L);
+        for (int i = 0; i < 512; i++) {
+            String value = Long.toString(random.nextLong());
+            if ((i & 3) == 0) value = "  " + value + " ";
+            if ((i & 7) != 0) value += "\n";
+            write(policy, "scaling_cur_freq", value);
+            assertEquals(value, referencePeak(current), sampler.currentPeakMhz());
+        }
+    }
+
+    private static int referencePeak(File current) {
+        try (BufferedReader reader = new BufferedReader(new FileReader(current))) {
+            String line = reader.readLine();
+            if (line != null) {
+                long khz = Long.parseLong(line.trim());
+                if (khz > 0) return (int) Math.min(Integer.MAX_VALUE, khz / 1000L);
+            }
+        } catch (Exception ignored) {
+        }
+        return 1234; // cpuinfo_cur_freq fallback
+    }
+
 }

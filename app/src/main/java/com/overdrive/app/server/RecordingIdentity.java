@@ -6,6 +6,8 @@ import java.security.MessageDigest;
 import java.util.Locale;
 
 final class RecordingIdentity {
+    private static final String HEX = "0123456789abcdef";
+
     final String recordingId;
     final String rootId;
     final String volumeId;
@@ -86,9 +88,13 @@ final class RecordingIdentity {
         try {
             byte[] bytes = MessageDigest.getInstance("SHA-256")
                     .digest(value.getBytes(StandardCharsets.UTF_8));
-            StringBuilder hex = new StringBuilder(bytes.length * 2);
-            for (byte b : bytes) hex.append(String.format(Locale.US, "%02x", b & 0xff));
-            return hex.substring(0, chars);
+            // Encode only the requested prefix, preserving the existing lowercase IDs.
+            char[] hex = new char[chars];
+            for (int i = 0; i < chars; i++) {
+                int valueByte = bytes[i / 2] & 0xff;
+                hex[i] = HEX.charAt((i & 1) == 0 ? valueByte >>> 4 : valueByte & 0x0f);
+            }
+            return new String(hex);
         } catch (Exception impossible) {
             throw new IllegalStateException("SHA-256 unavailable", impossible);
         }

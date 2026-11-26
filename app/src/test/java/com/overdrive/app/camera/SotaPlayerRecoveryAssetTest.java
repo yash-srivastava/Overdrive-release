@@ -102,7 +102,7 @@ public class SotaPlayerRecoveryAssetTest {
     @Test
     public void liveViewLoadsTheRecoveringPlayerBuild() throws Exception {
         String liveView = readRepositoryFile(LIVE_VIEW);
-        assertTrue(liveView.contains("<script src=\"../shared/SotaPlayer.js?v=14\"></script>"));
+        assertTrue(liveView.contains("<script src=\"../shared/SotaPlayer.js?v=15\"></script>"));
     }
 
     /** Body of a class method from its header to the next method at the same indent. */

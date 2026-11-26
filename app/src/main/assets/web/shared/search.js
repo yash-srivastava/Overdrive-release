@@ -449,22 +449,41 @@
         return 0;
     }
 
-    function scoreEntry(q, e) {
-        var best = score(q, resolveLabel(e));
-        var c = score(q, resolveCrumb(e)) - 12;
-        if (c > best) best = c;
-        if (e.i18n) {
-            var kt = score(q, e.i18n.split('.').pop().replace(/_/g, ' ')) - 18;
+    // Page names, tab breadcrumbs and English labels recur across many entries.
+    // Cache their scores for this query only (including zero/non-matches), so
+    // normalization and fuzzy matching never retain stale translations.
+    function queryScorer(q) {
+        var scores = Object.create(null);
+        return function (hay) {
+            if (!hay) return 0;
+            var cached = scores[hay];
+            if (cached !== undefined) return cached;
+            return (scores[hay] = score(q, hay));
+        };
+    }
+
+    function scoreEntry(match, e, label) {
+        var best = match(label);
+        // Each alternative has a maximum of 100 minus its penalty. Once
+        // that ceiling cannot beat best, there is no need to resolve it.
+        if (best < 88) {
+            var c = match(resolveCrumb(e)) - 12;
+            if (c > best) best = c;
+        }
+        if (e.i18n && best < 82) {
+            var kt = match(e.i18n.split('.').pop().replace(/_/g, ' ')) - 18;
             if (kt > best) best = kt;
         }
         // Always also match the stored English label (and English page/tab
         // names for tabs/settings), so a non-English user can still find things
         // by their English term. When the active locale IS English these equal
         // resolveLabel/resolveCrumb above, so this only adds reach elsewhere.
-        var enl = score(q, e.label) - 4;
-        if (enl > best) best = enl;
-        if (e.type !== 'page') {
-            var enc = score(q, (e.pageLabel || '') + ' ' + (e.tabLabel || '')) - 14;
+        if (best < 96 && e.label !== label) {
+            var enl = match(e.label) - 4;
+            if (enl > best) best = enl;
+        }
+        if (e.type !== 'page' && best < 86) {
+            var enc = match((e.pageLabel || '') + ' ' + (e.tabLabel || '')) - 14;
             if (enc > best) best = enc;
         }
         if (best <= 0) return 0;
@@ -668,11 +687,13 @@
                 }
             } else {
                 var scored = [];
+                var match = queryScorer(q);
                 for (i = 0; i < entries.length; i++) {
-                    var sc = scoreEntry(q, entries[i]);
+                    var label = resolveLabel(entries[i]);
+                    var sc = scoreEntry(match, entries[i], label);
                     // Stash the resolved-label length now so the comparator
                     // doesn't re-run resolveLabel (an i18n.t lookup) O(N log N).
-                    if (sc > 0) scored.push({ e: entries[i], s: sc, n: resolveLabel(entries[i]).length });
+                    if (sc > 0) scored.push({ e: entries[i], s: sc, n: label.length });
                 }
                 scored.sort(function (a, b) {
                     if (b.s !== a.s) return b.s - a.s;

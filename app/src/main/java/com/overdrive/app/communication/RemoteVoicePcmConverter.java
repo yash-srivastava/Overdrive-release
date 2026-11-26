@@ -38,6 +38,21 @@ public final class RemoteVoicePcmConverter {
 
         int inputSamples = sourceBytes / 2;
         int outputFrames = outputBytes / 4;
+        // Browser voice arrives at 16 kHz; the fallback native output is 48 kHz.
+        // Keep the general converter for other rates and for aliased buffers.
+        if (source != destination) {
+            if (sourceRate == outputRate) {
+                for (int i = 0, out = 0; i < sourceBytes; i += 2, out += 4) {
+                    destination[out] = destination[out + 2] = source[i];
+                    destination[out + 1] = destination[out + 3] = source[i + 1];
+                }
+                return outputBytes;
+            }
+            if ((long) sourceRate * 3 == outputRate) {
+                expandTripleRate(source, inputSamples, destination);
+                return outputBytes;
+            }
+        }
         double sourceStep = sourceRate / (double) outputRate;
         for (int frame = 0; frame < outputFrames; frame++) {
             double sourcePosition = frame * sourceStep;
@@ -51,6 +66,26 @@ public final class RemoteVoicePcmConverter {
             writeStereoSample(destination, frame * 4, sample);
         }
         return outputBytes;
+    }
+
+    /** Exact linear interpolation at phases 0, 1/3 and 2/3, then hold the last sample. */
+    private static void expandTripleRate(byte[] source, int inputSamples, byte[] destination) {
+        int first = readSample(source, 0);
+        int out = 0;
+        for (int i = 1; i < inputSamples; i++, out += 12) {
+            int second = readSample(source, i);
+            // Bias into a non-negative range before integer division, so nearest
+            // rounding is identical for negative samples. Thirds never tie at .5.
+            int oneThird = (2 * first + second + 98_305) / 3 - 32_768;
+            int twoThirds = (first + 2 * second + 98_305) / 3 - 32_768;
+            writeStereoSample(destination, out, first);
+            writeStereoSample(destination, out + 4, oneThird);
+            writeStereoSample(destination, out + 8, twoThirds);
+            first = second;
+        }
+        writeStereoSample(destination, out, first);
+        writeStereoSample(destination, out + 4, first);
+        writeStereoSample(destination, out + 8, first);
     }
 
     public static int peakAbsoluteSample(byte[] pcm, int byteCount) {

@@ -69,11 +69,18 @@ internal object Intervals {
     /** Sorts by start and merges pieces whose gap is <= tolerance; returns new compact arrays. */
     fun merge(starts: LongArray, ends: LongArray, n: Int, tolerance: Long): Pair<LongArray, LongArray> {
         if (n == 0) return Pair(LongArray(0), LongArray(0))
-        val order = (0 until n).sortedBy { starts[it] }
+        // Several callers already produce ordered intervals. Avoid boxing and
+        // sorting every index in that common case; keep stable sorting otherwise.
+        var sorted = true
+        for (i in 1 until n) {
+            if (starts[i] < starts[i - 1]) { sorted = false; break }
+        }
+        val order = if (sorted) null else (0 until n).sortedBy { starts[it] }
         val os = LongArray(n)
         val oe = LongArray(n)
         var k = 0
-        for (i in order) {
+        for (position in 0 until n) {
+            val i = order?.get(position) ?: position
             val s = starts[i]
             val e = maxOf(ends[i], s)
             if (k > 0 && s <= oe[k - 1] + tolerance) {
@@ -84,13 +91,35 @@ internal object Intervals {
                 k++
             }
         }
-        return Pair(os.copyOf(k), oe.copyOf(k))
+        return if (k == n) Pair(os, oe) else Pair(os.copyOf(k), oe.copyOf(k))
+    }
+
+    // Request-local output buffer: no Long boxing and no large upfront
+    // allocation for an operation that may return only a few intervals.
+    private class PairBuffer {
+        private var starts = LongArray(0)
+        private var ends = LongArray(0)
+        private var size = 0
+
+        fun add(start: Long, end: Long) {
+            if (size == starts.size) {
+                val capacity = if (size == 0) 8 else size + (size ushr 1)
+                starts = starts.copyOf(capacity)
+                ends = ends.copyOf(capacity)
+            }
+            starts[size] = start
+            ends[size] = end
+            size++
+        }
+
+        fun finish(): Pair<LongArray, LongArray> =
+            if (size == starts.size) Pair(starts, ends)
+            else Pair(starts.copyOf(size), ends.copyOf(size))
     }
 
     /** a minus b; both sorted and disjoint. */
     fun subtract(aS: LongArray, aE: LongArray, bS: LongArray, bE: LongArray): Pair<LongArray, LongArray> {
-        val rs = ArrayList<Long>()
-        val re = ArrayList<Long>()
+        val result = PairBuffer()
         var j = 0
         for (i in aS.indices) {
             var s = aS[i]
@@ -99,55 +128,48 @@ internal object Intervals {
             var k = j
             while (k < bS.size && bS[k] < e) {
                 if (bS[k] > s) {
-                    rs.add(s)
-                    re.add(bS[k])
+                    result.add(s, bS[k])
                 }
                 if (bE[k] > s) s = bE[k]
                 if (s >= e) break
                 k++
             }
             if (s < e) {
-                rs.add(s)
-                re.add(e)
+                result.add(s, e)
             }
         }
-        return Pair(rs.toLongArray(), re.toLongArray())
+        return result.finish()
     }
 
     /** Pieces of [lo, hi) not covered by the sorted disjoint set, keeping only pieces >= minLen. */
     fun complement(s: LongArray, e: LongArray, lo: Long, hi: Long, minLen: Long): Pair<LongArray, LongArray> {
-        val rs = ArrayList<Long>()
-        val re = ArrayList<Long>()
+        val result = PairBuffer()
         var cur = lo
         for (i in s.indices) {
             if (e[i] <= cur) continue
             if (s[i] >= hi) break
             if (s[i] > cur && s[i] - cur >= minLen) {
-                rs.add(cur)
-                re.add(minOf(s[i], hi))
+                result.add(cur, minOf(s[i], hi))
             }
             if (e[i] > cur) cur = e[i]
             if (cur >= hi) break
         }
         if (cur < hi && hi - cur >= minLen) {
-            rs.add(cur)
-            re.add(hi)
+            result.add(cur, hi)
         }
-        return Pair(rs.toLongArray(), re.toLongArray())
+        return result.finish()
     }
 
     fun clip(s: LongArray, e: LongArray, lo: Long, hi: Long): Pair<LongArray, LongArray> {
-        val rs = ArrayList<Long>()
-        val re = ArrayList<Long>()
+        val result = PairBuffer()
         for (i in s.indices) {
             val a = maxOf(s[i], lo)
             val b = minOf(e[i], hi)
             if (b > a) {
-                rs.add(a)
-                re.add(b)
+                result.add(a, b)
             }
         }
-        return Pair(rs.toLongArray(), re.toLongArray())
+        return result.finish()
     }
 }
 

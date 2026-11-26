@@ -66,6 +66,23 @@ public final class Resampler {
             return len;
         }
         final int k = taps;
+        // A fully silent input block with a fully drained filter history
+        // produces only zero samples. Keep phase and ring position advancing
+        // exactly as in the regular loop, without evaluating the FIR taps.
+        // Checking the first sample rejects most active audio immediately.
+        if (len > 0 && in[off] == 0 && isSilent(in, off, len) && isHistorySilent()) {
+            // Each input subtracts up; each emitted sample adds down.
+            // Emit the minimum number needed to leave rel nonnegative.
+            long phase = (long) len * up - rel;
+            long count = phase > 0 ? (phase + down - 1) / down : 0;
+            if (count <= Integer.MAX_VALUE && outOff >= 0 && count <= out.length - outOff) {
+                int n = (int) count;
+                java.util.Arrays.fill(out, outOff, outOff + n, (short) 0);
+                write = (int) (((long) write + len) % k);
+                rel = (int) (count * down - phase);
+                return n;
+            }
+        }
         int o = outOff;
         for (int i = 0; i < len; i++) {
             float s = in[off + i];
@@ -86,6 +103,21 @@ public final class Resampler {
             rel -= up;
         }
         return o - outOff;
+    }
+
+    private static boolean isSilent(short[] in, int off, int len) {
+        for (int i = 1; i < len; i++) {
+            if (in[off + i] != 0) return false;
+        }
+        return true;
+    }
+
+    private boolean isHistorySilent() {
+        // Both halves of the mirrored ring contain the same samples.
+        for (int i = 0; i < taps; i++) {
+            if (ring[i] != 0f) return false;
+        }
+        return true;
     }
 
     public void reset() {

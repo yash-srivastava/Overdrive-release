@@ -8,11 +8,11 @@ import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.Formatter;
 import java.util.List;
 import java.util.Locale;
 import java.util.TimeZone;
@@ -32,18 +32,23 @@ public final class TripExporter {
                 .append("<gpx version=\"1.1\" creator=\"OverDrive\" xmlns=\"http://www.topografix.com/GPX/1/1\"")
                 .append(" xmlns:gpxtpx=\"http://www.garmin.com/xmlschemas/TrackPointExtension/v2\"")
                 .append(" xmlns:od=\"").append(OD_NS).append("\">\n");
+        // Formatters are export-local: no shared mutable state between requests.
+        Formatter numbers = new Formatter(sb, Locale.US);
+        SimpleDateFormat utc = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US);
+        utc.setTimeZone(TimeZone.getTimeZone("UTC"));
+        Date date = new Date(t.startTime);
         String name = title(t);
-        sb.append(" <metadata><name>").append(esc(name)).append("</name><time>").append(iso(t.startTime))
+        sb.append(" <metadata><name>").append(esc(name)).append("</name><time>").append(utc.format(date))
                 .append("</time><extensions>").append(odTrip(t)).append("</extensions></metadata>\n");
         sb.append(" <trk><name>").append(esc(name)).append("</name><trkseg>\n");
         forEachPoint(telemetry, (ts, lat, lon, alt, speedKmh) -> {
-            sb.append("  <trkpt lat=\"").append(coord(lat)).append("\" lon=\"").append(coord(lon)).append("\">");
-            if (!Double.isNaN(alt)) sb.append("<ele>").append(String.format(Locale.US, "%.1f", alt)).append("</ele>");
-            sb.append("<time>").append(iso(ts)).append("</time>");
+            numbers.format("  <trkpt lat=\"%.6f\" lon=\"%.6f\">", lat, lon);
+            if (!Double.isNaN(alt)) numbers.format("<ele>%.1f</ele>", alt);
+            date.setTime(ts);
+            sb.append("<time>").append(utc.format(date)).append("</time>");
             if (speedKmh >= 0) {
-                sb.append("<extensions><gpxtpx:TrackPointExtension><gpxtpx:speed>")
-                        .append(String.format(Locale.US, "%.2f", speedKmh / 3.6))
-                        .append("</gpxtpx:speed></gpxtpx:TrackPointExtension></extensions>");
+                numbers.format("<extensions><gpxtpx:TrackPointExtension><gpxtpx:speed>%.2f"
+                        + "</gpxtpx:speed></gpxtpx:TrackPointExtension></extensions>", speedKmh / 3.6);
             }
             sb.append("</trkpt>\n");
         });
@@ -52,17 +57,25 @@ public final class TripExporter {
     }
 
     public static String kml(TripRecord t, File telemetry) {
-        StringBuilder coords = new StringBuilder(32 * 1024);
-        forEachPoint(telemetry, (ts, lat, lon, alt, speed) -> coords.append(coord(lon)).append(',')
-                .append(coord(lat)).append(',').append(Double.isNaN(alt) ? "0" : String.format(Locale.US, "%.1f", alt))
-                .append(' '));
-        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                + "<kml xmlns=\"http://www.opengis.net/kml/2.2\"><Document><name>" + esc(title(t)) + "</name>\n"
-                + "<Style id=\"route\"><LineStyle><color>ff2f80ed</color><width>4</width></LineStyle></Style>\n"
-                + "<Placemark><name>" + esc(title(t)) + "</name><description>"
-                + esc(String.format(Locale.US, "%.1f km · %d min", t.distanceKm, t.durationSeconds / 60))
-                + "</description><styleUrl>#route</styleUrl><LineString><tessellate>1</tessellate><coordinates>"
-                + coords.toString().trim() + "</coordinates></LineString></Placemark>\n</Document></kml>\n";
+        StringBuilder sb = new StringBuilder(32 * 1024);
+        String name = esc(title(t));
+        sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
+                .append("<kml xmlns=\"http://www.opengis.net/kml/2.2\"><Document><name>").append(name).append("</name>\n")
+                .append("<Style id=\"route\"><LineStyle><color>ff2f80ed</color><width>4</width></LineStyle></Style>\n")
+                .append("<Placemark><name>").append(name).append("</name><description>")
+                .append(esc(String.format(Locale.US, "%.1f km · %d min", t.distanceKm, t.durationSeconds / 60)))
+                .append("</description><styleUrl>#route</styleUrl><LineString><tessellate>1</tessellate><coordinates>");
+        int start = sb.length();
+        Formatter numbers = new Formatter(sb, Locale.US);
+        // Append directly to the final document, not a second full-size coordinate buffer.
+        forEachPoint(telemetry, (ts, lat, lon, alt, speed) -> {
+            numbers.format("%.6f,%.6f,", lon, lat);
+            if (Double.isNaN(alt)) sb.append('0');
+            else numbers.format("%.1f", alt);
+            sb.append(' ');
+        });
+        if (sb.length() > start) sb.setLength(sb.length() - 1); // trailing coordinate separator
+        return sb.append("</coordinates></LineString></Placemark>\n</Document></kml>\n").toString();
     }
 
     public static String csvHeader() {
@@ -128,12 +141,6 @@ public final class TripExporter {
         } catch (Exception ignored) {
             // A truncated .gz still yields the points read so far.
         }
-    }
-
-    private static String iso(long ts) {
-        SimpleDateFormat f = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US);
-        f.setTimeZone(TimeZone.getTimeZone("UTC"));
-        return f.format(new Date(ts));
     }
 
     private static String fmt(String p, long ts) {

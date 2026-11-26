@@ -1965,7 +1965,7 @@
     </div>
     
     <script src="../shared/video-player.js?v=2"></script>
-    <script src="../shared/lens-dewarp.js?v=4"></script>
+    <script src="../shared/lens-dewarp.js?v=5"></script>
     
     <!-- Calendar Popup -->
     <div class="calendar-popup" id="calendarPopup">
@@ -2000,7 +2000,7 @@
     <script src="../shared/core.js?v=31"></script>
     <script src="../shared/update-flow.js?v=6"></script>
     <script src="../shared/safekeep-badges.js?v=4"></script>
-    <script src="../shared/events.js?v=revamp27"></script>
+    <script src="../shared/events.js?v=revamp28"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
@@ -2012,7 +2012,7 @@
         // ?file= first; if they fail to load, the List shows and works as before.
         (function () {
             var html = document.documentElement, root = document.getElementById('tlvRoot');
-            var SRC = ['../shared/timeline-strip.js?v=3', '../shared/timeline-player.js?v=4', '../shared/timeline-view.js?v=4'];
+            var SRC = ['../shared/timeline-strip.js?v=4', '../shared/timeline-player.js?v=4', '../shared/timeline-view.js?v=4'];
             var loaded = {}, wait = null, chosen = null, first = html.classList.contains('tlv-on'), listReady = !first, waiters = [];
             function view() { return window.BYD && BYD.tlview && BYD.tlview.setMode ? BYD.tlview : null; }
             function paint(mode) {
