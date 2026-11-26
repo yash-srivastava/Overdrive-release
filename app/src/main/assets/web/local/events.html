@@ -634,6 +634,29 @@
         }
         .recordings-count:not(:empty)::before { content: "\00B7"; margin: 0 6px; }
 
+        .events-playlist-bar, .events-playlist-options {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px 12px;
+        }
+        .events-playlist-bar { margin: 4px 0 12px; }
+        .events-playlist-settings { color: var(--on-surface); font-size: var(--fs-label); }
+        .events-playlist-settings summary { cursor: pointer; padding: 8px 0; }
+        .events-playlist-options { padding: 8px; background: var(--tile); border-radius: 8px; }
+        .events-playlist-options label { display: inline-flex; align-items: center; gap: 4px; }
+        .events-playlist-options select { color: var(--on-surface); background: var(--tile); font: inherit; }
+        .video-transport .events-playlist-options {
+            position: absolute;
+            bottom: 100%;
+            inset-inline-start: 8px;
+            z-index: 16;
+            max-width: calc(100% - 16px);
+            max-height: 50vh;
+            overflow: auto;
+            border: 1px solid var(--outline-variant);
+        }
+
         /* The page scrolls (no inner scroller), so the day headers can stick under the app bar. */
         .recordings-list {
             display: grid;
@@ -1923,6 +1946,25 @@
                         <span class="recordings-title" id="recordingsTitle" data-i18n="events.all_recordings">All Recordings</span>
                         <span class="recordings-count" id="recordingsCount" data-i18n="events.videos_count_initial">0 videos</span>
                     </div>
+                    <div class="events-playlist-bar" id="eventsPlaylistBar">
+                        <button type="button" class="pagination-btn" id="eventsPlaylistResume" data-i18n="events.playlist_resume">Resume unwatched</button>
+                        <details class="events-playlist-settings" id="eventsPlaylistSettings">
+                            <summary data-i18n="events.playlist_settings">Playlist settings</summary>
+                            <div class="events-playlist-options">
+                                <label><span data-i18n="events.playlist_after_clip">After each clip</span>
+                                    <select data-playlist-option="direction">
+                                        <option value="-1" data-i18n="events.playlist_newer">Previous (newer)</option>
+                                        <option value="1" data-i18n="events.playlist_older">Next (older)</option>
+                                        <option value="0" data-i18n="events.playlist_stop">Stop</option>
+                                    </select>
+                                </label>
+                                <label><input type="checkbox" data-playlist-option="skipDvr"><span data-i18n="events.playlist_skip_dvr">Skip dvr_p*</span></label>
+                                <label><input type="checkbox" data-playlist-option="skipEvent"><span data-i18n="events.playlist_skip_event">Skip event_*</span></label>
+                                <label><input type="checkbox" data-playlist-option="skipCam"><span data-i18n="events.playlist_skip_cam">Skip cam_*</span></label>
+                                <label><input type="checkbox" data-playlist-option="unwatchedOnly"><span data-i18n="events.playlist_unwatched_only">Skip watched clips</span></label>
+                            </div>
+                        </details>
+                    </div>
                     <div class="recordings-list" id="recordingsList">
                         <div class="loading">
                             <div class="spinner"></div>
@@ -2000,7 +2042,7 @@
     <script src="../shared/core.js?v=31"></script>
     <script src="../shared/update-flow.js?v=6"></script>
     <script src="../shared/safekeep-badges.js?v=4"></script>
-    <script src="../shared/events.js?v=revamp28"></script>
+    <script src="../shared/events.js?v=revamp29"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');

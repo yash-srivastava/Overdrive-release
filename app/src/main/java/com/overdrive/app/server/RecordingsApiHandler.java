@@ -179,7 +179,9 @@ public class RecordingsApiHandler {
             Map<String, String> params = parseQuery(query);
             String fromId = params.get("fromId");
             String step = params.get("step");
-            if (!validRecordingId(fromId) || !("-1".equals(step) || "1".equals(step))) {
+            boolean resume = "1".equals(params.get("resume"));
+            if ((resume ? fromId != null : !validRecordingId(fromId))
+                    || !("-1".equals(step) || "1".equals(step))) {
                 HttpResponse.sendError(out, 400,
                         Messages.get("errors.invalid_request_with_detail", "fromId / step"));
                 return true;
@@ -210,8 +212,13 @@ public class RecordingsApiHandler {
                     params.get("storage"));
             applyParkingExtras(filter, params.get("parkingSessionId"),
                     params.get("camera"), params.get("minConfidence"));
-            RecordingsIndex.AdjacentResult found = idx.queryAdjacentRecording(filter, fromId,
-                    Integer.parseInt(step));
+            Set<String> skippedPrefixes = new HashSet<>();
+            for (String prefix : new String[] {"dvr_p", "event_", "cam_"}) {
+                if ("1".equals(params.get("skip_" + prefix))) skippedPrefixes.add(prefix);
+            }
+            RecordingsIndex.AdjacentResult found = idx.queryPlaylistRecording(filter, fromId,
+                    Integer.parseInt(step), resume, "1".equals(params.get("unwatchedOnly")),
+                    skippedPrefixes);
             JSONObject response = new JSONObject();
             response.put("success", found.status == RecordingsIndex.AdjacentResult.Status.FOUND
                     || found.status == RecordingsIndex.AdjacentResult.Status.END);

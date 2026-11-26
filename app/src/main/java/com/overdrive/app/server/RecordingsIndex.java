@@ -1978,20 +1978,30 @@ public final class RecordingsIndex {
      */
     public synchronized AdjacentResult queryAdjacentRecording(Filter f, String recordingId,
                                                                int step) {
-        if (recordingId == null || !recordingId.matches("[0-9a-f]{32}")
-                || (step != -1 && step != 1)) {
+        return queryPlaylistRecording(f, recordingId, step, false, false,
+                java.util.Collections.emptySet());
+    }
+
+    /** Seek a playlist candidate without changing the list's filters or page numbering. */
+    public synchronized AdjacentResult queryPlaylistRecording(Filter f, String recordingId,
+            int step, boolean resume, boolean unwatchedOnly, Set<String> skippedPrefixes) {
+        if ((!resume && (recordingId == null || !recordingId.matches("[0-9a-f]{32}")))
+                || (resume && recordingId != null) || (step != -1 && step != 1)) {
             return AdjacentResult.of(AdjacentResult.Status.MISSING_ANCHOR);
         }
         StringBuilder where = new StringBuilder();
         List<Object> args = new ArrayList<>();
         buildWhere(f, where, args);
+        appendPlaylistWhere(where, args, resume || unwatchedOnly, skippedPrefixes);
         final boolean newer = step < 0;
-        appendAnd(where, newer
-                ? "ts_ms >= ? AND (ts_ms > ? OR (ts_ms = ? AND root_rank < ?)"
-                        + " OR (ts_ms = ? AND root_rank = ? AND recording_id < ?))"
-                : "ts_ms <= ? AND (ts_ms < ? OR (ts_ms = ? AND root_rank > ?)"
-                        + " OR (ts_ms = ? AND root_rank = ? AND recording_id > ?))");
-        String from = sortIndexAvailable
+        if (!resume) {
+            appendAnd(where, newer
+                    ? "ts_ms >= ? AND (ts_ms > ? OR (ts_ms = ? AND root_rank < ?)"
+                            + " OR (ts_ms = ? AND root_rank = ? AND recording_id < ?))"
+                    : "ts_ms <= ? AND (ts_ms < ? OR (ts_ms = ? AND root_rank > ?)"
+                            + " OR (ts_ms = ? AND root_rank = ? AND recording_id > ?))");
+        }
+        String from = (resume ? useSortIndex(f) : sortIndexAvailable)
                 ? " FROM recordings USE INDEX ("
                         + (newer ? RecordingsIndexSchema.NEWER_INDEX
                                  : RecordingsIndexSchema.SORT_INDEX) + ")"
@@ -2007,31 +2017,35 @@ public final class RecordingsIndex {
 
         return withRetry("queryAdjacentRecording",
                 AdjacentResult.of(AdjacentResult.Status.ERROR), () -> {
-            long timestamp;
-            int rank;
-            try (PreparedStatement anchor = connection.prepareStatement(
-                    "SELECT ts_ms, root_rank FROM recordings"
-                            + " WHERE recording_id = ? AND is_available = TRUE")) {
-                anchor.setString(1, recordingId);
-                try (ResultSet rs = anchor.executeQuery()) {
-                    if (!rs.next()) {
-                        return AdjacentResult.of(AdjacentResult.Status.MISSING_ANCHOR);
+            long timestamp = 0;
+            int rank = 0;
+            if (!resume) {
+                try (PreparedStatement anchor = connection.prepareStatement(
+                        "SELECT ts_ms, root_rank FROM recordings"
+                                + " WHERE recording_id = ? AND is_available = TRUE")) {
+                    anchor.setString(1, recordingId);
+                    try (ResultSet rs = anchor.executeQuery()) {
+                        if (!rs.next()) {
+                            return AdjacentResult.of(AdjacentResult.Status.MISSING_ANCHOR);
+                        }
+                        timestamp = rs.getLong(1);
+                        rank = rs.getInt(2);
                     }
-                    timestamp = rs.getLong(1);
-                    rank = rs.getInt(2);
                 }
             }
             try (PreparedStatement ps = connection.prepareStatement(sql)) {
                 int p = 1;
                 for (Object arg : args) bind(ps, p++, arg);
-                // A single indexed timestamp range plus lexicographic ties.
-                ps.setLong(p++, timestamp);
-                ps.setLong(p++, timestamp);
-                ps.setLong(p++, timestamp);
-                ps.setInt(p++, rank);
-                ps.setLong(p++, timestamp);
-                ps.setInt(p++, rank);
-                ps.setString(p, recordingId);
+                if (!resume) {
+                    // A single indexed timestamp range plus lexicographic ties.
+                    ps.setLong(p++, timestamp);
+                    ps.setLong(p++, timestamp);
+                    ps.setLong(p++, timestamp);
+                    ps.setInt(p++, rank);
+                    ps.setLong(p++, timestamp);
+                    ps.setInt(p++, rank);
+                    ps.setString(p, recordingId);
+                }
                 try (ResultSet rs = ps.executeQuery()) {
                     return rs.next()
                             ? new AdjacentResult(AdjacentResult.Status.FOUND, rowToJson(rs))
@@ -2039,6 +2053,23 @@ public final class RecordingsIndex {
                 }
             }
         });
+    }
+
+    // Prefixes are literal (underscore is not a LIKE wildcard). Watched state
+    // must match the same file fingerprint used by the list and watched POST.
+    private static void appendPlaylistWhere(StringBuilder where, List<Object> args,
+            boolean unwatchedOnly, Set<String> skippedPrefixes) {
+        for (String prefix : skippedPrefixes) {
+            appendAnd(where, "SUBSTRING(filename, 1, ?) <> ?");
+            args.add(prefix.length());
+            args.add(prefix);
+        }
+        if (unwatchedOnly) {
+            appendAnd(where, "NOT EXISTS (SELECT 1 FROM recordings_watched w"
+                    + " WHERE w.recording_id = recordings.recording_id"
+                    + " AND w.size_bytes = recordings.size_bytes"
+                    + " AND w.mp4_mtime = recordings.mp4_mtime)");
+        }
     }
 
     /**
