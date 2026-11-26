@@ -8066,20 +8066,6 @@ public class SurveillanceEngineGpu {
     }
     
     /**
-     * Gets class name from COCO class ID.
-     */
-    private String getClassName(int classId) {
-        switch (classId) {
-            case 0: return "person";
-            case 2: return "car";
-            case 3: return "motorcycle";
-            case 5: return "bus";
-            case 7: return "truck";
-            default: return "object_" + classId;
-        }
-    }
-    
-    /**
      * Sets object detection filters.
      * 
      * Also adjusts motion detection sensitivity based on minSize:

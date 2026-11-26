@@ -12,10 +12,8 @@ import com.overdrive.app.automation.value.IntValue;
 import com.overdrive.app.automation.value.Label;
 import com.overdrive.app.server.Messages;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 

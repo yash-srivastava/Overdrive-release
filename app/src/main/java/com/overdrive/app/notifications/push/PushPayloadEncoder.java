@@ -5,7 +5,6 @@ import java.nio.ByteBuffer;
 import java.security.KeyFactory;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
-import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.security.interfaces.ECPrivateKey;
 import java.security.interfaces.ECPublicKey;
@@ -185,12 +184,5 @@ public final class PushPayloadEncoder {
             off += p.length;
         }
         return out;
-    }
-
-    // SHA-256 included for callers that need it — keeps the crypto primitives
-    // colocated even if currently unused.
-    @SuppressWarnings("unused")
-    private static byte[] sha256(byte[] in) throws Exception {
-        return MessageDigest.getInstance("SHA-256").digest(in);
     }
 }

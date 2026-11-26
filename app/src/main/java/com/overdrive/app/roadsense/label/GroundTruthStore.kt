@@ -4,7 +4,6 @@ import com.overdrive.app.logging.DaemonLogger
 import com.overdrive.app.roadsense.detect.DetectionCandidate
 import com.overdrive.app.roadsense.detect.HazardType
 import com.overdrive.app.roadsense.detect.Severity
-import java.io.File
 import java.sql.Connection
 import java.sql.DriverManager
 import java.util.UUID

@@ -18,7 +18,6 @@ import com.google.android.material.button.MaterialButton
 import com.google.android.material.switchmaterial.SwitchMaterial
 import com.google.android.material.textfield.TextInputEditText
 import com.overdrive.app.R
-import com.overdrive.app.config.UnifiedConfigManager
 import com.overdrive.app.network.CellularRelay
 import com.overdrive.app.network.HotspotManager
 import org.json.JSONObject

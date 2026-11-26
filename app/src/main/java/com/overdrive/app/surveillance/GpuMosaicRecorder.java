@@ -13,7 +13,6 @@ import com.overdrive.app.camera.EGLCore;
 import com.overdrive.app.camera.GlUtil;
 import com.overdrive.app.telemetry.OverlayBitmapRenderer;
 import com.overdrive.app.telemetry.TelemetryDataCollector;
-import com.overdrive.app.telemetry.TelemetrySnapshot;
 
 import java.nio.FloatBuffer;
 import java.util.Locale;

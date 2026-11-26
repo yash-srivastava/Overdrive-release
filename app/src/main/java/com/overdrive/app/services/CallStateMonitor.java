@@ -2,7 +2,6 @@ package com.overdrive.app.services;
 
 import android.content.Context;
 import android.content.pm.PackageManager;
-import android.os.Build;
 import android.telephony.PhoneStateListener;
 import android.telephony.TelephonyManager;
 import android.util.Log;

@@ -17,7 +17,6 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.overdrive.app.R
 import com.overdrive.app.ui.model.DaemonStatus
 import com.overdrive.app.ui.vehicle.VehicleArt
-import com.overdrive.app.util.ScratchRoot
 import org.json.JSONObject
 import java.util.Locale
 import java.util.concurrent.ExecutorService

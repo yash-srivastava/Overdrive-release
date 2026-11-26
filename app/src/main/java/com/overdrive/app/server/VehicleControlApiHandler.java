@@ -3738,11 +3738,6 @@ public class VehicleControlApiHandler {
         }
     }
 
-    /** Minimal shell single-quote wrap for a component/package token. */
-    private static String shellQuote(String s) {
-        return "'" + s.replace("'", "'\\''") + "'";
-    }
-
     // Audio library dir (mirror of AudioApiHandler.AUDIO_DIR) — where uploaded
     // sounds picked by the "Play Audio" action live. A "name" payload resolves here.
     private static final String AUDIO_LIBRARY_DIR = com.overdrive.app.util.ScratchRoot.path(".overdrive/audio");

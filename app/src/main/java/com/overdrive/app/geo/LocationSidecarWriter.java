@@ -8,7 +8,6 @@ import com.overdrive.app.surveillance.SrtWriter;
 import org.json.JSONObject;
 
 import java.io.File;
-import java.io.FileWriter;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
