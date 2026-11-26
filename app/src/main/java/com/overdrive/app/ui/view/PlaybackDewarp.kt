@@ -148,7 +148,7 @@ class PlaybackDewarp(
         eglSurface = surface
         if (!EGL14.eglMakeCurrent(dpy, surface, surface, ctx)) throw IllegalStateException("eglMakeCurrent failed")
 
-        program = buildProgram()
+        program = PlaybackGl.buildProgram(PlaybackGl.dewarpShader, "dewarp shader failed", "dewarp link failed")
         aPosition = GLES20.glGetAttribLocation(program, "aPosition")
         aTexCoord = GLES20.glGetAttribLocation(program, "aTexCoord")
         uTex = GLES20.glGetUniformLocation(program, "uTex")
@@ -165,49 +165,13 @@ class PlaybackDewarp(
         GLES20.glGenTextures(1, tex, 0)
         oesTex = tex[0]
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTex)
-        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
-        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
-        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
-        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        PlaybackGl.setLinearClamp(GLES11Ext.GL_TEXTURE_EXTERNAL_OES)
         val st = SurfaceTexture(oesTex)
         st.setDefaultBufferSize(spec.frameWidth, spec.frameHeight)
         st.setOnFrameAvailableListener({ drawFrame() }, handler)
         input = st
         inputSurface = Surface(st)
         GLES20.glClearColor(0f, 0f, 0f, 1f)
-    }
-
-    private fun buildProgram(): Int {
-        val vs = compileShader(GLES20.GL_VERTEX_SHADER, VERTEX_SHADER)
-        val fs = compileShader(GLES20.GL_FRAGMENT_SHADER, FRAGMENT_SHADER)
-        val prog = GLES20.glCreateProgram()
-        GLES20.glAttachShader(prog, vs)
-        GLES20.glAttachShader(prog, fs)
-        GLES20.glLinkProgram(prog)
-        GLES20.glDeleteShader(vs)
-        GLES20.glDeleteShader(fs)
-        val linked = IntArray(1)
-        GLES20.glGetProgramiv(prog, GLES20.GL_LINK_STATUS, linked, 0)
-        if (linked[0] == 0) {
-            val log = GLES20.glGetProgramInfoLog(prog)
-            GLES20.glDeleteProgram(prog)
-            throw IllegalStateException("dewarp link failed: $log")
-        }
-        return prog
-    }
-
-    private fun compileShader(type: Int, source: String): Int {
-        val shader = GLES20.glCreateShader(type)
-        GLES20.glShaderSource(shader, source)
-        GLES20.glCompileShader(shader)
-        val ok = IntArray(1)
-        GLES20.glGetShaderiv(shader, GLES20.GL_COMPILE_STATUS, ok, 0)
-        if (ok[0] == 0) {
-            val log = GLES20.glGetShaderInfoLog(shader)
-            GLES20.glDeleteShader(shader)
-            throw IllegalStateException("dewarp shader failed: $log")
-        }
-        return shader
     }
 
     private fun drawFrame() {
@@ -298,53 +262,6 @@ class PlaybackDewarp(
             -1f, 1f, 0f, 1f,
             1f, 1f, 1f, 1f,
         )
-
-        private const val VERTEX_SHADER = """
-attribute vec4 aPosition;
-attribute vec2 aTexCoord;
-varying vec2 vTex;
-void main() {
-    gl_Position = aPosition;
-    vTex = aTexCoord;
-}
-"""
-
-        // The dewarp is point-symmetric about each tile centre, so working in
-        // texture space (y up) matches the recorder's image-space result.
-        private const val FRAGMENT_SHADER = """
-#extension GL_OES_EGL_image_external : require
-precision highp float;
-uniform samplerExternalOES uTex;
-uniform mat4 uStMatrix;
-uniform vec2 uK;
-uniform float uAspect;
-uniform vec2 uHalfTexel;
-uniform float uStrip;
-varying vec2 vTex;
-vec2 rectifyTile(vec2 t) {
-    vec2 nxy = t * 2.0 - 1.0;
-    vec2 nxyAspect = vec2(nxy.x, nxy.y * uAspect);
-    float r2 = dot(nxyAspect, nxyAspect);
-    float invDenom = 1.0 / (1.0 + uK.x * r2 + uK.y * r2 * r2);
-    float aspect2 = uAspect * uAspect;
-    float zoom = 1.0 + uK.x * aspect2 + uK.y * aspect2 * aspect2;
-    vec2 srcAspect = nxyAspect * invDenom * zoom;
-    vec2 camUV = vec2(srcAspect.x, srcAspect.y / uAspect) * 0.5 + 0.5;
-    return clamp(camUV, vec2(0.0), vec2(1.0));
-}
-void main() {
-    // The telemetry strip (top of the frame) is shown as recorded, never sampled for the picture.
-    if (vTex.y > 1.0 - uStrip) {
-        gl_FragColor = texture2D(uTex, (uStMatrix * vec4(vTex, 0.0, 1.0)).xy);
-        return;
-    }
-    vec2 tile = step(vec2(0.5), vTex) * 0.5;
-    vec2 cam = rectifyTile((vTex - tile) * 2.0);
-    vec2 src = clamp(tile + cam * 0.5, tile + uHalfTexel, tile + 0.5 - uHalfTexel);
-    src.y = min(src.y, 1.0 - uStrip - uHalfTexel.y);
-    gl_FragColor = texture2D(uTex, (uStMatrix * vec4(src, 0.0, 1.0)).xy);
-}
-"""
 
         /**
          * Spec for a clip's sidecar, or null when it isn't a raw clip or the
