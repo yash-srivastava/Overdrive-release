@@ -563,26 +563,51 @@ public final class TimelineJournal {
         List<Long> trips = tripStarts != null ? new ArrayList<>(tripStarts) : new ArrayList<Long>();
         Collections.sort(trips);
         List<Interval> powerStarts = new ArrayList<>();
+        // Each kind has at most one open interval. Its starts appear in
+        // chronological order in out (closed intervals, then the open tail),
+        // even though intervals of different kinds may be interleaved.
+        int tripCursor = 0;
         for (int i = 0; i < out.size(); i++) {
             Interval iv = out.get(i);
             if (!KIND_POWER.equals(iv.kind)) continue;
-            for (Long t : trips) {
-                if (t == null || t <= iv.start) continue;
+            while (tripCursor < trips.size()) {
+                Long t = trips.get(tripCursor);
+                if (t != null && t > iv.start) break;
+                tripCursor++;
+            }
+            if (tripCursor < trips.size()) {
+                long t = trips.get(tripCursor);
                 if (iv.end == null || t < iv.end) {
                     iv = new Interval(iv.start, t, iv.kind, iv.state, iv.reason);
                     out.set(i, iv);
                 }
-                break;
             }
             powerStarts.add(iv);
         }
+        int powerCursor = 0;
         for (int i = 0; i < out.size(); i++) {
             Interval iv = out.get(i);
             if (!KIND_SURVEILLANCE.equals(iv.kind) || !"user_off".equals(iv.reason)) continue;
-            for (Interval p : powerStarts) {
-                if (Math.abs(p.start - iv.start) <= RELABEL_WINDOW_MS) {
+            // For real (nonnegative) wall timestamps, subtraction cannot
+            // overflow. Preserve the original Math.abs behavior on unusual
+            // negative timestamps, including signed-long overflow cases.
+            if (iv.start < 0 || (!powerStarts.isEmpty() && powerStarts.get(0).start < 0)) {
+                for (Interval p : powerStarts) {
+                    if (Math.abs(p.start - iv.start) <= RELABEL_WINDOW_MS) {
+                        out.set(i, new Interval(iv.start, iv.end, iv.kind, iv.state, p.reason));
+                        break;
+                    }
+                }
+                continue;
+            }
+            while (powerCursor < powerStarts.size()
+                    && powerStarts.get(powerCursor).start < iv.start - RELABEL_WINDOW_MS) {
+                powerCursor++;
+            }
+            if (powerCursor < powerStarts.size()) {
+                Interval p = powerStarts.get(powerCursor);
+                if (p.start - iv.start <= RELABEL_WINDOW_MS) {
                     out.set(i, new Interval(iv.start, iv.end, iv.kind, iv.state, p.reason));
-                    break;
                 }
             }
         }
