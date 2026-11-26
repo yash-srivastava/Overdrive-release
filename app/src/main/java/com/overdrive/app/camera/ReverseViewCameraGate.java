@@ -33,10 +33,14 @@ public final class ReverseViewCameraGate {
         return holdStartMs <= 0L || nowMs - holdStartMs < MAX_HOLD_MS;
     }
 
-    /** True on a BYD100F unit on the AVMCamera path. */
+    /**
+     * True on a BYD100F unit on an AVMCamera path: the default mode, or SurfaceTexture mode,
+     * which opens the same AVMCamera service as the car's own view.
+     */
     public static boolean appliesHere() {
         try {
-            return DiLink100Platform.isAvmPathActive();
+            return DiLink100Platform.isAvmPathActive()
+                    || AvmSurfaceTexturePlatform.usesByd100fTileOrder();
         } catch (Throwable t) {
             return false;
         }
