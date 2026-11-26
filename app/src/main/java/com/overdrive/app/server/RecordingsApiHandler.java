@@ -638,10 +638,10 @@ public class RecordingsApiHandler {
             else retriever.setDataSource(fis.getFD());
 
             // Get frame at 1 second (1000000 microseconds)
-            frame = extractThumbnailFrame(retriever, 1000000);
+            frame = retriever.getFrameAtTime(1000000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
             if (frame == null) {
                 // Try frame at 0 if 1 second fails
-                frame = extractThumbnailFrame(retriever, 0);
+                frame = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
             }
 
             if (frame == null) {
@@ -650,7 +650,7 @@ public class RecordingsApiHandler {
 
             // Scale down to thumbnail size (320x180 for 16:9 aspect).
             scaled = Bitmap.createScaledBitmap(frame, 320, 180, true);
-            // Release the full-size fallback (or intermediate aspect-fit frame) early.
+            // Release the full-size frame early.
             if (scaled != frame) frame.recycle();
             // Raw (player-dewarped) clips get the same lens correction as playback.
             if (scaled != null) {
@@ -681,19 +681,6 @@ public class RecordingsApiHandler {
                 retriever.release();
             } catch (Exception e) {}
         }
-    }
-
-    private static Bitmap extractThumbnailFrame(MediaMetadataRetriever retriever, long timeUs) {
-        // API 27+, available on the app's minSdk 28. Prefer the smaller native result;
-        // vendor retrievers may reject scaled extraction even for a playable clip.
-        try {
-            Bitmap small = retriever.getScaledFrameAtTime(timeUs,
-                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 320, 180);
-            if (small != null) return small;
-        } catch (RuntimeException ignored) {
-            // Preserve the previous full-frame route on incompatible implementations.
-        }
-        return retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
     }
 
     /**

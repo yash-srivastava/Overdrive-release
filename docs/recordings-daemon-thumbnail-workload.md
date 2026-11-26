@@ -2,8 +2,7 @@
 
 Both `/thumb/<filename>` and `/thumb/id/<recordingId>` prefer existing JPEGs.
 For cache misses, the daemon previously retained an unlimited number of unique
-jobs in a single-thread executor and extracted full-resolution bitmaps before
-reducing them to 320x180. Bursts of requests could leave the decoder processing
+jobs in a single-thread executor. Bursts of requests could leave the decoder processing
 old requests long after the viewer had left the page.
 
 The shared admission gate now permits at most 17 outstanding distinct keys,
@@ -14,19 +13,9 @@ after 30 seconds without work. Requests that do not get a slot receive the same
 Each admitted job rechecks the cache before decoding and releases its key and
 slot even if generation fails. The executor also has a physically bounded queue.
 
-The decoder first asks Android for a scaled frame within 320x180 at the existing
-sync-frame timestamp. The full-frame path is retained if scaled extraction
-returns null or throws a runtime exception. The final thumbnail remains 320x180,
-with existing JPEG quality and lens correction. Non-16:9 input may be scaled in
-two steps and interpolation may differ from the old path. Sidecar and cached
-JPEGs, media data-source selection, and recording settings are unchanged.
-
-For a 1920x1080 ARGB_8888 frame, the nominal returned pixel allocation falls
-from 8,294,400 bytes to at most 230,400 bytes on the scaled path (36x smaller).
-At 3840x2160 it falls from 33,177,600 to at most 230,400 bytes (144x smaller).
-These figures exclude stride, decoder-native buffers, lens correction and JPEG
-encoding; the native decoder may still decode at full resolution internally.
-The fallback does not get this reduction. No device measurements are available.
+Frames are still extracted with `getFrameAtTime` and scaled to 320x180. The full
+frame is recycled as soon as it has been scaled. JPEG quality, lens correction,
+sidecar and cached JPEGs and media data-source selection are unchanged.
 
 ## Verification plan (parked vehicle)
 
@@ -45,5 +34,4 @@ The fallback does not get this reduction. No device measurements are available.
 
 Under sustained overload, finite client retry budgets can expire before admission;
 reopening the page may be required. This is an intentional initial trade-off to
-bound background work, not a guarantee of latency or fairness. No build, automated
-test execution or physical device benchmark was performed for this change.
+bound background work, not a guarantee of latency or fairness.
