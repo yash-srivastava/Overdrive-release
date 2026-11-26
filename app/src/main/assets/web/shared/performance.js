@@ -57,6 +57,12 @@ BYD.performance = {
     _dataUsageRequestGeneration: 0,
     dataUsageData: { days: [], enabled: false, available: true },
     
+    // Keep only the latest pointer position until the next display frame.
+    _chartHoverFrame: null,
+    _chartHoverInput: null,
+    _chartHoverHideTimer: null,
+    _chartHoverHideType: null,
+
     // Interactive tooltip state
     tooltip: {
         visible: false,
@@ -184,6 +190,7 @@ BYD.performance = {
 
         // Handle page unload (close tab, navigate away)
         window.addEventListener('beforeunload', () => {
+            this.resetChartHover();
             this.stopPolling();
         });
 
@@ -192,6 +199,7 @@ BYD.performance = {
         // observe the new layout.
         document.addEventListener('ot-tabs:active-changed', (event) => {
             const id = event && event.detail ? event.detail.id : null;
+            this.resetChartHover();
             if (id && id !== 'battery') this._sohFixPending = false;
             this.syncViewLifecycle(id);
             requestAnimationFrame(() => this.resizeCharts());
@@ -200,11 +208,13 @@ BYD.performance = {
         // Handle visibility change (tab switch, minimize)
         document.addEventListener('visibilitychange', () => {
             console.log('[Performance] Visibility:', document.hidden ? 'hidden' : 'visible');
+            if (document.hidden) this.resetChartHover();
             this.syncViewLifecycle();
         });
 
         // Handle page hide (mobile browsers)
         window.addEventListener('pagehide', () => {
+            this.resetChartHover();
             this.stopPolling();
         });
         window.addEventListener('pageshow', () => {
@@ -455,58 +465,82 @@ BYD.performance = {
      * SOTA: Setup mouse/touch interaction for crosshair tooltips
      */
     setupChartInteraction(canvas, chartType) {
-        const self = this;
-        
-        // Mouse move handler
-        canvas.addEventListener('mousemove', (e) => {
-            const rect = canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-            self.handleChartHover(chartType, x, y, rect.width, rect.height);
-        });
-        
-        // Mouse leave handler
-        canvas.addEventListener('mouseleave', () => {
-            self.tooltip.visible = false;
-            self.tooltip.chartId = null;
-            self.renderChartByType(chartType);
-        });
-        
-        // Touch support - need touchstart to initiate tracking
-        canvas.addEventListener('touchstart', (e) => {
+        const queue = (clientX, clientY) => this.queueChartHover(canvas, chartType, clientX, clientY);
+        const hide = () => this.hideChartHover(chartType);
+        canvas.addEventListener('mousemove', e => queue(e.clientX, e.clientY));
+        canvas.addEventListener('mouseleave', hide);
+
+        // Prevent scrolling while tracking a touch; defer only the rendering.
+        const touch = e => {
             e.preventDefault();
-            const rect = canvas.getBoundingClientRect();
-            const touch = e.touches[0];
-            const x = touch.clientX - rect.left;
-            const y = touch.clientY - rect.top;
-            self.handleChartHover(chartType, x, y, rect.width, rect.height);
-        }, { passive: false });
-        
-        canvas.addEventListener('touchmove', (e) => {
-            e.preventDefault();
-            const rect = canvas.getBoundingClientRect();
-            const touch = e.touches[0];
-            const x = touch.clientX - rect.left;
-            const y = touch.clientY - rect.top;
-            self.handleChartHover(chartType, x, y, rect.width, rect.height);
-        }, { passive: false });
-        
+            const point = e.touches[0];
+            if (point) queue(point.clientX, point.clientY);
+        };
+        canvas.addEventListener('touchstart', touch, { passive: false });
+        canvas.addEventListener('touchmove', touch, { passive: false });
         canvas.addEventListener('touchend', () => {
-            // Keep tooltip visible for a moment on touch end, then hide
-            setTimeout(() => {
-                self.tooltip.visible = false;
-                self.tooltip.chartId = null;
-                self.renderChartByType(chartType);
-            }, 1500); // Keep visible for 1.5s after touch ends
+            this.clearChartHoverHideTimer();
+            this._chartHoverHideType = chartType;
+            this._chartHoverHideTimer = setTimeout(() => {
+                this._chartHoverHideTimer = null;
+                this._chartHoverHideType = null;
+                hide();
+            }, 1500);
         });
-        
-        canvas.addEventListener('touchcancel', () => {
-            self.tooltip.visible = false;
-            self.tooltip.chartId = null;
-            self.renderChartByType(chartType);
+        canvas.addEventListener('touchcancel', hide);
+    },
+
+    queueChartHover(canvas, chartType, clientX, clientY) {
+        this.clearChartHoverHideTimer();
+        if (document.hidden) return;
+        const input = this._chartHoverInput || (this._chartHoverInput = {});
+        input.canvas = canvas;
+        input.chartType = chartType;
+        input.clientX = clientX;
+        input.clientY = clientY;
+        if (this._chartHoverFrame !== null) return;
+        this._chartHoverFrame = requestAnimationFrame(() => {
+            this._chartHoverFrame = null;
+            const latest = this._chartHoverInput;
+            this._chartHoverInput = null;
+            if (!latest || document.hidden || latest.canvas.isConnected === false) return;
+            const rect = latest.canvas.getBoundingClientRect();
+            if (rect.width <= 0 || rect.height <= 0) return;
+            this.handleChartHover(latest.chartType, latest.clientX - rect.left,
+                latest.clientY - rect.top, rect.width, rect.height);
         });
     },
-    
+
+    clearChartHoverHideTimer() {
+        if (this._chartHoverHideTimer !== null) clearTimeout(this._chartHoverHideTimer);
+        this._chartHoverHideTimer = null;
+        this._chartHoverHideType = null;
+    },
+
+    cancelChartHover(chartType) {
+        if (!chartType || (this._chartHoverInput && this._chartHoverInput.chartType === chartType)) {
+            if (this._chartHoverFrame !== null) cancelAnimationFrame(this._chartHoverFrame);
+            this._chartHoverFrame = null;
+            this._chartHoverInput = null;
+        }
+        if (!chartType || this._chartHoverHideType === chartType) this.clearChartHoverHideTimer();
+    },
+
+    resetChartHover() {
+        this.cancelChartHover();
+        this.tooltip.visible = false;
+        this.tooltip.chartId = null;
+    },
+
+    hideChartHover(chartType) {
+        this.cancelChartHover(chartType);
+        // A delayed touch-end from another canvas must not hide the current tooltip.
+        if (this.tooltip.chartId !== chartType) return;
+        this.tooltip.visible = false;
+        this.tooltip.chartId = null;
+        if (!document.hidden) this.renderChartByType(chartType);
+    },
+
     /**
      * Handle hover on chart - calculate data index and show tooltip
      */
