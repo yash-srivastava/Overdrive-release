@@ -10,6 +10,7 @@ BYD.events = {
     selectedDate: null,
     currentFilter: 'all',
     recordings: [],
+    _thumbnailBatch: null,
     totalCount: 0,
     datesWithRecordings: new Map(),
     currentPage: 1,
@@ -1863,7 +1864,7 @@ BYD.events = {
 
     async loadRecordings() {
         const list = document.getElementById('recordingsList');
-        list.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+        this._replaceRecordingList(list, '<div class="loading"><div class="spinner"></div></div>');
         // Overlapping reads: a reply for other filters never paints; a success paints unless a newer
         // success did, a failure only if nothing newer painted. Failed/pending feed the reconnect handler.
         const seq = this._listSeq = (this._listSeq || 0) + 1;
@@ -1893,7 +1894,7 @@ BYD.events = {
             // rendering a misleading "no recordings" empty state.
             if (data.indexUnavailable) {
                 this._indexDown = true;
-                list.innerHTML = this._indexDownCardHtml();
+                this._replaceRecordingList(list, this._indexDownCardHtml());
                 // Clear the stale pagination bar + count. Without this the
                 // user is left with "Page 3 of 5" and an enabled Next button
                 // sitting above the error card, and clicking Next just walks
@@ -1967,7 +1968,7 @@ BYD.events = {
                 // doesn't wait on this auxiliary fetch.
                 this.loadPlaceChips();
             } else {
-                list.innerHTML = this._failedCardHtml();
+                this._replaceRecordingList(list, this._failedCardHtml());
             }
         } catch (e) {
             if ((reqUrl !== null && reqUrl !== this._listUrl) || seq < (this._listLast || 0)) return;
@@ -1975,7 +1976,7 @@ BYD.events = {
             if (seq === this._listSeq) this._listPending = false;
             this._listFailed = true;
             console.error('Failed to load recordings:', e);
-            list.innerHTML = this._failedCardHtml();
+            this._replaceRecordingList(list, this._failedCardHtml());
         }
     },
 
@@ -2043,7 +2044,7 @@ BYD.events = {
 
         if (visible.length === 0) {
             if (inflightHtml) {
-                list.innerHTML = inflightHtml;
+                this._replaceRecordingList(list, inflightHtml);
             } else if (this._indexDown) {
                 // The index is down, so "empty" is unknown, not zero. Several
                 // handlers (select-mode toggle, select/deselect-all, the
@@ -2051,9 +2052,9 @@ BYD.events = {
                 // without refetching — without this branch any one of them
                 // would overwrite the honest card with "No recordings found",
                 // reinstating exactly the lie this fix removes.
-                list.innerHTML = this._indexDownCardHtml();
+                this._replaceRecordingList(list, this._indexDownCardHtml());
             } else {
-                list.innerHTML = '<div class="empty-state"><svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><div class="empty-title">' + BYD.i18n.t('events.empty_none_title') + '</div><div class="empty-text">' + BYD.i18n.t('events.empty_none_text') + '</div></div>';
+                this._replaceRecordingList(list, '<div class="empty-state"><svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><div class="empty-title">' + BYD.i18n.t('events.empty_none_title') + '</div><div class="empty-text">' + BYD.i18n.t('events.empty_none_text') + '</div></div>');
             }
             return;
         }
@@ -2062,7 +2063,7 @@ BYD.events = {
         // the list arrives newest first, so a header starts each new date.
         const icons = this._CARD_ICONS;
         let lastDay = null;
-        list.innerHTML = inflightHtml + visible.map(rec => {
+        this._replaceRecordingList(list, inflightHtml + visible.map(rec => {
             const recordingKey = this.recordingKey(rec);
             const thumbId = this._thumbDomId(recordingKey);
             const badge = rec.type === 'sentry' ? BYD.i18n.t('events.badge_sentry') : rec.type === 'proximity' ? BYD.i18n.t('events.badge_proximity') : rec.type === 'replay' ? BYD.i18n.t('events.badge_replay') : BYD.i18n.t('events.badge_normal');
@@ -2189,7 +2190,7 @@ BYD.events = {
                 '</div>' +
                 '</div>' +
                 '</div>';
-        }).join('');
+        }).join(''));
         
         // Load thumbnails async after render
         this.loadThumbnailsAsync();
@@ -2197,62 +2198,100 @@ BYD.events = {
         if (window.SafeKeepBadges) window.SafeKeepBadges.decorate();
     },
     
-    // Load thumbnails asynchronously without blocking
+    // A rendered list owns its thumbnail requests, retry timers and blob URLs.
+    // Replacing it must not leave work running against detached cards.
+    _replaceRecordingList(list, html) {
+        const batch = this._thumbnailBatch;
+        this._thumbnailBatch = null;
+        if (batch) {
+            batch.timers.forEach(timer => clearTimeout(timer));
+            batch.timers.clear();
+            if (batch.controller) batch.controller.abort();
+            batch.urls.forEach(url => URL.revokeObjectURL(url));
+            batch.urls.clear();
+        }
+        list.innerHTML = html;
+    },
+
+    _thumbnailIsCurrent(batch, container) {
+        return this._thumbnailBatch === batch && batch.list.contains(container);
+    },
+
+    // Load thumbnails asynchronously without blocking.
     loadThumbnailsAsync() {
-        document.querySelectorAll('.recording-thumbnail[data-thumb]').forEach(container => {
+        const list = document.getElementById('recordingsList');
+        if (!list || this._thumbnailBatch) return;
+        const batch = {
+            list: list,
+            timers: new Set(),
+            urls: new Set(),
+            // Chrome 58 lacks AbortController. Identity checks still stop retries
+            // and discard late results on that WebView.
+            controller: typeof AbortController === 'function' ? new AbortController() : null
+        };
+        this._thumbnailBatch = batch;
+        list.querySelectorAll('.recording-thumbnail[data-thumb]').forEach(container => {
             const thumbUrl = container.dataset.thumb;
-            if (!thumbUrl) return;
-            
-            this.loadSingleThumbnail(container, thumbUrl, 0);
+            if (thumbUrl) this.loadSingleThumbnail(batch, container, thumbUrl, 0);
         });
     },
-    
-    // Load single thumbnail with retry on 202
-    loadSingleThumbnail(container, url, retryCount) {
+
+    _thumbnailUnavailable(container) {
+        const placeholder = container.querySelector('.thumb-placeholder');
+        if (placeholder) {
+            placeholder.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><span>' + BYD.i18n.t('events.no_preview') + '</span>';
+        }
+    },
+
+    // Keep the existing retry schedule for cards that still belong to the list.
+    async loadSingleThumbnail(batch, container, url, retryCount) {
+        if (!this._thumbnailIsCurrent(batch, container)) return;
         if (retryCount > 8) {
-            // After max retries, show "no preview" state
-            const placeholder = container.querySelector('.thumb-placeholder');
-            if (placeholder) {
-                placeholder.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><span>' + BYD.i18n.t('events.no_preview') + '</span>';
-            }
+            this._thumbnailUnavailable(container);
             return;
         }
-        
-        fetch(url).then(res => {
-            if (res.status === 200) {
-                return res.blob();
-            } else if (res.status === 202) {
-                // Generating, retry with exponential backoff
+        let imgUrl = null;
+        try {
+            const res = await fetch(url, batch.controller ? { signal: batch.controller.signal } : undefined);
+            if (!this._thumbnailIsCurrent(batch, container)) return;
+            if (res.status === 202) {
                 const delay = Math.min(1000 * Math.pow(1.5, retryCount), 5000);
-                setTimeout(() => this.loadSingleThumbnail(container, url, retryCount + 1), delay);
-                return null;
+                const timer = setTimeout(() => {
+                    batch.timers.delete(timer);
+                    this.loadSingleThumbnail(batch, container, url, retryCount + 1);
+                }, delay);
+                batch.timers.add(timer);
+                return;
             }
-            return null;
-        }).then(blob => {
-            if (blob && blob.size > 0) {
-                const imgUrl = URL.createObjectURL(blob);
-                const placeholder = container.querySelector('.thumb-placeholder');
-                if (placeholder) {
-                    const img = document.createElement('img');
-                    img.src = imgUrl;
-                    img.alt = BYD.i18n.t('events.thumbnail_alt');
-                    img.onload = () => placeholder.remove();
-                    img.onerror = () => {
-                        URL.revokeObjectURL(imgUrl);
-                        placeholder.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><span>' + BYD.i18n.t('events.no_preview') + '</span>';
-                    };
-                    container.insertBefore(img, container.firstChild);
-                }
-            }
-        }).catch(() => {
-            // Network error - show fallback
+            if (res.status !== 200) return;
+            const blob = await res.blob();
+            if (!this._thumbnailIsCurrent(batch, container) || !blob || !blob.size) return;
             const placeholder = container.querySelector('.thumb-placeholder');
-            if (placeholder) {
-                placeholder.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><span>' + BYD.i18n.t('events.no_preview') + '</span>';
-            }
-        });
+            if (!placeholder) return;
+            const img = document.createElement('img');
+            imgUrl = URL.createObjectURL(blob);
+            // Keep the URL while the image is displayed (e.g. browser save image),
+            // but release it when the list is replaced or image decoding fails.
+            batch.urls.add(imgUrl);
+            img.alt = BYD.i18n.t('events.thumbnail_alt');
+            img.onload = () => {
+                if (this._thumbnailIsCurrent(batch, container)) placeholder.remove();
+            };
+            img.onerror = () => {
+                if (batch.urls.delete(imgUrl)) URL.revokeObjectURL(imgUrl);
+                if (this._thumbnailIsCurrent(batch, container)) {
+                    img.remove();
+                    this._thumbnailUnavailable(container);
+                }
+            };
+            container.insertBefore(img, container.firstChild);
+            img.src = imgUrl;
+        } catch (e) {
+            if (imgUrl && batch.urls.delete(imgUrl)) URL.revokeObjectURL(imgUrl);
+            if (this._thumbnailIsCurrent(batch, container)) this._thumbnailUnavailable(container);
+        }
     },
-    
+
     onThumbError(el) {
         const container = el.parentElement;
         container.innerHTML = '<div class="thumb-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><span>' + BYD.i18n.t('events.no_preview') + '</span></div><div class="play-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>';
