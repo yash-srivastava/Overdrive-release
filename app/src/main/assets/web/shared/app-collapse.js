@@ -160,7 +160,7 @@
             if (ev.target !== header) return;
             if (ev.key === 'Enter' || ev.key === ' ' || ev.keyCode === 13 || ev.keyCode === 32) {
                 ev.preventDefault();
-                toggle(ev);
+                if (!ev.repeat) toggle(ev);
             }
         });
     }
