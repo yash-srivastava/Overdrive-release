@@ -44,7 +44,7 @@ public final class TerrainTracker {
     private static final long FRESH_MS = 60_000;
 
     // (receipt ms, altitude) for the moving median
-    private final ArrayDeque<double[]> recent = new ArrayDeque<>();
+    private final AltitudeWindow recent = new AltitudeWindow();
     // (distance m, smoothed altitude) every STEP_M of road
     private final ArrayDeque<double[]> profile = new ArrayDeque<>();
     private double distM;
@@ -83,9 +83,7 @@ public final class TerrainTracker {
         boolean altKnown = !Double.isNaN(alt) && Math.abs(alt) < 9000.0 && !(alt == 0.0 && f.verticalAccuracy == 0f);
         boolean accurate = f.verticalAccuracy <= 0f || f.verticalAccuracy <= MAX_VERTICAL_ACCURACY_M;
         if (!altKnown || !accurate) return;
-        recent.addLast(new double[] { now, alt });
-        while (!recent.isEmpty() && now - recent.peekFirst()[0] > MEDIAN_MS) recent.removeFirst();
-        smoothed = median();
+        smoothed = recent.add(now, alt);
 
         if (profile.isEmpty() || (moving && distM >= nextStepAt)) {
             profile.addLast(new double[] { distM, smoothed });
@@ -95,13 +93,66 @@ public final class TerrainTracker {
         }
     }
 
-    private double median() {
-        double[] a = new double[recent.size()];
-        int i = 0;
-        for (double[] s : recent) a[i++] = s[1];
-        Arrays.sort(a);
-        int n = a.length;
-        return n % 2 == 1 ? a[n / 2] : (a[n / 2 - 1] + a[n / 2]) / 2.0;
+    /** FIFO expiry and a sorted altitude window, owned by the tracker monitor.
+     * No sample or sort-array allocation after capacity has warmed up. */
+    static final class AltitudeWindow {
+        private long[] timestamps = new long[16];
+        private double[] altitudes = new double[16];
+        private double[] sorted = new double[16];
+        private int head;
+        private int size;
+
+        double add(long now, double altitude) {
+            // Preserve the inclusive five-second window and FIFO expiry. The
+            // original stored receipt times as doubles in each sample array.
+            int expired = 0;
+            while (expired < size && now - (double) timestamps[(head + expired)
+                    & (timestamps.length - 1)] > MEDIAN_MS) {
+                expired++;
+            }
+            if (expired == size) {
+                clear();
+            } else {
+                for (int i = 0; i < expired; i++) {
+                    // binarySearch uses Double.compare ordering, including signed zero.
+                    int at = Arrays.binarySearch(sorted, 0, size, altitudes[head]);
+                    System.arraycopy(sorted, at + 1, sorted, at, size - at - 1);
+                    head = (head + 1) & (timestamps.length - 1);
+                    size--;
+                }
+            }
+
+            if (size == timestamps.length) grow();
+            int tail = (head + size) & (timestamps.length - 1);
+            timestamps[tail] = now;
+            altitudes[tail] = altitude;
+            int at = Arrays.binarySearch(sorted, 0, size, altitude);
+            if (at < 0) at = -at - 1;
+            System.arraycopy(sorted, at, sorted, at + 1, size - at);
+            sorted[at] = altitude;
+            size++;
+            return size % 2 == 1 ? sorted[size / 2]
+                    : (sorted[size / 2 - 1] + sorted[size / 2]) / 2.0;
+        }
+
+        void clear() {
+            head = size = 0;
+        }
+
+        private void grow() {
+            int oldCapacity = timestamps.length;
+            long[] newTimestamps = new long[oldCapacity * 2];
+            double[] newAltitudes = new double[oldCapacity * 2];
+            int first = Math.min(size, oldCapacity - head);
+            System.arraycopy(timestamps, head, newTimestamps, 0, first);
+            System.arraycopy(timestamps, 0, newTimestamps, first, size - first);
+            System.arraycopy(altitudes, head, newAltitudes, 0, first);
+            System.arraycopy(altitudes, 0, newAltitudes, first, size - first);
+            timestamps = newTimestamps;
+            altitudes = newAltitudes;
+            sorted = Arrays.copyOf(sorted, oldCapacity * 2);
+            head = 0;
+        }
     }
 
     // least-squares slope of altitude over the last stretch of road, as a percentage
