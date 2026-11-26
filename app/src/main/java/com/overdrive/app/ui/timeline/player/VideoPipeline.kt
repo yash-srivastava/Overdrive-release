@@ -8,6 +8,7 @@ import android.os.HandlerThread
 import android.util.Log
 import android.view.Surface
 import com.overdrive.app.BuildConfig
+import java.nio.ByteBuffer
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -48,6 +49,7 @@ internal class VideoPipeline(
     private val feeder = VideoFeeder(this, host)
     private val codecReleased = CountDownLatch(1)
 
+    private val sampleBuffers = SampleBufferPool()
     private val qLock = Object()
     private val queue = ArrayDeque<Sample>()
     private var queueBytes = 0L
@@ -208,6 +210,9 @@ internal class VideoPipeline(
             reqGen = gens.incrementAndGet()
         }
         feeder.stop()
+        // A codec callback may still hold a dequeued array. Closing prevents late returns
+        // from repopulating the idle pool; queued arrays can simply be dropped.
+        sampleBuffers.close()
         synchronized(qLock) {
             queue.clear()
             queueBytes = 0
@@ -268,20 +273,29 @@ internal class VideoPipeline(
         return err
     }
 
-    /** Feeder thread: blocks while the queue is full. False when the generation is stale. */
+    internal fun copySampleData(source: ByteBuffer, size: Int): ByteArray =
+        sampleBuffers.copyFrom(source, size)
+
+    /** Feeder thread: takes ownership even on rejection; blocks while the queue is full. */
     internal fun enqueue(s: Sample): Boolean {
-        synchronized(qLock) {
-            while (!released && s.gen == reqGen && queue.isNotEmpty() &&
-                (queue.size >= MAX_QUEUE || queueBytes + s.size > MAX_QUEUE_BYTES)
-            ) {
-                qLock.wait(50L)
+        var accepted = false
+        try {
+            synchronized(qLock) {
+                while (!released && s.gen == reqGen && queue.isNotEmpty() &&
+                    (queue.size >= MAX_QUEUE || queueBytes + s.storageBytes > MAX_QUEUE_BYTES)
+                ) {
+                    qLock.wait(50L)
+                }
+                if (released || s.gen != reqGen) return false
+                queue.addLast(s)
+                queueBytes += s.storageBytes
+                accepted = true
             }
-            if (released || s.gen != reqGen) return false
-            queue.addLast(s)
-            queueBytes += s.size
+            if (feedPosted.compareAndSet(false, true)) handler.post(feedTask)
+            return true
+        } finally {
+            if (!accepted) sampleBuffers.recycle(s.data)
         }
-        if (feedPosted.compareAndSet(false, true)) handler.post(feedTask)
-        return true
     }
 
     internal fun emit(e: PipeEvent) {
@@ -341,7 +355,7 @@ internal class VideoPipeline(
         rateFromNs = 0L
         slowWindows = 0
         synchronized(qLock) {
-            while (queue.isNotEmpty() && queue.first().gen < gen) queueBytes -= queue.removeFirst().size
+            while (queue.isNotEmpty() && queue.first().gen < gen) discardFirstLocked()
             qLock.notifyAll()
         }
         inputsSinceOutput = 0
@@ -375,20 +389,26 @@ internal class VideoPipeline(
     }
 
     private fun peekSample(): Sample? = synchronized(qLock) {
-        while (queue.isNotEmpty() && queue.first().gen < codecGen) queueBytes -= queue.removeFirst().size
+        while (queue.isNotEmpty() && queue.first().gen < codecGen) discardFirstLocked()
         qLock.notifyAll()
         val h = queue.firstOrNull()
         if (h == null || h.gen > codecGen) null else h
     }
 
-    private fun takeSample(s: Sample) {
-        synchronized(qLock) {
-            if (queue.firstOrNull() === s) {
-                queue.removeFirst()
-                queueBytes -= s.size
-            }
-            qLock.notifyAll()
-        }
+    // Only the codec thread discards stale generations, under qLock.
+    private fun discardFirstLocked() {
+        val s = queue.removeFirst()
+        queueBytes -= s.storageBytes
+        sampleBuffers.recycle(s.data)
+    }
+
+    /** Transfer queue ownership to the codec thread, unless release already cleared it. */
+    private fun takeSample(s: Sample): Boolean = synchronized(qLock) {
+        if (queue.firstOrNull() !== s) return@synchronized false
+        queue.removeFirst()
+        queueBytes -= s.storageBytes
+        qLock.notifyAll()
+        true
     }
 
     private fun feedInputs() {
@@ -412,14 +432,20 @@ internal class VideoPipeline(
             } catch (_: IllegalStateException) {
                 null
             } ?: continue
-            takeSample(s)
+            if (!takeSample(s)) return
             val data = s.data
-            if (data == null || s.size > buf.capacity()) {
-                freeInputs.addFirst(idx)
-                continue
+            try {
+                if (data == null || s.size > buf.capacity()) {
+                    freeInputs.addFirst(idx)
+                    continue
+                }
+                buf.clear()
+                buf.put(data, 0, s.size)
+            } finally {
+                // MediaCodec owns its own input buffer. Once put() returns, no decoder
+                // operation reads the feeder array, even if queueInputBuffer fails.
+                sampleBuffers.recycle(data)
             }
-            buf.clear()
-            buf.put(data, 0, s.size)
             if (queueInput(c, idx, s.size, s.tag, s.flags)) inputsSinceOutput++
         }
     }
