@@ -8,6 +8,7 @@ import android.media.MediaMetadataRetriever;
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.storage.StorageManager;
 import com.overdrive.app.surveillance.LensTag;
+import com.overdrive.app.util.VideoPreviewFrame;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -253,7 +254,6 @@ public final class FrameService {
 
     private static Frame render(Job job) {
         MediaMetadataRetriever retriever = new MediaMetadataRetriever();
-        Bitmap frame = null;
         Bitmap scaled = null;
         Bitmap corrected = null;
         try (FileInputStream in = RemovableStorageFs.openInput(job.mp4)) {
@@ -265,15 +265,12 @@ public final class FrameService {
                 fail(job.clipKey);
                 return FAILED_FRAME;
             }
-            frame = retriever.getFrameAtTime(job.atMs * 1000L,
-                    MediaMetadataRetriever.OPTION_PREVIOUS_SYNC);
-            if (frame == null || frame.getWidth() <= 0 || frame.getHeight() <= 0) {
+            scaled = VideoPreviewFrame.extract(retriever, job.atMs * 1000L,
+                    MediaMetadataRetriever.OPTION_PREVIOUS_SYNC, job.width, 0);
+            if (scaled == null) {
                 fail(job.key);
                 return FAILED_FRAME;
             }
-            int height = (int) Math.max(1,
-                    Math.round((double) job.width * frame.getHeight() / frame.getWidth()));
-            scaled = Bitmap.createScaledBitmap(frame, job.width, height, true);
             corrected = LensTag.dewarpFrameForClip(scaled, job.mp4);
             ByteArrayOutputStream jpeg = new ByteArrayOutputStream(64 * 1024);
             if (corrected == null
@@ -291,7 +288,6 @@ public final class FrameService {
         } finally {
             recycle(corrected);
             recycle(scaled);
-            recycle(frame);
             try {
                 retriever.release();
             } catch (Throwable ignored) {
