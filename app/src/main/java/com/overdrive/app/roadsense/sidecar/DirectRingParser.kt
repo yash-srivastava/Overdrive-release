@@ -65,10 +65,25 @@ internal class DirectRingParser(
             val ts = bulkBuf.getLong(o + OFF_TIMESTAMP)
             if (ts <= (if (type == Sensor.TYPE_ACCELEROMETER) lastAccelNs else lastGyroNs)) continue
             var i = pending++
-            while (i > 0 && pendingTs[i - 1] > ts) {
-                pendingTs[i] = pendingTs[i - 1]
-                pendingSlots[i] = pendingSlots[i - 1]
-                i--
+            // Most polls append in timestamp order or move only a few entries. For
+            // a larger displacement (e.g. a wrapped ring after a delayed poll),
+            // find the stable insertion point and move both primitive spans in bulk.
+            if (i >= 8 && pendingTs[i - 8] > ts) {
+                var lo = 0
+                var hi = i - 8
+                while (lo < hi) {
+                    val mid = (lo + hi) ushr 1
+                    if (pendingTs[mid] <= ts) lo = mid + 1 else hi = mid
+                }
+                System.arraycopy(pendingTs, lo, pendingTs, lo + 1, i - lo)
+                System.arraycopy(pendingSlots, lo, pendingSlots, lo + 1, i - lo)
+                i = lo
+            } else {
+                while (i > 0 && pendingTs[i - 1] > ts) {
+                    pendingTs[i] = pendingTs[i - 1]
+                    pendingSlots[i] = pendingSlots[i - 1]
+                    i--
+                }
             }
             pendingTs[i] = ts
             pendingSlots[i] = slot
