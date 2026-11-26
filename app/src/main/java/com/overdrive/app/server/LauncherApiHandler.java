@@ -579,13 +579,20 @@ public final class LauncherApiHandler {
             boolean live = false;
             com.overdrive.app.trips.TripRecord trip = null;
             try {
-                trip = tam.getLiveTripSnapshot();
+                // priced on every poll, as the Custom Layouts feed does: the plain snapshot has no cost yet
+                trip = tam.getPricedLiveTripSnapshot();
                 live = trip != null;
             } catch (Throwable ignored) {}
             if (trip == null && db != null) {
                 try {
                     java.util.List<com.overdrive.app.trips.TripRecord> recent = db.getTripsWithoutMoments(365, 1, 0);
-                    if (recent != null && !recent.isEmpty()) trip = recent.get(0);
+                    if (recent != null && !recent.isEmpty()) {
+                        trip = recent.get(0);
+                        // the trips page's energy and cost back-fill, so a past trip shows the same figure
+                        com.overdrive.app.trips.TripApiHandler.enrichTripEnergy(trip, tam.getConfig());
+                        if (trip.tripCost > 0 && (trip.currency == null || trip.currency.isEmpty()) && tam.getConfig() != null)
+                            trip.currency = tam.getConfig().getCurrency();
+                    }
                 } catch (Throwable ignored) {}
             }
             // the trip just driven until its row is finished (or if finishing it failed): the table
@@ -620,7 +627,7 @@ public final class LauncherApiHandler {
             o.put("fuelL", trip.litresUsed > 0.05 ? round1(trip.litresUsed) : (Object) JSONObject.NULL);
             // whPerKm from kWh/km × 1000; null when no energy figure exists.
             o.put("whPerKm", trip.energyPerKm > 0 ? (int) Math.round(trip.energyPerKm * 1000.0) : (Object) JSONObject.NULL);
-            o.put("cost", trip.tripCost > 0 ? round1(trip.tripCost) : (Object) JSONObject.NULL);
+            o.put("cost", trip.tripCost > 0 && Double.isFinite(trip.tripCost) ? round2(trip.tripCost) : (Object) JSONObject.NULL);
             o.put("currency", (trip.currency != null && !trip.currency.isEmpty()) ? trip.currency : (Object) JSONObject.NULL);
             // route: no start/end place-name fields on TripRecord → null (honest).
             o.put("route", JSONObject.NULL);
