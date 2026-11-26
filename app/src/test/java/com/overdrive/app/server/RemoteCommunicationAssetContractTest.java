@@ -194,8 +194,12 @@ public class RemoteCommunicationAssetContractTest {
         assertTrue(websocket.contains("PTT network stats: frames="));
         assertTrue(websocket.contains("NETWORK_GAP_WARN_MS"));
         assertTrue(websocket.contains("catch (IdleReadTimeout timeout)"));
-        assertTrue(websocket.contains(
+        String frames = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/server/WebSocketFrames.java");
+        assertTrue(frames.contains(
                 "class IdleReadTimeout extends SocketTimeoutException"));
+        assertTrue(websocket.contains("WebSocketFrames.readFrame("));
+        assertTrue(websocket.contains("RemoteCommunicationPolicy.MAX_PCM_FRAME_BYTES"));
         assertFalse(browser.contains("MediaRecorder"));
         assertFalse(browser.contains("Blob("));
     }

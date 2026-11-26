@@ -4,6 +4,7 @@ import java.net.URI;
 
 /** Browser-origin checks for the credential-bearing GenAI HTTP/WebSocket surface. */
 final class GenAiRequestSecurity {
+    static final int MAX_CLIENT_FRAME_BYTES = 128 * 1024;
 
     private GenAiRequestSecurity() {
     }
