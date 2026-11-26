@@ -199,9 +199,7 @@ internal class VideoFeeder(private val pipe: VideoPipeline, private val host: Pi
                 }
                 val size = readInto(r)
                 if (size < 0) break
-                val data = ByteArray(size)
-                buf.position(0)
-                buf.get(data, 0, size)
+                val data = pipe.copySampleData(buf, size)
                 val tag = ep.tagOfClipUs(t)
                 val flags = if (sync) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0
                 if (!pipe.enqueue(Sample(req.gen, data, size, tag, flags, null))) {
@@ -313,13 +311,11 @@ internal class VideoFeeder(private val pipe: VideoPipeline, private val host: Pi
             endScrub(req, null)
             return
         }
-        val data = ByteArray(size)
-        buf.position(0)
-        buf.get(data, 0, size)
         val ep = Epoch(req.gen, item, nextTagBase, t, 0L, Join.START, req.gapFromWall, spec(seg), req.crossfade, scrub = true)
         log.add(ep)
         val tag = ep.tagOfClipUs(t)
         nextTagBase = tag + TAG_SPACING
+        val data = pipe.copySampleData(buf, size)
         if (!pipe.enqueue(Sample(req.gen, data, size, tag, MediaCodec.BUFFER_FLAG_KEY_FRAME, null))) return
         lastScrubKey = key
         endScrub(req, ep)

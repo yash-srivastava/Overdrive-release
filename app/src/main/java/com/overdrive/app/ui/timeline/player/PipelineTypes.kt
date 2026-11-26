@@ -38,7 +38,10 @@ internal class Sample(
     val tag: Long,
     val flags: Int,
     val eos: EosInfo?,
-)
+) {
+    // Pooled capacity may exceed the valid payload; account for real queue memory.
+    val storageBytes: Int get() = data?.size ?: 0
+}
 
 internal class OutFrame(val index: Int, val tag: Long, val eos: EosInfo?)
 
