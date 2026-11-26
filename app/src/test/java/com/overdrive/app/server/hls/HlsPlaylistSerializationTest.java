@@ -1,7 +1,9 @@
 package com.overdrive.app.server.hls;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertSame;
 
+import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.TimeZone;
@@ -53,6 +55,27 @@ public class HlsPlaylistSerializationTest {
         assertIso("2000-02-29T00:00:00.000Z", 951782400000L, "UTC");
         assertIso("0001-01-01T00:00:00.000Z", -62135596800000L, "UTC");
         assertIso("10000-01-01T00:00:00.000Z", 253402300800000L, "UTC");
+    }
+
+    @Test
+    public void paddingPreservesMinimumWidthAndExistingContent() throws Exception {
+        Method pad = HlsPlaylists.class.getDeclaredMethod("pad", StringBuilder.class,
+                long.class, int.class);
+        pad.setAccessible(true);
+        long[] values = {Long.MIN_VALUE, -123, -1, 0, 1, 9, 10, 99, 100, 999,
+                1000, 9999, 10000, Long.MAX_VALUE};
+        for (long value : values) {
+            String digits = Long.toString(value);
+            for (int width = -1; width <= 8; width++) {
+                StringBuilder expected = new StringBuilder("prefix:");
+                for (int i = digits.length(); i < width; i++) expected.append('0');
+                expected.append(digits);
+                StringBuilder actual = new StringBuilder("prefix:");
+                assertSame(actual, pad.invoke(null, actual, value, width));
+                assertEquals("value=" + value + ", width=" + width,
+                        expected.toString(), actual.toString());
+            }
+        }
     }
 
     private static void assertIso(String expected, long epochMs, String zone) {
