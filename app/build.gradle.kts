@@ -397,6 +397,8 @@ tasks.configureEach {
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
     dependsOn(preparePackagedMainAssets)
     systemProperty("overdrive.packagedMainAssetsDir", packagedMainAssetsDir.get().asFile.absolutePath)
+    // CI keeps no test reports, so print the assertion message of a failed test.
+    testLogging.exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
 }
 
 
