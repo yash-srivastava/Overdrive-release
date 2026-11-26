@@ -966,41 +966,9 @@ public class AudioApiHandler {
                 return;
             }
             short[] samples = new short[4800];
-            long t0 = System.nanoTime();
-            int totalRead = 0;
-            while (totalRead < samples.length) {
-                int n = rec.read(samples, totalRead, samples.length - totalRead);
-                if (n <= 0) {
-                    attempt.put("readError", "read returned " + n);
-                    break;
-                }
-                totalRead += n;
-                if (System.nanoTime() - t0 > 500_000_000L) {
-                    attempt.put("readTimeout", true);
-                    break;
-                }
-            }
-            attempt.put("samplesRead", totalRead);
+            int totalRead = readProbeSamples(rec, samples, attempt, false);
             if (totalRead > 0) {
-                double sumSq = 0.0;
-                int peak = 0;
-                int nonZero = 0;
-                for (int s = 0; s < totalRead; s++) {
-                    int v = samples[s];
-                    if (v != 0) nonZero++;
-                    int abs = v < 0 ? -v : v;
-                    if (abs > peak) peak = abs;
-                    sumSq += (double) v * v;
-                }
-                double rms = Math.sqrt(sumSq / totalRead);
-                double rmsDb = rms > 0 ? 20.0 * Math.log10(rms / 32768.0) : Double.NEGATIVE_INFINITY;
-                attempt.put("nonZeroSamples", nonZero);
-                attempt.put("peakAmplitude", peak);
-                attempt.put("rms", rms);
-                attempt.put("rmsDb", Double.isInfinite(rmsDb) ? "-inf"
-                    : String.format(java.util.Locale.US, "%.2f", rmsDb));
-                attempt.put("rmsDbValue", Double.isInfinite(rmsDb) ? -999.0 : rmsDb);
-                attempt.put("usable", !Double.isInfinite(rmsDb) && rmsDb > -70.0);
+                MicProbeLevels.append(samples, totalRead, attempt, true);
             }
             try { rec.stop(); } catch (Exception ignored) {}
             attempt.put("ok", true);
@@ -1009,6 +977,30 @@ public class AudioApiHandler {
         } finally {
             try { rec.release(); } catch (Exception ignored) {}
         }
+    }
+
+    /** Read a probe's PCM samples while retaining its endpoint-specific diagnostics. */
+    private static int readProbeSamples(AudioRecord rec, short[] samples, JSONObject attempt,
+                                        boolean detailed) throws org.json.JSONException {
+        long t0 = System.nanoTime();
+        int totalRead = 0;
+        while (totalRead < samples.length) {
+            int n = rec.read(samples, totalRead, samples.length - totalRead);
+            if (n <= 0) {
+                attempt.put("readError", "read returned " + n
+                        + (detailed ? " after " + totalRead + " samples" : ""));
+                break;
+            }
+            totalRead += n;
+            if (System.nanoTime() - t0 > 500_000_000L) {
+                attempt.put("readTimeout", true);
+                break;
+            }
+        }
+        long elapsedMs = detailed ? (System.nanoTime() - t0) / 1_000_000L : 0L;
+        attempt.put("samplesRead", totalRead);
+        if (detailed) attempt.put("readElapsedMs", elapsedMs);
+        return totalRead;
     }
 
     /**
@@ -1084,49 +1076,10 @@ public class AudioApiHandler {
 
                 // Capture ~100 ms = 4800 samples mono
                 short[] samples = new short[4800];
-                long t0 = System.nanoTime();
-                int totalRead = 0;
-                while (totalRead < samples.length) {
-                    int n = rec.read(samples, totalRead, samples.length - totalRead);
-                    if (n <= 0) {
-                        attempt.put("readError", "read returned " + n + " after " + totalRead + " samples");
-                        break;
-                    }
-                    totalRead += n;
-                    if (System.nanoTime() - t0 > 500_000_000L) {  // 500 ms timeout
-                        attempt.put("readTimeout", true);
-                        break;
-                    }
-                }
-                long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
-                attempt.put("samplesRead", totalRead);
-                attempt.put("readElapsedMs", elapsedMs);
-
+                int totalRead = readProbeSamples(rec, samples, attempt, true);
                 if (totalRead > 0) {
-                    double sumSq = 0.0;
-                    int peak = 0;
-                    int nonZero = 0;
-                    for (int s = 0; s < totalRead; s++) {
-                        int v = samples[s];
-                        if (v != 0) nonZero++;
-                        int abs = v < 0 ? -v : v;
-                        if (abs > peak) peak = abs;
-                        sumSq += (double) v * v;
-                    }
-                    double rms = Math.sqrt(sumSq / totalRead);
-                    double rmsDb = rms > 0 ? 20.0 * Math.log10(rms / 32768.0) : Double.NEGATIVE_INFINITY;
-                    attempt.put("nonZeroSamples", nonZero);
-                    attempt.put("peakAmplitude", peak);
-                    attempt.put("rms", rms);
-                    attempt.put("rmsDb", Double.isInfinite(rmsDb) ? "-inf"
-                        : String.format(java.util.Locale.US, "%.2f", rmsDb));
-
-                    // -70 dBFS is roughly the floor of usable speech capture.
-                    // Below that we're either policy-muted or in a silent room
-                    // with a working mic — without a known stimulus we can't
-                    // distinguish, so flag both as worth a follow-up listen.
-                    boolean usable = !Double.isInfinite(rmsDb) && rmsDb > -70.0;
-                    attempt.put("usable", usable);
+                    double rmsDb = MicProbeLevels.append(samples, totalRead, attempt, false);
+                    boolean usable = MicProbeLevels.isUsable(rmsDb);
 
                     // Pick the strongest source. A usable source always beats
                     // a non-usable one; among same-tier candidates the higher
