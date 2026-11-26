@@ -4,14 +4,11 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.DashPathEffect
-import android.graphics.LinearGradient
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PathMeasure
-import android.graphics.RadialGradient
 import android.graphics.RectF
-import android.graphics.Shader
 import android.os.SystemClock
 import android.view.MotionEvent
 import kotlin.math.roundToInt
@@ -93,16 +90,10 @@ class GlassSeatsView(context: Context, env: GlassEnv, ticker: GlassTicker) : Gla
     private val fm = Paint.FontMetrics()
     private val p = Paint(Paint.ANTI_ALIAS_FLAG)
     private val s = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
-    private val m = Matrix()
     private val r = RectF()
     private val dash = DashPathEffect(floatArrayOf(5f, 4f), 0f)
 
-    private var shaderNight: Boolean? = null
-    private lateinit var keyBody: LinearGradient
-    private lateinit var rimSh: LinearGradient
-    private lateinit var shadowSh: RadialGradient
-    private lateinit var glowAccent: RadialGradient
-    private lateinit var glowWarn: RadialGradient
+    private val keyShaders = GlassKeyShaders()
 
     init {
         emptyA = ellipsize(EMPTY_A, EMPTY_W, emptyP)
@@ -278,29 +269,13 @@ class GlassSeatsView(context: Context, env: GlassEnv, ticker: GlassTicker) : Gla
         return busy
     }
 
-    override fun onThemeChanged() { shaderNight = null }
+    override fun onThemeChanged() { keyShaders.invalidate() }
 
     // ── drawing ──────────────────────────────────────────────────────────────
 
-    private fun ensureShaders(t: GlassTheme) {
-        if (shaderNight == t.night) return
-        shaderNight = t.night
-        val night = t.night
-        val white = 0xFFFFFFFF.toInt()
-        keyBody = LinearGradient(0f, 0f, 0.6f, 1f,
-            if (night) intArrayOf(GlassColor.alpha(white, 0.13f), GlassColor.alpha(white, 0.04f), 0x40000000) else intArrayOf(white, 0xFFF1F5F2.toInt(), 0xFFD9E1DC.toInt()),
-            floatArrayOf(0f, if (night) 0.45f else 0.5f, 1f), Shader.TileMode.CLAMP)
-        rimSh = LinearGradient(0f, 0f, 1f, 1f,
-            if (night) intArrayOf(GlassColor.alpha(white, 0.55f), GlassColor.alpha(white, 0.1f), 0x80000000.toInt()) else intArrayOf(white, 0x1A0B281E, 0x4D0B281E),
-            floatArrayOf(0f, if (night) 0.4f else 0.5f, 1f), Shader.TileMode.CLAMP)
-        shadowSh = RadialGradient(0f, 0f, 1f, GlassColor.alpha(t.shadow, t.shadowA), GlassColor.clear(t.shadow), Shader.TileMode.CLAMP)
-        fun glow(c: Int) = RadialGradient(0f, 0f, 1f, intArrayOf(GlassColor.alpha(c, 0.8f), GlassColor.alpha(c, 0.3f), GlassColor.clear(c)), floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP)
-        glowAccent = glow(t.glowAccent); glowWarn = glow(t.glowWarn)
-    }
-
     override fun drawBack(c: Canvas) {
         val t = env.theme
-        ensureShaders(t)
+        keyShaders.ensure(t)
         if (failMs < 0) drawHeader(c, header, t.text2, 1f)
         if (shown == 0) { drawEmpty(c, t); return }
         val dim = shownBlocked
@@ -312,7 +287,7 @@ class GlassSeatsView(context: Context, env: GlassEnv, ticker: GlassTicker) : Gla
 
     override fun drawLive(c: Canvas, nowMs: Long) {
         val t = env.theme
-        ensureShaders(t)
+        keyShaders.ensure(t)
         val pr = pressed
         if (pr == MORE) { if (more > 0) drawMore(c, t, true) } else if (pr in 0 until shown) drawPill(c, t, pr, true)
         if (busyT >= 0) drawBusy(c, t, busyT, nowMs)
@@ -397,7 +372,7 @@ class GlassSeatsView(context: Context, env: GlassEnv, ticker: GlassTicker) : Gla
     private fun shadow(c: Canvas, cx: Float, cy: Float, w: Float, h: Float, dx: Float, dy: Float) {
         c.save(); c.translate(cx + dx, cy + dy); c.scale(w / 2f, h / 2f)
         r.set(-1f, -1f, 1f, 1f)
-        c.drawRoundRect(r, h / w, 1f, p.shade(shadowSh))
+        c.drawRoundRect(r, h / w, 1f, p.shade(keyShaders.shadowSh))
         c.restore()
     }
 
@@ -405,11 +380,11 @@ class GlassSeatsView(context: Context, env: GlassEnv, ticker: GlassTicker) : Gla
     private fun glass(c: Canvas, t: GlassTheme, x: Float, y: Float, w: Float, h: Float) {
         val rad = h / 2f
         r.set(x, y, x + w, y + h)
-        bbox(keyBody, r)
-        c.drawRoundRect(r, rad, rad, p.shade(keyBody))
+        keyShaders.mapToBounds(keyShaders.keyBody, r)
+        c.drawRoundRect(r, rad, rad, p.shade(keyShaders.keyBody))
         r.set(x + 0.6f, y + 0.6f, x + w - 0.6f, y + h - 0.6f)
-        bbox(rimSh, r)
-        s.shade(rimSh); s.pathEffect = null; s.strokeWidth = 1.2f; s.strokeCap = Paint.Cap.BUTT
+        keyShaders.mapToBounds(keyShaders.rimSh, r)
+        s.shade(keyShaders.rimSh); s.pathEffect = null; s.strokeWidth = 1.2f; s.strokeCap = Paint.Cap.BUTT
         c.drawRoundRect(r, rad - 0.6f, rad - 0.6f, s)
         s.shader = null; s.strokeCap = Paint.Cap.ROUND
         s.color = GlassColor.alpha(0xFFFFFFFF.toInt(), if (t.night) 0.5f else 1f); s.strokeWidth = 1.2f
@@ -452,7 +427,7 @@ class GlassSeatsView(context: Context, env: GlassEnv, ticker: GlassTicker) : Gla
         val k = place(i)
         val x = left(k); val y = top(k); val w = width(k); val h = height(k)
         val cx = x + w / 2f; val cy = y + h / 2f
-        c.unitOval(p, if (ok) glowAccent else glowWarn, cx, cy, w * 0.58f, h * 0.85f, (a * 190f).roundToInt())
+        c.unitOval(p, if (ok) keyShaders.glowAccent else keyShaders.glowWarn, cx, cy, w * 0.58f, h * 0.85f, (a * 190f).roundToInt())
         if (ok && i < PILLS) seat(c, t, litSlots[i], glyphCx(k), cy, GlassGlyphs.Tone.LIT, (a * 255f).roundToInt(), true)
         // the badge sits on the trailing top corner
         val inset = if (i < PILLS) 16f else 6f
@@ -463,11 +438,6 @@ class GlassSeatsView(context: Context, env: GlassEnv, ticker: GlassTicker) : Gla
         s.strokeWidth = 2.2f; s.strokeCap = Paint.Cap.ROUND; s.strokeJoin = Paint.Join.ROUND
         if (ok) { c.drawLine(bx - 4f, by, bx - 1f, by + 3.2f, s); c.drawLine(bx - 1f, by + 3.2f, bx + 4.5f, by - 3.5f, s) }
         else { c.drawLine(bx, by - 4.5f, bx, by + 1f, s); c.drawPoint(bx, by + 4.4f, s) }
-    }
-
-    private fun bbox(sh: Shader, box: RectF) {
-        m.setScale(box.width(), box.height()); m.postTranslate(box.left, box.top)
-        sh.setLocalMatrix(m)
     }
 
     // pill i's place, in reading order (right to left in an RTL layout); one or two pills sit in a centred row
