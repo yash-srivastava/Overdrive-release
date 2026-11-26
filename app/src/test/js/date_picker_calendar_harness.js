@@ -96,6 +96,14 @@ for (const [name, environment, render] of [
     assert.ok(cell('2024-02-12').classList.contains('selected'), name);
     cell('2024-02-11').handlers.click();
     assert.strictEqual(picked, '2024-02-11', name);
+    // Existing range callers still highlight adjacent-month endpoints and interior dates.
+    calendar[draft ? '_draftFrom' : '_calFromKey'] = '2024-01-28';
+    calendar[draft ? '_draftTo' : '_calToKey'] = '2024-02-02';
+    calendar[render]();
+    assert.ok(cell('2024-01-28').classList.contains('other-month'), name);
+    assert.ok(cell('2024-01-28').classList.contains('selected'), name);
+    assert.ok(cell('2024-01-29').classList.contains('in-range'), name);
+    assert.ok(cell('2024-02-02').classList.contains('selected'), name);
     assert.strictEqual(calendar._keyToMs('2024-02-29', false), new Date(2024, 1, 29).getTime());
     assert.strictEqual(calendar._keyToMs('2024-02-29', true), new Date(2024, 1, 29, 23, 59, 59, 999).getTime());
     assert.strictEqual(calendar._keyToMs('invalid', false), null);
