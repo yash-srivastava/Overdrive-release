@@ -181,15 +181,8 @@ public final class GenAiRuntime implements Closeable {
             JSONArray messages, JSONObject context, String taskInstructions,
             String schemaName, JSONObject schema)
             throws GenAiException {
-        if (schemaName == null
-                || !schemaName.matches("[A-Za-z0-9_-]{1,64}")
-                || schema == null || schema.length() == 0) {
-            throw new GenAiException(400, "invalid_schema",
-                    "The structured-output schema is invalid.");
-        }
-        return completeInternal(
-                messages, context, taskInstructions,
-                schemaName, schema, null, false);
+        return completeStructured(messages, context, taskInstructions,
+                schemaName, schema, null);
     }
 
     public JSONObject completeStructured(
@@ -212,27 +205,13 @@ public final class GenAiRuntime implements Closeable {
             String schemaName, JSONObject schema, Cancellation cancellation,
             boolean webSearch)
             throws GenAiException {
-        GenAiConfig config = GenAiConfig.fromUnifiedConfig();
-        if (!config.enabled) {
-            throw new GenAiException(409, "genai_disabled",
-                    "GenAI is disabled.");
-        }
-        if (!config.isConfigured()) {
-            throw new GenAiException(409, "genai_not_configured",
-                    "GenAI provider settings are incomplete.");
-        }
+        GenAiConfig config = requireTextConfig();
 
         long requestGeneration = generation.get();
         String instructions =
                 buildInstructions(context, taskInstructions);
-        JSONArray providerMessages;
-        try {
-            providerMessages = messagesWithContext(
-                    messages, context);
-        } catch (Exception e) {
-            throw new GenAiException(400, "invalid_request",
-                    "Could not attach OverDrive context.");
-        }
+        JSONArray providerMessages =
+                prepareProviderMessages(messages, context);
         ProviderRequest providerRequest =
                 buildProviderRequest(
                         config, providerMessages, instructions, false,
@@ -294,28 +273,14 @@ public final class GenAiRuntime implements Closeable {
             Cancellation cancellation, StreamListener listener,
             boolean webSearch)
             throws GenAiException {
-        GenAiConfig config = GenAiConfig.fromUnifiedConfig();
-        if (!config.enabled) {
-            throw new GenAiException(409, "genai_disabled",
-                    "GenAI is disabled.");
-        }
-        if (!config.isConfigured()) {
-            throw new GenAiException(409, "genai_not_configured",
-                    "GenAI provider settings are incomplete.");
-        }
+        GenAiConfig config = requireTextConfig();
         Cancellation control = cancellation == null
                 ? new Cancellation() : cancellation;
         StreamListener sink = listener == null
                 ? delta -> { } : listener;
         long requestGeneration = generation.get();
-        JSONArray providerMessages;
-        try {
-            providerMessages = messagesWithContext(
-                    messages, context);
-        } catch (Exception e) {
-            throw new GenAiException(400, "invalid_request",
-                    "Could not attach OverDrive context.");
-        }
+        JSONArray providerMessages =
+                prepareProviderMessages(messages, context);
         String instructions = buildInstructions(context, taskInstructions);
         ProviderRequest providerRequest = buildProviderRequest(
                 config, providerMessages, instructions, true,
@@ -332,6 +297,29 @@ public final class GenAiRuntime implements Closeable {
                     requestGeneration, control, sink);
             rememberSearchRejected(config, e);
             return result;
+        }
+    }
+
+    private static GenAiConfig requireTextConfig() throws GenAiException {
+        GenAiConfig config = GenAiConfig.fromUnifiedConfig();
+        if (!config.enabled) {
+            throw new GenAiException(409, "genai_disabled",
+                    "GenAI is disabled.");
+        }
+        if (!config.isConfigured()) {
+            throw new GenAiException(409, "genai_not_configured",
+                    "GenAI provider settings are incomplete.");
+        }
+        return config;
+    }
+
+    private static JSONArray prepareProviderMessages(
+            JSONArray messages, JSONObject context) throws GenAiException {
+        try {
+            return messagesWithContext(messages, context);
+        } catch (Exception e) {
+            throw new GenAiException(400, "invalid_request",
+                    "Could not attach OverDrive context.");
         }
     }
 
