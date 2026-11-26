@@ -239,8 +239,9 @@ public final class HlsPlaylists {
     private static StringBuilder pad(StringBuilder sb, long v, int width) {
         // Normal timestamp components and EXTINF fractions fit in four digits.
         // Emit ASCII digits directly, avoiding a temporary decimal String for
-        // each component. Keep the old padding semantics for unusual years.
-        if (v >= 0 && v < 10_000) {
+        // each component. Use the general padding path for wider widths or
+        // values outside the fast path's range.
+        if (width <= 4 && v >= 0 && v < 10_000) {
             int n = (int) v;
             if (width >= 4 || n >= 1000) sb.append((char) ('0' + n / 1000));
             if (width >= 3 || n >= 100) sb.append((char) ('0' + n / 100 % 10));
