@@ -28,7 +28,7 @@
 (function () {
     'use strict';
 
-    var SCHEMA_VERSION = 2;
+    var SCHEMA_VERSION = 3;
     var CACHE_KEY = 'overdrive.searchIndex.v1';
     var MAX_RESULTS = 30;
     // Cross-navigation handoff for a setting deep-link. We can't put the target
@@ -196,6 +196,7 @@
     // ============================================================
 
     var _index = null;
+    var _indexComplete = false;
     var _building = false;
     var _buildWaiters = [];
 
@@ -214,7 +215,8 @@
         // in memory for this session; once the version is known a later load
         // persists it, and a stale on-disk cache (real version) simply mismatches
         // the empty current key and triggers a rebuild in ensureIndex.
-        if (!appVersion()) return;
+        // Never write a partial crawl or stale cache as the current index.
+        if (!_indexComplete || !appVersion()) return;
         try {
             window.localStorage.setItem(CACHE_KEY,
                 JSON.stringify({ ver: cacheVer(), entries: entries }));
@@ -229,24 +231,27 @@
     function fetchPage(page, collected, done) {
         var xhr;
         var completed = false;
-        function finish() {
+        function finish(success) {
             // Release a crawl worker slot exactly once, including on abort.
             if (completed) return;
             completed = true;
-            done();
+            done(success === true);
         }
         try { xhr = new XMLHttpRequest(); xhr.open('GET', page.href, true); }
         catch (e) { finish(); return; }
         xhr.timeout = 8000;
         xhr.onload = function () {
+            if (completed) return;
+            var success = false;
             if (xhr.status >= 200 && xhr.status < 300 && xhr.responseText) {
                 try {
                     var doc = new DOMParser().parseFromString(xhr.responseText, 'text/html');
                     var ex = extractFromDoc(page, xhr.responseText, doc);
                     for (var n = 0; n < ex.length; n++) collected.push(ex[n]);
+                    success = true;
                 } catch (e) { /* skip unparseable page */ }
             }
-            finish();
+            finish(success);
         };
         xhr.onerror = finish;
         xhr.ontimeout = finish;
@@ -266,15 +271,17 @@
             });
         }
         var total = pages.length;
-        if (!total) { cb(collected); return; }
+        if (!total) { cb(collected, false); return; }
         // Bounded worker pool: keep at most CRAWL_CONCURRENCY fetches in flight.
         var next = 0, active = 0, finished = 0;
+        var complete = true;
         function pump() {
             while (active < CRAWL_CONCURRENCY && next < total) {
                 active++;
-                fetchPage(pages[next++], collected, function () {
+                fetchPage(pages[next++], collected, function (success) {
+                    if (!success) complete = false;
                     active--; finished++;
-                    if (finished === total) cb(collected);
+                    if (finished === total) cb(collected, complete);
                     else pump();
                 });
             }
@@ -285,12 +292,13 @@
     function rebuild(cb) {
         if (_building) { if (cb) _buildWaiters.push(cb); return; }
         _building = true;
-        buildIndex(function (entries) {
+        buildIndex(function (entries, complete) {
             // Overlay the current page's live-DOM harvest so a background crawl
             // never clobbers the accurate (runtime-filtered + JS-rendered)
             // entries for the page the user is on.
             entries = applyHarvest(entries);
             _index = entries;
+            _indexComplete = complete;
             saveCache(entries);
             _building = false;
             var waiters = _buildWaiters.slice();
@@ -309,8 +317,9 @@
         var cached = loadCacheRaw();
         if (cached && cached.entries && cached.entries.length) {
             _index = cached.entries;
+            _indexComplete = !!appVersion() && cached.ver === cacheVer();
             if (cb) cb(_index);
-            if (cached.ver !== cacheVer()) rebuild(null);
+            if (!_indexComplete) rebuild(null);
             return;
         }
         rebuild(cb);
