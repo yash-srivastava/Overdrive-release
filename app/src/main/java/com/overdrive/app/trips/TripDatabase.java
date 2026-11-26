@@ -438,65 +438,8 @@ public class TripDatabase {
                 logger.debug("trips size column migration: " + e.getMessage());
             }
 
-            // Weekly rollups
-            stmt.execute(
-                "CREATE TABLE IF NOT EXISTS weekly_rollups (" +
-                "\"year\" INTEGER NOT NULL," +
-                "week_number INTEGER NOT NULL," +
-                "trip_count INTEGER DEFAULT 0," +
-                "total_distance_km REAL DEFAULT 0," +
-                "total_duration_seconds INTEGER DEFAULT 0," +
-                "avg_efficiency REAL DEFAULT 0," +
-                "total_energy_kwh REAL DEFAULT 0," +
-                "total_cost REAL DEFAULT 0," +
-                "avg_energy_per_km REAL DEFAULT 0," +
-                "avg_anticipation INTEGER DEFAULT 0," +
-                "avg_smoothness INTEGER DEFAULT 0," +
-                "avg_speed_discipline INTEGER DEFAULT 0," +
-                "avg_efficiency_score INTEGER DEFAULT 0," +
-                "avg_consistency INTEGER DEFAULT 0," +
-                "PRIMARY KEY (\"year\", week_number)" +
-                ")"
-            );
-
-            // Weekly rollups migration (for databases created before energy columns were added)
-            try {
-                stmt.execute("ALTER TABLE weekly_rollups ADD COLUMN IF NOT EXISTS total_energy_kwh REAL DEFAULT 0");
-                stmt.execute("ALTER TABLE weekly_rollups ADD COLUMN IF NOT EXISTS total_cost REAL DEFAULT 0");
-                stmt.execute("ALTER TABLE weekly_rollups ADD COLUMN IF NOT EXISTS avg_energy_per_km REAL DEFAULT 0");
-            } catch (Exception e) {
-                logger.debug("weekly_rollups energy migration: " + e.getMessage());
-            }
-
-            // Monthly rollups
-            stmt.execute(
-                "CREATE TABLE IF NOT EXISTS monthly_rollups (" +
-                "\"year\" INTEGER NOT NULL," +
-                "month_number INTEGER NOT NULL," +
-                "trip_count INTEGER DEFAULT 0," +
-                "total_distance_km REAL DEFAULT 0," +
-                "total_duration_seconds INTEGER DEFAULT 0," +
-                "avg_efficiency REAL DEFAULT 0," +
-                "total_energy_kwh REAL DEFAULT 0," +
-                "total_cost REAL DEFAULT 0," +
-                "avg_energy_per_km REAL DEFAULT 0," +
-                "avg_anticipation INTEGER DEFAULT 0," +
-                "avg_smoothness INTEGER DEFAULT 0," +
-                "avg_speed_discipline INTEGER DEFAULT 0," +
-                "avg_efficiency_score INTEGER DEFAULT 0," +
-                "avg_consistency INTEGER DEFAULT 0," +
-                "PRIMARY KEY (\"year\", month_number)" +
-                ")"
-            );
-
-            // Monthly rollups migration (for databases created before energy columns were added)
-            try {
-                stmt.execute("ALTER TABLE monthly_rollups ADD COLUMN IF NOT EXISTS total_energy_kwh REAL DEFAULT 0");
-                stmt.execute("ALTER TABLE monthly_rollups ADD COLUMN IF NOT EXISTS total_cost REAL DEFAULT 0");
-                stmt.execute("ALTER TABLE monthly_rollups ADD COLUMN IF NOT EXISTS avg_energy_per_km REAL DEFAULT 0");
-            } catch (Exception e) {
-                logger.debug("monthly_rollups energy migration: " + e.getMessage());
-            }
+            createRollupTable(stmt, "weekly_rollups", "week_number");
+            createRollupTable(stmt, "monthly_rollups", "month_number");
 
             // Consumption buckets
             stmt.execute(
@@ -536,6 +479,38 @@ public class TripDatabase {
         }
     }
 
+    // Both tables retain their existing period key and column definitions.
+    private void createRollupTable(Statement stmt, String table, String periodColumn) throws Exception {
+        stmt.execute(
+            "CREATE TABLE IF NOT EXISTS " + table + " (" +
+            "\"year\" INTEGER NOT NULL," +
+            periodColumn + " INTEGER NOT NULL," +
+            "trip_count INTEGER DEFAULT 0," +
+            "total_distance_km REAL DEFAULT 0," +
+            "total_duration_seconds INTEGER DEFAULT 0," +
+            "avg_efficiency REAL DEFAULT 0," +
+            "total_energy_kwh REAL DEFAULT 0," +
+            "total_cost REAL DEFAULT 0," +
+            "avg_energy_per_km REAL DEFAULT 0," +
+            "avg_anticipation INTEGER DEFAULT 0," +
+            "avg_smoothness INTEGER DEFAULT 0," +
+            "avg_speed_discipline INTEGER DEFAULT 0," +
+            "avg_efficiency_score INTEGER DEFAULT 0," +
+            "avg_consistency INTEGER DEFAULT 0," +
+            "PRIMARY KEY (\"year\", " + periodColumn + ")" +
+            ")"
+        );
+
+        // Rollup migration (for databases created before energy columns were added)
+        try {
+            stmt.execute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS total_energy_kwh REAL DEFAULT 0");
+            stmt.execute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS total_cost REAL DEFAULT 0");
+            stmt.execute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS avg_energy_per_km REAL DEFAULT 0");
+        } catch (Exception e) {
+            logger.debug(table + " energy migration: " + e.getMessage());
+        }
+    }
+
     // ==================== TRIP CRUD (Task 7.2) ====================
 
     /**
@@ -560,16 +535,6 @@ public class TripDatabase {
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             setTripParams(pstmt, trip);
-            pstmt.setObject(33, trip.routeId > 0 ? trip.routeId : null);
-            setTripFuelParams(pstmt, trip, 34);
-            pstmt.setLong(44, trip.sizeBytes);
-            pstmt.setLong(45, trip.sidecarSizeBytes);
-            pstmt.setDouble(46, trip.odometerStartKm);
-            pstmt.setDouble(47, trip.odometerEndKm);
-            pstmt.setString(48, trip.rateSource != null ? trip.rateSource : "");
-            pstmt.setString(49, trip.rateLabel != null ? trip.rateLabel : "");
-            pstmt.setDouble(50, trip.elecConStart);
-            pstmt.setDouble(51, trip.elecConEnd);
             pstmt.executeUpdate();
 
             try (ResultSet keys = pstmt.getGeneratedKeys()) {
@@ -615,16 +580,6 @@ public class TripDatabase {
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             setTripParams(pstmt, trip);
-            pstmt.setObject(33, trip.routeId > 0 ? trip.routeId : null);
-            setTripFuelParams(pstmt, trip, 34);
-            pstmt.setLong(44, trip.sizeBytes);
-            pstmt.setLong(45, trip.sidecarSizeBytes);
-            pstmt.setDouble(46, trip.odometerStartKm);
-            pstmt.setDouble(47, trip.odometerEndKm);
-            pstmt.setString(48, trip.rateSource != null ? trip.rateSource : "");
-            pstmt.setString(49, trip.rateLabel != null ? trip.rateLabel : "");
-            pstmt.setDouble(50, trip.elecConStart);
-            pstmt.setDouble(51, trip.elecConEnd);
             pstmt.setLong(52, trip.id);
             int rows = pstmt.executeUpdate();
             logger.debug("Updated trip id=" + trip.id + " (rows=" + rows + ")");
@@ -640,9 +595,13 @@ public class TripDatabase {
      * Get a single trip by id, or null if not found.
      */
     public synchronized TripRecord getTrip(long id) {
+        return getTrip(id, true);
+    }
+
+    private TripRecord getTrip(long id, boolean includeMoments) {
         if (!ensureConnection()) return null;
 
-        String sql = "SELECT * FROM trips WHERE id=?";
+        String sql = "SELECT " + tripColumns(includeMoments) + " FROM trips WHERE id=?";
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setLong(1, id);
             try (ResultSet rs = pstmt.executeQuery()) {
@@ -702,6 +661,10 @@ public class TripDatabase {
      * older rows during a paging session.
      */
     public synchronized List<TripRecord> getTrips(int days, int limit, int offset) {
+        return getTrips(days, limit, offset, true);
+    }
+
+    private List<TripRecord> getTrips(int days, int limit, int offset, boolean includeMoments) {
         List<TripRecord> trips = new ArrayList<>();
         if (!ensureConnection()) return trips;
         if (offset < 0) offset = 0;
@@ -710,8 +673,8 @@ public class TripDatabase {
         // end_time > 0: rows are inserted at trip START now; a half-open row
         // (in-flight drive, or a crash awaiting the recovery finalize pass)
         // must not surface in the trips list as a zero-distance entry.
-        String sql = "SELECT * FROM trips WHERE start_time >= ? AND end_time > 0 " +
-                "ORDER BY start_time DESC LIMIT ? OFFSET ?";
+        String sql = "SELECT " + tripColumns(includeMoments) + " FROM trips WHERE start_time >= ? " +
+                "AND end_time > 0 ORDER BY start_time DESC LIMIT ? OFFSET ?";
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setLong(1, cutoff);
@@ -734,51 +697,20 @@ public class TripDatabase {
      * CLOB makes H2 copy it into a temporary LOB, a store write on every read.
      */
     public synchronized List<TripRecord> getTripsWithoutMoments(int days, int limit, int offset) {
-        List<TripRecord> trips = new ArrayList<>();
-        if (!ensureConnection()) return trips;
-        if (offset < 0) offset = 0;
-
-        long cutoff = System.currentTimeMillis() - ((long) days * 86400000L);
-        String sql = "SELECT " + COLUMNS_WITHOUT_MOMENTS + " FROM trips WHERE start_time >= ? AND end_time > 0 " +
-                "ORDER BY start_time DESC LIMIT ? OFFSET ?";
-
-        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-            pstmt.setLong(1, cutoff);
-            pstmt.setInt(2, limit);
-            pstmt.setInt(3, offset);
-            try (ResultSet rs = pstmt.executeQuery()) {
-                while (rs.next()) {
-                    trips.add(readTripFromResultSet(rs));
-                }
-            }
-        } catch (Exception e) {
-            logger.error("Failed to get trips", e);
-            reconnect();
-        }
-        return trips;
+        return getTrips(days, limit, offset, false);
     }
 
     /** {@link #getTrip(long)} with micro_moments_json read as NULL; see {@link #getTripsWithoutMoments}. */
     public synchronized TripRecord getTripWithoutMoments(long id) {
-        if (!ensureConnection()) return null;
-
-        String sql = "SELECT " + COLUMNS_WITHOUT_MOMENTS + " FROM trips WHERE id=?";
-        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-            pstmt.setLong(1, id);
-            try (ResultSet rs = pstmt.executeQuery()) {
-                if (rs.next()) {
-                    return readTripFromResultSet(rs);
-                }
-            }
-        } catch (Exception e) {
-            logger.error("Failed to get trip id=" + id, e);
-            reconnect();
-        }
-        return null;
+        return getTrip(id, false);
     }
 
     private static final String COLUMNS_WITHOUT_MOMENTS =
             "* EXCEPT (micro_moments_json), CAST(NULL AS VARCHAR) AS micro_moments_json";
+
+    private static String tripColumns(boolean includeMoments) {
+        return includeMoments ? "*" : COLUMNS_WITHOUT_MOMENTS;
+    }
 
     /**
      * List trips whose start_time falls within an explicit [fromMs, toMs]
@@ -792,6 +724,11 @@ public class TripDatabase {
      * recent trips. The {@code start_time} index makes the range scan cheap.
      */
     public synchronized List<TripRecord> getTripsBetween(long fromMs, long toMs, int limit, int offset) {
+        return getTripsBetween(fromMs, toMs, limit, offset, true);
+    }
+
+    private List<TripRecord> getTripsBetween(long fromMs, long toMs, int limit, int offset,
+                                            boolean includeMoments) {
         List<TripRecord> trips = new ArrayList<>();
         if (!ensureConnection()) return trips;
         if (offset < 0) offset = 0;
@@ -799,20 +736,21 @@ public class TripDatabase {
         if (fromMs > toMs) { long t = fromMs; fromMs = toMs; toMs = t; }
 
         // end_time > 0: exclude in-flight / not-yet-finalized rows (see getTrips).
-        String sql = "SELECT * FROM trips WHERE start_time >= ? AND start_time <= ? "
-                + "AND end_time > 0 ORDER BY start_time DESC LIMIT ? OFFSET ?";
+        String sql = "SELECT " + tripColumns(includeMoments) + " FROM trips WHERE start_time >= ? " +
+                "AND start_time <= ? AND end_time > 0 ORDER BY start_time DESC LIMIT ?" +
+                (includeMoments ? " OFFSET ?" : "");
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setLong(1, fromMs);
             pstmt.setLong(2, toMs);
             pstmt.setInt(3, limit);
-            pstmt.setInt(4, offset);
+            if (includeMoments) pstmt.setInt(4, offset);
             try (ResultSet rs = pstmt.executeQuery()) {
                 while (rs.next()) {
                     trips.add(readTripFromResultSet(rs));
                 }
             }
         } catch (Exception e) {
-            logger.error("Failed to get trips in range", e);
+            logger.error(includeMoments ? "Failed to get trips in range" : "Failed to get trips for period totals", e);
             reconnect();
         }
         return trips;
@@ -824,27 +762,7 @@ public class TripDatabase {
      * totals on GET /api/trips/summary.
      */
     public synchronized List<TripRecord> getTripsBetweenWithoutMoments(long fromMs, long toMs, int limit) {
-        List<TripRecord> trips = new ArrayList<>();
-        if (!ensureConnection()) return trips;
-        if (toMs <= 0) toMs = System.currentTimeMillis();
-        if (fromMs > toMs) { long t = fromMs; fromMs = toMs; toMs = t; }
-
-        String sql = "SELECT " + COLUMNS_WITHOUT_MOMENTS + " FROM trips WHERE start_time >= ? "
-                + "AND start_time <= ? AND end_time > 0 ORDER BY start_time DESC LIMIT ?";
-        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-            pstmt.setLong(1, fromMs);
-            pstmt.setLong(2, toMs);
-            pstmt.setInt(3, limit);
-            try (ResultSet rs = pstmt.executeQuery()) {
-                while (rs.next()) {
-                    trips.add(readTripFromResultSet(rs));
-                }
-            }
-        } catch (Exception e) {
-            logger.error("Failed to get trips for period totals", e);
-            reconnect();
-        }
-        return trips;
+        return getTripsBetween(fromMs, toMs, limit, 0, false);
     }
 
     /**
@@ -1181,7 +1099,7 @@ public class TripDatabase {
 
     /**
      * Update the weekly rollup for the ISO week of the given trip.
-     * Uses MERGE with running average: new_avg = (old_avg * old_count + new_value) / (old_count + 1)
+     * Uses a running average: new_avg = (old_avg * old_count + new_value) / (old_count + 1)
      */
     public synchronized void updateWeeklyRollup(TripRecord trip) {
         if (!ensureConnection()) return;
@@ -1197,31 +1115,7 @@ public class TripDatabase {
             // First try to read existing rollup
             WeeklyRollup existing = getWeeklyRollup(year, week);
 
-            if (existing == null) {
-                insertRollup("weekly_rollups", "week_number", year, week, trip);
-            } else {
-                // Update with running averages
-                int oldCount = existing.tripCount;
-                int newCount = oldCount + 1;
-
-                try (PreparedStatement pstmt = prepareRollupUpdate("weekly_rollups", "week_number")) {
-                    pstmt.setInt(1, newCount);
-                    pstmt.setDouble(2, existing.totalDistanceKm + trip.distanceKm);
-                    pstmt.setInt(3, existing.totalDurationSeconds + trip.durationSeconds);
-                    pstmt.setDouble(4, runningAvg(existing.avgEfficiency, oldCount, trip.efficiencySocPerKm));
-                    pstmt.setDouble(5, existing.totalEnergyKwh + trip.getResolvedEnergyKwh());
-                    pstmt.setDouble(6, existing.totalCost + trip.tripCost);
-                    pstmt.setDouble(7, runningAvg(existing.avgEnergyPerKm, oldCount, trip.energyPerKm));
-                    pstmt.setInt(8, (int) Math.round(runningAvg(existing.avgAnticipation, oldCount, trip.anticipationScore)));
-                    pstmt.setInt(9, (int) Math.round(runningAvg(existing.avgSmoothness, oldCount, trip.smoothnessScore)));
-                    pstmt.setInt(10, (int) Math.round(runningAvg(existing.avgSpeedDiscipline, oldCount, trip.speedDisciplineScore)));
-                    pstmt.setInt(11, (int) Math.round(runningAvg(existing.avgEfficiencyScore, oldCount, trip.efficiencyScore)));
-                    pstmt.setInt(12, (int) Math.round(runningAvg(existing.avgConsistency, oldCount, trip.consistencyScore)));
-                    pstmt.setInt(13, year);
-                    pstmt.setInt(14, week);
-                    pstmt.executeUpdate();
-                }
-            }
+            updateRollup("weekly_rollups", "week_number", year, week, trip, existing);
             if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
                 // The trips this (year, week) key holds: its week, a day either side, in its calendar
                 // year; weeks 1 and 52/53 also take the year's other end. The key itself decides.
@@ -1264,7 +1158,7 @@ public class TripDatabase {
 
     /**
      * Update the monthly rollup for the month of the given trip.
-     * Uses MERGE with running average: new_avg = (old_avg * old_count + new_value) / (old_count + 1)
+     * Uses a running average: new_avg = (old_avg * old_count + new_value) / (old_count + 1)
      */
     public synchronized void updateMonthlyRollup(TripRecord trip) {
         if (!ensureConnection()) return;
@@ -1278,31 +1172,7 @@ public class TripDatabase {
             // First try to read existing rollup
             MonthlyRollup existing = getMonthlyRollup(year, month);
 
-            if (existing == null) {
-                insertRollup("monthly_rollups", "month_number", year, month, trip);
-            } else {
-                // Update with running averages
-                int oldCount = existing.tripCount;
-                int newCount = oldCount + 1;
-
-                try (PreparedStatement pstmt = prepareRollupUpdate("monthly_rollups", "month_number")) {
-                    pstmt.setInt(1, newCount);
-                    pstmt.setDouble(2, existing.totalDistanceKm + trip.distanceKm);
-                    pstmt.setInt(3, existing.totalDurationSeconds + trip.durationSeconds);
-                    pstmt.setDouble(4, runningAvg(existing.avgEfficiency, oldCount, trip.efficiencySocPerKm));
-                    pstmt.setDouble(5, existing.totalEnergyKwh + trip.getResolvedEnergyKwh());
-                    pstmt.setDouble(6, existing.totalCost + trip.tripCost);
-                    pstmt.setDouble(7, runningAvg(existing.avgEnergyPerKm, oldCount, trip.energyPerKm));
-                    pstmt.setInt(8, (int) Math.round(runningAvg(existing.avgAnticipation, oldCount, trip.anticipationScore)));
-                    pstmt.setInt(9, (int) Math.round(runningAvg(existing.avgSmoothness, oldCount, trip.smoothnessScore)));
-                    pstmt.setInt(10, (int) Math.round(runningAvg(existing.avgSpeedDiscipline, oldCount, trip.speedDisciplineScore)));
-                    pstmt.setInt(11, (int) Math.round(runningAvg(existing.avgEfficiencyScore, oldCount, trip.efficiencyScore)));
-                    pstmt.setInt(12, (int) Math.round(runningAvg(existing.avgConsistency, oldCount, trip.consistencyScore)));
-                    pstmt.setInt(13, year);
-                    pstmt.setInt(14, month);
-                    pstmt.executeUpdate();
-                }
-            }
+            updateRollup("monthly_rollups", "month_number", year, month, trip, existing);
             if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
                 Calendar from = (Calendar) cal.clone();
                 from.set(Calendar.DAY_OF_MONTH, 1);
@@ -1324,6 +1194,35 @@ public class TripDatabase {
     }
 
     // Table and period column names are fixed internal literals at both call sites.
+    private void updateRollup(String table, String periodColumn, int year, int period,
+                              TripRecord trip, TripRollup existing) throws Exception {
+        if (existing == null) {
+            insertRollup(table, periodColumn, year, period, trip);
+        } else {
+            // Update with running averages
+            int oldCount = existing.tripCount;
+            int newCount = oldCount + 1;
+
+            try (PreparedStatement pstmt = prepareRollupUpdate(table, periodColumn)) {
+                pstmt.setInt(1, newCount);
+                pstmt.setDouble(2, existing.totalDistanceKm + trip.distanceKm);
+                pstmt.setInt(3, existing.totalDurationSeconds + trip.durationSeconds);
+                pstmt.setDouble(4, runningAvg(existing.avgEfficiency, oldCount, trip.efficiencySocPerKm));
+                pstmt.setDouble(5, existing.totalEnergyKwh + trip.getResolvedEnergyKwh());
+                pstmt.setDouble(6, existing.totalCost + trip.tripCost);
+                pstmt.setDouble(7, runningAvg(existing.avgEnergyPerKm, oldCount, trip.energyPerKm));
+                pstmt.setInt(8, (int) Math.round(runningAvg(existing.avgAnticipation, oldCount, trip.anticipationScore)));
+                pstmt.setInt(9, (int) Math.round(runningAvg(existing.avgSmoothness, oldCount, trip.smoothnessScore)));
+                pstmt.setInt(10, (int) Math.round(runningAvg(existing.avgSpeedDiscipline, oldCount, trip.speedDisciplineScore)));
+                pstmt.setInt(11, (int) Math.round(runningAvg(existing.avgEfficiencyScore, oldCount, trip.efficiencyScore)));
+                pstmt.setInt(12, (int) Math.round(runningAvg(existing.avgConsistency, oldCount, trip.consistencyScore)));
+                pstmt.setInt(13, year);
+                pstmt.setInt(14, period);
+                pstmt.executeUpdate();
+            }
+        }
+    }
+
     private void insertRollup(String table, String periodColumn, int year, int period,
                               TripRecord trip) throws Exception {
         String sql = "INSERT INTO " + table + " (\"year\", " + periodColumn + ", trip_count, " +
@@ -1350,7 +1249,7 @@ public class TripDatabase {
         }
     }
 
-    // Keep this UPDATE column order in sync with the parameter bindings in updateWeeklyRollup() and updateMonthlyRollup().
+    // Keep this UPDATE column order in sync with the parameter bindings in updateRollup().
     private PreparedStatement prepareRollupUpdate(String table, String periodColumn) throws Exception {
         String sql = "UPDATE " + table + " SET trip_count=?, " +
                 "total_distance_km=?, total_duration_seconds=?, avg_efficiency=?, " +
@@ -1387,41 +1286,37 @@ public class TripDatabase {
      * Get the most recent N weekly rollups, ordered by year/week descending.
      */
     public synchronized List<WeeklyRollup> getRecentWeeklyRollups(int weeks) {
-        List<WeeklyRollup> rollups = new ArrayList<>();
-        if (!ensureConnection()) return rollups;
-
-        String sql = "SELECT * FROM weekly_rollups ORDER BY \"year\" DESC, week_number DESC LIMIT ?";
-        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-            pstmt.setInt(1, weeks);
-            try (ResultSet rs = pstmt.executeQuery()) {
-                while (rs.next()) {
-                    rollups.add(readWeeklyRollupFromResultSet(rs));
-                }
-            }
-        } catch (Exception e) {
-            logger.error("Failed to get recent weekly rollups", e);
-            reconnect();
-        }
-        return rollups;
+        return getRecentRollups(weeks, "weekly_rollups", "week_number", "weekly",
+                this::readWeeklyRollupFromResultSet);
     }
 
     /**
      * Get the most recent N monthly rollups, ordered by year/month descending.
      */
     public synchronized List<MonthlyRollup> getRecentMonthlyRollups(int months) {
-        List<MonthlyRollup> rollups = new ArrayList<>();
+        return getRecentRollups(months, "monthly_rollups", "month_number", "monthly",
+                this::readMonthlyRollupFromResultSet);
+    }
+
+    private interface RollupReader<T> {
+        T read(ResultSet rs) throws Exception;
+    }
+
+    private <T extends TripRollup> List<T> getRecentRollups(int limit, String table,
+            String periodColumn, String label, RollupReader<T> reader) {
+        List<T> rollups = new ArrayList<>();
         if (!ensureConnection()) return rollups;
 
-        String sql = "SELECT * FROM monthly_rollups ORDER BY \"year\" DESC, month_number DESC LIMIT ?";
+        String sql = "SELECT * FROM " + table + " ORDER BY \"year\" DESC, " + periodColumn + " DESC LIMIT ?";
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-            pstmt.setInt(1, months);
+            pstmt.setInt(1, limit);
             try (ResultSet rs = pstmt.executeQuery()) {
                 while (rs.next()) {
-                    rollups.add(readMonthlyRollupFromResultSet(rs));
+                    rollups.add(reader.read(rs));
                 }
             }
         } catch (Exception e) {
-            logger.error("Failed to get recent monthly rollups", e);
+            logger.error("Failed to get recent " + label + " rollups", e);
             reconnect();
         }
         return rollups;
@@ -1473,58 +1368,87 @@ public class TripDatabase {
      * Uses MERGE semantics: insert if not exists, update if exists.
      */
     public synchronized void updateConsumptionBucket(String bucketKey, double consumptionKwhPerKm) {
-        if (!ensureConnection()) return;
-
-        try {
-            // Try to read existing bucket
-            ConsumptionBucket existing = getBucket(bucketKey);
-
-            if (existing == null) {
-                // Insert new bucket
-                String sql = "INSERT INTO consumption_buckets (bucket_key, sample_count, sum_kwh_per_km, sum_squared_kwh_per_km) " +
-                        "VALUES (?, 1, ?, ?)";
-                try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-                    pstmt.setString(1, bucketKey);
-                    pstmt.setDouble(2, consumptionKwhPerKm);
-                    pstmt.setDouble(3, consumptionKwhPerKm * consumptionKwhPerKm);
-                    pstmt.executeUpdate();
-                }
-            } else {
-                // Update existing bucket: increment count, add to sum, add square to sumSquared
-                String sql = "UPDATE consumption_buckets SET sample_count = sample_count + 1, " +
-                        "sum_kwh_per_km = sum_kwh_per_km + ?, " +
-                        "sum_squared_kwh_per_km = sum_squared_kwh_per_km + ? " +
-                        "WHERE bucket_key = ?";
-                try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-                    pstmt.setDouble(1, consumptionKwhPerKm);
-                    pstmt.setDouble(2, consumptionKwhPerKm * consumptionKwhPerKm);
-                    pstmt.setString(3, bucketKey);
-                    pstmt.executeUpdate();
-                }
-            }
-            logger.debug("Updated consumption bucket: " + bucketKey);
-        } catch (Exception e) {
-            logger.error("Failed to update consumption bucket: " + bucketKey, e);
-            reconnect();
-        }
+        updateBucket(bucketKey, consumptionKwhPerKm, BucketTable.ELECTRIC);
     }
 
     /**
      * Get a consumption bucket by key, or null if not found.
      */
     public synchronized ConsumptionBucket getBucket(String bucketKey) {
+        return getBucket(bucketKey, BucketTable.ELECTRIC);
+    }
+
+    // Only fixed internal table and column names are used to construct SQL.
+    private enum BucketTable {
+        ELECTRIC("consumption_buckets", "sum_kwh_per_km", "sum_squared_kwh_per_km", "consumption"),
+        FUEL("fuel_consumption_buckets", "sum_litres_per_km", "sum_squared_litres_per_km", "fuel");
+
+        final String table;
+        final String sum;
+        final String squaredSum;
+        final String label;
+
+        BucketTable(String table, String sum, String squaredSum, String label) {
+            this.table = table;
+            this.sum = sum;
+            this.squaredSum = squaredSum;
+            this.label = label;
+        }
+    }
+
+    private void updateBucket(String bucketKey, double rate, BucketTable bucket) {
+        if (!ensureConnection()) return;
+
+        try {
+            // Try to read existing bucket
+            ConsumptionBucket existing = bucket == BucketTable.ELECTRIC
+                    ? getBucket(bucketKey) : getFuelBucket(bucketKey);
+
+            if (existing == null) {
+                // Insert new bucket
+                String sql = "INSERT INTO " + bucket.table + " (bucket_key, sample_count, " +
+                        bucket.sum + ", " + bucket.squaredSum + ") " +
+                        "VALUES (?, 1, ?, ?)";
+                try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+                    pstmt.setString(1, bucketKey);
+                    pstmt.setDouble(2, rate);
+                    pstmt.setDouble(3, rate * rate);
+                    pstmt.executeUpdate();
+                }
+            } else {
+                // Update existing bucket: increment count, add to sum, add square to sumSquared
+                String sql = "UPDATE " + bucket.table + " SET sample_count = sample_count + 1, " +
+                        bucket.sum + " = " + bucket.sum + " + ?, " +
+                        bucket.squaredSum + " = " + bucket.squaredSum + " + ? " +
+                        "WHERE bucket_key = ?";
+                try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+                    pstmt.setDouble(1, rate);
+                    pstmt.setDouble(2, rate * rate);
+                    pstmt.setString(3, bucketKey);
+                    pstmt.executeUpdate();
+                }
+            }
+            logger.debug("Updated " + bucket.label + " bucket: " + bucketKey);
+        } catch (Exception e) {
+            logger.error("Failed to update " + bucket.label + " bucket: " + bucketKey, e);
+            reconnect();
+        }
+    }
+
+    private ConsumptionBucket getBucket(String bucketKey, BucketTable bucket) {
         if (!ensureConnection()) return null;
 
-        String sql = "SELECT * FROM consumption_buckets WHERE bucket_key = ?";
+        String sql = "SELECT bucket_key, sample_count, " + bucket.sum + ", " + bucket.squaredSum +
+                " FROM " + bucket.table + " WHERE bucket_key = ?";
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setString(1, bucketKey);
             try (ResultSet rs = pstmt.executeQuery()) {
                 if (rs.next()) {
-                    return readBucketFromResultSet(rs);
+                    return readBucketFromResultSet(rs, bucket);
                 }
             }
         } catch (Exception e) {
-            logger.error("Failed to get consumption bucket: " + bucketKey, e);
+            logger.error("Failed to get " + bucket.label + " bucket: " + bucketKey, e);
             reconnect();
         }
         return null;
@@ -2842,12 +2766,16 @@ public class TripDatabase {
      * Aggregates: sum all sums / sum all counts.
      */
     public synchronized ConsumptionBucket getOverallAverage() {
+        return getOverallAverage(BucketTable.ELECTRIC);
+    }
+
+    private ConsumptionBucket getOverallAverage(BucketTable bucket) {
         if (!ensureConnection()) return null;
 
         String sql = "SELECT SUM(sample_count) as total_count, " +
-                "SUM(sum_kwh_per_km) as total_sum, " +
-                "SUM(sum_squared_kwh_per_km) as total_sum_sq " +
-                "FROM consumption_buckets";
+                "SUM(" + bucket.sum + ") as total_sum, " +
+                "SUM(" + bucket.squaredSum + ") as total_sum_sq " +
+                "FROM " + bucket.table;
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql);
              ResultSet rs = pstmt.executeQuery()) {
@@ -2863,7 +2791,7 @@ public class TripDatabase {
                 return overall;
             }
         } catch (Exception e) {
-            logger.error("Failed to get overall consumption average", e);
+            logger.error("Failed to get overall " + bucket.label + " average", e);
             reconnect();
         }
         return null;
@@ -2879,38 +2807,7 @@ public class TripDatabase {
      * bucket-resolution code can stay generic.
      */
     public synchronized void updateFuelConsumptionBucket(String bucketKey, double litresPerKm) {
-        if (!ensureConnection()) return;
-
-        try {
-            ConsumptionBucket existing = getFuelBucket(bucketKey);
-
-            if (existing == null) {
-                String sql = "INSERT INTO fuel_consumption_buckets "
-                        + "(bucket_key, sample_count, sum_litres_per_km, sum_squared_litres_per_km) "
-                        + "VALUES (?, 1, ?, ?)";
-                try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-                    pstmt.setString(1, bucketKey);
-                    pstmt.setDouble(2, litresPerKm);
-                    pstmt.setDouble(3, litresPerKm * litresPerKm);
-                    pstmt.executeUpdate();
-                }
-            } else {
-                String sql = "UPDATE fuel_consumption_buckets SET sample_count = sample_count + 1, "
-                        + "sum_litres_per_km = sum_litres_per_km + ?, "
-                        + "sum_squared_litres_per_km = sum_squared_litres_per_km + ? "
-                        + "WHERE bucket_key = ?";
-                try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-                    pstmt.setDouble(1, litresPerKm);
-                    pstmt.setDouble(2, litresPerKm * litresPerKm);
-                    pstmt.setString(3, bucketKey);
-                    pstmt.executeUpdate();
-                }
-            }
-            logger.debug("Updated fuel bucket: " + bucketKey);
-        } catch (Exception e) {
-            logger.error("Failed to update fuel bucket: " + bucketKey, e);
-            reconnect();
-        }
+        updateBucket(bucketKey, litresPerKm, BucketTable.FUEL);
     }
 
     /**
@@ -2920,27 +2817,7 @@ public class TripDatabase {
      * call-site uniformity with the EV path.
      */
     public synchronized ConsumptionBucket getFuelBucket(String bucketKey) {
-        if (!ensureConnection()) return null;
-
-        String sql = "SELECT bucket_key, sample_count, sum_litres_per_km, sum_squared_litres_per_km "
-                + "FROM fuel_consumption_buckets WHERE bucket_key = ?";
-        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-            pstmt.setString(1, bucketKey);
-            try (ResultSet rs = pstmt.executeQuery()) {
-                if (rs.next()) {
-                    ConsumptionBucket b = new ConsumptionBucket();
-                    b.bucketKey = rs.getString("bucket_key");
-                    b.sampleCount = rs.getInt("sample_count");
-                    b.sumKwhPerKm = rs.getDouble("sum_litres_per_km");
-                    b.sumSquaredKwhPerKm = rs.getDouble("sum_squared_litres_per_km");
-                    return b;
-                }
-            }
-        } catch (Exception e) {
-            logger.error("Failed to get fuel bucket: " + bucketKey, e);
-            reconnect();
-        }
-        return null;
+        return getBucket(bucketKey, BucketTable.FUEL);
     }
 
     /**
@@ -2948,31 +2825,7 @@ public class TripDatabase {
      * {@link #getOverallAverage()} for the EV side.
      */
     public synchronized ConsumptionBucket getOverallFuelAverage() {
-        if (!ensureConnection()) return null;
-
-        String sql = "SELECT SUM(sample_count) as total_count, "
-                + "SUM(sum_litres_per_km) as total_sum, "
-                + "SUM(sum_squared_litres_per_km) as total_sum_sq "
-                + "FROM fuel_consumption_buckets";
-
-        try (PreparedStatement pstmt = connection.prepareStatement(sql);
-             ResultSet rs = pstmt.executeQuery()) {
-            if (rs.next()) {
-                int totalCount = rs.getInt("total_count");
-                if (totalCount == 0) return null;
-
-                ConsumptionBucket overall = new ConsumptionBucket();
-                overall.bucketKey = "overall";
-                overall.sampleCount = totalCount;
-                overall.sumKwhPerKm = rs.getDouble("total_sum");
-                overall.sumSquaredKwhPerKm = rs.getDouble("total_sum_sq");
-                return overall;
-            }
-        } catch (Exception e) {
-            logger.error("Failed to get overall fuel average", e);
-            reconnect();
-        }
-        return null;
+        return getOverallAverage(BucketTable.FUEL);
     }
 
     // ==================== RANGE CALIBRATION ====================
@@ -3124,9 +2977,8 @@ public class TripDatabase {
     }
 
     /**
-     * Set PreparedStatement parameters for a TripRecord (positions 1-32).
-     * Position 33 (route_id) is set by the caller; PHEV fuel columns at
-     * positions 34-43 are bound by {@link #setTripFuelParams}.
+     * Bind all 51 trip columns in the order shared by INSERT and UPDATE.
+     * UPDATE binds the row ID separately at position 52.
      */
     private void setTripParams(PreparedStatement pstmt, TripRecord trip) throws Exception {
         pstmt.setLong(1, trip.startTime);
@@ -3161,6 +3013,16 @@ public class TripDatabase {
         pstmt.setInt(30, trip.consistencyScore);
         pstmt.setString(31, trip.microMomentsJson);
         pstmt.setString(32, trip.telemetryFilePath);
+        pstmt.setObject(33, trip.routeId > 0 ? trip.routeId : null);
+        setTripFuelParams(pstmt, trip, 34);
+        pstmt.setLong(44, trip.sizeBytes);
+        pstmt.setLong(45, trip.sidecarSizeBytes);
+        pstmt.setDouble(46, trip.odometerStartKm);
+        pstmt.setDouble(47, trip.odometerEndKm);
+        pstmt.setString(48, trip.rateSource != null ? trip.rateSource : "");
+        pstmt.setString(49, trip.rateLabel != null ? trip.rateLabel : "");
+        pstmt.setDouble(50, trip.elecConStart);
+        pstmt.setDouble(51, trip.elecConEnd);
     }
 
     /**
@@ -3191,18 +3053,7 @@ public class TripDatabase {
         WeeklyRollup rollup = new WeeklyRollup();
         rollup.year = rs.getInt("year");
         rollup.weekNumber = rs.getInt("week_number");
-        rollup.tripCount = rs.getInt("trip_count");
-        rollup.totalDistanceKm = rs.getDouble("total_distance_km");
-        rollup.totalDurationSeconds = rs.getInt("total_duration_seconds");
-        rollup.avgEfficiency = rs.getDouble("avg_efficiency");
-        rollup.totalEnergyKwh = rs.getDouble("total_energy_kwh");
-        rollup.totalCost = rs.getDouble("total_cost");
-        rollup.avgEnergyPerKm = rs.getDouble("avg_energy_per_km");
-        rollup.avgAnticipation = rs.getInt("avg_anticipation");
-        rollup.avgSmoothness = rs.getInt("avg_smoothness");
-        rollup.avgSpeedDiscipline = rs.getInt("avg_speed_discipline");
-        rollup.avgEfficiencyScore = rs.getInt("avg_efficiency_score");
-        rollup.avgConsistency = rs.getInt("avg_consistency");
+        readRollupTotals(rs, rollup);
         return rollup;
     }
 
@@ -3213,6 +3064,11 @@ public class TripDatabase {
         MonthlyRollup rollup = new MonthlyRollup();
         rollup.year = rs.getInt("year");
         rollup.month = rs.getInt("month_number");
+        readRollupTotals(rs, rollup);
+        return rollup;
+    }
+
+    private void readRollupTotals(ResultSet rs, TripRollup rollup) throws Exception {
         rollup.tripCount = rs.getInt("trip_count");
         rollup.totalDistanceKm = rs.getDouble("total_distance_km");
         rollup.totalDurationSeconds = rs.getInt("total_duration_seconds");
@@ -3225,18 +3081,17 @@ public class TripDatabase {
         rollup.avgSpeedDiscipline = rs.getInt("avg_speed_discipline");
         rollup.avgEfficiencyScore = rs.getInt("avg_efficiency_score");
         rollup.avgConsistency = rs.getInt("avg_consistency");
-        return rollup;
     }
 
     /**
      * Read a ConsumptionBucket from a ResultSet row.
      */
-    private ConsumptionBucket readBucketFromResultSet(ResultSet rs) throws Exception {
+    private ConsumptionBucket readBucketFromResultSet(ResultSet rs, BucketTable table) throws Exception {
         ConsumptionBucket bucket = new ConsumptionBucket();
         bucket.bucketKey = rs.getString("bucket_key");
         bucket.sampleCount = rs.getInt("sample_count");
-        bucket.sumKwhPerKm = rs.getDouble("sum_kwh_per_km");
-        bucket.sumSquaredKwhPerKm = rs.getDouble("sum_squared_kwh_per_km");
+        bucket.sumKwhPerKm = rs.getDouble(table.sum);
+        bucket.sumSquaredKwhPerKm = rs.getDouble(table.squaredSum);
         return bucket;
     }
 
@@ -3259,9 +3114,6 @@ public class TripDatabase {
         return null;
     }
 
-    /**
-     * Compute running average: (oldAvg * oldCount + newValue) / (oldCount + 1)
-     */
     /** Windows clipped to [lo, hi), sorted and merged, so no trip falls in two of them. */
     private static java.util.List<long[]> mergeWithin(java.util.List<long[]> windows, long lo, long hi) {
         java.util.List<long[]> clipped = new java.util.ArrayList<>();
@@ -3340,6 +3192,7 @@ public class TripDatabase {
         }
     }
 
+    /** Compute running average: (oldAvg * oldCount + newValue) / (oldCount + 1). */
     private double runningAvg(double oldAvg, int oldCount, double newValue) {
         return (oldAvg * oldCount + newValue) / (oldCount + 1);
     }
