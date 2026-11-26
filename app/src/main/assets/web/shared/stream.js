@@ -606,6 +606,9 @@ BYD.stream = {
 
             this.broadwayPlayer = new Player({
                 useWorker: true,
+                // WebSocket packets are exclusively consumed by this decoder.
+                // Transfer their buffers instead of copying them on the UI thread.
+                transferMemory: true,
                 workerFile: workerUrl,
                 webgl: true,
                 // Opt-in diagnostics only; normal Broadway preserves the old GL path.
@@ -778,6 +781,7 @@ BYD.stream = {
                 const data = new Uint8Array(event.data);
                 
                 if (this.decoderMode === 'broadway' && this.broadwayPlayer) {
+                    // Ownership moves to the worker; do not read data after decode.
                     this.broadwayPlayer.decode(data);
                 } else if (this.decoderMode === 'jmuxer' && this.jmuxer) {
                     this.jmuxer.feed({ video: data });
