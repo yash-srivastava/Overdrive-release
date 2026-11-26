@@ -35,7 +35,19 @@ object GapReasons {
         val order = d.reaped.indices.sortedBy { d.reaped[it].start }
         val rStart = LongArray(order.size) { d.reaped[order[it]].start }
         var maxReap = 0L
-        for (r in d.reaped) maxReap = maxOf(maxReap, r.end - r.start)
+        // A single long deletion can make the duration-based lower bound very
+        // loose. For larger windows, also index the latest end in each prefix
+        // of the start-sorted entries, without changing their tie order.
+        val rMaxEnd = if (indexWindow && order.size >= 32) LongArray(order.size) else null
+        var latestEnd = Long.MIN_VALUE
+        for (i in order.indices) {
+            val r = d.reaped[order[i]]
+            maxReap = maxOf(maxReap, r.end - r.start)
+            if (rMaxEnd != null) {
+                latestEnd = maxOf(latestEnd, r.end)
+                rMaxEnd[i] = latestEnd
+            }
+        }
         for (g in 0 until n) {
             val gs = gapStart[g]
             val ge = gapEnd[g]
@@ -47,6 +59,18 @@ object GapReasons {
             var best = -1
             var bestOv = 0L
             var i = StripPhysics.lowerBound(rStart, rStart.size, (gs - maxReap).toDouble())
+            if (rMaxEnd != null && i < rMaxEnd.size && rMaxEnd[i] <= gs) {
+                // Every entry in this prefix ends at or before the gap start,
+                // so none can contribute overlap. Retain the existing lower
+                // bound and skip only entries known to have zero overlap.
+                var lo = i + 1
+                var hi = rMaxEnd.size
+                while (lo < hi) {
+                    val mid = (lo + hi) ushr 1
+                    if (rMaxEnd[mid] <= gs) lo = mid + 1 else hi = mid
+                }
+                i = lo
+            }
             while (i < rStart.size && rStart[i] < ge) {
                 val r = d.reaped[order[i]]
                 val ov = overlap(gs, ge, r.start, r.end)

@@ -96,4 +96,40 @@ class GapReasonsIndexTest {
             check(data(states, sessions, trips, reaped), starts, ends)
         }
     }
+
+    @Test fun reapedLongHistoryAndStartOrderTies() {
+        val r = Random(5731)
+        val reaped = listOf(TlReaped(0, 100_000, "normal", "user")) +
+            List(4_096) { i ->
+                val s = 100_000L + i * 10L
+                TlReaped(s, s + 5, "normal", "retention")
+            } + listOf(
+                TlReaped(142_000, 142_050, "normal", "user"),
+                TlReaped(141_950, 142_000, "normal", "retention"),
+                TlReaped(142_000, 142_050, "normal", "relief"),
+                TlReaped(143_000, 142_990, "normal", "user"),
+            )
+        val starts = longArrayOf(99_999, 100_000, 100_005, 100_010, 120_000,
+            141_950, 142_000, 142_050, 143_000, 143_001, 140_000, 0)
+        val ends = LongArray(starts.size) { starts[it] + if (it == 5) 100 else 10 }
+        val d = data(reaped = reaped.shuffled(r))
+        check(d, starts, ends)
+        check(d, starts.copyOf(7), ends.copyOf(7)) // small-window fallback
+        check(d.copy(reaped = d.reaped.take(31)), starts, ends)
+    }
+
+    @Test fun randomizedReapedPrefixIndexMatchesReference() {
+        val r = Random(5732)
+        repeat(300) {
+            val reaped = List(r.nextInt(32, 180)) {
+                val start = r.nextLong(0, 100_000)
+                val end = start + if (r.nextInt(12) == 0) r.nextLong(0, 80_000)
+                    else r.nextLong(-20, 400)
+                TlReaped(start, end, "normal", "retention")
+            }.shuffled(r)
+            val starts = LongArray(r.nextInt(8, 100)) { r.nextLong(0, 200_000) }
+            val ends = LongArray(starts.size) { starts[it] + r.nextLong(-10, 1_000) }
+            check(data(reaped = reaped), starts, ends)
+        }
+    }
 }
