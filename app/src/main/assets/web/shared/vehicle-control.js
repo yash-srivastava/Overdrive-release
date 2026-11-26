@@ -640,11 +640,9 @@ var VC = {
         });
         // The AVN stretches the native WebView to the physical display after
         // page layout. Rendering at its reported devicePixelRatio wastes GPU
-        // fill-rate without adding visible detail; render the cosmetic model
-        // at 75% of CSS resolution on the head unit. DOM controls and labels
-        // stay at full resolution. Phones retain high DPI.
+        // fill-rate without adding visible detail; phones retain high DPI.
         this.renderer.setPixelRatio(window.AndroidBridge
-            ? 0.75
+            ? 1
             : Math.min(window.devicePixelRatio, 2));
         this.renderer.setSize(renderW, renderH, false);
         if (window.AndroidBridge && window.console) {
@@ -674,16 +672,8 @@ var VC = {
         this.controls.autoRotate = true;
         this.controls.autoRotateSpeed = 0.3;
 
-        this._orbitInteracting = false;
-        this._orbitActiveUntil = 0;
         this.controls.addEventListener('start', function() {
             self.controls.autoRotate = false;
-            self._orbitInteracting = true;
-        });
-        this.controls.addEventListener('end', function() {
-            self._orbitInteracting = false;
-            // Keep the interactive cadence through OrbitControls damping.
-            self._orbitActiveUntil = performance.now() + 1000;
         });
 
         // Scene lighting — enhance the model's own materials
@@ -1234,20 +1224,6 @@ var VC = {
         this._lastRenderFrame = null;
     },
 
-    _needsInteractiveFrame: function(now) {
-        if (this._3dViewActive || this._orbitInteracting || now < this._orbitActiveUntil) {
-            return true;
-        }
-        // Short VFX and camera transitions retain the interactive cadence.
-        // Infinite decorative glow tweens can use the quieter idle cadence.
-        if (typeof gsap === 'undefined' || !gsap.globalTimeline) return false;
-        var tweens = gsap.globalTimeline.getChildren(true, true, false);
-        for (var i = 0; i < tweens.length; i++) {
-            if (tweens[i].repeat() !== -1 && tweens[i].isActive()) return true;
-        }
-        return false;
-    },
-
     animate: function(frameTime) {
         var self = this;
         if (document.hidden || !this.renderer) return;
@@ -1267,17 +1243,15 @@ var VC = {
             self._renderFrame = null;
             self.animate(typeof nextFrameTime === 'number' ? nextFrameTime : 0);
         });
-        // Head-unit only: about 10fps for the cosmetic idle scene, up to 30fps
-        // during interaction, finite VFX or live video. Browsers keep full rate.
+        // 30fps is smooth for this fixed automotive display. Together with
+        // the 1x backing buffer it removes most continuous AVN GPU load;
+        // standalone phone/browser clients retain their native refresh rate.
         if (window.AndroidBridge) {
             var now = typeof frameTime === 'number'
                 ? frameTime
                 : (window.performance && performance.now ? performance.now() : Date.now());
             if (this._lastRenderFrame != null
                     && now - this._lastRenderFrame < 32) return;
-            if (this._lastRenderFrame != null
-                    && now - this._lastRenderFrame < 100
-                    && !this._needsInteractiveFrame(now)) return;
             this._lastRenderFrame = now;
         }
         if (this.controls) this.controls.update();
