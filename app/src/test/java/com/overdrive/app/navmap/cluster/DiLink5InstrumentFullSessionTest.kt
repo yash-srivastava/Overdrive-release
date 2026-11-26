@@ -104,9 +104,25 @@ class DiLink5InstrumentFullSessionTest {
             val io = FakeIo().apply { nextReply = reply }
             assertFalse(Lifecycle(io).start(owner.generation, owner.bootId) { true })
             assertEquals(owner, io.marker)
-            io.nextReply = answered(RESULT_SENT, 5)
+            io.nextReply = answered(RESULT_SENT, 4)
             assertTrue(Lifecycle(io).release(null, owner.bootId))
             assertEquals(listOf(owner, owner.copy(closing = true)), io.commands)
+            assertNull(io.marker)
+        }
+    }
+
+    @Test
+    fun successfulReplyWithAnUnexpectedCountLeavesTheNewSessionRecoverable() {
+        for (sent in listOf(3, 5)) {
+            val io = FakeIo().apply { nextReply = answered(RESULT_SENT, sent) }
+            val lifecycle = Lifecycle(io)
+            assertFalse(lifecycle.start(owner.generation, owner.bootId) { true })
+            assertEquals(owner, io.marker)
+            assertFalse(lifecycle.release(owner.generation, owner.bootId))
+            assertEquals(owner.copy(closing = true), io.marker)
+
+            io.nextReply = answered(RESULT_SENT, 4)
+            assertTrue(lifecycle.release(owner.generation, owner.bootId))
             assertNull(io.marker)
         }
     }
@@ -189,13 +205,32 @@ class DiLink5InstrumentFullSessionTest {
         assertNull(Owner.decode("""{"generation":42,"bootId":"boot-id"}"""))
     }
 
+    @Test
+    fun sameBootRecoveryRetainsLegacyMapFocusCleanupUntilAllFiveCommandsAreSent() {
+        for (closing in listOf(false, true)) {
+            val legacy = Owner.decode("""{"generation":42,"bootId":"boot-id","closing":$closing}""")
+            assertEquals(owner.copy(closing = closing, legacyMapFocus = true), legacy)
+            val io = FakeIo().apply { marker = legacy }
+            val lifecycle = Lifecycle(io)
+            val expectedClose = owner.copy(closing = true, legacyMapFocus = true)
+
+            assertFalse(lifecycle.release(null, owner.bootId))
+            assertEquals(expectedClose, io.marker)
+            assertEquals(expectedClose, Owner.decode(expectedClose.encode()))
+            io.nextReply = answered(RESULT_SENT, 5)
+            assertTrue(lifecycle.release(null, owner.bootId))
+            assertEquals(listOf(expectedClose, expectedClose), io.commands)
+            assertNull(io.marker)
+        }
+    }
+
     private class FakeIo(private val shellMode: (() -> Int)? = null) : DiLink5InstrumentFullSession.Io {
         var marker: Owner? = null
         var mode = 1
         var acc = true
         var canWrite = true
         var observedModeAtDispatch: Int? = null
-        var nextReply = answered(RESULT_SENT, 5)
+        var nextReply = answered(RESULT_SENT, 4)
         val writes = mutableListOf<Owner?>()
         val commands = mutableListOf<Owner>()
 

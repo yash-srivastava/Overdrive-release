@@ -19,7 +19,6 @@ import com.overdrive.app.navmap.cluster.ClusterCommContract.displayModeDirect
 import com.overdrive.app.navmap.cluster.ClusterCommContract.mapFocusDirect
 import com.overdrive.app.navmap.cluster.ClusterCommContract.naviState
 import com.overdrive.app.navmap.cluster.ClusterCommContract.presentation
-import com.overdrive.app.navmap.cluster.ClusterCommContract.requestMapFocus
 import com.overdrive.app.navmap.cluster.ClusterCommDispatcher.Reply
 import org.json.JSONObject
 
@@ -30,15 +29,22 @@ internal object DiLink5InstrumentFullSession {
     private const val UNKNOWN = -1
     private const val OFF = 1
     private const val FULL = 4
-    private const val COMMAND_COUNT = 5
     private val lock = Any()
     private val logger by lazy { DaemonLogger.getInstance("DiLink5InstrumentFull") }
 
-    internal data class Owner(val generation: Long, val bootId: String, val closing: Boolean = false) {
+    internal data class Owner(
+        val generation: Long,
+        val bootId: String,
+        val closing: Boolean = false,
+        val legacyMapFocus: Boolean = false,
+    ) {
+        val expectedCommandCount: Int get() = commandBuilders(this).size
+
         fun encode(): String = JSONObject()
             .put("generation", generation)
             .put("bootId", bootId)
             .put("closing", closing)
+            .put("legacyMapFocus", legacyMapFocus)
             .toString()
 
         companion object {
@@ -47,7 +53,9 @@ internal object DiLink5InstrumentFullSession {
                 val generation = json.getLong("generation")
                 val bootId = json.getString("bootId")
                 val closing = json.getBoolean("closing")
-                if (generation > 0 && bootId.isNotBlank()) Owner(generation, bootId, closing) else null
+                // Owners persisted before this field could have acquired OEM map focus.
+                val legacyMapFocus = !json.has("legacyMapFocus") || json.getBoolean("legacyMapFocus")
+                if (generation > 0 && bootId.isNotBlank()) Owner(generation, bootId, closing, legacyMapFocus) else null
             } catch (_: Exception) {
                 null
             }
@@ -76,7 +84,7 @@ internal object DiLink5InstrumentFullSession {
                 return false
             }
             val reply = io.dispatch(owner)
-            if (reply.ok() && reply.sent == COMMAND_COUNT) return current()
+            if (reply.ok() && reply.sent == owner.expectedCommandCount) return current()
             if (definitelyNotSent(reply)) {
                 val cleared = io.writeOwner(null)
                 return cleared && reply.code == RESULT_INSTRUMENT_ALREADY_FULL && current()
@@ -95,7 +103,7 @@ internal object DiLink5InstrumentFullSession {
             val closing = owner.copy(closing = true)
             if (!owner.closing && !io.writeOwner(closing)) return false
             val reply = io.dispatch(closing)
-            return (reply.ok() && reply.sent == COMMAND_COUNT ||
+            return (reply.ok() && reply.sent == closing.expectedCommandCount ||
                 reply.answered && reply.code == RESULT_INSTRUMENT_MODE_CHANGED) && io.writeOwner(null)
         }
 
@@ -222,7 +230,7 @@ internal object DiLink5InstrumentFullSession {
     @JvmStatic
     fun beforeWire(context: Context, owner: Owner): Int? = try {
         if (!Sealion7HdmiProjection.isTestedFirmware() || loadOwner() != owner ||
-            !owner.closing && !Sealion7HdmiProjection.isEnabled(context)
+            !owner.closing && (owner.legacyMapFocus || !Sealion7HdmiProjection.isEnabled(context))
         ) {
             RESULT_INSTRUMENT_GUARD_FAILED
         } else {
@@ -247,9 +255,17 @@ internal object DiLink5InstrumentFullSession {
 
     /** The QNX display-mode messages leave the saved Android setting untouched. */
     @JvmStatic
-    fun commands(owner: Owner): List<Bundle> = if (owner.closing) {
-        listOf(presentation(1), naviState(1), abandonMapFocus(), mapFocusDirect(0), displayModeDirect(OFF))
+    fun commands(owner: Owner): List<Bundle> = commandBuilders(owner).map { it() }
+
+    private fun commandBuilders(owner: Owner): List<() -> Bundle> = if (owner.closing) {
+        listOfNotNull(
+            { presentation(1) },
+            { naviState(1) },
+            if (owner.legacyMapFocus) ::abandonMapFocus else null,
+            { mapFocusDirect(0) },
+            { displayModeDirect(OFF) },
+        )
     } else {
-        listOf(displayModeDirect(FULL), presentation(6), naviState(0), mapFocusDirect(1), requestMapFocus())
+        listOf({ displayModeDirect(FULL) }, { presentation(6) }, { naviState(0) }, { mapFocusDirect(1) })
     }
 }
