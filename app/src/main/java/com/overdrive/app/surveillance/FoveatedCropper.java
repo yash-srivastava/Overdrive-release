@@ -131,8 +131,8 @@ public class FoveatedCropper {
     private int ringHead = 0;
     private int ringTail = 0;
 
-    private byte[] scratchRgba = null;   // bulk-copy RGBA scratch (single JNI hop)
-    private byte[] rgbBuffer = null;
+    private DirectRgbReadback readback;
+    private final int[] savedViewport = new int[4];
     private boolean initialized = false;
     // True iff the live GL context is GLES 3.x — checked once at init via
     // glGetString(GL_VERSION). The PBO + fence-sync path requires GLES 3
@@ -446,8 +446,12 @@ public class FoveatedCropper {
                 fallbackReadBuffer.order(ByteOrder.nativeOrder());
             }
 
-            scratchRgba = new byte[PBO_BYTES];
-            rgbBuffer = new byte[CROP_SIZE * CROP_SIZE * 3];
+            // Reuse the same self-checking native/Java packer as the mosaic lane.
+            // Allocate its scratch before any PBO is mapped.
+            DirectRgbReadback.Mode mode = DirectReadbackDiagnostics.readMode();
+            if (mode == null) mode = DirectReadbackDiagnostics.configuredMode();
+            readback = new DirectRgbReadback(CROP_SIZE, CROP_SIZE, mode);
+            logger.info("Foveated AI frame copy: " + mode);
 
             vertexBuffer = GlUtil.createFloatBuffer(VERTEX_COORDS);
             texCoordBuffer = GlUtil.createFloatBuffer(TEX_COORDS);
@@ -640,7 +644,6 @@ public class FoveatedCropper {
                     + ") — publishing without affine so the consumer fails safe");
         }
 
-        int[] savedViewport = new int[4];
         GLES20.glGetIntegerv(GLES20.GL_VIEWPORT, savedViewport, 0);
 
         // ---- 1. Render the CURRENT request to the FBO ----
@@ -689,25 +692,12 @@ public class FoveatedCropper {
             GLES20.glReadPixels(0, 0, CROP_SIZE, CROP_SIZE,
                     GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, fallbackReadBuffer);
             fallbackReadBuffer.rewind();
-            fallbackReadBuffer.get(scratchRgba, 0, PBO_BYTES);
-            byte[] src = scratchRgba;
-            byte[] dst = rgbBuffer;
-            final int rowRgbaBytes = CROP_SIZE * 4;
-            int dstIdx = 0;
-            for (int y = CROP_SIZE - 1; y >= 0; y--) {
-                int srcRow = y * rowRgbaBytes;
-                for (int x = 0; x < CROP_SIZE; x++) {
-                    int s = srcRow + (x << 2);
-                    dst[dstIdx++] = src[s];
-                    dst[dstIdx++] = src[s + 1];
-                    dst[dstIdx++] = src[s + 2];
-                }
-            }
+            byte[] dst = packSynchronous();
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
             GLES20.glViewport(savedViewport[0], savedViewport[1], savedViewport[2], savedViewport[3]);
             // Synchronous path: the bytes ARE this call's window, so the affine
             // computed above is the exact match (and the capture time is now).
-            return new Result(dst, quadrant, CROP_SIZE, CROP_SIZE,
+            return dst == null ? null : new Result(dst, quadrant, CROP_SIZE, CROP_SIZE,
                     mapAx, mapBx, mapAy, mapBy, System.nanoTime());
         }
 
@@ -758,61 +748,35 @@ public class FoveatedCropper {
             int sig = GLES30.glClientWaitSync(fenceSyncs[ringTail], 0, 0);
             boolean signaled = (sig == GLES30.GL_ALREADY_SIGNALED
                              || sig == GLES30.GL_CONDITION_SATISFIED);
-            if (signaled) {
-                int q = pboQuadrant[ringTail];
-                // Read back the affine stamped when THIS slot was queued (an
-                // earlier crop() window than the current call's centroid).
-                float rAx = ringCropAffine[ringTail][0];
-                float rBx = ringCropAffine[ringTail][1];
-                float rAy = ringCropAffine[ringTail][2];
-                float rBy = ringCropAffine[ringTail][3];
-                // Map the PBO read-only and bulk-copy into our scratch
-                // byte[]. glMapBufferRange returns a Buffer whose backing
-                // memory is the GPU's PBO storage — direct DMA buffer.
-                GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, pboIds[ringTail]);
-                Buffer mapped = GLES30.glMapBufferRange(
-                        GLES30.GL_PIXEL_PACK_BUFFER, 0, PBO_BYTES,
-                        GLES30.GL_MAP_READ_BIT);
-                if (mapped instanceof ByteBuffer) {
-                    ByteBuffer bb = (ByteBuffer) mapped;
-                    bb.order(ByteOrder.nativeOrder());
-                    bb.rewind();
-                    bb.get(scratchRgba, 0, PBO_BYTES);
-                    GLES30.glUnmapBuffer(GLES30.GL_PIXEL_PACK_BUFFER);
-                    GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0);
-
-                    // Y-flip + RGBA→RGB pack into the result buffer.
-                    byte[] src = scratchRgba;
-                    byte[] dst = rgbBuffer;
-                    final int rowRgbaBytes = CROP_SIZE * 4;
-                    int dstIdx = 0;
-                    for (int y = CROP_SIZE - 1; y >= 0; y--) {
-                        int srcRow = y * rowRgbaBytes;
-                        for (int x = 0; x < CROP_SIZE; x++) {
-                            int s = srcRow + (x << 2);
-                            dst[dstIdx++] = src[s];
-                            dst[dstIdx++] = src[s + 1];
-                            dst[dstIdx++] = src[s + 2];
+            boolean waitFailed = sig == GLES30.GL_WAIT_FAILED;
+            if (signaled || waitFailed) {
+                try {
+                    if (signaled) {
+                        byte[] rgb = packMappedSlot();
+                        if (rgb != null) {
+                            float[] affine = ringCropAffine[ringTail];
+                            result = new Result(rgb, pboQuadrant[ringTail], CROP_SIZE, CROP_SIZE,
+                                    affine[0], affine[1], affine[2], affine[3],
+                                    ringCaptureNanos[ringTail]);
                         }
+                    } else {
+                        logger.warn("Foveated PBO fence wait failed; dropping slot");
                     }
-                    result = new Result(dst, q, CROP_SIZE, CROP_SIZE,
-                            rAx, rBx, rAy, rBy, ringCaptureNanos[ringTail]);
-                } else {
-                    GLES30.glUnmapBuffer(GLES30.GL_PIXEL_PACK_BUFFER);
-                    GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0);
-                    logger.warn("glMapBufferRange returned non-ByteBuffer mapping");
+                } finally {
+                    // Retire failed slots too; one bad readback must not stall the ring.
+                    try {
+                        GLES30.glDeleteSync(fenceSyncs[ringTail]);
+                    } finally {
+                        fenceSyncs[ringTail] = 0L;
+                        pboQuadrant[ringTail] = -1;
+                        ringCropAffine[ringTail][0] = 0f;
+                        ringCropAffine[ringTail][1] = 0f;
+                        ringCropAffine[ringTail][2] = 0f;
+                        ringCropAffine[ringTail][3] = 0f;
+                        ringCaptureNanos[ringTail] = 0L;
+                        ringTail = (ringTail + 1) % RING_SIZE;
+                    }
                 }
-
-                // Done with this slot — release fence + advance tail.
-                GLES30.glDeleteSync(fenceSyncs[ringTail]);
-                fenceSyncs[ringTail] = 0L;
-                pboQuadrant[ringTail] = -1;
-                ringCropAffine[ringTail][0] = 0f;
-                ringCropAffine[ringTail][1] = 0f;
-                ringCropAffine[ringTail][2] = 0f;
-                ringCropAffine[ringTail][3] = 0f;
-                ringCaptureNanos[ringTail] = 0L;
-                ringTail = (ringTail + 1) % RING_SIZE;
             }
             // If sig == GL_TIMEOUT_EXPIRED we just leave the fence in
             // place; the next call will poll it again. Caller falls back
@@ -824,6 +788,60 @@ public class FoveatedCropper {
         GLES20.glViewport(savedViewport[0], savedViewport[1], savedViewport[2], savedViewport[3]);
 
         return result;
+    }
+
+    /** The returned RGB array is borrowed until the next crop, as before. */
+    private byte[] packSynchronous() {
+        try {
+            readback.prepare(fallbackReadBuffer);
+            return finishReadback(true);
+        } catch (RuntimeException | OutOfMemoryError e) {
+            readback.finish(false);
+            logger.warn("Foveated synchronous RGB pack failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private byte[] packMappedSlot() {
+        Buffer mapped = null;
+        boolean prepared = false;
+        boolean mappingValid = false;
+        GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, pboIds[ringTail]);
+        try {
+            mapped = GLES30.glMapBufferRange(
+                    GLES30.GL_PIXEL_PACK_BUFFER, 0, PBO_BYTES, GLES30.GL_MAP_READ_BIT);
+            if (mapped instanceof ByteBuffer) {
+                ByteBuffer bb = (ByteBuffer) mapped;
+                bb.rewind();
+                // Native mode packs directly from the signalled PBO into staging RGB.
+                // Java/verification mode copies while mapped, then packs after unmap.
+                readback.prepare(bb);
+                prepared = true;
+            }
+        } catch (RuntimeException | OutOfMemoryError e) {
+            logger.warn("Foveated PBO RGB pack failed: " + e.getMessage());
+        } finally {
+            try {
+                if (mapped != null) {
+                    mappingValid = GLES30.glUnmapBuffer(GLES30.GL_PIXEL_PACK_BUFFER);
+                }
+            } catch (RuntimeException e) {
+                logger.warn("Foveated PBO unmap failed: " + e.getMessage());
+            } finally {
+                GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0);
+            }
+        }
+        byte[] rgb = finishReadback(prepared && mappingValid);
+        if (rgb == null) logger.warn("Discarding invalid foveated PBO contents");
+        return rgb;
+    }
+
+    private byte[] finishReadback(boolean valid) {
+        byte[] rgb = readback.finish(valid);
+        if (rgb != null && readback.lastMismatch()) {
+            logger.warn("Foveated RGB mismatch; using Java reference and disabling native for this lane");
+        }
+        return rgb;
     }
 
     public boolean isInitialized() {
@@ -935,10 +953,8 @@ public class FoveatedCropper {
             GLES20.glDeleteProgram(program);
             program = -1;
         }
-        // Drop CPU-side scratch + readback. ~4.4 MB held otherwise across
-        // every surveillance pause; lazy paths re-init on next call.
-        scratchRgba = null;
-        rgbBuffer = null;
+        // Drop CPU-side readback buffers across surveillance pauses.
+        readback = null;
         fallbackReadBuffer = null;
         ringHead = 0;
         ringTail = 0;

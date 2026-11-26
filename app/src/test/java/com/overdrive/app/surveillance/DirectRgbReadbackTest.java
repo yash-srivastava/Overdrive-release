@@ -108,4 +108,47 @@ public class DirectRgbReadbackTest {
         readback.prepare(ByteBuffer.allocate(3));
         assertNull(readback.finish(true));
     }
+
+    @Test public void foveatedSizeNativeWarmupAndFallbackPreserveRgbRows() {
+        int size = 640;
+        ByteBuffer source = ByteBuffer.allocateDirect(size * size * 4);
+        for (int y = 0; y < size; y++) {
+            for (int x = 0; x < size; x++) {
+                source.put((byte) y).put((byte) x).put((byte) (x ^ y)).put((byte) 255);
+            }
+        }
+        source.rewind();
+        RgbaReadback reference = new RgbaReadback(size, size);
+        byte[] expected = new byte[size * size * 3];
+        assertTrue(reference.pack(source, expected));
+        DirectRgbReadback readback = new DirectRgbReadback(size, size,
+                DirectRgbReadback.Mode.NATIVE, (rgba, target) -> {
+                    int dst = 0;
+                    for (int y = size - 1; y >= 0; y--) {
+                        for (int x = 0; x < size; x++) {
+                            int src = (y * size + x) * 4;
+                            target[dst++] = rgba.get(src);
+                            target[dst++] = rgba.get(src + 1);
+                            target[dst++] = rgba.get(src + 2);
+                        }
+                    }
+                    return true;
+                });
+        for (int i = 0; i <= DirectRgbReadback.NATIVE_SELF_CHECK_FRAMES; i++) {
+            readback.prepare(source);
+            assertArrayEquals(expected, readback.finish(true));
+            assertTrue(readback.lastNative());
+            assertEquals(i < DirectRgbReadback.NATIVE_SELF_CHECK_FRAMES,
+                    readback.lastCompared());
+        }
+        readback.prepare(source);
+        assertNull(readback.finish(false));
+        assertNull(readback.finish(true));
+
+        DirectRgbReadback fallback = new DirectRgbReadback(size, size,
+                DirectRgbReadback.Mode.NATIVE, (rgba, target) -> false);
+        fallback.prepare(source);
+        assertArrayEquals(expected, fallback.finish(true));
+        assertFalse(fallback.lastNative());
+    }
 }
