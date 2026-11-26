@@ -4,7 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class NavGuidanceRecoveryScanTest {
+class NavGuidanceRecoveryScanAndroidTest {
     private class CountingPoints(private val data: List<GeoPoint>) : AbstractList<GeoPoint>() {
         var reads = 0
         override val size: Int get() = data.size
