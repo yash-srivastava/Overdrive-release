@@ -17,12 +17,16 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
 const payload = (id, page, total, totalPages) => ({ items: [{ id }], page, total, totalPages });
 
 function fixture() {
-    const requests = [], states = [], renders = [], scrolls = [];
+    const requests = [], states = [], renders = [], scrolls = [], details = [], toasts = [];
+    const listeners = {};
     const anchor = {};
     const BYD = { utils: { scrollToTop: node => scrolls.push(node) } };
     const sandbox = {
         BYD, window: { BYD },
-        document: { getElementById: id => id === 'communityControls' ? anchor : null },
+        document: {
+            getElementById: id => id === 'communityControls' ? anchor : null,
+            addEventListener: (name, fn) => { listeners[name] = fn; }
+        },
         fetch: url => {
             const response = deferred();
             requests.push({ url, response });
@@ -36,10 +40,20 @@ function fixture() {
         renders.push(items);
         catalog._maybeScrollTop();
     };
+    catalog._showDetailModal = data => details.push(data);
+    catalog._toast = (msg, kind) => toasts.push([msg, kind]);
+    function initTabs() {
+        // Bind the real tab listener without unrelated startup requests.
+        for (const method of ['renderControls', '_loadPublishedIds', 'loadPage',
+            '_hookLocalRender', '_scheduleAugment']) catalog[method] = () => {};
+        catalog.init();
+    }
+    function switchTab(id) { listeners['ot-tabs:active-changed']({ detail: { id } }); }
     function reply(index, data) {
         requests[index].response.resolve({ json: () => Promise.resolve(data) });
     }
-    return { catalog, requests, states, renders, scrolls, reply, anchor };
+    return { catalog, requests, states, renders, scrolls, reply, anchor,
+        details, toasts, initTabs, switchTab };
 }
 
 async function newestFilterWins() {
@@ -118,6 +132,68 @@ async function failure(kind, stale) {
     assert.strictEqual(catalog._loading, false);
 }
 
+// Only the most recent detail request may open a dialog.
+async function detailOrdering(newestFirst) {
+    const { catalog, requests, details, toasts, reply } = fixture();
+    catalog.openDetail('old');
+    catalog.openDetail('new');
+    assert.match(requests[1].url, /automation\/new$/);
+    const latest = { id: 'new' };
+    if (newestFirst) {
+        reply(1, { automation: latest });
+        await flush();
+        reply(0, { automation: { id: 'old' } });
+    } else {
+        reply(0, { automation: { id: 'old' } });
+        await flush();
+        assert.deepStrictEqual(details, []);
+        reply(1, { automation: latest });
+    }
+    await flush();
+    assert.deepStrictEqual(details, [latest]);
+    assert.deepStrictEqual(toasts, []);
+}
+
+async function detailFailure(stale, kind) {
+    const { catalog, requests, details, toasts, reply } = fixture();
+    catalog.openDetail('old');
+    if (stale) catalog.openDetail('new');
+    if (kind === 'network') requests[0].response.reject(new Error('offline'));
+    else if (kind === 'json') requests[0].response.resolve({ json: () => Promise.reject(new Error('bad JSON')) });
+    else reply(0, { error: 'Unavailable' });
+    await flush();
+    assert.deepStrictEqual(details, []);
+    assert.deepStrictEqual(toasts, stale ? [] : [['community.load_failed', 'error']]);
+    if (stale) {
+        const latest = { id: 'new' };
+        reply(1, { automation: latest });
+        await flush();
+        assert.deepStrictEqual(details, [latest]);
+    }
+}
+
+async function detailAfterTabChange(fail) {
+    const { catalog, requests, details, toasts, reply, initTabs, switchTab } = fixture();
+    initTabs();
+    catalog.openDetail('old');
+    // The HTTP headers can arrive before the user changes tabs, with the body still pending.
+    const body = deferred();
+    requests[0].response.resolve({ json: () => body.promise });
+    await flush();
+    switchTab('general');
+    switchTab('community');
+    if (fail) body.reject(new Error('bad JSON'));
+    else body.resolve({ automation: { id: 'old' } });
+    await flush();
+    assert.deepStrictEqual(details, []);
+    assert.deepStrictEqual(toasts, []);
+    catalog.openDetail('new');
+    const latest = { id: 'new' };
+    reply(1, { automation: latest });
+    await flush();
+    assert.deepStrictEqual(details, [latest]);
+}
+
 (async () => {
     await newestFilterWins();
     await olderResponseWhileNewPagePending();
@@ -126,5 +202,13 @@ async function failure(kind, stale) {
         await failure(kind, true);
         await failure(kind, false);
     }
-    console.log('Community catalog request ordering: 9 scenarios passed');
+    await detailOrdering(true);
+    await detailOrdering(false);
+    for (const kind of ['network', 'json', 'payload']) {
+        await detailFailure(true, kind);
+        await detailFailure(false, kind);
+    }
+    await detailAfterTabChange(false);
+    await detailAfterTabChange(true);
+    console.log('Community catalog request ordering: 19 scenarios passed (9 list, 10 detail)');
 })().catch(error => { console.error(error); process.exitCode = 1; });
