@@ -2657,6 +2657,7 @@ BYD.utils.scrollToTop = function (anchor) {
  */
 BYD.utils._modalEscBound = false;
 BYD.utils._modalStack = [];
+BYD.utils._modalSequence = 0;
 BYD.utils._dismissTopModal = function (result) {
     var top = BYD.utils._modalStack.pop();
     if (top) top.dismiss(result);
@@ -2688,10 +2689,14 @@ BYD.utils._showModal = function (opts) {
         card.setAttribute('role', 'dialog');
         card.setAttribute('aria-modal', 'true');
 
+        // Each open dialog needs its own title and description references.
+        var modalId = 'ot-modal-' + (++BYD.utils._modalSequence);
         // Title + body — text content only, never raw HTML.
         if (opts.title) {
             var h = document.createElement('h3');
             h.className = 'soh-modal-title';
+            h.id = modalId + '-title';
+            card.setAttribute('aria-labelledby', h.id);
             h.textContent = opts.title;
             card.appendChild(h);
         }
@@ -2702,6 +2707,8 @@ BYD.utils._showModal = function (opts) {
             p.style.lineHeight = '1.5';
             p.style.color = 'var(--text-secondary, var(--text-primary))';
             p.style.whiteSpace = 'pre-wrap';
+            p.id = modalId + '-description';
+            card.setAttribute('aria-describedby', p.id);
             p.textContent = opts.body;
             card.appendChild(p);
         }
