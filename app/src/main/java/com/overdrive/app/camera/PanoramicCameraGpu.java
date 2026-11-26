@@ -1877,6 +1877,12 @@ public class PanoramicCameraGpu {
                                 "FastCam camera error event " + eventType);
                         return;
                     }
+                    if (byd100fRecovery) {
+                        logger.error("CAMERA ERROR: event=" + eventType
+                            + " — checking for frames before restarting (BYD100F)");
+                        postByd100fErrorCheck(errorOpenSeq);
+                        return;
+                    }
                     logger.error("CAMERA ERROR: event=" + eventType + " — restarting camera");
                     postLegacyErrorRestart(errorOpenSeq);
                 }
@@ -7621,6 +7627,7 @@ public class PanoramicCameraGpu {
             }
             long stageAfterAcquireNs = System.nanoTime();
             frameCounter++;
+            if (byd100fRecovery) Byd100fCameraRecovery.PROCESS_BUDGET.onGenuineFrame();
             lastFrameTime = System.currentTimeMillis();
             if (USE_AVM_SURFACE_TEXTURE_PATH && !firstFrameReceived) {
                 logger.info("SurfaceTexture: first genuine preview frame consumed"
@@ -8465,11 +8472,28 @@ public class PanoramicCameraGpu {
         firstFrameReceived = false;
         
         watchdogThread = new Thread(() -> {
+            long lastTickWallMs = System.currentTimeMillis();
+            long lastTickUptimeMs = android.os.SystemClock.uptimeMillis();
             while (running) {
                 try {
                     Thread.sleep(1000);  // Check every second
                     
                     long now = System.currentTimeMillis();
+                    // BYD100F: a tick that spanned a device sleep (wall clock ran, uptime
+                    // did not) says nothing about the GL thread, which was frozen with it.
+                    // Re-arm from now instead of killing the daemon on every wake; a real
+                    // hang still trips one timeout later.
+                    long uptimeNow = android.os.SystemClock.uptimeMillis();
+                    boolean crossedSleep = byd100fRecovery
+                        && Byd100fCameraRecovery.crossedSleep(
+                            now - lastTickWallMs, uptimeNow - lastTickUptimeMs);
+                    lastTickWallMs = now;
+                    lastTickUptimeMs = uptimeNow;
+                    if (crossedSleep) {
+                        lastGlThreadHeartbeat = now;
+                        logger.info("GL watchdog: device slept — heartbeat re-armed");
+                        continue;
+                    }
                     long timeSinceHeartbeat = now - lastGlThreadHeartbeat;
                     
                     // Use extended timeout until the first camera frame arrives.
@@ -8985,6 +9009,9 @@ public class PanoramicCameraGpu {
         if (isNativeAppHoldingCameraNow()) {
             return;
         }
+        if (byd100fRecovery && holdReopenForReverseView("dead-slot camera switch")) {
+            return;
+        }
 
         int currentId = cameraIdOverride >= 0 ? cameraIdOverride : PHYSICAL_CAMERA_ID;
         int nextId = PanoCameraFallbackOrder.next(
@@ -9062,6 +9089,9 @@ public class PanoramicCameraGpu {
             return;
         }
         if (isNativeAppHoldingCameraNow()) {
+            return;
+        }
+        if (byd100fRecovery && holdReopenForReverseView("dead-slot camera retry")) {
             return;
         }
         int originId = deadSlotWalkOriginId >= 0 ? deadSlotWalkOriginId
@@ -10056,6 +10086,8 @@ public class PanoramicCameraGpu {
                 logger.info("Skipping queued stall restart — the camera reopened since");
                 return;
             }
+            // BYD100F: the stall clock was reset, so a spaced-out restart retries on a later tick.
+            if (byd100fRecovery && deferZeroFrameReopen("stall restart") > 0L) return;
             restartCameraAfterError();
         });
     }
@@ -10071,6 +10103,82 @@ public class PanoramicCameraGpu {
             }
             restartCameraAfterError();
         });
+    }
+
+    // BYD100F only (#1001): the car's own 360/reverse view opens the same AVMCamera service.
+    // HAL event 8 used to reopen our camera at once, every ~7 s for as long as the HAL kept
+    // refusing it, and in R as well. GL-thread state; one hold is shared by the error restart
+    // and the dead-slot reopens, so a reverse manoeuvre waits at most MAX_HOLD_MS in total.
+    private final boolean byd100fRecovery = Byd100fCameraRecovery.appliesHere();
+    private final ReverseViewCameraGate.Hold reverseReopenHold =
+        new ReverseViewCameraGate.Hold(byd100fRecovery);
+    private boolean reverseReopenHoldLogged;
+    private long byd100fErrorCheckOpenSeq = -1L;
+    private long byd100fSpacingLoggedOpenSeq = -1L;
+
+    /** GL thread. True to skip this reopen now because the car is in R (bounded). */
+    private boolean holdReopenForReverseView(String what) {
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (!reverseReopenHold.holdNow(ReverseViewCameraGate.freshGear(), now)) {
+            reverseReopenHoldLogged = false;
+            return false;
+        }
+        if (!reverseReopenHoldLogged) {
+            reverseReopenHoldLogged = true;
+            logger.info("Car is in R: " + what + " held (up to "
+                + ReverseViewCameraGate.MAX_HOLD_MS
+                + "ms) so the car's reverse view is not interrupted");
+        }
+        return true;
+    }
+
+    /**
+     * GL thread. Ms to wait before reopening a camera that keeps delivering zero frames, or 0
+     * to reopen now. A camera that streamed since its open is never delayed.
+     */
+    private long deferZeroFrameReopen(String what) {
+        long wait = Byd100fCameraRecovery.PROCESS_BUDGET.delayBeforeReopen(
+            frameCounter == frameCounterAtOpen, android.os.SystemClock.elapsedRealtime());
+        if (wait > 0L && byd100fSpacingLoggedOpenSeq != cameraOpenSeq) {
+            byd100fSpacingLoggedOpenSeq = cameraOpenSeq;
+            logger.warn("Camera still delivers no frames after "
+                + Byd100fCameraRecovery.PROCESS_BUDGET.zeroFrameReopens()
+                + " reopens — next " + what + " in " + (wait / 1000L)
+                + "s, so the car's own camera view is not disturbed");
+        }
+        return wait;
+    }
+
+    /** BYD100F HAL event 8: reopen only if frames stopped, and never while held for R. */
+    private void postByd100fErrorCheck(final long openSeq) {
+        final Handler handler = glHandler;
+        if (handler == null) return;
+        handler.post(() -> {
+            if (cameraOpenSeq != openSeq || byd100fErrorCheckOpenSeq == openSeq) return;
+            byd100fErrorCheckOpenSeq = openSeq;
+            final int framesAtError = frameCounter;
+            handler.postDelayed(() -> runByd100fErrorCheck(openSeq, framesAtError),
+                Byd100fCameraRecovery.ERROR_VERIFY_MS);
+        });
+    }
+
+    private void runByd100fErrorCheck(final long openSeq, final int framesAtError) {
+        if (byd100fErrorCheckOpenSeq == openSeq) byd100fErrorCheckOpenSeq = -1L;
+        final Handler handler = glHandler;
+        if (!running || handler == null || cameraOpenSeq != openSeq) return;
+        if (frameCounter != framesAtError) {
+            logger.info("HAL event 8: frames still arriving — keeping the camera");
+            return;
+        }
+        long delay = holdReopenForReverseView("camera restart after HAL error")
+            ? Byd100fCameraRecovery.REVERSE_RECHECK_MS
+            : deferZeroFrameReopen("camera restart after HAL error");
+        if (delay > 0L) {
+            byd100fErrorCheckOpenSeq = openSeq;
+            handler.postDelayed(() -> runByd100fErrorCheck(openSeq, framesAtError), delay);
+            return;
+        }
+        restartCameraAfterError();
     }
 
     /**
