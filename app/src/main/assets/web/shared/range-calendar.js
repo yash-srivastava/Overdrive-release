@@ -18,7 +18,14 @@ var ODRangeCalendar = (function () {
         var monthDate = new Date(year, month, 1);
         try { title.textContent = new Intl.DateTimeFormat(lang, { month: 'long' }).format(monthDate) + ' ' + year; }
         catch (e) { title.textContent = monthDate.toLocaleDateString(lang, { month: 'long' }) + ' ' + year; }
+        var active = document.activeElement;
+        var focusedKey = active && active.parentNode === grid && active.dataset
+            ? active.dataset.date : null;
         grid.innerHTML = '';
+
+        var dayFmt;
+        try { dayFmt = new Intl.DateTimeFormat(lang, { year: 'numeric', month: 'long', day: 'numeric' }); }
+        catch (e) { dayFmt = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); }
 
         var wkFmt; try { wkFmt = new Intl.DateTimeFormat(lang, { weekday: 'short' }); } catch (e) { wkFmt = null; }
         for (var w = 0; w < 7; w++) {
@@ -57,10 +64,25 @@ var ODRangeCalendar = (function () {
                 if (key === fromKey || key === toKey) el.classList.add('selected');
                 else if (fromKey && toKey && key > fromKey && key < toKey) el.classList.add('in-range');
             }
-            var today = new Date(); today.setHours(0, 0, 0, 0);
-            if (new Date(key + 'T00:00:00') > today) el.classList.add('disabled');
-            else el.addEventListener('click', function () { onPick(key); });
+            el.setAttribute('role', 'button');
+            el.setAttribute('aria-label', dayFmt.format(new Date(key + 'T00:00:00')));
+            el.setAttribute('aria-pressed', el.classList.contains('selected') ? 'true' : 'false');
+            if (key > todayKey) {
+                el.classList.add('disabled');
+                el.setAttribute('aria-disabled', 'true');
+            } else {
+                el.tabIndex = 0;
+                el.addEventListener('click', function () { onPick(key); });
+                el.addEventListener('keydown', function (event) {
+                    if (event.key === 'Enter' || event.key === ' ' || event.keyCode === 13 || event.keyCode === 32) {
+                        event.preventDefault();
+                        if (!event.repeat) onPick(key);
+                    }
+                });
+            }
             grid.appendChild(el);
+            // Notification range selection rebuilds the grid after each pick.
+            if (key === focusedKey && key <= todayKey) el.focus();
         }
     }
 
