@@ -33,8 +33,6 @@ public final class MicroFrontend {
     private static final int PCAN_OUTPUT_BITS = 6;
     private static final int WIDE_DYNAMIC_FUNCTION_BITS = 32;
     private static final int WIDE_DYNAMIC_FUNCTION_LUT_SIZE = 4 * WIDE_DYNAMIC_FUNCTION_BITS - 3;
-    private static final int FILTERBANK_INDEX_ALIGNMENT = 2;
-    private static final int FILTERBANK_CHANNEL_BLOCK_SIZE = 4;
     private static final int LOG_SCALE_LOG2 = 16;
     private static final int LOG_SCALE = 1 << LOG_SCALE_LOG2;
     private static final int LOG_SEGMENTS_LOG2 = 7;
@@ -76,14 +74,11 @@ public final class MicroFrontend {
     private final int[] factors;
 
     private final int startIndex;
-    private final int endIndex;
-    private final short[] channelFrequencyStarts;
-    private final short[] channelWeightStarts;
-    private final short[] channelWidths;
+    // Consecutive, unpadded FFT-bin ranges. Each bin belongs to exactly one
+    // interval between mel centers; its two weights feed neighboring channels.
+    private final int[] channelEnds;
     private final short[] weights;
     private final short[] unweights;
-    private final int[] energy;
-    private final long[] work;
     private final int[] signal;
 
     private final int evenSmoothing;
@@ -142,72 +137,35 @@ public final class MicroFrontend {
 
         int spectrumSize = fftSize / 2 + 1;
         int channelsPlus1 = NUM_CHANNELS + 1;
-        channelFrequencyStarts = new short[channelsPlus1];
-        channelWeightStarts = new short[channelsPlus1];
-        channelWidths = new short[channelsPlus1];
-        work = new long[channelsPlus1];
+        channelEnds = new int[channelsPlus1];
         float[] centerMel = new float[channelsPlus1];
-        int[] actualStarts = new int[channelsPlus1];
-        int[] actualWidths = new int[channelsPlus1];
         float melLow = freqToMel(LOWER_BAND_LIMIT);
         float melSpacing = (freqToMel(UPPER_BAND_LIMIT) - melLow) / ((float) channelsPlus1);
         for (int i = 0; i < channelsPlus1; i++) centerMel[i] = melLow + (melSpacing * (i + 1));
 
         float hzPerSbin = 0.5f * SAMPLE_RATE / ((float) spectrumSize - 1);
         startIndex = (int) (1.5f + LOWER_BAND_LIMIT / hzPerSbin);
-        int chanFreqIndexStart = startIndex;
-        int weightIndexStart = 0;
-        boolean needsZeros = false;
+        int frequency = startIndex;
         for (int chan = 0; chan < channelsPlus1; chan++) {
-            int freqIndex = chanFreqIndexStart;
-            while (freqToMel(freqIndex * hzPerSbin) <= centerMel[chan]) freqIndex++;
-            int width = freqIndex - chanFreqIndexStart;
-            actualStarts[chan] = chanFreqIndexStart;
-            actualWidths[chan] = width;
-            if (width == 0) {
-                channelFrequencyStarts[chan] = 0;
-                channelWeightStarts[chan] = 0;
-                channelWidths[chan] = FILTERBANK_CHANNEL_BLOCK_SIZE;
-                if (!needsZeros) {
-                    needsZeros = true;
-                    for (int j = 0; j < chan; j++) channelWeightStarts[j] += FILTERBANK_CHANNEL_BLOCK_SIZE;
-                    weightIndexStart += FILTERBANK_CHANNEL_BLOCK_SIZE;
-                }
-            } else {
-                int alignedStart = (chanFreqIndexStart / FILTERBANK_INDEX_ALIGNMENT) * FILTERBANK_INDEX_ALIGNMENT;
-                int alignedWidth = chanFreqIndexStart - alignedStart + width;
-                int paddedWidth = (((alignedWidth - 1) / FILTERBANK_CHANNEL_BLOCK_SIZE) + 1)
-                        * FILTERBANK_CHANNEL_BLOCK_SIZE;
-                channelFrequencyStarts[chan] = (short) alignedStart;
-                channelWeightStarts[chan] = (short) weightIndexStart;
-                channelWidths[chan] = (short) paddedWidth;
-                weightIndexStart += paddedWidth;
-            }
-            chanFreqIndexStart = freqIndex;
+            while (freqToMel(frequency * hzPerSbin) <= centerMel[chan]) frequency++;
+            channelEnds[chan] = frequency;
         }
-        weights = new short[weightIndexStart];
-        unweights = new short[weightIndexStart];
-        int end = 0;
+        if (frequency >= spectrumSize) throw new IllegalStateException("filterbank end above spectrum");
+        // The C reference pads weight blocks for vector loads. Java consumes
+        // only real bins, in order, so no aligned offsets or zero slots are needed.
+        weights = new short[frequency - startIndex];
+        unweights = new short[weights.length];
+        frequency = startIndex;
+        int idx = 0;
         for (int chan = 0; chan < channelsPlus1; chan++) {
-            int frequency = actualStarts[chan];
-            int offset = frequency - channelFrequencyStarts[chan];
-            int weightStart = channelWeightStarts[chan];
             float denom = chan == 0 ? melLow : centerMel[chan - 1];
-            for (int j = 0; j < actualWidths[chan]; j++, frequency++) {
+            for (; frequency < channelEnds[chan]; frequency++, idx++) {
                 float w = (centerMel[chan] - freqToMel(frequency * hzPerSbin)) / (centerMel[chan] - denom);
-                int idx = weightStart + offset + j;
+                // Round both independently, exactly as in the reference.
                 weights[idx] = (short) Math.floor(w * (1 << FILTERBANK_BITS) + 0.5f);
                 unweights[idx] = (short) Math.floor((1.0f - w) * (1 << FILTERBANK_BITS) + 0.5f);
             }
-            if (frequency > end) end = frequency;
         }
-        endIndex = end;
-        if (endIndex >= spectrumSize) throw new IllegalStateException("filterbank end above spectrum");
-        int maxEnergyIndex = spectrumSize;
-        for (int chan = 0; chan < channelsPlus1; chan++) {
-            maxEnergyIndex = Math.max(maxEnergyIndex, channelFrequencyStarts[chan] + channelWidths[chan]);
-        }
-        energy = new int[maxEnergyIndex];
         signal = new int[NUM_CHANNELS];
 
         oddSmoothing = (int) (ODD_SMOOTHING * (1 << NOISE_REDUCTION_BITS));
@@ -250,7 +208,16 @@ public final class MicroFrontend {
         inputUsed += copy;
         if (inputUsed < windowSize) return copy;
 
-        applyWindow();
+        if (applyWindow()) {
+            // An exactly zero window has zero energy in every FFT bin. Keep
+            // the adaptive noise estimate decaying just as on the full path.
+            // Zero signal stays zero through noise reduction, PCAN and log.
+            java.util.Arrays.fill(signal, 0);
+            reduceNoise();
+            java.util.Arrays.fill(features, 0);
+            frameReady = true;
+            return copy;
+        }
         int inputShift = 15 - msb32(maxAbsOutput);
         for (int i = 0; i < windowSize; i++) {
             fftInput[i] = (short) ((windowOutput[i] & 0xFFFF) << inputShift);
@@ -288,7 +255,6 @@ public final class MicroFrontend {
         java.util.Arrays.fill(fftInput, (short) 0);
         java.util.Arrays.fill(outRe, (short) 0);
         java.util.Arrays.fill(outIm, (short) 0);
-        java.util.Arrays.fill(work, 0L);
         java.util.Arrays.fill(estimate, 0);
         frameReady = false;
     }
@@ -304,17 +270,22 @@ public final class MicroFrontend {
         return (int) Math.round(25.6 * 256.0 * inputScale);
     }
 
-    private void applyWindow() {
+    /** Returns true only when every windowed sample is exactly zero. */
+    private boolean applyWindow() {
         int maxAbs = 0;
+        int sampleBits = 0;
         for (int i = 0; i < windowSize; i++) {
             short v = (short) ((windowInput[i] * windowCoefficients[i]) >> WINDOW_BITS);
             windowOutput[i] = v;
+            // Do not use maxAbs: negating Short.MIN_VALUE as a short wraps.
+            sampleBits |= v;
             short a = v < 0 ? (short) -v : v;
             if (a > maxAbs) maxAbs = a;
         }
         System.arraycopy(windowInput, windowStep, windowInput, 0, windowSize - windowStep);
         inputUsed -= windowStep;
         maxAbsOutput = maxAbs;
+        return sampleBits == 0;
     }
 
     private void kissFftr() {
@@ -348,6 +319,10 @@ public final class MicroFrontend {
         int p = factors[factorIndex];
         int m = factors[factorIndex + 1];
         int foutEnd = fout + p * m;
+        if (m == 1 && p == 4) {
+            bfly4Leaf(fout, f, fstride);
+            return;
+        }
         if (m == 1) {
             for (int o = fout; o != foutEnd; o++) {
                 tmpRe[o] = fftInput[2 * f];
@@ -365,6 +340,39 @@ public final class MicroFrontend {
         } else {
             bfly2(fout, fstride, m);
         }
+    }
+
+    /** Radix-4 leaf: fuse the input gather, fixed-point scaling and butterfly.
+     * All three twiddles are (32767, 0). After division by four, the
+     * scaled values are in [-8191, 8191], where sround(v * 32767) == v.
+     * Keep the original short narrowing at every butterfly boundary. */
+    private void bfly4Leaf(int fout, int f, int stride) {
+        int i = 2 * f;
+        int step = 2 * stride;
+        short aR = sround(fftInput[i] * (SAMP_MAX / 4));
+        short aI = sround(fftInput[i + 1] * (SAMP_MAX / 4));
+        i += step;
+        short bR = sround(fftInput[i] * (SAMP_MAX / 4));
+        short bI = sround(fftInput[i + 1] * (SAMP_MAX / 4));
+        i += step;
+        short cR = sround(fftInput[i] * (SAMP_MAX / 4));
+        short cI = sround(fftInput[i + 1] * (SAMP_MAX / 4));
+        i += step;
+        short dR = sround(fftInput[i] * (SAMP_MAX / 4));
+        short dI = sround(fftInput[i + 1] * (SAMP_MAX / 4));
+
+        short acSumR = (short) (aR + cR), acSumI = (short) (aI + cI);
+        short acDiffR = (short) (aR - cR), acDiffI = (short) (aI - cI);
+        short bdSumR = (short) (bR + dR), bdSumI = (short) (bI + dI);
+        short bdDiffR = (short) (bR - dR), bdDiffI = (short) (bI - dI);
+        tmpRe[fout] = (short) (acSumR + bdSumR);
+        tmpIm[fout] = (short) (acSumI + bdSumI);
+        tmpRe[fout + 1] = (short) (acDiffR + bdDiffI);
+        tmpIm[fout + 1] = (short) (acDiffI - bdDiffR);
+        tmpRe[fout + 2] = (short) (acSumR - bdSumR);
+        tmpIm[fout + 2] = (short) (acSumI - bdSumI);
+        tmpRe[fout + 3] = (short) (acDiffR - bdDiffI);
+        tmpIm[fout + 3] = (short) (acDiffI + bdDiffR);
     }
 
     private void bfly2(int fout, int fstride, int m) {
@@ -393,31 +401,46 @@ public final class MicroFrontend {
             int i1 = i0 + m;
             int i2 = i1 + m;
             int i3 = i2 + m;
-            fixdiv(i0, SAMP_MAX / 4);
-            fixdiv(i1, SAMP_MAX / 4);
-            fixdiv(i2, SAMP_MAX / 4);
-            fixdiv(i3, SAMP_MAX / 4);
-            short s0R = sround(tmpRe[i1] * twiddleRe[tw1] - tmpIm[i1] * twiddleIm[tw1]);
-            short s0I = sround(tmpRe[i1] * twiddleIm[tw1] + tmpIm[i1] * twiddleRe[tw1]);
-            short s1R = sround(tmpRe[i2] * twiddleRe[tw2] - tmpIm[i2] * twiddleIm[tw2]);
-            short s1I = sround(tmpRe[i2] * twiddleIm[tw2] + tmpIm[i2] * twiddleRe[tw2]);
-            short s2R = sround(tmpRe[i3] * twiddleRe[tw3] - tmpIm[i3] * twiddleIm[tw3]);
-            short s2I = sround(tmpRe[i3] * twiddleIm[tw3] + tmpIm[i3] * twiddleRe[tw3]);
-            short s5R = (short) (tmpRe[i0] - s1R);
-            short s5I = (short) (tmpIm[i0] - s1I);
-            tmpRe[i0] = (short) (tmpRe[i0] + s1R);
-            tmpIm[i0] = (short) (tmpIm[i0] + s1I);
+            // Scale in locals rather than round-tripping through the scratch arrays.
+            // Retain the short narrowing at each fixed-point butterfly boundary.
+            short aR = sround(tmpRe[i0] * (SAMP_MAX / 4));
+            short aI = sround(tmpIm[i0] * (SAMP_MAX / 4));
+            short bR = sround(tmpRe[i1] * (SAMP_MAX / 4));
+            short bI = sround(tmpIm[i1] * (SAMP_MAX / 4));
+            short cR = sround(tmpRe[i2] * (SAMP_MAX / 4));
+            short cI = sround(tmpIm[i2] * (SAMP_MAX / 4));
+            short dR = sround(tmpRe[i3] * (SAMP_MAX / 4));
+            short dI = sround(tmpIm[i3] * (SAMP_MAX / 4));
+            short s0R, s0I, s1R, s1I, s2R, s2I;
+            if (k == 0) {
+                // Unity twiddles (32767, 0) are exact after radix-4 scaling.
+                // The scaled values are in [-8191, 8191], so sround(v*32767) == v.
+                s0R = bR; s0I = bI;
+                s1R = cR; s1I = cI;
+                s2R = dR; s2I = dI;
+            } else {
+                s0R = sround(bR * twiddleRe[tw1] - bI * twiddleIm[tw1]);
+                s0I = sround(bR * twiddleIm[tw1] + bI * twiddleRe[tw1]);
+                s1R = sround(cR * twiddleRe[tw2] - cI * twiddleIm[tw2]);
+                s1I = sround(cR * twiddleIm[tw2] + cI * twiddleRe[tw2]);
+                s2R = sround(dR * twiddleRe[tw3] - dI * twiddleIm[tw3]);
+                s2I = sround(dR * twiddleIm[tw3] + dI * twiddleRe[tw3]);
+            }
+            short s5R = (short) (aR - s1R);
+            short s5I = (short) (aI - s1I);
+            short acR = (short) (aR + s1R);
+            short acI = (short) (aI + s1I);
             short s3R = (short) (s0R + s2R);
             short s3I = (short) (s0I + s2I);
             short s4R = (short) (s0R - s2R);
             short s4I = (short) (s0I - s2I);
-            tmpRe[i2] = (short) (tmpRe[i0] - s3R);
-            tmpIm[i2] = (short) (tmpIm[i0] - s3I);
+            tmpRe[i2] = (short) (acR - s3R);
+            tmpIm[i2] = (short) (acI - s3I);
             tw1 += fstride;
             tw2 += fstride * 2;
             tw3 += fstride * 3;
-            tmpRe[i0] = (short) (tmpRe[i0] + s3R);
-            tmpIm[i0] = (short) (tmpIm[i0] + s3I);
+            tmpRe[i0] = (short) (acR + s3R);
+            tmpIm[i0] = (short) (acI + s3I);
             tmpRe[i1] = (short) (s5R + s4I);
             tmpIm[i1] = (short) (s5I - s4R);
             tmpRe[i3] = (short) (s5R - s4I);
@@ -431,28 +454,26 @@ public final class MicroFrontend {
     }
 
     private void accumulateFilterbank(int inputShift) {
-        for (int i = startIndex; i < endIndex; i++) {
-            int re = outRe[i];
-            int im = outIm[i];
-            energy[i] = re * re + im * im;
-        }
-        long weightAcc = 0;
-        long unweightAcc = 0;
+        int bin = startIndex;
+        int idx = 0;
+        long carry = 0;
         for (int ch = 0; ch <= NUM_CHANNELS; ch++) {
-            int mag = channelFrequencyStarts[ch];
-            int w = channelWeightStarts[ch];
-            int width = channelWidths[ch];
-            for (int j = 0; j < width; j++) {
-                long e = energy[mag + j];
-                weightAcc += weights[w + j] * e;
-                unweightAcc += unweights[w + j] * e;
+            long weightAcc = carry;
+            long unweightAcc = 0;
+            int end = channelEnds[ch];
+            for (; bin < end; bin++, idx++) {
+                int re = outRe[bin];
+                int im = outIm[bin];
+                // Preserve the reference's int arithmetic (including wrap),
+                // then widen before the weighted long accumulation.
+                long e = re * re + im * im;
+                weightAcc += weights[idx] * e;
+                unweightAcc += unweights[idx] * e;
             }
-            work[ch] = weightAcc;
-            weightAcc = unweightAcc;
-            unweightAcc = 0;
-        }
-        for (int i = 0; i < NUM_CHANNELS; i++) {
-            signal[i] = sqrt64(work[i + 1]) >>> inputShift;
+            // The first interval supplies only the carry for channel zero.
+            // Every later interval completes one output, even if it is empty.
+            if (ch > 0) signal[ch - 1] = sqrt64(weightAcc) >>> inputShift;
+            carry = unweightAcc;
         }
     }
 
@@ -522,8 +543,25 @@ public final class MicroFrontend {
         return ((loge << LOG_SCALE_SHIFT) + round) >>> LOG_SCALE_LOG2;
     }
 
-    private static int sqrt64(long num) {
-        if ((num >>> 32) == 0) return sqrt32((int) num);
+    static int sqrt64(long num) {
+        // Normal filterbank energies fit exactly in a double. Use the
+        // hardware/JIT square root, then recover the exact integer result
+        // (including values whose floating-point root rounds up to an integer).
+        // The original unsigned algorithm covers larger or unsigned inputs.
+        if (num >= 0 && num <= (1L << 53)) {
+            long root = (long) Math.sqrt(num);
+            long square = root * root;
+            if (square > num) {
+                square -= 2 * root - 1;
+                root--;
+            }
+            // Round to nearest, as in the original remainder > root rule.
+            long rounded = num - square > root ? root + 1 : root;
+            // The original 32-bit path saturates at 0xffff.
+            if ((num >>> 32) == 0 && rounded > 0xffffL) return 0xffff;
+            return (int) rounded;
+        }
+
         long res = 0;
         int maxBitNumber = Long.numberOfLeadingZeros(num) | 1;
         long bit = 1L << (63 - maxBitNumber);
@@ -538,24 +576,6 @@ public final class MicroFrontend {
         }
         if (Long.compareUnsigned(num, res) > 0 && res != 0xFFFFFFFFL) res++;
         return (int) res;
-    }
-
-    private static int sqrt32(int num) {
-        if (num == 0) return 0;
-        int res = 0;
-        int maxBitNumber = Integer.numberOfLeadingZeros(num) | 1;
-        int bit = 1 << (31 - maxBitNumber);
-        for (int iterations = (31 - maxBitNumber) / 2 + 1; iterations > 0; iterations--) {
-            if (Integer.compareUnsigned(num, res + bit) >= 0) {
-                num -= res + bit;
-                res = (res >>> 1) + bit;
-            } else {
-                res >>>= 1;
-            }
-            bit >>>= 2;
-        }
-        if (Integer.compareUnsigned(num, res) > 0 && res != 0xFFFF) res++;
-        return res & 0xFFFF;
     }
 
     private static short sround(int x) {

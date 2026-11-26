@@ -75,12 +75,14 @@
 }
 
 /* Body collapse animation — drives off max-height + opacity.
-   The script writes max-height inline; CSS only owns the transition curve. */
+   Visibility stays visible during the slide, then hides the settled body
+   from keyboard focus and the accessibility tree. */
 .card > .card-body {
     overflow: hidden;
     transition: max-height 280ms cubic-bezier(0.2, 0.0, 0.2, 1.0),
                 opacity 200ms ease-out,
-                padding 240ms cubic-bezier(0.2, 0.0, 0.2, 1.0);
+                padding 240ms cubic-bezier(0.2, 0.0, 0.2, 1.0),
+                visibility 280ms linear;
 }
 
 .card.is-collapsed > .card-body {
@@ -89,6 +91,7 @@
        transition above animates the padding shrink/grow. */
     padding-top: 0;
     padding-bottom: 0;
+    visibility: hidden;
 }
 
 /* Drop the bottom border on the header when the card is collapsed so the

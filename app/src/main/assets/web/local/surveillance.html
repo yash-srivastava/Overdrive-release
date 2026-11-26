@@ -422,6 +422,7 @@
                             <div class="setting-info">
                                 <div class="setting-name" data-i18n="surveillance.bluetooth_keepalive">Keep Bluetooth on while parked</div>
                                 <div class="setting-desc" data-i18n="surveillance.bluetooth_keepalive_desc">Shared with Proximity, Automations and key bindings. Saves immediately, independently of surveillance and proximity monitoring. Turning this off disables Bluetooth while vehicle power is off.</div>
+                                <div class="setting-desc" data-i18n="remote_access.parked_bluetooth_audio_warning">When enabled, Bluetooth calls and media may stay connected, and wireless phone projection may remain active while parked. Phone proximity requires a live Bluetooth connection; audio and projection are not suspended separately.</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -1527,6 +1528,8 @@
                                     <span data-i18n="recording.codec">Video Codec</span>
                                 </div>
                                 <div class="setting-desc" data-i18n="recording.codec_desc">H.265 produces 50% smaller files</div>
+                                <div class="setting-desc" id="codecAvailabilityNote" role="status" hidden></div>
+                                <div class="setting-desc" id="codecRuntimeNote" role="status" hidden></div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group" id="codecBtns">
@@ -1866,7 +1869,7 @@
     <script src="../shared/update-flow.js?v=6"></script>
     <script src="../shared/storage-budget.js?v=9"></script>
     <script src="../shared/settings-hydration.js?v=1"></script>
-    <script src="../shared/surveillance.js?v=survtoggle22"></script>
+    <script src="../shared/surveillance.js?v=codecavailability3"></script>
     <script src="../shared/safe-locations.js?v=6"></script>
     <script src="../shared/roi-schedule.js?v=7"></script>
     <script src="../shared/parking-settings.js?v=7"></script>

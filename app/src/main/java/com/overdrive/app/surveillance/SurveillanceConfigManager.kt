@@ -21,7 +21,6 @@ class SurveillanceConfigManager(
         private const val TAG = "SurveillanceConfigMgr"
         
         // Legacy paths (for migration only)
-        private const val SYSTEM_CONFIG_PATH = "/data/data/com.android.providers.settings/sentry_config.json"
         private val SHELL_CONFIG_PATH: String get() = com.overdrive.app.util.ScratchRoot.path("sentry_config.json")
         
         // SOTA: Use unified config path

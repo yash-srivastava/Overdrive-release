@@ -9,7 +9,6 @@ import android.os.PowerManager;
 import com.overdrive.app.byd.BydDeviceHelper;
 import com.overdrive.app.logging.DaemonLogger;
 
-import java.lang.reflect.Method;
 
 /**
  * 12V-voltage-driven MCU sleep/wake state machine.

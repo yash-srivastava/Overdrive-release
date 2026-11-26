@@ -19,6 +19,7 @@
     'use strict';
 
     var STORAGE_PREFIX = 'ot-card-collapsed:';
+    var expansionTimers = new WeakMap();
 
     function pageKey() {
         var path = window.location.pathname || '';
@@ -64,6 +65,11 @@
     function setCollapsed(card, collapsed, animate) {
         var body = card.querySelector(':scope > .card-body');
         if (!body) return;
+        // A previous expansion must not clear the height during a newer one.
+        if (expansionTimers.has(card)) {
+            clearTimeout(expansionTimers.get(card));
+            expansionTimers.delete(card);
+        }
         var header = card.querySelector(':scope > .card-header');
         if (collapsed) {
             // Browsers can't transition out of `max-height: none` — they need
@@ -90,11 +96,12 @@
                 // then clear it so subsequent DOM growth reflows naturally.
                 body.style.maxHeight = (body.scrollHeight + 64) + 'px';
                 body.style.opacity = '1';
-                setTimeout(function () {
+                expansionTimers.set(card, setTimeout(function () {
+                    expansionTimers.delete(card);
                     if (!card.classList.contains('is-collapsed')) {
                         body.style.maxHeight = 'none';
                     }
-                }, 320);
+                }, 320));
             } else {
                 body.style.maxHeight = 'none';
                 body.style.opacity = '1';

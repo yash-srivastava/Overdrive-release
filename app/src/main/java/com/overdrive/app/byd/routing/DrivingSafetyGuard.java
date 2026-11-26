@@ -269,6 +269,15 @@ public final class DrivingSafetyGuard {
      * Network/config failures fail closed.
      */
     public static boolean isActionBlockedViaDaemon(String key) {
+        return isBlockedViaDaemon(key, false);
+    }
+
+    /** Automatic UI work must honor movement safety even if a user-facing guard is disabled. */
+    public static boolean isMovementBlockedViaDaemon() {
+        return isBlockedViaDaemon(GUARD_SCREEN_MEDIA, true);
+    }
+
+    private static boolean isBlockedViaDaemon(String key, boolean requireMovementSafe) {
         if (!isKnownGuard(key)) return true;
         HttpURLConnection connection = null;
         try {
@@ -283,6 +292,11 @@ public final class DrivingSafetyGuard {
                 while ((line = reader.readLine()) != null) body.append(line);
             }
             JSONObject response = new JSONObject(body.toString());
+            if (requireMovementSafe) {
+                return !Boolean.TRUE.equals(response.opt("success"))
+                        || !key.equals(response.opt("guard"))
+                        || !Boolean.FALSE.equals(response.opt("movementBlocked"));
+            }
             return !isDaemonResponseUnblocked(response, key);
         } catch (Throwable ignored) {
             return true;

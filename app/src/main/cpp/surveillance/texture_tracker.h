@@ -98,12 +98,13 @@ int tracker_startTrack(
  * @param height    Frame height (240)
  * @param quadrant  Which quadrant this frame is from (0-3)
  * @param nowMs     Current time in milliseconds
+ * @param rgbStride RGB row stride in bytes; 0 means tightly packed width*3
  */
 void tracker_update(
     TrackerState* state,
     const uint8_t* frame, int width, int height,
     int quadrant,
-    long long nowMs
+    long long nowMs, int rgbStride = 0
 );
 
 /**

@@ -267,7 +267,7 @@ public class UnifiedConfigManagerDurabilityContractTest {
         String optionalLock = between(
                 source,
                 "private fun <T> withConfigFileLockOrNull(",
-                "/**\n     * Persist a config mutated");
+                "/**\n     * Persist the geocoding-schema migration");
 
         assertTrue(optionalLock.contains(
                 "catch (e: ConfigLockUnavailableException)"));

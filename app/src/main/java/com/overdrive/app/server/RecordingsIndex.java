@@ -4,6 +4,7 @@ import com.overdrive.app.storage.removable.RemovableStorageFs;
 
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.storage.StorageManager;
+import com.overdrive.app.util.RecordingSizeFormatter;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -95,7 +96,8 @@ public final class RecordingsIndex {
     // AUTO_COMPACT_FILL_RATE=50: idle-CPU tuning shared by all seven H2 stores
     // (see SocHistoryDatabase.JDBC_URL for the full rationale).
     // WRITE_DELAY=5000: H2 housekeeps every WRITE_DELAY/10 ms; rows lost to a kill are
-    // rebuilt from the files by the boot warmup and the reconcile.
+    // rebuilt from the files by the boot warmup and the reconcile. User-owned
+    // watched acknowledgements explicitly sync before returning success.
     private static final String JDBC_URL = "jdbc:h2:file:" + DB_PATH +
             ";FILE_LOCK=SOCKET;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
             ";AUTO_COMPACT_FILL_RATE=50;WRITE_DELAY=5000";
@@ -1779,7 +1781,7 @@ public final class RecordingsIndex {
                 RecordingIdentity identity = RecordingIdentity.fromFile(file);
                 scan.observedIds.add(identity.recordingId);
                 if (!RemovableStorageFs.isFile(file)) continue;
-                RecordingFileFingerprint fingerprint = RecordingFileFingerprint.from(file);
+                RecordingFileFingerprint fingerprint = RecordingFileFingerprint.from(file, identity);
                 if (fingerprint.sizeBytes > 0) {
                     scan.files.put(fingerprint.recordingId, fingerprint);
                 }
@@ -1977,20 +1979,30 @@ public final class RecordingsIndex {
      */
     public synchronized AdjacentResult queryAdjacentRecording(Filter f, String recordingId,
                                                                int step) {
-        if (recordingId == null || !recordingId.matches("[0-9a-f]{32}")
-                || (step != -1 && step != 1)) {
+        return queryPlaylistRecording(f, recordingId, step, false, false,
+                java.util.Collections.emptySet());
+    }
+
+    /** Seek a playlist candidate without changing the list's filters or page numbering. */
+    public synchronized AdjacentResult queryPlaylistRecording(Filter f, String recordingId,
+            int step, boolean resume, boolean unwatchedOnly, Set<String> skippedPrefixes) {
+        if ((!resume && (recordingId == null || !recordingId.matches("[0-9a-f]{32}")))
+                || (resume && recordingId != null) || (step != -1 && step != 1)) {
             return AdjacentResult.of(AdjacentResult.Status.MISSING_ANCHOR);
         }
         StringBuilder where = new StringBuilder();
         List<Object> args = new ArrayList<>();
         buildWhere(f, where, args);
+        appendPlaylistWhere(where, args, resume || unwatchedOnly, skippedPrefixes);
         final boolean newer = step < 0;
-        appendAnd(where, newer
-                ? "ts_ms >= ? AND (ts_ms > ? OR (ts_ms = ? AND root_rank < ?)"
-                        + " OR (ts_ms = ? AND root_rank = ? AND recording_id < ?))"
-                : "ts_ms <= ? AND (ts_ms < ? OR (ts_ms = ? AND root_rank > ?)"
-                        + " OR (ts_ms = ? AND root_rank = ? AND recording_id > ?))");
-        String from = sortIndexAvailable
+        if (!resume) {
+            appendAnd(where, newer
+                    ? "ts_ms >= ? AND (ts_ms > ? OR (ts_ms = ? AND root_rank < ?)"
+                            + " OR (ts_ms = ? AND root_rank = ? AND recording_id < ?))"
+                    : "ts_ms <= ? AND (ts_ms < ? OR (ts_ms = ? AND root_rank > ?)"
+                            + " OR (ts_ms = ? AND root_rank = ? AND recording_id > ?))");
+        }
+        String from = (resume ? useSortIndex(f) : sortIndexAvailable)
                 ? " FROM recordings USE INDEX ("
                         + (newer ? RecordingsIndexSchema.NEWER_INDEX
                                  : RecordingsIndexSchema.SORT_INDEX) + ")"
@@ -2006,31 +2018,35 @@ public final class RecordingsIndex {
 
         return withRetry("queryAdjacentRecording",
                 AdjacentResult.of(AdjacentResult.Status.ERROR), () -> {
-            long timestamp;
-            int rank;
-            try (PreparedStatement anchor = connection.prepareStatement(
-                    "SELECT ts_ms, root_rank FROM recordings"
-                            + " WHERE recording_id = ? AND is_available = TRUE")) {
-                anchor.setString(1, recordingId);
-                try (ResultSet rs = anchor.executeQuery()) {
-                    if (!rs.next()) {
-                        return AdjacentResult.of(AdjacentResult.Status.MISSING_ANCHOR);
+            long timestamp = 0;
+            int rank = 0;
+            if (!resume) {
+                try (PreparedStatement anchor = connection.prepareStatement(
+                        "SELECT ts_ms, root_rank FROM recordings"
+                                + " WHERE recording_id = ? AND is_available = TRUE")) {
+                    anchor.setString(1, recordingId);
+                    try (ResultSet rs = anchor.executeQuery()) {
+                        if (!rs.next()) {
+                            return AdjacentResult.of(AdjacentResult.Status.MISSING_ANCHOR);
+                        }
+                        timestamp = rs.getLong(1);
+                        rank = rs.getInt(2);
                     }
-                    timestamp = rs.getLong(1);
-                    rank = rs.getInt(2);
                 }
             }
             try (PreparedStatement ps = connection.prepareStatement(sql)) {
                 int p = 1;
                 for (Object arg : args) bind(ps, p++, arg);
-                // A single indexed timestamp range plus lexicographic ties.
-                ps.setLong(p++, timestamp);
-                ps.setLong(p++, timestamp);
-                ps.setLong(p++, timestamp);
-                ps.setInt(p++, rank);
-                ps.setLong(p++, timestamp);
-                ps.setInt(p++, rank);
-                ps.setString(p, recordingId);
+                if (!resume) {
+                    // A single indexed timestamp range plus lexicographic ties.
+                    ps.setLong(p++, timestamp);
+                    ps.setLong(p++, timestamp);
+                    ps.setLong(p++, timestamp);
+                    ps.setInt(p++, rank);
+                    ps.setLong(p++, timestamp);
+                    ps.setInt(p++, rank);
+                    ps.setString(p, recordingId);
+                }
                 try (ResultSet rs = ps.executeQuery()) {
                     return rs.next()
                             ? new AdjacentResult(AdjacentResult.Status.FOUND, rowToJson(rs))
@@ -2038,6 +2054,23 @@ public final class RecordingsIndex {
                 }
             }
         });
+    }
+
+    // Prefixes are literal (underscore is not a LIKE wildcard). Watched state
+    // must match the same file fingerprint used by the list and watched POST.
+    private static void appendPlaylistWhere(StringBuilder where, List<Object> args,
+            boolean unwatchedOnly, Set<String> skippedPrefixes) {
+        for (String prefix : skippedPrefixes) {
+            appendAnd(where, "SUBSTRING(filename, 1, ?) <> ?");
+            args.add(prefix.length());
+            args.add(prefix);
+        }
+        if (unwatchedOnly) {
+            appendAnd(where, "NOT EXISTS (SELECT 1 FROM recordings_watched w"
+                    + " WHERE w.recording_id = recordings.recording_id"
+                    + " AND w.size_bytes = recordings.size_bytes"
+                    + " AND w.mp4_mtime = recordings.mp4_mtime)");
+        }
     }
 
     /**
@@ -2117,8 +2150,14 @@ public final class RecordingsIndex {
                 save.setLong(3, mp4Mtime);
                 save.setLong(4, System.currentTimeMillis());
                 save.executeUpdate();
-                return Boolean.TRUE;
             }
+            // Unlike the derived index, watch history cannot be rebuilt from
+            // the MP4s. Do not acknowledge it while H2 may still have the
+            // commit buffered (e.g. the daemon is killed during sleep).
+            try (Statement sync = connection.createStatement()) {
+                sync.execute("CHECKPOINT SYNC");
+            }
+            return Boolean.TRUE;
         });
     }
 
@@ -2815,7 +2854,7 @@ public final class RecordingsIndex {
         rec.put("size", size);
         rec.put("mp4Mtime", rs.getLong("mp4_mtime"));
         rec.put("watched", rs.getBoolean("watched"));
-        rec.put("sizeFormatted", formatSize(size));
+        rec.put("sizeFormatted", RecordingSizeFormatter.format(size, Locale.US));
 
         Date d = new Date(ts);
         rec.put("date", FMT_DATE_ISO.get().format(d));
@@ -2942,13 +2981,6 @@ public final class RecordingsIndex {
         c.set(Calendar.SECOND, 0);
         c.set(Calendar.MILLISECOND, 0);
         return c.getTimeInMillis();
-    }
-
-    private static String formatSize(long bytes) {
-        if (bytes >= 1_000_000_000L) return String.format(Locale.US, "%.1f GB", bytes / 1_000_000_000.0);
-        if (bytes >= 1_000_000L) return String.format(Locale.US, "%.1f MB", bytes / 1_000_000.0);
-        if (bytes >= 1_000L) return String.format(Locale.US, "%.1f KB", bytes / 1_000.0);
-        return bytes + " B";
     }
 
     private static final ThreadLocal<SimpleDateFormat> FMT_DATE_ISO =

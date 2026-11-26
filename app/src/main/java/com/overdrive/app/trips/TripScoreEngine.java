@@ -177,13 +177,79 @@ public class TripScoreEngine {
             TelemetrySample s = samples.get(i);
             out.add(s);
             // The last row spans as long as the step before it.
-            long next = i + 1 < samples.size() ? samples.get(i + 1).timestampMs
-                    : i > 0 ? 2 * s.timestampMs - samples.get(i - 1).timestampMs : s.timestampMs + 1_000L;
+            long next = nextRowTime(samples, i, s.timestampMs);
             for (long t = s.timestampMs + 200L; t <= s.timestampMs + 800L && t < next; t += 200L) {
                 out.add(s.atTimestamp(t));
             }
         }
         return out;
+    }
+
+    private static long nextRowTime(List<TelemetrySample> samples, int i, long timestamp) {
+        return i + 1 < samples.size() ? samples.get(i + 1).timestampMs
+                : i > 0 ? 2 * timestamp - samples.get(i - 1).timestampMs : timestamp + 1_000L;
+    }
+
+    /**
+     * Virtual 5 Hz scoring stream for recovered DI5 journals. The scorer needs only
+     * the original immutable row and the effective timestamp, not a copied row for
+     * each tick. The input list must remain unchanged until scoring completes.
+     */
+    static final class ExpandedScoringSamples {
+        private final List<TelemetrySample> rows;
+        final int count;
+        final double seconds;
+
+        ExpandedScoringSamples(List<TelemetrySample> rows) {
+            this.rows = rows;
+            Cursor cursor = cursor();
+            int n = 0;
+            long previous = 0, lastStep = 0;
+            double ms = 0;
+            while (cursor.next() != null) {
+                long timestamp = cursor.timestamp;
+                if (n > 0) {
+                    long step = timestamp - previous;
+                    if (step > 0) {
+                        lastStep = Math.min(step, 1_000L);
+                        ms += lastStep;
+                    }
+                }
+                previous = timestamp;
+                n++;
+            }
+            count = n;
+            seconds = n == 0 ? 0 : (ms + lastStep) / 1000.0;
+        }
+
+        Cursor cursor() { return new Cursor(rows); }
+
+        static final class Cursor {
+            private final List<TelemetrySample> rows;
+            private int index = -1;
+            private TelemetrySample row;
+            private long next, limit;
+            long timestamp;
+
+            Cursor(List<TelemetrySample> rows) { this.rows = rows; }
+
+            TelemetrySample next() {
+                if (row != null && next <= row.timestampMs + 800L && next < limit) {
+                    timestamp = next;
+                    next += 200L;
+                    return row;
+                }
+                if (++index >= rows.size()) {
+                    row = null;
+                    return null;
+                }
+                row = rows.get(index);
+                timestamp = row.timestampMs;
+                next = timestamp + 200L;
+                limit = nextRowTime(rows, index, timestamp);
+                return row;
+            }
+        }
     }
 
     /** DI5: scores need at least 30 s of scoreable data, covering at least a quarter of the trip. */
@@ -231,9 +297,20 @@ public class TripScoreEngine {
      */
     TripRecord computeSummary(TripRecord trip, List<TelemetrySample> samples,
                               double presetGainM, double presetLossM) {
-        if (samples == null || samples.size() < MIN_SAMPLES) {
-            logger.warn("computeSummary: insufficient samples ("
-                    + (samples != null ? samples.size() : 0) + "), using defaults");
+        return computeSummary(trip, samples, null, presetGainM, presetLossM);
+    }
+
+    TripRecord computeExpandedSummary(TripRecord trip, ExpandedScoringSamples expanded,
+                                      double presetGainM, double presetLossM) {
+        return computeSummary(trip, null, expanded, presetGainM, presetLossM);
+    }
+
+    private TripRecord computeSummary(TripRecord trip, List<TelemetrySample> samples,
+                                      ExpandedScoringSamples expanded,
+                                      double presetGainM, double presetLossM) {
+        final int n = expanded != null ? expanded.count : samples == null ? 0 : samples.size();
+        if (n < MIN_SAMPLES) {
+            logger.warn("computeSummary: insufficient samples (" + n + "), using defaults");
             trip.anticipationScore = DEFAULT_SCORE;
             trip.smoothnessScore = DEFAULT_SCORE;
             trip.speedDisciplineScore = DEFAULT_SCORE;
@@ -244,7 +321,7 @@ public class TripScoreEngine {
             return trip;
         }
 
-        final int n = samples.size();
+        ExpandedScoringSamples.Cursor cursor = expanded == null ? null : expanded.cursor();
 
         // ── Accumulators: kinematic state classification ──
         int stopCount = 0;
@@ -256,7 +333,10 @@ public class TripScoreEngine {
 
         // ── Accumulators: elevation (gradient profile) ──
         // Shared gated/smoothed/hysteresis pipeline — see ElevationEstimator.
-        final ElevationEstimator elevation = new ElevationEstimator();
+        // A supplied whole-journal gain is authoritative (including zero). Do not
+        // rebuild a second median window from the filtered scoring stream.
+        final ElevationEstimator elevation = Double.isNaN(presetGainM)
+                ? new ElevationEstimator() : null;
 
         // ── Accumulators: pedal jerk (smoothness score) ──
         // Only sums jerk between two consecutive DRIVING samples, each sample's
@@ -317,6 +397,7 @@ public class TripScoreEngine {
         int[] smoothWindowAccel = new int[SMOOTH_WINDOW_SIZE];
         boolean[] smoothWindowDriving = new boolean[SMOOTH_WINDOW_SIZE];
         int smoothStepCounter = 0;
+        long[] smoothWindowTimes = cursor == null ? null : new long[SMOOTH_WINDOW_SIZE];
 
         // ── Output collectors ──
         MicroMoments microMoments = new MicroMoments();
@@ -325,7 +406,8 @@ public class TripScoreEngine {
         //  SINGLE PASS: iterate samples exactly once
         // ════════════════════════════════════════════════════════════
         for (int i = 0; i < n; i++) {
-            final TelemetrySample s = samples.get(i);
+            final TelemetrySample s = cursor == null ? samples.get(i) : cursor.next();
+            final long timestamp = cursor == null ? s.timestampMs : cursor.timestamp;
             final int speed = s.speedKmh;
             final int accel = s.accelPedalPercent;
             final int brake = s.brakePedalPercent;
@@ -346,15 +428,17 @@ public class TripScoreEngine {
             }
 
             // ── 3b. Elevation tracking (gradient profile) ──
-            // Every sample feeds the shared estimator: it gates on movement
+            // Without journal totals, every sample feeds the shared estimator: it gates on movement
             // (gear P / unknown-at-standstill excluded, so the park-debounce
             // tail and idle noise can't accumulate), gates on reported vertical
             // accuracy, median-smooths over 10 s, resets on MSL/ellipsoid source
             // flips and long gaps, and banks movement through a hysteresis band
             // so sub-threshold noise contributes exactly zero.
-            elevation.addSample(s.timestampMs, s.altitude, s.verticalAccuracyM,
-                    s.altitudeIsMsl,
-                    ElevationEstimator.isElevationEligible(s.gearMode, speed));
+            if (elevation != null) {
+                elevation.addSample(timestamp, s.altitude, s.verticalAccuracyM,
+                        s.altitudeIsMsl,
+                        ElevationEstimator.isElevationEligible(s.gearMode, speed));
+            }
 
             final boolean driving = speed > MIN_DRIVING_SPEED;
             final boolean wasDriving = lastSpeed > MIN_DRIVING_SPEED;
@@ -377,11 +461,11 @@ public class TripScoreEngine {
             // stop. Crediting light-throttle and roll-to-stop coasts is what lets
             // one-pedal EV drivers (who rarely touch the brake) score honestly.
             if (accel < 5 && brake == 0 && speed > MIN_DRIVING_SPEED) {
-                if (coastStartTime == null) coastStartTime = s.timestampMs;
+                if (coastStartTime == null) coastStartTime = timestamp;
             } else if (coastStartTime != null
                     && (brake > 0 || accel >= 5 || speed <= MIN_DRIVING_SPEED)) {
                 // Coast ended — credit the gap regardless of HOW it ended.
-                long gapMs = s.timestampMs - coastStartTime;
+                long gapMs = timestamp - coastStartTime;
                 double gapSec = gapMs / 1000.0;
                 if (gapSec > 0 && gapSec < MAX_COAST_GAP_SECONDS) {
                     coastGapSumMs += gapMs;
@@ -398,14 +482,8 @@ public class TripScoreEngine {
                 launchCaptureRemaining--;
                 if (launchCaptureRemaining == 0) {
                     // Finalize this launch profile
-                    MicroMoments.LaunchProfile lp = new MicroMoments.LaunchProfile();
-                    lp.startTime = launchStartTime;
-                    lp.peakAccelPercent = launchPeakAccel;
-                    lp.accelCurve = new int[launchCurveBuffer.size()];
-                    for (int k = 0; k < launchCurveBuffer.size(); k++) {
-                        lp.accelCurve[k] = launchCurveBuffer.get(k);
-                    }
-                    microMoments.launches.add(lp);
+                    microMoments.launches.add(buildLaunchProfile(
+                            launchStartTime, launchPeakAccel, launchCurveBuffer));
                 }
             } else {
                 // Detect launch: was stationary, now moving. Arm at a near-
@@ -417,7 +495,7 @@ public class TripScoreEngine {
                     wasStationary = true;
                 } else if (wasStationary && speed > MIN_DRIVING_SPEED) {
                     // Start capturing launch profile
-                    launchStartTime = s.timestampMs;
+                    launchStartTime = timestamp;
                     launchPeakAccel = accel;
                     launchCurveBuffer = new ArrayList<>(LAUNCH_PROFILE_SAMPLES);
                     launchCurveBuffer.add(accel);
@@ -429,10 +507,10 @@ public class TripScoreEngine {
 
             // ── 7. Coast-brake events (micro-moments) ──
             if (accel < 5 && brake == 0 && mmCoastStartTime == null && speed > MIN_DRIVING_SPEED) {
-                mmCoastStartTime = s.timestampMs;
+                mmCoastStartTime = timestamp;
             }
             if (brake > 0 && mmCoastStartTime != null) {
-                long gapMs = s.timestampMs - mmCoastStartTime;
+                long gapMs = timestamp - mmCoastStartTime;
                 if (gapMs > 0 && gapMs < (long) (MAX_COAST_GAP_SECONDS * 1000)) {
                     MicroMoments.CoastBrakeEvent event = new MicroMoments.CoastBrakeEvent();
                     event.coastGapMs = gapMs;
@@ -515,6 +593,7 @@ public class TripScoreEngine {
             int smoothCircIdx = i % SMOOTH_WINDOW_SIZE;
             smoothWindowAccel[smoothCircIdx] = accel;
             smoothWindowDriving[smoothCircIdx] = isDriving;
+            if (smoothWindowTimes != null) smoothWindowTimes[smoothCircIdx] = timestamp;
 
             smoothStepCounter++;
             if (i >= SMOOTH_WINDOW_SIZE - 1 && smoothStepCounter >= SMOOTH_WINDOW_STEP) {
@@ -534,7 +613,9 @@ public class TripScoreEngine {
                     double aVar = (aSumSq / drivingCount) - (aMean * aMean);
                     if (aVar < 0) aVar = 0;
                     MicroMoments.PedalSmoothnessWindow window = new MicroMoments.PedalSmoothnessWindow();
-                    window.startTime = samples.get(Math.max(0, i - SMOOTH_WINDOW_SIZE + 1)).timestampMs;
+                    window.startTime = smoothWindowTimes == null
+                            ? samples.get(i - SMOOTH_WINDOW_SIZE + 1).timestampMs
+                            : smoothWindowTimes[(smoothCircIdx + 1) % SMOOTH_WINDOW_SIZE];
                     window.stdDev = Math.sqrt(aVar);
                     microMoments.smoothnessWindows.add(window);
                 }
@@ -550,14 +631,7 @@ public class TripScoreEngine {
 
         // Finalize any in-progress launch capture (trip ended mid-launch)
         if (launchCaptureRemaining > 0 && launchCurveBuffer != null && !launchCurveBuffer.isEmpty()) {
-            MicroMoments.LaunchProfile lp = new MicroMoments.LaunchProfile();
-            lp.startTime = launchStartTime;
-            lp.peakAccelPercent = launchPeakAccel;
-            lp.accelCurve = new int[launchCurveBuffer.size()];
-            for (int k = 0; k < launchCurveBuffer.size(); k++) {
-                lp.accelCurve[k] = launchCurveBuffer.get(k);
-            }
-            microMoments.launches.add(lp);
+            microMoments.launches.add(buildLaunchProfile(launchStartTime, launchPeakAccel, launchCurveBuffer));
         }
 
         // ── Classify kinematic state ──
@@ -579,7 +653,7 @@ public class TripScoreEngine {
         // Elevation gain/loss per km — standard metric for terrain difficulty.
         // Climb and descent are separate profiles because the physics and
         // optimal driving behavior are fundamentally different.
-        GradientProfile gradProfile = Double.isNaN(presetGainM)
+        GradientProfile gradProfile = elevation != null
                 ? applyElevation(trip, elevation.getGainM(), elevation.getLossM())
                 : applyElevation(trip, presetGainM, presetLossM);
         final double elevationGain = trip.elevationGainM;
@@ -820,6 +894,18 @@ public class TripScoreEngine {
     }
 
     // ==================== Utilities ====================
+
+    private static MicroMoments.LaunchProfile buildLaunchProfile(long startTime, int peakAccel,
+                                                                List<Integer> curve) {
+        MicroMoments.LaunchProfile profile = new MicroMoments.LaunchProfile();
+        profile.startTime = startTime;
+        profile.peakAccelPercent = peakAccel;
+        profile.accelCurve = new int[curve.size()];
+        for (int k = 0; k < curve.size(); k++) {
+            profile.accelCurve[k] = curve.get(k);
+        }
+        return profile;
+    }
 
     static int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));

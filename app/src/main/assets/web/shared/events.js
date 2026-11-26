@@ -10,6 +10,7 @@ BYD.events = {
     selectedDate: null,
     currentFilter: 'all',
     recordings: [],
+    _thumbnailBatch: null,
     totalCount: 0,
     datesWithRecordings: new Map(),
     currentPage: 1,
@@ -23,6 +24,7 @@ BYD.events = {
     _watchActiveKey: null,
     _watchTimer: null,
     _watchListenersReady: false,
+    _watchRevision: 0,
 
     // Multi-select state
     selectMode: false,
@@ -102,6 +104,114 @@ BYD.events = {
     _recordingNavSerial: 0,
     _recordingNavBoundary: { '-1': false, '1': false },
     _timelineSeq: 0,
+    // Off by default: continuing to the next clip is an opt-in (it streams over tunnels too).
+    _playlist: { direction: 0, skipDvr: false, skipEvent: false, skipCam: false, unwatchedOnly: false },
+    _playlistRequest: null,
+    _PLAYLIST_LS_KEY: 'byd.events.playlist',
+
+    initPlaylist(player) {
+        const settings = document.getElementById('eventsPlaylistSettings');
+        if (!settings) return; // The shared Parking player has no playlist.
+        try {
+            const saved = JSON.parse(localStorage.getItem(this._PLAYLIST_LS_KEY));
+            if (saved) {
+                if ([-1, 0, 1].includes(saved.direction)) this._playlist.direction = saved.direction;
+                for (const key of ['skipDvr', 'skipEvent', 'skipCam', 'unwatchedOnly']) {
+                    if (typeof saved[key] === 'boolean') this._playlist[key] = saved[key];
+                }
+            }
+        } catch (error) { /* private mode or invalid stored settings */ }
+        const modalSettings = settings.cloneNode(true);
+        modalSettings.id = 'videoPlaylistSettings';
+        modalSettings.open = false;
+        const shortcuts = document.getElementById('videoShortcuts');
+        shortcuts.parentNode.insertBefore(modalSettings, shortcuts);
+        const controls = document.querySelectorAll('[data-playlist-option]');
+        const sync = () => controls.forEach(control => {
+            const value = this._playlist[control.dataset.playlistOption];
+            if (control.type === 'checkbox') control.checked = value;
+            else control.value = String(value);
+        });
+        controls.forEach(control => control.addEventListener('change', () => {
+            const key = control.dataset.playlistOption;
+            this._playlist[key] = control.type === 'checkbox' ? control.checked : Number(control.value);
+            this._cancelPlaylistRequest();
+            sync();
+            try { localStorage.setItem(this._PLAYLIST_LS_KEY, JSON.stringify(this._playlist)); }
+            catch (error) { /* private mode */ }
+        }));
+        sync();
+        document.getElementById('eventsPlaylistResume').addEventListener('click', () => this.seekPlaylist(true));
+        player.addEventListener('ended', () => {
+            if (player.ended) this.seekPlaylist(false);
+        });
+    },
+
+    _cancelPlaylistRequest() {
+        if (!this._playlistRequest) return;
+        this._playlistRequest = null;
+        this._refreshPlaylistControls();
+        this._refreshRecordingNav();
+    },
+
+    _refreshPlaylistControls() {
+        const resume = document.getElementById('eventsPlaylistResume');
+        if (resume) resume.disabled = !!this._playlistRequest;
+    },
+
+    // Resume always uses daemon watched fingerprints. Auto-advance uses the
+    // same stable-ID ordering as manual navigation but adds playlist-only filters.
+    async seekPlaylist(resume) {
+        if (!document.getElementById('eventsPlaylistSettings') || this._listHidden()
+                || this._externalRecordingKey || this._playlistRequest || this._recordingNavBusy) return;
+        const modal = document.getElementById('videoModal');
+        const player = document.getElementById('videoPlayer');
+        const isOpen = () => modal.classList.contains('active');
+        if (resume ? isOpen() : (!isOpen() || !player.ended || document.hidden
+                || !this._canSeekRecording() || !this._playlist.direction)) return;
+        const step = this._playlist.direction || -1;
+        const filters = this._recordingFilterParams().join('&');
+        const params = [filters, 'step=' + step, 'pageSize=' + this.pageSize];
+        if (resume) params.push('resume=1');
+        else params.push('fromId=' + encodeURIComponent(this._activeRecording.id));
+        if (this._playlist.skipDvr) params.push('skip_dvr_p=1');
+        if (this._playlist.skipEvent) params.push('skip_event_=1');
+        if (this._playlist.skipCam) params.push('skip_cam_=1');
+        if (this._playlist.unwatchedOnly) params.push('unwatchedOnly=1');
+        const request = this._playlistRequest = { filters };
+        const serial = this._recordingNavSerial;
+        const current = () => this._playlistRequest === request && this._recordingNavSerial === serial
+            && !this._listHidden() && this._recordingFilterParams().join('&') === filters
+            && (resume ? !isOpen() : isOpen() && player.ended);
+        this._refreshPlaylistControls();
+        this._refreshRecordingNav();
+        try {
+            const response = await fetch('/api/recordings/adjacent?' + params.filter(Boolean).join('&'), { cache: 'no-store' });
+            const data = await response.json();
+            if (!current()) return;
+            if (!response.ok || !data.success) throw new Error(data.status || response.status);
+            if (data.status === 'end') {
+                BYD.core.toast(BYD.i18n.t(resume ? 'events.playlist_no_unwatched' : 'events.playlist_end'));
+                return;
+            }
+            if (data.status !== 'found' || !data.recording || !Number.isInteger(data.page) || data.page < 1) {
+                throw new Error('Invalid playlist response');
+            }
+            if (resume) this.openRecording(data.recording);
+            else this._openAdjacentRecording(this.recordingKey(data.recording), data.recording);
+            if (this.currentPage !== data.page || this._activeRecordingIndex() < 0) {
+                this.currentPage = data.page;
+                this.loadRecordings();
+            }
+        } catch (error) {
+            if (current()) {
+                console.warn('[events] Playlist seek failed:', error);
+                BYD.core.toast(BYD.i18n.t('events.playlist_failed'), 'error');
+            }
+        } finally {
+            if (this._playlistRequest === request) this._cancelPlaylistRequest();
+        }
+    },
 
     recordingKey(rec) {
         // SECURITY (run-2 fix): the filename fallback must never carry markup or
@@ -153,7 +263,7 @@ BYD.events = {
         if (header && header.classList) header.classList.toggle('has-nav', shown);
         const prev = document.getElementById('videoPrevBtn');
         const next = document.getElementById('videoNextBtn');
-        const busy = this._recordingNavBusy;
+        const busy = this._recordingNavBusy || !!this._playlistRequest;
         if (anchored) {
             // Page one already contains the newest row: Previous has no work.
             // For a clip outside the loaded page, defer to an indexed seek.
@@ -178,7 +288,7 @@ BYD.events = {
     },
 
     async navigateRecording(step) {
-        if ((step !== -1 && step !== 1) || this._recordingNavBusy) return;
+        if ((step !== -1 && step !== 1) || this._recordingNavBusy || this._playlistRequest) return;
         // No HTTP request for either direction inside the already loaded page.
         if (this._navigateLoadedRecording(step)) return;
         if (this._canSeekRecording()) {
@@ -314,6 +424,7 @@ BYD.events = {
         if (!modal || !player) return;
 
         this.wireQuadrantBar();
+        this.initPlaylist(player);
         document.addEventListener('keydown', (e) => {
             if (!modal.classList.contains('active')) return;
             if (e.key === 'Escape') {
@@ -741,7 +852,8 @@ BYD.events = {
         new MutationObserver(() => {
             if (listHidden === this._listHidden()) return;
             listHidden = !listHidden;
-            if (!listHidden) this._resumeHeldPolls();
+            if (listHidden) this._cancelPlaylistRequest();
+            else this._resumeHeldPolls();
         }).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
         const urlParams = new URLSearchParams(window.location.search);
         const filterParam = urlParams.get('filter');
@@ -837,6 +949,9 @@ BYD.events = {
         const stopOnExit = () => this.stopInflightPolling();
         window.addEventListener('pagehide', stopOnExit);
         window.addEventListener('beforeunload', stopOnExit);
+        window.addEventListener('pageshow', (event) => {
+            if (event.persisted) this._refreshWatchHistory();
+        });
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'hidden') { stopOnExit(); return; }
             // Coming back to the foreground: the index-down retry is a ONE-SHOT
@@ -848,12 +963,22 @@ BYD.events = {
             if (this._indexDown && !this._indexDownRetryTimer) {
                 this.scheduleIndexDownRetry(0);
             }
+            this._refreshWatchHistory();
         });
     },
 
-    /** A list on screen stays (reloading it flashes a spinner and loses the scroll); a failed one, or one still
-     *  on its way from the outage, loads again. While hidden: on the next return to the page, once; while init
-     *  reads: when it's done. */
+    // LAN and tunnel URLs have separate page instances. Re-read daemon state
+    // when returning to an already-open list, without blanking its cards.
+    _refreshWatchHistory() {
+        if (!this._initDone || document.hidden || this._listHidden()
+                || this._listPending || this._indexDown) return;
+        // Quiet unless a spinner or status card is showing: never blank a healthy list.
+        return this.loadRecordings(!this._listShowsStatus);
+    },
+
+    /** Refresh even a successful list: another client may have watched clips
+     *  during the outage. While hidden, defer until visible; during init,
+     *  defer until the initial reads finish. */
     _refreshAfterReconnect() {
         if (document.hidden) {
             if (this._reconnectDeferred) return;
@@ -870,7 +995,8 @@ BYD.events = {
         if (!this._initDone) { this._reconnectDuringInit = true; return; }
         this.loadStorageStats();
         this.loadDatesWithRecordings();
-        if (this._listFailed || this._listPending) this.loadRecordings();
+        if (this._listFailed || this._listPending) return this.loadRecordings(!this._listShowsStatus);
+        return this._refreshWatchHistory();
     },
 
     // Timeline mode hides the list: a poll falling due there is held (no request) until the list shows again.
@@ -890,6 +1016,7 @@ BYD.events = {
         if (held.inflight && this.inflightFilename && !this.inflightPollHandle) this.startInflightPolling();
         if (indexDown && this._indexDown && !this._indexDownRetryTimer) this.scheduleIndexDownRetry(0);
         if (held.warming && !this._warmingPollTimer && this.loadStorageStats) this.loadStorageStats();
+        this._refreshWatchHistory();
     },
 
     /**
@@ -1003,98 +1130,31 @@ BYD.events = {
     renderCalendar() {
         const grid = document.getElementById('calendarGrid');
         const title = document.getElementById('calendarTitle');
-        const year = this.currentDate.getFullYear();
-        const month = this.currentDate.getMonth();
-        
-        // i18n: Use Intl.DateTimeFormat for localized month/weekday names instead of hardcoded English arrays.
-        var monthDate = new Date(year, month, 1);
-        var monthName;
-        try {
-            monthName = new Intl.DateTimeFormat(BYD.i18n.getLang(), { month: 'long' }).format(monthDate);
-        } catch (e) {
-            monthName = monthDate.toLocaleDateString(BYD.i18n.getLang(), { month: 'long' });
-        }
-        title.textContent = monthName + ' ' + year;
-        grid.innerHTML = '';
+        ODRangeCalendar.render(grid, title, this.currentDate, BYD.i18n.getLang(),
+            this.selectedDate, null, key => this.selectDate(key), { currentMonthHighlightsOnly: true });
 
-        var weekdayFmt;
-        try {
-            weekdayFmt = new Intl.DateTimeFormat(BYD.i18n.getLang(), { weekday: 'short' });
-        } catch (e) { weekdayFmt = null; }
-        // Use Sunday 2024-01-07 .. Saturday 2024-01-13 as a known week for label rendering
-        for (var w = 0; w < 7; w++) {
-            const dateForDay = new Date(2024, 0, 7 + w); // Sun..Sat
-            const label = weekdayFmt ? weekdayFmt.format(dateForDay) : dateForDay.toLocaleDateString(BYD.i18n.getLang(), { weekday: 'short' });
-            const el = document.createElement('div');
-            el.className = 'calendar-weekday';
-            el.textContent = label;
-            grid.appendChild(el);
-        }
-        
-        const firstDay = new Date(year, month, 1).getDay();
-        const daysInMonth = new Date(year, month + 1, 0).getDate();
-        const daysInPrevMonth = new Date(year, month, 0).getDate();
-        const todayStr = this.formatDateKey(new Date());
-        
-        for (let i = firstDay - 1; i >= 0; i--) {
-            const day = daysInPrevMonth - i;
-            this.addDayCell(grid, day, this.formatDateKey(new Date(year, month - 1, day)), true);
-        }
-        
-        for (let day = 1; day <= daysInMonth; day++) {
-            const dateKey = this.formatDateKey(new Date(year, month, day));
-            this.addDayCell(grid, day, dateKey, false, dateKey === todayStr, this.selectedDate === dateKey);
-        }
-        
-        const totalCells = grid.children.length;
-        for (let day = 1; totalCells + day - 7 <= 42; day++) {
-            this.addDayCell(grid, day, this.formatDateKey(new Date(year, month + 1, day)), true);
-        }
-    },
-    
-    addDayCell(grid, day, dateKey, isOtherMonth, isToday, isSelected) {
-        const el = document.createElement('div');
-        el.className = 'calendar-day';
-        el.textContent = day;
-        el.dataset.date = dateKey;
-        
-        if (isOtherMonth) el.classList.add('other-month');
-        if (isToday) el.classList.add('today');
-        if (isSelected) el.classList.add('selected');
-        
-        // Disable future dates
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const cellDate = new Date(dateKey + 'T00:00:00');
-        const isFuture = cellDate > today;
-        
-        if (isFuture) {
-            el.classList.add('disabled');
-        } else {
-            const dateInfo = this.datesWithRecordings.get(dateKey);
+        // Keep recording and Sentry dots page-specific, including adjacent-month days.
+        for (const el of grid.children) {
+            if (!el.dataset.date || el.classList.contains('disabled')) continue;
+            const dateInfo = this.datesWithRecordings.get(el.dataset.date);
             if (dateInfo) {
                 el.classList.add('has-recordings');
                 if (dateInfo.hasSentry) el.classList.add('has-sentry');
             }
-            el.addEventListener('click', () => this.selectDate(dateKey));
         }
-        
-        grid.appendChild(el);
     },
-    
+
     formatDateKey(date) {
-        return date.getFullYear() + '-' + 
-               String(date.getMonth() + 1).padStart(2, '0') + '-' + 
-               String(date.getDate()).padStart(2, '0');
+        return ODRangeCalendar.dateKey(date);
     },
-    
+
     prevMonth() {
-        this.currentDate.setMonth(this.currentDate.getMonth() - 1);
+        this.currentDate.setMonth(this.currentDate.getMonth() - 1, 1);
         this.renderCalendar();
     },
     
     nextMonth() {
-        this.currentDate.setMonth(this.currentDate.getMonth() + 1);
+        this.currentDate.setMonth(this.currentDate.getMonth() + 1, 1);
         this.renderCalendar();
     },
     
@@ -1861,12 +1921,19 @@ BYD.events = {
         return params;
     },
 
-    async loadRecordings() {
+    async loadRecordings(quiet = false) {
+        if (this._playlistRequest && this._playlistRequest.filters !== this._recordingFilterParams().join('&')) {
+            this._cancelPlaylistRequest();
+        }
         const list = document.getElementById('recordingsList');
-        list.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+        if (!quiet) {
+            this._replaceRecordingList(list, '<div class="loading"><div class="spinner"></div></div>');
+            this._listShowsStatus = true;
+        }
         // Overlapping reads: a reply for other filters never paints; a success paints unless a newer
         // success did, a failure only if nothing newer painted. Failed/pending feed the reconnect handler.
         const seq = this._listSeq = (this._listSeq || 0) + 1;
+        const watchRevision = this._watchRevision;
         this._listPending = true;
         let reqUrl = null;
 
@@ -1878,10 +1945,16 @@ BYD.events = {
             url += '?' + params.join('&');
             reqUrl = this._listUrl = url;
 
-            const res = await fetch(url);
+            const res = await fetch(url, { cache: 'no-store' });
             const data = await res.json();
             const ok = !!data && (data.success === true || !!data.indexUnavailable);
             if (url !== this._listUrl || (ok ? seq < (this._listOk || 0) : seq < (this._listLast || 0))) return;
+            // A list snapshot started before a successful watched POST can
+            // arrive afterwards. Never repaint it over the acknowledged badge.
+            if (data.success && !data.indexUnavailable && watchRevision !== this._watchRevision) {
+                if (seq === this._listSeq) return this.loadRecordings(quiet);
+                return;
+            }
             if (ok) this._listOk = seq;
             if (seq > (this._listLast || 0)) this._listLast = seq;
             if (seq === this._listSeq) this._listPending = false;
@@ -1893,7 +1966,8 @@ BYD.events = {
             // rendering a misleading "no recordings" empty state.
             if (data.indexUnavailable) {
                 this._indexDown = true;
-                list.innerHTML = this._indexDownCardHtml();
+                this._replaceRecordingList(list, this._indexDownCardHtml());
+                this._listShowsStatus = true;
                 // Clear the stale pagination bar + count. Without this the
                 // user is left with "Page 3 of 5" and an enabled Next button
                 // sitting above the error card, and clicking Next just walks
@@ -1932,13 +2006,17 @@ BYD.events = {
                     if (this.loadStorageStats) this.loadStorageStats();
                     if (this.loadDatesWithRecordings) this.loadDatesWithRecordings();
                 }
-                this.recordings = data.recordings || [];
+                const recordings = data.recordings || [];
+                const unchanged = quiet && JSON.stringify(this.recordings) === JSON.stringify(recordings);
+                this.recordings = recordings;
                 // Newly indexed clips can extend an end that was previously
                 // empty while the player remains open.
                 this._recordingNavBoundary = { '-1': false, '1': false };
                 this.totalPages = data.totalPages || 1;
                 this.totalCount = data.totalCount || this.recordings.length;
-                this.renderRecordings();
+                if (!unchanged) this.renderRecordings();
+                // A spinner or status card is only kept on screen until real cards replace it.
+                this._listShowsStatus = false;
                 this.updatePagination();
                 if (this._activeRecordingKey) this._refreshRecordingNav();
                 document.getElementById('recordingsCount').textContent =
@@ -1967,7 +2045,10 @@ BYD.events = {
                 // doesn't wait on this auxiliary fetch.
                 this.loadPlaceChips();
             } else {
-                list.innerHTML = this._failedCardHtml();
+                if (!quiet) {
+                    this._replaceRecordingList(list, this._failedCardHtml());
+                    this._listShowsStatus = true;
+                }
             }
         } catch (e) {
             if ((reqUrl !== null && reqUrl !== this._listUrl) || seq < (this._listLast || 0)) return;
@@ -1975,7 +2056,10 @@ BYD.events = {
             if (seq === this._listSeq) this._listPending = false;
             this._listFailed = true;
             console.error('Failed to load recordings:', e);
-            list.innerHTML = this._failedCardHtml();
+            if (!quiet) {
+                this._replaceRecordingList(list, this._failedCardHtml());
+                this._listShowsStatus = true;
+            }
         }
     },
 
@@ -2043,7 +2127,7 @@ BYD.events = {
 
         if (visible.length === 0) {
             if (inflightHtml) {
-                list.innerHTML = inflightHtml;
+                this._replaceRecordingList(list, inflightHtml);
             } else if (this._indexDown) {
                 // The index is down, so "empty" is unknown, not zero. Several
                 // handlers (select-mode toggle, select/deselect-all, the
@@ -2051,9 +2135,9 @@ BYD.events = {
                 // without refetching — without this branch any one of them
                 // would overwrite the honest card with "No recordings found",
                 // reinstating exactly the lie this fix removes.
-                list.innerHTML = this._indexDownCardHtml();
+                this._replaceRecordingList(list, this._indexDownCardHtml());
             } else {
-                list.innerHTML = '<div class="empty-state"><svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><div class="empty-title">' + BYD.i18n.t('events.empty_none_title') + '</div><div class="empty-text">' + BYD.i18n.t('events.empty_none_text') + '</div></div>';
+                this._replaceRecordingList(list, '<div class="empty-state"><svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><div class="empty-title">' + BYD.i18n.t('events.empty_none_title') + '</div><div class="empty-text">' + BYD.i18n.t('events.empty_none_text') + '</div></div>');
             }
             return;
         }
@@ -2062,7 +2146,7 @@ BYD.events = {
         // the list arrives newest first, so a header starts each new date.
         const icons = this._CARD_ICONS;
         let lastDay = null;
-        list.innerHTML = inflightHtml + visible.map(rec => {
+        this._replaceRecordingList(list, inflightHtml + visible.map(rec => {
             const recordingKey = this.recordingKey(rec);
             const thumbId = this._thumbDomId(recordingKey);
             const badge = rec.type === 'sentry' ? BYD.i18n.t('events.badge_sentry') : rec.type === 'proximity' ? BYD.i18n.t('events.badge_proximity') : rec.type === 'replay' ? BYD.i18n.t('events.badge_replay') : BYD.i18n.t('events.badge_normal');
@@ -2189,7 +2273,7 @@ BYD.events = {
                 '</div>' +
                 '</div>' +
                 '</div>';
-        }).join('');
+        }).join(''));
         
         // Load thumbnails async after render
         this.loadThumbnailsAsync();
@@ -2197,67 +2281,100 @@ BYD.events = {
         if (window.SafeKeepBadges) window.SafeKeepBadges.decorate();
     },
     
-    // Load thumbnails asynchronously without blocking
+    // A rendered list owns its thumbnail requests, retry timers and blob URLs.
+    // Replacing it must not leave work running against detached cards.
+    _replaceRecordingList(list, html) {
+        const batch = this._thumbnailBatch;
+        this._thumbnailBatch = null;
+        if (batch) {
+            batch.timers.forEach(timer => clearTimeout(timer));
+            batch.timers.clear();
+            if (batch.controller) batch.controller.abort();
+            batch.urls.forEach(url => URL.revokeObjectURL(url));
+            batch.urls.clear();
+        }
+        list.innerHTML = html;
+    },
+
+    _thumbnailIsCurrent(batch, container) {
+        return this._thumbnailBatch === batch && batch.list.contains(container);
+    },
+
+    // Load thumbnails asynchronously without blocking.
     loadThumbnailsAsync() {
-        document.querySelectorAll('.recording-thumbnail[data-thumb]').forEach(container => {
+        const list = document.getElementById('recordingsList');
+        if (!list || this._thumbnailBatch) return;
+        const batch = {
+            list: list,
+            timers: new Set(),
+            urls: new Set(),
+            // Chrome 58 lacks AbortController. Identity checks still stop retries
+            // and discard late results on that WebView.
+            controller: typeof AbortController === 'function' ? new AbortController() : null
+        };
+        this._thumbnailBatch = batch;
+        list.querySelectorAll('.recording-thumbnail[data-thumb]').forEach(container => {
             const thumbUrl = container.dataset.thumb;
-            if (!thumbUrl) return;
-            
-            this.loadSingleThumbnail(container, thumbUrl, 0);
+            if (thumbUrl) this.loadSingleThumbnail(batch, container, thumbUrl, 0);
         });
     },
-    
-    // Load single thumbnail with retry on 202
-    loadSingleThumbnail(container, url, retryCount) {
+
+    _thumbnailUnavailable(container) {
+        const placeholder = container.querySelector('.thumb-placeholder');
+        if (placeholder) {
+            placeholder.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><span>' + BYD.i18n.t('events.no_preview') + '</span>';
+        }
+    },
+
+    // Keep the existing retry schedule for cards that still belong to the list.
+    async loadSingleThumbnail(batch, container, url, retryCount) {
+        if (!this._thumbnailIsCurrent(batch, container)) return;
         if (retryCount > 8) {
-            // After max retries, show "no preview" state
-            const placeholder = container.querySelector('.thumb-placeholder');
-            if (placeholder) {
-                placeholder.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><span>' + BYD.i18n.t('events.no_preview') + '</span>';
-            }
+            this._thumbnailUnavailable(container);
             return;
         }
-        
-        fetch(url).then(res => {
-            if (res.status === 200) {
-                return res.blob();
-            } else if (res.status === 202) {
-                // Generating, retry with exponential backoff
+        let imgUrl = null;
+        try {
+            const res = await fetch(url, batch.controller ? { signal: batch.controller.signal } : undefined);
+            if (!this._thumbnailIsCurrent(batch, container)) return;
+            if (res.status === 202) {
                 const delay = Math.min(1000 * Math.pow(1.5, retryCount), 5000);
-                setTimeout(() => this.loadSingleThumbnail(container, url, retryCount + 1), delay);
-                return null;
+                const timer = setTimeout(() => {
+                    batch.timers.delete(timer);
+                    this.loadSingleThumbnail(batch, container, url, retryCount + 1);
+                }, delay);
+                batch.timers.add(timer);
+                return;
             }
-            return null;
-        }).then(blob => {
-            if (blob && blob.size > 0) {
-                const imgUrl = URL.createObjectURL(blob);
-                const placeholder = container.querySelector('.thumb-placeholder');
-                if (placeholder) {
-                    const img = document.createElement('img');
-                    img.src = imgUrl;
-                    img.alt = BYD.i18n.t('events.thumbnail_alt');
-                    img.onload = () => placeholder.remove();
-                    img.onerror = () => {
-                        URL.revokeObjectURL(imgUrl);
-                        placeholder.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><span>' + BYD.i18n.t('events.no_preview') + '</span>';
-                    };
-                    container.insertBefore(img, container.firstChild);
-                }
-            }
-        }).catch(() => {
-            // Network error - show fallback
+            if (res.status !== 200) return;
+            const blob = await res.blob();
+            if (!this._thumbnailIsCurrent(batch, container) || !blob || !blob.size) return;
             const placeholder = container.querySelector('.thumb-placeholder');
-            if (placeholder) {
-                placeholder.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><span>' + BYD.i18n.t('events.no_preview') + '</span>';
-            }
-        });
+            if (!placeholder) return;
+            const img = document.createElement('img');
+            imgUrl = URL.createObjectURL(blob);
+            // Keep the URL while the image is displayed (e.g. browser save image),
+            // but release it when the list is replaced or image decoding fails.
+            batch.urls.add(imgUrl);
+            img.alt = BYD.i18n.t('events.thumbnail_alt');
+            img.onload = () => {
+                if (this._thumbnailIsCurrent(batch, container)) placeholder.remove();
+            };
+            img.onerror = () => {
+                if (batch.urls.delete(imgUrl)) URL.revokeObjectURL(imgUrl);
+                if (this._thumbnailIsCurrent(batch, container)) {
+                    img.remove();
+                    this._thumbnailUnavailable(container);
+                }
+            };
+            container.insertBefore(img, container.firstChild);
+            img.src = imgUrl;
+        } catch (e) {
+            if (imgUrl && batch.urls.delete(imgUrl)) URL.revokeObjectURL(imgUrl);
+            if (this._thumbnailIsCurrent(batch, container)) this._thumbnailUnavailable(container);
+        }
     },
-    
-    onThumbError(el) {
-        const container = el.parentElement;
-        container.innerHTML = '<div class="thumb-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><span>' + BYD.i18n.t('events.no_preview') + '</span></div><div class="play-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>';
-    },
-    
+
     _cancelWatchedTimer() {
         if (this._watchTimer !== null) clearTimeout(this._watchTimer);
         this._watchTimer = null;
@@ -2309,6 +2426,7 @@ BYD.events = {
             const result = await response.json();
             if (!result.success) throw new Error('Watched status not saved');
             rec.watched = true;
+            this._watchRevision++;
             // The list may have been reloaded while the POST was in flight.
             const current = this.findRecording(key);
             if (this._activeRecording && this._activeRecording.id === rec.id
@@ -2370,6 +2488,7 @@ BYD.events = {
     },
 
     openRecording(rec) {
+        this._cancelPlaylistRequest();
         document.getElementById('videoTitle').textContent = rec.filename;
         document.getElementById('videoDate').innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> ' + (rec.dateFormatted || '');
         document.getElementById('videoTime').innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> ' + (rec.timeFormatted || '');
@@ -2450,6 +2569,9 @@ BYD.events = {
     },
     
     closeVideo() {
+        this._cancelPlaylistRequest();
+        const playlistSettings = document.getElementById('videoPlaylistSettings');
+        if (playlistSettings) playlistSettings.open = false;
         this._cancelWatchedTimer();
         this._watchActiveKey = null;
         const player = document.getElementById('videoPlayer');

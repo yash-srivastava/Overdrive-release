@@ -5,7 +5,6 @@ import com.overdrive.app.logging.DaemonLogger
 import org.tensorflow.lite.Interpreter
 import org.tensorflow.lite.DataType
 import org.tensorflow.lite.support.common.FileUtil
-import org.tensorflow.lite.support.common.ops.NormalizeOp
 import org.tensorflow.lite.support.image.ImageProcessor
 import org.tensorflow.lite.support.image.TensorImage
 import org.tensorflow.lite.support.image.ops.ResizeOp
@@ -80,8 +79,8 @@ data class Detection(
  * dispatch overhead — no benefit, more code surface, more failure modes.
  *
  * SOTA Implementation properties retained from prior version:
- * - Native C++ ImageProcessor (SIMD-accelerated bilinear resize + normalize)
- * - Pre-allocated buffers (zero GC churn)
+ * - Bilinear resize only when needed, reusable FP32 normalization buffer
+ * - Reusable input and output buffers
  * - Cache-friendly output parsing
  * - Height filter before NMS
  * - Ghost filter (max 50 detections)
@@ -148,8 +147,8 @@ class YoloDetector(private val context: Context) {
     // and routes preprocessing accordingly. There is no per-detect()
     // overhead from this; the routing decision is cached.
     //
-    // FP32 path: ImageProcessor does Resize + Normalize(0..1); output is
-    //   already float, no dequant needed.
+    // FP32 path: resize if needed, then normalize into a reusable direct
+    //   float buffer; output is already float, no dequant needed.
     // INT8 path: ImageProcessor does Resize only (the int8 input tensor's
     //   embedded scale/zero_point handles the [0,255] -> int8 mapping
     //   inside the interpreter); output is int8 and must be dequantized
@@ -188,16 +187,15 @@ class YoloDetector(private val context: Context) {
     private var outputElements = 84 * 8400
     private var int8OutputBuffer: ByteArray? = null  // raw output for int8 path
 
-    // SOTA: Native C++ image processor (SIMD-accelerated bilinear resize
-    // + optional normalize). Built lazily in init() once we know the
-    // input tensor dtype.
+    // Preserve the support library's bilinear resize for non-native sizes.
+    // FP32 normalization is handled separately without per-call tensor allocation.
     private var imageProcessor: ImageProcessor? = null
 
     // Non-square crops (the 320×240 mosaic quadrant) are letterboxed instead of
     // stretched to square; the 4:3→1:1 stretch made painted pillars read as people.
     // Square crops never touch these. Cached per crop size; guarded by interpLock.
     private class LetterboxGeometry(val padX: Float, val padY: Float, val contentW: Int, val contentH: Int)
-    private var normalizeProcessor: ImageProcessor? = null
+    private var normalizedInput: NormalizedRgbInput? = null
     private var letterboxProcessor: ImageProcessor? = null
     private var letterboxGeom: LetterboxGeometry? = null
     private var letterboxSrcW = -1
@@ -354,26 +352,16 @@ class YoloDetector(private val context: Context) {
                 return false
             }
 
-            // Build the preprocessing pipeline that matches the model's
-            // expected input dtype:
-            //   - FP32 model: resize + normalize (0..255 -> 0.0..1.0)
-            //   - INT8 model: resize only; the interpreter's embedded
-            //     input quantization params handle the uint8 -> int8 mapping
-            //     internally with no host-side normalize step.
+            // Preserve bilinear resize for inputs that need it. The FP32 path
+            // uses a reusable direct buffer instead of NormalizeOp's new tensors.
             inputImageBuffer = TensorImage(DataType.UINT8)
-            imageProcessor = if (inputIsQuantized) {
-                ImageProcessor.Builder()
-                    .add(ResizeOp(inputSize, inputSize, ResizeOp.ResizeMethod.BILINEAR))
-                    .build()
-            } else {
-                ImageProcessor.Builder()
-                    .add(ResizeOp(inputSize, inputSize, ResizeOp.ResizeMethod.BILINEAR))
-                    .add(NormalizeOp(0f, 255f))
-                    .build()
-            }
-            // Letterbox path: same normalize step, applied after padding.
-            normalizeProcessor = if (inputIsQuantized) null else
-                ImageProcessor.Builder().add(NormalizeOp(0f, 255f)).build()
+            imageProcessor = ImageProcessor.Builder()
+                .add(ResizeOp(inputSize, inputSize, ResizeOp.ResizeMethod.BILINEAR))
+                .build()
+            normalizedInput = null
+            letterboxBytes = null
+            letterboxBuffer = null
+            letterboxImage = null
             letterboxGeom = null
             letterboxSrcW = -1
             letterboxSrcH = -1
@@ -411,7 +399,7 @@ class YoloDetector(private val context: Context) {
     }
     
     /**
-     * SOTA Detection with native C++ preprocessing
+     * Detection with reusable input preprocessing
      * 
      * @param rgbData RGB888 byte array (vertically flipped for OpenGL)
      * @param width Image width
@@ -462,32 +450,38 @@ class YoloDetector(private val context: Context) {
         synchronized(interpLock) {
             val interp = interpreter ?: return emptyList()
 
-            // Reuse the shaped TensorBuffer across calls. Re-allocate only on
-            // dimension change (rare). Same for the float output array.
-            var sb = shapedBuffer
-            if (sb == null || shapedBufferW != width || shapedBufferH != height) {
-                sb = TensorBuffer.createFixedSize(intArrayOf(height, width, 3), DataType.UINT8)
-                shapedBuffer = sb
-                shapedBufferW = width
-                shapedBufferH = height
-            }
-            sb.loadBuffer(ByteBuffer.wrap(processedData))
-
-            inputImageBuffer!!.load(sb)
-
-            // SOTA: Process with native C++ ops. Pipeline differs by model
-            // dtype: FP32 path normalizes 0..255 -> 0.0..1.0; INT8 path is
-            // resize-only and the interpreter's input quantization handles
-            // the uint8 mapping internally.
             val geom = if (width != height) letterboxGeometry(width, height) else null
-            val tensorImage = if (geom != null) letterbox(inputImageBuffer!!, geom)
-                              else imageProcessor!!.process(inputImageBuffer)
+            val modelInput = if (!inputIsQuantized && width == inputSize && height == inputSize
+                    && processedData.size == inputSize * inputSize * 3) {
+                // An opaque RGB image already at model resolution needs no
+                // Bitmap round-trip or identity resize (the foveated crop path).
+                floatInput().prepare(processedData)
+            } else {
+                // Keep the original resize and letterbox geometry for all
+                // other sizes, and the original quantized input path.
+                val cached = shapedBuffer
+                val sb = if (cached == null || shapedBufferW != width || shapedBufferH != height) {
+                    TensorBuffer.createFixedSize(intArrayOf(height, width, 3), DataType.UINT8).also {
+                        shapedBuffer = it
+                        shapedBufferW = width
+                        shapedBufferH = height
+                    }
+                } else cached
+                sb.loadBuffer(ByteBuffer.wrap(processedData))
+                inputImageBuffer!!.load(sb)
+                if (geom != null) {
+                    letterbox(inputImageBuffer!!, geom)
+                } else {
+                    val resized = imageProcessor!!.process(inputImageBuffer).buffer
+                    if (inputIsQuantized) resized else floatInput().prepare(resized)
+                }
+            }
 
             // Run inference (CPU XNNPACK). interp.run() blocks until the
             // last layer is computed; there's no async/queue model on the
             // CPU backend (unlike the previous GPU delegate).
             outputBuffer!!.rewind()
-            interp.run(tensorImage.buffer, outputBuffer)
+            interp.run(modelInput, outputBuffer)
             outputBuffer!!.rewind()
 
             var fo = floatOutput
@@ -586,8 +580,10 @@ class YoloDetector(private val context: Context) {
             .add(ResizeOp(contentH, contentW, ResizeOp.ResizeMethod.BILINEAR))
             .build()
         letterboxBytes = ByteArray(inputSize * inputSize * 3).also { it.fill(LETTERBOX_PAD) }
-        letterboxBuffer = TensorBuffer.createFixedSize(intArrayOf(inputSize, inputSize, 3), DataType.UINT8)
-        letterboxImage = TensorImage(DataType.UINT8)
+        if (inputIsQuantized) {
+            letterboxBuffer = TensorBuffer.createFixedSize(intArrayOf(inputSize, inputSize, 3), DataType.UINT8)
+            letterboxImage = TensorImage(DataType.UINT8)
+        }
         letterboxSrcW = width
         letterboxSrcH = height
         letterboxGeom = geom
@@ -595,7 +591,7 @@ class YoloDetector(private val context: Context) {
     }
 
     /** Resize into the content box and paste onto the grey canvas (padding bytes are never rewritten). */
-    private fun letterbox(src: TensorImage, geom: LetterboxGeometry): TensorImage {
+    private fun letterbox(src: TensorImage, geom: LetterboxGeometry): ByteBuffer {
         val resized = letterboxProcessor!!.process(src).buffer
         resized.rewind()
         val canvas = letterboxBytes!!
@@ -605,11 +601,19 @@ class YoloDetector(private val context: Context) {
         for (row in 0 until geom.contentH) {
             resized.get(canvas, ((padY + row) * inputSize + padX) * 3, rowBytes)
         }
+        if (!inputIsQuantized) return floatInput().prepare(canvas)
         val buf = letterboxBuffer!!
         buf.loadBuffer(ByteBuffer.wrap(canvas))
         val img = letterboxImage!!
         img.load(buf)
-        return normalizeProcessor?.process(img) ?: img
+        return img.buffer
+    }
+
+    // Accessed only under interpLock; reused until close or model re-init.
+    private fun floatInput(): NormalizedRgbInput {
+        val cached = normalizedInput
+        if (cached != null) return cached
+        return NormalizedRgbInput(inputSize * inputSize * 3).also { normalizedInput = it }
     }
     
     /**
@@ -1234,6 +1238,7 @@ class YoloDetector(private val context: Context) {
             floatOutputView = null
             boxesScratch = null
             nmsScratch = null
+            normalizedInput = null
             letterboxProcessor = null
             letterboxGeom = null
             letterboxSrcW = -1

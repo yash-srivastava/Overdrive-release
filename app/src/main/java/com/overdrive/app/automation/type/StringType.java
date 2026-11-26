@@ -1,14 +1,13 @@
 package com.overdrive.app.automation.type;
 
 import com.overdrive.app.automation.value.Label;
-import com.overdrive.app.automation.value.StringValue;
 
+import org.json.JSONException;
 import org.json.JSONObject;
 
-public class StringType extends BaseType<String> {
+public class StringType extends StringSchemaType {
     private static final String TYPE = "string";
 
-    private final Label label;
     private final int maxLength;
     // Optional i18n key for a cautionary note rendered under the field (e.g. the
     // shell-command action's "runs unattended" warning). null = no warning.
@@ -34,18 +33,9 @@ public class StringType extends BaseType<String> {
      * @param warningKey i18n key for a warning note, or null for none
      */
     public StringType(Label label, int maxLength, String warningKey) {
-        this.label = label;
+        super(label, TYPE);
         this.maxLength = maxLength;
         this.warningKey = warningKey;
-    }
-
-    /**
-     * The label that was stored when this string was initialized
-     *
-     * @return The Label for this int
-     */
-    public Label getLabel() {
-        return label;
     }
 
     /**
@@ -55,15 +45,6 @@ public class StringType extends BaseType<String> {
      */
     public int getMaxLength() {
         return maxLength;
-    }
-
-    /**
-     * The comparators for this string
-     *
-     * @return The comparators for this string
-     */
-    public EnumType getComparators() {
-        return StringValue.COMPARATORS;
     }
 
     /**
@@ -78,27 +59,12 @@ public class StringType extends BaseType<String> {
         return value.length() <= getMaxLength();
     }
 
-    /**
-     * Create a JSON representation of this string to display in the frontend
-     * Will contain the maxLength
-     *
-     * @return JSON representation of this string
-     */
-    public JSONObject toJson() {
-        JSONObject json = getLabel().toJson();
-
-        try {
-            json.put("type", TYPE);
-            json.put("maxLength", getMaxLength());
-            if (warningKey != null) {
-                // Resolve server-side (same as labels/descriptions) so the
-                // frontend just renders the translated text.
-                json.put("warning", com.overdrive.app.server.Messages.get(warningKey));
-            }
-        } catch (Exception e) {
-            // JSONObject.put only throws on null key
+    @Override
+    protected void appendSchemaFields(JSONObject json) throws JSONException {
+        json.put("maxLength", getMaxLength());
+        if (warningKey != null) {
+            // Resolve the warning server-side, just like labels.
+            json.put("warning", com.overdrive.app.server.Messages.get(warningKey));
         }
-
-        return json;
     }
 }

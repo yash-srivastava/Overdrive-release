@@ -206,22 +206,23 @@ BYD.i18n = (function () {
         } catch (e) { /* no bundle */ }
         return null;
     }
-    /** Catalog available without waiting: the app bundle in-app, else the cache. */
-    function syncCatalog(lang) {
-        return bundledCatalog(lang) || readCachedCatalog(lang);
-    }
+    // Single-use handoff from early hydration. Only immutable APK data qualifies;
+    // a localStorage catalog must still be refreshed, even inside the app if the
+    // bridge was unavailable during early paint.
+    var earlyBundle = null;
 
     /** Fetch the catalog JSON for `lang`. Falls back to en on failure. */
     function fetchCatalog(lang) {
+        // Reuse the parsed APK catalog from this document, not a browser cache.
+        // Consume the handoff even on a language mismatch so old catalogs are
+        // not retained after a locale change.
+        var prepared = earlyBundle;
+        earlyBundle = null;
+        if (prepared && prepared.lang === lang) return Promise.resolve(prepared.catalog);
         // The embedded WebView can read the APK asset directly. This avoids a
         // stale or unavailable daemon extract under /data/local/tmp/web/i18n.
-        try {
-            if (window.AndroidBridge
-                    && typeof window.AndroidBridge.getI18nCatalog === 'function') {
-                var bundled = window.AndroidBridge.getI18nCatalog(lang);
-                if (bundled) return Promise.resolve(JSON.parse(bundled));
-            }
-        } catch (e) { /* fall through to HTTP */ }
+        var bundled = bundledCatalog(lang);
+        if (bundled) return Promise.resolve(bundled);
         return fetch('/i18n/' + lang + '.json', { cache: 'no-cache' })
             .then(function (r) {
                 if (!r.ok) throw new Error('catalog ' + lang + ' http ' + r.status);
@@ -600,8 +601,8 @@ BYD.i18n = (function () {
     /**
      * Translate the page as soon as core.js runs, before first paint, when the
      * catalog is available synchronously (in-app bundle or localStorage cache).
-     * Pages still call init() later; it re-fetches the catalog and re-hydrates,
-     * so a stale cache is corrected without blocking the first paint.
+     * Pages still call init() later; it reuses an APK catalog or refreshes a
+     * browser cache, then re-hydrates so stale data cannot survive first paint.
      */
     (function earlyHydrate() {
         try {
@@ -621,7 +622,18 @@ BYD.i18n = (function () {
             } catch (e) {}
             var lang = resolveLang(picked || getStored() || detectFromBrowser());
             if (lang === DEFAULT_LANG) return;
-            var cat = (early && early.lang === lang) ? early.catalog : syncCatalog(lang);
+            var cat;
+            if (early && early.lang === lang && early.catalog) {
+                cat = early.catalog;
+                // Older theme.js has no provenance marker: safely refresh it.
+                if (early.fromBundle === true && inAppWebView()) {
+                    earlyBundle = { lang: lang, catalog: cat };
+                }
+            } else {
+                cat = bundledCatalog(lang);
+                if (cat) earlyBundle = { lang: lang, catalog: cat };
+                else cat = readCachedCatalog(lang);
+            }
             if (!cat) return;
             state.lang = lang;
             state.catalog = cat;
@@ -2345,16 +2357,30 @@ BYD.core = {
 
         var now = Date.now();
         var TTL_MS = 60000;
-        if (this._personalizedRangeFetched
+        if (this._personalizedRangeInFlight || (this._personalizedRangeFetched
                 && this._personalizedRangeFetchedAt
-                && (now - this._personalizedRangeFetchedAt) < TTL_MS) {
+                && (now - this._personalizedRangeFetchedAt) < TTL_MS)) {
             this._renderPersonalizedRange();
             return;
         }
 
+        // Status ticks do not await this secondary request. Bound its lifetime
+        // so a stalled response cannot wedge the single-flight guard.
+        this._personalizedRangeInFlight = true;
+        let timer;
         try {
-            const resp = await fetch('/api/trips/range');
-            const data = await resp.json();
+            const abort = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            const deadline = new Promise(function (resolve, reject) {
+                timer = setTimeout(function () {
+                    if (abort) { try { abort.abort(); } catch (ignored) {} }
+                    reject(new Error('range request timed out'));
+                }, 15000);
+            });
+            const resp = await Promise.race([
+                abort ? fetch('/api/trips/range', { signal: abort.signal }) : fetch('/api/trips/range'),
+                deadline
+            ]);
+            const data = await Promise.race([resp.json(), deadline]);
             this._personalizedRangeFetched = true;
             this._personalizedRangeFetchedAt = now;
             this._personalizedRangeKm = 0;
@@ -2380,6 +2406,9 @@ BYD.core = {
             this._personalizedRangeFetched = true;
             this._personalizedRangeFetchedAt = now;
             this._renderPersonalizedRange();
+        } finally {
+            clearTimeout(timer);
+            this._personalizedRangeInFlight = false;
         }
     },
 

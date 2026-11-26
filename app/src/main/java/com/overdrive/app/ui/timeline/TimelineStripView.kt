@@ -265,6 +265,7 @@ class TimelineStripView @JvmOverloads constructor(
     private var visIdx = IntArray(0)
     private var visTime = LongArray(0)
     private var visCount = 0
+    private var minClusterSpacing = Double.POSITIVE_INFINITY
     private var snapTimes = LongArray(0)
     private var snapMark = IntArray(0)
     private var snapCount = 0
@@ -274,6 +275,7 @@ class TimelineStripView @JvmOverloads constructor(
     private var cCenter = DoubleArray(0)
     private var cAlert = BooleanArray(0)
     private var cBorn = LongArray(0)
+    private val clusterAnimationClock = ClusterAnimationClock()
     private var pStart = IntArray(0)
     private var pCount = IntArray(0)
     private var pBorn = LongArray(0)
@@ -438,6 +440,7 @@ class TimelineStripView @JvmOverloads constructor(
         visIdx = idx
         visCount = n
         visTime = LongArray(n) { m.markTime[idx[it]] }
+        minClusterSpacing = StripPhysics.minClusterSpacing(visTime, n)
 
         val mom = m.moments
         val st = LongArray(n + mom.size)
@@ -472,6 +475,7 @@ class TimelineStripView @JvmOverloads constructor(
             pStart = IntArray(cap); pCount = IntArray(cap); pBorn = LongArray(cap)
         }
         clusterN = 0
+        clusterAnimationClock.reset()
         prevClusterN = 0
         clusterSpan = Double.NaN
     }
@@ -504,12 +508,22 @@ class TimelineStripView @JvmOverloads constructor(
     private fun ensureClusters() {
         val w = width
         if (w <= 0 || (clusterSpan == span && clusterWidth == w)) return
+        val gap = clusterPx * span / w
+        if (StripPhysics.canReuseSingletonClusters(clustersStable, clusterN, visCount, gap, minClusterSpacing)) {
+            // Membership, centres, alerts and birth times are unchanged. A stable
+            // rebuild (data/filter/size change) still takes the normal path.
+            clusterSpan = span
+            clusterWidth = w
+            if (clusterAnimating()) scheduleFrame()
+            return
+        }
         val ts = pStart; pStart = cStart; cStart = ts
         val tc = pCount; pCount = cCount; cCount = tc
         val tb = pBorn; pBorn = cBorn; cBorn = tb
         prevClusterN = clusterN
-        clusterN = StripPhysics.cluster(visTime, visCount, clusterPx * span / w, cStart, cCount, cCenter)
+        clusterN = StripPhysics.cluster(visTime, visCount, gap, cStart, cCount, cCenter)
         val now = SystemClock.uptimeMillis()
+        clusterAnimationClock.reset()
         var j = 0
         for (k in 0 until clusterN) {
             val s = cStart[k]
@@ -526,6 +540,7 @@ class TimelineStripView @JvmOverloads constructor(
                 j < prevClusterN && pStart[j] == s && pBorn[j] != 0L && now - pBorn[j] < CLUSTER_ANIM_MS -> pBorn[j]
                 else -> now
             }
+            clusterAnimationClock.include(cBorn[k])
         }
         val popped = !clustersStable
         clustersStable = false
@@ -933,14 +948,8 @@ class TimelineStripView @JvmOverloads constructor(
         return (500.0 / max(pxPerS, 1e-6)).toLong().coerceIn(16L, if (m.liveSince != Long.MIN_VALUE) 1000L else 5000L)
     }
 
-    private fun clusterAnimating(): Boolean {
-        val now = SystemClock.uptimeMillis()
-        for (k in 0 until clusterN) {
-            val b = cBorn[k]
-            if (b != 0L && now - b < CLUSTER_ANIM_MS) return true
-        }
-        return false
-    }
+    private fun clusterAnimating(): Boolean =
+        clusterAnimationClock.isAnimating(SystemClock.uptimeMillis(), CLUSTER_ANIM_MS)
 
     // ---------------------------------------------------------------- callbacks
 

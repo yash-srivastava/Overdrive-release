@@ -4,6 +4,8 @@ import static org.junit.Assert.assertEquals;
 
 import org.junit.Test;
 
+import java.util.Locale;
+
 /**
  * Pins {@link SohEstimator#mapCarTypeToCapacity(String)}'s branch ORDERING.
  *
@@ -111,5 +113,28 @@ public class SohModelCapacityTest {
     public void matchingIsCaseInsensitive() {
         assertEquals(21.5, SohEstimator.mapCarTypeToCapacity("tang dm-i"), 0.001);
         assertEquals(108.8, SohEstimator.mapCarTypeToCapacity("TANG"), 0.001);
+    }
+
+    /** Model identifiers must not follow the user's language-specific casing rules. */
+    @Test
+    public void matchingIsIndependentOfDefaultLocale() {
+        Locale previous = Locale.getDefault();
+        try {
+            Locale.setDefault(new Locale("tr", "TR"));
+            // Lowercase i must not become dotted capital I in a DM-i identifier.
+            assertEquals(21.5, SohEstimator.mapCarTypeToCapacity("Tang DM-i"), 0.001);
+            assertEquals(18.3, SohEstimator.mapCarTypeToCapacity("Seal U DM-i"), 0.001);
+            assertEquals(18.3, SohEstimator.mapCarTypeToCapacity("Qin Plus DM-i"), 0.001);
+            assertEquals(0.0, SohEstimator.mapCarTypeToCapacity("Han DM-i"), 0.001);
+            // BEV names containing i must also retain their existing mapping.
+            assertEquals(26.6, SohEstimator.mapCarTypeToCapacity("Sealion 6"), 0.001);
+            assertEquals(91.3, SohEstimator.mapCarTypeToCapacity("Sealion 7"), 0.001);
+            assertEquals(38.0, SohEstimator.mapCarTypeToCapacity("Dolphin Mini"), 0.001);
+            assertEquals(44.9, SohEstimator.mapCarTypeToCapacity("Dolphin"), 0.001);
+            assertEquals(108.8, SohEstimator.mapCarTypeToCapacity("TANG"), 0.001);
+            assertEquals(0.0, SohEstimator.mapCarTypeToCapacity("Unknown Model"), 0.001);
+        } finally {
+            Locale.setDefault(previous);
+        }
     }
 }

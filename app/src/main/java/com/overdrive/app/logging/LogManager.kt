@@ -157,58 +157,43 @@ class LogManager private constructor(@Volatile private var config: LogConfig) {
         }
     }
 
-    /**
-     * Rotate a log file that is found already-oversized at writer-open time,
-     * without going through the writers map (the writer for [tag] does not
-     * exist yet). Shifts .1→.2→.3 (oldest deleted) then moves the live file
-     * to .1, matching [rotateLogFile].
-     */
+    /** Rotate an oversized log before opening its append writer. */
     private fun rotateExisting(tag: String) {
         try {
-            val logFile = File(config.logDir, "${tag.lowercase()}.log")
-            for (i in config.rotationCount downTo 1) {
-                val oldFile = File(config.logDir, "${tag.lowercase()}.log.$i")
-                if (i == config.rotationCount) {
-                    oldFile.delete()
-                } else {
-                    val newFile = File(config.logDir, "${tag.lowercase()}.log.${i + 1}")
-                    if (oldFile.exists()) oldFile.renameTo(newFile)
-                }
-            }
-            File(config.logDir, "${tag.lowercase()}.log.1").let { logFile.renameTo(it) }
-            fileSizes[tag] = 0L
+            rotateArchives(tag, skipMissing = true)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to rotate pre-existing log file: ${e.message}")
         }
     }
-    
+
     private fun rotateLogFile(tag: String) {
         try {
             writers[tag]?.close()
             writers.remove(tag)
-            
-            val logFile = File(config.logDir, "${tag.lowercase()}.log")
-            
-            for (i in config.rotationCount downTo 1) {
-                val oldFile = File(config.logDir, "${tag.lowercase()}.log.$i")
-                if (i == config.rotationCount) {
-                    oldFile.delete()
-                } else {
-                    val newFile = File(config.logDir, "${tag.lowercase()}.log.${i + 1}")
-                    oldFile.renameTo(newFile)
-                }
-            }
-            
-            val rotatedFile = File(config.logDir, "${tag.lowercase()}.log.1")
-            logFile.renameTo(rotatedFile)
-            
-            fileSizes[tag] = 0L
+            rotateArchives(tag, skipMissing = false)
             Log.i(TAG, "Rotated log file: ${tag.lowercase()}.log")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to rotate log file: ${e.message}")
         }
     }
-    
+
+    /** Shift archives oldest-first, then move the live log to .1. */
+    private fun rotateArchives(tag: String, skipMissing: Boolean) {
+        val logFile = File(config.logDir, "${tag.lowercase()}.log")
+        for (i in config.rotationCount downTo 1) {
+            val oldFile = File(config.logDir, "${tag.lowercase()}.log.$i")
+            if (i == config.rotationCount) {
+                oldFile.delete()
+            } else {
+                val newFile = File(config.logDir, "${tag.lowercase()}.log.${i + 1}")
+                if (!skipMissing || oldFile.exists()) oldFile.renameTo(newFile)
+            }
+        }
+        val rotatedFile = File(config.logDir, "${tag.lowercase()}.log.1")
+        logFile.renameTo(rotatedFile)
+        fileSizes[tag] = 0L
+    }
+
     fun debug(tag: String, message: String) = log(tag, message, LogLevel.DEBUG)
     fun info(tag: String, message: String) = log(tag, message, LogLevel.INFO)
     fun warn(tag: String, message: String) = log(tag, message, LogLevel.WARN)

@@ -130,6 +130,7 @@ var CHARGING = {
         var self = this;
         document.addEventListener('ot-tabs:active-changed', function (ev) {
             self.hideDetail();
+            self._hoverBase = null;
             // Canvas charts on a display:none tab render at a degenerate size
             // (offsetParent is null → _renderSummaryCharts skips them). They were
             // painted once on first load while the Stats tab was hidden, so the
@@ -184,8 +185,10 @@ var CHARGING = {
         // show stale first-paint values. Mirrors core.js/road-sense.js. Guarded
         // by _writing so it can't clobber an in-flight save.
         document.addEventListener('visibilitychange', function () {
-            if (document.visibilityState === 'hidden') self._stopVisibleRefresh();
-            else self._restartVisibleRefresh(true);
+            if (document.visibilityState === 'hidden') {
+                self._hoverBase = null;
+                self._stopVisibleRefresh();
+            } else self._restartVisibleRefresh(true);
         });
 
         this._showSkeleton();
@@ -2006,44 +2009,9 @@ var CHARGING = {
         var title = document.getElementById('chargeCalendarTitle');
         if (!grid || !this._calMonth) return;
         var lang = (window.BYD && BYD.i18n && BYD.i18n.getLang) ? BYD.i18n.getLang() : undefined;
-        var year = this._calMonth.getFullYear(), month = this._calMonth.getMonth();
-        var monthDate = new Date(year, month, 1);
-        try { title.textContent = new Intl.DateTimeFormat(lang, { month: 'long' }).format(monthDate) + ' ' + year; }
-        catch (e) { title.textContent = monthDate.toLocaleDateString(lang, { month: 'long' }) + ' ' + year; }
-        grid.innerHTML = '';
-
-        var wkFmt; try { wkFmt = new Intl.DateTimeFormat(lang, { weekday: 'short' }); } catch (e) { wkFmt = null; }
-        for (var w = 0; w < 7; w++) {
-            var dd = new Date(2024, 0, 7 + w);
-            var el = document.createElement('div');
-            el.className = 'calendar-weekday';
-            el.textContent = wkFmt ? wkFmt.format(dd) : dd.toLocaleDateString(lang, { weekday: 'short' });
-            grid.appendChild(el);
-        }
-        var firstDay = new Date(year, month, 1).getDay();
-        var daysInMonth = new Date(year, month + 1, 0).getDate();
-        var daysInPrev = new Date(year, month, 0).getDate();
-        var todayKey = this._dateKey(new Date());
-        for (var i = firstDay - 1; i >= 0; i--) this._calDayCell(grid, daysInPrev - i, this._dateKey(new Date(year, month - 1, daysInPrev - i)), true, todayKey);
-        for (var day = 1; day <= daysInMonth; day++) this._calDayCell(grid, day, this._dateKey(new Date(year, month, day)), false, todayKey);
-        for (var d2 = 1; grid.children.length - 7 + d2 <= 42; d2++) this._calDayCell(grid, d2, this._dateKey(new Date(year, month + 1, d2)), true, todayKey);
-    },
-
-    _calDayCell: function (grid, day, dateKey, otherMonth, todayKey) {
         var self = this;
-        var el = document.createElement('div');
-        el.className = 'calendar-day';
-        el.textContent = day;
-        el.dataset.date = dateKey;
-        if (otherMonth) el.classList.add('other-month');
-        if (dateKey === todayKey) el.classList.add('today');
-        if (dateKey === this._calFromKey || dateKey === this._calToKey) el.classList.add('selected');
-        else if (this._calFromKey && this._calToKey && dateKey > this._calFromKey && dateKey < this._calToKey) el.classList.add('in-range');
-        // Disable future dates.
-        var today = new Date(); today.setHours(0, 0, 0, 0);
-        if (new Date(dateKey + 'T00:00:00') > today) el.classList.add('disabled');
-        else el.addEventListener('click', function () { self._calPick(dateKey); });
-        grid.appendChild(el);
+        ODRangeCalendar.render(grid, title, this._calMonth, lang,
+            this._calFromKey, this._calToKey, function (key) { self._calPick(key); });
     },
 
     _calPick: function (dateKey) {
@@ -2079,16 +2047,11 @@ var CHARGING = {
 
     // "YYYY-MM-DD" local date key.
     _dateKey: function (d) {
-        var m = d.getMonth() + 1, day = d.getDate();
-        return d.getFullYear() + '-' + (m < 10 ? '0' + m : m) + '-' + (day < 10 ? '0' + day : day);
+        return ODRangeCalendar.dateKey(d);
     },
     // date key → epoch-ms at local 00:00 (or 23:59:59.999 when endOfDay).
     _keyToMs: function (key, endOfDay) {
-        var p = key.split('-');
-        if (p.length !== 3) return null;
-        var y = parseInt(p[0], 10), mo = parseInt(p[1], 10) - 1, da = parseInt(p[2], 10);
-        if (isNaN(y) || isNaN(mo) || isNaN(da)) return null;
-        return (endOfDay ? new Date(y, mo, da, 23, 59, 59, 999) : new Date(y, mo, da, 0, 0, 0, 0)).getTime();
+        return ODRangeCalendar.keyToMs(key, endOfDay);
     },
 
     loadMore: function () {
@@ -2261,7 +2224,12 @@ var CHARGING = {
         var ids = ['detailPowerChart', 'detailTempChart'];
         for (var i = 0; i < ids.length; i++) {
             var c = document.getElementById(ids[i]);
-            if (c) { c._chgHoverIdx = null; }
+            if (c) {
+                this._forgetHoverBase(c);
+                c._chgHoverIdx = null;
+                c._chgHoverSpec = null;
+                c._chargingHoverPainted = false;
+            }
         }
     },
 
@@ -2805,10 +2773,88 @@ var CHARGING = {
 
     // ==================== CHART RENDERERS (Canvas2D, DPR-scaled) ====================
 
+    // One detached backing canvas for the entire page, allocated only on hover.
+    // At most 4 MiB of nominal RGBA pixels, not counting browser/driver overhead.
+    _hoverBase: null,
+
+    _forgetHoverBase: function (canvas) {
+        if (this._hoverBase && this._hoverBase.canvas === canvas) this._hoverBase = null;
+    },
+
+    _restoreHoverBase: function (canvas) {
+        var base = this._hoverBase;
+        if (!base || base.canvas !== canvas || base.image.width !== canvas.width
+                || base.image.height !== canvas.height) return false;
+        try {
+            var ctx = canvas.getContext('2d');
+            if (!ctx) return false;
+            ctx.save();
+            try {
+                // Copy backing pixels, not CSS pixels (the visible context is DPR-scaled).
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.globalAlpha = 1;
+                ctx.globalCompositeOperation = 'copy';
+                ctx.drawImage(base.image, 0, 0);
+            } finally { ctx.restore(); }
+            canvas._chargingHoverClean = true;
+            canvas._chargingHoverPainted = false;
+            return true;
+        } catch (e) {
+            this._forgetHoverBase(canvas);
+            return false;
+        }
+    },
+
+    _hoverLayoutStale: function (canvas) {
+        var dpr = window.devicePixelRatio || 1;
+        var w = canvas.clientWidth || (canvas.parentNode && canvas.parentNode.clientWidth) || 320;
+        return Math.round(w * dpr) !== canvas.width;
+    },
+
+    _prepareHoverBase: function (canvas, repaint) {
+        if (this._hoverLayoutStale(canvas)) {
+            this._forgetHoverBase(canvas);
+            canvas._chargingHoverClean = false;
+        }
+        if (!canvas._chargingHoverClean && !this._restoreHoverBase(canvas)) {
+            repaint(); // Legacy/oversized canvas or cache failure: rebuild as before.
+            if (!canvas._chargingHoverClean) return false;
+        }
+        if (!this._hoverBase || this._hoverBase.canvas !== canvas) {
+            this._hoverBase = null;
+            if (canvas.width > 0 && canvas.height > 0 && canvas.width * canvas.height <= 1048576) {
+                try {
+                    var image = document.createElement('canvas');
+                    image.width = canvas.width;
+                    image.height = canvas.height;
+                    var ctx = image.getContext('2d');
+                    if (ctx) {
+                        ctx.drawImage(canvas, 0, 0);
+                        this._hoverBase = { canvas: canvas, image: image };
+                    }
+                } catch (e) { /* Keep rendering without the optional cache. */ }
+            }
+        }
+        return true;
+    },
+
+    _finishHover: function (canvas, repaint) {
+        if (this._hoverLayoutStale(canvas)) {
+            this._forgetHoverBase(canvas);
+            canvas._chargingHoverClean = false;
+        }
+        if (!canvas._chargingHoverClean && !this._restoreHoverBase(canvas)) repaint();
+        this._forgetHoverBase(canvas);
+        canvas._chargingHoverPainted = false;
+    },
+
     _setupCanvas: function (canvas, h) {
         var dpr = window.devicePixelRatio || 1;
         var w = canvas.clientWidth || canvas.parentNode.clientWidth || 320;
         var height = h || 180;
+        this._forgetHoverBase(canvas);
+        canvas._chargingHoverClean = true;
+        canvas._chargingHoverPainted = false;
         canvas.width = Math.round(w * dpr);
         canvas.height = Math.round(height * dpr);
         canvas.style.height = height + 'px';
@@ -2822,6 +2868,17 @@ var CHARGING = {
     _clearCanvas: function (id) {
         var c = document.getElementById(id);
         if (!c) return;
+        this._forgetHoverBase(c);
+        c._chargingHoverClean = true;
+        c._chargingHoverPainted = false;
+        c._chgHoverSpec = null;
+        c._chgHoverIdx = null;
+        c._barSpec = null;
+        c._barIdx = null;
+        if (this._socGeom && this._socGeom.canvas === c) {
+            this._socGeom = null;
+            this._socHoverIdx = null;
+        }
         var ctx = c.getContext('2d');
         if (ctx) ctx.clearRect(0, 0, c.width, c.height);
     },
@@ -2932,6 +2989,15 @@ var CHARGING = {
         var onMove = function (clientX) {
             var g = self._socGeom;
             if (!g) return;
+            // Refresh geometry before hit-testing, even if the old index would match.
+            if (self._hoverLayoutStale(canvas)) {
+                self._socHoverIdx = null;
+                self._finishHover(canvas, function () {
+                    if (self.socHistoryCache) self.renderSocOverTime(canvas, self.socHistoryCache);
+                });
+                g = self._socGeom;
+                if (!g || self._hoverLayoutStale(canvas)) return;
+            }
             var rect = g.canvas.getBoundingClientRect();
             var px = clientX - rect.left;
             // Find nearest sample by x.
@@ -2941,41 +3007,47 @@ var CHARGING = {
                 var dx = Math.abs(sx - px);
                 if (dx < bestDx) { bestDx = dx; best = i; }
             }
-            if (best >= 0) { self._socHoverIdx = best; self._drawSocHover(best); }
+            if (best >= 0 && (self._socHoverIdx !== best || !canvas._chargingHoverPainted)) {
+                self._socHoverIdx = best;
+                self._drawSocHover(best);
+            }
         };
         canvas.addEventListener('mousemove', function (e) { onMove(e.clientX); });
-        canvas.addEventListener('mouseleave', function () {
+        var clear = function () {
+            if (self._socHoverIdx == null) return;
             self._socHoverIdx = null;
-            if (self.socHistoryCache) self.renderSocOverTime(canvas, self.socHistoryCache);
-        });
+            self._finishHover(canvas, function () {
+                if (self.socHistoryCache) self.renderSocOverTime(canvas, self.socHistoryCache);
+            });
+        };
+        canvas.addEventListener('mouseleave', clear);
         canvas.addEventListener('touchstart', function (e) {
             if (e.touches && e.touches[0]) { e.preventDefault(); onMove(e.touches[0].clientX); }
         }, { passive: false });
         canvas.addEventListener('touchmove', function (e) {
             if (e.touches && e.touches[0]) { e.preventDefault(); onMove(e.touches[0].clientX); }
         }, { passive: false });
-        canvas.addEventListener('touchend', function () {
-            setTimeout(function () {
-                self._socHoverIdx = null;
-                if (self.socHistoryCache) self.renderSocOverTime(canvas, self.socHistoryCache);
-            }, 1500);
-        });
+        canvas.addEventListener('touchend', function () { setTimeout(clear, 1500); });
+        canvas.addEventListener('touchcancel', clear);
     },
 
-    // Draw the crosshair + dot + tooltip for the sample at index `idx`. Repaints
-    // the base chart first (cheap) so the overlay doesn't accumulate.
+    // Draw the crosshair + dot + tooltip for the sample at index `idx`.
+    // Restore clean backing pixels instead of regenerating the full chart.
     _drawSocHover: function (idx) {
         var g = this._socGeom;
         if (!g || !g.list || idx == null || idx < 0 || idx >= g.list.length) return;
-        // Repaint base, but guard against recursion (renderSocOverTime calls
-        // _drawSocHover at the end — so temporarily clear the index).
-        var saved = this._socHoverIdx;
-        this._socHoverIdx = null;
-        this.renderSocOverTime(g.canvas, this.socHistoryCache);
-        this._socHoverIdx = saved;
-
+        var self = this;
+        if (!this._prepareHoverBase(g.canvas, function () {
+            self._socHoverIdx = null;
+            try { self.renderSocOverTime(g.canvas, self.socHistoryCache); }
+            finally { self._socHoverIdx = idx; }
+        })) return;
+        g = this._socGeom;
+        if (!g || idx >= g.list.length) return;
         var ctx = g.canvas.getContext('2d');
         if (!ctx) return;
+        g.canvas._chargingHoverClean = false;
+        g.canvas._chargingHoverPainted = false;
         var p = g.list[idx];
         var px = g.pad.l + ((p.t - g.t0) / g.tSpan) * g.plotW;
         var py = g.pad.t + (1 - (p.soc / 100)) * g.plotH;
@@ -3025,6 +3097,7 @@ var CHARGING = {
         ctx.font = '10px Inter, sans-serif';
         ctx.fillText(timeTxt, bx + 8, by + 19);
         ctx.restore();
+        g.canvas._chargingHoverPainted = true;
     },
 
     // Combined per-session chart: power kW (left axis, filled line) + SoC%
@@ -3280,6 +3353,13 @@ var CHARGING = {
         var onMove = function (clientX) {
             var g = canvas._chgHoverSpec;
             if (!g) return;
+            // Refresh geometry before hit-testing, even if the old index would match.
+            if (self._hoverLayoutStale(canvas)) {
+                canvas._chgHoverIdx = null;
+                self._finishHover(canvas, function () { if (g.render) g.render(); });
+                g = canvas._chgHoverSpec;
+                if (!g || self._hoverLayoutStale(canvas)) return;
+            }
             var rect = canvas.getBoundingClientRect();
             var px = clientX - rect.left;
             var best = -1, bestDx = 1e9;
@@ -3289,12 +3369,16 @@ var CHARGING = {
                 var dx = Math.abs(sx - px);
                 if (dx < bestDx) { bestDx = dx; best = i; }
             }
-            if (best >= 0) { canvas._chgHoverIdx = best; self._drawDetailHover(canvas); }
+            if (best >= 0 && (canvas._chgHoverIdx !== best || !canvas._chargingHoverPainted)) {
+                canvas._chgHoverIdx = best;
+                self._drawDetailHover(canvas);
+            }
         };
         var clear = function () {
+            if (canvas._chgHoverIdx == null) return;
             canvas._chgHoverIdx = null;
             var g = canvas._chgHoverSpec;
-            if (g && g.render) g.render();
+            self._finishHover(canvas, function () { if (g && g.render) g.render(); });
         };
         canvas.addEventListener('mousemove', function (e) { onMove(e.clientX); });
         canvas.addEventListener('mouseleave', clear);
@@ -3305,6 +3389,7 @@ var CHARGING = {
             if (e.touches && e.touches[0]) { e.preventDefault(); onMove(e.touches[0].clientX); }
         }, { passive: false });
         canvas.addEventListener('touchend', function () { setTimeout(clear, 1500); });
+        canvas.addEventListener('touchcancel', clear);
         if (canvas._chgHoverIdx != null) this._drawDetailHover(canvas);
     },
 
@@ -3312,19 +3397,20 @@ var CHARGING = {
         var g = canvas._chgHoverSpec;
         var idx = canvas._chgHoverIdx;
         if (!g || idx == null || idx < 0 || idx >= g.samples.length) return;
+        if (!this._prepareHoverBase(canvas, function () {
+            canvas._chgHoverIdx = null;
+            try { if (g.render) g.render(); }
+            finally { canvas._chgHoverIdx = idx; }
+        })) return;
+        // A fallback render may have replaced the samples or cleared the chart.
+        g = canvas._chgHoverSpec;
+        if (!g || idx >= g.samples.length) return;
         var p = g.samples[idx];
         if (p == null || p.t == null) return;
-        // Repaint base first (guard recursion: render() re-enters this via
-        // _registerDetailHover, so clear the index across the repaint).
-        var saved = canvas._chgHoverIdx;
-        canvas._chgHoverIdx = null;
-        if (g.render) g.render();
-        canvas._chgHoverIdx = saved;
-        // render() rebuilds the spec (new closures) — re-read it.
-        g = canvas._chgHoverSpec;
-
         var ctx = canvas.getContext('2d');
         if (!ctx) return;
+        canvas._chargingHoverClean = false;
+        canvas._chargingHoverPainted = false;
         var px = g.pad.l + ((p.t - g.t0) / g.tSpan) * g.plotW;
 
         ctx.save();
@@ -3367,6 +3453,7 @@ var CHARGING = {
             }
         }
         ctx.restore();
+        canvas._chargingHoverPainted = true;
     },
 
     // Bar hover: nearest bar by pointer x within the plot. `spec` =
@@ -3384,6 +3471,13 @@ var CHARGING = {
         var onMove = function (clientX) {
             var g = canvas._barSpec;
             if (!g) return;
+            // Refresh geometry before hit-testing, even if the old index would match.
+            if (self._hoverLayoutStale(canvas)) {
+                canvas._barIdx = null;
+                self._finishHover(canvas, function () { if (g.render) g.render(); });
+                g = canvas._barSpec;
+                if (!g || self._hoverLayoutStale(canvas)) return;
+            }
             var rect = canvas.getBoundingClientRect();
             var px = clientX - rect.left;
             var best = -1, bestDx = 1e9;
@@ -3392,12 +3486,16 @@ var CHARGING = {
                 var dx = Math.abs(cx - px);
                 if (dx < bestDx) { bestDx = dx; best = i; }
             }
-            if (best >= 0) { canvas._barIdx = best; self._drawBarHover(canvas); }
+            if (best >= 0 && (canvas._barIdx !== best || !canvas._chargingHoverPainted)) {
+                canvas._barIdx = best;
+                self._drawBarHover(canvas);
+            }
         };
         var clear = function () {
+            if (canvas._barIdx == null) return;
             canvas._barIdx = null;
             var g = canvas._barSpec;
-            if (g && g.render) g.render();
+            self._finishHover(canvas, function () { if (g && g.render) g.render(); });
         };
         canvas.addEventListener('mousemove', function (e) { onMove(e.clientX); });
         canvas.addEventListener('mouseleave', clear);
@@ -3408,6 +3506,7 @@ var CHARGING = {
             if (e.touches && e.touches[0]) { e.preventDefault(); onMove(e.touches[0].clientX); }
         }, { passive: false });
         canvas.addEventListener('touchend', function () { setTimeout(clear, 1500); });
+        canvas.addEventListener('touchcancel', clear);
         if (canvas._barIdx != null) this._drawBarHover(canvas);
     },
 
@@ -3415,16 +3514,18 @@ var CHARGING = {
         var g = canvas._barSpec;
         var idx = canvas._barIdx;
         if (!g || idx == null || idx < 0 || idx >= g.rects.length) return;
-        var r = g.rects[idx];
-        var saved = canvas._barIdx;
-        canvas._barIdx = null;
-        if (g.render) g.render();
-        canvas._barIdx = saved;
+        if (!this._prepareHoverBase(canvas, function () {
+            canvas._barIdx = null;
+            try { if (g.render) g.render(); }
+            finally { canvas._barIdx = idx; }
+        })) return;
         g = canvas._barSpec;
-        r = g.rects[idx];
-
+        if (!g || idx >= g.rects.length) return;
+        var r = g.rects[idx];
         var ctx = canvas.getContext('2d');
         if (!ctx) return;
+        canvas._chargingHoverClean = false;
+        canvas._chargingHoverPainted = false;
         ctx.save();
         // Highlight the hovered bar with an outline.
         ctx.beginPath();
@@ -3462,6 +3563,7 @@ var CHARGING = {
             }
         }
         ctx.restore();
+        canvas._chargingHoverPainted = true;
     },
 
     // Two-series legend drawn at the top-right of a chart's plot area: a solid

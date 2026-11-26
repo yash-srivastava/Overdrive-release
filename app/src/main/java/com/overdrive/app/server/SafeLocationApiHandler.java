@@ -1,14 +1,11 @@
 package com.overdrive.app.server;
 
-import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.surveillance.SafeLocation;
 import com.overdrive.app.surveillance.SafeLocationManager;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.OutputStream;
-import java.util.List;
 
 /**
  * Safe Location API Handler — REST endpoints for geofence zone management.

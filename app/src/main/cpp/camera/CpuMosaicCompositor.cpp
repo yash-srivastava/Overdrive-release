@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <time.h>
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
@@ -78,6 +79,41 @@ static void swapPairs(uint8_t* d, const uint8_t* s, int n) {
     }
 }
 
+// A pair of planar rows can be copied in bulk. For mixed planar/interleaved
+// layouts, use structured NEON loads/stores to convert 16 chroma samples at
+// once, preserving the U/V order and leaving row padding untouched.
+static void copyChromaRow(const uint8_t* su, const uint8_t* sv, int sPix, Chroma sc,
+                          uint8_t* du, uint8_t* dv, int dPix, Chroma dc, int n) {
+    if (sPix == 1 && dPix == 1) {
+        memcpy(du, su, (size_t) n);
+        memcpy(dv, sv, (size_t) n);
+        return;
+    }
+    int i = 0;
+#ifdef OD_CPU_MOSAIC_NEON
+    if (sPix == 1 && dc != kStrided) {
+        uint8_t* dst = dc == kNv12 ? du : dv;
+        for (; i + 16 <= n; i += 16) {
+            uint8x16x2_t pair;
+            pair.val[0] = vld1q_u8((dc == kNv12 ? su : sv) + i);
+            pair.val[1] = vld1q_u8((dc == kNv12 ? sv : su) + i);
+            vst2q_u8(dst + (size_t) i * 2, pair);
+        }
+    } else if (sc != kStrided && dPix == 1) {
+        const uint8_t* src = sc == kNv12 ? su : sv;
+        for (; i + 16 <= n; i += 16) {
+            const uint8x16x2_t pair = vld2q_u8(src + (size_t) i * 2);
+            vst1q_u8(du + i, pair.val[sc == kNv12 ? 0 : 1]);
+            vst1q_u8(dv + i, pair.val[sc == kNv12 ? 1 : 0]);
+        }
+    }
+#endif
+    for (; i < n; i++) {
+        du[(size_t) i * dPix] = su[(size_t) i * sPix];
+        dv[(size_t) i * dPix] = sv[(size_t) i * sPix];
+    }
+}
+
 // Quadrants: 0=TL, 1=TR, 2=BL, 3=BR; srcX[q] is the tile's left column in the strip.
 int composeGrid(const Planes& s, int srcW, int srcH, const Planes& d, int dstW, int dstH,
                 const int srcX[4], int camW, int camH) {
@@ -125,10 +161,7 @@ int composeGrid(const Planes& s, int srcW, int srcH, const Planes& d, int dstW, 
                 const uint8_t* sv = s.v + sRow + (size_t) (sx / 2) * s.pixUV;
                 uint8_t* du = d.u + dRow + (size_t) (ox / 2) * d.pixUV;
                 uint8_t* dv = d.v + dRow + (size_t) (ox / 2) * d.pixUV;
-                for (int i = 0; i < halfW; i++) {
-                    du[(size_t) i * d.pixUV] = su[(size_t) i * s.pixUV];
-                    dv[(size_t) i * d.pixUV] = sv[(size_t) i * s.pixUV];
-                }
+                copyChromaRow(su, sv, s.pixUV, sc, du, dv, d.pixUV, dc, halfW);
             }
         }
     }
@@ -180,6 +213,25 @@ bool prepareOverlay(const uint8_t* rgba, size_t rgbaCap, int bw, int bh, int row
     float* rowU[2] = {scratch + 2 * (size_t) w, scratch + 3 * (size_t) w};
     float* rowV[2] = {scratch + 4 * (size_t) w, scratch + 5 * (size_t) w};
 
+    // The horizontal bilinear mapping is identical for every output row.
+    // Preserve the original double expression and clamping (no accumulated step).
+    struct Column {
+        int x0, x1;
+        double wx;
+    };
+    Column* columns = new (std::nothrow) Column[w];
+    if (!columns) {
+        delete[] scratch;
+        return false;
+    }
+    for (int x = 0; x < w; x++) {
+        double fx = ((double) x + 0.5) * bw / w - 0.5;
+        if (fx < 0) fx = 0;
+        if (fx > bw - 1) fx = bw - 1;
+        const int x0 = (int) fx;
+        columns[x] = {x0, x0 + 1 < bw ? x0 + 1 : x0, fx - x0};
+    }
+
     for (int yc = 0; yc < h / 2; yc++) {
         for (int k = 0; k < 2; k++) {
             const int y = yc * 2 + k;
@@ -194,12 +246,10 @@ bool prepareOverlay(const uint8_t* rgba, size_t rgbaCap, int bw, int bh, int row
             int first = -1, last = -1;
             uint16_t* ty = tabY + (size_t) y * w * 2;
             for (int x = 0; x < w; x++) {
-                double fx = ((double) x + 0.5) * bw / w - 0.5;
-                if (fx < 0) fx = 0;
-                if (fx > bw - 1) fx = bw - 1;
-                const int x0 = (int) fx;
-                const int x1 = x0 + 1 < bw ? x0 + 1 : x0;
-                const double wx = fx - x0;
+                const Column& column = columns[x];
+                const int x0 = column.x0;
+                const int x1 = column.x1;
+                const double wx = column.wx;
                 const uint8_t* p00 = r0 + (size_t) x0 * 4;
                 const uint8_t* p01 = r0 + (size_t) x1 * 4;
                 const uint8_t* p10 = r1 + (size_t) x0 * 4;
@@ -240,20 +290,26 @@ bool prepareOverlay(const uint8_t* rgba, size_t rgbaCap, int bw, int bh, int row
         for (int xc = 0; xc < wc; xc++) {
             const int x = xc * 2;
             const double a = ((double) rowA[0][x] + rowA[0][x + 1] + rowA[1][x] + rowA[1][x + 1]) * 0.25;
+            // Zero (or rounded-to-zero) alpha is an identity blend. Do not
+            // load/average the two chroma channels when their weights are unused.
+            const long a256 = a == 0.0 ? 0 : lround(a * 256.0);
+            if (a256 <= 0) {
+                tc[xc * 3] = tc[xc * 3 + 1] = 0;
+                tc[xc * 3 + 2] = 256;
+                continue;
+            }
             const double pu = ((double) rowU[0][x] + rowU[0][x + 1] + rowU[1][x] + rowU[1][x + 1]) * 0.25;
             const double pv = ((double) rowV[0][x] + rowV[0][x + 1] + rowV[1][x] + rowV[1][x + 1]) * 0.25;
-            const long a256 = lround(a * 256.0);
-            tc[xc * 3] = a256 > 0 ? clampU16(pu * 256.0) : 0;
-            tc[xc * 3 + 1] = a256 > 0 ? clampU16(pv * 256.0) : 0;
-            tc[xc * 3 + 2] = (uint16_t) (256 - (a256 < 0 ? 0 : a256 > 256 ? 256 : a256));
-            if (a256 > 0) {
-                if (first < 0) first = xc;
-                last = xc;
-            }
+            tc[xc * 3] = clampU16(pu * 256.0);
+            tc[xc * 3 + 1] = clampU16(pv * 256.0);
+            tc[xc * 3 + 2] = (uint16_t) (256 - (a256 > 256 ? 256 : a256));
+            if (first < 0) first = xc;
+            last = xc;
         }
         spansC[yc * 2] = first < 0 ? 0 : first;
         spansC[yc * 2 + 1] = first < 0 ? 0 : last + 1;
     }
+    delete[] columns;
     delete[] scratch;
     hdr[3] = 1;
     return true;
@@ -263,6 +319,19 @@ static inline uint8_t mix(uint32_t premul, uint32_t inv, uint32_t dst) {
     uint32_t v = (premul + inv * dst + 128u) >> 8;
     return (uint8_t) (v > 255u ? 255u : v);
 }
+
+#ifdef OD_CPU_MOSAIC_NEON
+// Match mix() exactly, including rounding and saturation. Widen before
+// adding: arbitrary 16-bit table weights can produce a sum above 65535.
+static inline uint8x8_t mix8(uint16x8_t premul, uint16x8_t inv, uint8x8_t dst) {
+    const uint16x8_t pixels = vmovl_u8(dst);
+    const uint32x4_t lo = vmlal_u16(vmovl_u16(vget_low_u16(premul)),
+                                    vget_low_u16(inv), vget_low_u16(pixels));
+    const uint32x4_t hi = vmlal_u16(vmovl_u16(vget_high_u16(premul)),
+                                    vget_high_u16(inv), vget_high_u16(pixels));
+    return vqmovn_u16(vcombine_u16(vqrshrn_n_u32(lo, 8), vqrshrn_n_u32(hi, 8)));
+}
+#endif
 
 // 0 = blended, 1 = no overlay table yet, negative = rejected.
 int blendOverlay(const uint8_t* table, size_t tableCap, const Planes& d, int dstW, int dstH) {
@@ -285,20 +354,52 @@ int blendOverlay(const uint8_t* table, size_t tableCap, const Planes& d, int dst
     const int wc = w / 2;
     for (int y = 0; y < h; y++) {
         int x0 = spansY[y * 2], x1 = spansY[y * 2 + 1];
-        if (x0 < 0) x0 = 0;
-        if (x1 > w) x1 = w;
+        x0 = std::max(0, std::min(x0, w));
+        x1 = std::max(0, std::min(x1, w));
         uint8_t* row = d.y + (size_t) y * d.rowY;
         const uint16_t* t = tabY + (size_t) y * w * 2;
-        for (int x = x0; x < x1; x++) row[x] = mix(t[x * 2], t[x * 2 + 1], row[x]);
+        int x = x0;
+#ifdef OD_CPU_MOSAIC_NEON
+        for (; x + 8 <= x1; x += 8) {
+            const uint16x8x2_t weights = vld2q_u16(t + x * 2);
+            vst1_u8(row + x, mix8(weights.val[0], weights.val[1], vld1_u8(row + x)));
+        }
+#endif
+        for (; x < x1; x++) row[x] = mix(t[x * 2], t[x * 2 + 1], row[x]);
     }
+#ifdef OD_CPU_MOSAIC_NEON
+    const Chroma dc = chromaOf(d.u, d.v, d.pixUV);
+#endif
     for (int yc = 0; yc < h / 2; yc++) {
         int x0 = spansC[yc * 2], x1 = spansC[yc * 2 + 1];
-        if (x0 < 0) x0 = 0;
-        if (x1 > wc) x1 = wc;
+        x0 = std::max(0, std::min(x0, wc));
+        x1 = std::max(0, std::min(x1, wc));
         uint8_t* ur = d.u + (size_t) yc * d.rowUV;
         uint8_t* vr = d.v + (size_t) yc * d.rowUV;
         const uint16_t* t = tabC + (size_t) yc * wc * 3;
-        for (int xc = x0; xc < x1; xc++) {
+        int xc = x0;
+#ifdef OD_CPU_MOSAIC_NEON
+        if (d.pixUV == 1) {
+            for (; xc + 8 <= x1; xc += 8) {
+                const uint16x8x3_t weights = vld3q_u16(t + xc * 3);
+                vst1_u8(ur + xc, mix8(weights.val[0], weights.val[2], vld1_u8(ur + xc)));
+                vst1_u8(vr + xc, mix8(weights.val[1], weights.val[2], vld1_u8(vr + xc)));
+            }
+        } else if (dc != kStrided) {
+            uint8_t* base = dc == kNv12 ? ur : vr;
+            const int uIndex = dc == kNv12 ? 0 : 1;
+            const int vIndex = 1 - uIndex;
+            for (; xc + 8 <= x1; xc += 8) {
+                const uint16x8x3_t weights = vld3q_u16(t + xc * 3);
+                uint8_t* dst = base + (size_t) xc * 2;
+                uint8x8x2_t pair = vld2_u8(dst);
+                pair.val[uIndex] = mix8(weights.val[0], weights.val[2], pair.val[uIndex]);
+                pair.val[vIndex] = mix8(weights.val[1], weights.val[2], pair.val[vIndex]);
+                vst2_u8(dst, pair);
+            }
+        }
+#endif
+        for (; xc < x1; xc++) {
             const size_t o = (size_t) xc * d.pixUV;
             ur[o] = mix(t[xc * 3], t[xc * 3 + 2], ur[o]);
             vr[o] = mix(t[xc * 3 + 1], t[xc * 3 + 2], vr[o]);
@@ -329,12 +430,40 @@ struct RemapSpec {
 
 static const int kMaxRow = 4096;
 
+// With lens correction disabled, X depends only on the column and Y only
+// on the row. Keep the original float operation order and 8.8 rounding.
+static bool isIdentityRemap(const RemapSpec& p) {
+    // Outside plausible camera aspect ratios retain the original math.
+    return p.k1 == 0.f && p.k2 == 0.f && p.aspect >= 0.0625f && p.aspect <= 16.f;
+}
+
+static void identityX(int n, float tx0, float dtx, float uScale, int32_t* lu) {
+    for (int i = 0; i < n; i++) {
+        const float ax = (tx0 + (float) i * dtx) * 2.f - 1.f;
+        const float ux = fminf(fmaxf(ax * 0.5f + 0.5f, 0.f), 1.f);
+        lu[i] = (int32_t) floorf((ux * uScale - 0.5f) * 256.f + 0.5f);
+    }
+}
+
+static void identityY(int n, float ty, float aspect, float vSize, int32_t* lv) {
+    const float ay = (ty * 2.f - 1.f) * aspect;
+    const float yScale = 1.f / aspect;
+    const float uy = fminf(fmaxf(ay * yScale * 0.5f + 0.5f, 0.f), 1.f);
+    const float vt = fminf(fmaxf(uy * vSize - 0.5f, 0.f), vSize - 1.f);
+    std::fill_n(lv, n, (int32_t) (vt * 256.f + 0.5f));
+}
+
 // Tile coords tx = tx0 + i * dtx at fixed ty -> rectifyTile() of the shader ->
 // 8.8 fixed texel coords: lu is tile-local (add the strip offset), lv is
 // clamped to the source height. k1 = k2 = 0 is the identity.
 static void rectifyRow(const RemapSpec& p, int n, float tx0, float dtx, float ty,
                        float uScale, float vSize, int32_t* __restrict lu,
                        int32_t* __restrict lv) {
+    if (isIdentityRemap(p)) {
+        identityX(n, tx0, dtx, uScale, lu);
+        identityY(n, ty, p.aspect, vSize, lv);
+        return;
+    }
     const float ay = (ty * 2.f - 1.f) * p.aspect;
     const float ay2 = ay * ay;
     const float a2 = p.aspect * p.aspect;
@@ -590,16 +719,17 @@ static void gatherUV(const RemapSource& sr, int n, const int32_t* __restrict lu,
 }
 
 // Linear (windshield) coords: u = (x0 + i) * du + u0 texels, fixed v.
-static void linearRow(int n, float u0, float du, float vTex, int uSize, int vSize,
-                      int32_t* lu, int32_t* lv) {
+static void linearX(int n, float u0, float du, int uSize, int32_t* lu) {
     const float uMax = (float) (uSize - 1);
-    float vt = fminf(fmaxf(vTex, 0.f), (float) (vSize - 1));
-    const int32_t vf = (int32_t) (vt * 256.f + 0.5f);
     for (int i = 0; i < n; i++) {
         const float u = fminf(fmaxf(u0 + (float) i * du, 0.f), uMax);
         lu[i] = (int32_t) (u * 256.f + 0.5f);
-        lv[i] = vf;
     }
+}
+
+static void linearY(int n, float vTex, int vSize, int32_t* lv) {
+    float vt = fminf(fmaxf(vTex, 0.f), (float) (vSize - 1));
+    std::fill_n(lv, n, (int32_t) (vt * 256.f + 0.5f));
 }
 
 static inline int offsetFx(float off, int size) {
@@ -610,14 +740,22 @@ static inline int offsetFx(float off, int size) {
 static void gridRows(const RemapSpec& p, const RemapSource& sr, const Planes& d,
                      int ty0, int ty1) {
     const int tw = p.outW / 2, th = p.outH / 2;
-    int32_t lu[kMaxRow], lv[kMaxRow];
+    int32_t lu[kMaxRow], lv[kMaxRow], chromaLu[kMaxRow / 4];
+    const bool identity = isIdentityRemap(p);
+    if (identity) {
+        identityX(tw, 0.5f / (float) tw, 1.f / (float) tw, 0.25f * (float) sr.w, lu);
+        identityX(tw / 2, 1.f / (float) tw, 2.f / (float) tw,
+                  0.25f * (float) (sr.w / 2), chromaLu);
+    }
     const int offY[4] = {offsetFx(p.off[0], sr.w), offsetFx(p.off[1], sr.w),
                          offsetFx(p.off[2], sr.w), offsetFx(p.off[3], sr.w)};
     const int offC[4] = {offsetFx(p.off[0], sr.w / 2), offsetFx(p.off[1], sr.w / 2),
                          offsetFx(p.off[2], sr.w / 2), offsetFx(p.off[3], sr.w / 2)};
     for (int y = ty0; y < ty1; y++) {
-        rectifyRow(p, tw, 0.5f / (float) tw, 1.f / (float) tw, ((float) y + 0.5f) / (float) th,
-                   0.25f * (float) sr.w, (float) sr.h, lu, lv);
+        const float ty = ((float) y + 0.5f) / (float) th;
+        if (identity) identityY(tw, ty, p.aspect, (float) sr.h, lv);
+        else rectifyRow(p, tw, 0.5f / (float) tw, 1.f / (float) tw, ty,
+                        0.25f * (float) sr.w, (float) sr.h, lu, lv);
         for (int q = 0; q < 4; q++) {
             uint8_t* out = d.y + (size_t) (y + (q >> 1) * th) * d.rowY + (size_t) (q & 1) * tw;
             gatherY(sr, tw, lu, lv, offY[q], out);
@@ -625,13 +763,15 @@ static void gridRows(const RemapSpec& p, const RemapSource& sr, const Planes& d,
         if (y & 1) continue;
         const int yc = y / 2;
         const int tcw = tw / 2, tch = th / 2;
-        rectifyRow(p, tcw, 1.f / (float) tw, 2.f / (float) tw, (float) (2 * yc + 1) / (float) th,
-                   0.25f * (float) (sr.w / 2), (float) (sr.h / 2), lu, lv);
+        const float cty = (float) (2 * yc + 1) / (float) th;
+        if (identity) identityY(tcw, cty, p.aspect, (float) (sr.h / 2), lv);
+        else rectifyRow(p, tcw, 1.f / (float) tw, 2.f / (float) tw, cty,
+                        0.25f * (float) (sr.w / 2), (float) (sr.h / 2), lu, lv);
         for (int q = 0; q < 4; q++) {
             const size_t rowOff = (size_t) (yc + (q >> 1) * tch) * d.rowUV;
             const size_t colOff = (size_t) ((q & 1) * tcw) * d.pixUV;
-            gatherUV(sr, tcw, lu, lv, offC[q], d.u + rowOff + colOff, d.v + rowOff + colOff,
-                     d.pixUV);
+            gatherUV(sr, tcw, identity ? chromaLu : lu, lv, offC[q],
+                     d.u + rowOff + colOff, d.v + rowOff + colOff, d.pixUV);
         }
     }
 }
@@ -660,9 +800,46 @@ static void cellBounds(int outW, CellBounds* cb) {
     }
 }
 
+// Horizontal sampling is independent of row for an identity strip remap
+// and for the linear windshield band. Build once per frame, shared read-only
+// by all bands. Bottom columns are concatenated in their original cell order.
+struct DashcamColumns {
+    int32_t topY[kMaxRow], topC[kMaxRow / 2];
+    int32_t bottomY[kMaxRow], bottomC[kMaxRow / 2];
+    bool topReady, bottomReady;
+};
+
+static void dashcamColumns(const RemapSpec& p, const RemapSource* src,
+                           const CellBounds& cb, DashcamColumns& cols) {
+    cols.bottomReady = isIdentityRemap(p);
+    cols.topReady = cols.bottomReady || p.windshield;
+    for (int div : {1, 2}) {
+        const int n = p.outW / div;
+        const float vx0 = (0.5f * (float) div) / (float) p.outW;
+        const float dvx = (float) div / (float) p.outW;
+        const int sw = src[0].w / div;
+        int32_t* top = div == 1 ? cols.topY : cols.topC;
+        int32_t* bottom = div == 1 ? cols.bottomY : cols.bottomC;
+        if (p.windshield) {
+            const int ww = src[1].w / div;
+            linearX(n, vx0 * (float) ww - 0.5f, dvx * (float) ww, ww, top);
+        } else if (cols.topReady) {
+            identityX(n, vx0, dvx, 0.25f * (float) sw, top);
+        }
+        if (!cols.bottomReady) continue;
+        const int* bounds = div == 1 ? cb.luma : cb.chroma;
+        for (int c = 0; c < 3; c++) {
+            const int a = bounds[c], b = bounds[c + 1];
+            if (b <= a) continue;
+            const float tx0 = (vx0 + (float) a * dvx) * 3.f - (float) c;
+            identityX(b - a, tx0, dvx * 3.f, 0.25f * (float) sw, bottom + a);
+        }
+    }
+}
+
 // Dashcam: 360 front (or windshield) on top, left / rear / right below.
 static void dashcamRow(const RemapSpec& p, const RemapSource* src, const Planes& d,
-                       const CellBounds& cb, int y, bool chroma) {
+                       const CellBounds& cb, const DashcamColumns& cols, int y, bool chroma) {
     int32_t lu[kMaxRow], lv[kMaxRow];
     const int div = chroma ? 2 : 1;
     const int n = p.outW / div;
@@ -680,18 +857,24 @@ static void dashcamRow(const RemapSpec& p, const RemapSource* src, const Planes&
         const float ly = vy / p.split;
         if (p.windshield) {
             const RemapSource& ws = src[1];
-            const int ww = ws.w / div, wh = ws.h / div;
+            const int wh = ws.h / div;
             const float t = p.cropY + ly * (1.f - p.cropY * 2.f);
-            linearRow(n, vx0 * (float) ww - 0.5f, dvx * (float) ww, t * (float) wh - 0.5f,
-                      ww, wh, lu, lv);
-            if (chroma) gatherUV(ws, n, lu, lv, 0, ou, ov, d.pixUV);
-            else gatherY(ws, n, lu, lv, 0, oy);
+            linearY(n, t * (float) wh - 0.5f, wh, lv);
+            const int32_t* u = chroma ? cols.topC : cols.topY;
+            if (chroma) gatherUV(ws, n, u, lv, 0, ou, ov, d.pixUV);
+            else gatherY(ws, n, u, lv, 0, oy);
             return;
         }
-        rectifyRow(p, n, vx0, dvx, ly, 0.25f * (float) sw, (float) sh, lu, lv);
+        const int32_t* u = lu;
+        if (cols.topReady) {
+            u = chroma ? cols.topC : cols.topY;
+            identityY(n, ly, p.aspect, (float) sh, lv);
+        } else {
+            rectifyRow(p, n, vx0, dvx, ly, 0.25f * (float) sw, (float) sh, lu, lv);
+        }
         const int off = offsetFx(p.off[0], sw);
-        if (chroma) gatherUV(strip, n, lu, lv, off, ou, ov, d.pixUV);
-        else gatherY(strip, n, lu, lv, off, oy);
+        if (chroma) gatherUV(strip, n, u, lv, off, ou, ov, d.pixUV);
+        else gatherY(strip, n, u, lv, off, oy);
         return;
     }
     const float by = (vy - p.split) / (1.f - p.split);
@@ -701,10 +884,16 @@ static void dashcamRow(const RemapSpec& p, const RemapSource* src, const Planes&
         const int a = bounds[c], b = bounds[c + 1];
         if (b <= a) continue;
         const float tx0 = (vx0 + (float) a * dvx) * 3.f - (float) c;
-        rectifyRow(p, b - a, tx0, dvx * 3.f, by, 0.25f * (float) sw, (float) sh, lu, lv);
+        const int32_t* u = lu;
+        if (cols.bottomReady) {
+            u = (chroma ? cols.bottomC : cols.bottomY) + a;
+            identityY(b - a, by, p.aspect, (float) sh, lv);
+        } else {
+            rectifyRow(p, b - a, tx0, dvx * 3.f, by, 0.25f * (float) sw, (float) sh, lu, lv);
+        }
         const int off = offsetFx(cellOff[c], sw);
-        if (chroma) gatherUV(strip, b - a, lu, lv, off, ou + (size_t) a * d.pixUV, ov + (size_t) a * d.pixUV, d.pixUV);
-        else gatherY(strip, b - a, lu, lv, off, oy + a);
+        if (chroma) gatherUV(strip, b - a, u, lv, off, ou + (size_t) a * d.pixUV, ov + (size_t) a * d.pixUV, d.pixUV);
+        else gatherY(strip, b - a, u, lv, off, oy + a);
     }
 }
 
@@ -857,6 +1046,7 @@ struct BandJob {
     int rows;
     int per;
     CellBounds cb;
+    const DashcamColumns* columns;
 };
 
 static void gridBand(void* ctx, int b) {
@@ -871,9 +1061,9 @@ static void dashcamBand(void* ctx, int b) {
     const int c0 = b * j.per;
     const int c1 = c0 + j.per < j.rows ? c0 + j.per : j.rows;
     for (int yc = c0; yc < c1; yc++) {
-        dashcamRow(*j.p, j.src, *j.d, j.cb, yc * 2, false);
-        dashcamRow(*j.p, j.src, *j.d, j.cb, yc * 2 + 1, false);
-        dashcamRow(*j.p, j.src, *j.d, j.cb, yc, true);
+        dashcamRow(*j.p, j.src, *j.d, j.cb, *j.columns, yc * 2, false);
+        dashcamRow(*j.p, j.src, *j.d, j.cb, *j.columns, yc * 2 + 1, false);
+        dashcamRow(*j.p, j.src, *j.d, j.cb, *j.columns, yc, true);
     }
 }
 
@@ -907,6 +1097,9 @@ int remapGrid(const RemapSpec& p, const RemapSource& strip, const RemapSource* w
         job.rows = ch;
         job.per = (ch + bands - 1) / bands;  // chroma rows per band
         cellBounds(p.outW, &job.cb);
+        DashcamColumns columns;
+        dashcamColumns(p, src, job.cb, columns);
+        job.columns = &columns;
         Pool::get().run(bands, dashcamBand, &job);
     }
     return 0;

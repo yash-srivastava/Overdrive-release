@@ -75,6 +75,7 @@
     }
 
     var others = [];
+    var refreshGeneration = 0;
 
     function renderCurrent(current) {
         var name = document.getElementById('currentName');
@@ -132,8 +133,13 @@
     }
 
     function refresh() {
-        return call('/api/auth/sessions', 'GET').then(render).catch(function () {
-            document.getElementById('loadError').style.display = '';
+        var generation = ++refreshGeneration;
+        return call('/api/auth/sessions', 'GET').then(function (data) {
+            if (generation === refreshGeneration) render(data);
+        }).catch(function () {
+            if (generation === refreshGeneration) {
+                document.getElementById('loadError').style.display = '';
+            }
         });
     }
 

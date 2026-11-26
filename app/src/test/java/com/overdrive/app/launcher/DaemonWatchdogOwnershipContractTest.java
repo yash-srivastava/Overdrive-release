@@ -47,6 +47,7 @@ public class DaemonWatchdogOwnershipContractTest {
             Path pidFile = root.resolve("cam_watchdog.pid");
             Path lockDir = root.resolve("cam_watchdog.lock");
             Path owners = root.resolve("owners.txt");
+            Path release = root.resolve("release");
 
             String generated = join(DaemonLauncher.Companion
                     .buildCamDaemonWatchdogScript(
@@ -75,7 +76,18 @@ public class DaemonWatchdogOwnershipContractTest {
                                     + "  if mkdir \"$WATCHDOG_LOCK_DIR\" "
                                     + "2>/dev/null; then")
                     + "\necho $$ >> \"" + owners + "\"\n"
-                    + "sleep 1\n";
+                    // Hold the lock until the other contender has tried and exited, so a
+                    // late start on a loaded machine cannot take a lock already released.
+                    + "i=0\n"
+                    + "while [ ! -e \"" + release + "\" ] && [ $i -lt 30 ]; do\n"
+                    + "  sleep 1\n"
+                    + "  i=$((i + 1))\n"
+                    + "done\n";
+            // Another test's scratch-root override would leave the real paths in place.
+            for (Path expected : new Path[] {scriptPath, pidFile, lockDir}) {
+                assertTrue("protocol does not use " + expected + ":\n" + protocol,
+                        protocol.contains(expected.toString()));
+            }
             Files.write(scriptPath,
                     protocol.getBytes(StandardCharsets.UTF_8));
 
@@ -87,6 +99,12 @@ public class DaemonWatchdogOwnershipContractTest {
                     shell.toString(), scriptPath.toString())
                     .redirectErrorStream(true)
                     .start();
+            // The contender that loses the lock exits first; only then may the owner finish.
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+            while (first.isAlive() && second.isAlive() && System.nanoTime() < deadline) {
+                Thread.sleep(50);
+            }
+            Files.createFile(release);
             byte[] firstOutput = first.getInputStream().readAllBytes();
             byte[] secondOutput = second.getInputStream().readAllBytes();
             assertEquals(new String(firstOutput, StandardCharsets.UTF_8),
@@ -94,7 +112,12 @@ public class DaemonWatchdogOwnershipContractTest {
             assertEquals(new String(secondOutput, StandardCharsets.UTF_8),
                     0, second.waitFor());
 
-            assertEquals(1, Files.readAllLines(owners).size());
+            List<String> ownerLines = Files.exists(owners)
+                    ? Files.readAllLines(owners) : java.util.Collections.emptyList();
+            assertEquals("owners=" + ownerLines
+                            + " first=[" + new String(firstOutput, StandardCharsets.UTF_8)
+                            + "] second=[" + new String(secondOutput, StandardCharsets.UTF_8) + "]",
+                    1, ownerLines.size());
             assertFalse(Files.exists(pidFile));
             assertFalse(Files.exists(lockDir));
         } finally {

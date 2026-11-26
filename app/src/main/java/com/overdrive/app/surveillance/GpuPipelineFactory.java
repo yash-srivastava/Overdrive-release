@@ -33,12 +33,9 @@ public class GpuPipelineFactory {
             com.overdrive.app.camera.CameraConfigResolver.resolve();
         boolean passiveApa =
             com.overdrive.app.camera.CameraConfigResolver.isPassiveApaModeEnabled();
-        int encoderWidth = passiveApa
-            ? com.overdrive.app.camera.PassiveApaGeometry.WIDTH
-            : resolved.getProfile().getEncoderWidth();
-        int encoderHeight = passiveApa
-            ? com.overdrive.app.camera.PassiveApaGeometry.HEIGHT
-            : resolved.getProfile().getEncoderHeight();
+        int[] geometry = resolveEncoderGeometry(resolved.getProfile(), passiveApa);
+        int encoderWidth = geometry[0];
+        int encoderHeight = geometry[1];
         logger.info("createDefault: profile=" + resolved.getProfile().getDisplayName()
             + " (panoSize=" + resolved.getPanoWidth() + "x" + resolved.getPanoHeight()
             + ", encoderSize=" + encoderWidth + "x" + encoderHeight
@@ -51,6 +48,15 @@ public class GpuPipelineFactory {
             eventOutputDir);
     }
     
+    /** Resolves the panoramic recording encoder size before a pipeline exists. */
+    public static int[] resolveEncoderGeometry(com.overdrive.app.camera.CameraProfile profile,
+            boolean passiveApa) {
+        return new int[] {
+            passiveApa ? com.overdrive.app.camera.PassiveApaGeometry.WIDTH : profile.getEncoderWidth(),
+            passiveApa ? com.overdrive.app.camera.PassiveApaGeometry.HEIGHT : profile.getEncoderHeight()
+        };
+    }
+
     /**
      * Creates a GPU pipeline for sentry mode.
      * 

@@ -1,5 +1,7 @@
 package com.overdrive.app.server;
 
+import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.function.LongSupplier;
@@ -33,7 +35,8 @@ import java.util.function.LongSupplier;
  * <p>Pure state machine over an {@link ArrayBlockingQueue}: no sockets, no
  * threads, injectable monotonic clock, so it is unit-testable in isolation.
  * All {@code offer*} methods are non-blocking; the encoder drain thread is
- * never stalled by a slow viewer.
+ * never stalled by a slow viewer. Encoded payloads are copied only after
+ * admission and owned by the queue or sender until explicitly released.
  */
 final class StreamFrameDropPolicy {
 
@@ -46,10 +49,24 @@ final class StreamFrameDropPolicy {
     /** Minimum spacing of the daemon-log drop summary. */
     static final long SUMMARY_INTERVAL_MS = 10_000L;
 
+    // Two idle arrays per power-of-two class (4 KiB through 256 KiB).
+    // At most 1016 KiB of spare payload capacity per viewer; larger frames
+    // use exact-size arrays and are never retained by the pool.
+    private static final int MIN_POOLED_BYTES = 4 * 1024;
+    private static final int MAX_POOLED_BYTES = 256 * 1024;
+    private static final int POOL_CLASSES = 7;
+    private static final int SPARES_PER_CLASS = 2;
+    private final byte[][] spareBuffers = new byte[POOL_CLASSES * SPARES_PER_CLASS][];
+
     /** One queued WebSocket message. */
     static final class Frame {
         /** Bare Annex-B payload; {@code null} only for {@link #RETIRED}. */
         final byte[] bytes;
+        /** Valid prefix of bytes; the backing array may be larger. */
+        final int length;
+        // Guarded by the owning policy's monitor. Config and RETIRED are
+        // never recyclable. Clear on release so a double release is harmless.
+        private boolean recyclable;
         /** {@code MediaCodec.BUFFER_FLAG_KEY_FRAME} was set on the packet. */
         final boolean isKey;
         /** SPS+PPS codec config (from {@code onSpsPps}), not a picture. */
@@ -67,7 +84,14 @@ final class StreamFrameDropPolicy {
         static final Frame RETIRED = new Frame(null, false, false, 0L, 0L);
 
         Frame(byte[] bytes, boolean isKey, boolean isConfig, long ptsUs, long enqueuedAtMs) {
+            this(bytes, bytes == null ? 0 : bytes.length, false, isKey, isConfig, ptsUs, enqueuedAtMs);
+        }
+
+        private Frame(byte[] bytes, int length, boolean recyclable, boolean isKey,
+                      boolean isConfig, long ptsUs, long enqueuedAtMs) {
             this.bytes = bytes;
+            this.length = length;
+            this.recyclable = recyclable;
             this.isKey = isKey;
             this.isConfig = isConfig;
             this.ptsUs = ptsUs;
@@ -133,28 +157,18 @@ final class StreamFrameDropPolicy {
     }
 
     /**
-     * Cheap pre-check for the drain thread so it can avoid copying a frame
-     * that is about to be discarded anyway.
+     * Queue one encoded picture. Copies only admitted payloads, while the
+     * codec still owns the source. The source position and limit are unchanged.
      *
-     * @return true if a non-key frame is being discarded while waiting for an
-     *         IDR (the drop is counted)
+     * @return true if queued; false if dropped (check
+     *         {@link #consumeSyncFrameRequest()} for a keyframe request)
      */
-    synchronized boolean discardsWhileSkipping(boolean isKey) {
-        if (skipping && !isKey) {
-            droppedFrames++;
-            return true;
+    synchronized boolean offerVideo(ByteBuffer source, int offset, int length,
+                                    boolean isKey, long ptsUs) {
+        if (offset < 0 || length < 0 || offset > source.limit()
+                || length > source.limit() - offset) {
+            throw new IllegalArgumentException("Invalid encoded frame window");
         }
-        return false;
-    }
-
-    /**
-     * Queue one encoded picture.
-     *
-     * @return true if the frame was queued; false if it was dropped (check
-     *         {@link #consumeSyncFrameRequest()} to learn whether a keyframe
-     *         should be requested from the encoder)
-     */
-    synchronized boolean offerVideo(byte[] bytes, boolean isKey, long ptsUs) {
         long now = monotonicMs.getAsLong();
         if (skipping && !isKey) {
             droppedFrames++;
@@ -182,9 +196,16 @@ final class StreamFrameDropPolicy {
             queue.offer(new Frame(latestConfig, false, true, 0L, now));
             configDirty = false;
         }
-        if (queue.offer(new Frame(bytes, isKey, false, ptsUs, now))) {
+        byte[] bytes = acquireBuffer(length);
+        ByteBuffer view = source.duplicate();
+        view.position(offset);
+        view.get(bytes, 0, length);
+        Frame frame = new Frame(bytes, length, bytes.length <= MAX_POOLED_BYTES,
+                isKey, false, ptsUs, now);
+        if (queue.offer(frame)) {
             return true;
         }
+        release(frame);
         // Unreachable after the capacity check above; keep the invariant that a
         // dropped IDR always leaves us waiting for the next one.
         droppedFrames++;
@@ -201,10 +222,11 @@ final class StreamFrameDropPolicy {
     synchronized void offerRetired() {
         if (queue.offer(Frame.RETIRED)) return;
         int discarded = 0;
-        for (Frame f : queue) {
+        Frame f;
+        while ((f = queue.poll()) != null) {
             if (!f.isConfig && !f.isRetired()) discarded++;
+            release(f);
         }
-        queue.clear();
         droppedFrames += discarded;
         queue.offer(Frame.RETIRED);
     }
@@ -226,6 +248,19 @@ final class StreamFrameDropPolicy {
         return queue.poll(timeout, unit);
     }
 
+    /** Return a video payload only after the sender has finished writing it. */
+    synchronized void release(Frame frame) {
+        if (!frame.recyclable) return;
+        frame.recyclable = false;
+        int first = poolClass(frame.bytes.length) * SPARES_PER_CLASS;
+        for (int i = first; i < first + SPARES_PER_CLASS; i++) {
+            if (spareBuffers[i] == null) {
+                spareBuffers[i] = frame.bytes;
+                return;
+            }
+        }
+    }
+
     /**
      * Forget everything about the retired encoder before re-attaching to its
      * replacement: queued leftovers, skip state and the old SPS/PPS (the new
@@ -233,6 +268,7 @@ final class StreamFrameDropPolicy {
      */
     synchronized void resetForReattach() {
         queue.clear();
+        Arrays.fill(spareBuffers, null);
         skipping = false;
         syncFrameWanted = false;
         latestConfig = null;
@@ -288,6 +324,28 @@ final class StreamFrameDropPolicy {
 
     // ----------------------------------------------------------------- internals
 
+    // Caller holds the policy monitor. No preallocation and no waiting for
+    // an in-flight sender: a miss simply allocates a new payload array.
+    private byte[] acquireBuffer(int length) {
+        if (length > MAX_POOLED_BYTES) return new byte[length];
+        int bucket = poolClass(length);
+        int first = bucket * SPARES_PER_CLASS;
+        for (int i = first; i < first + SPARES_PER_CLASS; i++) {
+            byte[] buffer = spareBuffers[i];
+            if (buffer != null) {
+                spareBuffers[i] = null;
+                return buffer;
+            }
+        }
+        return new byte[MIN_POOLED_BYTES << bucket];
+    }
+
+    private static int poolClass(int length) {
+        int bucket = 0;
+        while (length > (MIN_POOLED_BYTES << bucket)) bucket++;
+        return bucket;
+    }
+
     private boolean oldestOlderThan(long now) {
         Frame oldest = queue.peek();
         return oldest != null && !oldest.isRetired() && now - oldest.enqueuedAtMs > maxQueueAgeMs;
@@ -302,12 +360,15 @@ final class StreamFrameDropPolicy {
         int discardedVideo = 0;
         boolean hadRetired = false;
         boolean hadConfig = false;
-        for (Frame f : queue) {
+        // Poll claims each discarded frame exclusively. A weakly consistent
+        // iterator followed by clear could recycle a frame the sender owns.
+        Frame f;
+        while ((f = queue.poll()) != null) {
             if (f.isRetired()) hadRetired = true;
             else if (f.isConfig) hadConfig = true;
             else discardedVideo++;
+            release(f);
         }
-        queue.clear();
         if (hadRetired) queue.offer(Frame.RETIRED);
         if (hadConfig && latestConfig != null) configDirty = true;
         droppedFrames += discardedVideo;

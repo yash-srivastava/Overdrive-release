@@ -7,6 +7,7 @@ import android.media.MediaMetadataRetriever;
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.storage.RecordingDirectoryRegistry;
 import com.overdrive.app.storage.StorageManager;
+import com.overdrive.app.util.RecordingSizeFormatter;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -179,7 +180,9 @@ public class RecordingsApiHandler {
             Map<String, String> params = parseQuery(query);
             String fromId = params.get("fromId");
             String step = params.get("step");
-            if (!validRecordingId(fromId) || !("-1".equals(step) || "1".equals(step))) {
+            boolean resume = "1".equals(params.get("resume"));
+            if ((resume ? fromId != null : !validRecordingId(fromId))
+                    || !("-1".equals(step) || "1".equals(step))) {
                 HttpResponse.sendError(out, 400,
                         Messages.get("errors.invalid_request_with_detail", "fromId / step"));
                 return true;
@@ -210,8 +213,13 @@ public class RecordingsApiHandler {
                     params.get("storage"));
             applyParkingExtras(filter, params.get("parkingSessionId"),
                     params.get("camera"), params.get("minConfidence"));
-            RecordingsIndex.AdjacentResult found = idx.queryAdjacentRecording(filter, fromId,
-                    Integer.parseInt(step));
+            Set<String> skippedPrefixes = new HashSet<>();
+            for (String prefix : new String[] {"dvr_p", "event_", "cam_"}) {
+                if ("1".equals(params.get("skip_" + prefix))) skippedPrefixes.add(prefix);
+            }
+            RecordingsIndex.AdjacentResult found = idx.queryPlaylistRecording(filter, fromId,
+                    Integer.parseInt(step), resume, "1".equals(params.get("unwatchedOnly")),
+                    skippedPrefixes);
             JSONObject response = new JSONObject();
             response.put("success", found.status == RecordingsIndex.AdjacentResult.Status.FOUND
                     || found.status == RecordingsIndex.AdjacentResult.Status.END);
@@ -446,10 +454,12 @@ public class RecordingsApiHandler {
         return recordingId != null && recordingId.matches("[0-9a-f]{32}");
     }
     
-    // Background thumbnail generator
-    private static final java.util.concurrent.ExecutorService thumbExecutor = 
-        java.util.concurrent.Executors.newSingleThreadExecutor();
-    private static final Set<String> pendingThumbs = java.util.Collections.synchronizedSet(new HashSet<>());
+    // One decoder, with a bounded total of running and queued cache misses.
+    private static final int MAX_PENDING_THUMBNAILS = 17;
+    private static final ThumbnailWorkQueue thumbQueue = new ThumbnailWorkQueue(MAX_PENDING_THUMBNAILS,
+            new java.util.concurrent.ThreadPoolExecutor(0, 1, 30L,
+                    java.util.concurrent.TimeUnit.SECONDS,
+                    new java.util.concurrent.ArrayBlockingQueue<>(MAX_PENDING_THUMBNAILS)));
     
     /**
      * Serve a cached thumbnail for a video file.
@@ -531,31 +541,8 @@ public class RecordingsApiHandler {
             return;
         }
 
-        // Queue background generation if not already pending. add() returns
-        // false when the element was already present, so a single atomic
-        // call avoids the check-then-act race where two concurrent requests
-        // both pass `contains()` and submit overlapping FileOutputStreams to
-        // the same thumb file.
-        if (pendingThumbs.add(cacheKey)) {
-            final File vf = videoFile;
-            final File tf = thumbFile;
-            final String pendingKey = cacheKey;
-            thumbExecutor.submit(() -> {
-                try {
-                    byte[] data = generateThumbnail(vf);
-                    if (data != null) {
-                        try (FileOutputStream fos = RemovableStorageFs.openOutput(tf)) {
-                            fos.write(data);
-                        }
-                    }
-                } catch (Exception e) {
-                    CameraDaemon.log("Background thumb gen failed: " + e.getMessage());
-                } finally {
-                    pendingThumbs.remove(pendingKey);
-                }
-            });
-        }
-        
+        queueThumbnail(cacheKey, videoFile, thumbFile);
+
         // Return 202 Accepted with retry hint - client should retry
         sendThumbnailGenerating(out);
     }
@@ -599,23 +586,28 @@ public class RecordingsApiHandler {
             HttpResponse.sendImage(out, thumbFile, "image/jpeg");
             return;
         }
-        if (pendingThumbs.add(recordingId)) {
-            thumbExecutor.submit(() -> {
-                try {
-                    byte[] data = generateThumbnail(videoFile);
-                    if (data != null) {
-                        try (FileOutputStream output = RemovableStorageFs.openOutput(thumbFile)) {
-                            output.write(data);
-                        }
-                    }
-                } catch (Exception failure) {
-                    CameraDaemon.log("ID thumbnail generation failed: " + failure.getMessage());
-                } finally {
-                    pendingThumbs.remove(recordingId);
-                }
-            });
-        }
+        queueThumbnail(recordingId, videoFile, thumbFile);
         sendThumbnailGenerating(out);
+    }
+
+    private static void queueThumbnail(String key, File videoFile, File thumbFile) {
+        // A saturated queue leaves the key unreserved: the next 202 retry can try again.
+        thumbQueue.submit(key, () -> {
+            try {
+                // A previous request may have populated the cache before this job ran.
+                if (RemovableStorageFs.isFile(thumbFile) && RemovableStorageFs.length(thumbFile) > 0) {
+                    return;
+                }
+                byte[] data = generateThumbnail(videoFile);
+                if (data != null) {
+                    try (FileOutputStream output = RemovableStorageFs.openOutput(thumbFile)) {
+                        output.write(data);
+                    }
+                }
+            } catch (Exception failure) {
+                CameraDaemon.log("Thumbnail generation failed: " + failure.getMessage());
+            }
+        });
     }
 
     /** True when the thumbnail source is a recording still being written. */
@@ -641,7 +633,7 @@ public class RecordingsApiHandler {
     
     /**
      * Generate a thumbnail from a video file using MediaMetadataRetriever.
-     * Extracts frame at 1 second mark, scales to 160x90 for efficiency.
+     * Extracts a thumbnail-sized frame at 1 second, falling back to the first frame.
      */
     private static byte[] generateThumbnail(File videoFile) {
         MediaMetadataRetriever retriever = new MediaMetadataRetriever();
@@ -666,7 +658,8 @@ public class RecordingsApiHandler {
 
             // Scale down to thumbnail size (320x180 for 16:9 aspect).
             scaled = Bitmap.createScaledBitmap(frame, 320, 180, true);
-            if (scaled == frame) scaled = scaled.copy(Bitmap.Config.ARGB_8888, false);
+            // Release the full-size frame early.
+            if (scaled != frame) frame.recycle();
             // Raw (player-dewarped) clips get the same lens correction as playback.
             if (scaled != null) {
                 scaled = com.overdrive.app.surveillance.LensTag.dewarpFrameForClip(scaled, videoFile);
@@ -697,6 +690,7 @@ public class RecordingsApiHandler {
             } catch (Exception e) {}
         }
     }
+
     /**
      * Reports whether a given filename is currently being written by the
      * encoder as {@code <filename>.tmp}. Used by the events page to display
@@ -1521,23 +1515,23 @@ public class RecordingsApiHandler {
         // Legacy flat fields — preserved verbatim for client compat.
         response.put("normalCount", s.normalCount);
         response.put("normalSize", s.normalBytes);
-        response.put("normalSizeFormatted", formatSize(s.normalBytes));
+        response.put("normalSizeFormatted", RecordingSizeFormatter.format(s.normalBytes, Locale.US));
         response.put("sentryCount", s.sentryCount);
         response.put("sentrySize", s.sentryBytes);
-        response.put("sentrySizeFormatted", formatSize(s.sentryBytes));
+        response.put("sentrySizeFormatted", RecordingSizeFormatter.format(s.sentryBytes, Locale.US));
         response.put("proximityCount", s.proximityCount);
         response.put("proximitySize", s.proximityBytes);
-        response.put("proximitySizeFormatted", formatSize(s.proximityBytes));
+        response.put("proximitySizeFormatted", RecordingSizeFormatter.format(s.proximityBytes, Locale.US));
         response.put("replayCount", s.replayCount);
         response.put("replaySize", s.replayBytes);
-        response.put("replaySizeFormatted", formatSize(s.replayBytes));
+        response.put("replaySizeFormatted", RecordingSizeFormatter.format(s.replayBytes, Locale.US));
         response.put("totalCount", s.totalCount());
         response.put("totalSize", s.totalBytes());
-        response.put("totalSizeFormatted", formatSize(s.totalBytes()));
+        response.put("totalSizeFormatted", RecordingSizeFormatter.format(s.totalBytes(), Locale.US));
         response.put("availableSpace", availableSpace);
-        response.put("availableSpaceFormatted", formatSize(availableSpace));
+        response.put("availableSpaceFormatted", RecordingSizeFormatter.format(availableSpace, Locale.US));
         response.put("totalSpace", totalSpace);
-        response.put("totalSpaceFormatted", formatSize(totalSpace));
+        response.put("totalSpaceFormatted", RecordingSizeFormatter.format(totalSpace, Locale.US));
         response.put("normalTodayCount", s.normalToday);
         response.put("sentryTodayCount", s.sentryToday);
         response.put("proximityTodayCount", s.proximityToday);
@@ -1596,7 +1590,7 @@ public class RecordingsApiHandler {
         JSONObject o = new JSONObject();
         o.put("count", count);
         o.put("bytes", bytes);
-        o.put("bytesFormatted", formatSize(bytes));
+        o.put("bytesFormatted", RecordingSizeFormatter.format(bytes, Locale.US));
         o.put("todayCount", today);
         return o;
     }
@@ -2134,16 +2128,5 @@ public class RecordingsApiHandler {
         }
 
         return null;
-    }
-    
-    private static String formatSize(long bytes) {
-        if (bytes >= 1_000_000_000) {
-            return String.format(Locale.US, "%.1f GB", bytes / 1_000_000_000.0);
-        } else if (bytes >= 1_000_000) {
-            return String.format(Locale.US, "%.1f MB", bytes / 1_000_000.0);
-        } else if (bytes >= 1_000) {
-            return String.format(Locale.US, "%.1f KB", bytes / 1_000.0);
-        }
-        return bytes + " B";
     }
 }

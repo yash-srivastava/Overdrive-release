@@ -894,22 +894,16 @@ class DashboardFragment : Fragment() {
             skeleton?.markLoaded(R.id.vehicleRangeSkeleton)
         }
         when (val vehicle = dashboardState.vehicle) {
-            DashboardUiState.VehicleState.Loading -> {
-                heroGreeting.setText(R.string.dashboard_modern_vehicle_status)
-                heroSubtitle.setText(R.string.dashboard_modern_updating)
-                vehicleSocValue.text = pendingPercent()
-                vehicleSocValue.contentDescription = null
-                vehicleRangeValue.setText(R.string.dashboard_metric_value_pending)
-                vehicleRangeLabel?.setText(R.string.dash_range_caption)
-                setHalRangeColumnVisible(false)
-                chargingCard.visibility = View.GONE
-                heroSubtitle.visibility = View.VISIBLE
-                renderSocGauge(null)
-                renderRangeBreakdown(null)
-            }
+            DashboardUiState.VehicleState.Loading,
             is DashboardUiState.VehicleState.Unavailable -> {
                 heroGreeting.setText(R.string.dashboard_modern_vehicle_status)
-                heroSubtitle.setText(R.string.dashboard_modern_vehicle_unavailable)
+                heroSubtitle.setText(
+                    if (vehicle == DashboardUiState.VehicleState.Loading) {
+                        R.string.dashboard_modern_updating
+                    } else {
+                        R.string.dashboard_modern_vehicle_unavailable
+                    }
+                )
                 vehicleSocValue.text = pendingPercent()
                 vehicleSocValue.contentDescription = null
                 vehicleRangeValue.setText(R.string.dashboard_metric_value_pending)
@@ -1784,7 +1778,6 @@ class DashboardFragment : Fragment() {
         executor.execute {
             var nominalKwh = 0.0
             var nominalKnown = false
-            var modelId: String? = null
             try {
                 val conn = com.overdrive.app.util.DaemonHttpClient.open(
                     "/api/performance/soh/nominal", "GET", 2000, 3000)
@@ -1798,25 +1791,7 @@ class DashboardFragment : Fragment() {
                 }
                 conn.disconnect()
             } catch (_: Throwable) { /* keep defaults */ }
-            try {
-                val conn = com.overdrive.app.util.DaemonHttpClient.open(
-                    "/api/models/selected", "GET", 2000, 3000)
-                if (conn.responseCode == 200) {
-                    val body = conn.inputStream.bufferedReader().use { it.readText() }
-                    val json = org.json.JSONObject(body)
-                    val m = when {
-                        json.has("selectedModelId") && !json.isNull("selectedModelId") ->
-                            json.optString("selectedModelId", "")
-                        json.has("modelSource")
-                                && json.optString("modelSource", "unset") == "unset" -> ""
-                        // Backward compatibility with an older daemon that does
-                        // not expose selection provenance yet.
-                        else -> json.optString("modelId", "")
-                    }
-                    if (m.isNotEmpty()) modelId = m
-                }
-                conn.disconnect()
-            } catch (_: Throwable) {}
+            val modelId = fetchSelectedModelId()
 
             mainHandler.post {
                 if (!isAdded || view == null || generation != viewGeneration) return@post
@@ -1847,6 +1822,31 @@ class DashboardFragment : Fragment() {
                 vehicleArt?.setImageResource(VehicleArt.drawableFor(modelId))
             }
         }
+    }
+
+    /** Read the selected model without mistaking a renderer fallback for a selection. */
+    private fun fetchSelectedModelId(): String? {
+        var modelId: String? = null
+        try {
+            val conn = com.overdrive.app.util.DaemonHttpClient.open(
+                "/api/models/selected", "GET", 2000, 3000)
+            if (conn.responseCode == 200) {
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                val json = org.json.JSONObject(body)
+                val m = when {
+                    json.has("selectedModelId") && !json.isNull("selectedModelId") ->
+                        json.optString("selectedModelId", "")
+                    json.has("modelSource")
+                            && json.optString("modelSource", "unset") == "unset" -> ""
+                    // Backward compatibility with an older daemon that does
+                    // not expose selection provenance yet.
+                    else -> json.optString("modelId", "")
+                }
+                if (m.isNotEmpty()) modelId = m
+            }
+            conn.disconnect()
+        } catch (_: Throwable) {}
+        return modelId
     }
 
     /**
@@ -1932,7 +1932,6 @@ class DashboardFragment : Fragment() {
         executor.execute {
             var initialKwh = 0.0
             val modelIds = mutableListOf<ModelEntry>()
-            var initialModelId: String? = null
 
             // Full status fields for the summary section.
             var nominalKwh = 0.0
@@ -2014,23 +2013,7 @@ class DashboardFragment : Fragment() {
                 }
                 conn.disconnect()
             } catch (_: Throwable) {}
-            try {
-                val conn = com.overdrive.app.util.DaemonHttpClient.open(
-                    "/api/models/selected", "GET", 2000, 3000)
-                if (conn.responseCode == 200) {
-                    val body = conn.inputStream.bufferedReader().use { it.readText() }
-                    val json = org.json.JSONObject(body)
-                    val m = when {
-                        json.has("selectedModelId") && !json.isNull("selectedModelId") ->
-                            json.optString("selectedModelId", "")
-                        json.has("modelSource")
-                                && json.optString("modelSource", "unset") == "unset" -> ""
-                        else -> json.optString("modelId", "")
-                    }
-                    if (m.isNotEmpty()) initialModelId = m
-                }
-                conn.disconnect()
-            } catch (_: Throwable) {}
+            val initialModelId = fetchSelectedModelId()
 
             val finalNominalKwh = nominalKwh
             val finalNominalSource = nominalSource

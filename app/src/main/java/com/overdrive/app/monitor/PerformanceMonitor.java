@@ -1033,7 +1033,7 @@ public class PerformanceMonitor {
      * resolving which zone is the right one). Once a zone is cached, reads are a
      * single open+parse with no directory scan.
      */
-    private Double readTempFile(java.io.File f, boolean sanityCheck) {
+    private static Double readTempFile(java.io.File f, boolean sanityCheck) {
         try (BufferedReader reader = new BufferedReader(new FileReader(f))) {
             String line = reader.readLine();
             if (line == null || line.trim().isEmpty()) return null;
@@ -1046,6 +1046,34 @@ public class PerformanceMonitor {
         }
     }
     
+    static JSONArray discoverThermalZones(java.io.File zonesDirectory, int[] indices) {
+        JSONArray zones = new JSONArray();
+        for (int index : indices) {
+            java.io.File directory = new java.io.File(zonesDirectory, "thermal_zone" + index);
+            try (BufferedReader reader = new BufferedReader(new FileReader(
+                    new java.io.File(directory, "type")))) {
+                String type = reader.readLine();
+                if (type == null || type.trim().isEmpty()) continue;
+
+                JSONObject zone = new JSONObject();
+                zone.put("zone", index);
+                zone.put("type", type.trim());
+                Double temp = readTempFile(new java.io.File(directory, "temp"), false);
+                // An identified zone is still useful for diagnostics without a reading.
+                // JSON null distinguishes unavailable readings from an actual zero.
+                if (temp == null || !Double.isFinite(temp)) {
+                    zone.put("temp", JSONObject.NULL);
+                } else {
+                    zone.put("temp", temp);
+                }
+                zones.put(zone);
+            } catch (Exception ignored) {
+                // No readable type: skip this unidentified zone.
+            }
+        }
+        return zones;
+    }
+
     /**
      * Diagnostic method to discover available thermal zones and GPU paths.
      * Call this to identify what's available on the device.
@@ -1054,32 +1082,10 @@ public class PerformanceMonitor {
         JSONObject discovery = new JSONObject();
         
         try {
-            // Discover thermal zones
-            JSONArray thermalZones = new JSONArray();
-            for (int i : getThermalZoneIndices(40)) {
-                try {
-                    String typePath = "/sys/class/thermal/thermal_zone" + i + "/type";
-                    BufferedReader typeReader = new BufferedReader(new FileReader(typePath));
-                    String type = typeReader.readLine();
-                    typeReader.close();
-                    
-                    String tempPath = "/sys/class/thermal/thermal_zone" + i + "/temp";
-                    BufferedReader tempReader = new BufferedReader(new FileReader(tempPath));
-                    String tempLine = tempReader.readLine();
-                    tempReader.close();
-                    
-                    if (type != null && tempLine != null) {
-                        JSONObject zone = new JSONObject();
-                        zone.put("zone", i);
-                        zone.put("type", type.trim());
-                        double temp = Double.parseDouble(tempLine.trim());
-                        zone.put("temp", temp > 1000 ? temp / 1000.0 : temp);
-                        thermalZones.put(zone);
-                    }
-                } catch (Exception ignored) {}
-            }
-            discovery.put("thermalZones", thermalZones);
-            
+            // Keep identified zones even when their live temperature is unavailable.
+            discovery.put("thermalZones", discoverThermalZones(
+                    new java.io.File("/sys/class/thermal"), getThermalZoneIndices(40)));
+
             // Check GPU paths
             JSONArray gpuPaths = new JSONArray();
             String[] allGpuPaths = {

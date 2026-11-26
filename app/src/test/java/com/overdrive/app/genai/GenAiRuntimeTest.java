@@ -3,6 +3,7 @@ package com.overdrive.app.genai;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -16,6 +17,35 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 public class GenAiRuntimeTest {
+
+    @Test
+    public void structuredOverloadsRejectInvalidSchemasBeforeProviderSetup()
+            throws Exception {
+        GenAiRuntime runtime = new GenAiRuntime();
+        JSONObject schema = new JSONObject().put("type", "object");
+        String[] names = {null, "", "invalid name",
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "valid", "valid"};
+        JSONObject[] schemas = {schema, schema, schema, schema,
+                null, new JSONObject()};
+        for (int i = 0; i < names.length; i++) {
+            for (boolean cancellable : new boolean[]{false, true}) {
+                try {
+                    if (cancellable) {
+                        runtime.completeStructured(null, null, "", names[i], schemas[i],
+                                new GenAiRuntime.Cancellation());
+                    } else {
+                        runtime.completeStructured(null, null, "", names[i], schemas[i]);
+                    }
+                    fail("Expected invalid_schema");
+                } catch (GenAiRuntime.GenAiException e) {
+                    assertEquals(400, e.status);
+                    assertEquals("invalid_schema", e.code);
+                    assertEquals("The structured-output schema is invalid.", e.getMessage());
+                }
+            }
+        }
+    }
 
     @Test
     public void endpointAcceptsRootOrVersionedBaseUrls() {

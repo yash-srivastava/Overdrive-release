@@ -930,6 +930,8 @@
 
     Player.prototype.beginScrub = function () {
         if (this.dead || this.scrub) return;
+        // A new gesture must not inherit pending previews from the previous one.
+        this.frameShownSeq = ++this.frameSeq;
         this.scrub = { wasPlaying: this.intent === 'play' || (this.video && !this.video.paused) };
         clearTimeout(this.dwell);
         this.dwell = 0;
@@ -2666,7 +2668,7 @@
         const img = this.img;
         const self = this;
         const swap = function () {
-            if (self.dead || self.frameShownSeq !== seq) return;
+            if (self.dead || self.frameShownSeq !== seq || (!self.scrub && !self.scrubRelease)) return;
             const prev = self.shownUrl;
             img.src = url;
             img.hidden = false;
@@ -2679,6 +2681,8 @@
     };
 
     Player.prototype._hideScrubFrame = function () {
+        // A pending image decode must not cover the video again after this handoff.
+        this.frameShownSeq = ++this.frameSeq;
         this.scrubRelease = false;
         this.img.hidden = true;
     };

@@ -28,8 +28,8 @@
             // Auto-reconnect backoff (capped) so a dead tunnel link doesn't
             // reconnect every 2 s forever, hammering cellular.
             this.reconnectAttempts = 0;
-            this.handleFrame = this.handleFrame.bind(this);
-            this.handleError = this.handleError.bind(this);
+            this.pendingFrame = null;
+            this.paintRequest = null;
 
             // Suspend the H.264 stream while the tab is backgrounded. Without
             // this, a live-view tab left open over the tunnel keeps pulling
@@ -58,6 +58,7 @@
             this.running = false;
             this._clearFrameWatchdog();
             this._clearStallWatchdog();
+            this._discardPendingFrame();
             if (this.ws) { try { this.ws.close(); } catch (e) {} this.ws = null; }
             if (this.decoder) { try { this.decoder.close(); } catch (e) {} this.decoder = null; }
             if (this.onDisconnected) this.onDisconnected();
@@ -106,8 +107,11 @@
             
             this.ws = new WebSocket(this.url);
             this.ws.binaryType = "arraybuffer";
+            const socket = this.ws;
 
             this.ws.onopen = () => {
+                if (this.ws !== socket || !this.running) return;
+                this._discardPendingFrame();
                 this.reconnectAttempts = 0;  // healthy link — reset backoff
                 // Never carry a decoder across connections. WebCodecs closes
                 // the VideoDecoder BEFORE it invokes the error callback, so a
@@ -120,8 +124,13 @@
                 this._armStallWatchdog();
                 if (this.onConnected) this.onConnected();
             };
-            this.ws.onmessage = (e) => this.ingest(new Uint8Array(e.data));
+            this.ws.onmessage = (e) => {
+                if (this.ws === socket) this.ingest(new Uint8Array(e.data));
+            };
             this.ws.onclose = () => {
+                if (this.ws !== socket) return;
+                this._discardPendingFrame();
+                if (this.decoder) { try { this.decoder.close(); } catch (e) {} this.decoder = null; }
                 // Retire the watchdogs for this connection: a closed socket is a
                 // link event, not a decode failure, and the next onopen re-arms
                 // them. Leaving them armed could misfire during the reconnect gap.
@@ -136,7 +145,7 @@
                     this.reconnectAttempts = (this.reconnectAttempts || 0) + 1;
                     var backoff = Math.min(30000, 2000 * Math.pow(2, this.reconnectAttempts - 1));
                     setTimeout(() => {
-                        if (this.running && !(typeof document !== 'undefined' && document.hidden)) {
+                        if (this.running && this.ws === socket && !(typeof document !== 'undefined' && document.hidden)) {
                             this.connectWebSocket();
                         }
                     }, backoff);
@@ -157,10 +166,14 @@
          */
         initDecoder(codec) {
             if (this.decoder) return;
-            this.decoder = new VideoDecoder({
-                output: this.handleFrame,
-                error: this.handleError
+            const decoder = new VideoDecoder({
+                output: (frame) => {
+                    if (this.decoder === decoder) this.handleFrame(frame);
+                    else frame.close();
+                },
+                error: (e) => { if (this.decoder === decoder) this.handleError(e); }
             });
+            this.decoder = decoder;
             // The server REQUESTS Baseline/3.1, but KEY_PROFILE is only a hint —
             // plenty of encoders ignore it and emit Main/High. So this initial
             // config is provisional; processNAL reconfigures from the real SPS.
@@ -279,6 +292,7 @@
         _fail(reason) {
             if (this._failed) return;
             this._failed = true;
+            this._discardPendingFrame();
             console.error('[SotaPlayer] Fatal decode failure:', reason);
             if (this.onError) {
                 try { this.onError(new Error(reason)); } catch (e) {}
@@ -295,6 +309,9 @@
         }
 
         splitNALUnits(data) {
+            // NALs are consumed synchronously by ingest(). Keep views into the
+            // received message instead of copying the encoded payload here.
+            // EncodedVideoChunk copies its BufferSource (no transfer requested).
             const units = [];
             let i = 0, lastStart = -1;
 
@@ -305,7 +322,7 @@
                     else if (data[i+2] === 1) startCodeLen = 3;
 
                     if (startCodeLen > 0) {
-                        if (lastStart >= 0) units.push(data.slice(lastStart, i));
+                        if (lastStart >= 0) units.push(data.subarray(lastStart, i));
                         lastStart = i;
                         i += startCodeLen;
                         continue;
@@ -314,7 +331,7 @@
                 i++;
             }
 
-            if (lastStart >= 0) units.push(data.slice(lastStart));
+            if (lastStart >= 0) units.push(data.subarray(lastStart));
             else if (data.length > 0) units.push(data);
             return units;
         }
@@ -329,14 +346,16 @@
                 return;
             }
 
-            // Capture SPS/PPS — reconfigure decoder if SPS changes (quality switch)
+            // Capture owned SPS/PPS copies — reconfigure decoder if SPS changes
+            // (quality switch). Never retain a view of the whole message.
             if (nalType === 7) {
                 if (this.sps && !this.arraysEqual(this.sps, data)) {
                     // SPS changed (quality/resolution change) — reset decoder state
-                    this.sps = data;
+                    this.sps = data.slice();
                     this.hasReceivedKeyframe = false;
                     if (this.decoder) {
                         try {
+                            this._discardPendingFrame();
                             this.decoder.reset();
                             this._configure(this.extractCodecFromSPS(data));
                         } catch (e) {}
@@ -351,10 +370,11 @@
                 // some phones and not others: lenient desktop/WebView decoders
                 // ignore the mismatch, stricter mobile ones reject every frame.
                 if (!this.sps) {
-                    this.sps = data;
+                    this.sps = data.slice();
                     const realCodec = this.extractCodecFromSPS(data);
                     if (this.decoder && realCodec !== this.codecString) {
                         try {
+                            this._discardPendingFrame();
                             this.decoder.reset();
                             this._configure(realCodec);
                             this.hasReceivedKeyframe = false;
@@ -362,28 +382,36 @@
                     }
                     return;
                 }
-                this.sps = data;
+                // Equal SPS: retain the existing compact owned copy.
                 return;
             }
-            if (nalType === 8) { this.pps = data; return; }
-
-            // Handle video frames
-            if (nalType === 5 || nalType === 1) {
-                if (nalType === 5 && !this.hasReceivedKeyframe) {
-                    if (this.sps) {
-                        const superFrame = this.buildSuperFrame(data);
-                        this.decodeChunk(superFrame, true);
-                        this.hasReceivedKeyframe = true;
-                    }
-                    return;
+            if (nalType === 8) {
+                if (!this.pps || !this.arraysEqual(this.pps, data)) {
+                    // Like SPS, PPS outlives this message. Do not pin a large
+                    // WebSocket buffer (e.g. a bundled keyframe) via a view.
+                    this.pps = data.slice();
                 }
+                return;
+            }
 
-                if (this.hasReceivedKeyframe) {
-                    if (nalType === 5 && this.sps) {
-                        this.decodeChunk(this.buildSuperFrame(data), true);
-                    } else {
-                        this.decodeChunk(data, false);
+            // Bound queued decode work. Once overloaded, discard the old GOP
+            // and wait for a new IDR; never submit dependent frames after reset.
+            if (nalType === 5 || nalType === 1) {
+                if (this.decoder && this.decoder.decodeQueueSize >= SotaPlayer.MAX_DECODE_QUEUE) {
+                    this.hasReceivedKeyframe = false;
+                    this._discardPendingFrame();
+                    try {
+                        this.decoder.reset();
+                        if (!this._configure(this.codecString)) return;
+                    } catch (e) {
+                        this.handleError(e);
+                        return;
                     }
+                }
+                if (nalType === 5 && this.sps) {
+                    this.hasReceivedKeyframe = this.decodeChunk(this.buildSuperFrame(data), true);
+                } else if (nalType === 1 && this.hasReceivedKeyframe) {
+                    this.decodeChunk(data, false);
                 }
             }
         }
@@ -400,7 +428,7 @@
         }
 
         decodeChunk(data, isKey) {
-            if (this._failed || !this.decoder) return;
+            if (this._failed || !this.decoder) return false;
             try {
                 const chunk = new EncodedVideoChunk({
                     type: isKey ? "key" : "delta",
@@ -408,32 +436,60 @@
                     data: data
                 });
                 this.decoder.decode(chunk);
+                return true;
             } catch (e) {
                 // decode() throws synchronously when the decoder is in a bad
                 // state (unconfigured / closed). Silently swallowing every one of
                 // those was the other half of the black-canvas symptom — count
                 // them so handleError's ceiling can escalate to a fallback.
                 this.handleError(e);
+                return false;
             }
         }
 
         handleFrame(frame) {
-            if (!this.running) { frame.close(); return; }
-            // First painted frame proves the decoder works — retire the watchdog
-            // and the error tally so later transient errors get a full allowance.
+            if (!this.running || this._failed) { frame.close(); return; }
+            this._lastFrameAt = SotaPlayer._now();
+
+            // Only one decoded frame may wait for the display. Bursts replace
+            // the pending frame instead of repeatedly painting invisible work.
+            if (this.pendingFrame) this.pendingFrame.close();
+            this.pendingFrame = frame;
+            if (this.paintRequest === null) {
+                this.paintRequest = window.requestAnimationFrame(() => this._paintLatestFrame());
+            }
+        }
+
+        _paintLatestFrame() {
+            this.paintRequest = null;
+            const frame = this.pendingFrame;
+            this.pendingFrame = null;
+            if (!frame) return;
+            try {
+                if (!this.running || this._failed) return;
+                if (this.canvas.width !== frame.displayWidth || this.canvas.height !== frame.displayHeight) {
+                    this.canvas.width = frame.displayWidth;
+                    this.canvas.height = frame.displayHeight;
+                }
+                this.ctx.drawImage(frame, 0, 0, this.canvas.width, this.canvas.height);
+            } finally {
+                frame.close();
+            }
             if (this._frameWatchdog) this._clearFrameWatchdog();
             this.decodeErrors = 0;
-            this._lastFrameAt = SotaPlayer._now();   // feeds the stall watchdog
-
-            if (this.canvas.width !== frame.displayWidth || this.canvas.height !== frame.displayHeight) {
-                this.canvas.width = frame.displayWidth;
-                this.canvas.height = frame.displayHeight;
-            }
-
-            this.ctx.drawImage(frame, 0, 0, this.canvas.width, this.canvas.height);
-            frame.close();
             this.frameCount++;
             if (this.onFrame) this.onFrame(this.frameCount);
+        }
+
+        _discardPendingFrame() {
+            if (this.paintRequest !== null) {
+                window.cancelAnimationFrame(this.paintRequest);
+                this.paintRequest = null;
+            }
+            if (this.pendingFrame) {
+                this.pendingFrame.close();
+                this.pendingFrame = null;
+            }
         }
 
         handleError(e) {
@@ -445,6 +501,7 @@
             // every later decode() threw, re-entered here, and the 6th error
             // retired WebCodecs entirely. Drop the faulted instance and build
             // a fresh one so the next IDR decodes.
+            this._discardPendingFrame();
             const faulted = this.decoder;
             this.decoder = null;
             if (faulted) { try { faulted.close(); } catch (err) {} }
@@ -476,12 +533,15 @@
             this.running = false;
             this._clearFrameWatchdog();
             this._clearStallWatchdog();
+            const hadSocket = this.ws && this.ws.readyState !== WebSocket.CLOSED;
             if (this.ws) { this.ws.close(); this.ws = null; }
+            this._discardPendingFrame();
             if (this.decoder) { try { this.decoder.close(); } catch(e) {} this.decoder = null; }
             this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
             this.sps = null;
             this.pps = null;
             this.hasReceivedKeyframe = false;
+            if (hadSocket && this.onDisconnected) this.onDisconnected();
             // Remove the visibility listeners on explicit stop so instances that
             // are stopped+discarded don't accumulate orphan handlers. (Kept alive
             // through _suspendForHidden, which must still resume on show.)
@@ -534,6 +594,7 @@
     // file must still PARSE on the in-car Chrome 58 WebView (it is loaded by
     // live-view.html there even though never instantiated).
     SotaPlayer.STALL_TIMEOUT_MS = 8000;
+    SotaPlayer.MAX_DECODE_QUEUE = 12;
 
     if (typeof module !== 'undefined' && module.exports) module.exports = SotaPlayer;
     else global.SotaPlayer = SotaPlayer;

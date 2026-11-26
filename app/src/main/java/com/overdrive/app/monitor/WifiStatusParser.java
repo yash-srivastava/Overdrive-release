@@ -28,12 +28,14 @@ public final class WifiStatusParser {
     private static final String NOT_CONNECTED_PREFIX = "Wifi is not connected";
     private static final String DISABLED_PREFIX = "Wifi is disabled";
     private static final String WIFI_INFO_PREFIX = "WifiInfo:";
+    private static final String SSID_PREFIX = WIFI_INFO_PREFIX + " SSID: ";
+    private static final String BSSID_FIELD = ", BSSID:";
 
     /** Result of one parse. Unknown pieces are {@code null}. */
     public static final class Parsed {
         /** Network name without surrounding quotes, or null when unknown, hidden or absent. */
         public final String ssid;
-        /** {@code Metered hint} from the WifiInfo line, or null when that line is absent. */
+        /** {@code Metered hint} from the WifiInfo fields, or null when unavailable. */
         public final Boolean meteredHint;
         /** True only when the output states a connection. */
         public final boolean connected;
@@ -79,10 +81,20 @@ public final class WifiStatusParser {
             if (line.startsWith(WIFI_INFO_PREFIX)) {
                 // The framework prints this line only in the connected branch.
                 connected = true;
-                if (ssid == null) {
-                    ssid = normalizeSsid(field(line, "SSID: ", ", BSSID:"));
+                // The SSID is free text and can itself contain field-like strings.
+                // In the framework format, BSSID follows the SSID and precedes the hint.
+                int bssidStart = line.lastIndexOf(BSSID_FIELD);
+                if (!line.startsWith(SSID_PREFIX) || bssidStart < SSID_PREFIX.length()) {
+                    continue;
                 }
-                String hint = field(line, "Metered hint: ", ",");
+                String rawSsid = line.substring(SSID_PREFIX.length(), bssidStart).trim();
+                if (rawSsid.startsWith("\"") && (rawSsid.length() < 2 || !rawSsid.endsWith("\""))) {
+                    continue; // Incomplete quoted SSID, not a trustworthy field boundary.
+                }
+                if (ssid == null) {
+                    ssid = normalizeSsid(rawSsid);
+                }
+                String hint = field(line.substring(bssidStart), ", Metered hint: ", ",");
                 if ("true".equalsIgnoreCase(hint)) {
                     metered = Boolean.TRUE;
                 } else if ("false".equalsIgnoreCase(hint)) {

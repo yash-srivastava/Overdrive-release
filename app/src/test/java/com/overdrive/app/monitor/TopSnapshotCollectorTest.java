@@ -76,6 +76,51 @@ public class TopSnapshotCollectorTest {
     }
 
     @Test
+    public void timedOutCommandDoesNotPublishPartialRowsOrRetry() throws Exception {
+        TopSnapshotCollector.CommandResult result =
+                new TopSnapshotCollector.CommandResult(BYD_TOP_OUTPUT, -1, true);
+        JSONObject snapshot = TopSnapshotCollector.parseCommandResult(
+                result, -1, 123L, 3000L, "fixture");
+
+        assertFalse(snapshot.getBoolean("available"));
+        assertEquals(0, snapshot.getJSONArray("processes").length());
+        assertEquals(0, snapshot.getInt("processCount"));
+        assertEquals("top timed out", snapshot.getString("error"));
+        assertEquals(123L, snapshot.getLong("timestamp"));
+        assertEquals(3000L, snapshot.getLong("durationMs"));
+        assertFalse(result.shouldRetryWithoutLimit(true));
+        assertFalse(new TopSnapshotCollector.CommandResult("", -1, true)
+                .shouldRetryWithoutLimit(true));
+    }
+
+    @Test
+    public void nonzeroExitCannotPublishPartialRowsButAllowsPortableFallback() throws Exception {
+        TopSnapshotCollector.CommandResult result =
+                new TopSnapshotCollector.CommandResult(BYD_TOP_OUTPUT, 1, false);
+        JSONObject snapshot = TopSnapshotCollector.parseCommandResult(
+                result, -1, 1L, 1L, "fixture");
+
+        assertFalse(snapshot.getBoolean("available"));
+        assertEquals(0, snapshot.getInt("processCount"));
+        assertEquals("top exited with code 1", snapshot.getString("error"));
+        assertTrue(result.shouldRetryWithoutLimit(true));
+        assertFalse(result.shouldRetryWithoutLimit(false));
+    }
+
+    @Test
+    public void successfulCommandStillPublishesRowsWithoutFallback() throws Exception {
+        TopSnapshotCollector.CommandResult result =
+                new TopSnapshotCollector.CommandResult(BYD_TOP_OUTPUT, 0, false);
+        JSONObject snapshot = TopSnapshotCollector.parseCommandResult(
+                result, -1, 1L, 1L, "fixture");
+
+        assertTrue(snapshot.getBoolean("available"));
+        assertEquals(6, snapshot.getInt("processCount"));
+        assertFalse(snapshot.has("error"));
+        assertFalse(result.shouldRetryWithoutLimit(true));
+    }
+
+    @Test
     public void cachedProcessSnapshotExpiresAfter750ElapsedMilliseconds() {
         assertTrue(TopSnapshotCollector.isCacheFresh(10_000L, 10_000L));
         assertTrue(TopSnapshotCollector.isCacheFresh(10_000L, 10_750L));

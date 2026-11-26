@@ -55,6 +55,8 @@ endif()
 # ==================== Surveillance Library ====================
 set(SURVEILLANCE_SOURCES
     surveillance/native_motion.cpp
+    surveillance/rgba_readback.cpp
+    surveillance/rgb_normalize.cpp
     surveillance/motion_pipeline_v2.cpp
     surveillance/texture_tracker.cpp
     # Camera/EGL: AHardwareBuffer → EGLImage → GL_TEXTURE_EXTERNAL_OES
@@ -65,6 +67,9 @@ set(SURVEILLANCE_SOURCES
 )
 
 add_library(surveillance SHARED ${SURVEILLANCE_SOURCES})
+# RGB normalization must match Java division bit-for-bit; do not reassociate
+# the corrected reciprocal or replace the scalar tail division with fast math.
+set_source_files_properties(surveillance/rgb_normalize.cpp PROPERTIES COMPILE_OPTIONS "-fno-fast-math")
 
 target_include_directories(surveillance PRIVATE
     ${CMAKE_SOURCE_DIR}

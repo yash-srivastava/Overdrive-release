@@ -55,8 +55,6 @@ public class TelegramBotDaemon {
     // Decrypted at runtime via Safe.s() - AES-256-CBC with stack-based key reconstruction
     /** /data/local/tmp */
     private static String PATH_DATA_LOCAL_TMP() { return com.overdrive.app.util.ScratchRoot.path(Safe.s("vuaMjrmBGBFh07qqnUuL8w==")); }
-    /** /data/local/tmp/telegram_config.properties */
-    private static String PATH_TELEGRAM_CONFIG() { return com.overdrive.app.util.ScratchRoot.path(Safe.s("ZHx6IP38aGV/Q7iMCCcxzwQSn0P1N0jxHygc8N+4Ft+9mlR8XQ+WvEw0ktanrtNx")); }
     /** /data/local/tmp/tunnel_url.txt */
     private static String PATH_TELEGRAM_URL_FILE() { return com.overdrive.app.util.ScratchRoot.path(Safe.s("ZHx6IP38aGV/Q7iMCCcxz/kVx51CDNRiQ/Mc5+npiPo=")); }
     /** https://api.telegram.org/bot */

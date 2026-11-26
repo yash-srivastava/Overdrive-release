@@ -10,6 +10,9 @@
     <string name="notif_channel_parked_impact">ניטור פגיעות בחניה</string>
     <string name="notif_parked_impact_title">מעקב</string>
     <string name="notif_parked_impact_text">מנטר פגיעות בזמן חניה</string>
+    <string name="notif_channel_proximity_collector">נעילת קרבה</string>
+    <string name="notif_proximity_collector_title">קרבה</string>
+    <string name="notif_proximity_collector_text">מזהה את הטלפון שלך בזמן חניה</string>
     <string name="notif_network_hotspot">רשת ונקודה חמה</string>
     <string name="notif_channel_media_playback">הפעלת מדיה</string>
     <string name="notif_roadsense_chime_title">אזהרת RoadSense</string>

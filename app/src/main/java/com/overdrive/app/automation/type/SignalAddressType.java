@@ -2,8 +2,8 @@ package com.overdrive.app.automation.type;
 
 import com.overdrive.app.automation.AutomationCondition;
 import com.overdrive.app.automation.value.Label;
-import com.overdrive.app.automation.value.StringValue;
 
+import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
@@ -33,31 +33,15 @@ import org.json.JSONObject;
  * time and the action fails safe (condition not met), which is the same outcome the actions
  * already had for an unknown id, without the data loss.
  */
-public class SignalAddressType extends BaseType<String> {
+public class SignalAddressType extends StringSchemaType {
 
     private static final String TYPE = "signalAddress";
 
     /** Bound so a hand-edited or imported config can't store an unbounded string. */
     private static final int MAX_LEN = 128;
 
-    private final Label label;
-
     public SignalAddressType(Label label) {
-        this.label = label;
-    }
-
-    @Override
-    public Label getLabel() {
-        return label;
-    }
-
-    /**
-     * An address is not compared directly (it names the LHS), but the interface requires a
-     * comparator set; eq/neq is the meaningful pair for a reference.
-     */
-    @Override
-    public EnumType getComparators() {
-        return StringValue.COMPARATORS;
+        super(label, TYPE);
     }
 
     @Override
@@ -74,16 +58,8 @@ public class SignalAddressType extends BaseType<String> {
     }
 
     @Override
-    public JSONObject toJson() {
-        JSONObject json = getLabel().toJson();
-        try {
-            json.put("type", TYPE);
-            // Tells the editor to render the shared signal picker (catalog + per-attribute
-            // selectors) for this field instead of a plain text/enum input.
-            json.put("signalAddress", true);
-        } catch (Exception ignored) {
-            // JSONObject.put only throws on a null key
-        }
-        return json;
+    protected void appendSchemaFields(JSONObject json) throws JSONException {
+        // Render the shared signal picker rather than a plain text input.
+        json.put("signalAddress", true);
     }
 }

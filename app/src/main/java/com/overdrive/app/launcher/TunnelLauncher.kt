@@ -24,9 +24,6 @@ class TunnelLauncher(
         private val CLOUDFLARED_LOG: String get() = com.overdrive.app.util.ScratchRoot.path("cloudflared.log")
         private val CLOUDFLARED_DISABLED_SENTINEL: String get() = com.overdrive.app.util.ScratchRoot.path("cloudflared.disabled")
         
-        // Process name for identification
-        private const val CLOUDFLARED_PROCESS = "cloudflared"
-
         private val launchLock = Any()
         private var activeLaunch: LaunchFlight? = null
         private val launchGuardScheduler =

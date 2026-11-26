@@ -125,7 +125,6 @@ class AdbShellExecutor @JvmOverloads constructor(
 
         /** Process-wide rate limit for [requestDiLink5AdbReenable]. */
         private const val DI5_ADB_REENABLE_INTERVAL_MS = 60_000L
-        private val lastDi5AdbReenableMs = java.util.concurrent.atomic.AtomicLong(0L)
         // A connection after the last re-apply means ADB was switched off again (com.byd.ota does
         // it once, ~18 s after boot), so the next re-apply may come sooner.
         private const val DI5_ADB_REENABLE_AFTER_CONNECT_MS = 10_000L

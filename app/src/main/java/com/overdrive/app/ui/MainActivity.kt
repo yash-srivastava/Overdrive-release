@@ -416,9 +416,6 @@ open class MainActivity : AppCompatActivity() {
             android.util.Log.w("MainActivity", "ProcessRevivalReceiver.schedule failed: ${e.message}")
         }
         
-        // Setup privileged shell (UID 1000) - required for daemon management
-        // setupPrivilegedShell()
-        
         // Start daemons and services
         // Device ID is already synced above via generateDeviceId() which writes to file async
         // The daemon will reload from file when getState() is called
@@ -1728,40 +1725,6 @@ open class MainActivity : AppCompatActivity() {
         })
     }
     
-    /**
-     * Setup the privileged shell (UID 1000) for daemon management.
-     * This must be done before starting any daemons that need elevated privileges.
-     */
-    private fun setupPrivilegedShell() {
-        logsViewModel.info("Shell", "Setting up privileged shell...")
-        
-        // PrivilegedShellSetup disabled — all daemons now run via ADB shell (UID 2000)
-        // PrivilegedShellSetup.init(this)
-        // 
-        // PrivilegedShellSetup.setup(object : PrivilegedShellSetup.SetupCallback {
-        //     override fun onSuccess() {
-        //         runOnUiThread {
-        //             logsViewModel.info("Shell", "✓ Privileged shell ready (UID 1000)")
-        //             daemonStartupManager.checkAllDaemonStatuses()
-        //         }
-        //     }
-        //     
-        //     override fun onFailure(reason: String) {
-        //         runOnUiThread {
-        //             logsViewModel.warn("Shell", "⚠ Privileged shell setup failed: $reason")
-        //             logsViewModel.info("Shell", "Falling back to ADB shell for daemon management")
-        //             daemonStartupManager.checkAllDaemonStatuses()
-        //         }
-        //     }
-        //     
-        //     override fun onProgress(message: String) {
-        //         runOnUiThread {
-        //             logsViewModel.debug("Shell", "→ $message")
-        //         }
-        //     }
-        // })
-    }
-    
     private fun initViews() {
         toolbar = findViewById(R.id.toolbar)
         navigationRail = findViewById(R.id.navigationRail)
@@ -2870,15 +2833,6 @@ open class MainActivity : AppCompatActivity() {
         super.onBackPressed()
     }
     
-    // ==================== Camera Reconfiguration ====================
-    
-    /**
-     * No-op since the rail shell doesn't have a drawer-side menu item to
-     * retitle — Camera probe status is shown inside the dialog itself.
-     */
-    private fun updateCameraProbeMenuItem() { /* intentionally empty */ }
-
-
     // ==================== Camera Mapping data model ====================
 
     private data class CameraRoleOption(val key: String, val label: String)
@@ -2941,13 +2895,15 @@ open class MainActivity : AppCompatActivity() {
         // Opt-in for the decoupled encoder pipeline
         // (camera.decoupledEncoderLane) — the native-AVM reverse-camera
         // starvation fix. Legacy camera mode only; applied at the next
-        // camera restart. Default false = shipped zero-copy behaviour.
+        // camera restart. Unset = platform default (on for BYD100F, else off).
         val decoupledEncoderLaneEnabled: Boolean,
         // Recording engine preference (camera.recordingEngine, default CPU on
         // DiLink 3) and what the running pipeline uses ("cpu"/"gpu"/"") + why.
         val recordingEngineCpu: Boolean,
         val recordingEngineActive: String,
-        val recordingEngineWhy: String
+        val recordingEngineWhy: String,
+        // camera.fastAiFrameCopy (default on): native copy of the AI lane's frames.
+        val fastAiFrameCopy: Boolean
     )
 
     /**
@@ -3073,8 +3029,8 @@ open class MainActivity : AppCompatActivity() {
                 "oemDashcamManualOverride", false)
             val concurrentAvmProbeEnabled = cameraSection.optBoolean(
                 "concurrentAvmProbeEnabled", false)
-            val decoupledEncoderLaneEnabled = cameraSection.optBoolean(
-                "decoupledEncoderLane", false)
+            val decoupledEncoderLaneEnabled = com.overdrive.app.camera
+                .DecoupledEncoderLanePolicy.resolve(cameraSection)
             val recordingEngineCpu = com.overdrive.app.surveillance.RecordingEngine.prefersCpu()
 
             CameraMappingState(
@@ -3098,7 +3054,9 @@ open class MainActivity : AppCompatActivity() {
                 decoupledEncoderLaneEnabled = decoupledEncoderLaneEnabled,
                 recordingEngineCpu = recordingEngineCpu,
                 recordingEngineActive = config.optString("recordingEngineActive", ""),
-                recordingEngineWhy = config.optString("recordingEngineWhy", "")
+                recordingEngineWhy = config.optString("recordingEngineWhy", ""),
+                fastAiFrameCopy = com.overdrive.app.camera.CameraConfigResolver
+                    .isFastAiFrameCopyEnabled()
             )
         } catch (e: Exception) {
             logsViewModel.error("Camera", "Failed to load camera mapping state: ${e.message}")
@@ -3893,6 +3851,43 @@ open class MainActivity : AppCompatActivity() {
                             (switchView as? android.widget.CompoundButton)?.isChecked = !checked
                         } finally {
                             recordingEngineReverting.set(false)
+                        }
+                        Toast.makeText(
+                            this,
+                            getString(R.string.toast_failed_to_save_short),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+            }.start()
+        }
+
+        // AI frame copy: same write-through and camera restart as the engine switch.
+        val fastAiCopySwitch = dialogView.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(R.id.swFastAiFrameCopy)
+        fastAiCopySwitch?.isChecked = state.fastAiFrameCopy
+        val fastAiCopyReverting = java.util.concurrent.atomic.AtomicBoolean(false)
+        fastAiCopySwitch?.setOnCheckedChangeListener { switchView, checked ->
+            if (fastAiCopyReverting.get()) return@setOnCheckedChangeListener
+            switchView.isEnabled = false
+            Thread {
+                val ok = try {
+                    com.overdrive.app.camera.CameraConfigResolver.saveFastAiFrameCopy(checked)
+                } catch (e: Exception) {
+                    logsViewModel.error("Camera", "Failed to save fastAiFrameCopy: ${e.message}")
+                    false
+                }
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    if (ok) {
+                        restartCameraDaemonForCameraSettings()
+                        dialog.dismiss()
+                    } else {
+                        switchView.isEnabled = true
+                        fastAiCopyReverting.set(true)
+                        try {
+                            (switchView as? android.widget.CompoundButton)?.isChecked = !checked
+                        } finally {
+                            fastAiCopyReverting.set(false)
                         }
                         Toast.makeText(
                             this,

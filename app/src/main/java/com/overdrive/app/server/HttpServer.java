@@ -55,6 +55,7 @@ public class HttpServer {
 
     private static final String WEB_ROOT = com.overdrive.app.util.ScratchRoot.path("web");
     private final int port;
+    private final AssetCatalogCache assetCatalogs = new AssetCatalogCache();
     // stop() runs on a different thread from start()/accept(); volatile is
     // required so it always closes the currently published listener socket.
     private volatile ServerSocket serverSocket;
@@ -2133,6 +2134,13 @@ public class HttpServer {
         }
         status.put("genAiDashboardEnabled",
                 GenAiConfig.isDashboardPresentationEnabled());
+        // Only expose observations where the BYD auto-start dialog applies,
+        // and never in public mode.
+        if (!CameraDaemon.isPublicMode()) {
+            JSONObject autoStart = com.overdrive.app.services.AutoStartObservation.read(
+                    CameraDaemon.getAppContext());
+            if (autoStart != null) status.put("autoStartObservation", autoStart);
+        }
 
         // Vehicle-data readiness, surfaced explicitly so the web UI can render
         // a "waiting for vehicle…" state instead of silently leaving every
@@ -2749,17 +2757,7 @@ public class HttpServer {
      * same-length translation edit as unchanged across app versions.
      */
     static String assetContentEtag(byte[] data) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(data);
-            StringBuilder hex = new StringBuilder(digest.length * 2 + 2);
-            hex.append('"');
-            for (byte value : digest) {
-                hex.append(String.format(java.util.Locale.ROOT, "%02x", value & 0xff));
-            }
-            return hex.append('"').toString();
-        } catch (Exception impossible) {
-            return "\"" + Integer.toHexString(java.util.Arrays.hashCode(data)) + "\"";
-        }
+        return AssetCatalogCache.contentEtag(data);
     }
 
     /**
@@ -2779,18 +2777,13 @@ public class HttpServer {
 
         android.content.Context context =
                 com.overdrive.app.daemon.DaemonBootstrap.getContext();
-        if (context == null || context.getAssets() == null) return false;
-        try (InputStream in = context.getAssets().open(
-                "web/i18n/" + requested + ".json")) {
-            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-            byte[] buffer = new byte[8192];
-            int count;
-            while ((count = in.read(buffer)) != -1) {
-                bytes.write(buffer, 0, count);
-            }
-            byte[] data = bytes.toByteArray();
+        AssetManager assets = context == null ? null : context.getAssets();
+        if (assets == null) return false;
+        try {
+            AssetCatalogCache.Entry catalog = assetCatalogs.get(assets, requested,
+                    () -> assets.open("web/i18n/" + requested + ".json"));
             String cacheControl = "public, max-age=3600, must-revalidate";
-            String etag = assetContentEtag(data);
+            String etag = catalog.etag;
             if (ifNoneMatch != null && etag.equals(ifNoneMatch.trim())) {
                 out.write(("HTTP/1.1 304 Not Modified\r\n"
                         + "ETag: " + etag + "\r\n"
@@ -2801,12 +2794,12 @@ public class HttpServer {
             }
             String headers = "HTTP/1.1 200 OK\r\n"
                     + "Content-Type: application/json; charset=utf-8\r\n"
-                    + "Content-Length: " + data.length + "\r\n"
+                    + "Content-Length: " + catalog.length() + "\r\n"
                     + "ETag: " + etag + "\r\n"
                     + "Cache-Control: " + cacheControl + "\r\n"
                     + "Connection: close\r\n\r\n";
             out.write(headers.getBytes("UTF-8"));
-            out.write(data);
+            catalog.writeTo(out);
             out.flush();
             return true;
         } catch (Exception e) {
@@ -3141,13 +3134,9 @@ public class HttpServer {
                     }
                     
                     // Runs on the encoder drain thread: everything here is
-                    // non-blocking. Skip the copy for frames the policy is
-                    // discarding anyway while it waits for the next IDR.
-                    if (frameQueue.discardsWhileSkipping(isKeyframe)) return;
-                    byte[] frame = new byte[info.size];
-                    data.position(info.offset);
-                    data.get(frame);
-                    if (!frameQueue.offerVideo(frame, isKeyframe, info.presentationTimeUs)
+                    // non-blocking. Admission precedes the copy, and the queue
+                    // owns the pooled payload until the sender finishes.
+                    if (!frameQueue.offerVideo(data, info.offset, info.size, isKeyframe, info.presentationTimeUs)
                             && frameQueue.consumeSyncFrameRequest()) {
                         // Entered skip: ask for an IDR so the gap ends at the
                         // next possible frame rather than the next natural GOP.
@@ -3218,9 +3207,9 @@ public class HttpServer {
                         try {
                             // Log first few frames for debugging
                             if (frameCount < 5) {
-                                CameraDaemon.log("WS: Frame " + frameCount + " size=" + frame.length + " bytes");
+                                CameraDaemon.log("WS: Frame " + frameCount + " size=" + queued.length + " bytes");
                             }
-                            sendWebSocketBinaryFrame(out, frame);
+                            sendWebSocketBinaryFrame(out, frame, queued.length);
                             lastFrameTime = System.currentTimeMillis();
                             frameCount++;
                             
@@ -3237,6 +3226,8 @@ public class HttpServer {
                         } catch (java.io.IOException e) {
                             CameraDaemon.log("WS: Write error (" + e.getMessage() + ")");
                             break;
+                        } finally {
+                            frameQueue.release(queued);
                         }
                     } else {
                         // No frame for 5 seconds — send ping to keep alive
@@ -3323,17 +3314,17 @@ public class HttpServer {
      */
     private static final int MAX_WS_FRAME_SIZE = 32768;  // 32KB per WebSocket frame
     
-    private void sendWebSocketBinaryFrame(OutputStream out, byte[] data) throws Exception {
-        if (data.length <= MAX_WS_FRAME_SIZE) {
+    private void sendWebSocketBinaryFrame(OutputStream out, byte[] data, int length) throws Exception {
+        if (length <= MAX_WS_FRAME_SIZE) {
             // Small frame — send as single message
-            sendWebSocketRawFrame(out, data, 0, data.length, 0x82, true);
+            sendWebSocketRawFrame(out, data, 0, length, 0x82, true);
         } else {
             // Large frame — fragment into continuation frames
             int offset = 0;
             boolean first = true;
-            while (offset < data.length) {
-                int chunkSize = Math.min(MAX_WS_FRAME_SIZE, data.length - offset);
-                boolean last = (offset + chunkSize >= data.length);
+            while (offset < length) {
+                int chunkSize = Math.min(MAX_WS_FRAME_SIZE, length - offset);
+                boolean last = (offset + chunkSize >= length);
                 int opcode = first ? 0x02 : 0x00;  // binary for first, continuation for rest
                 sendWebSocketRawFrame(out, data, offset, chunkSize, opcode, last);
                 offset += chunkSize;

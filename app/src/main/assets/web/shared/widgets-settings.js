@@ -273,7 +273,7 @@ const WidgetsSettings = {
         const ordered = sel.map((id) => this.CATALOG.find((w) => w.id === id)).filter(Boolean)
             .concat(this.CATALOG.filter((w) => sel.indexOf(w.id) < 0));
         list.innerHTML = '';
-        ordered.forEach((w) => {
+        ordered.forEach((w, rowIndex) => {
             const on = sel.indexOf(w.id) >= 0;
             const idx = sel.indexOf(w.id);
             const row = document.createElement('div');
@@ -282,9 +282,17 @@ const WidgetsSettings = {
                 '<label class="toggle-switch"><input type="checkbox"' + (on ? ' checked' : '') + '><span class="toggle-slider"></span></label>' +
                 '<div class="setting-info"><div class="setting-name"></div><div class="setting-desc"></div></div>' +
                 '<div class="gw-order"><button type="button" aria-label="Move up">&#8593;</button><button type="button" aria-label="Move down">&#8595;</button></div>';
-            row.querySelector('.setting-name').textContent = this._t(w.key, w.name);
-            row.querySelector('.setting-desc').textContent = this._t(w.desc, w.descFb);
-            row.querySelector('input').addEventListener('change', (e) => this.toggleWidget(w.id, e.target.checked));
+            const name = row.querySelector('.setting-name');
+            const desc = row.querySelector('.setting-desc');
+            const checkbox = row.querySelector('input');
+            name.id = 'gwWidgetName-' + rowIndex;
+            desc.id = 'gwWidgetDesc-' + rowIndex;
+            name.textContent = this._t(w.key, w.name);
+            desc.textContent = this._t(w.desc, w.descFb);
+            // Reuse the visible translated text as the accessible name and description.
+            checkbox.setAttribute('aria-labelledby', name.id);
+            checkbox.setAttribute('aria-describedby', desc.id);
+            checkbox.addEventListener('change', (e) => this.toggleWidget(w.id, e.target.checked));
             const [up, down] = row.querySelectorAll('.gw-order button');
             up.disabled = !on || idx === 0;
             down.disabled = !on || idx === sel.length - 1;

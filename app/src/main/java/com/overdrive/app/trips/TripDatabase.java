@@ -1198,41 +1198,13 @@ public class TripDatabase {
             WeeklyRollup existing = getWeeklyRollup(year, week);
 
             if (existing == null) {
-                // Insert new rollup
-                String sql = "INSERT INTO weekly_rollups (\"year\", week_number, trip_count, " +
-                        "total_distance_km, total_duration_seconds, avg_efficiency, " +
-                        "total_energy_kwh, total_cost, avg_energy_per_km, " +
-                        "avg_anticipation, avg_smoothness, avg_speed_discipline, " +
-                        "avg_efficiency_score, avg_consistency) " +
-                        "VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-                try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-                    pstmt.setInt(1, year);
-                    pstmt.setInt(2, week);
-                    pstmt.setDouble(3, trip.distanceKm);
-                    pstmt.setInt(4, trip.durationSeconds);
-                    pstmt.setDouble(5, trip.efficiencySocPerKm);
-                    pstmt.setDouble(6, trip.getResolvedEnergyKwh());
-                    pstmt.setDouble(7, trip.tripCost);
-                    pstmt.setDouble(8, trip.energyPerKm);
-                    pstmt.setInt(9, trip.anticipationScore);
-                    pstmt.setInt(10, trip.smoothnessScore);
-                    pstmt.setInt(11, trip.speedDisciplineScore);
-                    pstmt.setInt(12, trip.efficiencyScore);
-                    pstmt.setInt(13, trip.consistencyScore);
-                    pstmt.executeUpdate();
-                }
+                insertRollup("weekly_rollups", "week_number", year, week, trip);
             } else {
                 // Update with running averages
                 int oldCount = existing.tripCount;
                 int newCount = oldCount + 1;
 
-                String sql = "UPDATE weekly_rollups SET trip_count=?, " +
-                        "total_distance_km=?, total_duration_seconds=?, avg_efficiency=?, " +
-                        "total_energy_kwh=?, total_cost=?, avg_energy_per_km=?, " +
-                        "avg_anticipation=?, avg_smoothness=?, avg_speed_discipline=?, " +
-                        "avg_efficiency_score=?, avg_consistency=? " +
-                        "WHERE \"year\"=? AND week_number=?";
-                try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+                try (PreparedStatement pstmt = prepareRollupUpdate("weekly_rollups", "week_number")) {
                     pstmt.setInt(1, newCount);
                     pstmt.setDouble(2, existing.totalDistanceKm + trip.distanceKm);
                     pstmt.setInt(3, existing.totalDurationSeconds + trip.durationSeconds);
@@ -1307,41 +1279,13 @@ public class TripDatabase {
             MonthlyRollup existing = getMonthlyRollup(year, month);
 
             if (existing == null) {
-                // Insert new rollup
-                String sql = "INSERT INTO monthly_rollups (\"year\", month_number, trip_count, " +
-                        "total_distance_km, total_duration_seconds, avg_efficiency, " +
-                        "total_energy_kwh, total_cost, avg_energy_per_km, " +
-                        "avg_anticipation, avg_smoothness, avg_speed_discipline, " +
-                        "avg_efficiency_score, avg_consistency) " +
-                        "VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-                try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
-                    pstmt.setInt(1, year);
-                    pstmt.setInt(2, month);
-                    pstmt.setDouble(3, trip.distanceKm);
-                    pstmt.setInt(4, trip.durationSeconds);
-                    pstmt.setDouble(5, trip.efficiencySocPerKm);
-                    pstmt.setDouble(6, trip.getResolvedEnergyKwh());
-                    pstmt.setDouble(7, trip.tripCost);
-                    pstmt.setDouble(8, trip.energyPerKm);
-                    pstmt.setInt(9, trip.anticipationScore);
-                    pstmt.setInt(10, trip.smoothnessScore);
-                    pstmt.setInt(11, trip.speedDisciplineScore);
-                    pstmt.setInt(12, trip.efficiencyScore);
-                    pstmt.setInt(13, trip.consistencyScore);
-                    pstmt.executeUpdate();
-                }
+                insertRollup("monthly_rollups", "month_number", year, month, trip);
             } else {
                 // Update with running averages
                 int oldCount = existing.tripCount;
                 int newCount = oldCount + 1;
 
-                String sql = "UPDATE monthly_rollups SET trip_count=?, " +
-                        "total_distance_km=?, total_duration_seconds=?, avg_efficiency=?, " +
-                        "total_energy_kwh=?, total_cost=?, avg_energy_per_km=?, " +
-                        "avg_anticipation=?, avg_smoothness=?, avg_speed_discipline=?, " +
-                        "avg_efficiency_score=?, avg_consistency=? " +
-                        "WHERE \"year\"=? AND month_number=?";
-                try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+                try (PreparedStatement pstmt = prepareRollupUpdate("monthly_rollups", "month_number")) {
                     pstmt.setInt(1, newCount);
                     pstmt.setDouble(2, existing.totalDistanceKm + trip.distanceKm);
                     pstmt.setInt(3, existing.totalDurationSeconds + trip.durationSeconds);
@@ -1377,6 +1321,44 @@ public class TripDatabase {
             logger.error("Failed to update monthly rollup", e);
             reconnect();
         }
+    }
+
+    // Table and period column names are fixed internal literals at both call sites.
+    private void insertRollup(String table, String periodColumn, int year, int period,
+                              TripRecord trip) throws Exception {
+        String sql = "INSERT INTO " + table + " (\"year\", " + periodColumn + ", trip_count, " +
+                "total_distance_km, total_duration_seconds, avg_efficiency, " +
+                "total_energy_kwh, total_cost, avg_energy_per_km, " +
+                "avg_anticipation, avg_smoothness, avg_speed_discipline, " +
+                "avg_efficiency_score, avg_consistency) " +
+                "VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setInt(1, year);
+            pstmt.setInt(2, period);
+            pstmt.setDouble(3, trip.distanceKm);
+            pstmt.setInt(4, trip.durationSeconds);
+            pstmt.setDouble(5, trip.efficiencySocPerKm);
+            pstmt.setDouble(6, trip.getResolvedEnergyKwh());
+            pstmt.setDouble(7, trip.tripCost);
+            pstmt.setDouble(8, trip.energyPerKm);
+            pstmt.setInt(9, trip.anticipationScore);
+            pstmt.setInt(10, trip.smoothnessScore);
+            pstmt.setInt(11, trip.speedDisciplineScore);
+            pstmt.setInt(12, trip.efficiencyScore);
+            pstmt.setInt(13, trip.consistencyScore);
+            pstmt.executeUpdate();
+        }
+    }
+
+    // Keep this UPDATE column order in sync with the parameter bindings in updateWeeklyRollup() and updateMonthlyRollup().
+    private PreparedStatement prepareRollupUpdate(String table, String periodColumn) throws Exception {
+        String sql = "UPDATE " + table + " SET trip_count=?, " +
+                "total_distance_km=?, total_duration_seconds=?, avg_efficiency=?, " +
+                "total_energy_kwh=?, total_cost=?, avg_energy_per_km=?, " +
+                "avg_anticipation=?, avg_smoothness=?, avg_speed_discipline=?, " +
+                "avg_efficiency_score=?, avg_consistency=? " +
+                "WHERE \"year\"=? AND " + periodColumn + "=?";
+        return connection.prepareStatement(sql);
     }
 
     /**
@@ -2182,15 +2164,16 @@ public class TripDatabase {
         // scoreable data (1 Hz rows) leaves the trip unscored, the UI's "no data".
         double[] elevation = diLink5 ? TripScoreEngine.journalElevation(samples, Long.MAX_VALUE) : null;
         // DI5: 1 Hz rows stand in for their 5 Hz samples, for the coverage gate as for the engine.
-        if (diLink5) scoring = TripScoreEngine.diLink5At5Hz(scoring);
-        if (scoring.isEmpty() || (diLink5 && !TripScoreEngine.hasDiLink5ScoringCoverage(
-                TripScoreEngine.scoreableSeconds(scoring), target.durationSeconds))) {
+        TripScoreEngine.ExpandedScoringSamples expanded = diLink5
+                ? new TripScoreEngine.ExpandedScoringSamples(scoring) : null;
+        if (scoring.isEmpty() || (expanded != null && !TripScoreEngine.hasDiLink5ScoringCoverage(
+                expanded.seconds, target.durationSeconds))) {
             if (elevation != null) TripScoreEngine.applyElevation(target, elevation[0], elevation[1]);
             return;
         }
         try {
             if (elevation != null) {
-                new TripScoreEngine().computeSummary(target, scoring, elevation[0], elevation[1]);
+                new TripScoreEngine().computeExpandedSummary(target, expanded, elevation[0], elevation[1]);
             } else {
                 new TripScoreEngine().computeSummary(target, scoring);
             }

@@ -8,7 +8,6 @@ import android.os.Binder
 import android.os.Bundle
 import android.os.IBinder
 import android.os.Parcel
-import android.os.RemoteException
 import android.os.SystemClock
 import android.os.ResultReceiver
 import android.view.Display

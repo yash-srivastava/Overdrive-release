@@ -1,5 +1,6 @@
 package com.overdrive.app.ui;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 import java.io.IOException;
@@ -7,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import org.json.JSONObject;
 import org.junit.Test;
 
 /** Guards first-load locking, ordered writes, and failed-toggle reconciliation. */
@@ -14,16 +16,16 @@ public class WebSettingsToggleReliabilityContractTest {
 
     @Test
     public void immediateSavePagesLockUntilHydratedAndSerializeWrites() throws IOException {
-        assertPageLock("recording.html", "recording.js?v=dl5fish4");
+        assertPageLock("recording.html", "recording.js?v=codecavailability3");
         assertPageLock("road-sense.html", "road-sense.js?v=bsux3");
-        assertPageLock("trips.html", "trips.js?v=rangecal6");
+        assertPageLock("trips.html", "trips.js?v=routebatch1-calendar1");
         assertPageLock("abrp.html", "abrp.js?v=toggle3");
-        assertPageLock("surveillance.html", "surveillance.js?v=survtoggle22");
-        assertPageLock("byd-cloud.html", "surveillance.js?v=survtoggle22");
+        assertPageLock("surveillance.html", "surveillance.js?v=codecavailability3");
+        assertPageLock("byd-cloud.html", "surveillance.js?v=codecavailability3");
         assertTrue(read("app/src/main/assets/web/local/live-view.html").contains(
-                "surveillance.js?v=survtoggle22"));
+                "surveillance.js?v=codecavailability3"));
         assertTrue(read("app/src/main/assets/web/local/notifications.html").contains(
-                "surveillance.js?v=survtoggle22"));
+                "surveillance.js?v=codecavailability3"));
 
         String hydration = read("app/src/main/assets/web/shared/settings-hydration.js");
         assertTrue(hydration.contains("event.stopImmediatePropagation();"));
@@ -151,6 +153,27 @@ public class WebSettingsToggleReliabilityContractTest {
         assertTrue(script.contains("if (!this.ready) {"));
         assertTrue(script.contains("toggle.disabled = !this.ready || this.togglePending;"));
         assertTrue(script.contains("zoneTogglePending"));
+    }
+
+    @Test
+    public void parkedBluetoothAudioWarningIsVisibleOnBothSharedSettingPages() throws Exception {
+        String key = "parked_bluetooth_audio_warning";
+        String warning = "When enabled, Bluetooth calls and media may stay connected, and wireless "
+                + "phone projection may remain active while parked. Phone proximity requires a live "
+                + "Bluetooth connection; audio and projection are not suspended separately.";
+        JSONObject en = new JSONObject(read("app/src/main/assets/web/i18n/en.json"));
+        assertEquals(warning, en.getJSONObject("remote_access").getString(key));
+        String markup = "data-i18n=\"remote_access." + key + "\">" + warning;
+        String proximity = read("app/src/main/assets/web/local/remote-access.html");
+        int rule = proximity.indexOf("<label class=\"ra-rule ra-radio-rule\">");
+        int toggle = proximity.indexOf("id=\"raKeepBluetoothOn\"", rule);
+        assertTrue(rule >= 0 && toggle > rule);
+        assertTrue(proximity.substring(rule, toggle).contains(markup));
+        String surveillance = read("app/src/main/assets/web/local/surveillance.html");
+        int setting = surveillance.indexOf("data-i18n=\"surveillance.bluetooth_keepalive\"");
+        int sharedToggle = surveillance.indexOf("id=\"survBluetoothKeepAlive\"", setting);
+        assertTrue(setting >= 0 && sharedToggle > setting);
+        assertTrue(surveillance.substring(setting, sharedToggle).contains(markup));
     }
 
     private static void assertPageLock(String page, String scriptVersion) throws IOException {

@@ -15,11 +15,12 @@ import com.overdrive.app.genai.VoiceActionTokens;
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.voice.VoiceAssistantConfig;
 import com.overdrive.app.voice.daemon.VoiceIntentExecutor;
+import com.overdrive.app.server.WebSocketFrames.Frame;
+import com.overdrive.app.server.WebSocketFrames.IdleReadTimeout;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InterruptedIOException;
@@ -32,7 +33,6 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -56,9 +56,6 @@ public final class GenAiVoiceWebSocket {
 
     public static final String PATH = "/ws/genai";
 
-    static final String WS_MAGIC =
-            "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-    static final int MAX_CLIENT_FRAME_BYTES = 128 * 1024;
     private static final long MAX_SESSION_MS = 10 * 60 * 1000L;
     private static final long AUDIO_IDLE_MS = 2 * 60 * 1000L;
     private static final long CONTEXT_APPROVAL_MS = 60 * 1000L;
@@ -665,16 +662,7 @@ public final class GenAiVoiceWebSocket {
         void handshake(String key) throws Exception {
             input = socket.getInputStream();
             output = socket.getOutputStream();
-            String response = "HTTP/1.1 101 Switching Protocols\r\n"
-                    + "Upgrade: websocket\r\n"
-                    + "Connection: Upgrade\r\n"
-                    + "Sec-WebSocket-Accept: " + websocketAccept(key)
-                    + "\r\n\r\n";
-            output.write(response.getBytes(StandardCharsets.US_ASCII));
-            output.flush();
-            socket.setTcpNoDelay(true);
-            socket.setKeepAlive(true);
-            socket.setSoTimeout(1_000);
+            WebSocketFrames.handshake(socket, output, key);
         }
 
         void run() throws Exception {
@@ -806,7 +794,8 @@ public final class GenAiVoiceWebSocket {
 
                 Frame frame;
                 try {
-                    frame = readFrame(input);
+                    frame = WebSocketFrames.readFrame(
+                            input, GenAiRequestSecurity.MAX_CLIENT_FRAME_BYTES);
                 } catch (IdleReadTimeout timeout) {
                     continue;
                 }
@@ -1553,20 +1542,12 @@ public final class GenAiVoiceWebSocket {
 
         private void sendClose(int code, String reason)
                 throws IOException {
-            byte[] reasonBytes = reason == null
-                    ? new byte[0]
-                    : reason.getBytes(StandardCharsets.UTF_8);
-            int length = Math.min(reasonBytes.length, 123);
-            byte[] payload = new byte[2 + length];
-            payload[0] = (byte) ((code >>> 8) & 0xFF);
-            payload[1] = (byte) (code & 0xFF);
-            System.arraycopy(reasonBytes, 0, payload, 2, length);
-            sendFrame(0x8, payload);
+            sendFrame(0x8, WebSocketFrames.closePayload(code, reason));
         }
 
         private void sendFrame(int opcode, byte[] payload)
                 throws IOException {
-            writeFrame(output, outputLock, opcode, payload);
+            WebSocketFrames.writeFrame(output, outputLock, opcode, payload);
         }
 
         private final class ProviderListener extends WebSocketListener {
@@ -2200,116 +2181,6 @@ public final class GenAiVoiceWebSocket {
             this.token = token;
             this.arguments = arguments;
             this.expiresAtMs = expiresAtMs;
-        }
-    }
-
-    static final class Frame {
-        final int opcode;
-        final byte[] payload;
-
-        Frame(int opcode, byte[] payload) {
-            this.opcode = opcode;
-            this.payload = payload;
-        }
-    }
-
-    static final class IdleReadTimeout
-            extends SocketTimeoutException {
-        IdleReadTimeout() {
-            super("No WebSocket frame before timeout");
-        }
-    }
-
-    static Frame readFrame(InputStream input)
-            throws IOException {
-        int first;
-        try {
-            first = input.read();
-        } catch (SocketTimeoutException timeout) {
-            throw new IdleReadTimeout();
-        }
-        if (first < 0) return null;
-        int second = input.read();
-        if (second < 0) throw new EOFException();
-        if ((first & 0x80) == 0) {
-            throw new IOException(
-                    "Fragmented client frames are unsupported");
-        }
-        int opcode = first & 0x0F;
-        if ((second & 0x80) == 0) {
-            throw new IOException(
-                    "Client WebSocket frames must be masked");
-        }
-        long length = second & 0x7F;
-        if (length == 126) {
-            length = ((long) readRequired(input) << 8)
-                    | readRequired(input);
-        } else if (length == 127) {
-            length = 0L;
-            for (int i = 0; i < 8; i++) {
-                length = (length << 8) | readRequired(input);
-            }
-        }
-        if (length < 0 || length > MAX_CLIENT_FRAME_BYTES) {
-            throw new IOException("WebSocket frame is too large");
-        }
-        byte[] mask = new byte[4];
-        readFully(input, mask);
-        byte[] payload = new byte[(int) length];
-        readFully(input, payload);
-        for (int i = 0; i < payload.length; i++) {
-            payload[i] = (byte) (payload[i] ^ mask[i & 3]);
-        }
-        return new Frame(opcode, payload);
-    }
-
-    private static int readRequired(InputStream input)
-            throws IOException {
-        int value = input.read();
-        if (value < 0) throw new EOFException();
-        return value;
-    }
-
-    private static void readFully(InputStream input, byte[] target)
-            throws IOException {
-        int offset = 0;
-        while (offset < target.length) {
-            int read = input.read(
-                    target, offset, target.length - offset);
-            if (read < 0) throw new EOFException();
-            offset += read;
-        }
-    }
-
-    static String websocketAccept(String key)
-            throws Exception {
-        byte[] digest = MessageDigest.getInstance("SHA-1")
-                .digest((key + WS_MAGIC).getBytes(
-                        StandardCharsets.UTF_8));
-        return Base64.encodeToString(digest, Base64.NO_WRAP);
-    }
-
-    static void writeFrame(
-            OutputStream output, Object lock, int opcode, byte[] payload)
-            throws IOException {
-        synchronized (lock) {
-            int length = payload.length;
-            output.write(0x80 | (opcode & 0x0F));
-            if (length <= 125) {
-                output.write(length);
-            } else if (length <= 65_535) {
-                output.write(126);
-                output.write((length >>> 8) & 0xFF);
-                output.write(length & 0xFF);
-            } else {
-                output.write(127);
-                for (int i = 7; i >= 0; i--) {
-                    output.write((int) (((long) length
-                            >>> (8 * i)) & 0xFF));
-                }
-            }
-            output.write(payload);
-            output.flush();
         }
     }
 }

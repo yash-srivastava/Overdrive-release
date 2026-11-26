@@ -37,7 +37,6 @@ class ZrokLauncher(
         private val ZROK_TMP_PATH: String get() = com.overdrive.app.util.ScratchRoot.path("zrok")
         private val ZROK_LOG: String get() = com.overdrive.app.util.ScratchRoot.path("zrok.log")
         private val ZROK_HOME: String get() = com.overdrive.app.util.ScratchRoot.dir()
-        private const val ZROK_BACKEND_PORT = 8080
         private const val ZROK_BACKEND_URL = "http://127.0.0.1:8080"
         private const val ZROK_RUNTIME_PROBE_CLASS = "com.overdrive.app.launcher.ZrokRuntimeProbe"
         private const val APP_PACKAGE = "com.overdrive.app"
@@ -1334,39 +1333,6 @@ class ZrokLauncher(
         )
     }
     
-    /**
-     * Launch zrok share public.
-     * This is SAFE to run unlimited times - it doesn't count against device limit.
-     */
-    private fun launchZrokShare(callback: ZrokCallback) {
-        callback.onLog("Starting zrok share (unlimited restarts OK)...")
-
-        launchZrokShareWithConfig(callback, ProxyHelper.probePort(PROXY_PORT))
-    }
-    
-    private fun launchZrokShareWithConfig(callback: ZrokCallback, useProxy: Boolean) {
-        // Same pre-launch sweep as the reserved-mode path, via script-tmpfile
-        // form to avoid pkill self-match.
-        val cleanupScript =
-            "rm -f $ZROK_DISABLED_SENTINEL $ZROK_WATCHDOG_SCRIPT $ZROK_LOG 2>/dev/null\n" +
-            com.overdrive.app.launcher.DaemonLauncher.psAwkKillLine("zrok") +
-            "echo done\n"
-        adbShellExecutor.executeScript(
-            scriptBody = cleanupScript,
-            callback = object : AdbShellExecutor.ShellCallback {
-                override fun onSuccess(output: String) {
-                    writeAndLaunchWatchdog(reserved = false, shareToken = "",
-                            permanentUrl = "", useProxy = useProxy, callback = callback)
-                }
-                override fun onError(error: String) {
-                    writeAndLaunchWatchdog(reserved = false, shareToken = "",
-                            permanentUrl = "", useProxy = useProxy, callback = callback)
-                }
-            }
-        )
-    }
-
-
     private fun waitForTunnelUrl(callback: ZrokCallback, attempt: Int) {
         if (attempt > 30) {
             // Timeout - get final log

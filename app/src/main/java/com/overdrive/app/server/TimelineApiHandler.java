@@ -356,18 +356,18 @@ public final class TimelineApiHandler {
 
     private static void streamSegment(OutputStream out, File file, Mp4Index index, int gop,
                                       int skim, boolean silentAudio) throws Exception {
-        long length;
+        Fmp4Writer.PreparedSegment segment;
         try {
             if (gop >= index.gopCount()) throw new Reject(404, "not_found");
-            length = skim > 0 ? Fmp4Writer.skimSegmentLength(index, gop, skim)
-                    : silentAudio ? Fmp4Writer.mediaSegmentLength(index, gop, true)
-                    : Fmp4Writer.mediaSegmentLength(index, gop);
+            segment = skim > 0 ? Fmp4Writer.prepareSkimSegment(index, gop, skim)
+                    : Fmp4Writer.prepareMediaSegment(index, gop, silentAudio);
         } catch (Reject r) {
             throw r;
         } catch (Throwable t) {
             log("segment " + gop + " length failed: " + t);
             throw new Reject(500, "hls");
         }
+        long length = segment.length();
         if (length <= 0) throw new Reject(500, "hls");
         SeekableFileReader source;
         try {
@@ -382,9 +382,7 @@ public final class TimelineApiHandler {
             ScheduledFuture<?> watch = watchStall(body, CLIENT.get());
             try {
                 writeHead(out, "video/iso.segment", length, MEDIA_CACHE);
-                if (skim > 0) Fmp4Writer.writeSkimSegment(index, channel, gop, skim, body);
-                else if (silentAudio) Fmp4Writer.writeMediaSegment(index, channel, gop, true, body);
-                else Fmp4Writer.writeMediaSegment(index, channel, gop, body);
+                segment.writeTo(channel, body);
                 out.flush();
             } catch (Throwable t) {
                 // Headers are out: a short body is the only failure signal left. Peer aborts stay quiet.
@@ -519,11 +517,11 @@ public final class TimelineApiHandler {
         }
         File file = new File(clip.absPath);
         if (!RecordingsApiHandler.indexPathAllowed(file)) throw new Reject(404, "not_found");
-        if (!RemovableStorageFs.isFile(file) || !RemovableStorageFs.canRead(file)) throw new Reject(410, "gone");
         // URLs carry the fingerprint and are cached for a day: bytes must match it.
-        if (RemovableStorageFs.length(file) != clip.sizeBytes || RemovableStorageFs.lastModified(file) != clip.mp4Mtime) {
-            throw new Reject(409, "stale");
-        }
+        RemovableStorageFs.FileMatch match = RemovableStorageFs.matchReadableFile(
+                file, clip.sizeBytes, clip.mp4Mtime);
+        if (match == RemovableStorageFs.FileMatch.GONE) throw new Reject(410, "gone");
+        if (match == RemovableStorageFs.FileMatch.STALE) throw new Reject(409, "stale");
         return file;
     }
 

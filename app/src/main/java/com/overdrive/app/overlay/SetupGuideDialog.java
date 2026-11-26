@@ -17,6 +17,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import com.overdrive.app.R;
+import com.overdrive.app.camera.DiLink100Platform;
 import com.overdrive.app.camera.dilink5.DiLink5Platform;
 import com.overdrive.app.services.AutoStartReapply;
 import com.overdrive.app.services.KeepAliveAccessibilityService;
@@ -31,8 +32,8 @@ import com.overdrive.app.util.BydDataCacheWhitelist;
  *
  * Re-show policy: the dialog re-appears every time PackageInfo.lastUpdateTime
  * advances past the stored marker. That covers first install, in-app update,
- * adb sideload, and any other replace path. BYD wipes its autostart whitelist
- * on every install, so the user MUST be reminded to re-enable it.
+ * adb sideload, and any other replace path. On DiLink 3, BYD wipes its autostart
+ * whitelist on every install, so the user must be reminded to re-enable it.
  */
 public class SetupGuideDialog {
     // A BYD settings round trip from this guide keeps an unlocked PIN session.
@@ -59,6 +60,12 @@ public class SetupGuideDialog {
         }
 
         boolean isUpdate = lastSeen > 0L;
+        if (isUpdate && !isAutoStartStepNeeded(context)
+                && OverlayPermissionChecker.isGranted(context)) {
+            Log.i(TAG, "update guide skipped: no auto-start restriction on this firmware");
+            markCurrentInstallSeen(context);
+            return false;
+        }
         // Opted in: AutoStartReapply redoes BYD's switch and resets this marker if it gives up.
         if (isUpdate && AutoStartReapply.willHandleCurrentInstall(context)
                 && OverlayPermissionChecker.isGranted(context)) {
@@ -68,6 +75,26 @@ public class SetupGuideDialog {
         }
         show(context, isUpdate);
         return true;
+    }
+
+    /** False on firmware that has no auto-start restriction to lift (see {@link AutoStartStepPolicy}). */
+    static boolean isAutoStartStepNeeded(Context context) {
+        return AutoStartStepPolicy.applies(
+                DiLink5Platform.isSelected(),
+                DiLink100Platform.isByd100f(),
+                hasAutoStartManager(context));
+    }
+
+    /** BYD's auto-start manager can be opened by the deep link or its launcher entry. */
+    private static boolean hasAutoStartManager(Context context) {
+        try {
+            android.content.pm.PackageManager pm = context.getPackageManager();
+            return pm.resolveActivity(buildAppStartManagementIntent(), 0) != null
+                    || pm.getLaunchIntentForPackage(BYD_APPSTART_PKG) != null;
+        } catch (Throwable t) {
+            // Unknown: keep the step rather than hide one the car may need.
+            return true;
+        }
     }
 
     /** Force-show the setup guide (e.g., from a settings entry). */
@@ -122,19 +149,23 @@ public class SetupGuideDialog {
         final StepRow autoStartStep = new StepRow(view,
                 R.id.tvAutoStartTitle, R.id.tvAutoStartBody,
                 R.id.btnOpenAutoStart, R.id.ivAutoStartCheck);
-        autoStartStep.button.setOnClickListener(v -> {
-            com.overdrive.app.auth.PinSession.INSTANCE.expectReturn(SETUP_RETURN_GRACE_MS);
-            autoStartStep.button.setEnabled(false);
-            autoStartStep.button.setText(context.getString(R.string.setup_autostart_enabling));
-            runAutoStartWhenServiceReady(
-                    context,
-                    autoStartStep,
-                    SystemClock.elapsedRealtime() + AUTOSTART_SERVICE_WAIT_MS);
-        });
-        if (AutoStartReapply.isDoneForCurrentInstall(context)) {
-            autoStartStep.markComplete(context, R.string.setup_autostart_enabled);
+        if (!isAutoStartStepNeeded(context)) {
+            autoStartStep.markComplete(context, R.string.setup_autostart_not_needed);
+        } else {
+            autoStartStep.button.setOnClickListener(v -> {
+                com.overdrive.app.auth.PinSession.INSTANCE.expectReturn(SETUP_RETURN_GRACE_MS);
+                autoStartStep.button.setEnabled(false);
+                autoStartStep.button.setText(context.getString(R.string.setup_autostart_enabling));
+                runAutoStartWhenServiceReady(
+                        context,
+                        autoStartStep,
+                        SystemClock.elapsedRealtime() + AUTOSTART_SERVICE_WAIT_MS);
+            });
+            if (AutoStartReapply.isDoneForCurrentInstall(context)) {
+                autoStartStep.markComplete(context, R.string.setup_autostart_enabled);
+            }
+            bindAutoStartReapply(context, view, autoStartStep);
         }
-        bindAutoStartReapply(context, view, autoStartStep);
 
         // Step 3: Overlay permission
         final StepRow overlayStep = new StepRow(view,
@@ -193,7 +224,7 @@ public class SetupGuideDialog {
 
         // "Don't show again" — record current install time so the dialog stays
         // suppressed until PackageInfo.lastUpdateTime advances (next install
-        // or update). BYD wipes the autostart whitelist on every install, so
+        // or update). BYD wipes the autostart whitelist on every install on DiLink 3, so
         // the marker naturally invalidates and the dialog reappears post-update.
         view.findViewById(R.id.btnDone).setOnClickListener(v -> {
             markCurrentInstallSeen(context);

@@ -144,6 +144,20 @@ object StripPhysics {
         return best
     }
 
+    /** Smallest adjacent spacing in the same Double arithmetic used by [cluster]. */
+    internal fun minClusterSpacing(times: LongArray, n: Int): Double {
+        var spacing = Double.POSITIVE_INFINITY
+        for (i in 1 until n) {
+            spacing = minOf(spacing, times[i].toDouble() - times[i - 1].toDouble())
+        }
+        return spacing
+    }
+
+    /** Existing singleton clusters remain identical whenever no adjacent pair can merge. */
+    internal fun canReuseSingletonClusters(
+        needsStableRebuild: Boolean, clusterCount: Int, markCount: Int, gap: Double, minSpacing: Double,
+    ): Boolean = !needsStableRebuild && clusterCount == markCount && gap <= minSpacing
+
     /**
      * Greedy left-to-right clusters with a running-mean centre: an entry closer than [gap] to the current
      * centre joins it. [times] ascending; returns the cluster count written to the out arrays.
@@ -369,4 +383,16 @@ object StripPhysics {
         fun settled(posEps: Double, velEps: Double): Boolean =
             abs(value - target) < posEps && abs(velocity) < velEps
     }
+}
+
+/** Summary of the current cluster pass; births are nonnegative monotonic uptime values. */
+internal class ClusterAnimationClock {
+    private var latestBirth = 0L
+
+    fun reset() { latestBirth = 0L }
+
+    fun include(birth: Long) { latestBirth = maxOf(latestBirth, birth) }
+
+    fun isAnimating(now: Long, duration: Long): Boolean =
+        latestBirth != 0L && now - latestBirth < duration
 }

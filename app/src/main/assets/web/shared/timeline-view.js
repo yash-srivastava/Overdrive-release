@@ -380,15 +380,27 @@
     /** [cond] carries the ETag both ways: sent as If-None-Match, a 304 resolves UNCHANGED. A 401 goes to login here. */
     function fetchJson(url, cond) {
         var ctl = typeof AbortController === 'function' ? new AbortController() : null;
-        var timer = setTimeout(function () { if (ctl) ctl.abort(); }, FETCH_TIMEOUT_MS);
+        var timer, timeoutError;
+        // Fetch resolves at the headers, not at the end of the JSON body. Bound
+        // the whole operation, even on older WebViews without AbortController.
+        var timeout = new Promise(function (resolve, reject) {
+            timer = setTimeout(function () {
+                timeoutError = new Error('Timeline request timed out');
+                timeoutError.offline = true;
+                reject(timeoutError);
+                if (ctl) ctl.abort();
+            }, FETCH_TIMEOUT_MS);
+        });
         var headers = authHeaders();
         if (cond && cond.etag) headers['If-None-Match'] = cond.etag;
         var opts = { cache: 'no-store', headers: headers };
         if (ctl) opts.signal = ctl.signal;
         var req;
         try { req = root.fetch(url, opts); } catch (e) { req = Promise.reject(e); }
-        return Promise.resolve(req).then(function (r) {
-            clearTimeout(timer);
+        var body = Promise.resolve(req).then(function (r) {
+            // A late response on a browser without abort support must not
+            // redirect to login or process an expired request's headers.
+            if (timeoutError) throw timeoutError;
             if (r && r.status === 304 && cond && cond.etag) return UNCHANGED;
             if (!r || !r.ok) {
                 var err = new Error('http ' + (r ? r.status : 0));
@@ -400,10 +412,16 @@
             if (cond) cond.etag = (r.headers && r.headers.get('ETag')) || null;
             return r.json();
         }, function (e) {
-            clearTimeout(timer);
             var err = new Error('offline');
             err.offline = true;
             err.cause = e;
+            throw err;
+        });
+        return Promise.race([body, timeout]).then(function (value) {
+            clearTimeout(timer);
+            return value;
+        }, function (err) {
+            clearTimeout(timer);
             throw err;
         });
     }
@@ -2014,14 +2032,34 @@
         V.userScrollAt = 0;
         seekTo(m.start, { glide: true, play: true });
     }
-    function sortedNav() {
-        return V.moments.filter(function (m) { return momentPasses(m, V.filter); }).sort(function (a, b) { return a.start - b.start; });
+    // Store refreshes replace the moments array; language changes only edit labels.
+    // Keep just the current filtered order, not one copy for every filter.
+    function MomentNavigation() {
+        this.source = null;
+        this.filter = null;
+        this.list = [];
     }
+    MomentNavigation.prototype.find = function (moments, filter, t, dir) {
+        if (this.source !== moments || this.filter !== filter) {
+            this.list = moments.filter(function (m) { return momentPasses(m, filter); })
+                .sort(function (a, b) { return a.start - b.start; });
+            this.source = moments;
+            this.filter = filter;
+        }
+        var list = this.list, lo = 0, hi = list.length;
+        var forward = dir > 0, threshold = forward ? t + SEC : t - 2 * SEC;
+        // Preserve strict thresholds and the original first/last tie selection.
+        while (lo < hi) {
+            var mid = lo + Math.floor((hi - lo) / 2);
+            if (forward ? !(list[mid].start > threshold) : list[mid].start < threshold) lo = mid + 1;
+            else hi = mid;
+        }
+        var i = forward ? lo : lo - 1;
+        return i >= 0 && i < list.length ? list[i] : null;
+    };
+    var momentNavigation = new MomentNavigation();
     function findMoment(dir) {
-        var list = sortedNav(), t = V.playhead, i;
-        if (dir > 0) { for (i = 0; i < list.length; i++) if (list[i].start > t + SEC) return list[i]; return null; }
-        for (i = list.length - 1; i >= 0; i--) if (list[i].start < t - 2 * SEC) return list[i];
-        return null;
+        return momentNavigation.find(V.moments, V.filter, V.playhead, dir);
     }
     function jumpMoment(dir, animate) {
         var m = findMoment(dir);
@@ -2062,15 +2100,54 @@
         if (els.vrows) els.vrows.innerHTML = '';
         V.vRowEls = {};
     }
+    // Moments are newest first, and the vertical strip projects newer times above older ones.
+    // Validate ordering once per data revision; never sort or copy the moments on a frame.
+    function PortraitMomentRows() {
+        this.source = null;
+        this.ordered = false;
+    }
+    PortraitMomentRows.prototype.collect = function (list, filter, strip, height) {
+        if (this.source !== list) {
+            this.source = list;
+            this.ordered = true;
+            var previous = Infinity;
+            for (var j = 0; j < list.length; j++) {
+                var t = num(list[j].t);
+                if (t == null || t > previous) { this.ordered = false; break; }
+                previous = t;
+            }
+        }
+        var min = -ROW_H * 8, max = height + ROW_H;
+        var items = [], lo = 0, hi = list.length, ordered = this.ordered;
+        if (ordered) {
+            // Search in pixel space to preserve the exact inclusive boundary tests,
+            // including rounding at large wall-clock timestamps and duplicate times.
+            while (lo < hi) {
+                var mid = lo + Math.floor((hi - lo) / 2);
+                var p = call(strip, 'timeToPos', list[mid].t);
+                if (num(p) == null) { ordered = false; lo = 0; break; }
+                if (p < min) lo = mid + 1;
+                else hi = mid;
+            }
+        }
+        for (var i = lo; i < list.length; i++) {
+            var m = list[i];
+            if (!ordered && !momentPasses(m, filter)) continue;
+            var pos = call(strip, 'timeToPos', m.t);
+            if (num(pos) == null || pos < min) continue;
+            if (pos > max) {
+                if (ordered) break;
+                continue;
+            }
+            if (ordered && !momentPasses(m, filter)) continue;
+            items.push({ key: m.id, pos: pos });
+        }
+        return items;
+    };
+    var portraitMomentRows = new PortraitMomentRows();
     function positionRows() {
         if (V.layout !== 'port' || !V.active || !V.strip || typeof V.strip.timeToPos !== 'function') return;
-        var h = els.vfeed.clientHeight, items = [], list = V.moments, i;
-        for (i = 0; i < list.length; i++) {
-            if (!momentPasses(list[i], V.filter)) continue;
-            var pos = call(V.strip, 'timeToPos', list[i].t);
-            if (num(pos) == null || pos < -ROW_H * 8 || pos > h + ROW_H) continue;
-            items.push({ key: list[i].id, pos: pos });
-        }
+        var h = els.vfeed.clientHeight, items = portraitMomentRows.collect(V.moments, V.filter, V.strip, h), i;
         var placed = pushRows(items, ROW_H, ROW_GAP, null), keep = {}, pool = V.vRowEls || (V.vRowEls = {});
         for (i = 0; i < placed.length; i++) {
             var p = placed[i];
@@ -2635,7 +2712,8 @@
             addDaysKey: addDaysKey, parseFilename: parseFilename, matchFileSegment: matchFileSegment,
             buildMoments: buildMoments, momentKind: momentKind, momentPasses: momentPasses, momentMeta: momentMeta,
             segClasses: segClasses, pushRows: pushRows, fmtSpan: fmtSpan, fmtClipDur: fmtClipDur, FILTERS: FILTERS,
-            Store: Store, normalizeWindow: normalizeWindow
+            Store: Store, normalizeWindow: normalizeWindow, MomentNavigation: MomentNavigation,
+            PortraitMomentRows: PortraitMomentRows
         }
     };
 

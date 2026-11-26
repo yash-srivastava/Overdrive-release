@@ -6,6 +6,7 @@
  * ON-DEMAND ARCHITECTURE:
  * - Connects only while the visible System or Live subview needs live metrics
  * - Samples Android top only while the visible System subview owns the panel
+ * - Loads Battery and Data reports only for their visible subview
  * - Stops timers, heartbeats and backend clients on tab or page hide
  * - Backend only polls CPU/GPU/Memory when clients are connected
  */
@@ -30,7 +31,7 @@ BYD.performance = {
     _lifecycleGeneration: 0,
     _connectAttempt: 0,
     _lifecycleHandlersSetup: false,
-    _initialDataLoaded: false,
+    _sohFixPending: false,
     topPollInterval: null,
     _topRequestGeneration: 0,
     _topRequestInFlight: false,
@@ -53,6 +54,7 @@ BYD.performance = {
 
     // Data-usage state
     dataUsageRange: 30, // days
+    _dataUsageRequestGeneration: 0,
     dataUsageData: { days: [], enabled: false, available: true },
     
     // Interactive tooltip state
@@ -141,61 +143,35 @@ BYD.performance = {
         // Initialize charts
         this.initCharts();
 
-        // Paint the data-usage card's DEFAULT (disabled) state immediately, before
-        // the await chain below. The card's hint + content both start display:none
-        // and only applyDataUsageState() reveals one — so if the first
-        // fetchDataUsage() (line ~169) fails/hangs, or init aborts before it, the
-        // card would otherwise sit permanently blank (no hint, no error). Painting
-        // the default here guarantees the "Enable to track…" hint shows on load;
-        // a later successful fetch upgrades it to the live state.
+        // Paint the default state before the first on-demand Data request.
         try { this.applyDataUsageState(); } catch (e) {}
 
-        // Install visibility/tab listeners before any async fetches. The
-        // lifecycle synchronizer starts only the work owned by the currently
-        // visible subview.
         this.setupLifecycleHandlers();
-        this.syncViewLifecycle();
-        
-        // Fetch initial SOC data
-        await this.fetchSocHistory();
-        
-        // Fetch initial battery health data
-        await this.fetchBatteryHealth();
-        
-        // Fetch SOH detail status
-        await this.fetchSohStatus();
 
-        // Push-notification deep link: #soh-fix lands the user on the SOH
-        // card with the frame-mismatch banner visible. Scroll into view +
-        // briefly highlight so it's obvious which control answers the
-        // notification's "needs review" prompt. Listen for hashchange too
-        // — when a click hits an already-open tab, sw.js navigates the
-        // existing window which only updates location.hash, no reload.
+        // A notification may open this page with another saved subview.
+        // Select Battery before loading its reports, and scroll only once SOH
+        // has arrived. Hash changes also cover an already-open page.
         var self = this;
         if (BYD.i18n && typeof BYD.i18n.onChange === 'function') {
-            BYD.i18n.onChange(function() { self.fetchSohStatus(); });
-        }
-        if (window.location.hash === '#soh-fix') {
-            this._scrollToSohFixBanner();
+            BYD.i18n.onChange(function() {
+                if (self._shouldRunBatteryReports()) self.fetchSohStatus();
+            });
         }
         window.addEventListener('hashchange', function () {
-            if (window.location.hash === '#soh-fix') {
-                self._scrollToSohFixBanner();
-            }
+            self._openSohFix();
         });
+        this._openSohFix();
+        this.syncViewLifecycle();
 
-        // Fetch initial data-usage (also reflects the enabled/disabled state)
-        await this.fetchDataUsage();
-
-        this._initialDataLoaded = true;
-
-        // Handle resize
         window.addEventListener('resize', () => this.resizeCharts());
 
-        // app-tabs mounts on DOMContentLoaded. Re-sync once the current stack
-        // unwinds in case performance.init() raced that mount.
-        setTimeout(() => this.syncViewLifecycle(), 0);
-        
+        // app-tabs has normally mounted already; re-sync after the current
+        // stack in case init raced its DOMContentLoaded listener.
+        setTimeout(() => {
+            if (this._sohFixPending && this._detectActiveTab() !== 'battery') this._openSohFix();
+            this.syncViewLifecycle();
+        }, 0);
+
         console.log('[Performance] Initialized');
     },
     
@@ -216,6 +192,7 @@ BYD.performance = {
         // observe the new layout.
         document.addEventListener('ot-tabs:active-changed', (event) => {
             const id = event && event.detail ? event.detail.id : null;
+            if (id && id !== 'battery') this._sohFixPending = false;
             this.syncViewLifecycle(id);
             requestAnimationFrame(() => this.resizeCharts());
         });
@@ -235,7 +212,7 @@ BYD.performance = {
         });
         if (window.BYD && BYD.offline && typeof BYD.offline.onReconnect === 'function') {
             BYD.offline.onReconnect(() => {
-                // Restarted from stopped, the minute pollers read at once, as on a return to the page.
+                // Restart only the report pollers owned by the visible subview.
                 this.stopAncillaryPolling();
                 this.syncViewLifecycle();
             });
@@ -742,45 +719,53 @@ BYD.performance = {
         }
     },
 
+    _shouldRunBatteryReports() {
+        return this._pageIsVisible() && this._activeTab === 'battery';
+    },
+
+    _shouldRunDataReports() {
+        return this._pageIsVisible() && this._activeTab === 'data';
+    },
+
     startAncillaryPolling() {
-        if (!this._pageIsVisible()) return;
-        const wasStopped = !this.socPollInterval
-            && !this.batteryHealthPollInterval
-            && !this.dataUsagePollInterval
-            && !this.sohPollInterval;
-
-        if (!this.socPollInterval) {
-            this.socPollInterval = setInterval(
-                () => this._pageIsVisible() && this.fetchSocHistory(),
-                this.SOC_UPDATE_INTERVAL);
-        }
-        if (!this.dataUsagePollInterval) {
-            this.dataUsagePollInterval = setInterval(
-                () => this._pageIsVisible() && this.fetchDataUsage(),
-                this.SOC_UPDATE_INTERVAL);
-        }
-        if (!this.batteryHealthPollInterval) {
-            this.batteryHealthPollInterval = setInterval(
-                () => this._pageIsVisible() && this.fetchBatteryHealth(),
-                this.SOC_UPDATE_INTERVAL);
-        }
-        if (!this.sohPollInterval) {
-            this.sohPollInterval = setInterval(
-                () => this._pageIsVisible() && this.fetchSohStatus(),
-                this.SOC_UPDATE_INTERVAL);
+        // Keep the existing one-minute cadence, but only for the cards that
+        // can actually be seen. Every new owner gets an immediate refresh.
+        if (this._shouldRunBatteryReports()) {
+            if (!this.socPollInterval) {
+                this.socPollInterval = setInterval(
+                    () => this._shouldRunBatteryReports() && this.fetchSocHistory(),
+                    this.SOC_UPDATE_INTERVAL);
+                this.fetchSocHistory();
+            }
+            if (!this.batteryHealthPollInterval) {
+                this.batteryHealthPollInterval = setInterval(
+                    () => this._shouldRunBatteryReports() && this.fetchBatteryHealth(),
+                    this.SOC_UPDATE_INTERVAL);
+                this.fetchBatteryHealth();
+            }
+            if (!this.sohPollInterval) {
+                this.sohPollInterval = setInterval(
+                    () => this._shouldRunBatteryReports() && this.fetchSohStatus(),
+                    this.SOC_UPDATE_INTERVAL);
+                this.fetchSohStatus();
+            }
+        } else {
+            this.stopBatteryReportPolling();
         }
 
-        // Returning from a hidden page should refresh immediately instead of
-        // waiting up to a minute for the next timer.
-        if (wasStopped && this._initialDataLoaded) {
-            this.fetchSocHistory();
-            this.fetchBatteryHealth();
-            this.fetchSohStatus();
-            this.fetchDataUsage();
+        if (this._shouldRunDataReports()) {
+            if (!this.dataUsagePollInterval) {
+                this.dataUsagePollInterval = setInterval(
+                    () => this._shouldRunDataReports() && this.fetchDataUsage(),
+                    this.SOC_UPDATE_INTERVAL);
+                this.fetchDataUsage();
+            }
+        } else {
+            this.stopDataReportPolling();
         }
     },
 
-    stopAncillaryPolling() {
+    stopBatteryReportPolling() {
         if (this.socPollInterval) {
             clearInterval(this.socPollInterval);
             this.socPollInterval = null;
@@ -789,14 +774,22 @@ BYD.performance = {
             clearInterval(this.batteryHealthPollInterval);
             this.batteryHealthPollInterval = null;
         }
-        if (this.dataUsagePollInterval) {
-            clearInterval(this.dataUsagePollInterval);
-            this.dataUsagePollInterval = null;
-        }
         if (this.sohPollInterval) {
             clearInterval(this.sohPollInterval);
             this.sohPollInterval = null;
         }
+    },
+
+    stopDataReportPolling() {
+        if (this.dataUsagePollInterval) {
+            clearInterval(this.dataUsagePollInterval);
+            this.dataUsagePollInterval = null;
+        }
+    },
+
+    stopAncillaryPolling() {
+        this.stopBatteryReportPolling();
+        this.stopDataReportPolling();
     },
 
     stopPolling() {
@@ -1394,36 +1387,32 @@ BYD.performance = {
     },
     
     renderAllCharts() {
-        // Only render charts that aren't currently being hovered
-        // This prevents tooltip from being cleared during data updates
-        if (this.tooltip.chartId !== 'cpu') {
-            this.renderChart(this.charts.cpu, [
-                { data: this.history.cpuSystem, color: this.colors.system, label: BYD.i18n.t('performance.legend_system') },
-                { data: this.history.cpuApp, color: this.colors.app, label: BYD.i18n.t('performance.legend_app') }
-            ]);
-        } else {
-            // Re-render with tooltip
-            this.renderChartByType('cpu');
-        }
-
-        if (this.tooltip.chartId !== 'mem') {
-            this.renderChart(this.charts.mem, [
-                { data: this.history.memSystem, color: this.colors.system, label: BYD.i18n.t('performance.legend_system') },
-                { data: this.history.memApp, color: this.colors.app, label: BYD.i18n.t('performance.legend_app') }
-            ]);
-        } else {
-            this.renderChartByType('mem');
-        }
-
-        if (this.tooltip.chartId !== 'gpu') {
-            this.renderChart(this.charts.gpu, [
-                { data: this.history.gpu, color: this.colors.gpu, label: BYD.i18n.t('performance.card_gpu') }
-            ]);
-        } else {
-            this.renderChartByType('gpu');
-        }
+        // The renderer also restores the crosshair and tooltip for the hovered chart.
+        this.renderChartByType('cpu');
+        this.renderChartByType('mem');
+        this.renderChartByType('gpu');
     },
 
+    /** Draw the common 0–100% grid using the caller's chart geometry. */
+    drawPercentageGrid(ctx, padding, width, chartHeight) {
+        ctx.strokeStyle = this.colors.grid;
+        ctx.lineWidth = 1;
+
+        // Horizontal grid lines (0%, 25%, 50%, 75%, 100%)
+        for (let i = 0; i <= 4; i++) {
+            const y = padding.top + (chartHeight * i / 4);
+            ctx.beginPath();
+            ctx.moveTo(padding.left, y);
+            ctx.lineTo(width - padding.right, y);
+            ctx.stroke();
+
+            // Y-axis labels
+            ctx.fillStyle = this.colors.text;
+            ctx.font = '10px Inter, sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText((100 - i * 25) + '%', padding.left - 8, y + 3);
+        }
+    },
 
     renderChart(chart, series) {
         if (!chart || !chart.ctx) return;
@@ -1432,28 +1421,11 @@ BYD.performance = {
         const padding = { top: 10, right: 10, bottom: 25, left: 40 };
         const chartWidth = width - padding.left - padding.right;
         const chartHeight = height - padding.top - padding.bottom;
-        
+
         // Clear canvas
         ctx.clearRect(0, 0, width, height);
-        
-        // Draw grid
-        ctx.strokeStyle = this.colors.grid;
-        ctx.lineWidth = 1;
-        
-        // Horizontal grid lines (0%, 25%, 50%, 75%, 100%)
-        for (let i = 0; i <= 4; i++) {
-            const y = padding.top + (chartHeight * i / 4);
-            ctx.beginPath();
-            ctx.moveTo(padding.left, y);
-            ctx.lineTo(width - padding.right, y);
-            ctx.stroke();
-            
-            // Y-axis labels
-            ctx.fillStyle = this.colors.text;
-            ctx.font = '10px Inter, sans-serif';
-            ctx.textAlign = 'right';
-            ctx.fillText((100 - i * 25) + '%', padding.left - 8, y + 3);
-        }
+
+        this.drawPercentageGrid(ctx, padding, width, chartHeight);
         
         // X-axis labels (time)
         ctx.textAlign = 'center';
@@ -1692,21 +1664,26 @@ BYD.performance = {
     },
 
     /** Fetch usage + reflect the enabled/disabled state into the card UI.
-     *  EVERY exit path calls applyDataUsageState() so the card can never sit
-     *  blank: on a non-2xx status, a JSON-parse throw, or a rejected/stalled
+     *  Every exit path of the latest request calls applyDataUsageState() so the
+     *  card can never sit blank: on a non-2xx status, a JSON-parse throw, or a rejected
      *  fetch we fall back to painting the current (default-or-last-known) state
      *  — the hint at minimum — instead of returning early and leaving both the
-     *  hint and content divs at their HTML display:none. */
+     *  hint and content divs at their HTML display:none. Superseded requests
+     *  must not repaint a newer range or refresh. */
     async fetchDataUsage() {
+        var generation = ++this._dataUsageRequestGeneration;
         try {
             var res = await fetch('/api/performance/data-usage?days=' + this.dataUsageRange);
+            if (generation !== this._dataUsageRequestGeneration) return;
             if (!res.ok) { this.applyDataUsageState(); return; }
             var data = await res.json();
+            if (generation !== this._dataUsageRequestGeneration) return;
             this.dataUsageData = data || { days: [], enabled: false, available: true };
             this.applyDataUsageState();
             this.updateDataUsageStats();
             this.renderDataUsageChart();
         } catch (e) {
+            if (generation !== this._dataUsageRequestGeneration) return;
             console.error('[Performance] data-usage fetch error:', e);
             try { this.applyDataUsageState(); } catch (e2) {}
         }
@@ -2122,24 +2099,7 @@ BYD.performance = {
         const rawRange = timeEnd - timeStart;
         const timeRange = rawRange > 0 ? rawRange : 1;
         
-        // Draw grid
-        ctx.strokeStyle = this.colors.grid;
-        ctx.lineWidth = 1;
-        
-        // Horizontal grid lines (0%, 25%, 50%, 75%, 100%)
-        for (let i = 0; i <= 4; i++) {
-            const y = padding.top + (chartHeight * i / 4);
-            ctx.beginPath();
-            ctx.moveTo(padding.left, y);
-            ctx.lineTo(width - padding.right, y);
-            ctx.stroke();
-            
-            // Y-axis labels
-            ctx.fillStyle = this.colors.text;
-            ctx.font = '10px Inter, sans-serif';
-            ctx.textAlign = 'right';
-            ctx.fillText((100 - i * 25) + '%', padding.left - 8, y + 3);
-        }
+        this.drawPercentageGrid(ctx, padding, width, chartHeight);
         
         // X-axis time labels
         ctx.textAlign = 'center';
@@ -2523,7 +2483,11 @@ BYD.performance = {
         } catch (e) {
             console.error('[Performance] Battery health fetch error:', e);
         }
-        this.fetchHvCells();
+        // A report already in flight may finish after a tab change. Do not
+        // start its follow-up request for a card that is no longer visible.
+        if (this._shouldRunBatteryReports() && this.batteryHealthPollInterval) {
+            this.fetchHvCells();
+        }
     },
 
     // Live cell readings; the card stays hidden until the car reports cell voltages.
@@ -3012,6 +2976,11 @@ BYD.performance = {
             const data = await resp.json();
             if (data.success) {
                 this.updateSohDetailCard(data);
+                if (this._sohFixPending && this._shouldRunBatteryReports()
+                        && window.location.hash === '#soh-fix') {
+                    this._sohFixPending = false;
+                    this._scrollToSohFixBanner();
+                }
             }
         } catch (e) {
             console.warn('[Performance] SOH fetch error:', e);
@@ -3229,6 +3198,19 @@ BYD.performance = {
                     'warning');
             }
         });
+    },
+
+    _openSohFix() {
+        this._sohFixPending = window.location.hash === '#soh-fix';
+        if (!this._sohFixPending) return;
+        const batteryTab = document.querySelector('.bottom-tab[data-tab-target="battery"]');
+        if (batteryTab && this._detectActiveTab() !== 'battery') {
+            // The real tab click updates hidden panels, aria state and lifecycle.
+            batteryTab.click();
+        } else if (this._shouldRunBatteryReports() && this.sohPollInterval) {
+            // Already on Battery: request fresh mismatch status for the link.
+            this.fetchSohStatus();
+        }
     },
 
     /**

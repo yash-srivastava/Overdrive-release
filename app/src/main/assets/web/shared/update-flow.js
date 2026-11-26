@@ -1032,7 +1032,9 @@
         var now = Date.now();
         var last = 0;
         try { last = parseInt(localStorage.getItem('upd_lastAutoCheck') || '0', 10) || 0; } catch (e) {}
-        if (now - last < CHECK_THROTTLE_MS) return;
+        // A persisted timestamp can be in the future after a clock correction.
+        var age = now - last;
+        if (last > 0 && age >= 0 && age < CHECK_THROTTLE_MS) return;
         try { localStorage.setItem('upd_lastAutoCheck', String(now)); } catch (e) {}
 
         var accOff = !(status && status.acc);

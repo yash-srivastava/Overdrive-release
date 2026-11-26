@@ -819,21 +819,6 @@ public final class MediaPlaybackService extends Service {
         }
     }
 
-    private static int usageForChannel(String channel) {
-        if (channel == null) return AudioAttributes.USAGE_MEDIA;
-        switch (channel.trim().toLowerCase()) {
-            case "navigation": return AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE;
-            case "voice":
-            case "assistant":  return AudioAttributes.USAGE_ASSISTANT;
-            case "phone":
-            case "call":       return AudioAttributes.USAGE_VOICE_COMMUNICATION;
-            case "alarm":      return AudioAttributes.USAGE_ALARM;
-            case "system":     return AudioAttributes.USAGE_ASSISTANCE_SONIFICATION;
-            case "media":
-            default:           return AudioAttributes.USAGE_MEDIA;
-        }
-    }
-
     /**
      * Apply the proven OEM route recipe. Package-visible so the isolated RoadSense
      * player cannot drift from Automation Audio's channel behavior.

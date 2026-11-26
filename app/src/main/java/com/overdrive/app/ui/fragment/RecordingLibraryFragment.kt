@@ -20,6 +20,7 @@ import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.overdrive.app.ui.adapter.RecordingAdapter
 import com.overdrive.app.ui.model.RecordingFile
+import com.overdrive.app.ui.util.RecordingDateSelection
 import com.overdrive.app.ui.util.RecordingScanner
 import com.overdrive.app.ui.util.RecordingSectionHeaderDecoration
 import com.overdrive.app.ui.util.RecordingLibraryFilterState
@@ -32,9 +33,6 @@ import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
-import com.google.android.material.datepicker.CalendarConstraints
-import com.google.android.material.datepicker.DateValidatorPointBackward
-import com.google.android.material.datepicker.MaterialDatePicker
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.overdrive.app.R
 import java.io.File
@@ -875,75 +873,17 @@ class RecordingLibraryFragment : Fragment() {
     }
 
     private fun showDatePicker() {
-        val constraints = CalendarConstraints.Builder()
-            .setEnd(MaterialDatePicker.todayInUtcMilliseconds())
-            .setValidator(DateValidatorPointBackward.now())
-            .build()
-
-        // Pre-select the current selection in UTC midnight (MaterialDatePicker
-        // expects UTC ms from epoch).
-        val selectedUtcMs = utcMidnightMillis(
-            calendar.get(Calendar.YEAR),
-            calendar.get(Calendar.MONTH),
-            selectedDay
-        )
-
-        val picker = MaterialDatePicker.Builder.datePicker()
-            .setTitleText(R.string.recording_lib_pick_date)
-            .setCalendarConstraints(constraints)
-            .setSelection(selectedUtcMs)
-            .build()
-
-        picker.addOnPositiveButtonClickListener { utcMs ->
-            // Convert UTC ms back to local Y/M/D.
-            val cal = Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
-                timeInMillis = utcMs
-            }
-            val y = cal.get(Calendar.YEAR)
-            val m = cal.get(Calendar.MONTH)
-            val d = cal.get(Calendar.DAY_OF_MONTH)
-            calendar.set(y, m, 1)
-            selectedDay = d
-            dateNarrowed = true
-            updateDateHeader()
-            loadRecordingsForSelectedDate()
-        }
-
-        picker.show(parentFragmentManager, "recording_lib_date_picker")
+        RecordingDateSelection.showPicker(parentFragmentManager, calendar, selectedDay, ::selectDate)
     }
 
-    private fun utcMidnightMillis(year: Int, month: Int, day: Int): Long {
-        val cal = Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
-            clear()
-            set(year, month, day, 0, 0, 0)
-            set(Calendar.MILLISECOND, 0)
-        }
-        return cal.timeInMillis
-    }
-
-    /** ◀ / ▶ one-day jumps. Clamps at today (no future days). */
     private fun shiftSelectedDay(delta: Int) {
-        val cal = Calendar.getInstance().apply {
-            set(
-                calendar.get(Calendar.YEAR),
-                calendar.get(Calendar.MONTH),
-                selectedDay
-            )
-            add(Calendar.DAY_OF_MONTH, delta)
-        }
-        // Clamp at today.
-        val today = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-        }
-        val candidate = (cal.clone() as Calendar).apply {
-            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-        }
-        if (candidate.after(today)) return
+        val day = RecordingDateSelection.shiftDay(calendar, selectedDay, delta) ?: return
+        selectDate(day)
+    }
 
-        calendar.set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), 1)
-        selectedDay = cal.get(Calendar.DAY_OF_MONTH)
+    private fun selectDate(day: Calendar) {
+        calendar.set(day.get(Calendar.YEAR), day.get(Calendar.MONTH), 1)
+        selectedDay = day.get(Calendar.DAY_OF_MONTH)
         dateNarrowed = true
         updateDateHeader()
         loadRecordingsForSelectedDate()

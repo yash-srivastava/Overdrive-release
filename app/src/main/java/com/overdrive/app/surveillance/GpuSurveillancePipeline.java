@@ -483,6 +483,21 @@ public class GpuSurveillancePipeline {
         return config;
     }
 
+    /** Width passed to the panoramic recording encoder. */
+    public int getEncoderWidth() {
+        return encoderWidth;
+    }
+
+    /** Current panoramic recording encoder, including the CPU-input recording lane. */
+    public HardwareEventRecorderGpu getRecordingEncoder() {
+        return encoder;
+    }
+
+    /** Height passed to the panoramic recording encoder. */
+    public int getEncoderHeight() {
+        return encoderHeight;
+    }
+
     /**
      * Returns the underlying hardware encoder, or null if the pipeline has
      * not been initialized yet. Used by callers that need the active output
@@ -5522,6 +5537,7 @@ public class GpuSurveillancePipeline {
         // WebSocket has zero buffering delay vs HTTP Chunked (64KB+ buffer)
         logger.info("Starting WebSocket stream server...");
         wsStreamServer = new com.overdrive.app.streaming.WebSocketStreamServer();
+        wsStreamServer.setKeyframeRequestHook(encoderLocal::requestSyncFrameRateLimited);
 
         // Gate PASS 1B on live client presence: with no viewer on either the
         // port-8887 or the /ws relay path, skip the stream raster + encode

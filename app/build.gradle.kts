@@ -397,6 +397,8 @@ tasks.configureEach {
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
     dependsOn(preparePackagedMainAssets)
     systemProperty("overdrive.packagedMainAssetsDir", packagedMainAssetsDir.get().asFile.absolutePath)
+    // CI keeps no test reports, so print the assertion message of a failed test.
+    testLogging.exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
 }
 
 
@@ -496,8 +498,8 @@ android {
         // value (e.g. `-PoverdriveVersionName=27.4 -PoverdriveVersionCode=12`)
         // without a source edit per release; the defaults track the current
         // rolling head so a plain local build is still accurate.
-        versionCode = (project.findProperty("overdriveVersionCode") as? String)?.toIntOrNull() ?: 225
-        versionName = (project.findProperty("overdriveVersionName") as? String) ?: "65.0"
+        versionCode = (project.findProperty("overdriveVersionCode") as? String)?.toIntOrNull() ?: 229
+        versionName = (project.findProperty("overdriveVersionName") as? String) ?: "65.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
         // Note: abiFilters removed - using splits.abi instead for size optimization

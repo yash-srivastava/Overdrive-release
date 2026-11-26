@@ -10,6 +10,7 @@ window.SafeKeepBadges = (function () {
     var states = {};
     var pending = null;
     var refreshTimer = null;
+    var statesGeneration = 0;
 
     function t(key, fallback, vars) {
         var s = null;
@@ -85,6 +86,8 @@ window.SafeKeepBadges = (function () {
     }
 
     function fetchStates() {
+        if (enabled === false) return;
+        var generation = ++statesGeneration;
         var els = badgeEls();
         var files = [];
         for (var i = 0; i < els.length && files.length < 200; i++) {
@@ -93,7 +96,15 @@ window.SafeKeepBadges = (function () {
         }
         if (!files.length) return;
         post('/api/safekeep/clips', { files: files }).then(function (r) {
-            if (r.httpStatus === 409) { enabled = false; hideAll(); return; }
+            // A newer recordings render or refresh owns the badge state.
+            if (generation !== statesGeneration) return;
+            if (r.httpStatus === 409) {
+                enabled = false;
+                if (refreshTimer !== null) clearTimeout(refreshTimer);
+                refreshTimer = null;
+                hideAll();
+                return;
+            }
             if (!r.success) return;
             states = r.states || {};
             render();

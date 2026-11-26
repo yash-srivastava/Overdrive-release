@@ -1194,14 +1194,30 @@ internal class PieceBuilder {
             if (set.b[k] < x1) marks[m++] = set.b[k]
         }
         Arrays.sort(marks, 0, m)
+        // Both span starts and interval midpoints are ordered. For each level,
+        // only the furthest end among spans started by the midpoint matters:
+        // an earlier span of that level cannot cover a point beyond that end.
+        var next = 0
+        var slowEnd = Double.NEGATIVE_INFINITY
+        var jamEnd = Double.NEGATIVE_INFINITY
         for (q in 0 until m - 1) {
             val p = marks[q]
             val r = marks[q + 1]
             if (r - p < 1e-6) continue
             val mid = 0.5 * (p + r)
-            var lv = SpanSet.NONE
-            for (k in 0 until set.size) {
-                if (set.a[k] < before && set.a[k] <= mid && set.b[k] > mid && set.level[k] > lv) lv = set.level[k]
+            while (next < set.size && set.a[next] < before && set.a[next] <= mid) {
+                val end = set.b[next]
+                if (set.level[next] == SpanSet.JAM) {
+                    if (end > jamEnd) jamEnd = end
+                } else if (set.level[next] == SpanSet.SLOW) {
+                    if (end > slowEnd) slowEnd = end
+                }
+                next++
+            }
+            val lv = when {
+                jamEnd > mid -> SpanSet.JAM
+                slowEnd > mid -> SpanSet.SLOW
+                else -> SpanSet.NONE
             }
             if (lv != SpanSet.NONE) out.add(p, r, lv)
         }

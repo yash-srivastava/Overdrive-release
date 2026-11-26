@@ -1349,7 +1349,7 @@ public class OemDashcamApiHandler {
             return;
         }
 
-        String shellOut = execShell("pm disable-user --user 0 " + NATIVE_DVR_PACKAGE + " 2>&1");
+        String shellOut = execShell("pm disable-user " + com.overdrive.app.util.ShellUser.flag() + " " + NATIVE_DVR_PACKAGE + " 2>&1");
         logger.info("pm disable-user " + NATIVE_DVR_PACKAGE + " → " + shellOut);
 
         // FIX M5: drop the pm cache so the post-pm currentState() probe re-runs
@@ -1390,7 +1390,7 @@ public class OemDashcamApiHandler {
             return;
         }
 
-        String shellOut = execShell("pm enable " + NATIVE_DVR_PACKAGE + " 2>&1");
+        String shellOut = execShell("pm enable " + com.overdrive.app.util.ShellUser.flag() + " " + NATIVE_DVR_PACKAGE + " 2>&1");
         logger.info("pm enable " + NATIVE_DVR_PACKAGE + " → " + shellOut);
 
         // FIX M5: drop the pm cache so the post-pm currentState() probe re-runs
@@ -1483,7 +1483,7 @@ public class OemDashcamApiHandler {
         }
         String sentinel = "-d".equals(flag) ? "NOT_DISABLED" : "NOT_INSTALLED";
         String fresh = execShell(
-            "pm list packages " + flag + " 2>/dev/null | grep -F " + NATIVE_DVR_PACKAGE
+            "pm list packages " + flag + " " + com.overdrive.app.util.ShellUser.flag() + " 2>/dev/null | grep -F " + NATIVE_DVR_PACKAGE
                 + " || echo " + sentinel);
         if (fresh == null) fresh = "";
         if ("-d".equals(flag)) {
@@ -1513,7 +1513,7 @@ public class OemDashcamApiHandler {
             }
             // state == "enabled" but UCM says "stay disabled" — re-apply.
             String result = execShell(
-                "pm disable-user --user 0 " + NATIVE_DVR_PACKAGE + " 2>&1");
+                "pm disable-user " + com.overdrive.app.util.ShellUser.flag() + " " + NATIVE_DVR_PACKAGE + " 2>&1");
             logger.info("DVR disable: re-applied after OTA / factory reset / "
                 + "external `pm enable` — pm output: " + result);
             // FIX M5: invalidate so the next currentState() probe sees the new state.

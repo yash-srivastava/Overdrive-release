@@ -1458,7 +1458,7 @@
     <script src="../shared/auth.js?v=18"></script>
     <script src="../shared/core.js?v=31"></script>
     <script src="../shared/update-flow.js?v=6"></script>
-    <script src="../shared/performance.js?v=18"></script>
+    <script src="../shared/performance.js?v=20"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
@@ -1466,10 +1466,8 @@
         }
         BYD.i18n.init().then(function () {
             BYD.core.init();
-            // init() is async + fire-and-forget; catch so a sync throw in an
-            // early step (initCharts/startPolling) surfaces in the console
-            // instead of silently aborting the rest of init (which would leave
-            // late-initialized cards like Data Usage blank).
+            // Report loading is owned by the active subview. Surface init
+            // errors instead of silently leaving its cards uninitialized.
             try { Promise.resolve(BYD.performance.init()).catch(function (e) {
                 console.error('[Performance] init failed:', e);
             }); } catch (e) { console.error('[Performance] init threw:', e); }

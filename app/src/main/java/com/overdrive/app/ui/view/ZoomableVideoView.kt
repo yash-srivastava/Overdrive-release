@@ -15,7 +15,6 @@ import android.view.Surface
 import android.view.TextureView
 import android.view.View
 import android.view.animation.PathInterpolator
-import java.io.File
 import kotlin.math.ceil
 import kotlin.math.floor
 

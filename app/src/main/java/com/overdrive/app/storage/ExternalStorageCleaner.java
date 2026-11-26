@@ -1,6 +1,7 @@
 package com.overdrive.app.storage;
 
 import com.overdrive.app.storage.removable.RemovableStorageFs;
+import com.overdrive.app.util.RecordingSizeFormatter;
 
 import android.os.StatFs;
 import android.util.Log;
@@ -8,11 +9,9 @@ import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileFilter;
 import java.io.FileReader;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.Executors;
@@ -1323,15 +1322,9 @@ public class ExternalStorageCleaner {
     
     // ==================== Utility ====================
     
+    /** Format a byte count using the current formatting locale. */
     public static String formatSize(long bytes) {
-        if (bytes >= 1_000_000_000) {
-            return String.format("%.1f GB", bytes / 1_000_000_000.0);
-        } else if (bytes >= 1_000_000) {
-            return String.format("%.1f MB", bytes / 1_000_000.0);
-        } else if (bytes >= 1_000) {
-            return String.format("%.1f KB", bytes / 1_000.0);
-        }
-        return bytes + " B";
+        return RecordingSizeFormatter.format(bytes);
     }
     
     /**

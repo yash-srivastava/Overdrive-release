@@ -188,7 +188,8 @@ public final class ServiceModeManager {
                 return failure("Select at least one app or feature to pause.");
             }
 
-            Context context = requireContext();
+            int targetUser = com.overdrive.app.util.ShellUser.targetUserId();
+            Context context = requireContext(targetUser);
             PackageManager pm = context.getPackageManager();
             JSONArray originalStates = new JSONArray();
             for (int i = 0; i < hiddenPackages.length(); i++) {
@@ -219,6 +220,8 @@ public final class ServiceModeManager {
             state.put("hiddenPackages", hiddenPackages);
             state.put("disabledFeatures", disabledFeatures);
             state.put("originalStates", originalStates);
+            // Ending must undo the same user even after a user switch or an early-boot restart.
+            state.put("targetUser", targetUser);
             state.put("lastError", "");
 
             // Establish an out-of-APK recovery path BEFORE changing any package.
@@ -319,9 +322,9 @@ public final class ServiceModeManager {
                 String pkg = packages.optString(i, "");
                 if (pkg.isEmpty()) continue;
 
-                int currentState = getPackageEnabledState(pkg);
+                int currentState = getPackageEnabledState(pkg, targetUser(state));
                 if (currentState < 0) {
-                    if (isPackageInstalled(pkg)) {
+                    if (isPackageInstalled(pkg, targetUser(state))) {
                         failures.add(pkg + ": could not read its enabled state");
                     }
                     continue;
@@ -342,7 +345,7 @@ public final class ServiceModeManager {
                 if (findOriginalState(savedStates, pkg) < 0) continue;
 
                 ShellResult result = runShell(
-                        "pm disable-user --user 0 " + shellQuote(pkg));
+                        "pm disable-user " + userFlag(targetUser(state)) + " " + shellQuote(pkg));
                 if (!result.success) {
                     failures.add(pkg + ": " + result.output);
                 } else {
@@ -373,9 +376,9 @@ public final class ServiceModeManager {
                 int previousState = original.optInt("state", -1);
                 if (pkg.isEmpty() || previousState < 0) continue;
 
-                int currentState = getPackageEnabledState(pkg);
+                int currentState = getPackageEnabledState(pkg, targetUser(state));
                 if (currentState < 0) {
-                    if (isPackageInstalled(pkg)) {
+                    if (isPackageInstalled(pkg, targetUser(state))) {
                         failures.add(pkg + ": could not read its enabled state");
                     }
                     continue;
@@ -386,10 +389,10 @@ public final class ServiceModeManager {
                 // It is deliberately allowed even if a later firmware update
                 // reclassified the package as a system app.
                 ShellResult result = runShell(
-                        restoreCommand(pkg, previousState));
+                        restoreCommand(pkg, previousState, targetUser(state)));
                 if (!result.success) {
                     failures.add(pkg + ": " + result.output);
-                } else if (!isEnabledState(getPackageEnabledState(pkg))) {
+                } else if (!isEnabledState(getPackageEnabledState(pkg, targetUser(state)))) {
                     failures.add(pkg + ": still disabled after pm");
                 } else {
                     logger.info("Restored app after Service Mode: " + pkg);
@@ -599,10 +602,20 @@ public final class ServiceModeManager {
         return false;
     }
 
-    private static String restoreCommand(String pkg, int previousState) {
+    private static String restoreCommand(String pkg, int previousState, int user) {
         String operation = previousState == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
                 ? "default-state" : "enable";
-        return "pm " + operation + " --user 0 " + shellQuote(pkg);
+        return "pm " + operation + " " + userFlag(user) + " " + shellQuote(pkg);
+    }
+
+    /** The user a session was started for; sessions saved before it was recorded use the current one. */
+    static int targetUser(JSONObject state) {
+        return state != null && state.has("targetUser") ? state.optInt("targetUser", -1)
+                : com.overdrive.app.util.ShellUser.targetUserId();
+    }
+
+    static String userFlag(int user) {
+        return user >= 0 ? "--user " + user : "";
     }
 
     private static boolean isEnabledState(int state) {
@@ -610,9 +623,9 @@ public final class ServiceModeManager {
                 || state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED;
     }
 
-    private static boolean isPackageInstalled(String pkg) {
+    private static boolean isPackageInstalled(String pkg, int user) {
         try {
-            requireContext().getPackageManager().getApplicationInfo(pkg, 0);
+            requireContext(user).getPackageManager().getApplicationInfo(pkg, 0);
             return true;
         } catch (PackageManager.NameNotFoundException error) {
             return false;
@@ -623,9 +636,9 @@ public final class ServiceModeManager {
         }
     }
 
-    private static int getPackageEnabledState(String pkg) {
+    private static int getPackageEnabledState(String pkg, int user) {
         try {
-            return requireContext().getPackageManager().getApplicationEnabledSetting(pkg);
+            return requireContext(user).getPackageManager().getApplicationEnabledSetting(pkg);
         } catch (IllegalArgumentException error) {
             return -1;
         } catch (Throwable error) {
@@ -635,7 +648,11 @@ public final class ServiceModeManager {
     }
 
     private static Context requireContext() {
-        Context context = CameraDaemon.getAppContext();
+        return requireContext(com.overdrive.app.util.ShellUser.targetUserId());
+    }
+
+    private static Context requireContext(int user) {
+        Context context = com.overdrive.app.util.ShellUser.context(CameraDaemon.getAppContext(), user);
         if (context == null) {
             throw new IllegalStateException("The daemon package context is not ready.");
         }
@@ -705,9 +722,9 @@ public final class ServiceModeManager {
             int enabledState = saved.optInt("state", -1);
             if (!pkg.matches("[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+")
                     || APP_PACKAGE.equals(pkg) || !isEnabledState(enabledState)) continue;
-            recovery.append(restoreCommand(pkg, enabledState))
+            recovery.append(restoreCommand(pkg, enabledState, targetUser(state)))
                     .append(" || code=1\n")
-                    .append("pm list packages -d 2>/dev/null | grep -qx ")
+                    .append("pm list packages " + userFlag(targetUser(state)) + " -d 2>/dev/null | grep -qx ")
                     .append(shellQuote("package:" + pkg)).append(" && code=1\n");
         }
         recovery.append("exit $code\n");
@@ -734,7 +751,7 @@ public final class ServiceModeManager {
                 + "echo $$ > \"$lock/pid\" || exit 1\n"
                 + "trap 'rm -f \"$lock/pid\"; rmdir \"$lock\" 2>/dev/null' EXIT\n"
                 + "while [ -e " + shellQuote(guardMarker()) + " ]; do\n"
-                + "  if ! pm path " + APP_PACKAGE + " | grep -q '^package:'; then\n"
+                + "  if ! pm path " + userFlag(targetUser(state)) + " " + APP_PACKAGE + " | grep -q '^package:'; then\n"
                 + "    if sh " + shellQuote(privateRescueScript()) + "; then\n"
                 + "      rm -f " + shellQuote(guardMarker()) + "\n"
                 + "      exit 0\n"

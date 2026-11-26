@@ -3,12 +3,9 @@ package com.overdrive.app.automation.type;
 import com.overdrive.app.automation.value.IntValue;
 import com.overdrive.app.automation.value.Label;
 
-import org.json.JSONObject;
-
-public class TimeType extends BaseType<Integer> {
+public class TimeType extends SchemaType<Integer> {
     private static final String TYPE = "time";
     private static final int MINUTES_PER_DAY = 60 * 24;
-    private final Label label;
 
     /**
      * A time-of-day representation.
@@ -18,16 +15,7 @@ public class TimeType extends BaseType<Integer> {
      * @param label An id and display name for this time
      */
     public TimeType(Label label) {
-        this.label = label;
-    }
-
-    /**
-     * The label that was stored when this time was initialized
-     *
-     * @return The Label for this time
-     */
-    public Label getLabel() {
-        return label;
+        super(label, TYPE);
     }
 
     /**
@@ -51,22 +39,5 @@ public class TimeType extends BaseType<Integer> {
         if (value == null) return false;
 
         return value >= 0 && value < MINUTES_PER_DAY;
-    }
-
-    /**
-     * Create a JSON representation of this type to display in the frontend.
-     *
-     * @return JSON representation of this type
-     */
-    public JSONObject toJson() {
-        JSONObject json = getLabel().toJson();
-
-        try {
-            json.put("type", TYPE);
-        } catch (Exception e) {
-            // JSONObject.put only throws on null key
-        }
-
-        return json;
     }
 }

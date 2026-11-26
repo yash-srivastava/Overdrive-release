@@ -8,7 +8,6 @@ import com.overdrive.app.daemon.CameraDaemon;
 import org.json.JSONObject;
 
 import java.io.File;
-import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.security.spec.KeySpec;
 import java.util.Arrays;

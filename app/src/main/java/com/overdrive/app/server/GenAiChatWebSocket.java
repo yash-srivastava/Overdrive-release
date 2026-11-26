@@ -6,6 +6,8 @@ import com.overdrive.app.genai.GenAiConfig;
 import com.overdrive.app.genai.GenAiContext;
 import com.overdrive.app.genai.GenAiRuntime;
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.server.WebSocketFrames.Frame;
+import com.overdrive.app.server.WebSocketFrames.IdleReadTimeout;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -56,16 +58,7 @@ public final class GenAiChatWebSocket {
         void run(String key) throws Exception {
             input = socket.getInputStream();
             output = socket.getOutputStream();
-            output.write(("HTTP/1.1 101 Switching Protocols\r\n"
-                    + "Upgrade: websocket\r\n"
-                    + "Connection: Upgrade\r\n"
-                    + "Sec-WebSocket-Accept: "
-                    + GenAiVoiceWebSocket.websocketAccept(key)
-                    + "\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
-            output.flush();
-            socket.setTcpNoDelay(true);
-            socket.setKeepAlive(true);
-            socket.setSoTimeout(1_000);
+            WebSocketFrames.handshake(socket, output, key);
 
             JSONObject request = readInitialRequest();
             if (request == null) return;
@@ -166,15 +159,16 @@ public final class GenAiChatWebSocket {
         private JSONObject readInitialRequest() throws Exception {
             long deadline = System.currentTimeMillis() + 15_000L;
             while (System.currentTimeMillis() < deadline) {
-                GenAiVoiceWebSocket.Frame frame;
+                Frame frame;
                 try {
-                    frame = GenAiVoiceWebSocket.readFrame(input);
-                } catch (GenAiVoiceWebSocket.IdleReadTimeout timeout) {
+                    frame = WebSocketFrames.readFrame(
+                            input, GenAiRequestSecurity.MAX_CLIENT_FRAME_BYTES);
+                } catch (IdleReadTimeout timeout) {
                     continue;
                 }
                 if (frame == null || frame.opcode == 0x8) return null;
                 if (frame.opcode == 0x9) {
-                    GenAiVoiceWebSocket.writeFrame(
+                    WebSocketFrames.writeFrame(
                             output, outputLock, 0xA, frame.payload);
                     continue;
                 }
@@ -191,14 +185,14 @@ public final class GenAiChatWebSocket {
             Thread control = new Thread(() -> {
                 while (!finished.get() && !socket.isClosed()) {
                     try {
-                        GenAiVoiceWebSocket.Frame frame =
-                                GenAiVoiceWebSocket.readFrame(input);
+                        Frame frame = WebSocketFrames.readFrame(
+                                input, GenAiRequestSecurity.MAX_CLIENT_FRAME_BYTES);
                         if (frame == null || frame.opcode == 0x8) {
                             cancellation.cancel();
                             return;
                         }
                         if (frame.opcode == 0x9) {
-                            GenAiVoiceWebSocket.writeFrame(
+                            WebSocketFrames.writeFrame(
                                     output, outputLock, 0xA,
                                     frame.payload);
                         } else if (frame.opcode == 0x1) {
@@ -211,7 +205,7 @@ public final class GenAiChatWebSocket {
                                 return;
                             }
                         }
-                    } catch (GenAiVoiceWebSocket.IdleReadTimeout ignored) {
+                    } catch (IdleReadTimeout ignored) {
                     } catch (Throwable ignored) {
                         cancellation.cancel();
                         return;
@@ -235,22 +229,15 @@ public final class GenAiChatWebSocket {
         }
 
         private void sendJson(JSONObject object) throws java.io.IOException {
-            GenAiVoiceWebSocket.writeFrame(
+            WebSocketFrames.writeFrame(
                     output, outputLock, 0x1,
                     object.toString().getBytes(StandardCharsets.UTF_8));
         }
 
         private void sendClose(int code, String reason)
                 throws java.io.IOException {
-            byte[] text = safeReason(reason).getBytes(
-                    StandardCharsets.UTF_8);
-            int length = Math.min(123, text.length);
-            byte[] payload = new byte[2 + length];
-            payload[0] = (byte) ((code >>> 8) & 0xFF);
-            payload[1] = (byte) (code & 0xFF);
-            System.arraycopy(text, 0, payload, 2, length);
-            GenAiVoiceWebSocket.writeFrame(
-                    output, outputLock, 0x8, payload);
+            WebSocketFrames.writeFrame(output, outputLock, 0x8,
+                    WebSocketFrames.closePayload(code, safeReason(reason)));
         }
 
         void close() {

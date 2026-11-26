@@ -8,8 +8,7 @@
  * page. Per-card delete + multi-select bulk delete.
  *
  * Consistency: mirrors charging.js / events.js idioms —
- *   - The date filter is the charging-page calendar (quick pills + custom
- *     From→To month-grid popup), ported verbatim and renamed nl* / NOTIFLOG.
+ *   - The date filter uses the shared range calendar with local draft state.
  *   - Pagination is the events-page Prev / Next "Page X of Y" bar.
  *   - Cards, tokens, toasts, and confirm dialogs use the shared design system.
  *
@@ -42,7 +41,7 @@ var NOTIFLOG = {
     selectMode: false,
     selected: {},            // id -> true
 
-    // Calendar range-picker state (ported from charging.js).
+    // Calendar range-picker state (local to this page).
     _calMonth: null,
     _draftFrom: null,     // draft range start key (YYYY-MM-DD) while the date sheet is open
     _draftTo: null,       // draft range end key; applied to _rangeFrom/_rangeTo only on Apply
@@ -123,8 +122,11 @@ var NOTIFLOG = {
         if (empty) empty.style.display = 'none';
 
         list.innerHTML = '';
+        // Formatters are lazy and scoped to this render, so locale/timezone
+        // changes between renders do not leave stale formatting state.
+        var timeFormats = {};
         for (var i = 0; i < this.notifications.length; i++) {
-            list.appendChild(this._buildCard(this.notifications[i]));
+            list.appendChild(this._buildCard(this.notifications[i], timeFormats));
         }
         this._updatePagination();
         this._updateBulkBar();
@@ -160,7 +162,7 @@ var NOTIFLOG = {
         this._updateCount();
     },
 
-    _buildCard: function (n) {
+    _buildCard: function (n, timeFormats) {
         var self = this;
         var sev = (n.severity || 'info').toLowerCase();
         var card = document.createElement('div');
@@ -213,6 +215,7 @@ var NOTIFLOG = {
                 '" onerror="this.parentNode.style.display=\'none\'"></div>';
         }
 
+        var timeLabel = this._fmtTime(n.ts, timeFormats);
         card.innerHTML =
             checkCol +
             '<div class="nl-icon sev-' + sev + '">' + icon + '</div>' +
@@ -225,7 +228,7 @@ var NOTIFLOG = {
                 (n.body ? '<div class="nl-text">' + this._esc(n.body) + '</div>' : '') +
                 '<div class="nl-meta">' +
                     sevPill + groupPill + place + chips +
-                    '<span class="nl-time">' + this._esc(this._fmtTime(n.ts)) + '</span>' +
+                    '<span class="nl-time">' + this._esc(timeLabel) + '</span>' +
                 '</div>' +
             '</div>' +
             (this.selectMode ? '' :
@@ -253,9 +256,11 @@ var NOTIFLOG = {
             if (card.className.indexOf('nl-clickable') >= 0) {
                 card.setAttribute('role', 'button');
                 card.setAttribute('tabindex', '0');
-                card.setAttribute('aria-label', (n.title || '') + ' — ' + self._fmtTime(n.ts));
+                card.setAttribute('aria-label', (n.title || '') + ' — ' + timeLabel);
                 card.addEventListener('click', function () { self._open(n); });
                 card.addEventListener('keydown', function (e) {
+                    // Leave keyboard activation of the nested Delete button to the browser.
+                    if (e.target !== card) return;
                     if (e.key === 'Enter' || e.key === ' ' || e.keyCode === 13 || e.keyCode === 32) {
                         e.preventDefault();
                         self._open(n);
@@ -532,48 +537,9 @@ var NOTIFLOG = {
         var title = document.getElementById('nlCalendarTitle');
         if (!grid || !this._calMonth) return;
         var lang = (window.BYD && BYD.i18n && BYD.i18n.getLang) ? BYD.i18n.getLang() : undefined;
-        var year = this._calMonth.getFullYear(), month = this._calMonth.getMonth();
-        var monthDate = new Date(year, month, 1);
-        try { title.textContent = new Intl.DateTimeFormat(lang, { month: 'long' }).format(monthDate) + ' ' + year; }
-        catch (e) { title.textContent = monthDate.toLocaleDateString(lang, { month: 'long' }) + ' ' + year; }
-        grid.innerHTML = '';
-
-        var wkFmt; try { wkFmt = new Intl.DateTimeFormat(lang, { weekday: 'short' }); } catch (e) { wkFmt = null; }
-        for (var w = 0; w < 7; w++) {
-            var dd = new Date(2024, 0, 7 + w);
-            var el = document.createElement('div');
-            el.className = 'calendar-weekday';
-            el.textContent = wkFmt ? wkFmt.format(dd) : dd.toLocaleDateString(lang, { weekday: 'short' });
-            grid.appendChild(el);
-        }
-        var firstDay = new Date(year, month, 1).getDay();
-        var daysInMonth = new Date(year, month + 1, 0).getDate();
-        var daysInPrev = new Date(year, month, 0).getDate();
-        var todayKey = this._dateKey(new Date());
-        for (var i = firstDay - 1; i >= 0; i--) this._calDayCell(grid, daysInPrev - i, this._dateKey(new Date(year, month - 1, daysInPrev - i)), true, todayKey);
-        for (var day = 1; day <= daysInMonth; day++) this._calDayCell(grid, day, this._dateKey(new Date(year, month, day)), false, todayKey);
-        // Pad the trailing week(s) to a fixed 6-row grid (42 day cells) so every
-        // month renders a clean rectangle. Snapshot the count FIRST — appending
-        // in the loop condition would move the target as we add cells.
-        var emitted = firstDay + daysInMonth;            // leading + current day cells
-        var trailing = 42 - emitted;                      // fill to 6 rows
-        for (var d2 = 1; d2 <= trailing; d2++) this._calDayCell(grid, d2, this._dateKey(new Date(year, month + 1, d2)), true, todayKey);
-    },
-
-    _calDayCell: function (grid, day, dateKey, otherMonth, todayKey) {
         var self = this;
-        var el = document.createElement('div');
-        el.className = 'calendar-day';
-        el.textContent = day;
-        el.setAttribute('data-date', dateKey);
-        if (otherMonth) el.classList.add('other-month');
-        if (dateKey === todayKey) el.classList.add('today');
-        if (dateKey === this._draftFrom || dateKey === this._draftTo) el.classList.add('selected');
-        else if (this._draftFrom && this._draftTo && dateKey > this._draftFrom && dateKey < this._draftTo) el.classList.add('in-range');
-        var today = new Date(); today.setHours(0, 0, 0, 0);
-        if (new Date(dateKey + 'T00:00:00') > today) el.classList.add('disabled');
-        else el.addEventListener('click', function () { self._calPick(dateKey); });
-        grid.appendChild(el);
+        ODRangeCalendar.render(grid, title, this._calMonth, lang,
+            this._draftFrom, this._draftTo, function (key) { self._calPick(key); });
     },
 
     // Tap-tap range selection: 1st tap = start (clears end), 2nd tap = end
@@ -629,15 +595,10 @@ var NOTIFLOG = {
     },
 
     _dateKey: function (d) {
-        var m = d.getMonth() + 1, day = d.getDate();
-        return d.getFullYear() + '-' + (m < 10 ? '0' + m : m) + '-' + (day < 10 ? '0' + day : day);
+        return ODRangeCalendar.dateKey(d);
     },
     _keyToMs: function (key, endOfDay) {
-        var p = key.split('-');
-        if (p.length !== 3) return null;
-        var y = parseInt(p[0], 10), mo = parseInt(p[1], 10) - 1, da = parseInt(p[2], 10);
-        if (isNaN(y) || isNaN(mo) || isNaN(da)) return null;
-        return (endOfDay ? new Date(y, mo, da, 23, 59, 59, 999) : new Date(y, mo, da, 0, 0, 0, 0)).getTime();
+        return ODRangeCalendar.keyToMs(key, endOfDay);
     },
 
     // ==================== PAGINATION (events-style Prev / Next) ====================
@@ -905,12 +866,34 @@ var NOTIFLOG = {
         return this._t('notiflog.prox_far', 'Far');
     },
 
-    _fmtTime: function (ts) {
+    _fmtTime: function (ts, formats) {
         if (!ts) return '';
         var lang = (window.BYD && BYD.i18n && BYD.i18n.getLang) ? BYD.i18n.getLang() : undefined;
         var d = new Date(ts);
         var now = new Date();
         var sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+        // Intl.format throws for an invalid Date, whereas Date's locale
+        // methods return the legacy invalid-date label. Keep that path intact.
+        if (formats && !formats.unavailable && !isNaN(d.getTime())) {
+            try {
+                if (formats.lang !== lang) {
+                    formats.lang = lang;
+                    formats.time = formats.day = null;
+                }
+                if (!formats.time) {
+                    formats.time = new Intl.DateTimeFormat(lang, { hour: '2-digit', minute: '2-digit' });
+                }
+                if (sameDay) return formats.time.format(d);
+                if (!formats.day) {
+                    formats.day = new Intl.DateTimeFormat(lang, { month: 'short', day: 'numeric' });
+                }
+                return formats.day.format(d) + ' · ' + formats.time.format(d);
+            } catch (e) {
+                // Older WebViews may not support Intl.DateTimeFormat. Avoid
+                // repeated failed construction for the rest of this render.
+                formats.unavailable = true;
+            }
+        }
         try {
             if (sameDay) {
                 return d.toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit' });

@@ -107,40 +107,14 @@
 
         gl.viewport(0, 0, width, height);
 
-        var tTop = 0;
-        var tLeft = 0;
-        var tBottom = height / yRowCnt;
-        var tRight = width / yDataPerRow;
-        var texturePosValues = new Float32Array([tRight, tTop, tLeft, tTop, tRight, tBottom, tLeft, tBottom]);
-
-        gl.bindBuffer(gl.ARRAY_BUFFER, texturePosBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, texturePosValues, gl.DYNAMIC_DRAW);
-
-        if (this.customYUV444){
-          tBottom = height / uRowCnt;
-          tRight = width / uDataPerRow;
-        }else{
-          tBottom = (height / 2) / uRowCnt;
-          tRight = (width / 2) / uDataPerRow;
-        };
-        var uTexturePosValues = new Float32Array([tRight, tTop, tLeft, tTop, tRight, tBottom, tLeft, tBottom]);
-
-        gl.bindBuffer(gl.ARRAY_BUFFER, uTexturePosBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, uTexturePosValues, gl.DYNAMIC_DRAW);
-
-
-        if (this.customYUV444){
-          tBottom = height / vRowCnt;
-          tRight = width / vDataPerRow;
-        }else{
-          tBottom = (height / 2) / vRowCnt;
-          tRight = (width / 2) / vDataPerRow;
-        };
-        var vTexturePosValues = new Float32Array([tRight, tTop, tLeft, tTop, tRight, tBottom, tLeft, tBottom]);
-
-        gl.bindBuffer(gl.ARRAY_BUFFER, vTexturePosBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, vTexturePosValues, gl.DYNAMIC_DRAW);
-
+        var chromaWidth = this.customYUV444 ? width : width / 2;
+        var chromaHeight = this.customYUV444 ? height : height / 2;
+        this.uploadTextureCoordinates(texturePosBuffer, this.yCoords,
+            width / yDataPerRow, height / yRowCnt);
+        this.uploadTextureCoordinates(uTexturePosBuffer, this.uCoords,
+            chromaWidth / uDataPerRow, chromaHeight / uRowCnt);
+        this.uploadTextureCoordinates(vTexturePosBuffer, this.vCoords,
+            chromaWidth / vDataPerRow, chromaHeight / vRowCnt);
 
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, yTextureRef);
@@ -174,14 +148,8 @@
 
         gl.viewport(0, 0, width, height);
 
-        var tTop = 0;
-        var tLeft = 0;
-        var tBottom = height / rowCnt;
-        var tRight = width / (dataPerRow / 2);
-        var texturePosValues = new Float32Array([tRight, tTop, tLeft, tTop, tRight, tBottom, tLeft, tBottom]);
-
-        gl.bindBuffer(gl.ARRAY_BUFFER, texturePosBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, texturePosValues, gl.DYNAMIC_DRAW);
+        this.uploadTextureCoordinates(texturePosBuffer, this.yCoords,
+            width / (dataPerRow / 2), height / rowCnt);
 
         gl.uniform2f(gl.getUniformLocation(this.shaderProgram, 'resolution'), dataPerRow, height);
 
@@ -284,7 +252,8 @@
     };
   };
 
-  // Keep bufferData each frame to preserve buffer orphaning on hidden canvases.
+  // Reuse the CPU-side coordinates in both upload modes. Keep bufferData each
+  // frame to preserve buffer orphaning on hidden canvases.
   YUVCanvas.prototype.uploadTextureCoordinates = function(buffer, state, right, bottom) {
     var values = state.values;
     if (state.right !== right || state.bottom !== bottom) {
@@ -588,10 +557,8 @@ YUVCanvas.prototype.initBuffers = function() {
   gl.vertexAttribPointer(texturePosRef, 2, gl.FLOAT, false, 0, 0);
 
   this.texturePosBuffer = texturePosBuffer;
-  if (this.reusePlaneTextures) {
-    this.yCoords = { right: 1, bottom: 1,
-        values: new Float32Array([1, 0, 0, 0, 1, 1, 0, 1]) };
-  }
+  this.yCoords = { right: 1, bottom: 1,
+      values: new Float32Array([1, 0, 0, 0, 1, 1, 0, 1]) };
 
   if (this.type === "yuv420"){
     var uTexturePosBuffer = gl.createBuffer();
@@ -603,10 +570,8 @@ YUVCanvas.prototype.initBuffers = function() {
     gl.vertexAttribPointer(uTexturePosRef, 2, gl.FLOAT, false, 0, 0);
 
     this.uTexturePosBuffer = uTexturePosBuffer;
-    if (this.reusePlaneTextures) {
-      this.uCoords = { right: 1, bottom: 1,
-          values: new Float32Array([1, 0, 0, 0, 1, 1, 0, 1]) };
-    }
+    this.uCoords = { right: 1, bottom: 1,
+        values: new Float32Array([1, 0, 0, 0, 1, 1, 0, 1]) };
 
 
     var vTexturePosBuffer = gl.createBuffer();
@@ -618,10 +583,8 @@ YUVCanvas.prototype.initBuffers = function() {
     gl.vertexAttribPointer(vTexturePosRef, 2, gl.FLOAT, false, 0, 0);
 
     this.vTexturePosBuffer = vTexturePosBuffer;
-    if (this.reusePlaneTextures) {
-      this.vCoords = { right: 1, bottom: 1,
-          values: new Float32Array([1, 0, 0, 0, 1, 1, 0, 1]) };
-    }
+    this.vCoords = { right: 1, bottom: 1,
+        values: new Float32Array([1, 0, 0, 0, 1, 1, 0, 1]) };
   };
 
 };

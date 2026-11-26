@@ -314,9 +314,25 @@
         return out;
     }
 
-    function overlapsAny(sorted, s, e) {
-        for (let i = 0; i < sorted.length && sorted[i][0] < e; i++) if (sorted[i][1] > s) return true;
-        return false;
+    // Every available segment belongs to exactly one merged footage run. Carry
+    // its driving flag through the merge instead of rescanning all drive clips
+    // for each run (quadratic on fragmented recording days).
+    function mergeFootageRuns(available) {
+        available.sort(function (a, b) { return a[0] - b[0]; });
+        const runs = [], drive = [];
+        for (let i = 0; i < available.length; i++) {
+            const [s, e, driving] = available[i];
+            if (!(e > s)) continue;
+            const last = runs[runs.length - 1];
+            if (last && s <= last[1] + CONTIG_MS) {
+                if (e > last[1]) last[1] = e;
+                if (driving) drive[drive.length - 1] = 1;
+            } else {
+                runs.push([s, e]);
+                drive.push(driving ? 1 : 0);
+            }
+        }
+        return { runs: runs, runDrive: new Uint8Array(drive) };
     }
 
     function segEnd(sg) {
@@ -335,15 +351,16 @@
         const hiData = Math.max(lo, Math.min(maxMs, dataNow));
         const segs = arr(d.segments).filter(function (sg) { return sg && num(sg.start, NaN) === sg.start; });
         const av = [], un = [];
-        for (let i = 0; i < segs.length; i++) (segs[i].available === false ? un : av).push([segs[i].start, segEnd(segs[i])]);
-        const runs = mergeIntervals(av, CONTIG_MS);
+        for (let i = 0; i < segs.length; i++) {
+            const sg = segs[i], end = segEnd(sg);
+            if (sg.available === false) un.push([sg.start, end]);
+            else av.push([sg.start, end, sg.type === 'normal' || sg.type === 'oemDashcam']);
+        }
+        const { runs, runDrive } = mergeFootageRuns(av);
         const unav = subtractIntervals(mergeIntervals(un, CONTIG_MS), runs);
         const liveSince = arr(d.live).map(function (l) { return l ? num(l.since, NaN) : NaN; })
             .filter(function (v) { return v === v && v <= dataNow; }).sort(function (a, b) { return a - b; });
         const live = mergeIntervals(liveSince.map(function (s) { return [s, dataNow]; }), 0);
-        const trips = mergeIntervals(arr(d.trips).filter(Boolean).map(function (t) {
-            return [num(t.start, NaN), num(t.end, dataNow)];
-        }), 0);
         const reaped = mergeIntervals(arr(d.reaped).filter(Boolean).map(function (r) {
             return [num(r.start, NaN), num(r.end, NaN)];
         }), 0);
@@ -365,11 +382,6 @@
         }
         const gapOpen = gaps.length > 0 && gaps[gaps.length - 1][1] >= dataNow && hiData === dataNow;
         const gapKey = gapReasons(gaps, d, dataNow);
-        const runDrive = new Uint8Array(runs.length);
-        // A run is driving footage when it holds a drive recording (normal or factory dashcam), as on the head unit.
-        const driveSegs = segs.filter(function (sg) { return sg.available !== false && (sg.type === 'normal' || sg.type === 'oemDashcam'); })
-            .map(function (sg) { return [sg.start, segEnd(sg)]; }).sort(function (a, b) { return a[0] - b[0]; });
-        for (let i = 0; i < runs.length; i++) runDrive[i] = overlapsAny(driveSegs, runs[i][0], runs[i][1]) ? 1 : 0;
 
         const seamList = [];
         ['normal', 'oemDashcam', 'sentry'].forEach(function (type) {
@@ -1091,13 +1103,17 @@
             lastRangeFrom = from; lastRangeTo = to;
             emit('range', { from: Math.round(from), to: Math.round(to) });
         }
+        function setNumericAttr(name, value) {
+            const text = String(value);
+            if (canvas.getAttribute(name) !== text) canvas.setAttribute(name, text);
+        }
         function setValueAttrs() {
             const lo = model.lo;
             if (isFinite(lo)) {
-                canvas.setAttribute('aria-valuemin', '0');
-                canvas.setAttribute('aria-valuemax', String(Math.max(0, Math.round((hiB() - lo) / 1000))));
-                canvas.setAttribute('aria-valuenow', String(Math.max(0, Math.round((c - lo) / 1000))));
-            } else canvas.setAttribute('aria-valuenow', String(Math.round(c / 1000)));
+                setNumericAttr('aria-valuemin', 0);
+                setNumericAttr('aria-valuemax', Math.max(0, Math.round((hiB() - lo) / 1000)));
+                setNumericAttr('aria-valuenow', Math.max(0, Math.round((c - lo) / 1000)));
+            } else setNumericAttr('aria-valuenow', Math.round(c / 1000));
         }
         const ariaTick = function () { ariaTimer = 0; updateAria(performance.now()); };
         function updateAria(tNow) {
@@ -1111,7 +1127,9 @@
             const txt = m && m.label != null
                 ? tr('tlview.ariaStripNearest', { time: time, moment: String(m.label) })
                 : tr('tlview.ariaStrip', { time: time });
-            if (txt !== ariaText) { ariaText = txt; canvas.setAttribute('aria-valuetext', txt); setValueAttrs(); }
+            if (txt !== ariaText) { ariaText = txt; canvas.setAttribute('aria-valuetext', txt); }
+            // The bounds and relative position can change without changing the spoken time.
+            setValueAttrs();
         }
         const liveTick = function () { liveTimer = 0; invalidate(); };
         function scheduleLiveTick() {

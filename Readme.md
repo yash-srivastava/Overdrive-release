@@ -38,7 +38,7 @@ Download the latest APK from [GitHub Releases](https://github.com/yash-srivastav
 
 ### 2. Initial Configuration
 1. **Authorize ADB:** On first launch, accept the ADB authentication prompt on your device screen.
-2. **Background Persistence:** In Settings, ensure the **"Disable Autostart"** toggle is **unchecked**. This is critical for reliable background operation.
+2. **Background Persistence:** In Settings, ensure the **"Disable Autostart"** toggle is **unchecked**. This is critical for reliable background operation. On firmware with the BYD auto-start dialog, the setup guide's opt-in automatic recheck verifies the switch after an update (one pass, at most three attempts per install, when parked with the screen on). The WebUI dashboard shows the last observed switch state and time, not a live firmware reading. An unverified state may require an in-car check.
 
 > ⚠️ **CRITICAL: Hard Reboot Required**
 > After the first installation and initial run, you must hard reboot the device:
@@ -80,7 +80,23 @@ Enable your preferred tunnel (Zrok, Cloudflared or Tailscale).
 - **ISP Blocklist Bypass** — Browse via BYD's built-in SIM card without a dedicated hotspot
 - **ADB Shell Runner** — Built-in terminal for running commands, checking processes, and viewing logs
 - **Telegram Notifications** — Instant alerts for motion detection, recording events, and low battery
-- **Recording Library** — Calendar view for browsing and managing recordings
+- **Recording Library** — Calendar view for browsing and managing recordings. Watched badges are saved on the car and refreshed when returning to the Events list, including when switching between LAN and remote access. In List view, the player can continue to newer or older clips after each one ends (off by default). Playlist settings can skip `dvr_p*`, `event_*`, `cam_*`, or watched clips without hiding them from the list. Resume unwatched starts at the oldest matching unwatched clip when reviewing newer clips (the newest when reviewing older clips), across all pages of the active filters.
+
+### Combined Live View (All + DVR)
+
+On vehicles with an OEM DVR camera configured, the Cameras card in Live View
+shows **All + DVR** (view 9). It combines the DVR with the four AVM cameras
+when simultaneous camera access has been confirmed. If the chip shows an
+information icon, tap it to see why the combined view is unavailable.
+
+On legacy AVMCamera vehicles such as DiLink 3, an unverified result can be
+checked by enabling **Test dual-camera support on next boot** in
+Diagnostics > Camera probe and saving the OEM dashcam settings. Restart
+while parked with ACC confirmed off and reload Live View after the check.
+The check is optional and can interrupt recording; it may be deferred if a
+camera pipeline is already active or ACC-off cannot be confirmed. If only
+single-client support is detected, continue using All Cameras and DVR
+separately. Working individual feeds do not establish simultaneous support.
 
 ## Remote Access
 
@@ -467,24 +483,40 @@ Developers can still send pull requests on the language files: `app/src/main/ass
 The latest release in full, then earlier highlights. APKs and per-release notes are on
 [GitHub Releases](https://github.com/yash-srivastava/Overdrive-release/releases).
 
-### v65.0: Take Control of Your Full Driver Cluster + Face ID Lock
+### v65.4: Calls Stay on Your Phone, Richer Custom Layouts & 80+ Fixes
 
-#### ✨ New Features
+#### ✨ New
 
-- **Full-screen cluster** — On supported DiLink 3 cars (starting with the 10.25" Seal), BYD's header and footer bars disappear, so Custom Layouts, the RoadSense map and projected apps get all 1920×720 pixels. On by default; restart the cluster once, parked, to switch it on.
-- **Clean screen** — Status and driver-assist icons step aside. Fault and safety warnings, turn signals and high beam always stay.
-- **Every layout redrawn** — Presets, Studio designs and Originals are rebuilt for the full screen, in light and dark, and size their text to your cluster (8.8", 10.25" or 12.3").
-- **Face ID or fingerprint lock** — Turn it on in Vehicle Control → Safety, and remote unlock, opening the trunk or switching the car on or off asks for your phone's Face ID or fingerprint first. The car screen, automations and proximity unlock never ask.
-- **Works when the car doesn't** — The web app opens instantly with your last-known data, clearly marked, instead of a "bad gateway" page, and switches to live data by itself the moment the car answers. While the car is offline, commands aren't sent and say so straight away.
-- **Climate API: vents and more** — On DiLink 3 cars with electric vents, the climate API sets each side's vent mode and points each front vent. Airflow takes names such as "foot", and the vehicle state now reports SYNC, AUTO, defrost and the vents.
-- **Timeline fullscreen and share** — The Recordings Timeline goes fullscreen with one tap, in the car and the browser. Share sends the clip that's playing once it's saved: from your phone straight to another app, from the car through the share sheet.
+- **Keep calls and music on your phone while parked** — A new, optional Proximity rule. With the car off, phone proximity keeps working, but calls and media stay on your phone instead of the parked car.
+- **More on every Custom Layout** — The car's regeneration level, a status rail (clock, drive mode, outside and cabin temperature, compass, odometer, Trip A and Trip B) and a detailed trip wherever there's room, with no fact shown twice. The Motorcourt ring now glows, lamps follow the curved lens, and Navigator can host any map app.
+- **Full cluster on more DiLink 3 cars** — The full-cluster takeover now works on more DiLink 3 firmwares.
+- **Auto theme follows the sun** — Custom Layouts' Auto theme now changes with the time of day instead of turning dark whenever the headlamps come on in rain or shade.
+- **Trip B** — The cluster's "since reset" trip meter is now available.
+- **Codec support at a glance** — Recording and Surveillance settings show whether your car supports H.264 and H.265 in hardware, and which codec is recording.
 
-#### ⚡ Optimizations & Fixes
+#### ⚡ Optimizations
 
-- **SD card that stops answering while parked** — When the card refuses writes and can't be read either, OverDrive now remounts it, instead of saving to internal storage until the head unit restarts.
+- **Faster AI frames** — Camera frames reach the AI detector about twice as fast (measured on DiLink 3), including zoomed AI crops. You can switch this in Camera probe → AI frame copy.
+- **Quicker thumbnails** — Busy Events and Timeline pages no longer queue up old thumbnail work.
+- **Lighter live view in the browser** — Fewer full-frame copies, so phones and laptops work less.
+- **Smaller improvements everywhere** — Recording, playback, the timeline, trips, voice, OCR and the web server all do less work.
+
+#### 🛠️ Fixes
+
+- **DiLink 100** — Screen brightness comes back as you set it, not at 50%. BYD's own apps, Service Mode and the config backup now use the driver's account. The reverse camera stays live while OverDrive records, and setup skips the auto-start step when the car doesn't need it.
+- **Pre-heat** — If the car ignores the remote power-on, climate control falls back to the cloud.
+- **Walk-away lock** — Phone proximity keeps working after switch-off, even if the head unit closes the app.
+- **Trip timeline** — Shows the real battery level along the trip instead of a straight line.
+- **DiLink 5 recordings** — The video overlay shows the real gear instead of P.
+- **Tyre limits** — Limits are shown and edited in your chosen unit (PSI or bar).
+- **Watched clips** — Stay in sync between local and remote access.
+- **Live View** — All + DVR explains why it's unavailable, and older viewers recover at the next keyframe instead of disconnecting.
+- **And more** — Charging chart hover after rotating, 3D car page memory use, leftover export files, the AVM camera probe, and a warning about Bluetooth audio while parked.
 
 ### Earlier releases
 
+- **v65.2** — Lighter Surveillance, Smoother Live View & 60+ Fixes
+- **v65.0** — Take Control of Your Full Driver Cluster + Face ID Lock
 - **v64.3** — Living Layouts & Drive-Start Fixes
 - **v64.0** — Pick Your Dashboard or Build Your Own
 - **v63.4.1** — Dashboard Builder

@@ -572,50 +572,51 @@ public final class Mp4Index {
         if (ver > 1) throw new Mp4Exception(w + "ctts version " + ver);
         long ec = u32(m, t.ctts + 4);
         if (ec > (t.cttsEnd - t.ctts - 8) / 8) throw new Mp4Exception(w + "ctts truncated");
-        int[] cts = new int[n];
+        // Zero offsets need no table; allocate only on the first nonzero run.
+        int[] cts = null;
         int k = 0;
-        boolean nonZero = false;
         for (long e = 0, p = t.ctts + 8; e < ec; e++, p += 8) {
             long c = u32(m, (int) p);
             // v0 is nominally unsigned; writers emit signed values there too.
             int off = s32(m, (int) p + 4);
             if (c > n - k) throw new Mp4Exception(w + "ctts overruns sample count");
-            Arrays.fill(cts, k, k + (int) c, off);
+            if (off != 0 && c > 0) {
+                if (cts == null) cts = new int[n];
+                Arrays.fill(cts, k, k + (int) c, off);
+            }
             k += (int) c;
-            if (off != 0 && c > 0) nonZero = true;
         }
         if (k != n) throw new Mp4Exception(w + "ctts covers " + k + " of " + n + " samples");
-        return nonZero ? cts : null;
+        return cts;
     }
 
     private static long[] sampleOffsets(byte[] m, TrakInfo t, int[] size, long fileLen, String w)
             throws Mp4Exception {
         int n = size.length;
         if (t.stco >= 0 && t.co64 >= 0) throw new Mp4Exception(w + "stco and co64");
-        long[] chunk;
-        if (t.stco >= 0 || t.co64 >= 0) {
-            boolean wide = t.co64 >= 0;
-            int p = wide ? t.co64 : t.stco;
-            int end = wide ? t.co64End : t.stcoEnd;
-            int es = wide ? 8 : 4;
-            need(p, 8, end, wide ? "co64" : "stco");
-            long ec = u32(m, p + 4);
-            if (ec > (end - p - 8) / es) throw new Mp4Exception(w + "chunk table truncated");
-            if (ec > n) throw new Mp4Exception(w + "more chunks than samples");
-            chunk = new long[(int) ec];
-            for (int i = 0, q = p + 8; i < chunk.length; i++, q += es) {
-                chunk[i] = wide ? u64(m, q) : u32(m, q);
-                if (chunk[i] < 0) throw new Mp4Exception(w + "chunk offset invalid");
+        if (t.stco < 0 && t.co64 < 0) throw new Mp4Exception(w + "chunk offsets missing");
+        boolean wide = t.co64 >= 0;
+        int p = wide ? t.co64 : t.stco;
+        int end = wide ? t.co64End : t.stcoEnd;
+        int es = wide ? 8 : 4;
+        need(p, 8, end, wide ? "co64" : "stco");
+        long chunks = u32(m, p + 4);
+        if (chunks > (end - p - 8) / es) throw new Mp4Exception(w + "chunk table truncated");
+        if (chunks > n) throw new Mp4Exception(w + "more chunks than samples");
+        int chunkStart = p + 8;
+        // Retain the original co64 sign validation before reading stsc. stco is
+        // unsigned 32-bit, so its entries cannot be negative. The validated box
+        // already holds the offsets; there is no need for a second long array.
+        if (wide) {
+            for (int i = 0, q = chunkStart; i < chunks; i++, q += es) {
+                if (m[q] < 0) throw new Mp4Exception(w + "chunk offset invalid");
             }
-        } else {
-            throw new Mp4Exception(w + "chunk offsets missing");
         }
 
         if (t.stsc < 0) throw new Mp4Exception(w + "stsc missing");
         need(t.stsc, 8, t.stscEnd, "stsc");
         long ec = u32(m, t.stsc + 4);
         if (ec == 0 || ec > (t.stscEnd - t.stsc - 8) / 12) throw new Mp4Exception(w + "stsc truncated");
-        long chunks = chunk.length;
         long[] offset = new long[n];
         int s = 0;
         for (int e = 0, q = t.stsc + 8; e < ec; e++, q += 12) {
@@ -628,7 +629,8 @@ public final class Mp4Index {
             if (spc == 0 || spc > n) throw new Mp4Exception(w + "stsc samples per chunk invalid");
             if (sdi != 1) throw new Mp4Exception(w + "multiple sample descriptions");
             for (long c = fc - 1; c < next - 1; c++) {
-                long o = chunk[(int) c];
+                int at = chunkStart + (int) c * es;
+                long o = wide ? u64(m, at) : u32(m, at);
                 for (long j = 0; j < spc; j++) {
                     if (s >= n) throw new Mp4Exception(w + "chunks hold more samples than stsz");
                     long e2 = o + size[s];

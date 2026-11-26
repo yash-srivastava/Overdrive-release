@@ -1,6 +1,7 @@
 package com.overdrive.app.storage;
 
 import com.overdrive.app.storage.removable.RemovableStorageFs;
+import com.overdrive.app.util.RecordingSizeFormatter;
 
 import android.os.Build;
 import android.os.StatFs;
@@ -16,7 +17,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -216,7 +216,6 @@ public class StorageManager {
     // but they still count toward the user's configured limit and must be
     // reaped — otherwise a 500 MB limit can show 800 MB used in the UI.
     private static final String LEGACY_APP_FILES_DIR = RecordingDirectoryRegistry.LEGACY_BASE;
-    private static final String LEGACY_SURVEILLANCE_DIR = RecordingDirectoryRegistry.LEGACY_SENTRY;
 
     // Subdirectories
     public static final String RECORDINGS_SUBDIR = "recordings";
@@ -11949,15 +11948,9 @@ public class StorageManager {
     
     // ==================== Utility ====================
     
+    /** Format a byte count using the current formatting locale. */
     public static String formatSize(long bytes) {
-        if (bytes >= 1_000_000_000) {
-            return String.format("%.1f GB", bytes / 1_000_000_000.0);
-        } else if (bytes >= 1_000_000) {
-            return String.format("%.1f MB", bytes / 1_000_000.0);
-        } else if (bytes >= 1_000) {
-            return String.format("%.1f KB", bytes / 1_000.0);
-        }
-        return bytes + " B";
+        return RecordingSizeFormatter.format(bytes);
     }
     
     public static long getMinLimitMb() {

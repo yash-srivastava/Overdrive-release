@@ -143,6 +143,50 @@ public final class RemovableStorageFs {
         return isRouted(f) ? stat(f, true).mtime : f.lastModified();
     }
 
+    /** Size and modification time from one exact routed stat (not a new cache). */
+    public static final class FileStamp {
+        public final long length;
+        public final long mtime;
+
+        private FileStamp(long length, long mtime) {
+            this.length = length;
+            this.mtime = mtime;
+        }
+    }
+
+    /** Read both fingerprint components without opening a routed file twice. */
+    public static FileStamp fileStamp(File f) {
+        if (isRouted(f)) {
+            Stat s = stat(f, true);
+            return new FileStamp(s.length, s.mtime);
+        }
+        return new FileStamp(f.length(), f.lastModified());
+    }
+
+    /** A readable entry's modification time, or zero, using one exact routed stat. */
+    public static long readableLastModified(File f) {
+        if (isRouted(f)) {
+            Stat s = stat(f, true);
+            return s.exists ? s.mtime : 0L;
+        }
+        return f.canRead() ? f.lastModified() : 0L;
+    }
+
+    public enum FileMatch { MATCH, GONE, STALE }
+
+    /** Check type, readability and fingerprint without repeated routed metadata queries. */
+    public static FileMatch matchReadableFile(File f, long length, long mtime) {
+        if (isRouted(f)) {
+            // Routed canRead() means the MediaStore row exists; retain that
+            // definition and the exact-stat descriptor/fallback policy.
+            Stat s = stat(f, true);
+            if (!s.exists || s.dir) return FileMatch.GONE;
+            return s.length == length && s.mtime == mtime ? FileMatch.MATCH : FileMatch.STALE;
+        }
+        if (!f.isFile() || !f.canRead()) return FileMatch.GONE;
+        return f.length() == length && f.lastModified() == mtime ? FileMatch.MATCH : FileMatch.STALE;
+    }
+
     public static boolean canWrite(File f) {
         if (!isRouted(f)) return f.canWrite();
         return MediaStoreBackend.isWritable(f.getAbsolutePath()) && stat(f).exists;
@@ -315,6 +359,34 @@ public final class RemovableStorageFs {
             logError("list " + dir, e);
             return null;
         }
+    }
+
+    /** Lightweight recording-index listing; null preserves the caller's previous baseline. */
+    public static RecordingListingSnapshot listRecordingSnapshot(File dir,
+            RecordingListingSnapshot previous) {
+        if (isRouted(dir)) {
+            try {
+                return MediaStoreBackend.listRecordingSnapshot(dir.getAbsolutePath(), previous);
+            } catch (IOException e) {
+                logError("list " + dir, e);
+                return null;
+            }
+        }
+        // A volume can change routing between polls. Preserve the ordinary File fallback.
+        File[] kids = dir.listFiles();
+        if (kids == null) return null;
+        RecordingListingSnapshot out = new RecordingListingSnapshot();
+        for (File kid : kids) {
+            String name = kid.getName();
+            if (!RecordingListingSnapshot.accepts(name)) continue;
+            if (kid instanceof ListedFile) {
+                Stat snap = ((ListedFile) kid).rawSnapshot();
+                out.add(name, snap.length, snap.mtime, previous);
+            } else {
+                out.add(name, length(kid), lastModified(kid), previous);
+            }
+        }
+        return out;
     }
 
     public static File[] listFiles(File dir, FilenameFilter filter) {

@@ -1,7 +1,5 @@
 package com.overdrive.app.camera;
 
-import android.opengl.EGL14;
-
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.surveillance.FoveatedCropper;
 import com.overdrive.app.surveillance.GpuDownscaler;

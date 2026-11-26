@@ -8,7 +8,6 @@ import android.os.StatFs;
 import android.util.Log;
 
 import com.overdrive.app.BuildConfig;
-import com.overdrive.app.launcher.AdbShellExecutor;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -259,7 +258,6 @@ public class AppUpdater {
         canWriteTmpCached = ok;
         return ok;
     }
-    private AdbShellExecutor adb; // Lazy — only created when install is triggered
     private com.overdrive.app.launcher.AdbDaemonLauncher adbLauncher; // For daemon management
 
     private String latestDownloadUrl;
@@ -355,13 +353,6 @@ public class AppUpdater {
         cleanupLeftoverApk(true);
     }
 
-    private AdbShellExecutor getAdb() {
-        if (adb == null) {
-            adb = new AdbShellExecutor(context);
-        }
-        return adb;
-    }
-
     private com.overdrive.app.launcher.AdbDaemonLauncher getAdbLauncher() {
         if (adbLauncher == null) {
             adbLauncher = new com.overdrive.app.launcher.AdbDaemonLauncher(context);
@@ -370,7 +361,7 @@ public class AppUpdater {
     }
 
     /**
-     * Release per-instance ADB executor + tunnel-poll scheduler that this
+     * Release per-instance ADB launcher resources that this
      * AppUpdater lazily allocated. AppUpdater is NOT a process singleton
      * — it's `new`'d at every call site (MainActivity manual-check, the
      * 6h periodic check, UpdateApiHandler, SettingsAboutFragment,
@@ -392,12 +383,6 @@ public class AppUpdater {
             if (adbLauncher != null) {
                 adbLauncher.releasePerInstanceResources();
                 adbLauncher = null;
-            }
-        } catch (Exception ignored) {}
-        try {
-            if (adb != null) {
-                adb.shutdown();
-                adb = null;
             }
         } catch (Exception ignored) {}
     }
@@ -711,10 +696,6 @@ public class AppUpdater {
     private static final long UPDATE_INSTALL_HEADROOM_BYTES = 128L * MIB;
     private static final String STORAGE_ERROR_MESSAGE =
             "Not enough storage to update Overdrive. Free space on the head unit and try again.";
-
-    private String getApkPath() {
-        return APK_PATH;
-    }
 
     private void cleanupLeftoverApk(boolean staleOnly) {
         try {

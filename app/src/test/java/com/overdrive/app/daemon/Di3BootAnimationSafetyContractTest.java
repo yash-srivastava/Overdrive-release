@@ -311,11 +311,12 @@ public class Di3BootAnimationSafetyContractTest {
                 "final long cameraStartEpoch",
                 "CameraDaemon.isCameraStartEpochCurrent(",
                 "Skipping stale camera warmup",
-                "avcWarmup.warmupAndWait(",
+                "final java.util.function.BooleanSupplier stillRequired =",
                 "() -> !shuttingDown",
                 "CameraDaemon.isCameraStartEpochCurrent(",
                 "&& accIsOn",
-                "&& currentMode == mode");
+                "&& currentMode == mode",
+                "avcWarmup.warmupAndWait(stillRequired)");
 
         String cameraCommand = method(
                 daemon,

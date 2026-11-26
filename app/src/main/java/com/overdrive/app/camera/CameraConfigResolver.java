@@ -375,6 +375,24 @@ public final class CameraConfigResolver {
         return UnifiedConfigManager.updateSection("camera", update);
     }
 
+    /** camera.fastAiFrameCopy: native copy of AI frames off the GPU. Unset = on. */
+    public static final String FAST_AI_FRAME_COPY_KEY = "fastAiFrameCopy";
+
+    public static boolean isFastAiFrameCopyEnabled() {
+        try {
+            JSONObject cam = UnifiedConfigManager.loadConfig().optJSONObject("camera");
+            return cam == null || cam.optBoolean(FAST_AI_FRAME_COPY_KEY, true);
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    public static boolean saveFastAiFrameCopy(boolean enabled) {
+        JSONObject update = new JSONObject();
+        putSafely(update, FAST_AI_FRAME_COPY_KEY, enabled);
+        return UnifiedConfigManager.updateSection("camera", update);
+    }
+
     /** Remember a CPU-engine failure for this app build (see RecordingEngine.BLOCK_KEY). */
     public static boolean saveRecordingEngineBlock(String why) {
         JSONObject update = new JSONObject();

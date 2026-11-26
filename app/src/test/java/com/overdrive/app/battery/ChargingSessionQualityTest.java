@@ -58,6 +58,46 @@ public class ChargingSessionQualityTest {
     }
 
     @Test
+    public void outOfRangeSocCannotQualifyButHistoricalEvidenceIsUnchanged() throws Exception {
+        for (double[] span : new double[][]{{-1, 100}, {8, 101}, {-1, 101}}) {
+            JSONObject session = completed(span[0], span[1]).put("isDc", true);
+            ChargingSessionQuality.enrich(session, false, 3.65, "lfp");
+
+            JSONObject calibration = session.getJSONObject("calibration");
+            assertFalse(calibration.getBoolean("qualified"));
+            assertEquals("not_qualified", calibration.getString("reason"));
+            assertEquals(span[0], session.getDouble("startSoc"), 0.0);
+            assertEquals(span[1], session.getDouble("endSoc"), 0.0);
+            assertEquals("valid", session.getString("powerDataQuality"));
+            assertTrue(session.getBoolean("energyUsable"));
+        }
+    }
+
+    @Test
+    public void nonFiniteAndMissingSocCannotQualify() throws Exception {
+        JSONObject invalidStart = completed(8, 100).put("startSoc", "-Infinity");
+        ChargingSessionQuality.enrich(invalidStart, false, 3.65, "lfp");
+        assertFalse(invalidStart.getJSONObject("calibration").getBoolean("qualified"));
+
+        JSONObject missingStart = completed(8, 100);
+        missingStart.remove("startSoc");
+        ChargingSessionQuality.enrich(missingStart, false, 3.65, "lfp");
+        assertFalse(missingStart.getJSONObject("calibration").getBoolean("qualified"));
+
+        JSONObject invalidEnd = completed(8, 100).put("endSoc", "Infinity");
+        ChargingSessionQuality.enrich(invalidEnd, false, 3.65, "lfp");
+        assertFalse(invalidEnd.getJSONObject("calibration").getBoolean("qualified"));
+    }
+
+    @Test
+    public void zeroToHundredSocCanStillQualify() throws Exception {
+        JSONObject session = completed(0, 100);
+        ChargingSessionQuality.enrich(session, false, 3.65, "lfp");
+        assertTrue(session.getJSONObject("calibration").getBoolean("qualified"));
+        assertEquals("lfp_full_span", session.getJSONObject("calibration").getString("reason"));
+    }
+
+    @Test
     public void missingChemistryNeverDefaultsToLfp() throws Exception {
         JSONObject session = completed(8, 100);
         ChargingSessionQuality.enrich(session, false, 3.45, "unknown");

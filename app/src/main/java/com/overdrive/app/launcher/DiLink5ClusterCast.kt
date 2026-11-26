@@ -38,8 +38,6 @@ private const val DI5_SHARED_DISPLAY_FULL =
     "shared_fission_bg_XDJAScreenProjection_0"
 private const val DI5_SHARED_DISPLAY_STANDARD =
     "shared_fission_bg_XDJAScreenProjection_1"
-private const val DI5_DISPLAY_FULL = "XDJAScreenProjection_0"
-private const val DI5_DISPLAY_STANDARD = "XDJAScreenProjection_1"
 private const val DI5_MAP_PACKAGE = "com.overdrive.app"
 private const val DI5_MAP_COMPONENT =
     "com.overdrive.app/.navmap.RoadSenseClusterMapActivity"
@@ -63,8 +61,6 @@ object DiLink5ClusterCast {
     private const val START_FOREGROUND_OBSERVE_MS = 6_500L
     private const val START_CORRECTION_COOLDOWN_MS = 750L
     private const val CONTAINER_SETTLE_MS = 250L
-    private const val PROJECTION_DISPLAY_TIMEOUT_MS = 8_000L
-    private const val PROJECTION_DISPLAY_POLL_MS = 200L
     private const val CONTAINER_CLOSE_GAP_MS = 1_000L
     private const val INDETERMINATE_ENABLE_FENCE_MS = 3_000L
     private const val ENABLE_FENCE_POLL_MS = 200L
@@ -91,7 +87,6 @@ object DiLink5ClusterCast {
     private const val MARKER_TEARDOWN_BOOT_ID =
         "di5ClusterProjectionTeardownBootId"
     private const val MARKER_PACKAGE = "di5ClusterProjectionPackage"
-    private const val PREFER_FULL_KEY = "di5PreferFullCluster"
     /** projection.<key>: the shared display that last survived an OEM takeover
      *  fallback (empty = none learned). First choice on later casts. */
     private const val SHARED_DISPLAY_PREFERENCE_KEY = "di5SharedDisplayPreference"

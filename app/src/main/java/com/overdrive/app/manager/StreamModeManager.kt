@@ -97,26 +97,6 @@ class StreamModeManager(
             false
         }
     }
-    
-    /**
-     * Get mode from daemon.
-     */
-    private fun getModeFromDaemon(): StreamMode? {
-        return try {
-            val client = CameraDaemonClient()
-            if (client.connect()) {
-                val response = client.sendCommand("""{"cmd":"getStreamMode"}""")
-                client.disconnect()
-                
-                val modeStr = response?.optString("mode", "private") ?: "private"
-                if (modeStr == "public") StreamMode.PUBLIC else StreamMode.PRIVATE
-            } else {
-                null
-            }
-        } catch (e: Exception) {
-            null
-        }
-    }
 }
 
 /**

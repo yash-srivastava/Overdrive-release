@@ -1,7 +1,5 @@
 package com.overdrive.app.battery;
 
-import com.overdrive.app.byd.BydVehicleData;
-
 import org.json.JSONObject;
 
 /**
@@ -27,10 +25,13 @@ public final class ChargingSessionQuality {
         boolean completed = isCompleted(session);
         boolean poisoned = isPoisonedPower(session);
         String chemistry = chemistry(isPhev, highCellVoltage, declaredChemistry);
+        double startSoc = session.optDouble("startSoc", Double.NaN);
+        double endSoc = session.optDouble("endSoc", Double.NaN);
+        // Only physically valid SOC endpoints can qualify as a calibration candidate.
         boolean calibration = completed
                 && "lfp".equals(chemistry)
-                && session.optDouble("startSoc", Double.NaN) <= CALIBRATION_START_MAX_SOC
-                && session.optDouble("endSoc", Double.NaN) >= CALIBRATION_END_MIN_SOC;
+                && startSoc >= 0.0 && startSoc <= CALIBRATION_START_MAX_SOC
+                && endSoc >= CALIBRATION_END_MIN_SOC && endSoc <= 100.0;
 
         session.put("powerDataQuality", poisoned ? "poisoned" :
                 (completed ? "valid" : "unknown"));

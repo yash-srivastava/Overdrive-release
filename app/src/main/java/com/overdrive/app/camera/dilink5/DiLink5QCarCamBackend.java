@@ -2450,12 +2450,6 @@ public class DiLink5QCarCamBackend {
         return closeAfterCancelledAcquisition();
     }
 
-    private OwnerRetirementResult closeAfterFailedGlOwnerClaimBefore(
-            long deadlineElapsedMs) {
-        return closeWithLifecycleGateResult(
-                false, deadlineElapsedMs);
-    }
-
     private boolean closeAfterCancelledAcquisition() {
         boolean systemAvmCancellation =
                 com.overdrive.app.daemon.CameraDaemon

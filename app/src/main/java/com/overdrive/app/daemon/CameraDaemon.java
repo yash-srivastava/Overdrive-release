@@ -168,14 +168,6 @@ public class CameraDaemon {
     // edge has already arrived.
     private static long pendingAccTransitionGeneration = 0L;
 
-    // DiLink 4 post-ACC-OFF camera-open grace duration. oem hardcodes 60 s
-    // (FlameoutService p111dh/C4995i.java:407 m22726w(60_000L)). Earlier
-    // AVMCamera.open races the MCU/ISP power-down and yields all-zero
-    // frames forever. The actual gate lives in PanoramicCameraGpu and
-    // covers ALL open paths (sentry, streaming, OEM, recording-mode).
-    // Legacy fleet never arms it.
-    private static final long DILINK4_SENTRY_DEFER_MS = 60_000L;
-
     // ==================== DOOR LOCK GATE (surveillance arm/disarm) ====================
     // Lock detection runs in CameraDaemon's process where cloud MQTT is active.
     // Surveillance is only armed after doors are locked (reduces false triggers from owner exiting).
@@ -758,7 +750,6 @@ public class CameraDaemon {
 
         // Camera scan disabled — opening/closing all camera IDs can briefly
         // disrupt the BYD dashcam. Camera ID is auto-detected in GpuSurveillancePipeline.init()
-        // scanCameras();
 
         // === RECOVERY-FIRST STARTUP ===
         // Construct + spawn the HTTP/TCP/IPC servers BEFORE any subsystem that
@@ -1215,6 +1206,14 @@ public class CameraDaemon {
             com.overdrive.app.surveillance.impact.ParkedImpactController.attach();
         } catch (Throwable t) {
             log("Parked impact attach failed: " + t.getMessage());
+        }
+
+        // Proximity collector: the head unit can kill the app process at switch-off, taking
+        // the phone collector with it. Same posture: a disabled feature costs a config read per tick.
+        try {
+            com.overdrive.app.remoteaccess.ProximityCollectorWatchdog.attach();
+        } catch (Throwable t) {
+            log("Proximity collector watchdog attach failed: " + t.getMessage());
         }
 
         // Parking Intelligence: same posture. attach() reads parking.enabled and
@@ -4245,18 +4244,6 @@ public class CameraDaemon {
             log("Released singleton lock");
         } catch (Exception e) {
             log("Error releasing singleton lock: " + e.getMessage());
-        }
-    }
-
-    /**
-     * Check if a port is already in use (fallback check).
-     */
-    private static boolean isPortInUse(int port) {
-        try (java.net.ServerSocket socket = new java.net.ServerSocket(port)) {
-            socket.setReuseAddress(true);
-            return false;
-        } catch (java.io.IOException e) {
-            return true;
         }
     }
 
@@ -7408,15 +7395,6 @@ public class CameraDaemon {
         }
     }
 
-    private static boolean isAccOnRequestedOrCached() {
-        synchronized (parkTerminateLock) {
-            if (latestAccIsOff != null) {
-                return !latestAccIsOff.booleanValue();
-            }
-        }
-        return com.overdrive.app.monitor.AccMonitor.isAccOn();
-    }
-
     private static long captureAccObservationGeneration() {
         synchronized (parkTerminateLock) {
             return accTransitionGeneration;
@@ -10178,14 +10156,6 @@ public class CameraDaemon {
         return status;
     }
 
-    /**
-     * Count event recordings from today.
-     * Looks for files matching pattern: event_YYYYMMDD_*.mp4 in sentry_events directory
-     */
-    private static int countTodaysEvents() {
-        return getTodaysEvents().size();
-    }
-
     /** Map battery capacity to ABRP car model name */
     private static String capacityToModelName(double capacityKwh) {
         if (capacityKwh >= 105) return "byd:seal:23:108";     // Tang EV
@@ -10363,21 +10333,6 @@ public class CameraDaemon {
         return STREAM_MODE_PUBLIC.equals(streamMode);
     }
 
-    /**
-     * Get list of recording cameras (helper for status).
-     */
-    private static java.util.List<Integer> getRecordingCameras() {
-        java.util.List<Integer> recording = new java.util.ArrayList<>();
-        // GPU pipeline records all 4 cameras in mosaic
-        if (gpuPipeline != null && gpuPipeline.isRunning()) {
-            recording.add(1);
-            recording.add(2);
-            recording.add(3);
-            recording.add(4);
-        }
-        return recording;
-    }
-
     // ==================== INITIALIZATION ====================
 
     private static void generateDeviceId() {
@@ -10548,61 +10503,6 @@ public class CameraDaemon {
                 }
             }
         }
-    }
-
-    private static void scanCameras() {
-        log("--- CAMERA SCAN ---");
-        try {
-            Class<?> infoClass = Class.forName("android.hardware.BmmCameraInfo");
-            java.lang.reflect.Method mGetTags = infoClass.getDeclaredMethod("getValidCameraTag");
-            mGetTags.setAccessible(true);
-            @SuppressWarnings("unchecked")
-            java.util.List<String> tags = (java.util.List<String>) mGetTags.invoke(null);
-
-            java.lang.reflect.Method mGetId = infoClass.getDeclaredMethod("getCameraId", String.class);
-            mGetId.setAccessible(true);
-
-            if (tags != null) {
-                for (String tag : tags) {
-                    int id = (int) mGetId.invoke(null, tag);
-                    log("FOUND: [" + tag.toUpperCase() + "] -> ID: " + id);
-                }
-            }
-        } catch (Exception e) {
-            log("WARN: BmmCamera scan failed: " + e.getMessage());
-        }
-
-        // Probe AVMCamera IDs 0-5 to find which cameras exist on this device
-        try {
-            Class<?> avmClass = Class.forName("android.hardware.AVMCamera");
-            java.lang.reflect.Constructor<?> ctor = avmClass.getDeclaredConstructor(int.class);
-            ctor.setAccessible(true);
-            java.lang.reflect.Method mOpen = avmClass.getDeclaredMethod("open");
-            mOpen.setAccessible(true);
-            java.lang.reflect.Method mClose = avmClass.getDeclaredMethod("close");
-            mClose.setAccessible(true);
-
-            for (int id = 0; id <= 5; id++) {
-                try {
-                    Object cam = ctor.newInstance(id);
-                    boolean opened = (boolean) mOpen.invoke(cam);
-                    if (opened) {
-                        log("AVMCamera ID " + id + ": AVAILABLE");
-                        mClose.invoke(cam);
-                    } else {
-                        log("AVMCamera ID " + id + ": open() returned false");
-                    }
-                } catch (Exception e) {
-                    // Camera ID doesn't exist or can't be opened
-                }
-            }
-        } catch (ClassNotFoundException e) {
-            log("WARN: AVMCamera not available on this device");
-        } catch (Exception e) {
-            log("WARN: AVMCamera probe failed: " + e.getMessage());
-        }
-
-        log("--- END SCAN ---");
     }
 
     /**
@@ -10861,35 +10761,6 @@ public class CameraDaemon {
             log("Failed to initialize GPS Monitor with context: " + e.getMessage());
             log("Falling back to daemon mode (shell commands)");
             com.overdrive.app.monitor.GpsMonitor.getInstance().init(null);
-        }
-    }
-
-    /**
-     * Grant location permissions to the app via shell commands.
-     * The daemon runs with elevated privileges so it can grant permissions.
-     */
-    private static void grantLocationPermissions() {
-        String[] permissions = {
-            "android.permission.ACCESS_FINE_LOCATION",
-            "android.permission.ACCESS_COARSE_LOCATION",
-            "android.permission.ACCESS_BACKGROUND_LOCATION"
-        };
-
-        log("Granting location permissions...");
-
-        for (String perm : permissions) {
-            try {
-                Process process = Runtime.getRuntime().exec(
-                    "pm grant " + com.overdrive.app.util.ShellUser.flag() + " com.overdrive.app " + perm);
-                int exitCode = process.waitFor();
-                if (exitCode == 0) {
-                    log("Granted: " + perm);
-                } else {
-                    log("Failed to grant: " + perm + " (exit=" + exitCode + ")");
-                }
-            } catch (Exception e) {
-                log("Error granting " + perm + ": " + e.getMessage());
-            }
         }
     }
 

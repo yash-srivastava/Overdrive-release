@@ -67,7 +67,8 @@ public class NetworkMonitor {
     private static volatile int signalPercent = -1;
     // Wi-Fi RSSI in dBm; Integer.MIN_VALUE when not on Wi-Fi or unknown.
     private static volatile int rssiDbm = Integer.MIN_VALUE;
-    private static volatile long lastUpdate = 0;
+    // Cache age must not depend on GPS/NTP wall-clock corrections.
+    private static volatile long lastUpdateElapsed = -1L;
     private static volatile Context appContext;
     private static volatile boolean shellFallbackLogged = false;
     private static volatile boolean wifiServiceReadLogged = false;
@@ -146,19 +147,19 @@ public class NetworkMonitor {
                 networkType = "wifi";
                 ipAddress = ip;
                 readWifiDetailsAndroid();
-                lastUpdate = System.currentTimeMillis();
+                lastUpdateElapsed = SystemClock.elapsedRealtime();
                 return true;
             } else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
                 networkType = "cellular";
                 ipAddress = ip;
                 clearWifiDetails();
-                lastUpdate = System.currentTimeMillis();
+                lastUpdateElapsed = SystemClock.elapsedRealtime();
                 return true;
             } else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) {
                 networkType = "ethernet";
                 ipAddress = ip;
                 clearWifiDetails();
-                lastUpdate = System.currentTimeMillis();
+                lastUpdateElapsed = SystemClock.elapsedRealtime();
                 return true;
             }
 
@@ -241,7 +242,7 @@ public class NetworkMonitor {
                 String ssid = shellGetWifiSsid();
                 wifiSsid = (ssid != null && !ssid.isEmpty()) ? ssid : SSID_UNKNOWN_PLACEHOLDER;
                 shellGetWifiSignal();
-                lastUpdate = System.currentTimeMillis();
+                lastUpdateElapsed = SystemClock.elapsedRealtime();
                 return;
             }
 
@@ -252,7 +253,7 @@ public class NetworkMonitor {
                     networkType = "cellular";
                     ipAddress = rmnetIp;
                     clearWifiDetails();
-                    lastUpdate = System.currentTimeMillis();
+                    lastUpdateElapsed = SystemClock.elapsedRealtime();
                     return;
                 }
             }
@@ -262,7 +263,7 @@ public class NetworkMonitor {
                 networkType = "ethernet";
                 ipAddress = ethIp;
                 clearWifiDetails();
-                lastUpdate = System.currentTimeMillis();
+                lastUpdateElapsed = SystemClock.elapsedRealtime();
                 return;
             }
 
@@ -270,7 +271,7 @@ public class NetworkMonitor {
             networkType = "none";
             ipAddress = "";
             clearWifiDetails();
-            lastUpdate = System.currentTimeMillis();
+            lastUpdateElapsed = SystemClock.elapsedRealtime();
         } catch (Exception e) {
             CameraDaemon.log("NetworkMonitor: shell fallback error: " + e.getMessage());
         }
@@ -434,6 +435,12 @@ public class NetworkMonitor {
 
     // ==================== STATUS API ====================
 
+    /** A missing timestamp or an invalid elapsed age cannot represent a fresh cache. */
+    static boolean needsNetworkRefresh(long lastElapsed, long nowElapsed) {
+        long age = nowElapsed - lastElapsed;
+        return lastElapsed < 0L || age < 0L || age > 10_000L;
+    }
+
     /**
      * Get network info as JSON for the /status endpoint.
      * Auto-refreshes if data is older than 10 seconds.
@@ -443,7 +450,7 @@ public class NetworkMonitor {
      * {@code meteredHintKnown} (whether that flag could be read at all).
      */
     public static JSONObject getNetworkInfo() {
-        if (System.currentTimeMillis() - lastUpdate > 10000) {
+        if (needsNetworkRefresh(lastUpdateElapsed, SystemClock.elapsedRealtime())) {
             refresh();
         }
         JSONObject net = new JSONObject();

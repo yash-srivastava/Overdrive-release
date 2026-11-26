@@ -96,6 +96,32 @@ public class SyncFrameRateLimiterTest {
         assertFalse(httpServer.contains(".setBitrate("));
     }
 
+    @Test
+    public void legacyKeyframeRequestsReachSharedLimiterWithoutOpeningRecoveryGate() throws Exception {
+        String server = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/streaming/WebSocketStreamServer.java");
+        String pipeline = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/surveillance/GpuSurveillancePipeline.java");
+        assertTrue(pipeline.contains("setKeyframeRequestHook(encoderLocal::requestSyncFrameRateLimited)"));
+        assertFalse(server.contains("shutdownRequested || waitingForIdr.contains(conn)"));
+        int waiting = server.indexOf("if (waitingForIdr.contains(conn)) {");
+        assertTrue(waiting >= 0);
+        String waitingBranch = server.substring(waiting, server.indexOf('}', waiting));
+        assertTrue(waitingBranch.contains("requestKeyframeIfConnected(conn);"));
+        assertTrue(waitingBranch.contains("return;"));
+        assertFalse(waitingBranch.contains("sendBounded("));
+        assertFalse(waitingBranch.contains("waitingForIdr.remove("));
+        int rejected = server.indexOf("if (!sendBounded(conn, ByteBuffer.wrap(sps), false)) {");
+        assertTrue(rejected >= 0);
+        assertTrue(server.substring(rejected, server.indexOf('}', rejected))
+                .contains("requestKeyframeIfConnected(conn);"));
+        int helper = server.indexOf("private void requestKeyframeIfConnected(WebSocket conn) {");
+        assertTrue(helper >= 0);
+        String hook = server.substring(helper, server.indexOf("public void onMessage(WebSocket conn, ByteBuffer", helper));
+        assertTrue(hook.contains("if (shutdownRequested || !clients.contains(conn) || !conn.isOpen()) return;"));
+        assertTrue(hook.contains("hook.run();"));
+    }
+
     private static String readRepositoryFile(String relativePath) throws Exception {
         Path current = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
         while (current != null) {

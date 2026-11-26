@@ -24,6 +24,7 @@
     'use strict';
     var STORAGE_KEY = 'overdrive_theme';
     var DEFAULT_THEME = 'dark';
+    var themeSelectedLocally = false;
 
     // Direction has to be on <html> before the stylesheet, same as the theme.
     // core.js only sets dir after the language file arrives, so every Hebrew
@@ -53,7 +54,7 @@
     // core.js cached in localStorage on the last load, for the language
     // core.js resolved then (this file has no resolveLang()). A cold cache
     // paints as before: there is no synchronous fetch. core.js picks up
-    // window.__odI18nEarly, does the full hydrate and refreshes the cache.
+    // window.__odI18nEarly, does the full hydrate and refreshes browser caches.
     // English users skip all of this.
     (function earlyI18n() {
         var code = '';
@@ -68,11 +69,18 @@
         if (/^iw(-|$)/i.test(code)) code = 'he';
         if (/^he-/i.test(code)) code = 'he';
         if (!code || /^en(-|$)/i.test(code)) return;
+        var fromBundle = false;
         function load(lang) {
             try {
                 if (window.AndroidBridge && typeof window.AndroidBridge.getI18nCatalog === 'function') {
                     var b = window.AndroidBridge.getI18nCatalog(lang);
-                    if (b) return JSON.parse(b);
+                    if (b) {
+                        var parsed = JSON.parse(b);
+                        if (parsed) {
+                            fromBundle = true;
+                            return parsed;
+                        }
+                    }
                 }
             } catch (e) {}
             try {
@@ -121,7 +129,8 @@
         var existing = document.querySelectorAll('[data-i18n]');
         for (var e = 0; e < existing.length; e++) apply(existing[e]);
         obs.observe(document.documentElement, { childList: true, subtree: true });
-        window.__odI18nEarly = { lang: code, catalog: cat, stop: function () { obs.disconnect(); } };
+        window.__odI18nEarly = { lang: code, catalog: cat, fromBundle: fromBundle,
+            stop: function () { obs.disconnect(); } };
     })();
 
     // ─── Step 0: viewport-height stabilizer ─────────────────────────────────
@@ -249,12 +258,13 @@
     // truth there; syncing the web preference would let it flicker over
     // the app's value on the next data-theme stamp).
     function syncWithServer() {
-        if (IN_APP_WEBVIEW) return;
+        if (IN_APP_WEBVIEW || themeSelectedLocally) return;
         try {
             fetch('/api/settings/appearance', { credentials: 'same-origin' })
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (j) {
-                    if (!j || !j.theme) return;
+                    // A late bootstrap response must not undo an explicit local choice.
+                    if (themeSelectedLocally || !j || !j.theme) return;
                     var serverTheme = j.theme;
                     var local = readStoredTheme();
                     if (serverTheme !== local) {
@@ -299,6 +309,7 @@
          */
         set: function (value) {
             if (value !== 'dark' && value !== 'light' && value !== 'auto') return;
+            themeSelectedLocally = true;
             try { localStorage.setItem(STORAGE_KEY, value); } catch (e) {}
             stamp(resolveEffective(value));
             try {

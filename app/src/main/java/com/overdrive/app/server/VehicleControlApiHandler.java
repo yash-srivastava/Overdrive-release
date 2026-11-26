@@ -302,7 +302,13 @@ public class VehicleControlApiHandler {
             JSONObject response = new JSONObject();
             response.put("success", true);
             response.put("guard", key);
-            response.put("blocked", DrivingSafetyGuard.isActionBlocked(key));
+            if (DrivingSafetyGuard.GUARD_SCREEN_MEDIA.equals(key)) {
+                boolean movementBlocked = DrivingSafetyGuard.getMovementBlockReason() != null;
+                response.put("movementBlocked", movementBlocked);
+                response.put("blocked", DrivingSafetyGuard.isGuardEnabled(key) && movementBlocked);
+            } else {
+                response.put("blocked", DrivingSafetyGuard.isActionBlocked(key));
+            }
             HttpResponse.sendJson(out, response.toString());
             return true;
         }
@@ -3743,11 +3749,6 @@ public class VehicleControlApiHandler {
                 }
             }
         }
-    }
-
-    /** Minimal shell single-quote wrap for a component/package token. */
-    private static String shellQuote(String s) {
-        return "'" + s.replace("'", "'\\''") + "'";
     }
 
     // Audio library dir (mirror of AudioApiHandler.AUDIO_DIR) — where uploaded

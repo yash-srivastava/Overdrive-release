@@ -18,7 +18,7 @@ const NetworkPage = {
     _refreshInFlight: false,
     _refreshAgain: false,
     status: null,
-    statusAt: 0,
+    statusAt: 0, // Monotonic browser time, not a wall-clock timestamp.
     // Text inputs are seeded from config once, then left to the user.
     _seeded: false,
     _revealed: false,
@@ -65,7 +65,7 @@ const NetworkPage = {
             const data = await resp.json();
             if (!data || !data.success || !data.status) return;
             this.status = data.status;
-            this.statusAt = Date.now();
+            this.statusAt = performance.now();
             this.render();
         } catch (e) {
             console.warn('[Network] status fetch failed:', e);
@@ -150,7 +150,7 @@ const NetworkPage = {
         if (!s) return;
         let secs = 0;
         if (s.enabled) {
-            const drift = Math.max(0, Math.floor((Date.now() - this.statusAt) / 1000));
+            const drift = Math.max(0, Math.floor((performance.now() - this.statusAt) / 1000));
             secs = (s.uptimeSeconds || 0) + drift;
         }
         this.text('hsUptime', this.fmtDuration(secs));
@@ -384,16 +384,5 @@ const NetworkPage = {
         const s = seconds % 60;
         const pad = n => (n < 10 ? '0' + n : String(n));
         return h > 0 ? (h + ':' + pad(m) + ':' + pad(s)) : (m + ':' + pad(s));
-    },
-
-    fmtAge(seconds) {
-        seconds = Math.max(0, Math.floor(Number(seconds) || 0));
-        function ago(key, n, fallback) {
-            var phrase = (window.BYD && BYD.i18n && BYD.i18n.t) ? BYD.i18n.t(key, { n: n }) : null;
-            if (phrase && phrase !== key) return phrase;
-            return fallback;
-        }
-        if (seconds < 60) return ago('dashboard.time_seconds_ago', seconds, seconds + 's ago');
-        return ago('dashboard.time_minutes_ago', Math.floor(seconds / 60), Math.floor(seconds / 60) + 'm ago');
     }
 };

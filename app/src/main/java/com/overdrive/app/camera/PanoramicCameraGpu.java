@@ -145,7 +145,8 @@ public class PanoramicCameraGpu {
     // the native AVM losing its reverse-gear feed while we keep recording.
     //
     // Opt-in per vehicle via camera.decoupledEncoderLane (default false =
-    // shipped zero-copy behaviour, bit-identical). Applied at pipeline
+    // shipped zero-copy behaviour, bit-identical), except BYD100F where an
+    // unset flag defaults on (DecoupledEncoderLanePolicy, #1001). Applied at pipeline
     // construction like every other USE_* path selector — never hot-swapped.
     // Legacy path only: DiLink 5 already publishes app-owned 2D textures
     // (native DMA compositor) and DiLink 4's SurfaceTexture path has a
@@ -163,7 +164,8 @@ public class PanoramicCameraGpu {
         try {
             org.json.JSONObject cam = com.overdrive.app.config.UnifiedConfigManager
                 .loadConfig().optJSONObject("camera");
-            return cam != null && cam.optBoolean("decoupledEncoderLane", false);
+            // Unset = platform default (on for BYD100F, off elsewhere): DecoupledEncoderLanePolicy.
+            return DecoupledEncoderLanePolicy.resolve(cam);
         } catch (Throwable t) {
             return false;
         }
@@ -1386,10 +1388,6 @@ public class PanoramicCameraGpu {
     }
     private CameraYieldListener yieldListener;
     
-    // CPU usage monitoring
-    private long lastCpuCheckTime = 0;
-    private static final long CPU_CHECK_INTERVAL_MS = 10000;  // Every 10 seconds
-    
     // Stats logging (time-based, not frame-based)
     private long lastStatsTime = 0;
     private int lastStatsFrameCount = 0;
@@ -1410,17 +1408,6 @@ public class PanoramicCameraGpu {
     // incl. lock wait, and capture-to-pickup lag (capture clock only).
     private long stageWorstBindNs = 0;
     private long stageWorstLagNs = 0;
-
-    // AI readback throttle — frame-counter modulo, NOT wall-clock.
-    // Wall-clock throttling is fragile when readback duration approaches the
-    // interval: the GL thread spends ~117ms per frame (mosaic+swap+readback),
-    // which guarantees `now - lastReadback >= 95ms` on every loop, so 100% of
-    // frames trigger readback and the pipeline collapses to ~8 fps.
-    // Frame-modulo couples AI rate directly to HAL emission rate. With HAL
-    // emitting at ~26 fps (ImageReader path), every 3rd frame is ~8.6 AI fps,
-    // matching V2 motion's 10 fps internal cadence. If HAL rate changes, AI
-    // rate scales proportionally and the GL thread budget stays balanced.
-    private static final int AI_READBACK_FRAME_MODULO = 3;
 
     private int targetFps = 15;  // Desired frame rate for camera
 
@@ -8339,71 +8326,6 @@ public class PanoramicCameraGpu {
     }
     
     /**
-     * Verifies that the camera is producing a real panoramic strip (4 distinct views)
-     * rather than a single camera stretched or AVM bird's-eye view.
-     *
-     * A real panoramic strip has 4 cameras stitched side by side. Each quadrant shows
-     * a different scene. We verify by reading pixel samples from each quadrant and
-     * checking that they have significantly different luma values.
-     *
-     * Uses the downscaler's 8x8 readback. Columns 0-1=Q0, 2-3=Q1, 4-5=Q2, 6-7=Q3.
-     */
-    private boolean verifyPanoramicStrip(byte[] probe8x8) {
-        if (probe8x8 == null || probe8x8.length < 192) return false;
-        int[] qLuma = new int[4];
-        int[] qCnt = new int[4];
-        int[] qMin = {255, 255, 255, 255};
-        int[] qMax = {0, 0, 0, 0};
-        int totalNonBlack = 0;
-        for (int y = 0; y < 8; y++) {
-            for (int x = 0; x < 8; x++) {
-                int idx = (y * 8 + x) * 3;
-                int r = probe8x8[idx] & 0xFF, g = probe8x8[idx+1] & 0xFF, b = probe8x8[idx+2] & 0xFF;
-                int luma = (r + g*2 + b) / 4;
-                int q = x / 2;
-                qLuma[q] += luma; qCnt[q]++;
-                if (luma < qMin[q]) qMin[q] = luma;
-                if (luma > qMax[q]) qMax[q] = luma;
-                if (luma > 10) totalNonBlack++;
-            }
-        }
-        for (int q = 0; q < 4; q++) { if (qCnt[q] > 0) qLuma[q] /= qCnt[q]; }
-        
-        // Primary check: luma difference between quadrant pairs.
-        // A real panoramic strip has 4 cameras showing different scenes.
-        int diffPairs = 0;
-        for (int i = 0; i < 4; i++) for (int j = i+1; j < 4; j++) if (Math.abs(qLuma[i]-qLuma[j]) > 15) diffPairs++;
-        boolean isStrip = diffPairs >= 2;
-        
-        // Secondary check: if all quadrants have real (non-black) data with internal
-        // variance, this is a real camera feed even if the scenes look similar.
-        // This handles the common case of a parked car in a garage/at night where
-        // all 4 cameras see similar dark scenes (low inter-quadrant difference)
-        // but each quadrant still has texture/detail (intra-quadrant variance).
-        if (!isStrip && totalNonBlack >= 48) {  // At least 75% of pixels are non-black
-            int quadrantsWithVariance = 0;
-            for (int q = 0; q < 4; q++) {
-                // Each quadrant has internal texture (not a flat solid color)
-                if (qMax[q] - qMin[q] >= 3) quadrantsWithVariance++;
-            }
-            // Accept if all quadrants have real data (non-black) and at least 3 have
-            // internal variance. This distinguishes a real 4-camera feed from a
-            // synthetic AVM bird's-eye view (which would have large inter-quadrant
-            // differences) or a single stretched camera (which would have identical
-            // min/max patterns across all quadrants).
-            if (quadrantsWithVariance >= 3) {
-                isStrip = true;
-                logger.info("Strip accepted via secondary check: " + quadrantsWithVariance + 
-                    " quadrants with variance, " + totalNonBlack + "/64 non-black pixels");
-            }
-        }
-        
-        logger.info("Strip check: Q0=" + qLuma[0] + " Q1=" + qLuma[1] + " Q2=" + qLuma[2] + " Q3=" + qLuma[3] +
-                " diffPairs=" + diffPairs + " → " + (isStrip ? "STRIP" : "NOT_STRIP"));
-        return isStrip;
-    }
-
-    /**
      * SOTA: Advance to the next camera ID during probe.
      * Surface mode 0 is confirmed working on all tested models — only probe camera IDs 0-5.
      * 
@@ -8930,11 +8852,15 @@ public class PanoramicCameraGpu {
                                 } else {
                                     // No native app — this is a HAL issue, restart camera
                                     consecutiveContentionStalls = 0;
-                                    postLegacyStallRestart(stallOpenSeq);
+                                    if (!holdStallRestartForReverseView()) {
+                                        postLegacyStallRestart(stallOpenSeq);
+                                    }
                                 }
                             } else {
                                 // No coordinator — just restart
-                                postLegacyStallRestart(stallOpenSeq);
+                                if (!holdStallRestartForReverseView()) {
+                                    postLegacyStallRestart(stallOpenSeq);
+                                }
                             }
                         } else if (nativeActive && timeSinceFrame < 500) {
                             // Frames are flowing despite native app — reset stall counter
@@ -10100,6 +10026,23 @@ public class PanoramicCameraGpu {
      * Legacy stall restart: none while a restart runs, and none once the camera has
      * reopened since {@code openSeq} (read when the stall was observed).
      */
+    // BYD100F only (#1001): a stall restart in R closes and reopens our camera
+    // while the car's own reverse view is opening on the same camera service.
+    // Watchdog-thread state. The stall clock was just reset, so a held restart
+    // retries on the next stall tick; the hold lapses after MAX_HOLD_MS in R.
+    private final ReverseViewCameraGate.Hold reverseStallHold =
+        new ReverseViewCameraGate.Hold(ReverseViewCameraGate.appliesHere());
+
+    private boolean holdStallRestartForReverseView() {
+        // Monotonic, like the gate's cap; the watchdog's own clock is wall time.
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (!reverseStallHold.holdNow(ReverseViewCameraGate.freshGear(), now)) return false;
+        logger.info("Frame stall in R: restart held " + reverseStallHold.heldMs(now)
+            + "ms (max " + ReverseViewCameraGate.MAX_HOLD_MS
+            + "ms) so the car's reverse view is not interrupted");
+        return true;
+    }
+
     private void postLegacyStallRestart(final long openSeq) {
         Handler handler = glHandler;
         if (handler == null) return;
@@ -12189,53 +12132,6 @@ public class PanoramicCameraGpu {
             if (mosaic != null) {
                 try { mosaic.recycle(); } catch (Exception ignored) {}
             }
-        }
-    }
-    
-    /**
-     * Checks CPU usage and logs warning if exceeds threshold.
-     * 
-     * Provides breakdown by component to identify bottlenecks.
-     */
-    private void checkCpuUsage() {
-        long now = System.currentTimeMillis();
-        if (now - lastCpuCheckTime < CPU_CHECK_INTERVAL_MS) {
-            return;
-        }
-        
-        lastCpuCheckTime = now;
-        
-        try {
-            // Read /proc/stat for total CPU time
-            java.io.BufferedReader reader = new java.io.BufferedReader(
-                    new java.io.FileReader("/proc/stat"));
-            String line = reader.readLine();
-            reader.close();
-            
-            // Parse CPU times
-            String[] tokens = line.split("\\s+");
-            long totalCpu = 0;
-            for (int i = 1; i < tokens.length; i++) {
-                totalCpu += Long.parseLong(tokens[i]);
-            }
-            
-            // Read /proc/self/stat for process CPU time
-            reader = new java.io.BufferedReader(
-                    new java.io.FileReader("/proc/self/stat"));
-            line = reader.readLine();
-            reader.close();
-            
-            tokens = line.split("\\s+");
-            long processCpu = Long.parseLong(tokens[13]) + Long.parseLong(tokens[14]);
-            
-            // Calculate CPU percentage (simplified)
-            // Note: This is a rough estimate. For accurate measurement, use
-            // Android Profiler or systrace.
-            // Logging disabled to reduce log spam - uncomment for debugging
-            // logger.debug( String.format("CPU check: process=%d, total=%d", processCpu, totalCpu));
-            
-        } catch (Exception e) {
-            // Silent fail - CPU monitoring is optional
         }
     }
 }

@@ -29,6 +29,10 @@ public final class HlsPlaylists {
         }
     }
 
+    private static final String HEADER = "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:";
+    private static final String HEADER_REST = "\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n"
+            + "#EXT-X-INDEPENDENT-SEGMENTS\n";
+
     private HlsPlaylists() {}
 
     public static String clipPlaylist(Mp4Index idx, Long startWallMs) {
@@ -95,7 +99,7 @@ public final class HlsPlaylists {
         }
         boolean pad = anyAudio && k == 0;
         TimeZone tz = TimeZone.getDefault();
-        StringBuilder body = new StringBuilder(4096);
+        StringBuilder body = startPlaylist(4096);
         long maxMs = 0;
         boolean first = true;
         for (Pick p : picks) {
@@ -158,7 +162,7 @@ public final class HlsPlaylists {
     private static String single(Mp4Index idx, int k, Long startWall, String init, String prefix) {
         GopTable gt = idx.gops;
         int gops = gt.count();
-        StringBuilder body = new StringBuilder(96 * (gops + 2));
+        StringBuilder body = startPlaylist(96 * (gops + 2));
         body.append("#EXT-X-MAP:URI=\"").append(init).append("\"\n");
         TimeZone tz = TimeZone.getDefault();
         long maxMs = 0;
@@ -172,13 +176,21 @@ public final class HlsPlaylists {
         return finish(maxMs, body);
     }
 
+    private static StringBuilder startPlaylist(int capacity) {
+        // Reserve one digit for the target duration, normally a single digit.
+        // Write the body directly into the final builder rather than keeping
+        // another full playlist-sized backing array alive at completion.
+        return new StringBuilder(capacity).append(HEADER).append('0').append(HEADER_REST);
+    }
+
     private static String finish(long maxMs, StringBuilder body) {
         long target = Math.max(1, (maxMs + 999) / 1000);
-        StringBuilder sb = new StringBuilder(body.length() + 200);
-        sb.append("#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:").append(target)
-                .append("\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-INDEPENDENT-SEGMENTS\n")
-                .append(body).append("#EXT-X-ENDLIST\n");
-        return sb.toString();
+        if (target < 10) {
+            body.setCharAt(HEADER.length(), (char) ('0' + target));
+        } else {
+            body.replace(HEADER.length(), HEADER.length() + 1, Long.toString(target));
+        }
+        return body.append("#EXT-X-ENDLIST\n").toString();
     }
 
     private static void extinf(StringBuilder sb, long ms) {
@@ -225,6 +237,17 @@ public final class HlsPlaylists {
     }
 
     private static StringBuilder pad(StringBuilder sb, long v, int width) {
+        // Normal timestamp components and EXTINF fractions fit in four digits.
+        // Emit ASCII digits directly, avoiding a temporary decimal String for
+        // each component. Use the general padding path for wider widths or
+        // values outside the fast path's range.
+        if (width <= 4 && v >= 0 && v < 10_000) {
+            int n = (int) v;
+            if (width >= 4 || n >= 1000) sb.append((char) ('0' + n / 1000));
+            if (width >= 3 || n >= 100) sb.append((char) ('0' + n / 100 % 10));
+            if (width >= 2 || n >= 10) sb.append((char) ('0' + n / 10 % 10));
+            return sb.append((char) ('0' + n % 10));
+        }
         String s = Long.toString(v);
         for (int i = s.length(); i < width; i++) sb.append('0');
         return sb.append(s);

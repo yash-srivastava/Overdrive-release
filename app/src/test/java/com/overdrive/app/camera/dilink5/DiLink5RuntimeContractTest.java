@@ -1865,8 +1865,11 @@ public class DiLink5RuntimeContractTest {
                 "app/src/main/java/com/overdrive/app/surveillance/GpuPipelineFactory.java");
 
         assertTrue(daemon.contains(".createDefault(eventDir)"));
-        assertTrue(factory.contains("resolved.getProfile().getEncoderWidth()"));
-        assertTrue(factory.contains("resolved.getProfile().getEncoderHeight()"));
+        assertTrue(factory.contains("resolveEncoderGeometry(resolved.getProfile(), passiveApa)"));
+        assertTrue(factory.contains(
+                "passiveApa ? com.overdrive.app.camera.PassiveApaGeometry.WIDTH : profile.getEncoderWidth()"));
+        assertTrue(factory.contains(
+                "passiveApa ? com.overdrive.app.camera.PassiveApaGeometry.HEIGHT : profile.getEncoderHeight()"));
     }
 
     @Test

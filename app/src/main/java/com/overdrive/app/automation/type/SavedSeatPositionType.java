@@ -3,8 +3,6 @@ package com.overdrive.app.automation.type;
 import com.overdrive.app.automation.value.Label;
 import com.overdrive.app.automation.value.StringValue;
 
-import org.json.JSONObject;
-
 /**
  * A saved seat/mirror position selector. The value is a position id (String) from
  * OverDrive's own position store, not one of the car's hardware memory banks.
@@ -23,28 +21,14 @@ import org.json.JSONObject;
  * <p>Reuses {@link StringValue} as its backing value so no new Value type or
  * {@code Automations.update} overload is needed (same trick as AppType/ColourType).
  */
-public class SavedSeatPositionType extends BaseType<String> {
+public class SavedSeatPositionType extends StringSchemaType {
     private static final String TYPE = "savedSeatPosition";
-    private final Label label;
 
     /**
      * @param label An id and display name for this position selector
      */
     public SavedSeatPositionType(Label label) {
-        this.label = label;
-    }
-
-    public Label getLabel() {
-        return label;
-    }
-
-    /**
-     * Comparators. Like AppType this is an ACTION-only variable (a position selection),
-     * never a condition, so comparators are never requested — actions call isValid() only.
-     * Return String comparators defensively rather than null.
-     */
-    public EnumType getComparators() {
-        return StringValue.COMPARATORS;
+        super(label, TYPE);
     }
 
     /**
@@ -60,23 +44,6 @@ public class SavedSeatPositionType extends BaseType<String> {
      * rejects a legitimately-chosen position.
      */
     public boolean isValidValue(String value) {
-        if (value == null || value.isEmpty() || value.length() > 128) return false;
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            boolean ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-                    || (c >= '0' && c <= '9') || c == '_' || c == '-';
-            if (!ok) return false;
-        }
-        return true;
-    }
-
-    public JSONObject toJson() {
-        JSONObject json = getLabel().toJson();
-        try {
-            json.put("type", TYPE);
-        } catch (Exception e) {
-            // JSONObject.put only throws on null key
-        }
-        return json;
+        return isBoundedToken(value, 128, "_-");
     }
 }

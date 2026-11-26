@@ -124,6 +124,9 @@ public final class RemoteAccessApiHandler {
     private static long nextCollectorDiagnosticAt;
     // Envelope time of the latest accepted phone observation and the vehicle power read with it.
     private static long lastObservationElapsed = -1;
+    // Receipt time of the latest authenticated phone observation, accepted or not. It proves only
+    // that the app-process collector is alive; ProximityCollectorWatchdog restarts it when silent.
+    private static volatile long lastObservationRelayElapsedMs = -1;
     private static volatile int lastObservedPower = BydVehicleData.UNAVAILABLE;
     // The camera daemon alone owns this latch: it is set only after a phone walk-away
     // lock is confirmed and is cleared by power-on, a door edge, or a settings reset.
@@ -449,6 +452,11 @@ public final class RemoteAccessApiHandler {
         }
     }
 
+    /** Elapsed time of the latest authenticated phone observation relay, or -1 when none. */
+    public static long lastObservationRelayElapsedMs() {
+        return lastObservationRelayElapsedMs;
+    }
+
     /** Called only after socket-level loopback AND JWT checks in HttpServer. */
     public static void relay(String body, OutputStream out) throws Exception {
         RemoteDevViewBridgeAuth.AuthenticatedRequest authenticated = RemoteDevViewBridgeAuth.verify(body);
@@ -474,6 +482,7 @@ public final class RemoteAccessApiHandler {
         }
         if (!"remoteAccessObservation".equals(sample.optString("command")))
             throw new SecurityException("Invalid signal envelope");
+        lastObservationRelayElapsedMs = SystemClock.elapsedRealtime();
         if (com.overdrive.app.config.ServiceModeFeatureGate.isPaused("proximity")) {
             synchronized (STATE) { rememberNonce(authenticated.nonce, authenticated.timestampMs); }
             HttpResponse.sendJson(out, new JSONObject().put("success", false).put("revoked", true)
@@ -703,6 +712,8 @@ public final class RemoteAccessApiHandler {
                 stored.remove("errorDetail");
                 phone.signal.put("reconnect", stored);
             }
+            JSONObject parkedAudio = sample.optJSONObject("parkedAudio");
+            if (parkedAudio != null) phone.signal.put("parkedAudio", new JSONObject(parkedAudio.toString()));
             if (evaluated.rawRssi == null || !connected) {
                 if ("missing_signal".equals(evaluated.reason)
                         || !nativeProof && "disconnected".equals(evaluated.reason))

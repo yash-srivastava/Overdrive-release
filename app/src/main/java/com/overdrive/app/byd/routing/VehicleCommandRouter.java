@@ -2540,9 +2540,10 @@ public final class VehicleCommandRouter {
 
     /**
      * {@link VehicleCommand#wakeVehicleIfOff()}: power on, then write. Requires the live power
-     * level AND ACC to read off, since the power-on primer is a power-OFF frame. Cloud only when
-     * no power-on was sent: OPENAIR must never reach a car that may be coming on. Null = normal
-     * routing.
+     * level AND ACC to read off, since the power-on primer is a power-OFF frame. Cloud when no
+     * power-on was sent, or when the car ignored it and still reads off after the wait
+     * ({@link #ignoredPowerOnCloudRefusal}): OPENAIR must never reach a car that may be coming
+     * on. Null = normal routing.
      */
     private CommandResult runWithVehicleWake(VehicleCommand cmd) {
         // DiLink 5 virtualizes the bodywork power level and its local rail is unconfirmed.
@@ -2564,8 +2565,41 @@ public final class VehicleCommandRouter {
             return resolveEffectivePreference(cmd) != RoutePreference.SDK_ONLY
                     && cloudHandshakeSatisfied(cmd) ? runCloudOnly(cmd) : null;
         }
-        return CommandResult.failed(Path.SDK, msg("local_failed"),
-                System.currentTimeMillis() - start, null);
+        // NOT_ON. rc=0 only means the frames were delivered: some cars ignore the local
+        // power-on (field logs 2026-11-25: two Seal U DM-i, both plugged in). A car that reads
+        // exactly as off as before the wake ignored it; anything else may be coming on.
+        long elapsed = System.currentTimeMillis() - start;
+        CommandResult stopped = stoppedLocalAttempt(cmd, elapsed);
+        if (stopped != null) return stopped;
+        String refusal = ignoredPowerOnCloudRefusal(cmd, collector);
+        if (refusal != null) {
+            logger.warn("'" + cmd.name() + "': no cloud fallback after the power-on (" + refusal + ")");
+            return CommandResult.failed(Path.SDK, msg("local_failed"), elapsed, null);
+        }
+        logger.info("'" + cmd.name() + "': the car ignored the power-on and still reads off"
+                + " — sending it through the cloud");
+        CommandResult cloud = runCloudOnly(cmd);
+        return cloud.outcome == Outcome.SUCCESS
+                ? CommandResult.success(Path.SDK_THEN_CLOUD, msg("local_unavailable_used_cloud"),
+                        System.currentTimeMillis() - start)
+                : cloud;
+    }
+
+    /**
+     * Why a power-on that never landed must not fall back to the cloud, or null when it may:
+     * the wake's entry gate read again after the wait. Still ACC-off, live power level exactly
+     * 0, no switch-off edge, no remote session and nobody reported awake. Unreadable refuses.
+     */
+    private String ignoredPowerOnCloudRefusal(VehicleCommand cmd, BydDataCollector collector) {
+        if (!cmd.hasCloudPath()) return "no cloud leg";
+        if (resolveEffectivePreference(cmd) == RoutePreference.SDK_ONLY) return "sdk_only policy";
+        if (!cloudHandshakeSatisfied(cmd)) return "cloud not configured";
+        if (isRemoteClimateActive()) return "remote climate active";
+        if (isRecentPowerOff()) return "switched off during the wait";
+        if (!DrivingSafetyGuard.isAccConfirmedOff()) return "ACC not confirmed off";
+        if (cmd.localOnlyWhenAwake() && isVehicleOccupiedOrAwake()) return "awake or occupied";
+        int level = collector.readPowerLevelNow();
+        return level == POWER_LEVEL_OFF ? null : "power level " + level;
     }
 
     /** A climate write just after a switch-off is a power-off rule or an occupant, not a wake. */

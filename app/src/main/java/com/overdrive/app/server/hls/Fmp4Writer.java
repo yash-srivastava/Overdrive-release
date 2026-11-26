@@ -2,10 +2,8 @@ package com.overdrive.app.server.hls;
 
 import static com.overdrive.app.server.hls.Boxes.fourcc;
 
-import java.io.EOFException;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 
 /**
@@ -15,7 +13,6 @@ import java.nio.channels.FileChannel;
 public final class Fmp4Writer {
     static final int VIDEO_ID = 1;
     static final int AUDIO_ID = 2;
-    private static final int COPY_BUFFER = 64 * 1024;
     private static final int SYNC = 0x02000000;
     private static final int NON_SYNC = 0x01010000;
     private static final int[] IDENTITY = {0x00010000, 0, 0, 0, 0x00010000, 0, 0, 0, 0x40000000};
@@ -113,6 +110,37 @@ public final class Fmp4Writer {
     public static void writeSkimSegment(Mp4Index idx, FileChannel src, int n, int k, OutputStream out)
             throws IOException {
         write(idx, src, skimPlan(idx, n, k), out);
+    }
+
+    /** Prepare a normal media segment once, for both its length and its streamed body. */
+    public static PreparedSegment prepareMediaSegment(Mp4Index idx, int n, boolean silentAudio) {
+        return new PreparedSegment(idx, mediaPlan(idx, n, silentAudio));
+    }
+
+    /** Prepare a keyframe-only skim segment once. */
+    public static PreparedSegment prepareSkimSegment(Mp4Index idx, int n, int k) {
+        return new PreparedSegment(idx, skimPlan(idx, n, k));
+    }
+
+    /** Request-local metadata only; sample payloads are still streamed from the source file. */
+    public static final class PreparedSegment {
+        private final Mp4Index index;
+        private final Plan plan;
+
+        private PreparedSegment(Mp4Index index, Plan plan) {
+            this.index = index;
+            this.plan = plan;
+        }
+
+        /** Exact Content-Length of the prepared segment. */
+        public long length() {
+            return plan.length();
+        }
+
+        /** Write the prepared header and sample ranges, validating the source size again. */
+        public void writeTo(FileChannel src, OutputStream out) throws IOException {
+            write(index, src, plan, out);
+        }
     }
 
     static void checkK(int k) {
@@ -305,21 +333,6 @@ public final class Fmp4Writer {
         return d[n / 2];
     }
 
-    /** The whole clip's audio as Chromium plays it, back to back: real samples and silent frames (-1). */
-    private static final class ClipAudio {
-        final long f;
-        final long[] start;
-        final int[] sample;
-        final int n;
-
-        ClipAudio(long f, long[] start, int[] sample, int n) {
-            this.f = f;
-            this.start = start;
-            this.sample = sample;
-            this.n = n;
-        }
-    }
-
     private static final Object NO_FILL = new Object();
     // Clips run minutes; a span past this is a corrupt timestamp, not hours of silence to build.
     private static final long MAX_FILL_SECONDS = 3L * 3600L;
@@ -327,14 +340,14 @@ public final class Fmp4Writer {
             java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Mp4Index, Object>());
 
     /** Null when every sample already plays where its timestamp says (the plain traf path is exact). */
-    static ClipAudio clipAudio(Mp4Index idx) {
+    static ClipAudioTimeline clipAudio(Mp4Index idx) {
         Object cached = CLIP_AUDIO.get(idx);
         if (cached == null) {
-            ClipAudio built = buildClipAudio(idx);
+            ClipAudioTimeline built = buildClipAudio(idx);
             cached = built != null ? built : NO_FILL;
             CLIP_AUDIO.put(idx, cached);
         }
-        return cached instanceof ClipAudio ? (ClipAudio) cached : null;
+        return cached instanceof ClipAudioTimeline ? (ClipAudioTimeline) cached : null;
     }
 
     /**
@@ -342,95 +355,40 @@ public final class Fmp4Writer {
      * sample stretched over a late start, holes and an early end. A hole counts only when the lag
      * persists to the next sample, so timestamp jitter never shifts later audio.
      */
-    private static ClipAudio buildClipAudio(Mp4Index idx) {
+    private static ClipAudioTimeline buildClipAudio(Mp4Index idx) {
         Mp4Track a = idx.audio;
         long f = silenceFrameTicks(a);
         if (f <= 0) return null;
-        int gops = idx.gopCount();
         long clipStart = idx.silentTicks(0, a.timescale);
-        long clipEnd = idx.silentTicks(gops, a.timescale);
+        long clipEnd = idx.silentTicks(idx.gopCount(), a.timescale);
         if (clipEnd - clipStart > MAX_FILL_SECONDS * a.timescale) return null;
-        long em = a.editMediaTime;
-        int count = a.count;
-        long half = f / 2;
-        long[] start = new long[count + 64];
-        int[] sample = new int[count + 64];
-        int n = 0;
-        boolean filled = false;
-        // A stretched first sample decodes as one frame: its content is the frame just before sample 1.
-        long s0 = a.time[0] - em;
-        if (count > 1 && a.duration(0) > f + half) {
-            s0 = a.time[1] - em - f;
-            filled = true;
-        }
-        if (s0 - clipStart >= f && s0 <= clipEnd) {
-            for (long k = (s0 - clipStart) / f; k >= 1; k--) {
-                if (n == start.length) { start = java.util.Arrays.copyOf(start, n * 2); sample = java.util.Arrays.copyOf(sample, n * 2); }
-                start[n] = s0 - k * f;
-                sample[n++] = -1;
-            }
-            filled = true;
-        }
-        long cursor = s0;
-        for (int i = 0; i < count; i++) {
-            if (i > 0) {
-                long lag = a.time[i] - em - cursor;
-                long nextLag = i + 1 < count ? a.time[i + 1] - em - (cursor + f) : lag;
-                if (lag >= half && nextLag >= half) {
-                    // Silence never runs past the picture: a corrupt jump can't make millions of frames.
-                    long room = Math.max(0L, (clipEnd - cursor) / f);
-                    for (long k = Math.min((Math.min(lag, nextLag) + half) / f, room); k >= 1; k--) {
-                        if (n == start.length) { start = java.util.Arrays.copyOf(start, n * 2); sample = java.util.Arrays.copyOf(sample, n * 2); }
-                        start[n] = cursor;
-                        sample[n++] = -1;
-                        cursor += f;
-                    }
-                    filled = true;
-                }
-            }
-            if (n == start.length) { start = java.util.Arrays.copyOf(start, n * 2); sample = java.util.Arrays.copyOf(sample, n * 2); }
-            start[n] = cursor;
-            sample[n++] = i;
-            cursor += f;
-        }
-        if (clipEnd - cursor >= f) {
-            for (long k = (clipEnd - cursor) / f; k >= 1; k--) {
-                if (n == start.length) { start = java.util.Arrays.copyOf(start, n * 2); sample = java.util.Arrays.copyOf(sample, n * 2); }
-                start[n] = cursor;
-                sample[n++] = -1;
-                cursor += f;
-            }
-            filled = true;
-        }
-        if (!filled) return null;
-        return new ClipAudio(f, java.util.Arrays.copyOf(start, n), java.util.Arrays.copyOf(sample, n), n);
+        return ClipAudioTimeline.build(a.time, a.editMediaTime, f, clipStart, clipEnd);
     }
 
     /** GOP n's share of the clip's back-to-back audio, by entry start time; null when no fill is needed. */
     private static AudioRun filledRun(Mp4Index idx, int n) {
-        ClipAudio ca = clipAudio(idx);
+        ClipAudioTimeline ca = clipAudio(idx);
         if (ca == null) return null;
         Mp4Track a = idx.audio;
         int gops = idx.gopCount();
-        int from = n == 0 ? 0 : firstAtOrAfter(ca, idx.silentTicks(n, a.timescale));
-        int to = n + 1 >= gops ? ca.n : firstAtOrAfter(ca, idx.silentTicks(n + 1, a.timescale));
+        int from = n == 0 ? 0 : ca.firstAtOrAfter(idx.silentTicks(n, a.timescale));
+        int to = n + 1 >= gops ? ca.n : ca.firstAtOrAfter(idx.silentTicks(n + 1, a.timescale));
         RunBuilder b = new RunBuilder();
-        for (int e = from; e < to; e++) {
-            int smp = ca.sample[e];
-            b.add(smp, ca.f, smp < 0 ? SILENT_FRAME.length : a.size[smp], ca.start[e] + a.editMediaTime);
+        int e = from;
+        if (e < to) {
+            int run = ca.runAt(e);
+            while (e < to) {
+                int end = Math.min(to, ca.runEnd(run));
+                for (; e < end; e++) {
+                    int smp = ca.sampleAt(e, run);
+                    b.add(smp, ca.f, smp < 0 ? SILENT_FRAME.length : a.size[smp],
+                            ca.startAt(e) + a.editMediaTime);
+                }
+                run++;
+            }
         }
         if (b.n == 0) return new AudioRun(0, new int[0], new long[0], new int[0]);
         return b.build();
-    }
-
-    private static int firstAtOrAfter(ClipAudio ca, long t) {
-        int lo = 0;
-        int hi = ca.n;
-        while (lo < hi) {
-            int mid = (lo + hi) >>> 1;
-            if (ca.start[mid] < t) lo = mid + 1; else hi = mid;
-        }
-        return lo;
     }
 
     /** Silent 16 kHz frames on one 1024-tick grid from the clip's first picture; none overhang its end. */
@@ -475,60 +433,31 @@ public final class Fmp4Writer {
         // A changed file means the index (and the advertised length) is stale.
         if (src.size() != idx.fileLength()) throw new IOException("source changed since indexing");
         out.write(p.head);
-        ByteBuffer buf = ByteBuffer.allocate(COPY_BUFFER);
-        copySamples(idx.video, p.vFrom, p.vTo, src, out, buf);
+        SampleRangeCopier copier = new SampleRangeCopier(src::read, out);
+        copier.copySamples(idx.video.offset, idx.video.size, p.vFrom, p.vTo);
         if (p.run != null) {
-            writeRun(idx.audio, p.run, src, out, buf);
+            writeRun(idx.audio, p.run, out, copier);
             return;
         }
-        if (p.aTo > p.aFrom) copySamples(idx.audio, p.aFrom, p.aTo, src, out, buf);
+        if (p.aTo > p.aFrom) copier.copySamples(idx.audio.offset, idx.audio.size, p.aFrom, p.aTo);
         for (int i = 0; i < p.silentFrames; i++) out.write(SILENT_FRAME);
     }
 
-    private static void writeRun(Mp4Track a, AudioRun run, FileChannel src, OutputStream out,
-                                 ByteBuffer buf) throws IOException {
+    private static void writeRun(Mp4Track a, AudioRun run, OutputStream out,
+                                 SampleRangeCopier copier) throws IOException {
         int i = 0;
         while (i < run.count()) {
-            int s = run.sample[i];
-            if (s < 0) {
+            int first = run.sample[i++];
+            if (first < 0) {
                 out.write(SILENT_FRAME);
-                i++;
                 continue;
             }
-            long start = a.offset[s];
-            long end = start + a.size[s];
-            i++;
-            while (i < run.count() && run.sample[i] == s + 1 && a.offset[s + 1] == end) {
-                s++;
-                end += a.size[s];
+            int end = first + 1;
+            while (i < run.count() && run.sample[i] == end) {
+                end++;
                 i++;
             }
-            copyRange(src, start, end - start, out, buf);
-        }
-    }
-
-    private static void copySamples(Mp4Track t, int from, int to, FileChannel src, OutputStream out,
-                                    ByteBuffer buf) throws IOException {
-        int i = from;
-        while (i < to) {
-            long start = t.offset[i];
-            long end = start + t.size[i++];
-            while (i < to && t.offset[i] == end) end += t.size[i++];
-            copyRange(src, start, end - start, out, buf);
-        }
-    }
-
-    private static void copyRange(FileChannel src, long pos, long len, OutputStream out, ByteBuffer buf)
-            throws IOException {
-        byte[] a = buf.array();
-        while (len > 0) {
-            buf.clear();
-            if (len < buf.capacity()) buf.limit((int) len);
-            int r = src.read(buf, pos);
-            if (r <= 0) throw new EOFException("source truncated at " + pos);
-            out.write(a, 0, r);
-            pos += r;
-            len -= r;
+            copier.copySamples(a.offset, a.size, first, end);
         }
     }
 

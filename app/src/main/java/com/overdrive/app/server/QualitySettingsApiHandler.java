@@ -1,16 +1,20 @@
 package com.overdrive.app.server;
 
-import com.overdrive.app.storage.removable.RemovableStorageFs;
-
+import com.overdrive.app.camera.CameraConfigResolver;
+import com.overdrive.app.surveillance.GpuPipelineFactory;
+import com.overdrive.app.surveillance.HardwareEventRecorderGpu;
+import com.overdrive.app.surveillance.GpuPipelineConfig.VideoCodec;
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.storage.StorageManager;
+import com.overdrive.app.storage.removable.RemovableStorageFs;
+import com.overdrive.app.surveillance.GpuPipelineConfig.RecordingQuality;
+import com.overdrive.app.surveillance.GpuSurveillancePipeline;
 
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
-import java.io.FileWriter;
 import java.io.OutputStream;
 import java.util.LinkedHashMap;
 import java.util.Locale;
@@ -1352,6 +1356,9 @@ public class QualitySettingsApiHandler {
             int headroom = Math.max(2_000_000, budget - panoBps);
             oem.put("oemDashcamCameraId", oemId);
             oem.put("concurrentAvmSupported", concurrent);
+            // The dual-camera check never runs in Camera2 mode (ConcurrentAvmProbe.runIfNeeded).
+            oem.put("concurrentAvmProbeAvailable",
+                !com.overdrive.app.camera.camera2.Camera2Platform.isSelected());
             oem.put("bitrateBudget", budget);
             oem.put("panoBitrateBps", panoBps);
             oem.put("oemHeadroomBps", headroom);
@@ -1399,7 +1406,10 @@ public class QualitySettingsApiHandler {
         codecInfo.put("H264", "H.264/AVC (Compatible)");
         codecInfo.put("H265", "H.265/HEVC (50% smaller)");
         response.put("codecOptions", codecInfo);
-        
+
+        // Advisory hardware capabilities for the shared panoramic recording codec.
+        appendCodecAvailability(response, currentFps, currentSurveillanceFps, activeTier, survTier);
+
         // Add FPS options for UI. Range 10..30 — clamped server-side by
         // GpuSurveillancePipeline.applyFpsChange. The HAL on this device
         // tops out around 26 fps panoramic, so 30 will clamp gracefully.
@@ -1412,6 +1422,57 @@ public class QualitySettingsApiHandler {
         response.put("fpsOptions", fpsInfo);
         
         HttpResponse.sendJson(out, response.toString());
+    }
+
+    private static void appendCodecAvailability(JSONObject response, int driveFps, int parkedFps,
+            RecordingQuality driveTier, RecordingQuality parkedTier) throws Exception {
+        RecordingCodecAvailability.Result result = RecordingCodecAvailability.Result.UNKNOWN;
+        try {
+            GpuSurveillancePipeline pipeline = CameraDaemon.getGpuPipeline();
+            int width;
+            int height;
+            if (pipeline != null) {
+                width = pipeline.getEncoderWidth();
+                height = pipeline.getEncoderHeight();
+            } else {
+                int[] geometry = GpuPipelineFactory.resolveEncoderGeometry(
+                        CameraConfigResolver.resolve().getProfile(),
+                        CameraConfigResolver.isPassiveApaModeEnabled());
+                width = geometry[0];
+                height = geometry[1];
+            }
+            int override = pipeline == null ? 0 : pipeline.getConfig().getCustomBitrate();
+            HardwareEventRecorderGpu live = pipeline == null ? null : pipeline.getRecordingEncoder();
+            String mime = live == null ? null : live.getActiveOutputMimeType();
+            String name = mime == null ? null : live.getActiveEncoderName();
+            result = RecordingCodecAvailability.get(width, height, driveFps, parkedFps,
+                    driveTier, parkedTier, override, mime, name);
+            String runtimeCodec = VideoCodec.H264.mimeType.equals(mime) ? "H264"
+                    : VideoCodec.H265.mimeType.equals(mime) ? "H265" : null;
+            JSONObject runtime = new JSONObject()
+                    .put("codec", runtimeCodec == null ? JSONObject.NULL : runtimeCodec)
+                    .put("hevcFallback", "H264".equals(runtimeCodec) && live.hasHevcFallback());
+            if (runtimeCodec != null) {
+                runtime.put("encoderName", name == null ? JSONObject.NULL : name)
+                        .put("bitrate", live.getBitrate()).put("fps", live.getFps());
+            }
+            response.put("recordingCodecRuntime", runtime);
+            response.put("codecAvailabilityContext", new JSONObject()
+                    .put("width", width).put("height", height)
+                    .put("driveFps", driveFps).put("parkedFps", parkedFps)
+                    .put("driveQuality", driveTier.name()).put("parkedQuality", parkedTier.name())
+                    .put("customBitrate", override)
+                    .put("H264DriveBitrate", RecordingCodecAvailability.bitrate(VideoCodec.H264, driveFps, driveTier, override))
+                    .put("H264ParkedBitrate", RecordingCodecAvailability.bitrate(VideoCodec.H264, parkedFps, parkedTier, override))
+                    .put("H265DriveBitrate", RecordingCodecAvailability.bitrate(VideoCodec.H265, driveFps, driveTier, override))
+                    .put("H265ParkedBitrate", RecordingCodecAvailability.bitrate(VideoCodec.H265, parkedFps, parkedTier, override)));
+        } catch (RuntimeException | LinkageError e) {
+            CameraDaemon.log("Could not resolve recording encoder capabilities: " + e.getMessage());
+        }
+        response.put("codecAvailability", new JSONObject()
+                .put("H264", result.h264 == null ? JSONObject.NULL : result.h264)
+                .put("H265", result.h265 == null ? JSONObject.NULL : result.h265)
+                .put("stale", result.stale));
     }
 
     private static void handleQualitySettingsPost(OutputStream out, String body) throws Exception {

@@ -59,6 +59,15 @@ public class RecordingIdApiContractTest {
                 .contains("filename.substring(0, filename.length() - \".mp4\".length())"));
     }
 
+    @Test
+    public void watchedAcknowledgementSyncsBeforeReturningSuccess() throws IOException {
+        String source = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/server/RecordingsIndex.java");
+        String mark = methodBody(source, "public synchronized boolean markWatched(");
+        assertBefore(mark, "save.executeUpdate()", "sync.execute(\"CHECKPOINT SYNC\")");
+        assertBefore(mark, "sync.execute(\"CHECKPOINT SYNC\")", "return Boolean.TRUE");
+    }
+
     private static void assertBefore(String source, String first, String second) {
         int firstIndex = source.indexOf(first);
         int secondIndex = source.indexOf(second);

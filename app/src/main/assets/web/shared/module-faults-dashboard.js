@@ -3,6 +3,7 @@
     'use strict';
 
     var POLL_INTERVAL_MS = 60000;
+    var REQUEST_TIMEOUT_MS = 15000;
     var dashboard = {
         timer: null,
         request: null,
@@ -41,23 +42,42 @@
         refresh: function () {
             if (this.request) return this.request;
             var self = this;
-            this.request = window.fetch('/api/diagnostics/module-faults', {
+            var options = {
                 method: 'GET',
                 cache: 'no-store',
                 headers: { 'Accept': 'application/json' }
+            };
+            var abort = typeof window.AbortController === 'function' ? new window.AbortController() : null;
+            if (abort) options.signal = abort.signal;
+            var timeout;
+            var deadline = new Promise(function (resolve, reject) {
+                timeout = window.setTimeout(function () {
+                    reject(new Error('Module-fault diagnostics timed out'));
+                    if (abort) abort.abort();
+                }, REQUEST_TIMEOUT_MS);
+            });
+            var responsePayload = Promise.resolve().then(function () {
+                return window.fetch('/api/diagnostics/module-faults', options);
             }).then(function (response) {
                 return response.json().then(function (payload) {
                     if (!response.ok || !payload || payload.success !== true) {
                         throw new Error('Module-fault diagnostics unavailable');
                     }
-                    self.render(payload);
+                    return payload;
                 });
+            });
+            // Race the entire response, including its body. A timed-out response
+            // must never render, even on browsers that cannot abort fetch.
+            this.request = Promise.race([responsePayload, deadline]).then(function (payload) {
+                self.render(payload);
             }).catch(function () {
                 // A failed/stale diagnostics request must not imply that the
                 // vehicle is fault-free. Keep the last known warning visible.
             }).then(function () {
+                window.clearTimeout(timeout);
                 self.request = null;
             }, function () {
+                window.clearTimeout(timeout);
                 self.request = null;
             });
             return this.request;

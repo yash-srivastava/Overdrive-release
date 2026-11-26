@@ -29,6 +29,10 @@ const TRIPS = {
     routeLayer: null,
     sliderMarker: null,
     telemetryCache: null,
+    _socTrack: null,
+    // A row without a SoC reading keeps the previous one for this long (ms); past it the
+    // timeline breaks the SoC line and the readouts show '--' instead of a stale value.
+    _socHoldMs: 120000,
     radarScoresCache: null,
     rangeCache: null,
     pendingStorageType: null,
@@ -1768,48 +1772,12 @@ const TRIPS = {
         const title = document.getElementById('calendarTitle');
         if (!grid || !this._calMonth) return;
         const lang = BYD.i18n.getLang();
-        const year = this._calMonth.getFullYear(), month = this._calMonth.getMonth();
-        const monthDate = new Date(year, month, 1);
-        try { title.textContent = new Intl.DateTimeFormat(lang, { month: 'long' }).format(monthDate) + ' ' + year; }
-        catch (e) { title.textContent = monthDate.toLocaleDateString(lang, { month: 'long' }) + ' ' + year; }
-
-        grid.innerHTML = '';
-        let wkFmt; try { wkFmt = new Intl.DateTimeFormat(lang, { weekday: 'short' }); } catch (e) { wkFmt = null; }
-        for (let w = 0; w < 7; w++) {
-            const dd = new Date(2024, 0, 7 + w);   // 2024-01-07 is a Sunday
-            const el = document.createElement('div');
-            el.className = 'calendar-weekday';
-            el.textContent = wkFmt ? wkFmt.format(dd) : dd.toLocaleDateString(lang, { weekday: 'short' });
-            grid.appendChild(el);
-        }
-
-        const firstDay = new Date(year, month, 1).getDay();
-        const daysInMonth = new Date(year, month + 1, 0).getDate();
-        const daysInPrev = new Date(year, month, 0).getDate();
-        const todayKey = this._dateKey(new Date());
-        for (let i = firstDay - 1; i >= 0; i--) this._calDayCell(grid, daysInPrev - i, this._dateKey(new Date(year, month - 1, daysInPrev - i)), true, todayKey);
-        for (let day = 1; day <= daysInMonth; day++) this._calDayCell(grid, day, this._dateKey(new Date(year, month, day)), false, todayKey);
-        for (let d2 = 1; grid.children.length - 7 + d2 <= 42; d2++) this._calDayCell(grid, d2, this._dateKey(new Date(year, month + 1, d2)), true, todayKey);
+        const self = this;
+        ODRangeCalendar.render(grid, title, this._calMonth, lang,
+            this._calFromKey, this._calToKey, function (key) { self._calPick(key); });
 
         // Overlay dots on days that have trips (trips-specific enhancement).
         this.loadCalendarDots();
-    },
-
-    _calDayCell(grid, day, dateKey, otherMonth, todayKey) {
-        const self = this;
-        const el = document.createElement('div');
-        el.className = 'calendar-day';
-        el.textContent = day;
-        el.dataset.date = dateKey;
-        if (otherMonth) el.classList.add('other-month');
-        if (dateKey === todayKey) el.classList.add('today');
-        if (dateKey === this._calFromKey || dateKey === this._calToKey) el.classList.add('selected');
-        else if (this._calFromKey && this._calToKey && dateKey > this._calFromKey && dateKey < this._calToKey) el.classList.add('in-range');
-        // Disable future dates.
-        const today = new Date(); today.setHours(0, 0, 0, 0);
-        if (new Date(dateKey + 'T00:00:00') > today) el.classList.add('disabled');
-        else el.addEventListener('click', function () { self._calPick(dateKey); });
-        grid.appendChild(el);
     },
 
     _calPick(dateKey) {
@@ -1864,16 +1832,11 @@ const TRIPS = {
 
     // "YYYY-MM-DD" local date key.
     _dateKey(d) {
-        const m = d.getMonth() + 1, day = d.getDate();
-        return d.getFullYear() + '-' + (m < 10 ? '0' + m : m) + '-' + (day < 10 ? '0' + day : day);
+        return ODRangeCalendar.dateKey(d);
     },
     // date key → epoch-ms at local 00:00 (or 23:59:59.999 when endOfDay).
     _keyToMs(key, endOfDay) {
-        const p = key.split('-');
-        if (p.length !== 3) return null;
-        const y = parseInt(p[0], 10), mo = parseInt(p[1], 10) - 1, da = parseInt(p[2], 10);
-        if (isNaN(y) || isNaN(mo) || isNaN(da)) return null;
-        return (endOfDay ? new Date(y, mo, da, 23, 59, 59, 999) : new Date(y, mo, da, 0, 0, 0, 0)).getTime();
+        return ODRangeCalendar.keyToMs(key, endOfDay);
     },
 
     renderStorageUsage(usedMb, limitMb, count, unit) {
@@ -2116,16 +2079,30 @@ const TRIPS = {
             this.currentDays, this.currentOffset, this.currentCursor);
     },
 
-    /** The trips in the order renderTripList shows them (grouped by day). */
-    _displayedTrips() {
+    _groupTripsByDay(trips) {
         const groups = {};
-        (this.trips || []).forEach(t => {
-            const day = new Date(t.startTime || t.start_time).toLocaleDateString(BYD.i18n.getLang(), {
-                weekday: 'long', month: 'short', day: 'numeric'
-            });
+        const options = { weekday: 'long', month: 'short', day: 'numeric' };
+        let formatter = null;
+        // Reuse the locale formatter within this synchronous pass only.
+        // The next pass picks up locale and time-zone changes.
+        if (trips.length > 1 && typeof Intl !== 'undefined' && typeof Intl.DateTimeFormat === 'function') {
+            try { formatter = new Intl.DateTimeFormat(BYD.i18n.getLang(), options); }
+            catch (e) { /* Retain the original Date path on older engines. */ }
+        }
+        trips.forEach(t => {
+            const date = new Date(t.startTime || t.start_time);
+            // Unlike Date.toLocaleDateString, Intl.format throws on invalid dates.
+            const day = formatter && Number.isFinite(date.getTime())
+                ? formatter.format(date) : date.toLocaleDateString(BYD.i18n.getLang(), options);
             if (!groups[day]) groups[day] = [];
             groups[day].push(t);
         });
+        return groups;
+    },
+
+    /** The trips in the order renderTripList shows them (grouped by day). */
+    _displayedTrips() {
+        const groups = this._groupTripsByDay(this.trips || []);
         const ordered = [];
         Object.keys(groups).forEach(day => { groups[day].forEach(t => ordered.push(t)); });
         return ordered;
@@ -2193,14 +2170,7 @@ const TRIPS = {
         container.innerHTML = '';
         if (skel) container.appendChild(skel);
 
-        const groups = {};
-        trips.forEach(t => {
-            const day = new Date(t.startTime || t.start_time).toLocaleDateString(BYD.i18n.getLang(), {
-                weekday: 'long', month: 'short', day: 'numeric'
-            });
-            if (!groups[day]) groups[day] = [];
-            groups[day].push(t);
-        });
+        const groups = this._groupTripsByDay(trips);
 
         Object.keys(groups).forEach(day => {
             const header = document.createElement('h3');
@@ -3497,6 +3467,7 @@ const TRIPS = {
     },
 
     _clearDetailCanvas(id) {
+        if (id === 'timelineChart') this._releaseTimelineBase();
         const canvas = document.getElementById(id);
         if (!canvas) return;
         canvas.onmousemove = null;
@@ -3522,6 +3493,7 @@ const TRIPS = {
         this.telemetryCache = null;
         this.currentTripData = null;
         this._timelineAxis = null;
+        this._socTrack = null;
         this.routeLayer = null;
         this.sliderMarker = null;
         this._mapRetries = 0;
@@ -4026,11 +3998,27 @@ const TRIPS = {
         }
 
         const key = useElapsed ? 'e' : 't';
+        // Wall-clock corrections can make legacy timestamps run backwards.
+        // Only use binary search when the chosen axis is actually ordered.
+        let ordered = useElapsed;
+        if (!useElapsed && samples && samples.length) {
+            ordered = true;
+            let previous = -Infinity;
+            for (let i = 0; i < samples.length; i++) {
+                const t = samples[i] && samples[i].t;
+                if (typeof t !== 'number' || !isFinite(t) || t < previous) {
+                    ordered = false;
+                    break;
+                }
+                previous = t;
+            }
+        }
         const start = samples && samples.length ? samples[0][key] : 0;
         const end = samples && samples.length ? samples[samples.length - 1][key] : start;
         return {
             samples: samples,
             key: key,
+            ordered: ordered,
             start: start,
             end: end,
             range: end - start || 1
@@ -4042,6 +4030,77 @@ const TRIPS = {
             this._timelineAxis = this._selectTimelineAxis(samples);
         }
         return this._timelineAxis;
+    },
+
+    _closestTimelineSample(samples, axisKey, target) {
+        const axis = this._timelineAxisFor(samples);
+        if (axis.ordered && axis.key === axisKey && isFinite(target)) {
+            const lowerBound = value => {
+                let lo = 0, hi = samples.length;
+                while (lo < hi) {
+                    const mid = lo + Math.floor((hi - lo) / 2);
+                    if (samples[mid][axisKey] < value) lo = mid + 1;
+                    else hi = mid;
+                }
+                return lo;
+            };
+            const right = lowerBound(target);
+            if (right === 0) return 0;
+            const leftValue = samples[right - 1][axisKey];
+            if (right < samples.length && samples[right][axisKey] - target < target - leftValue) {
+                return right;
+            }
+            // Match the old strict-less-than scan: earliest row wins ties,
+            // including duplicate timestamps on the left of the target.
+            return isFinite(target - leftValue) ? lowerBound(leftValue) : 0;
+        }
+        let closest = 0, minDiff = Infinity;
+        for (let i = 0; i < samples.length; i++) {
+            const diff = Math.abs(samples[i][axisKey] - target);
+            if (diff < minDiff) { minDiff = diff; closest = i; }
+        }
+        return closest;
+    },
+
+    /** A telemetry row's recorded battery SoC ('so'), or NaN. 0 is "no reading", as for a trip's SoC. */
+    _socReading(sample) {
+        const so = sample ? Number(sample.so) : NaN;
+        return isFinite(so) && so > 0 && so <= 100 ? so : NaN;
+    },
+
+    /**
+     * The battery SoC the car reported along the trip, or null when no row carries one (trips
+     * recorded before rows carried SoC). at[i] is row i's reading, or the previous one held for
+     * up to _socHoldMs. Those older trips get no SoC line: the straight line from start to end
+     * SoC drawn before misread any trip whose charge was held (a PHEV in HEV mode) or rose.
+     */
+    _socTrackFor(samples) {
+        if (this._socTrack && this._socTrack.samples === samples) return this._socTrack.track;
+        const axisKey = this._timelineAxisFor(samples).key;
+        let track = null;
+        if (samples && samples.length) {
+            const at = new Array(samples.length);
+            let heldSoc = NaN, heldAt = NaN;
+            let first = NaN, last = NaN, min = Infinity, max = -Infinity;
+            for (let i = 0; i < samples.length; i++) {
+                const soc = this._socReading(samples[i]);
+                const t = samples[i] ? samples[i][axisKey] : NaN;
+                if (isFinite(soc)) {
+                    heldSoc = soc;
+                    heldAt = t;
+                    if (!isFinite(first)) first = soc;
+                    last = soc;
+                    if (soc < min) min = soc;
+                    if (soc > max) max = soc;
+                    at[i] = soc;
+                } else {
+                    at[i] = t - heldAt <= this._socHoldMs ? heldSoc : NaN;
+                }
+            }
+            if (isFinite(first)) track = { at: at, first: first, last: last, min: min, max: max };
+        }
+        this._socTrack = { samples: samples, track: track };
+        return track;
     },
 
     setupTimelineSlider(samples) {
@@ -4124,7 +4183,7 @@ const TRIPS = {
         return Math.atan2(sumSin / pairs, sumCos / pairs) * 180 / Math.PI;
     },
 
-    updateSliderDisplay(idx) {
+    updateSliderDisplay(idx, skipTimeline) {
         const samples = this.telemetryCache;
         if (!samples || idx >= samples.length) return;
         const s = samples[idx];
@@ -4139,15 +4198,10 @@ const TRIPS = {
         this.setEl('sliderBrake', s.b || 0);
         this.setEl('sliderCurrentTime', min + ':' + (sec < 10 ? '0' : '') + sec);
 
-        // SoC interpolated
-        const tripData = this.currentTripData;
-        if (tripData) {
-            const socS = parseFloat(tripData.socStart || tripData.soc_start || 0);
-            const socE = parseFloat(tripData.socEnd || tripData.soc_end || 0);
-            const totalSamples = samples.length - 1;
-            const socAtIdx = totalSamples > 0 ? socS + (socE - socS) * (idx / totalSamples) : socS;
-            this.setEl('sliderSoc', socAtIdx.toFixed(1));
-        }
+        // SoC the car reported at this row ('--' on trips recorded without per-row SoC)
+        const socTrack = this._socTrackFor(samples);
+        const socAtIdx = socTrack ? socTrack.at[idx] : NaN;
+        this.setEl('sliderSoc', isFinite(socAtIdx) ? socAtIdx.toFixed(1) : '--');
 
         // 2. Sync Map Marker with heading rotation
         if (this.leafletMap && this.sliderMarker && this._telemetryHasGps(s)) {
@@ -4197,7 +4251,7 @@ const TRIPS = {
 
         // 3. Sync Timeline chart scrubber
         const tlCanvas = document.getElementById('timelineChart');
-        if (tlCanvas && samples.length > 1) {
+        if (!skipTimeline && tlCanvas && samples.length > 1) {
             this.renderTimeline(tlCanvas, samples, idx);
         }
     },
@@ -5143,128 +5197,95 @@ const TRIPS = {
 
     // ==================== TIMELINE CHART ====================
 
+    _releaseTimelineBase() {
+        if (this._timelineBase) {
+            // Release the extra backing store rather than retaining the last trip.
+            this._timelineBase.image.width = 0;
+            this._timelineBase = null;
+        }
+    },
+
     renderTimeline(canvas, telemetry, highlightIdx) {
         const dpr = window.devicePixelRatio || 1;
         const rect = canvas.getBoundingClientRect();
-        // Fallback for zero-height containers on old WebView without aspect-ratio
+        // Fallback for zero-height containers on old WebView without aspect-ratio.
         const w = rect.width || 300;
         const h = rect.height > 0 ? rect.height : 160;
-        canvas.width = w * dpr;
-        canvas.height = h * dpr;
-        canvas.style.width = w + 'px';
-        canvas.style.height = h + 'px';
-        const ctx = canvas.getContext('2d');
-        ctx.scale(dpr, dpr);
-
         const pad = { top: 10, right: 40, bottom: 25, left: 50 };
         const cw = w - pad.left - pad.right;
         const ch = h - pad.top - pad.bottom;
-
-        ctx.clearRect(0, 0, w, h);
-        if (!telemetry || telemetry.length < 2) return;
+        if (!telemetry || telemetry.length < 2) {
+            this._releaseTimelineBase();
+            canvas.width = w * dpr;
+            canvas.height = h * dpr;
+            canvas.style.width = w + 'px';
+            canvas.style.height = h + 'px';
+            return;
+        }
 
         const axis = this._timelineAxisFor(telemetry);
         const axisKey = axis.key;
         const tStart = axis.start;
         const tRange = axis.range;
-        const maxSpeed = Math.max(10, ...telemetry.map(s => s.s || 0));
-
-        // Grid lines
-        ctx.strokeStyle = this.colors.grid;
-        ctx.lineWidth = 1;
-        for (let i = 0; i <= 4; i++) {
-            const y = pad.top + (ch * i / 4);
-            ctx.beginPath();
-            ctx.moveTo(pad.left, y);
-            ctx.lineTo(w - pad.right, y);
-            ctx.stroke();
-            ctx.fillStyle = this.colors.text;
-            ctx.font = '10px Inter, sans-serif';
-            ctx.textAlign = 'right';
-            ctx.fillText(Math.round(maxSpeed * (1 - i / 4)), pad.left - 6, y + 3);
-        }
-
-        // Brake area (red, from bottom)
-        ctx.beginPath();
-        ctx.moveTo(pad.left, pad.top + ch);
-        telemetry.forEach((s, i) => {
-            const x = pad.left + ((s[axisKey] - tStart) / tRange) * cw;
-            const y = pad.top + ch - ((s.b || 0) / 100) * ch;
-            ctx.lineTo(x, y);
-        });
-        ctx.lineTo(pad.left + cw, pad.top + ch);
-        ctx.closePath();
-        ctx.fillStyle = 'rgba(239, 68, 68, 0.2)';
-        ctx.fill();
-
-        // Accel pedal area (blue, from bottom)
-        ctx.beginPath();
-        ctx.moveTo(pad.left, pad.top + ch);
-        telemetry.forEach((s, i) => {
-            const x = pad.left + ((s[axisKey] - tStart) / tRange) * cw;
-            const y = pad.top + ch - ((s.a || 0) / 100) * ch;
-            ctx.lineTo(x, y);
-        });
-        ctx.lineTo(pad.left + cw, pad.top + ch);
-        ctx.closePath();
-        ctx.fillStyle = 'rgba(14, 165, 233, 0.15)';
-        ctx.fill();
-
-        // Speed line
-        ctx.beginPath();
-        telemetry.forEach((s, i) => {
-            const x = pad.left + ((s[axisKey] - tStart) / tRange) * cw;
-            const y = pad.top + ch - ((s.s || 0) / maxSpeed) * ch;
-            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        });
-        ctx.strokeStyle = this.colors.brand;
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-
-        // X-axis labels
-        ctx.fillStyle = this.colors.text;
-        ctx.font = '10px Inter, sans-serif';
-        ctx.textAlign = 'center';
-        const durMin = tRange / 60000;
+        const socTrack = this._socTrackFor(telemetry);
         const minSuf = BYD.units.minuteSuffix(false, false);
-        ctx.fillText('0' + minSuf, pad.left, h - 5);
-        ctx.fillText(Math.round(durMin / 2) + minSuf, pad.left + cw / 2, h - 5);
-        ctx.fillText(Math.round(durMin) + minSuf, w - pad.right, h - 5);
-
-        // SoC% interpolated line (right Y-axis, zoomed to actual range)
-        const tripData = this.currentTripData;
-        const socStart = tripData ? parseFloat(tripData.socStart || tripData.soc_start || 0) : 0;
-        const socEnd = tripData ? parseFloat(tripData.socEnd || tripData.soc_end || 0) : 0;
-        const hasSoc = socStart > 0 || socEnd > 0;
-
-        if (hasSoc) {
-            // Use a zoomed Y range: pad 5% above and below the actual SoC range
-            const socMin = Math.max(0, Math.min(socStart, socEnd) - 5);
-            const socMax = Math.min(100, Math.max(socStart, socEnd) + 5);
-            const socRange = socMax - socMin || 1;
-
-            // Right Y-axis labels
-            ctx.fillStyle = 'rgba(245,158,11,0.7)';
-            ctx.font = '10px Inter, sans-serif';
-            ctx.textAlign = 'right';
-            ctx.fillText(socStart.toFixed(1) + '%', w - 2, pad.top + ch - ((socStart - socMin) / socRange) * ch + 3);
-            ctx.fillText(socEnd.toFixed(1) + '%', w - 2, pad.top + ch - ((socEnd - socMin) / socRange) * ch + 3);
-
-            // SoC line
-            ctx.beginPath();
-            telemetry.forEach((s, i) => {
-                const x = pad.left + ((s[axisKey] - tStart) / tRange) * cw;
-                const progress = (s[axisKey] - tStart) / tRange;
-                const soc = socStart + (socEnd - socStart) * progress;
-                const y = pad.top + ch - ((soc - socMin) / socRange) * ch;
-                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-            });
-            ctx.strokeStyle = 'rgba(245,158,11,0.6)';
-            ctx.lineWidth = 1.5;
-            ctx.setLineDash([6, 4]);
-            ctx.stroke();
-            ctx.setLineDash([]);
+        const palette = [this.colors.grid, this.colors.text, this.colors.brand].join('|');
+        let ctx = canvas.getContext('2d');
+        const cached = this._timelineBase;
+        const fontsReady = !document.fonts || document.fonts.status !== 'loading';
+        let reused = false;
+        // Telemetry arrays are replaced on detail loads, never edited in place.
+        if (fontsReady && cached && cached.canvas === canvas && cached.samples === telemetry
+                && cached.w === w && cached.h === h && cached.dpr === dpr
+                && cached.palette === palette && cached.minSuf === minSuf
+                && canvas.width === cached.image.width && canvas.height === cached.image.height) {
+            try {
+                // Copy at backing-store resolution; avoid fractional-DPR resampling.
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(cached.image, 0, 0);
+                ctx.scale(dpr, dpr);
+                reused = true;
+            } catch (e) { /* fall back to the original full draw */ }
         }
+        let maxSpeed;
+        if (reused) {
+            maxSpeed = cached.maxSpeed;
+        } else {
+            this._releaseTimelineBase();
+            canvas.width = w * dpr;
+            canvas.height = h * dpr;
+            canvas.style.width = w + 'px';
+            canvas.style.height = h + 'px';
+            ctx = canvas.getContext('2d');
+            ctx.scale(dpr, dpr);
+            ctx.clearRect(0, 0, w, h);
+            // Avoid a temporary array and the argument-count limit of Math.max(...samples).
+            maxSpeed = 10;
+            for (let i = 0; i < telemetry.length; i++) {
+                maxSpeed = Math.max(maxSpeed, telemetry[i].s || 0);
+            }
+            this._drawTimelineBase(ctx, telemetry, axis, w, h, pad, cw, ch, maxSpeed, socTrack, minSuf);
+            // One ordinary detached Canvas2D (Chrome 58 compatible), at most 4 MiB
+            // of nominal RGBA pixels. Large canvases keep the full redraw path.
+            if (fontsReady && (!document.fonts || document.fonts.status !== 'loading')
+                    && canvas.width > 0 && canvas.height > 0 && canvas.width * canvas.height <= 1048576
+                    && typeof ctx.setTransform === 'function' && typeof ctx.drawImage === 'function') {
+                let image;
+                try {
+                    image = document.createElement('canvas');
+                    image.width = canvas.width;
+                    image.height = canvas.height;
+                    image.getContext('2d').drawImage(canvas, 0, 0);
+                    this._timelineBase = { canvas, samples: telemetry, w, h, dpr, palette, minSuf, maxSpeed, image };
+                } catch (e) {
+                    if (image) image.width = 0;
+                    // No cache is needed for correctness on older/limited renderers.
+                }
+            }
+        }
+        const socLegend = document.getElementById('tlLegendSoc');
+        if (socLegend) socLegend.style.display = socTrack ? 'flex' : 'none';
 
         // Compute pedal stats on first render
         if (highlightIdx === undefined) {
@@ -5328,15 +5349,118 @@ const TRIPS = {
                     + ' ' + BYD.units.speedLabel(), tx + 8, ty + 15);
             ctx.fillText('Accel: ' + (s.a || 0) + '%', tx + 8, ty + 30);
             ctx.fillText('Brake: ' + (s.b || 0) + '%', tx + 8, ty + 45);
-            // SoC interpolated
-            if (hasSoc) {
-                const progress = (s[axisKey] - tStart) / tRange;
-                const socAtPoint = socStart + (socEnd - socStart) * progress;
+            // SoC the car reported at this row
+            const socAtPoint = socTrack ? socTrack.at[highlightIdx] : NaN;
+            if (isFinite(socAtPoint)) {
                 ctx.fillStyle = 'rgba(245,158,11,0.8)';
                 ctx.fillText('SoC: ' + socAtPoint.toFixed(1) + '%', tx + 8, ty + 60);
             }
-        } else {
+        }
+        if (!reused || highlightIdx === undefined) {
             this.setupChartHover(canvas, telemetry, axisKey, tStart, tRange, cw, pad);
+        }
+    },
+
+    _drawTimelineBase(ctx, telemetry, axis, w, h, pad, cw, ch, maxSpeed, socTrack, minSuf) {
+        const axisKey = axis.key;
+        const tStart = axis.start;
+        const tRange = axis.range;
+        // Grid lines
+        ctx.strokeStyle = this.colors.grid;
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 4; i++) {
+            const y = pad.top + (ch * i / 4);
+            ctx.beginPath();
+            ctx.moveTo(pad.left, y);
+            ctx.lineTo(w - pad.right, y);
+            ctx.stroke();
+            ctx.fillStyle = this.colors.text;
+            ctx.font = '10px Inter, sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText(Math.round(maxSpeed * (1 - i / 4)), pad.left - 6, y + 3);
+        }
+
+        // Brake area (red, from bottom)
+        ctx.beginPath();
+        ctx.moveTo(pad.left, pad.top + ch);
+        telemetry.forEach((s, i) => {
+            const x = pad.left + ((s[axisKey] - tStart) / tRange) * cw;
+            const y = pad.top + ch - ((s.b || 0) / 100) * ch;
+            ctx.lineTo(x, y);
+        });
+        ctx.lineTo(pad.left + cw, pad.top + ch);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.2)';
+        ctx.fill();
+
+        // Accel pedal area (blue, from bottom)
+        ctx.beginPath();
+        ctx.moveTo(pad.left, pad.top + ch);
+        telemetry.forEach((s, i) => {
+            const x = pad.left + ((s[axisKey] - tStart) / tRange) * cw;
+            const y = pad.top + ch - ((s.a || 0) / 100) * ch;
+            ctx.lineTo(x, y);
+        });
+        ctx.lineTo(pad.left + cw, pad.top + ch);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(14, 165, 233, 0.15)';
+        ctx.fill();
+
+        // Speed line
+        ctx.beginPath();
+        telemetry.forEach((s, i) => {
+            const x = pad.left + ((s[axisKey] - tStart) / tRange) * cw;
+            const y = pad.top + ch - ((s.s || 0) / maxSpeed) * ch;
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.strokeStyle = this.colors.brand;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // X-axis labels
+        ctx.fillStyle = this.colors.text;
+        ctx.font = '10px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        const durMin = tRange / 60000;
+        ctx.fillText('0' + minSuf, pad.left, h - 5);
+        ctx.fillText(Math.round(durMin / 2) + minSuf, pad.left + cw / 2, h - 5);
+        ctx.fillText(Math.round(durMin) + minSuf, w - pad.right, h - 5);
+
+        // SoC% line (right Y-axis, zoomed to the recorded range): the SoC the car reported
+        // along the trip, so a charge held in HEV mode reads flat. Trips recorded without
+        // per-row SoC draw no line (and hide its legend entry) rather than a made-up one.
+        if (socTrack) {
+            // Use a zoomed Y range: pad 5% above and below the recorded SoC range
+            const socMin = Math.max(0, socTrack.min - 5);
+            const socMax = Math.min(100, socTrack.max + 5);
+            const socRange = socMax - socMin || 1;
+            const socY = soc => pad.top + ch - ((soc - socMin) / socRange) * ch;
+
+            // Right Y-axis labels: first and last reading (one label when they would overlap)
+            ctx.fillStyle = 'rgba(245,158,11,0.7)';
+            ctx.font = '10px Inter, sans-serif';
+            ctx.textAlign = 'right';
+            if (Math.abs(socY(socTrack.first) - socY(socTrack.last)) >= 11) {
+                ctx.fillText(socTrack.first.toFixed(1) + '%', w - 2, socY(socTrack.first) + 3);
+            }
+            ctx.fillText(socTrack.last.toFixed(1) + '%', w - 2, socY(socTrack.last) + 3);
+
+            // SoC line through the readings, broken where they stop for longer than _socHoldMs
+            ctx.beginPath();
+            let prevAt = NaN;
+            telemetry.forEach(s => {
+                const soc = this._socReading(s);
+                if (!isFinite(soc)) return;
+                const x = pad.left + ((s[axisKey] - tStart) / tRange) * cw;
+                if (s[axisKey] - prevAt <= this._socHoldMs) ctx.lineTo(x, socY(soc));
+                else ctx.moveTo(x, socY(soc));
+                prevAt = s[axisKey];
+            });
+            ctx.strokeStyle = 'rgba(245,158,11,0.6)';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([6, 4]);
+            ctx.stroke();
+            ctx.setLineDash([]);
         }
     },
 
@@ -5351,14 +5475,10 @@ const TRIPS = {
             if (mx < pad.left || mx > pad.left + cw) return;
             const relX = mx - pad.left;
             const targetT = tStart + (relX / cw) * tRange;
-            let closest = 0, minDiff = Infinity;
-            for (let i = 0; i < telemetry.length; i++) {
-                const diff = Math.abs(telemetry[i][axisKey] - targetT);
-                if (diff < minDiff) { minDiff = diff; closest = i; }
-            }
+            const closest = self._closestTimelineSample(telemetry, axisKey, targetT);
             self.renderTimeline(canvas, telemetry, closest);
             const slider = document.getElementById('timelineSlider');
-            if (slider) { slider.value = closest; self.updateSliderDisplay(closest); }
+            if (slider) { slider.value = closest; self.updateSliderDisplay(closest, true); }
         };
         canvas.onmouseleave = function() {
             self.renderTimeline(canvas, telemetry);
@@ -5385,14 +5505,10 @@ const TRIPS = {
                 if (mx < pad.left || mx > pad.left + cw) return;
                 const relX = mx - pad.left;
                 const targetT = tStart + (relX / cw) * tRange;
-                let closest = 0, minDiff = Infinity;
-                for (let i = 0; i < telemetry.length; i++) {
-                    const diff = Math.abs(telemetry[i][axisKey] - targetT);
-                    if (diff < minDiff) { minDiff = diff; closest = i; }
-                }
+                const closest = self._closestTimelineSample(telemetry, axisKey, targetT);
                 self.renderTimeline(canvas, telemetry, closest);
                 const slider = document.getElementById('timelineSlider');
-                if (slider) { slider.value = closest; self.updateSliderDisplay(closest); }
+                if (slider) { slider.value = closest; self.updateSliderDisplay(closest, true); }
             }
         };
         canvas.ontouchend = function() {
@@ -5592,6 +5708,44 @@ const TRIPS = {
             + this.esc(msg) + '</div>';
     },
 
+    _renderRouteRibbon(points, map) {
+        if (points.length < 2) return;
+        var coords = points.map(function (p) { return [p.la, p.lo]; });
+        // One missing speed disables the speed legend for the entire ribbon.
+        for (var i = 0; i < points.length; i++) {
+            if (typeof points[i].s !== 'number' || !isFinite(points[i].s)) {
+                L.polyline(coords, { color: this.colors.brand, weight: 4, opacity: 0.85 }).addTo(map);
+                return;
+            }
+        }
+
+        // Each edge keeps its destination sample's speed band. Batch disjoint
+        // runs of the same color as separate subpaths of a single Leaflet layer.
+        // This bounds layer/DOM count to three without joining unrelated runs.
+        var bands = Object.create(null);
+        var order = [];
+        var runColor = null;
+        var run = null;
+        for (var j = 1; j < coords.length; j++) {
+            var color = this._speedColorForRoute(points[j].s);
+            if (color !== runColor) {
+                if (!bands[color]) {
+                    bands[color] = [];
+                    order.push(color);
+                }
+                run = [coords[j - 1]];
+                bands[color].push(run);
+                runColor = color;
+            }
+            run.push(coords[j]);
+        }
+        // First-seen band order preserves the old stacking for non-repeated bands.
+        for (var k = 0; k < order.length; k++) {
+            var band = order[k];
+            L.polyline(bands[band], { color: band, weight: 4, opacity: 0.85 }).addTo(map);
+        }
+    },
+
     renderRouteMap(container, telemetry, detailRequest) {
         if (detailRequest && !this._isCurrentDetailRequest(detailRequest)) return;
         const isCurrentMap = () => {
@@ -5693,43 +5847,7 @@ const TRIPS = {
 
         console.log('[Trips] Map created successfully, tiles added, bounds set');
 
-        // Route ribbon, colored by speed (matches the map legend: green <40,
-        // yellow 40–80, red >80 km/h). Leaflet can't gradient a single polyline,
-        // so we walk the points and emit one polyline per RUN of same-colored
-        // samples — merging consecutive same-band points keeps the layer count
-        // near the number of band transitions instead of one-per-sample, which
-        // matters on the old WebView for long/dense trips. Each run is seeded
-        // with the previous point so the bands stay visually joined (no gaps).
-        //
-        // Fallback: only color when EVERY retained point carries a numeric speed.
-        // A trip with any missing `.s` would otherwise mix in the brand color and
-        // show an undocumented 4th band, so in that case we draw the original
-        // single flat-brand ribbon exactly as before.
-        var coords = points.map(function (p) { return [p.la, p.lo]; });
-        var hasAllSpeeds = true;
-        for (var si = 0; si < points.length; si++) {
-            if (typeof points[si].s !== 'number' || !isFinite(points[si].s)) { hasAllSpeeds = false; break; }
-        }
-        if (!hasAllSpeeds) {
-            L.polyline(coords, { color: this.colors.brand, weight: 4, opacity: 0.85 }).addTo(this.leafletMap);
-        } else {
-            var runStart = 0;
-            var runColor = this._speedColorForRoute(points[0].s);
-            for (var i = 1; i <= points.length; i++) {
-                var segColor = (i < points.length) ? this._speedColorForRoute(points[i].s) : null;
-                // Flush the run when the color changes or we reach the end.
-                if (i === points.length || segColor !== runColor) {
-                    L.polyline(coords.slice(runStart, i), {
-                        color: runColor,
-                        weight: 4,
-                        opacity: 0.85
-                    }).addTo(this.leafletMap);
-                    // Start the next run one point back so it connects to this one.
-                    runStart = i - 1;
-                    runColor = segColor;
-                }
-            }
-        }
+        this._renderRouteRibbon(points, this.leafletMap);
 
         // Start marker
         var startIcon = L.divIcon({

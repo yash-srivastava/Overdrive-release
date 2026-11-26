@@ -4,44 +4,22 @@ import com.overdrive.app.logging.DaemonLogger;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ConcurrentLinkedDeque;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * AacCircularBuffer — small in-memory ring of recent AAC access units, used to
  * give event recordings audio at frame 0 instead of the previous "5 seconds of
  * silent video at every event start".
  *
- * <p>This is the audio counterpart to {@link H264ByteRingBuffer}, but the
- * design is deliberately simpler: AAC frames at 64 kbps / 48 kHz / mono run
- * ~256 bytes each at 20 ms cadence (~50 frames per second). Even the internal
- * 62-second window is only ~3100 packets and under 1 MB of payload — small
- * enough that a lock-free deque + per-packet heap copies are cheaper and
- * easier to reason about than the seqlock-validated direct-byte arena the
- * video ring needs.
+ * <p>One lazily allocated byte arena packs variable-length frames, with a
+ * circular primitive header table for lengths and PTSs. The producer copies
+ * into the arena without allocating a packet, payload array or deque node
+ * once storage is warm. Exported packets own their bytes.
  *
- * <h3>Concurrency model</h3>
- * Single producer (the daemon's audio ingest thread, calling
- * {@link #add(byte[], int, int, long)}) plus a single consumer (the
- * trigger/event thread, calling {@link #drainAll()} or
- * {@link #snapshotRange(long, long)}). {@link #clear()} is called from start-up
- * and audio-disable paths. All operations are wait-free apart from
- * {@link ConcurrentLinkedDeque}'s internal CAS retries.
- *
- * <h3>Eviction</h3>
- * FIFO under a byte budget. The budget is sized for the configured pre-record
- * window with a 1.5× headroom so AAC frame-size variability (CBR is "constant"
- * only on average) doesn't truncate the window when a few back-to-back frames
- * land slightly above the bitrate-time product. At 62 s × 64 kbps that's
- * 62 × 64000 / 8 × 1.5 = 744 000 bytes — still negligible vs. the video
- * ring.
- *
- * <p>Note: the byte counter is best-effort under contention. {@link #drainAll}
- * resets it to zero after polling the deque so any concurrent {@link #add}
- * that lands during the drain (rare; the audio ingest thread is the sole
- * producer and a drain is microseconds) self-corrects on the next add — the
- * absolute count drifts within a packet's worth, which is well inside the
- * 1.5× budget headroom.
+ * <p>All ring operations share a monitor. Snapshot/drain hold it while copying
+ * the selected bytes; no muxer or storage I/O takes place under this lock.
+ * FIFO eviction uses the same byte budget as before (744,000 bytes at 62 s
+ * and 64 kbps), with no extra packet-count limit. Header storage grows only
+ * as needed and is bounded by the byte budget (every packet is nonempty).
  *
  * <h3>What this ring does NOT do</h3>
  * <ul>
@@ -53,7 +31,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  *       the existing {@code writeRebasedAudio} machinery anchors them to the
  *       segment's {@code ptsOriginUs}.</li>
  *   <li>It is not bounded by header count. The byte budget alone is enough —
- *       the maximum window's budget at 256 B/packet caps the deque at roughly
+ *       the maximum window's budget at 256 B/packet caps the ring at roughly
  *       3000 entries.</li>
  * </ul>
  */
@@ -66,10 +44,8 @@ public class AacCircularBuffer {
      *  bursts without padding the steady-state footprint. */
     private static final double BITRATE_OVERHEAD = 1.5;
 
-    /** One AAC access unit + its presentation timestamp. Immutable for the
-     *  lifetime of the ring entry — the producer copies bytes on
-     *  {@link #add(byte[], int, int, long)} so the caller may reuse its
-     *  source array immediately. */
+    /** One exported AAC access unit + its original presentation timestamp.
+     * Its payload is independent of the ring and other exports. */
     public static final class Packet {
         public final byte[] data;
         public final long ptsUs;
@@ -79,8 +55,11 @@ public class AacCircularBuffer {
         }
     }
 
-    private final ConcurrentLinkedDeque<Packet> ring = new ConcurrentLinkedDeque<>();
-    private final AtomicInteger byteCount = new AtomicInteger(0);
+    private byte[] payload;
+    private int[] lengths;
+    private long[] timestamps;
+    private int byteHead, byteCount;
+    private int headerHead, packetCount;
     /** Total bytes the ring is allowed to hold before FIFO eviction kicks in.
      *  Final after construction — no resize API. */
     private final int byteBudget;
@@ -121,108 +100,111 @@ public class AacCircularBuffer {
      * @param ptsUs   Presentation timestamp in microseconds, on the same
      *                wall-clock origin as the video encoder's PTSs
      */
-    public void add(byte[] data, int offset, int length, long ptsUs) {
-        if (data == null || length <= 0) return;
-        if (offset < 0 || offset + length > data.length) return;
-        if (length > byteBudget) {
-            // Defensive: a single packet bigger than the entire budget would
-            // loop forever in eviction (it'd evict everything and still be
-            // over budget). Drop it. Should never happen in practice.
-            return;
+    public synchronized void add(byte[] data, int offset, int length, long ptsUs) {
+        if (data == null || length <= 0 || offset < 0 || offset > data.length - length
+                || length > byteBudget) return;
+        if (payload == null) payload = new byte[byteBudget];
+
+        while (length > byteBudget - byteCount) {
+            int oldLength = lengths[headerHead];
+            byteHead = advance(byteHead, oldLength, byteBudget);
+            byteCount -= oldLength;
+            headerHead = advance(headerHead, 1, lengths.length);
+            packetCount--;
         }
-        byte[] copy = new byte[length];
-        System.arraycopy(data, offset, copy, 0, length);
-        ring.offer(new Packet(copy, ptsUs));
-        int total = byteCount.addAndGet(length);
-        // Evict oldest until we're back under budget.
-        while (total > byteBudget) {
-            Packet head = ring.pollFirst();
-            if (head == null) break;
-            total = byteCount.addAndGet(-head.data.length);
-        }
+        ensureHeaderSpace();
+        int tail = advance(byteHead, byteCount, byteBudget);
+        int first = Math.min(length, byteBudget - tail);
+        System.arraycopy(data, offset, payload, tail, first);
+        if (first < length) System.arraycopy(data, offset + first, payload, 0, length - first);
+        int header = advance(headerHead, packetCount, lengths.length);
+        lengths[header] = length;
+        timestamps[header] = ptsUs;
+        packetCount++;
+        byteCount += length;
     }
 
-    /**
-     * Pull every packet currently in the ring, in PTS / insertion order, and
-     * empty the ring. Intended for the event-trigger flow: at trigger time
-     * the surveillance pipeline drains everything in the ring into the
-     * muxer's write queue alongside the video pre-record flush.
-     *
-     * <p>Returned list is owned by the caller. Subsequent {@link #add}s
-     * populate a fresh window for the next event.
-     *
-     * <p>Concurrency: byteCount is decremented by exactly the bytes drained,
-     * never reset to 0. The previous {@code set(0)} approach raced with
-     * {@link #add}: if a producer landed between {@code ring.offer()} and
-     * {@code byteCount.addAndGet(length)}, drainAll could pollFirst the new
-     * packet and then clobber byteCount to 0, after which the still-pending
-     * addAndGet would push byteCount negative (and stay negative until enough
-     * subsequent adds repaid the debt). Subtracting only what we actually
-     * drained preserves the invariant that byteCount accounts only for
-     * packets currently held by the ring.
-     */
-    public List<Packet> drainAll() {
-        List<Packet> out = new ArrayList<>(ring.size());
-        long drainedBytes = 0;
-        Packet p;
-        while ((p = ring.pollFirst()) != null) {
-            out.add(p);
-            drainedBytes += p.data.length;
+    // Both offset and distance are bounded by capacity; avoid overflowing their sum.
+    private static int advance(int offset, int distance, int capacity) {
+        int remaining = capacity - offset;
+        return distance < remaining ? offset + distance : distance - remaining;
+    }
+
+    private void ensureHeaderSpace() {
+        if (lengths != null && packetCount < lengths.length) return;
+        int capacity = lengths == null ? Math.min(64, byteBudget)
+                : (int) Math.min((long) lengths.length * 2, byteBudget);
+        int[] newLengths = new int[capacity];
+        long[] newTimestamps = new long[capacity];
+        if (packetCount != 0) {
+            int first = Math.min(packetCount, lengths.length - headerHead);
+            System.arraycopy(lengths, headerHead, newLengths, 0, first);
+            System.arraycopy(timestamps, headerHead, newTimestamps, 0, first);
+            System.arraycopy(lengths, 0, newLengths, first, packetCount - first);
+            System.arraycopy(timestamps, 0, newTimestamps, first, packetCount - first);
         }
-        // drainedBytes is bounded by byteBudget (under 1 MB at the configured
-        // maximum and default bitrate), so the cast to int is safe —
-        // Math.toIntExact() would also work but adds an exception path for an
-        // arithmetically impossible overflow.
-        if (drainedBytes > 0) {
-            byteCount.addAndGet(-(int) drainedBytes);
-        }
+        lengths = newLengths;
+        timestamps = newTimestamps;
+        headerHead = 0;
+    }
+
+    /** Return independent packets in insertion order and atomically empty the ring. */
+    public synchronized List<Packet> drainAll() {
+        List<Packet> out = copyPackets(Long.MIN_VALUE, Long.MAX_VALUE, packetCount);
+        resetPositions();
         return out;
     }
 
     /**
-     * Return references to packets in the inclusive PTS range without
-     * removing them from the ring or copying their payload arrays. The
-     * returned list is independent, while each immutable {@link Packet}
-     * remains shared with the ring.
-     *
-     * <p>The deque's weakly-consistent iterator preserves insertion order and
-     * tolerates concurrent add/eviction. A packet present for the entire
-     * traversal is included exactly once when its PTS is in range; packets
-     * concurrently entering or leaving the ring may or may not be observed.
-     *
-     * @return packets in insertion order, or an empty list for an invalid or
-     *         empty range
+     * Copy packets in the inclusive PTS range without removing them. The
+     * returned bytes remain valid after any subsequent add, drain or clear.
+     * PTSs need not be monotonic; preserve insertion order even across resets.
      */
-    public List<Packet> snapshotRange(long startPtsUs, long endPtsUs) {
-        List<Packet> out = new ArrayList<>();
-        if (startPtsUs > endPtsUs) {
-            return out;
-        }
-        for (Packet packet : ring) {
-            if (packet.ptsUs >= startPtsUs && packet.ptsUs <= endPtsUs) {
-                out.add(packet);
+    public synchronized List<Packet> snapshotRange(long startPtsUs, long endPtsUs) {
+        return copyPackets(startPtsUs, endPtsUs, 0);
+    }
+
+    private List<Packet> copyPackets(long startPtsUs, long endPtsUs, int capacity) {
+        List<Packet> out = new ArrayList<>(capacity);
+        if (startPtsUs > endPtsUs) return out;
+        int offset = byteHead;
+        int header = headerHead;
+        for (int i = 0; i < packetCount; i++) {
+            int length = lengths[header];
+            long ptsUs = timestamps[header];
+            if (ptsUs >= startPtsUs && ptsUs <= endPtsUs) {
+                byte[] data = new byte[length];
+                int first = Math.min(length, byteBudget - offset);
+                System.arraycopy(payload, offset, data, 0, first);
+                if (first < length) System.arraycopy(payload, 0, data, first, length - first);
+                out.add(new Packet(data, ptsUs));
             }
+            offset = advance(offset, length, byteBudget);
+            header = advance(header, 1, lengths.length);
         }
         return out;
     }
 
-    /** Empty the ring without returning anything. O(n) but rarely called. */
-    public void clear() {
-        ring.clear();
-        byteCount.set(0);
+    private void resetPositions() {
+        byteHead = byteCount = headerHead = packetCount = 0;
     }
 
-    /** @return approximate bytes currently held (may briefly drift under
-     *          concurrent add/drain; self-corrects within one add). */
-    public int getByteCount() {
-        return byteCount.get();
+    /** Empty the ring and release storage when audio is disabled or restarted. */
+    public synchronized void clear() {
+        resetPositions();
+        payload = null;
+        lengths = null;
+        timestamps = null;
     }
 
-    /** @return current packet count (O(n) on ConcurrentLinkedDeque, but the
-     *          ring is small — ~3100 entries at 62 s × 64 kbps). Diagnostic
-     *          only. */
-    public int getPacketCount() {
-        return ring.size();
+    /** @return exact bytes currently held by the ring */
+    public synchronized int getByteCount() {
+        return byteCount;
+    }
+
+    /** @return current packet count, in constant time */
+    public synchronized int getPacketCount() {
+        return packetCount;
     }
 
     /** @return configured byte budget (final after construction). */

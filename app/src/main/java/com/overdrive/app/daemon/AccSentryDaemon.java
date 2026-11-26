@@ -62,20 +62,12 @@ public class AccSentryDaemon {
     private static String CMD_DATA_GET() { return Safe.s("4/qqmGNE2vhiGGggG70n0sRfHtz6gZempQZl+6FiiZk="); }
     /** /data/local/tmp */
     private static String PATH_DATA_LOCAL_TMP() { return com.overdrive.app.util.ScratchRoot.path(Safe.s("vuaMjrmBGBFh07qqnUuL8w==")); }
-    /** /data/local/tmp/telegram_config.properties */
-    private static String PATH_TELEGRAM_CONFIG() { return com.overdrive.app.util.ScratchRoot.path(Safe.s("ZHx6IP38aGV/Q7iMCCcxzwQSn0P1N0jxHygc8N+4Ft+9mlR8XQ+WvEw0ktanrtNx")); }
 
     // Power levels from BYDAutoBodyworkDevice
     private static final int POWER_LEVEL_OFF = 0;
     private static final int POWER_LEVEL_ACC = 1;
     private static final int POWER_LEVEL_ON = 2;
     private static final int POWER_LEVEL_OK = 3;
-
-    // MCU Status codes
-    private static final int MCU_STATUS_SLEEPING = 0;
-    private static final int MCU_STATUS_ACTIVE = 1;
-    private static final int MCU_STATUS_ACC_OFF = 2;
-    private static final int MCU_STATUS_DEEP_SLEEP = 3;
 
     private static volatile boolean running = true;
     private static volatile boolean inSentryMode = false;
@@ -236,9 +228,6 @@ public class AccSentryDaemon {
     // here would let both create + acquire a non-ref-counted lock and orphan one.
     private static volatile PowerManager.WakeLock wakeLock;
     private static volatile android.net.wifi.WifiManager.WifiLock wifiLock;
-
-    // Original screen timeout (saved before sentry mode)
-    private static String originalScreenTimeout = "60000";
 
     // Daemon start time for uptime tracking
     private static long startTime = 0;
@@ -5261,6 +5250,56 @@ public class AccSentryDaemon {
         }
     }
 
+    private static final String DRIVER_BRIGHTNESS_FILE = "overdrive_driver_brightness";
+
+    /** Saves the slider once before the panel is darkened; a saved level is never replaced by 0. */
+    private static void saveDriverBrightness(ShellOwnership ownership) {
+        java.io.File file = com.overdrive.app.util.ScratchRoot.file(DRIVER_BRIGHTNESS_FILE);
+        if (file.exists()) return;
+        ShellResult current = execShellResult("settings " + com.overdrive.app.util.ShellUser.flag() + " get system screen_brightness",
+                DEFAULT_SHELL_TIMEOUT_MS, ownership);
+        int value = parseBrightness(current.success ? current.output : null);
+        if (value <= 0) return;
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(file)) {
+            out.write(String.valueOf(value).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            log("Could not save driver brightness: " + e.getMessage());
+        }
+    }
+
+    /** The saved slider level, 128 only if the panel was left at 0, else no write. */
+    private static Integer brightnessForWake(ShellOwnership ownership) {
+        java.io.File file = com.overdrive.app.util.ScratchRoot.file(DRIVER_BRIGHTNESS_FILE);
+        if (file.exists()) {
+            int saved = -1;
+            try {
+                saved = parseBrightness(new String(java.nio.file.Files.readAllBytes(file.toPath()),
+                        java.nio.charset.StandardCharsets.UTF_8));
+            } catch (Exception ignored) { }
+            // Kept until written back, so a failed restore can retry on the next wake.
+            if (saved > 0) return saved;
+            clearSavedDriverBrightness();
+        }
+        ShellResult current = execShellResult("settings " + com.overdrive.app.util.ShellUser.flag() + " get system screen_brightness",
+                DEFAULT_SHELL_TIMEOUT_MS, ownership);
+        return current.success && parseBrightness(current.output) == 0 ? 128 : null;
+    }
+
+    private static void clearSavedDriverBrightness() {
+        java.io.File file = com.overdrive.app.util.ScratchRoot.file(DRIVER_BRIGHTNESS_FILE);
+        if (file.exists() && !file.delete()) log("Could not clear saved driver brightness");
+    }
+
+    static int parseBrightness(String text) {
+        if (text == null) return -1;
+        try {
+            int value = Integer.parseInt(text.trim());
+            return value >= 0 && value <= 255 ? value : -1;
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
     private static boolean setBacklightState(boolean on) {
         return setBacklightState(on, null, false);
     }
@@ -5406,12 +5445,18 @@ public class AccSentryDaemon {
         }
 
         // Legacy fallback: Settings brightness
-        int brightness = on ? 128 : 0;
-        ShellResult brightnessResult = execShellResult(
-                "settings put system screen_brightness " + brightness,
-                DEFAULT_SHELL_TIMEOUT_MS, ownership);
-        if (!brightnessResult.success) {
-            return false;
+        // The value is the driver's slider: save it before the first 0 and put that back on
+        // wake instead of a fixed level (BYD100F applies the stored value when the panel wakes).
+        Integer brightness = on ? brightnessForWake(ownership) : 0;
+        if (!on) saveDriverBrightness(ownership);
+        if (brightness != null) {
+            ShellResult brightnessResult = execShellResult(
+                    "settings " + com.overdrive.app.util.ShellUser.flag() + " put system screen_brightness " + brightness,
+                    DEFAULT_SHELL_TIMEOUT_MS, ownership);
+            if (!brightnessResult.success) {
+                return false;
+            }
+            if (on) clearSavedDriverBrightness();
         }
         if (on) {
             ShellResult keyResult = execShellResult(
@@ -6123,57 +6168,6 @@ public class AccSentryDaemon {
         // key-trust, cooldown, generation, cancellation, readback and rollback for every automatic
         // ADB mutation. This shell daemon must never maintain a competing settings writer.
         log("DI5 ADB port 5555 is closed; waiting for coordinated app-process recovery");
-    }
-
-    private static String lastAdbRecoveryLeaseDeferral = null;
-
-    /**
-     * Read the cross-process recovery lease via {@code settings get}. A read
-     * failure is treated as no lease, so the daemon's own recovery is never
-     * blocked by this mechanism.
-     */
-    private static com.overdrive.app.power.AdbRecoveryLease.Parsed readAdbRecoveryLease(
-            long transitionGeneration, long nowElapsedMs) {
-        ShellResult result = execShellResult(
-                "settings get global "
-                        + com.overdrive.app.power.AdbRecoveryLease.SETTING_KEY,
-                DEFAULT_SHELL_TIMEOUT_MS,
-                () -> isKeepAliveCommitCurrent(transitionGeneration));
-        String raw = result.success ? result.output.trim() : null;
-        return com.overdrive.app.power.AdbRecoveryLease.parse(
-                raw,
-                nowElapsedMs,
-                com.overdrive.app.power.AdbRecoveryLease.currentBootId());
-    }
-
-    /** Publish a daemon-owned lease (best effort; a failure is logged and recovery proceeds). */
-    private static void publishAdbRecoveryLease(
-            long transitionGeneration, long nowElapsedMs) {
-        String value = com.overdrive.app.power.AdbRecoveryLease.format(
-                com.overdrive.app.power.AdbRecoveryLease.Owner.DAEMON,
-                com.overdrive.app.power.AdbRecoveryLease.currentBootId(),
-                nowElapsedMs);
-        ShellResult result = execShellResult(
-                "settings put global "
-                        + com.overdrive.app.power.AdbRecoveryLease.SETTING_KEY
-                        + " '" + value + "'",
-                DEFAULT_SHELL_TIMEOUT_MS,
-                () -> isKeepAliveCommitCurrent(transitionGeneration));
-        if (!result.success) {
-            log("DI5 ADB recovery lease publish failed: "
-                    + result.describeFailure());
-        }
-    }
-
-    /** Log a deferral to a fresh app lease at most once per distinct lease. */
-    private static void logAdbRecoveryLeaseDeferralOnce(
-            com.overdrive.app.power.AdbRecoveryLease.Parsed lease) {
-        String marker = lease.owner + ":" + lease.stampMs;
-        if (!marker.equals(lastAdbRecoveryLeaseDeferral)) {
-            lastAdbRecoveryLeaseDeferral = marker;
-            log("DI5 ADB recovery deferring to a fresh app lease (age "
-                    + lease.ageMs + " ms)");
-        }
     }
 
     private static boolean isLoopbackPortOpen(int port) {
@@ -8726,8 +8720,6 @@ public class AccSentryDaemon {
 
     // ==================== TELEGRAM DAEMON AUTO-START ====================
 
-    private static final String TELEGRAM_CONFIG_FILE = null; // Lazy init
-    private static String getTelegramConfigFile() { return PATH_TELEGRAM_CONFIG(); }
     private static final String TELEGRAM_DAEMON_PROCESS = "telegram_bot_daemon";
 
     /**

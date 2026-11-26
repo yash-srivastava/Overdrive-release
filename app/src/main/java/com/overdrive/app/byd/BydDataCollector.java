@@ -5107,6 +5107,25 @@ public class BydDataCollector {
         return BydVehicleData.UNAVAILABLE;
     }
 
+    /**
+     * The cluster's resettable trip meter ("since zeroing", BYD's second trip next to the current journey) in km,
+     * or NaN when the car does not answer. The register's live meaning is unverified on every platform, so callers
+     * must treat a value outside 0..odometer as absent.
+     */
+    public double readMileageAfterZeroingKmNow() {
+        if (statisticDevice == null || isDiLink5Vehicle() || isDiLink5BridgeConsumer()) return Double.NaN;
+        try {
+            Object raw = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_MILEAGE_AFTER_ZEROING, Double.class);
+            if (raw == null) return Double.NaN;
+            double v = BydDeviceHelper.getDoubleValue(raw);
+            if (Double.isNaN(v) || v < 0 || v > 2_000_000) return Double.NaN;
+            return v * distanceToKmFactor;
+        } catch (Throwable t) {
+            logger.debug("readMileageAfterZeroingKmNow error: " + t.getMessage());
+            return Double.NaN;
+        }
+    }
+
     private int readLegacyInt(Object device, String getter, int min, int max) {
         if (device == null || isDiLink5Vehicle() || isDiLink5BridgeConsumer()) {
             return BydVehicleData.UNAVAILABLE;
@@ -13663,7 +13682,7 @@ public class BydDataCollector {
      * Read the live steering-wheel angle into the builder. Extracted so the periodic
      * poll ({@link #collectAll}) can refresh it every cycle — {@code
      * collectBodyworkExtended} runs ONLY at init ({@code collectAllFull}), and the
-     * live listener {@code handleSteeringAngleChanged} is unwired, so without this the
+     * steering-angle listener is not registered, so without this the
      * angle was seeded once at boot (wheel centered → 0) and carried forward forever:
      * the "steeringAngle" automation event never saw a transition and could never
      * fire. Guards the SDK sentinel + the same ±780° sanity range the listener uses.
@@ -13674,9 +13693,8 @@ public class BydDataCollector {
             Object steering = BydDeviceHelper.callGetter(bodyworkDevice, "getSteeringWheelValue", 1);
             if (steering instanceof Number) {
                 double angle = ((Number) steering).doubleValue();
-                // Guard the SDK not-available sentinel and clamp to the physical range
-                // (mirrors handleSteeringAngleChanged): a bogus value would false-fire
-                // a steering-angle automation.
+                // Reject the SDK not-available sentinel and out-of-range values
+                // so bogus readings cannot trigger a steering-angle automation.
                 if (angle != BydFeatureIds.SDK_NOT_AVAILABLE && angle >= -780 && angle <= 780) {
                     b.steeringAngleDegrees(angle);
                 }
@@ -15142,11 +15160,6 @@ public class BydDataCollector {
     private volatile long lastChargingPowerLogTime = 0;
     private volatile long lastChargingModeLogMs = 0;
     private volatile long lastChargingStateRawLogMs = 0;
-    // One-shot: log the raw vs scaled getExternalChargingPower value the first
-    // time we successfully publish a value, so the next field log capture can
-    // confirm the hectowatt vs kW scaling against the cluster's own readout.
-    private volatile boolean loggedExtChargePowerScale = false;
-
     // One-shot each: whether the per-session charged-energy counter answers on this trim, and
     // through which accessor. "Absent" has to be visible in a capture rather than inferred from
     // a missing line, because it decides whether session energy is metered or reconstructed.
@@ -16217,113 +16230,6 @@ public class BydDataCollector {
 
     private static String diagnosticValue(int value) {
         return value == Integer.MIN_VALUE ? "n/a" : Integer.toString(value);
-    }
-
-    // ==================== EXTENDED LISTENER HANDLERS ====================
-    // These handler methods exist for future use. To activate, add a registerListener() call
-    // in registerAllListeners() or registerBodyworkExtendedListeners() etc.
-
-    private void handleSteeringAngleChanged(Object[] args) {
-        if (args != null && args.length > 0 && snapshot.get() != null) {
-            try {
-                double angle = BydDeviceHelper.getDoubleValue(args[0]);
-                if (!Double.isNaN(angle) && angle >= -780 && angle <= 780) {
-                    BydVehicleData current = snapshot.get();
-                    if (current != null) {
-                        publishNonChargingSnapshot(current.toBuilder()
-                                .steeringAngleDegrees(angle).build());
-                    }
-                }
-            } catch (Exception e) { logger.debug("handleSteeringAngleChanged error: " + e.getMessage()); }
-        }
-    }
-
-    private void handleAutoSystemStateChanged(Object[] args) {
-        if (args != null && args.length > 0 && snapshot.get() != null) {
-            try {
-                int state = BydDeviceHelper.getIntValue(args[0]);
-                if (state >= 0 && state <= 2) {
-                    BydVehicleData current = snapshot.get();
-                    if (current != null) {
-                        publishNonChargingSnapshot(current.toBuilder()
-                                .autoSystemState(state).build());
-                    }
-                }
-            } catch (Exception e) { logger.debug("handleAutoSystemStateChanged error: " + e.getMessage()); }
-        }
-    }
-
-    private void handleSunroofStateChanged(Object[] args) {
-        if (args != null && args.length > 0 && snapshot.get() != null) {
-            try {
-                int state = BydDeviceHelper.getIntValue(args[0]);
-                if (state >= 0 && state <= 255) {
-                    BydVehicleData current = snapshot.get();
-                    if (current != null) {
-                        publishNonChargingSnapshot(current.toBuilder().sunroofState(state).build());
-                    }
-                }
-            } catch (Exception e) { logger.debug("handleSunroofStateChanged error: " + e.getMessage()); }
-        }
-    }
-
-    private void handleSunroofPositionChanged(Object[] args) {
-        if (args != null && args.length > 0 && snapshot.get() != null) {
-            try {
-                int position = BydDeviceHelper.getIntValue(args[0]);
-                if (position >= 0 && position <= 100) {
-                    BydVehicleData current = snapshot.get();
-                    if (current != null) {
-                        publishNonChargingSnapshot(current.toBuilder()
-                                .sunroofPosition(position).build());
-                    }
-                }
-            } catch (Exception e) { logger.debug("handleSunroofPositionChanged error: " + e.getMessage()); }
-        }
-    }
-
-    private void handleChargingCapacityChanged(Object[] args) {
-        if (args != null && args.length > 0 && snapshot.get() != null) {
-            try {
-                double capacity = BydDeviceHelper.getDoubleValue(args[0]);
-                if (!Double.isNaN(capacity) && capacity >= 0 && capacity <= 200) {
-                    BydVehicleData current = snapshot.get();
-                    if (current != null) {
-                        publishNonChargingSnapshot(current.toBuilder().remainKwh(capacity).build());
-                    }
-                }
-            } catch (Exception e) { logger.debug("handleChargingCapacityChanged error: " + e.getMessage()); }
-        }
-    }
-
-    private void handleDrivingTimeChanged(Object[] args) {
-        if (args != null && args.length > 0 && snapshot.get() != null) {
-            try {
-                double hours = BydDeviceHelper.getDoubleValue(args[0]);
-                if (!Double.isNaN(hours) && hours >= 0 && hours <= 10000) {
-                    BydVehicleData current = snapshot.get();
-                    if (current != null) {
-                        publishNonChargingSnapshot(current.toBuilder()
-                                .drivingTimeHours(hours).build());
-                    }
-                }
-            } catch (Exception e) { logger.debug("handleDrivingTimeChanged error: " + e.getMessage()); }
-        }
-    }
-
-    private void handleKeyBatteryLevelChanged(Object[] args) {
-        if (args != null && args.length > 0 && snapshot.get() != null) {
-            try {
-                int level = BydDeviceHelper.getIntValue(args[0]);
-                if (level >= 0 && level <= 1) {
-                    BydVehicleData current = snapshot.get();
-                    if (current != null) {
-                        publishNonChargingSnapshot(current.toBuilder()
-                                .keyBatteryLevel(level).build());
-                    }
-                }
-            } catch (Exception e) { logger.debug("handleKeyBatteryLevelChanged error: " + e.getMessage()); }
-        }
     }
 
     /**
@@ -25109,7 +25015,7 @@ public class BydDataCollector {
     // convention: setter returns 0 on success). BYDAutoEnergyDevice exposes both
     // get{Operation,Energy}Mode (see collectEnergy) AND the matching setters
     // set{Operation,Energy}Mode(int) — confirmed present in the OEM implementation
-    // and invoked below via invokeOptionalModeSetter, which surfaces a genuinely
+    // and probed by the bounded setter path, which surfaces a genuinely
     // absent method at WARN rather than a silent false. The writes are still gated
     // by the BYD signature-permission wall (the HAL may reject from our UID), so a
     // non-zero result is treated as failure by isSdkWriteSuccess.
@@ -27302,45 +27208,6 @@ public class BydDataCollector {
             case ENERGY_MODE_FUEL:     return "fuel";
             case ENERGY_MODE_KEEP:     return "keep";
             default:                   return "unknown";
-        }
-    }
-
-    /**
-     * Invoke an SDK setter by name, tolerating a firmware that dropped or renamed
-     * it. {@code set{Operation,Energy}Mode} ARE real BYDAutoEnergyDevice methods
-     * (confirmed in the OEM implementation), but reflecting by name lets a variant
-     * that lacks them fail loudly instead of silently. Probes for the method and:
-     * <ul>
-     *   <li>if present — invokes it and honors the SDK 0=success convention
-     *       (a non-zero return is the HAL rejecting the write, e.g. sigperm);</li>
-     *   <li>if absent — logs at WARN (so an SDK name/shape mismatch surfaces
-     *       loudly in production instead of a silent {@code false}) and returns
-     *       false, letting the command router treat the SDK leg as no-path.</li>
-     * </ul>
-     */
-    private boolean invokeOptionalModeSetter(Object device, String methodName, int value, String label) {
-        if (device == null) {
-            logger.warn(methodName + ": device unavailable — " + label + " cannot be set");
-            return false;
-        }
-        Method m;
-        try {
-            m = device.getClass().getMethod(methodName, int.class);
-        } catch (NoSuchMethodException nsme) {
-            logger.warn(methodName + ": method not present on " + device.getClass().getSimpleName()
-                + " — " + label + " has no local SDK write path on this build; route via cloud/CAN instead");
-            return false;
-        } catch (Exception e) {
-            logger.warn(methodName + ": lookup failed: " + e.getMessage());
-            return false;
-        }
-        try {
-            if (VehicleActuatorBridge.isDiLink5RequestExpired()) return false;
-            Object r = m.invoke(device, value);
-            return isSdkWriteSuccess(device, r, methodName);
-        } catch (Exception e) {
-            logger.warn(methodName + "(" + value + ") failed: " + e.getMessage());
-            return false;
         }
     }
 

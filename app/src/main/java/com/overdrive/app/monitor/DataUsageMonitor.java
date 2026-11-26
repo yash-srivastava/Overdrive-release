@@ -447,7 +447,7 @@ public class DataUsageMonitor {
                 String iface = p[1];
                 if ("iface".equals(iface)) continue;   // header row
                 if ("lo".equals(iface)) continue;       // loopback — proxy hops
-                if (!isUntagged(p[2])) continue;         // tagged rows are a subset
+                if (!NetstatsCounters.isUntagged(p[2])) continue;         // tagged rows are a subset
                 int uid;
                 try { uid = Integer.parseInt(p[3]); } catch (NumberFormatException e) { continue; }
                 boolean isApp = appUid > 0 && uid == appUid;
@@ -487,132 +487,36 @@ public class DataUsageMonitor {
      * summing both is correct — the delta layer handles the since-boot cumulative.
      */
     private long[] readCountersDumpsys() {
-        String out = execShell("dumpsys netstats detail");
-        if (out == null || out.isEmpty()) return null;
-        long wifi = 0, mobile = 0, other = 0, app = 0, system = 0;
-        boolean sawUidSection = false, inUidSection = false;
-        // State for the current ident block.
-        boolean blockMatches = false;
-        boolean blockIsApp = false;
-        int blockTransport = 0; // 0=other,1=wifi,2=mobile
+        Process process = null;
         try {
-            for (String raw : out.split("\n")) {
-                String line = raw.trim();
-                // Section boundaries: a header at column 0 (no leading spaces).
-                if (!raw.startsWith(" ") && raw.endsWith(":")) {
-                    inUidSection = "UID stats:".equals(line);
-                    if (inUidSection) sawUidSection = true;
-                    blockMatches = false;
-                    continue;
-                }
-                if (!inUidSection) continue;
-
-                if (line.startsWith("ident=")) {
-                    // New per-UID block header. Decide if it's one of ours + untagged.
-                    blockMatches = false;
-                    int uid = parseIntAfter(line, "uid=");
-                    String tag = parseTokenAfter(line, "tag=");
-                    boolean isApp = appUid > 0 && uid == appUid;
-                    boolean ours = (uid == SHELL_UID) || isApp;
-                    if (ours && isUntagged(tag)) {
-                        blockMatches = true;
-                        blockIsApp = isApp;
-                        String type = parseTypeIdent(line);   // WIFI / MOBILE / ...
-                        blockTransport = "WIFI".equals(type) ? 1
-                                : ("MOBILE".equals(type) ? 2 : 0);
-                    }
-                    continue;
-                }
-                if (blockMatches && line.startsWith("st=")) {
-                    long rb = parseLongAfter(line, "rb=");
-                    long tb = parseLongAfter(line, "tb=");
-                    long bytes = rb + tb;
-                    if (blockTransport == 1) wifi += bytes;
-                    else if (blockTransport == 2) mobile += bytes;
-                    else other += bytes;
-                    if (blockIsApp) app += bytes; else system += bytes;
-                }
-                // "NetworkStatsHistory:" and other lines inside a block are ignored.
+            process = new ProcessBuilder("sh", "-c",
+                    com.overdrive.app.util.ScratchRoot.remap("dumpsys netstats detail"))
+                    .redirectErrorStream(false).start();
+            long[] counters;
+            try (BufferedReader reader = new BufferedReader(
+                    new java.io.InputStreamReader(process.getInputStream()))) {
+                counters = NetstatsCounters.read(reader, appUid, SHELL_UID);
             }
+            // As before, stdout is read to EOF before waiting for process exit.
+            // Do not advance the baseline on a failed or incomplete command.
+            if (!process.waitFor(8, TimeUnit.SECONDS) || process.exitValue() != 0) return null;
+            return counters;
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return null;
         } catch (Throwable t) {
             return null;
+        } finally {
+            if (process != null) {
+                try { process.destroyForcibly(); } catch (Throwable ignored) {}
+            }
         }
-        if (!sawUidSection) return null;   // unexpected format → let caller warn
-        return new long[]{wifi, mobile, other, app, system};
     }
 
     // Whether at least one backend produced a reading since start (drives the
     // UI "available" flag). Volatile: written on the sampler thread, read on HTTP.
     private volatile boolean available = false;
     private volatile boolean sourceWarned = false;
-
-    /** Run a shell command and return stdout (null on failure). Bounded so a
-     *  wedged dumpsys can't hang the sampler thread. */
-    private static String execShell(String cmd) {
-        try {
-            Process p = new ProcessBuilder("sh", "-c", com.overdrive.app.util.ScratchRoot.remap(cmd))
-                    .redirectErrorStream(false).start();
-            StringBuilder sb = new StringBuilder(8192);
-            try (BufferedReader r = new BufferedReader(
-                    new java.io.InputStreamReader(p.getInputStream()))) {
-                String line;
-                while ((line = r.readLine()) != null) sb.append(line).append('\n');
-            }
-            p.waitFor(8, TimeUnit.SECONDS);
-            try { p.destroyForcibly(); } catch (Throwable ignored) {}
-            return sb.toString();
-        } catch (Throwable t) {
-            return null;
-        }
-    }
-
-    /** {@code type=WIFI} inside the {@code ident=[{...}]} of a netstats line. */
-    private static String parseTypeIdent(String line) {
-        return parseTokenAfter(line, "type=");
-    }
-
-    /** Integer immediately after {@code key} (e.g. "uid=") up to the next
-     *  whitespace/comma/brace. Returns -1 if absent/unparseable. */
-    private static int parseIntAfter(String line, String key) {
-        String tok = parseTokenAfter(line, key);
-        try { return Integer.parseInt(tok); } catch (Exception e) { return -1; }
-    }
-
-    private static long parseLongAfter(String line, String key) {
-        String tok = parseTokenAfter(line, key);
-        try { return Long.parseLong(tok); } catch (Exception e) { return 0L; }
-    }
-
-    /** The token right after {@code key}, delimited by whitespace, ',', '}', ']'.
-     *  "" if key not present. */
-    private static String parseTokenAfter(String line, String key) {
-        int i = line.indexOf(key);
-        if (i < 0) return "";
-        int start = i + key.length();
-        int end = start;
-        while (end < line.length()) {
-            char c = line.charAt(end);
-            if (c == ' ' || c == ',' || c == '}' || c == ']' || c == '\t') break;
-            end++;
-        }
-        return line.substring(start, end);
-    }
-
-    /** True when the acct_tag_hex column is the untagged/grand-total tag (0x0),
-     *  in either the short "0x0" or zero-padded "0x00...0" form. Parse the hex and
-     *  compare to 0 so any width is handled; a malformed tag is treated as tagged
-     *  (skip) so we never accidentally sum a subset row into the total. */
-    private static boolean isUntagged(String acctTagHex) {
-        if (acctTagHex == null) return false;
-        String s = acctTagHex.startsWith("0x") || acctTagHex.startsWith("0X")
-                ? acctTagHex.substring(2) : acctTagHex;
-        if (s.isEmpty()) return false;
-        try {
-            return Long.parseLong(s, 16) == 0L;
-        } catch (NumberFormatException e) {
-            return false;
-        }
-    }
 
     // ==================== QUERY (HTTP) ====================
 
@@ -652,51 +556,61 @@ public class DataUsageMonitor {
             }
             if (days <= 0) days = 30;
             long now = System.currentTimeMillis();
-            // Calendar days are not always 24 hours long across DST changes.
-            // Use the same local-day convention as writes, not fixed milliseconds.
-            String from = DataUsageDayKeys.firstDay(now, days, TimeZone.getDefault());
-
-            JSONArray arr = new JSONArray();
-            long tW = 0, tM = 0, tO = 0, tA = 0, tS = 0;
+            TimeZone zone = TimeZone.getDefault();
             synchronized (lock) {
-                try (PreparedStatement ps = connection.prepareStatement(
-                        "SELECT day_key, wifi_bytes, mobile_bytes, other_bytes, app_bytes, system_bytes FROM "
-                                + TABLE_DAILY + " WHERE day_key >= ? ORDER BY day_key ASC")) {
-                    ps.setString(1, from);
-                    try (ResultSet rs = ps.executeQuery()) {
-                        while (rs.next()) {
-                            long w = rs.getLong(2), m = rs.getLong(3), o = rs.getLong(4);
-                            long a = rs.getLong(5), s = rs.getLong(6);
-                            JSONObject d = new JSONObject();
-                            d.put("date", rs.getString(1));
-                            d.put("wifi", w);
-                            d.put("mobile", m);
-                            d.put("other", o);
-                            d.put("app", a);
-                            d.put("system", s);
-                            d.put("total", w + m + o);
-                            arr.put(d);
-                            tW += w; tM += m; tO += o; tA += a; tS += s;
-                        }
-                    }
+                try {
+                    readUsageWindow(connection, out, now, days, zone);
                 } catch (Exception e) {
                     final int requestedDays = days;
                     if (healDeadStore(e)) return retryAfterHeal(() -> getUsage(requestedDays));
                     throw e;
                 }
             }
-            out.put("days", arr);
-            out.put("totalWifi", tW);
-            out.put("totalMobile", tM);
-            out.put("totalOther", tO);
-            out.put("totalApp", tA);
-            out.put("totalSystem", tS);
-            out.put("total", tW + tM + tO);
         } catch (Throwable t) {
             logger.warn("DataUsageMonitor.getUsage failed: " + t.getMessage());
             try { out.put("error", String.valueOf(t.getMessage())); } catch (Exception ignored) {}
         }
         return out;
+    }
+
+    /** Read the inclusive local-calendar window, excluding future-dated rows.
+     * Caller holds the store lock; the explicit instant and zone keep both bounds consistent. */
+    static void readUsageWindow(Connection connection, JSONObject out, long now,
+            int days, TimeZone zone) throws Exception {
+        // Calendar days are not always 24 hours long across DST changes.
+        String from = DataUsageDayKeys.firstDay(now, days, zone);
+        String through = DataUsageDayKeys.format(now, zone);
+        JSONArray arr = new JSONArray();
+        long tW = 0, tM = 0, tO = 0, tA = 0, tS = 0;
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT day_key, wifi_bytes, mobile_bytes, other_bytes, app_bytes, system_bytes FROM "
+                        + TABLE_DAILY + " WHERE day_key >= ? AND day_key <= ? ORDER BY day_key ASC")) {
+            ps.setString(1, from);
+            ps.setString(2, through);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    long w = rs.getLong(2), m = rs.getLong(3), o = rs.getLong(4);
+                    long a = rs.getLong(5), s = rs.getLong(6);
+                    JSONObject d = new JSONObject();
+                    d.put("date", rs.getString(1));
+                    d.put("wifi", w);
+                    d.put("mobile", m);
+                    d.put("other", o);
+                    d.put("app", a);
+                    d.put("system", s);
+                    d.put("total", w + m + o);
+                    arr.put(d);
+                    tW += w; tM += m; tO += o; tA += a; tS += s;
+                }
+            }
+        }
+        out.put("days", arr);
+        out.put("totalWifi", tW);
+        out.put("totalMobile", tM);
+        out.put("totalOther", tO);
+        out.put("totalApp", tA);
+        out.put("totalSystem", tS);
+        out.put("total", tW + tM + tO);
     }
 
     /** Clear all recorded history (both the daily rows and the delta baseline).

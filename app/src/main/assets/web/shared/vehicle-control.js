@@ -482,7 +482,7 @@ var VC = {
      */
     _teardownImmersiveScene: function() {
         if (this._3dViewActive) this.stop3dView(true);
-        this._renderLoopActive = false;
+        this._stopRenderLoop();
 
         if (this._modelLoadTimeout) {
             clearTimeout(this._modelLoadTimeout);
@@ -510,6 +510,9 @@ var VC = {
         if (this.renderer) {
             var old = this.renderer.domElement;
             this.renderer.dispose();
+            // dispose() alone leaves the WebGL context alive until browser GC.
+            // The canvas is replaced below, so explicitly release its backing store.
+            try { this.renderer.forceContextLoss(); } catch (e) {}
             if (old && old.parentNode) {
                 var fresh = document.createElement('canvas');
                 fresh.id = old.id;
@@ -930,7 +933,6 @@ var VC = {
 
     _disposeCarModel: function() {
         if (!this.carModel) return;
-        var self = this;
 
         // Tear down satellite state that's *attached to* the car before removing
         // the car itself. Order matters: these helpers reference this.carModel and
@@ -941,22 +943,31 @@ var VC = {
             for (var k = 0; k < keys.length; k++) this.removeStateGlow(keys[k]);
         }
 
-        this.carModel.traverse(function(node) {
-            if (node.isMesh) {
-                if (node.geometry) node.geometry.dispose();
-                if (node.material) {
-                    if (Array.isArray(node.material)) {
-                        for (var i = 0; i < node.material.length; i++) node.material[i].dispose();
-                    } else {
-                        node.material.dispose();
-                    }
-                }
-            }
-        });
+        this._disposeModelMeshes(this.carModel);
         if (this.scene) this.scene.remove(this.carModel);
         this.carModel = null;
         this._modelSourceScale = null;
         this.bodyPaintMeshes = [];
+    },
+
+    _disposeModelMeshes: function(model) {
+        var geometries = new Set(), materials = new Set(), textures = new Set();
+        model.traverse(function(node) {
+            if (!node.isMesh) return;
+            if (node.geometry) geometries.add(node.geometry);
+            var mats = Array.isArray(node.material) ? node.material : [node.material];
+            for (var i = 0; i < mats.length; i++) {
+                var mat = mats[i];
+                if (!mat) continue;
+                materials.add(mat);
+                Object.keys(mat).forEach(function(key) {
+                    if (mat[key] && mat[key].isTexture) textures.add(mat[key]);
+                });
+            }
+        });
+        textures.forEach(function(texture) { texture.dispose(); });
+        materials.forEach(function(material) { material.dispose(); });
+        geometries.forEach(function(geometry) { geometry.dispose(); });
     },
 
     /**
@@ -1030,10 +1041,31 @@ var VC = {
         });
         loader.setDRACOLoader(dracoLoader);
 
+        // A successful GLB load has finished its decode tasks. Retire its
+        // worker pool and blob URL instead of retaining up to four workers
+        // per completed model selection for the lifetime of this page.
+        // A failed load can still have pending decode tasks; cancellation is
+        // deliberately left to a separate loader-lifecycle change.
+        function releaseDecoder() {
+            dracoLoader.dispose();
+            // Preload may still be pending if a GLB did not need any workers.
+            if (dracoLoader.decoderPending) {
+                dracoLoader.decoderPending.then(function() {
+                    if (dracoLoader.workerSourceURL) {
+                        URL.revokeObjectURL(dracoLoader.workerSourceURL);
+                        dracoLoader.workerSourceURL = '';
+                    }
+                }, function() {});
+            }
+        }
         loader.load(
             modelPath,
             function(gltf) {
-                if (gen !== self._loadGen) return; // a newer load has superseded this one
+                releaseDecoder();
+                if (gen !== self._loadGen) {
+                    self._disposeModelMeshes(gltf.scene);
+                    return; // a newer load has superseded this one
+                }
                 self._modelLoadComplete = true;
                 if (self._modelLoadTimeout) { clearTimeout(self._modelLoadTimeout); self._modelLoadTimeout = null; }
                 self.carModel = gltf.scene;
@@ -1183,18 +1215,32 @@ var VC = {
         this._tyreLastW = 0; this._tyreLastH = 0;
     },
 
+    _stopRenderLoop: function() {
+        this._renderLoopActive = false;
+        // Invalidate a callback even if it was already dequeued by the browser.
+        this._renderLoopGeneration = (this._renderLoopGeneration || 0) + 1;
+        if (this._renderFrame != null) cancelAnimationFrame(this._renderFrame);
+        this._renderFrame = null;
+        this._lastRenderFrame = null;
+    },
+
     animate: function(frameTime) {
         var self = this;
-        // Entry with no frame time is a fresh start; re-entry after the scene
-        // was torn down (lite switch) must end the loop rather than render
-        // against a disposed context.
+        if (document.hidden || !this.renderer) return;
+        // Only one callback chain per immersive scene. A stale callback from
+        // a previous scene must not join a newly started chain after a lite flip.
         if (typeof frameTime !== 'number') {
             if (this._renderLoopActive) return;
             this._renderLoopActive = true;
+            this._renderLoopGeneration = (this._renderLoopGeneration || 0) + 1;
+            this._lastRenderFrame = null;
         } else if (!this._renderLoopActive) {
             return;
         }
-        requestAnimationFrame(function(nextFrameTime) {
+        var generation = this._renderLoopGeneration;
+        this._renderFrame = requestAnimationFrame(function(nextFrameTime) {
+            if (generation !== self._renderLoopGeneration) return;
+            self._renderFrame = null;
             self.animate(typeof nextFrameTime === 'number' ? nextFrameTime : 0);
         });
         // 30fps is smooth for this fixed automotive display. Together with
@@ -1204,7 +1250,7 @@ var VC = {
             var now = typeof frameTime === 'number'
                 ? frameTime
                 : (window.performance && performance.now ? performance.now() : Date.now());
-            if (this._lastRenderFrame
+            if (this._lastRenderFrame != null
                     && now - this._lastRenderFrame < 32) return;
             this._lastRenderFrame = now;
         }
@@ -3617,8 +3663,10 @@ var VC = {
         var self = this;
         document.addEventListener('visibilitychange', function() {
             if (document.hidden) {
+                self._stopRenderLoop();
                 self.stopSyncPollers();
             } else {
+                if (self.renderer) self.animate();
                 self.startStateSync();
                 self.startAcChargeCurrentSync();
                 self.startCloudStatusSync();

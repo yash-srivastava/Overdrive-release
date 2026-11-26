@@ -19,6 +19,9 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.List;
 
 public class RecordingsIndexVolumeMutationTest {
@@ -89,6 +92,77 @@ public class RecordingsIndexVolumeMutationTest {
                 assertEquals(2, result.getInt(1));
             }
         }
+    }
+
+    @Test
+    public void watchedStateIsSharedButDoesNotFollowAReplacement() throws Exception {
+        RecordingsIndex index = newIndex("watched");
+        Path dir = Files.createTempDirectory("recordings-watched");
+        File file = write(dir.resolve("event_20260810_120000.mp4"));
+        assertTrue(index.upsert(file));
+        RecordingsIndex.Filter filter = new RecordingsIndex.Filter();
+        JSONObject before = index.queryRecordings(filter, 10, 0).get(0);
+        String id = before.getString("id");
+        long size = before.getLong("size");
+        long mtime = before.getLong("mp4Mtime");
+        assertFalse(before.getBoolean("watched"));
+        assertTrue(index.markWatched(id, size, mtime));
+        assertTrue(index.queryRecordings(filter, 10, 0).get(0).getBoolean("watched"));
+
+        // Same path/id but a different physical clip must start unwatched.
+        Files.write(file.toPath(), "replacement video".getBytes(StandardCharsets.UTF_8));
+        assertTrue(index.upsert(file));
+        JSONObject replacement = index.queryRecordings(filter, 10, 0).get(0);
+        assertEquals(id, replacement.getString("id"));
+        assertFalse(replacement.getBoolean("watched"));
+        assertFalse(index.markWatched(id, size, mtime));
+        assertTrue(index.markWatched(id, replacement.getLong("size"),
+                replacement.getLong("mp4Mtime")));
+        assertTrue(index.queryRecordings(filter, 10, 0).get(0).getBoolean("watched"));
+    }
+
+    @Test
+    public void playlistSeeksAcrossSkippedRowsAndResumesFromUnwatchedEdge() throws Exception {
+        RecordingsIndex index = newIndex("playlist");
+        Path dir = Files.createTempDirectory("recordings-playlist");
+        for (String name : Arrays.asList("event_20260810_120000.mp4", "dvr_p_20260810_120001.mp4",
+                "cam_20260810_120002.mp4", "event_20260810_120003.mp4",
+                "proximity_20260810_120004.mp4", "event_20260810_120005.mp4")) {
+            assertTrue(index.upsert(write(dir.resolve(name))));
+        }
+        RecordingsIndex.Filter filter = new RecordingsIndex.Filter();
+        List<JSONObject> rows = index.queryRecordings(filter, 10, 0);
+        JSONObject oldest = rows.get(5);
+        JSONObject newest = rows.get(0);
+        assertTrue(index.markWatched(oldest.getString("id"), oldest.getLong("size"),
+                oldest.getLong("mp4Mtime")));
+        Set<String> skipped = new HashSet<>(Arrays.asList("dvr_p", "cam_"));
+        RecordingsIndex.AdjacentResult resume = index.queryPlaylistRecording(filter, null,
+                -1, true, false, skipped);
+        assertEquals(RecordingsIndex.AdjacentResult.Status.FOUND, resume.status);
+        assertEquals(rows.get(2).getString("id"), resume.recording.getString("id"));
+        assertEquals(2, index.positionOfRecording(filter, resume.recording));
+        assertEquals(newest.getString("id"), index.queryPlaylistRecording(filter, null,
+                1, true, false, skipped).recording.getString("id"));
+        assertEquals(rows.get(1).getString("id"), index.queryPlaylistRecording(filter,
+                resume.recording.getString("id"), -1, false, true, skipped).recording.getString("id"));
+        assertEquals(RecordingsIndex.AdjacentResult.Status.END, index.queryPlaylistRecording(filter,
+                resume.recording.getString("id"), 1, false, true, skipped).status);
+        // The anchor need not itself match the playlist. Manual navigation is unfiltered.
+        assertEquals(rows.get(4).getString("id"), index.queryAdjacentRecording(filter,
+                oldest.getString("id"), -1).recording.getString("id"));
+        skipped.add("event_");
+        assertEquals(rows.get(1).getString("id"), index.queryPlaylistRecording(filter, null,
+                -1, true, false, skipped).recording.getString("id"));
+        filter.type = "sentry";
+        assertEquals(RecordingsIndex.AdjacentResult.Status.END, index.queryPlaylistRecording(filter,
+                null, -1, true, false, skipped).status);
+        // Same ID with a replaced file is once again eligible for resume.
+        File replacement = dir.resolve(oldest.getString("filename")).toFile();
+        Files.write(replacement.toPath(), "replacement video".getBytes(StandardCharsets.UTF_8));
+        assertTrue(index.upsert(replacement));
+        assertEquals(oldest.getString("id"), index.queryPlaylistRecording(filter, null,
+                -1, true, false, Collections.emptySet()).recording.getString("id"));
     }
 
     private RecordingsIndex newIndex(String name) throws Exception {

@@ -39,8 +39,6 @@ import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.expressions.Expression
-import org.maplibre.android.style.layers.CircleLayer
-import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory
 import org.maplibre.android.style.layers.SymbolLayer
@@ -58,6 +56,7 @@ import com.overdrive.app.navmap.nav.CongestionSpan
 import com.overdrive.app.navmap.nav.GeoPoint
 import com.overdrive.app.navmap.nav.NavRouting
 import com.overdrive.app.navmap.nav.RouteProvider
+import com.overdrive.app.navmap.nav.RouteHazardCorridor
 import com.overdrive.app.navmap.google.TrafficRefreshController
 import com.overdrive.app.navmap.google.GoogleAttributionView
 import com.overdrive.app.navmap.google.GoogleMapController
@@ -4013,7 +4012,7 @@ open class RoadSenseMapActivity : AppCompatActivity() {
             ) ?: return@execute
             // Parse hazard points (lng,lat,severity) from the GeoJSON. Cap the list
             // at HAZARD_COUNT_CAP so a pathologically dense bbox can't blow up the
-            // O(hazards × segments) corridor scan below — the per-route pills only
+            // corridor search below — the per-route pills only
             // need a representative count, not an exhaustive one.
             data class Hz(val lat: Double, val lng: Double, val sev: Int)
             val hazards = ArrayList<Hz>()
@@ -4040,10 +4039,8 @@ open class RoadSenseMapActivity : AppCompatActivity() {
             }
             // Hazards exist in the area, so it IS surveyed: a route with 0 hits is
             // genuinely clear (mapped=true), not un-mapped.
-            // Per-route bbox (padded by ~the corridor width in degrees) computed once,
-            // so hazards far from a route skip the expensive point-to-segment scan.
-            // Pure pre-reject: a hazard inside the corridor is always inside the bbox,
-            // so the surviving counts are identical to scanning every hazard.
+            // Retain the existing per-route degree bbox filter. Within it, the
+            // corridor index skips blocks that cannot contain a matching segment.
             val counts = routes.map { route ->
                 var bMinLat = Double.MAX_VALUE; var bMinLng = Double.MAX_VALUE
                 var bMaxLat = -Double.MAX_VALUE; var bMaxLng = -Double.MAX_VALUE
@@ -4053,11 +4050,12 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                 }
                 bMinLat -= HAZARD_CORRIDOR_DEG; bMaxLat += HAZARD_CORRIDOR_DEG
                 bMinLng -= HAZARD_CORRIDOR_DEG; bMaxLng += HAZARD_CORRIDOR_DEG
+                val corridor = RouteHazardCorridor(route.points, HAZARD_CORRIDOR_M)
                 var severe = 0; var moderate = 0; var minor = 0
                 for (h in hazards) {
                     // Cheap bbox pre-reject before the per-segment distance loop.
                     if (h.lat < bMinLat || h.lat > bMaxLat || h.lng < bMinLng || h.lng > bMaxLng) continue
-                    if (hazardNearRoute(h.lat, h.lng, route)) {
+                    if (corridor.contains(h.lat, h.lng, guidance)) {
                         when (h.sev) { 3 -> severe++; 2 -> moderate++; else -> minor++ }
                     }
                 }
@@ -4068,18 +4066,6 @@ open class RoadSenseMapActivity : AppCompatActivity() {
                 routeOptionAdapter.setHazardCounts(counts)
             }
         }
-    }
-
-    /** True if (lat,lng) is within HAZARD_CORRIDOR_M of any segment of [route]. */
-    private fun hazardNearRoute(lat: Double, lng: Double, route: NavRoute): Boolean {
-        val pts = route.points
-        for (i in 0 until pts.size - 1) {
-            val d = guidance.pointToSegmentMeters(
-                lat, lng, pts[i].lat, pts[i].lng, pts[i + 1].lat, pts[i + 1].lng
-            )
-            if (d <= HAZARD_CORRIDOR_M) return true
-        }
-        return false
     }
 
     /** Draw all candidate routes: alternates quiet underneath, the selected route on top. */
@@ -6992,10 +6978,9 @@ open class RoadSenseMapActivity : AppCompatActivity() {
         const val HAZARD_CORRIDOR_M = 40.0
 
         // Degree padding for the per-route bbox pre-reject in loadHazardCountsForRoutes.
-        // A strict superset of HAZARD_CORRIDOR_M (~40m): 1° lat ≈ 111.3km so 40m ≈
-        // 0.00036°; lng degrees are SHORTER in meters away from the equator, so the
-        // same 0.0004° always covers ≥40m on the lng axis too — guaranteeing any
-        // in-corridor hazard survives the bbox, so counts are unchanged.
+        // Existing coarse filter: fixed-degree longitude padding is not a full
+        // metric corridor at high latitudes. Retained for count compatibility;
+        // RouteHazardCorridor uses latitude-aware padding for its own block tests.
         const val HAZARD_CORRIDOR_DEG = 0.0004
 
         // Max hazards parsed for the per-route corridor scan — caps the O(n×segments)
