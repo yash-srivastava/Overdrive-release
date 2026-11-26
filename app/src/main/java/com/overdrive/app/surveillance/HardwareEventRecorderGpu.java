@@ -3036,7 +3036,7 @@ public class HardwareEventRecorderGpu {
         // of silent video. Gate only on audioConfig — when the user has
         // audio disabled there's no point copying bytes into a ring whose
         // drain on event-trigger is also gated on the same field. The ring
-        // owns its own deque + atomic byte counter; no lock taken here.
+        // serializes its bounded byte copies independently of muxer locks.
         if (audioConfig != null) {
             aacRing.add(data, offset, length, ptsUs);
             // Bump the confidence counter every time we receive a valid
@@ -5464,8 +5464,8 @@ public class HardwareEventRecorderGpu {
         }
 
         try {
-            // Snapshot immutable AAC packet references immediately after the
-            // video pin. Slow storage resolution must not evict the first audio
+            // Snapshot independent AAC packets immediately after the video pin.
+            // Slow storage resolution must not evict the first audio
             // seconds of a full 60-second replay from its independent ring.
             java.util.List<AacCircularBuffer.Packet> audioPackets =
                     aacRing.snapshotRange(cursor.getStartPtsUs(), cursor.getEndPtsUs());
