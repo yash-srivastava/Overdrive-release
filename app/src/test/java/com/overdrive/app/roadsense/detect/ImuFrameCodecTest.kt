@@ -77,6 +77,9 @@ class ImuFrameCodecTest {
             listOf(ImuAccelSample(Long.MIN_VALUE, Float.MIN_VALUE, -Float.MIN_VALUE, Float.MAX_VALUE)),
             listOf(ImuGyroSample(Long.MAX_VALUE, -Float.MAX_VALUE, java.lang.Float.MIN_NORMAL, 1f)),
         )
+        // "7.038531E-26" double-rounds to the next float through optDouble().toFloat().
+        val trap = Float.fromBits(0x15ae43fd)
+        checkParity(listOf(ImuAccelSample(1L, trap, -trap, 1f)), listOf(ImuGyroSample(2L, -trap, trap, 0f)))
         val random = Random(2921)
         fun finite(): Float {
             while (true) {

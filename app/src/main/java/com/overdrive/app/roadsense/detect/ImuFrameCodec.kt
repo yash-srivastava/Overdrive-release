@@ -100,12 +100,14 @@ object ImuFrameCodec {
     private fun StringBuilder.appendComponent(value: Float) {
         // Preserve JSONArray.put(double)'s rejection of invalid JSON numbers.
         if (!value.isFinite()) throw JSONException("Forbidden numeric value: $value")
-        // Keep the legacy zero spelling (including negative zero). For nonzero
-        // values, Float.toString round-trips to the original Float, which is
-        // exactly what decode() reads. Widening to Double first adds digits
-        // without adding sensor precision, and makes the daemon parse more bytes.
+        // Keep the legacy zero spelling (including negative zero). decode() reads
+        // optDouble().toFloat(); the short Float text survives that double rounding
+        // for every finite float except +-7.038531E-26, which lands on the next
+        // float, so that one keeps the exact widened Double text.
         if (value == 0f) {
             if (value.toRawBits() < 0) append("-0") else append('0')
+        } else if ((value.toRawBits() and 0x7fffffff) == 0x15ae43fd) {
+            append(value.toDouble())
         } else {
             append(value)
         }
