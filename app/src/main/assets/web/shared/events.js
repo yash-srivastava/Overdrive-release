@@ -1134,7 +1134,8 @@ BYD.events = {
             this.selectedDate, null, key => this.selectDate(key), { currentMonthHighlightsOnly: true });
 
         // Keep recording and Sentry dots page-specific, including adjacent-month days.
-        for (const el of grid.children) {
+        for (let i = 0; i < grid.children.length; i++) {
+            const el = grid.children[i];
             if (!el.dataset.date || el.classList.contains('disabled')) continue;
             const dateInfo = this.datesWithRecordings.get(el.dataset.date);
             if (dateInfo) {
