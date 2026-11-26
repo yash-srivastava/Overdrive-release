@@ -1656,11 +1656,18 @@ public class SocHistoryDatabaseChargingAccountingContractTest {
                 "public boolean load()",
                 "private boolean ensureLoaded()");
 
-        assertTrue(strict.contains("loadStrict();"));
-        assertTrue(tariff.contains(
-                "public synchronized TariffProfile resolveInCircleStrict"));
-        assertTrue(strict.contains("loaded = false;"));
-        assertTrue(strict.contains("throw new IllegalStateException("));
+        String strictCircle = between(tariff,
+                "public synchronized TariffProfile resolveInCircleStrict",
+                "private void requireFreshPricingConfig()");
+        String freshConfig = between(tariff,
+                "private void requireFreshPricingConfig()",
+                "private TariffProfile resolveInCircleLoaded");
+
+        assertTrue(strict.contains("requireFreshPricingConfig();"));
+        assertTrue(strictCircle.contains("requireFreshPricingConfig();"));
+        assertTrue(freshConfig.contains("loadStrict();"));
+        assertTrue(freshConfig.contains("loaded = false;"));
+        assertTrue(freshConfig.contains("throw new IllegalStateException("));
         assertTrue(load.contains("private synchronized void loadStrict()"));
         assertTrue(load.contains("loadVerifiedConfig()"));
         assertTrue(load.contains("publishImage(image)"));
