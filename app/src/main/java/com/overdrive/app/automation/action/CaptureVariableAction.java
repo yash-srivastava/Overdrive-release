@@ -9,14 +9,12 @@ import com.overdrive.app.automation.Automations;
 import com.overdrive.app.automation.condition.BydEvent;
 import com.overdrive.app.automation.type.EnumType;
 import com.overdrive.app.automation.type.StringType;
-import com.overdrive.app.automation.type.Type;
 import com.overdrive.app.automation.value.Label;
 import com.overdrive.app.byd.AmbientProbe;
 import com.overdrive.app.byd.BydDataCollector;
 import com.overdrive.app.byd.BydVehicleData;
 import com.overdrive.app.camera.dilink5.DiLink5Platform;
 import com.overdrive.app.daemon.CameraDaemon;
-import com.overdrive.app.server.Messages;
 
 import org.json.JSONObject;
 
@@ -30,7 +28,7 @@ import java.util.Map;
  * rule remember the current media volume or ambient lighting before changing it,
  * or retain the SOC at the point a trip phase starts.
  */
-public class CaptureVariableAction extends BaseAction {
+public class CaptureVariableAction extends DeclaredAction {
     private static final String TYPE = "captureVariable";
     private static final String SOURCE_MEDIA_VOLUME = "mediaVolume";
     private static final String SOURCE_BATTERY_SOC = "batterySoc";
@@ -42,41 +40,16 @@ public class CaptureVariableAction extends BaseAction {
     private static final long DI5_READ_WINDOW_MS = 2000;
     private static final long DI5_READ_RETRY_MS = 400;
 
-    private final Label label;
-    private final String description;
-    private final List<Type> variables = List.of(
-            new EnumType(new Label("source", "automation.capture_source"),
-                    new Label(SOURCE_MEDIA_VOLUME, "automation.capture_media_volume"),
-                    new Label(SOURCE_BATTERY_SOC, "automation.capture_battery_soc"),
-                    new Label(SOURCE_AMBIENT_COLOUR_FRONT, "automation.capture_ambient_colour_front"),
-                    new Label(SOURCE_AMBIENT_COLOUR_REAR, "automation.capture_ambient_colour_rear"),
-                    new Label(SOURCE_AMBIENT_BRIGHTNESS_FRONT, "automation.capture_ambient_brightness_front"),
-                    new Label(SOURCE_AMBIENT_BRIGHTNESS_REAR, "automation.capture_ambient_brightness_rear")),
-            new StringType(new Label("name", "automation.variable_name"), SetVariableAction.MAX_NAME));
-
     public CaptureVariableAction(Label label, String description) {
-        this.label = label;
-        this.description = description;
-    }
-
-    @Override
-    public String getType() {
-        return TYPE;
-    }
-
-    @Override
-    public Label getLabel() {
-        return label;
-    }
-
-    @Override
-    public String getDescription() {
-        return Messages.get(description);
-    }
-
-    @Override
-    public List<Type> getVariables() {
-        return variables;
+        super(TYPE, label, description, List.of(
+                new EnumType(new Label("source", "automation.capture_source"),
+                        new Label(SOURCE_MEDIA_VOLUME, "automation.capture_media_volume"),
+                        new Label(SOURCE_BATTERY_SOC, "automation.capture_battery_soc"),
+                        new Label(SOURCE_AMBIENT_COLOUR_FRONT, "automation.capture_ambient_colour_front"),
+                        new Label(SOURCE_AMBIENT_COLOUR_REAR, "automation.capture_ambient_colour_rear"),
+                        new Label(SOURCE_AMBIENT_BRIGHTNESS_FRONT, "automation.capture_ambient_brightness_front"),
+                        new Label(SOURCE_AMBIENT_BRIGHTNESS_REAR, "automation.capture_ambient_brightness_rear")),
+                new StringType(new Label("name", "automation.variable_name"), SetVariableAction.MAX_NAME)));
     }
 
     @Override

@@ -2,10 +2,8 @@ package com.overdrive.app.automation.action;
 
 import com.overdrive.app.automation.AutomationAction;
 import com.overdrive.app.automation.type.EnumType;
-import com.overdrive.app.automation.type.Type;
 import com.overdrive.app.automation.value.Label;
 import com.overdrive.app.byd.RadioControl;
-import com.overdrive.app.server.Messages;
 
 import java.util.List;
 import java.util.Map;
@@ -20,29 +18,19 @@ import java.util.Map;
  * {@link ManualClipAction} / {@link AutomationControlAction}, rather than routing through
  * the automation HTTP allowlist.
  */
-public class RadioAction extends BaseAction {
+public class RadioAction extends DeclaredAction {
     private static final String TYPE = "radio";
 
-    private final Label label;
-    private final String description;
-    private final List<Type> variables = List.of(
-            new EnumType(new Label("radio", "automation.radio_kind"),
-                    new Label("wifi", "automation.radio_wifi"),
-                    new Label("bluetooth", "automation.radio_bluetooth"),
-                    new Label("data", "automation.radio_data")),
-            new EnumType(new Label("state", "automation.state"),
-                    new Label("on", "automation.on"),
-                    new Label("off", "automation.off")));
-
     public RadioAction(Label label, String description) {
-        this.label = label;
-        this.description = description;
+        super(TYPE, label, description, List.of(
+                new EnumType(new Label("radio", "automation.radio_kind"),
+                        new Label("wifi", "automation.radio_wifi"),
+                        new Label("bluetooth", "automation.radio_bluetooth"),
+                        new Label("data", "automation.radio_data")),
+                new EnumType(new Label("state", "automation.state"),
+                        new Label("on", "automation.on"),
+                        new Label("off", "automation.off"))));
     }
-
-    public String getType() { return TYPE; }
-    public Label getLabel() { return label; }
-    public String getDescription() { return Messages.get(description); }
-    public List<Type> getVariables() { return variables; }
 
     public void trigger(AutomationAction automationAction) {
         Map<String, Object> vars = automationAction.getVariables();

@@ -4,9 +4,7 @@ import com.overdrive.app.automation.ActionGroups;
 import com.overdrive.app.automation.AutomationAction;
 import com.overdrive.app.automation.Automations;
 import com.overdrive.app.automation.type.ActionGroupType;
-import com.overdrive.app.automation.type.Type;
 import com.overdrive.app.automation.value.Label;
-import com.overdrive.app.server.Messages;
 
 import java.util.HashSet;
 import java.util.List;
@@ -27,7 +25,7 @@ import java.util.Set;
  * plain string (a UUID, so a StringType — not the package-charset AppType — is used).
  * The web renders a live group picker for this action id.
  */
-public class ActionGroupAction extends BaseAction {
+public class ActionGroupAction extends DeclaredAction {
     private static final String TYPE = "actionGroup";
 
     // Per-thread set of group ids currently on the execution stack (cycle detection).
@@ -35,20 +33,10 @@ public class ActionGroupAction extends BaseAction {
     // independent run starts empty.
     private static final ThreadLocal<Set<String>> STACK = ThreadLocal.withInitial(HashSet::new);
 
-    private final Label label;
-    private final String description;
-    private final List<Type> variables = List.of(
-            new ActionGroupType(new Label("groupId", "automation.action_group")));
-
     public ActionGroupAction(Label label, String description) {
-        this.label = label;
-        this.description = description;
+        super(TYPE, label, description, List.of(
+                new ActionGroupType(new Label("groupId", "automation.action_group"))));
     }
-
-    public String getType() { return TYPE; }
-    public Label getLabel() { return label; }
-    public String getDescription() { return Messages.get(description); }
-    public List<Type> getVariables() { return variables; }
 
     public void trigger(AutomationAction automationAction) {
         Object gidObj = automationAction.getVariables().get("groupId");

@@ -4,10 +4,8 @@ import com.overdrive.app.automation.AutomationAction;
 import com.overdrive.app.automation.TextInterpolator;
 import com.overdrive.app.automation.type.EnumType;
 import com.overdrive.app.automation.type.StringType;
-import com.overdrive.app.automation.type.Type;
 import com.overdrive.app.automation.value.Label;
 import com.overdrive.app.daemon.CameraDaemon;
-import com.overdrive.app.server.Messages;
 
 import java.util.List;
 import java.util.Map;
@@ -31,27 +29,17 @@ import java.util.Map;
  * base topic; an absolute topic ("/…") is used as-is. No live MQTT connection → clean
  * no-op (logged), never throws.
  */
-public class MqttPublishAction extends BaseAction {
+public class MqttPublishAction extends DeclaredAction {
     private static final String TYPE = "mqttPublish";
 
-    private final Label label;
-    private final String description;
-    private final List<Type> variables = List.of(
-            new StringType(new Label("topic", "automation.mqtt_topic"), 128),
-            new StringType(new Label("payload", "automation.mqtt_payload"), 256),
-            new EnumType(new Label("retain", "automation.mqtt_retain"),
-                    new Label("false", "automation.off"),
-                    new Label("true", "automation.on")));
-
     public MqttPublishAction(Label label, String description) {
-        this.label = label;
-        this.description = description;
+        super(TYPE, label, description, List.of(
+                new StringType(new Label("topic", "automation.mqtt_topic"), 128),
+                new StringType(new Label("payload", "automation.mqtt_payload"), 256),
+                new EnumType(new Label("retain", "automation.mqtt_retain"),
+                        new Label("false", "automation.off"),
+                        new Label("true", "automation.on"))));
     }
-
-    public String getType() { return TYPE; }
-    public Label getLabel() { return label; }
-    public String getDescription() { return Messages.get(description); }
-    public List<Type> getVariables() { return variables; }
 
     public void trigger(AutomationAction automationAction) {
         Map<String, Object> vars = automationAction.getVariables();
