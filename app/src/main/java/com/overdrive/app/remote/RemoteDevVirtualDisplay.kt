@@ -23,7 +23,6 @@ import android.util.Log
 import android.view.Display
 import com.overdrive.app.ui.MainActivity
 import com.overdrive.app.ui.RemoteMainActivity
-import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -207,6 +206,12 @@ object RemoteDevVirtualDisplay {
         @Volatile private var nextEncodeAtElapsedMs = 0L
         @Volatile private var stagingBitmap: Bitmap? = null
         @Volatile private var outputBitmap: Bitmap? = null
+        // Only the single encoder thread touches these scratch objects. A published
+        // JPEG is always a detached byte array, never the reusable backing storage.
+        private val jpegBuffer by lazy(LazyThreadSafetyMode.NONE) { FrameJpegBuffer() }
+        private val sourceRect = Rect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT)
+        private val destinationRect = Rect(0, 0, STREAM_WIDTH, STREAM_HEIGHT)
+        private val scalePaint = Paint(Paint.FILTER_BITMAP_FLAG)
         val latestFrame = AtomicReference<CachedFrame>()
         val displayId: Int
 
@@ -335,9 +340,9 @@ object RemoteDevVirtualDisplay {
             output.eraseColor(Color.BLACK)
             Canvas(output).drawBitmap(
                 staging,
-                Rect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT),
-                Rect(0, 0, STREAM_WIDTH, STREAM_HEIGHT),
-                Paint(Paint.FILTER_BITMAP_FLAG),
+                sourceRect,
+                destinationRect,
+                scalePaint,
             )
 
             if (isNearlyBlack(output) && latestFrame.get() != null &&
@@ -347,11 +352,15 @@ object RemoteDevVirtualDisplay {
                 return
             }
 
-            val bytes = ByteArrayOutputStream(128 * 1024).use { out ->
-                if (!output.compress(Bitmap.CompressFormat.JPEG, STREAM_JPEG_QUALITY, out)) {
+            val bytes = try {
+                if (!output.compress(Bitmap.CompressFormat.JPEG, STREAM_JPEG_QUALITY, jpegBuffer)) {
                     throw IllegalStateException("Bitmap.compress returned false")
                 }
-                out.toByteArray()
+                jpegBuffer.toByteArray()
+            } finally {
+                // Reset even after a partial/failed compression, without touching
+                // the independent byte array already returned to the caller.
+                jpegBuffer.reset()
             }
             latestFrame.set(
                 CachedFrame(
