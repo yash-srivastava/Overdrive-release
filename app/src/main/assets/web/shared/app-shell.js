@@ -1857,7 +1857,7 @@
         if (document.querySelector('script[data-overdrive-search]')) return;
         ensureSearchCss();
         var s = document.createElement('script');
-        s.src = '../shared/search.js?v=3';
+        s.src = '../shared/search.js?v=4';
         s.setAttribute('data-overdrive-search', '1');
         s.async = false;
         var ref = document.querySelector('script[src*="app-shell.js"]');
