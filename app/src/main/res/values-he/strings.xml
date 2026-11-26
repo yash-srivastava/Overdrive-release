@@ -113,6 +113,10 @@
     <string name="camera_oem_dashcam_save">שמור</string>
     <string name="camera_concurrent_probe_label">בדוק תמיכה בשתי מצלמות במקביל בעלייה הבאה</string>
     <string name="camera_concurrent_probe_subtitle">בדיקה חד-פעמית הפותחת את שתי המצלמות בו-זמנית כדי לוודא שרכב זה מסוגל להפעיל מצלמה פנורמית ומצלמת דרך במקביל. מתבצעת פעם אחת בהפעלה הבאה בזמן חניה. השאר כבוי אלא אם ההקלטות נראות משובשות — הבדיקה אינה חובה ועלולה לקטוע זמנית הקלטה אם היא פעילה בעת הבדיקה.</string>
+    <string name="camera_fast_ai_copy_title">העתקת פריימים ל-AI</string>
+    <string name="camera_fast_ai_copy_label">העתקת פריימים מהירה לזיהוי AI</string>
+    <string name="camera_fast_ai_copy_hint">מעביר פריימים מהמצלמות לזיהוי ה-AI בערך פי שניים מהר יותר, כך ששומר צורך פחות CPU בזמן שהוא שומר על הרכב. ההקלטות לא מושפעות.</string>
+    <string name="camera_fast_ai_copy_subtitle">הפריימים הראשונים נבדקים מול ההעתקה הרגילה, והמערכת חוזרת לבד אם הם שונים. כבה רק אם הזיהוי לא עובד כראוי. פעיל כברירת מחדל. שינוי ההגדרה מפעיל מחדש את שירות המצלמה.</string>
     <string name="camera_oem_option_0">מצלמה 0 — Seal / Han (ברירת מחדל)</string>
     <string name="camera_oem_option_1">מצלמה 1 — Atto / Tang</string>
     <string name="camera_pair_title">איזו מצלמה היא איזו?</string>
@@ -170,6 +174,7 @@
     <string name="setup_autostart_button">פתח הפעלה אוטומטית של BYD</string>
     <string name="setup_autostart_enabling">מפעיל הפעלה אוטומטית…</string>
     <string name="setup_autostart_enabled">הפעלה אוטומטית מופעלת ✓</string>
+    <string name="setup_autostart_not_needed">לא נדרש ברכב הזה. המערכת שלו לא מגבילה את OverDrive מהפעלה עצמאית.</string>
     <string name="setup_autostart_failed">לא ניתן היה להפעיל הפעלה אוטומטית באופן אוטומטי — פותח את מסך ההפעלה האוטומטית של BYD כדי שתוכל לעשות זאת ידנית.</string>
     <string name="setup_autostart_reapply">בצע זאת אוטומטית לאחר עדכונים</string>
     <string name="setup_autostart_reapply_hint">לאחר כל עדכון, מסך ההפעלה האוטומטית של BYD ייפתח לרגע ו-OverDrive יבטל את הסימון של עצמו. רק כשהרכב בחניה והמסך דולק.</string>
