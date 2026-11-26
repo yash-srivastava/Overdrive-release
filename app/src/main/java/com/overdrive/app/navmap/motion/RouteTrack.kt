@@ -22,6 +22,7 @@ class RouteTrack private constructor(val route: NavRoute) {
     /** Along-route positions of the maneuvers worth framing (turns, exits, roundabouts, arrival). */
     private val keyS: DoubleArray
     private var seg = 0
+    private var keyUpper = 0
 
     val length: Double
 
@@ -69,15 +70,32 @@ class RouteTrack private constructor(val route: NavRoute) {
 
     /** Distance from [s] to the next framed maneuver ahead, or +∞. */
     fun distanceToNextKey(s: Double): Double {
-        for (k in keyS) if (k > s + 0.5) return k - s
-        return Double.POSITIVE_INFINITY
+        val limit = s + 0.5
+        val i = keyUpperBound(limit)
+        // Non-finite route geometry can leave NaN keys at the end of the sorted array.
+        return if (i < keyS.size && keyS[i] > limit) keyS[i] - s else Double.POSITIVE_INFINITY
     }
 
     /** Distance travelled since the last framed maneuver at or behind [s], or +∞. */
     fun distanceSinceLastKey(s: Double): Double {
-        var best = Double.POSITIVE_INFINITY
-        for (k in keyS) if (k <= s + 0.5) best = s - k else break
-        return max(0.0, best)
+        val i = keyUpperBound(s + 0.5)
+        return if (i == 0) Double.POSITIVE_INFINITY else max(0.0, s - keyS[i - 1])
+    }
+
+    /** Upper bound of the inclusive camera threshold. Reuse the bracket on nearby frames;
+     *  binary search handles jumps, reverse progress and duplicate maneuver positions. */
+    private fun keyUpperBound(limit: Double): Int {
+        val hint = keyUpper
+        if ((hint == 0 || keyS[hint - 1] <= limit) &&
+            (hint == keyS.size || !(keyS[hint] <= limit))) return hint
+        var lo = 0
+        var hi = keyS.size
+        while (lo < hi) {
+            val mid = (lo + hi) ushr 1
+            if (keyS[mid] <= limit) lo = mid + 1 else hi = mid
+        }
+        keyUpper = lo
+        return lo
     }
 
     /**
