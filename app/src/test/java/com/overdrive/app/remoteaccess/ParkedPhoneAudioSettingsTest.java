@@ -45,6 +45,10 @@ public class ParkedPhoneAudioSettingsTest {
         assertTrue(script.contains("changes.parkedPhoneAudioOff = pending.parkedPhoneAudioOff;"));
         assertTrue(strings.contains("\"parked_phone_audio_off\":"));
         assertTrue(strings.contains("\"parked_phone_audio_off_desc\":"));
+        String css = read("app/src/main/assets/web/shared/remote-access.css");
+        assertTrue(page.contains("class=\"ra-rule ra-parked-audio-rule\""));
+        assertTrue(css.contains(".ra-key-inside-rule, .ra-parked-audio-rule")
+                && css.contains("margin: 14px 24px 0"));
     }
 
     private static String read(String relativePath) throws IOException {
