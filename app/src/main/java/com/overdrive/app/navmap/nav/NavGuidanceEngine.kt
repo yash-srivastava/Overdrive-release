@@ -111,6 +111,7 @@ class NavGuidanceEngine {
     private var cumArcM: DoubleArray = DoubleArray(0)
     /** Total polyline arc length (m) = cumArcM.last(); 0.0 when no route. */
     private var routeArcLenM: Double = 0.0
+    private var matchBounds: RouteMatchBounds? = null
 
     /** Count of consecutive fixes whose route distance exceeded the threshold
      *  (legacy count-based latch, used by the no-bearing update overload). */
@@ -171,6 +172,7 @@ class NavGuidanceEngine {
             cum[i] = cum[i - 1] + haversineMeters(pts[i - 1].lat, pts[i - 1].lng, pts[i].lat, pts[i].lng)
         }
         cumArcM = cum
+        matchBounds = RouteMatchBounds(pts)
         routeArcLenM = if (cum.isNotEmpty()) cum[cum.size - 1] else 0.0
         Log.i(TAG, "guidance started: ${route.points.size} pts, ${route.maneuvers.size} maneuvers")
     }
@@ -184,6 +186,7 @@ class NavGuidanceEngine {
         lastUpdateMs = 0L
         lastStood = false
         this.cumArcM = DoubleArray(0)
+        this.matchBounds = null
         this.routeArcLenM = 0.0
         hasSetOut = false
         traveledM = 0.0
@@ -315,7 +318,14 @@ class NavGuidanceEngine {
         for (pass in 0..1) {
             // the second pass only if nothing in reach was found (a long gap between fixes, a teleport)
             if (pass == 1 && bestDist < Double.MAX_VALUE) break
-            for (i in lo..hi) {
+            var next = lo
+            while (next <= hi) {
+                // The ordinary 20-segment tracking window is already cheap.
+                if (matchedSegIndex < 0) {
+                    val skip = matchBounds?.skipBlock(next, lat, lng, bestDist) ?: next
+                    if (skip > next) { next = skip; continue }
+                }
+                val i = next++
                 val a = pts[i]; val b = pts[i + 1]
                 val snap = pointToSegment(lat, lng, a.lat, a.lng, b.lat, b.lng)
                 if (pass == 0 && alongOf(i, snap.t) > maxAlong) continue
@@ -328,7 +338,13 @@ class NavGuidanceEngine {
         // First fix: of the segments about as near, the earliest. A round trip starts on its own last leg's street,
         // and matching there would put the car at the end.
         if (matchedSegIndex < 0) {
-            for (i in 0 until bestSegStart) {
+            var next = 0
+            while (next < bestSegStart) {
+                // The first-match pass accepts the earliest segment within slack,
+                // not just a strictly closer segment.
+                val skip = matchBounds?.skipBlock(next, lat, lng, bestDist + FIRST_MATCH_SLACK_M) ?: next
+                if (skip > next) { next = skip; continue }
+                val i = next++
                 val a = pts[i]; val b = pts[i + 1]
                 val snap = pointToSegment(lat, lng, a.lat, a.lng, b.lat, b.lng)
                 if (snap.distMeters <= bestDist + FIRST_MATCH_SLACK_M) {
@@ -342,11 +358,15 @@ class NavGuidanceEngine {
         // do ONE global rescan so a real reroute/teleport re-acquires correctly — within reach along the route.
         if (matchedSegIndex >= 0 && bestDist > OFF_ROUTE_LATERAL_M) {
             val finiteArc = routeArcLenM.isFinite()
-            for (i in 0 until pts.size - 1) {
+            var next = 0
+            while (next < pts.size - 1) {
                 // With a finite, nondecreasing arc table, even t=0 on this segment
                 // is beyond reach. Later segments cannot pass the existing gate either.
                 // Keep the full scan for malformed geometry (NaN comparisons fail open).
-                if (finiteArc && cumArcM[i] > maxAlong) break
+                if (finiteArc && cumArcM[next] > maxAlong) break
+                val skip = matchBounds?.skipBlock(next, lat, lng, bestDist) ?: next
+                if (skip > next) { next = skip; continue }
+                val i = next++
                 // Both window passes have already considered every reachable candidate here.
                 if (i in lo..hi) continue
                 val a = pts[i]; val b = pts[i + 1]

@@ -230,42 +230,15 @@ object CommunityApiHandler {
             return updateOwn(existingRow, body, out, localId)
         }
 
-        // Authoritative validate + canonicalize (drops any junk the client added).
-        val parsed = Automation.fromJson(rules)
-        if (parsed == null) { safeError(out, 400, "automation does not match the schema"); return true }
-        val canonical = parsed.toJson()
-        if (containsShellAction(canonical)) {
-            safeError(out, 403, "shell automations cannot be shared to the community catalog")
-            return true
-        }
-
-        val name = json.optString("name", "").trim()
-        if (name.isEmpty()) { safeError(out, 400, "name required"); return true }
-        val description = json.optString("description", "").trim()
-        // A description is REQUIRED so the community list always explains what a shared
-        // automation does (mirrors the client-side gate; defense-in-depth).
-        if (description.isEmpty()) { safeError(out, 400, "description required"); return true }
-        var category = json.optString("category", "other").trim().lowercase()
-        if (category.isEmpty()) category = "other"
-
-        // Referenced action groups, validated + canonicalized through the SAME gate as the
-        // automation (a group is a named action list). null return = a group failed the
-        // no-shell/schema gate and sanitize wrote the error response.
-        val bundledGroups = sanitizeBundledGroups(json.optJSONObject("actionGroups"), out)
-            ?: return true
-
-        // Author name: prefer the request, else the remembered value; persist it for next time.
-        var authorName = json.optString("authorName", "").trim()
-        if (authorName.isEmpty()) authorName = CommunityConfig.snapshot(forceReload = true).authorName ?: ""
-        if (authorName.isEmpty()) { safeError(out, 400, "authorName required"); return true }
-        CommunityConfig.setAuthorName(authorName)
+        val submission = validateSubmission(json, rules, out) ?: return true
 
         // Ownership key = the STABLE community publisher id (NOT DeviceId.current, which
         // rotates every 30 days — see CommunityConfig.publisherId). This is what the
         // server stores as author_device and later matches on delete, so the author can
         // still remove their upload after a RoadSense id rotation.
         val publisherId = CommunityConfig.publisherId()
-        val res = provider.publish(publisherId, authorName, name, description, category, canonical, SCHEMA_VERSION, bundledGroups)
+        val res = provider.publish(publisherId, submission.authorName, submission.name,
+            submission.description, submission.category, submission.canonical, SCHEMA_VERSION, submission.bundledGroups)
         // Remember local→remote so a later re-publish of this automation UPDATES the row
         // it created instead of inserting a duplicate. Best-effort: a failed persist only
         // costs us the dedupe on the next publish, never the publish itself.
@@ -277,6 +250,50 @@ object CommunityApiHandler {
         }
         forward(res, out)
         return true
+    }
+
+    private class Submission(
+        val authorName: String,
+        val name: String,
+        val description: String,
+        val category: String,
+        val canonical: JSONObject,
+        val bundledGroups: JSONObject
+    )
+
+    /** Shared publish/update gate. A null result means an error response was sent. */
+    private fun validateSubmission(json: JSONObject, rules: JSONObject, out: OutputStream): Submission? {
+        // Authoritative validate + canonicalize (drops any junk the client added).
+        val parsed = Automation.fromJson(rules)
+        if (parsed == null) { safeError(out, 400, "automation does not match the schema"); return null }
+        val canonical = parsed.toJson()
+        if (containsShellAction(canonical)) {
+            safeError(out, 403, "shell automations cannot be shared to the community catalog")
+            return null
+        }
+
+        val name = json.optString("name", "").trim()
+        if (name.isEmpty()) { safeError(out, 400, "name required"); return null }
+        val description = json.optString("description", "").trim()
+        // A description is REQUIRED so the community list always explains what a shared
+        // automation does (mirrors the client-side gate; defense-in-depth).
+        if (description.isEmpty()) { safeError(out, 400, "description required"); return null }
+        var category = json.optString("category", "other").trim().lowercase()
+        if (category.isEmpty()) category = "other"
+
+        // Referenced action groups, validated + canonicalized through the SAME gate as the
+        // automation (a group is a named action list). null return = a group failed the
+        // no-shell/schema gate and sanitize wrote the error response.
+        val bundledGroups = sanitizeBundledGroups(json.optJSONObject("actionGroups"), out)
+            ?: return null
+
+        // Author name: prefer the request, else the remembered value; persist it for next time.
+        var authorName = json.optString("authorName", "").trim()
+        if (authorName.isEmpty()) authorName = CommunityConfig.snapshot(forceReload = true).authorName ?: ""
+        if (authorName.isEmpty()) { safeError(out, 400, "authorName required"); return null }
+        CommunityConfig.setAuthorName(authorName)
+
+        return Submission(authorName, name, description, category, canonical, bundledGroups)
     }
 
     /**
@@ -341,34 +358,13 @@ object CommunityApiHandler {
         val json = parseBody(body) ?: run { safeError(out, 400, "invalid JSON body"); return true }
         val rules = json.optJSONObject("rules") ?: run { safeError(out, 400, "rules required"); return true }
 
-        // Authoritative validate + canonicalize (identical gate to publish).
-        val parsed = Automation.fromJson(rules)
-        if (parsed == null) { safeError(out, 400, "automation does not match the schema"); return true }
-        val canonical = parsed.toJson()
-        if (containsShellAction(canonical)) {
-            safeError(out, 403, "shell automations cannot be shared to the community catalog")
-            return true
-        }
-
-        val name = json.optString("name", "").trim()
-        if (name.isEmpty()) { safeError(out, 400, "name required"); return true }
-        val description = json.optString("description", "").trim()
-        if (description.isEmpty()) { safeError(out, 400, "description required"); return true }
-        var category = json.optString("category", "other").trim().lowercase()
-        if (category.isEmpty()) category = "other"
-
-        val bundledGroups = sanitizeBundledGroups(json.optJSONObject("actionGroups"), out)
-            ?: return true
-
-        var authorName = json.optString("authorName", "").trim()
-        if (authorName.isEmpty()) authorName = CommunityConfig.snapshot(forceReload = true).authorName ?: ""
-        if (authorName.isEmpty()) { safeError(out, 400, "authorName required"); return true }
-        CommunityConfig.setAuthorName(authorName)
+        val submission = validateSubmission(json, rules, out) ?: return true
 
         // Same stable publisher id as publish/delete — the Worker matches it against the
         // stored author_device, so only the original publisher can update the row.
         val publisherId = CommunityConfig.publisherId()
-        val res = provider.update(id, publisherId, authorName, name, description, category, canonical, SCHEMA_VERSION, bundledGroups)
+        val res = provider.update(id, publisherId, submission.authorName, submission.name,
+            submission.description, submission.category, submission.canonical, SCHEMA_VERSION, submission.bundledGroups)
 
         // Stale mapping: the remembered row is gone (or no longer ours). Forget it and
         // publish afresh so the user's Publish still does something sensible. Only ever

@@ -94,7 +94,10 @@ window.SafeKeepBadges = (function () {
             var f = els[i].getAttribute('data-sk-file');
             if (f && files.indexOf(f) < 0) files.push(f);
         }
-        if (!files.length) return;
+        if (!files.length) {
+            scheduleRefresh();
+            return;
+        }
         post('/api/safekeep/clips', { files: files }).then(function (r) {
             // A newer recordings render or refresh owns the badge state.
             if (generation !== statesGeneration) return;
@@ -105,7 +108,17 @@ window.SafeKeepBadges = (function () {
                 hideAll();
                 return;
             }
-            if (!r.success) return;
+            if (!r.success) {
+                // Keep the last known busy badges polling after transient failures.
+                if (r.httpStatus === 0 || r.httpStatus === 408 ||
+                    r.httpStatus >= 500 || (r.httpStatus >= 200 && r.httpStatus < 300)) {
+                    scheduleRefresh();
+                } else {
+                    if (refreshTimer !== null) clearTimeout(refreshTimer);
+                    refreshTimer = null;
+                }
+                return;
+            }
             states = r.states || {};
             render();
             scheduleRefresh();
@@ -113,15 +126,18 @@ window.SafeKeepBadges = (function () {
     }
 
     function scheduleRefresh() {
-        if (refreshTimer) clearTimeout(refreshTimer);
-        var busy = false;
-        for (var k in states) {
-            if (!states.hasOwnProperty(k)) continue;
-            var s = states[k].state;
-            if (s === 'uploading' || s === 'queued') busy = true;
+        if (refreshTimer !== null) clearTimeout(refreshTimer);
+        refreshTimer = null;
+        if (enabled === false || document.hidden) return;
+        // Only clips still present in the recordings list should drive polling.
+        var els = badgeEls();
+        for (var i = 0; i < els.length; i++) {
+            var st = states[els[i].getAttribute('data-sk-file')];
+            if (st && (st.state === 'uploading' || st.state === 'queued')) {
+                refreshTimer = setTimeout(fetchStates, 4000);
+                break;
+            }
         }
-        if (!busy || document.hidden) return;
-        refreshTimer = setTimeout(fetchStates, 4000);
     }
 
     function hideAll() {
@@ -249,7 +265,7 @@ window.SafeKeepBadges = (function () {
     }
 
     document.addEventListener('visibilitychange', function () {
-        if (!document.hidden && enabled) scheduleRefresh();
+        if (enabled) scheduleRefresh();
     });
 
     return { decorate: decorate };

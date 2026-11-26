@@ -1,10 +1,12 @@
 package com.overdrive.app.server.timeline;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.TreeSet;
 
 /**
@@ -22,12 +24,16 @@ final class TimelinePlan {
         final int rank;
         final long from;
         final long to;
+        final int order;
+        final boolean oem;
 
-        Cand(TimelineData.ClipRef clip, int rank, long from, long to) {
+        Cand(TimelineData.ClipRef clip, int rank, long from, long to, int order) {
             this.clip = clip;
             this.rank = rank;
             this.from = from;
             this.to = to;
+            this.order = order;
+            this.oem = oem(clip);
         }
     }
 
@@ -52,58 +58,91 @@ final class TimelinePlan {
         return 5;
     }
 
-    private static boolean better(Cand a, Cand b) {
-        if (a.rank != b.rank) return a.rank < b.rank;
-        if (a.clip.start != b.clip.start) return a.clip.start < b.clip.start;
-        return a.clip.id != null && (b.clip.id == null || a.clip.id.compareTo(b.clip.id) < 0);
-    }
+    // Equal-priority candidates used to win in stable input order. Keep them
+    // distinct in the set even when their IDs (including null IDs) match.
+    private static final Comparator<Cand> PRIORITY = (a, b) -> {
+        int cmp = Integer.compare(a.rank, b.rank);
+        if (cmp == 0) cmp = Long.compare(a.clip.start, b.clip.start);
+        if (cmp == 0) {
+            String ai = a.clip.id, bi = b.clip.id;
+            cmp = ai == null ? (bi == null ? 0 : 1) : (bi == null ? -1 : ai.compareTo(bi));
+        }
+        return cmp != 0 ? cmp : Integer.compare(a.order, b.order);
+    };
 
     static List<TimelineData.PlanItem> build(List<TimelineData.ClipRef> clips, long from, long to,
                                              String prefer) {
         List<TimelineData.PlanItem> out = new ArrayList<>();
         if (clips == null || to <= from) return out;
         List<Cand> cands = new ArrayList<>();
-        TreeSet<Long> points = new TreeSet<>();
         for (TimelineData.ClipRef clip : clips) {
             if (clip == null || !clip.available || clip.end == null || clip.end <= clip.start) continue;
             long a = Math.max(clip.start, from);
             long b = Math.min(clip.end, to);
             if (b <= a) continue;
-            cands.add(new Cand(clip, rank(clip, prefer), a, b));
-            points.add(a);
-            points.add(b);
+            cands.add(new Cand(clip, rank(clip, prefer), a, b, cands.size()));
         }
         if (cands.isEmpty()) return out;
         Collections.sort(cands, Comparator.comparingLong(c -> c.from));
 
-        List<Cand> active = new ArrayList<>();
+        // Ordinary non-overlapping recordings need neither boundary sorting
+        // nor active indexes. Adjacent clips and gaps retain their own slices.
+        boolean disjoint = true;
+        long lastEnd = cands.get(0).from;
+        for (Cand c : cands) {
+            if (c.from < lastEnd) {
+                disjoint = false;
+                break;
+            }
+            lastEnd = c.to;
+        }
+        if (disjoint) {
+            for (Cand c : cands) out.add(item(c, c.from, c.to));
+            return dropSlivers(out);
+        }
+
+        // Primitive boundaries avoid one boxed Long and tree node per endpoint.
+        long[] points = new long[cands.size() * 2];
+        for (int i = 0; i < cands.size(); i++) {
+            points[2 * i] = cands.get(i).from;
+            points[2 * i + 1] = cands.get(i).to;
+        }
+        Arrays.sort(points);
+
+        TreeSet<Cand> active = new TreeSet<>(PRIORITY);
+        // Use original (not window-clipped) ends for the seam rule. Expiry is
+        // equivalent at every interior boundary, since all a < window end.
+        TreeMap<Long, List<Cand>> byEnd = new TreeMap<>();
         int next = 0;
         Cand current = null;
         long currentFrom = 0L;
         long currentTo = 0L;
-        Long previous = null;
-        for (Long point : points) {
-            if (previous != null) {
-                long a = previous;
-                long b = point;
-                while (next < cands.size() && cands.get(next).from <= a) active.add(cands.get(next++));
-                for (Iterator<Cand> it = active.iterator(); it.hasNext(); ) {
-                    if (it.next().to <= a) it.remove();
-                }
-                Cand winner = winner(active);
-                if (winner == null) {
-                    if (current != null) out.add(item(current, currentFrom, currentTo));
-                    current = null;
-                } else if (winner == current && currentTo == a) {
-                    currentTo = b;
-                } else {
-                    if (current != null) out.add(item(current, currentFrom, currentTo));
-                    current = winner;
-                    currentFrom = a;
-                    currentTo = b;
-                }
+        long a = points[0];
+        for (int i = 1; i < points.length; i++) {
+            long b = points[i];
+            if (a == b) continue;
+            while (!byEnd.isEmpty() && byEnd.firstKey() <= a) {
+                for (Cand expired : byEnd.pollFirstEntry().getValue()) active.remove(expired);
             }
-            previous = point;
+            while (next < cands.size() && cands.get(next).from <= a) {
+                Cand c = cands.get(next++);
+                if (c.to <= a) continue;
+                active.add(c);
+                byEnd.computeIfAbsent(c.clip.end, ignored -> new ArrayList<>(1)).add(c);
+            }
+            Cand winner = winner(active, byEnd);
+            if (winner == null) {
+                if (current != null) out.add(item(current, currentFrom, currentTo));
+                current = null;
+            } else if (winner == current && currentTo == a) {
+                currentTo = b;
+            } else {
+                if (current != null) out.add(item(current, currentFrom, currentTo));
+                current = winner;
+                currentFrom = a;
+                currentTo = b;
+            }
+            a = b;
         }
         if (current != null) out.add(item(current, currentFrom, currentTo));
         return dropSlivers(out);
@@ -129,20 +168,27 @@ final class TimelinePlan {
         return out;
     }
 
-    private static Cand winner(List<Cand> active) {
-        Cand best = null;
-        for (Cand c : active) {
-            if (best == null || better(c, best)) best = c;
-        }
-        if (best == null) return null;
+    private static Cand winner(TreeSet<Cand> active, TreeMap<Long, List<Cand>> byEnd) {
+        if (active.isEmpty()) return null;
+        Cand best = active.first();
+        if (active.size() == 1) return best;
+        long start = best.clip.start;
+        long limit = start > Long.MAX_VALUE - SEAM_MS ? Long.MAX_VALUE : start + SEAM_MS;
+        // Preserve the original subtraction even for pathological signed-long
+        // timestamps that overflow. Real wall timestamps take the bounded path.
+        boolean mayOverflow = start < 0 && byEnd.lastKey() > Long.MAX_VALUE + start;
+        if (!mayOverflow && byEnd.firstKey() > limit) return best;
         Cand seam = null;
-        for (Cand c : active) {
-            if (c == best) continue;
-            if (c.clip.start < best.clip.start && c.clip.end > best.clip.start
-                    && c.clip.end - best.clip.start <= SEAM_MS
-                    && oem(c.clip) == oem(best.clip)
-                    && (seam == null || better(c, seam))) {
-                seam = c;
+        // Only ends in (start, start + SEAM_MS] can be eligible. All active
+        // clips outside this narrow interval need no per-clip checks.
+        for (Map.Entry<Long, List<Cand>> entry : byEnd.tailMap(start, false).entrySet()) {
+            if (!mayOverflow && entry.getKey() > limit) break;
+            if (entry.getKey() - start > SEAM_MS) continue;
+            for (Cand c : entry.getValue()) {
+                if (c.clip.start < start && c.oem == best.oem
+                        && (seam == null || PRIORITY.compare(c, seam) < 0)) {
+                    seam = c;
+                }
             }
         }
         return seam != null ? seam : best;

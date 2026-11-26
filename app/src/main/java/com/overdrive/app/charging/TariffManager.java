@@ -66,6 +66,16 @@ public class TariffManager {
     private static final String REPRICE_ALL = "*";
     private static final String LEGACY_REPRICE_TOKEN = "legacy";
 
+    private static final Comparator<TariffProfile> DISPLAY_ORDER = (a, b) -> {
+        if (a.getLastUsedAt() != b.getLastUsedAt()) {
+            return Long.compare(b.getLastUsedAt(), a.getLastUsedAt());
+        }
+        if (a.getUseCount() != b.getUseCount()) {
+            return Integer.compare(b.getUseCount(), a.getUseCount());
+        }
+        return Long.compare(b.getCreatedAt(), a.getCreatedAt());
+    };
+
     /** Cap the list so a runaway UI can't bloat the config file. */
     public static final int MAX_PROFILES = 40;
 
@@ -642,6 +652,10 @@ public class TariffManager {
         // PINNED this profile as the catch-all. A tariff is never auto-promoted to
         // default (see add()), so the global rate stays the fallback until they ask
         // otherwise.
+        return resolvePinnedDefault(isDc);
+    }
+
+    private TariffProfile resolvePinnedDefault(int isDc) {
         TariffProfile def = findById(defaultTariffId);
         if (def != null && def.isEnabled() && def.rateFor(isDc) > 0) return def;
         return null;
@@ -651,22 +665,10 @@ public class TariffManager {
      * Monetary-snapshot variant of {@link #resolve}; a config read failure is an error, not "no tariff".
      */
     public synchronized TariffProfile resolveStrict(double lat, double lng, int isDc) {
-        try {
-            // Monetary snapshots re-verify the durable source even when a cache is already
-            // published. A transient read failure must defer the close, not freeze stale pricing.
-            loadStrict();
-        } catch (Exception e) {
-            loaded = false;
-            lastLoadFailure = e.getMessage() != null
-                    ? e.getMessage() : e.getClass().getSimpleName();
-            throw new IllegalStateException(
-                    "tariff config unavailable: " + lastLoadFailure, e);
-        }
+        requireFreshPricingConfig();
         TariffProfile inCircle = resolveInCircleLoaded(lat, lng, isDc);
         if (inCircle != null) return inCircle;
-        TariffProfile def = findById(defaultTariffId);
-        if (def != null && def.isEnabled() && def.rateFor(isDc) > 0) return def;
-        return null;
+        return resolvePinnedDefault(isDc);
     }
 
     /**
@@ -688,7 +690,15 @@ public class TariffManager {
     }
 
     public synchronized TariffProfile resolveInCircleStrict(double lat, double lng, int isDc) {
+        requireFreshPricingConfig();
+        return resolveInCircleLoaded(lat, lng, isDc);
+    }
+
+    /** Caller holds the manager monitor; do not replay database work here. */
+    private void requireFreshPricingConfig() {
         try {
+            // Monetary snapshots re-verify the durable source even when a cache is already
+            // published. A transient read failure must defer the close, not freeze stale pricing.
             loadStrict();
         } catch (Exception e) {
             loaded = false;
@@ -697,7 +707,6 @@ public class TariffManager {
             throw new IllegalStateException(
                     "tariff config unavailable: " + lastLoadFailure, e);
         }
-        return resolveInCircleLoaded(lat, lng, isDc);
     }
 
     private TariffProfile resolveInCircleLoaded(double lat, double lng, int isDc) {
@@ -1051,18 +1060,7 @@ public class TariffManager {
      */
     public List<TariffProfile> getProfilesForDisplay() {
         List<TariffProfile> list = getProfiles();
-        Collections.sort(list, new Comparator<TariffProfile>() {
-            @Override
-            public int compare(TariffProfile a, TariffProfile b) {
-                if (a.getLastUsedAt() != b.getLastUsedAt()) {
-                    return Long.compare(b.getLastUsedAt(), a.getLastUsedAt());
-                }
-                if (a.getUseCount() != b.getUseCount()) {
-                    return Integer.compare(b.getUseCount(), a.getUseCount());
-                }
-                return Long.compare(b.getCreatedAt(), a.getCreatedAt());
-            }
-        });
+        Collections.sort(list, DISPLAY_ORDER);
         return list;
     }
 
@@ -1091,18 +1089,7 @@ public class TariffManager {
         JSONObject out = new JSONObject();
         JSONArray arr = new JSONArray();
         List<TariffProfile> ordered = new ArrayList<>(image.profiles);
-        Collections.sort(ordered, new Comparator<TariffProfile>() {
-            @Override
-            public int compare(TariffProfile a, TariffProfile b) {
-                if (a.getLastUsedAt() != b.getLastUsedAt()) {
-                    return Long.compare(b.getLastUsedAt(), a.getLastUsedAt());
-                }
-                if (a.getUseCount() != b.getUseCount()) {
-                    return Integer.compare(b.getUseCount(), a.getUseCount());
-                }
-                return Long.compare(b.getCreatedAt(), a.getCreatedAt());
-            }
-        });
+        Collections.sort(ordered, DISPLAY_ORDER);
         for (TariffProfile p : ordered) arr.put(p.toJson());
         out.put("tariffs", arr);
         out.put("defaultTariffId", image.defaultTariffId);

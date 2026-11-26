@@ -19,6 +19,7 @@ import android.view.Surface
 import android.view.animation.PathInterpolator
 import com.overdrive.app.ui.timeline.ClipSpec
 import com.overdrive.app.ui.view.PlaybackDewarp
+import com.overdrive.app.ui.view.PlaybackGl
 import com.overdrive.app.ui.view.ZoomableVideoView.Quadrant
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -299,7 +300,7 @@ internal class TimelineGlRenderer(private val host: Host) {
     private fun createGlObjects() {
         if (input != null) return
         if (plainProg == null) plainProg = buildOrNull(PLAIN_SHADER)
-        if (dewarpProg == null) dewarpProg = buildOrNull(DEWARP_SHADER)
+        if (dewarpProg == null) dewarpProg = buildOrNull(PlaybackGl.timelineDewarpShader)
         if (heldProg == null) heldProg = buildOrNull(HELD_SHADER)
         try {
             if (oesTex == 0) {
@@ -307,7 +308,7 @@ internal class TimelineGlRenderer(private val host: Host) {
                 GLES20.glGenTextures(1, ids, 0)
                 oesTex = ids[0]
                 GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTex)
-                texParams(GLES11Ext.GL_TEXTURE_EXTERNAL_OES)
+                PlaybackGl.setLinearClamp(GLES11Ext.GL_TEXTURE_EXTERNAL_OES)
             }
             val st = SurfaceTexture(oesTex)
             if (videoW > 0 && videoH > 0) st.setDefaultBufferSize(videoW, videoH)
@@ -493,7 +494,7 @@ internal class TimelineGlRenderer(private val host: Host) {
         GLES20.glGenTextures(1, ids, 0)
         slotTex[slot] = ids[0]
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, ids[0])
-        texParams(GLES20.GL_TEXTURE_2D)
+        PlaybackGl.setLinearClamp(GLES20.GL_TEXTURE_2D)
         GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0,
             GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
         GLES20.glGenFramebuffers(1, ids, 0)
@@ -917,56 +918,11 @@ internal class TimelineGlRenderer(private val host: Host) {
         while (n++ < 8 && GLES20.glGetError() != GLES20.GL_NO_ERROR) Unit
     }
 
-    private fun texParams(target: Int) {
-        GLES20.glTexParameteri(target, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
-        GLES20.glTexParameteri(target, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
-        GLES20.glTexParameteri(target, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
-        GLES20.glTexParameteri(target, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
-    }
-
     private fun buildOrNull(fragment: String): Prog? = try {
-        Prog(buildProgram(VERTEX_SHADER, fragment))
+        Prog(PlaybackGl.buildProgram(fragment, "compile failed", "link failed"))
     } catch (t: Throwable) {
         Log.w(TAG, "shader unavailable: ${t.message}")
         null
-    }
-
-    private fun buildProgram(vertex: String, fragment: String): Int {
-        val vs = compileShader(GLES20.GL_VERTEX_SHADER, vertex)
-        val fs = try {
-            compileShader(GLES20.GL_FRAGMENT_SHADER, fragment)
-        } catch (t: Throwable) {
-            GLES20.glDeleteShader(vs)
-            throw t
-        }
-        val prog = GLES20.glCreateProgram()
-        GLES20.glAttachShader(prog, vs)
-        GLES20.glAttachShader(prog, fs)
-        GLES20.glLinkProgram(prog)
-        GLES20.glDeleteShader(vs)
-        GLES20.glDeleteShader(fs)
-        val linked = IntArray(1)
-        GLES20.glGetProgramiv(prog, GLES20.GL_LINK_STATUS, linked, 0)
-        if (linked[0] == 0) {
-            val log = GLES20.glGetProgramInfoLog(prog)
-            GLES20.glDeleteProgram(prog)
-            throw IllegalStateException("link failed: $log")
-        }
-        return prog
-    }
-
-    private fun compileShader(type: Int, source: String): Int {
-        val shader = GLES20.glCreateShader(type)
-        GLES20.glShaderSource(shader, source)
-        GLES20.glCompileShader(shader)
-        val ok = IntArray(1)
-        GLES20.glGetShaderiv(shader, GLES20.GL_COMPILE_STATUS, ok, 0)
-        if (ok[0] == 0) {
-            val log = GLES20.glGetShaderInfoLog(shader)
-            GLES20.glDeleteShader(shader)
-            throw IllegalStateException("compile failed: $log")
-        }
-        return shader
     }
 
     companion object {
@@ -982,52 +938,6 @@ internal class TimelineGlRenderer(private val host: Host) {
         private const val MAX_RECOVERIES = 3
         private const val RECOVERY_WINDOW_MS = 60_000L
         private val FADE_EASE = PathInterpolator(0.23f, 1f, 0.32f, 1f)
-
-        private const val VERTEX_SHADER = """
-attribute vec4 aPosition;
-attribute vec2 aTexCoord;
-varying vec2 vTex;
-void main() {
-    gl_Position = aPosition;
-    vTex = aTexCoord;
-}
-"""
-
-        // PlaybackDewarp's fragment shader; vTex is the frame coordinate after crop/zoom, uAlpha premultiplies.
-        private const val DEWARP_SHADER = """
-#extension GL_OES_EGL_image_external : require
-precision highp float;
-uniform samplerExternalOES uTex;
-uniform mat4 uStMatrix;
-uniform vec2 uK;
-uniform float uAspect;
-uniform vec2 uHalfTexel;
-uniform float uStrip;
-uniform float uAlpha;
-varying vec2 vTex;
-vec2 rectifyTile(vec2 t) {
-    vec2 nxy = t * 2.0 - 1.0;
-    vec2 nxyAspect = vec2(nxy.x, nxy.y * uAspect);
-    float r2 = dot(nxyAspect, nxyAspect);
-    float invDenom = 1.0 / (1.0 + uK.x * r2 + uK.y * r2 * r2);
-    float aspect2 = uAspect * uAspect;
-    float zoom = 1.0 + uK.x * aspect2 + uK.y * aspect2 * aspect2;
-    vec2 srcAspect = nxyAspect * invDenom * zoom;
-    vec2 camUV = vec2(srcAspect.x, srcAspect.y / uAspect) * 0.5 + 0.5;
-    return clamp(camUV, vec2(0.0), vec2(1.0));
-}
-void main() {
-    if (vTex.y > 1.0 - uStrip) {
-        gl_FragColor = texture2D(uTex, (uStMatrix * vec4(vTex, 0.0, 1.0)).xy) * uAlpha;
-        return;
-    }
-    vec2 tile = step(vec2(0.5), vTex) * 0.5;
-    vec2 cam = rectifyTile((vTex - tile) * 2.0);
-    vec2 src = clamp(tile + cam * 0.5, tile + uHalfTexel, tile + 0.5 - uHalfTexel);
-    src.y = min(src.y, 1.0 - uStrip - uHalfTexel.y);
-    gl_FragColor = texture2D(uTex, (uStMatrix * vec4(src, 0.0, 1.0)).xy) * uAlpha;
-}
-"""
 
         private const val PLAIN_SHADER = """
 #extension GL_OES_EGL_image_external : require

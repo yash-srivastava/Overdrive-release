@@ -731,19 +731,28 @@ public class RecordingsApiHandler {
      * Returns null when no in-flight write is happening.
      */
     private static File findInflightTmp(String filename) {
-        StorageManager sm = StorageManager.getInstance();
-        String tmpName = filename + ".tmp";
-        for (File dir : sm.getAllRecordingsDirs()) {
-            File f = new File(dir, tmpName);
-            if (RemovableStorageFs.exists(f) && RemovableStorageFs.canRead(f) && RemovableStorageFs.length(f) > 0) return f;
-        }
-        for (File dir : sm.getAllSurveillanceDirs()) {
-            File f = new File(dir, tmpName);
-            if (RemovableStorageFs.exists(f) && RemovableStorageFs.canRead(f) && RemovableStorageFs.length(f) > 0) return f;
-        }
-        for (File dir : sm.getAllProximityDirs()) {
-            File f = new File(dir, tmpName);
-            if (RemovableStorageFs.exists(f) && RemovableStorageFs.canRead(f) && RemovableStorageFs.length(f) > 0) return f;
+        return findMediaByName(StorageManager.getInstance(), filename + ".tmp");
+    }
+
+    /** Search the active-first directory lists in the legacy media priority order. */
+    private static File findMediaByName(StorageManager sm, String filename) {
+        File file = findInDirectories(sm.getAllRecordingsDirs(), filename, true);
+        if (file != null) return file;
+        file = findInDirectories(sm.getAllSurveillanceDirs(), filename, true);
+        if (file != null) return file;
+        return findInDirectories(sm.getAllProximityDirs(), filename, true);
+    }
+
+    /** Media needs readable, nonempty content; legacy JSON lookup checks existence only. */
+    static File findInDirectories(List<File> directories, String filename,
+                                  boolean requireReadableContent) {
+        // Callers must pass an already-validated base name; this helper does not validate it.
+        for (File dir : directories) {
+            File file = new File(dir, filename);
+            if (!RemovableStorageFs.exists(file)) continue;
+            if (requireReadableContent && (!RemovableStorageFs.canRead(file)
+                    || RemovableStorageFs.length(file) <= 0)) continue;
+            return file;
         }
         return null;
     }
@@ -753,7 +762,7 @@ public class RecordingsApiHandler {
      * Uses StorageManager to get all possible directories without hardcoding paths.
      */
     private static File findVideoFile(String filename) {
-        return findVideoFile(filename, false);
+        return findVideoFile(filename, null, false);
     }
 
     /**
@@ -764,10 +773,6 @@ public class RecordingsApiHandler {
      *        a .tmp lacks the moov atom and the {@code <video>} element will
      *        fail to load it. Streaming MUST use the default false.
      */
-    private static File findVideoFile(String filename, boolean allowInFlightTmp) {
-        return findVideoFile(filename, null, allowInFlightTmp);
-    }
-
     private static File findVideoFile(
             String filename,
             String requestedPath,
@@ -777,23 +782,8 @@ public class RecordingsApiHandler {
         }
         StorageManager sm = StorageManager.getInstance();
 
-        // Search all recordings directories (active + alternate)
-        for (File dir : sm.getAllRecordingsDirs()) {
-            File f = new File(dir, filename);
-            if (RemovableStorageFs.exists(f) && RemovableStorageFs.canRead(f) && RemovableStorageFs.length(f) > 0) return f;
-        }
-
-        // Search all surveillance directories (active + alternate)
-        for (File dir : sm.getAllSurveillanceDirs()) {
-            File f = new File(dir, filename);
-            if (RemovableStorageFs.exists(f) && RemovableStorageFs.canRead(f) && RemovableStorageFs.length(f) > 0) return f;
-        }
-
-        // Search all proximity directories (active + alternate)
-        for (File dir : sm.getAllProximityDirs()) {
-            File f = new File(dir, filename);
-            if (RemovableStorageFs.exists(f) && RemovableStorageFs.canRead(f) && RemovableStorageFs.length(f) > 0) return f;
-        }
+        File file = findMediaByName(sm, filename);
+        if (file != null) return file;
 
         // In-flight fallback (thumbnails only): a notification fires the moment
         // startRecording() returns, but the file on disk is still
@@ -803,19 +793,7 @@ public class RecordingsApiHandler {
         // shows no hero image. We DON'T enable this for video streaming
         // because a .tmp lacks the moov atom.
         if (allowInFlightTmp) {
-            String tmpName = filename + ".tmp";
-            for (File dir : sm.getAllRecordingsDirs()) {
-                File f = new File(dir, tmpName);
-                if (RemovableStorageFs.exists(f) && RemovableStorageFs.canRead(f) && RemovableStorageFs.length(f) > 0) return f;
-            }
-            for (File dir : sm.getAllSurveillanceDirs()) {
-                File f = new File(dir, tmpName);
-                if (RemovableStorageFs.exists(f) && RemovableStorageFs.canRead(f) && RemovableStorageFs.length(f) > 0) return f;
-            }
-            for (File dir : sm.getAllProximityDirs()) {
-                File f = new File(dir, tmpName);
-                if (RemovableStorageFs.exists(f) && RemovableStorageFs.canRead(f) && RemovableStorageFs.length(f) > 0) return f;
-            }
+            return findMediaByName(sm, filename + ".tmp");
         }
 
         return null;
@@ -905,20 +883,7 @@ public class RecordingsApiHandler {
     private static File findSiblingJpeg(String jpegName) {
         if (jpegName == null || jpegName.isEmpty()) return null;
         if (jpegName.contains("..") || jpegName.contains("/")) return null;
-        StorageManager sm = StorageManager.getInstance();
-        for (File dir : sm.getAllRecordingsDirs()) {
-            File f = new File(dir, jpegName);
-            if (RemovableStorageFs.exists(f) && RemovableStorageFs.canRead(f) && RemovableStorageFs.length(f) > 0) return f;
-        }
-        for (File dir : sm.getAllSurveillanceDirs()) {
-            File f = new File(dir, jpegName);
-            if (RemovableStorageFs.exists(f) && RemovableStorageFs.canRead(f) && RemovableStorageFs.length(f) > 0) return f;
-        }
-        for (File dir : sm.getAllProximityDirs()) {
-            File f = new File(dir, jpegName);
-            if (RemovableStorageFs.exists(f) && RemovableStorageFs.canRead(f) && RemovableStorageFs.length(f) > 0) return f;
-        }
-        return null;
+        return findMediaByName(StorageManager.getInstance(), jpegName);
     }
 
     private static Set<String> splitCsvLower(String csv) {
@@ -2109,24 +2074,11 @@ public class RecordingsApiHandler {
     private static File findJsonSidecar(String jsonFilename) {
         StorageManager sm = StorageManager.getInstance();
 
-        // Check all surveillance directories
-        for (File dir : sm.getAllSurveillanceDirs()) {
-            File f = new File(dir, jsonFilename);
-            if (RemovableStorageFs.exists(f)) return f;
-        }
-
-        // Check all recordings directories
-        for (File dir : sm.getAllRecordingsDirs()) {
-            File f = new File(dir, jsonFilename);
-            if (RemovableStorageFs.exists(f)) return f;
-        }
-
-        // Check all proximity directories
-        for (File dir : sm.getAllProximityDirs()) {
-            File f = new File(dir, jsonFilename);
-            if (RemovableStorageFs.exists(f)) return f;
-        }
-
-        return null;
+        // Legacy sidecars prefer surveillance before regular recordings.
+        File file = findInDirectories(sm.getAllSurveillanceDirs(), jsonFilename, false);
+        if (file != null) return file;
+        file = findInDirectories(sm.getAllRecordingsDirs(), jsonFilename, false);
+        if (file != null) return file;
+        return findInDirectories(sm.getAllProximityDirs(), jsonFilename, false);
     }
 }

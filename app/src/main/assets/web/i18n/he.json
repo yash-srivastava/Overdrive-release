@@ -1508,7 +1508,14 @@
       "warn": "אזהרה",
       "critical": "קריטי",
       "auto": "אוטומטי"
-    }
+    },
+    "tyre_err_range_unit": "הזן ערך בין {min} ל-{max} {unit}.",
+    "tyre_unit_limits_note": "איך קריאות הלחץ מוצגות בלוח הבקרה, בהתראות ובגבולות למטה.",
+    "tyre_front_low_limit_aria": "לחץ מינימלי קדמי",
+    "tyre_front_high_limit_aria": "לחץ מקסימלי קדמי",
+    "tyre_rear_low_limit_aria": "לחץ מינימלי אחורי",
+    "tyre_rear_high_limit_aria": "לחץ מקסימלי אחורי",
+    "tyre_critical_low_limit_aria": "לחץ נמוך קריטי"
   },
   "charge": {
     "title": "טעינה",
@@ -2626,7 +2633,14 @@
     "telemetry_field_location": "מיקום GPS",
     "telemetry_field_vin": "מספר שלדה (VIN)",
     "values_rejected_all": "לא הוחלו שינויים — ערכים נדחו: {fields}",
-    "kept_old_values": "{applied} — אך נשמרו הערכים הקודמים עבור: {fields}"
+    "kept_old_values": "{applied} — אך נשמרו הערכים הקודמים עבור: {fields}",
+    "codec_capability_scope": "הגדרות הקלטת GPU שמורות לנסיעה ולחניה (לא בדיקת הקלטה):",
+    "codec_capability_stale": "יכולות הקלטת GPU האחרונות הידועות (רענון ממתין; לא בדיקת הקלטה):",
+    "codec_capability_advertised": "יש תמיכת חומרה מוצהרת",
+    "codec_capability_missing": "המקודד המועדף לא מצהיר על תמיכת חומרה",
+    "codec_capability_unknown": "תמיכה לא ידועה",
+    "codec_runtime_output": "פלט המקודד הנוכחי:",
+    "codec_runtime_fallback": "פלט המקודד הנוכחי: H.264 (חזרה מ-H.265 בסשן הזה)."
   },
   "events": {
     "player_volume": "עוצמת קול",
@@ -2751,7 +2765,20 @@
     "pack_invalid_id": "השירות החזיר מזהה חבילה לא תקין",
     "pack_ready": "חבילת הראיות מוכנה",
     "watched_clip": "נצפה",
-    "unwatched_clip": "לא נצפה"
+    "unwatched_clip": "לא נצפה",
+    "playlist_resume": "המשך מהקליפים שלא נצפו",
+    "playlist_settings": "הגדרות פלייליסט",
+    "playlist_after_clip": "אחרי כל קליפ",
+    "playlist_newer": "הקודם (חדש יותר)",
+    "playlist_older": "הבא (ישן יותר)",
+    "playlist_stop": "עצור",
+    "playlist_skip_dvr": "דלג על dvr_p*",
+    "playlist_skip_event": "דלג על event_*",
+    "playlist_skip_cam": "דלג על cam_*",
+    "playlist_unwatched_only": "דלג על קליפים שנצפו",
+    "playlist_no_unwatched": "אין קליפים שלא נצפו שמתאימים",
+    "playlist_end": "סוף הפלייליסט",
+    "playlist_failed": "לא ניתן להמשיך את הפלייליסט. נסה שוב."
   },
   "surveillance": {
     "deterrent_zone": "אזור ההרתעה",
@@ -4230,7 +4257,9 @@
     "view_name_9": "כל המצלמות + DVR",
     "combined_view_label": "הכל + DVR",
     "combined_view_unsupported": "תצוגת AVM ו-DVR משולבת אינה זמינה",
-    "combined_view_dvr_not_live": "שידור מצלמת הדרך אינו פעיל"
+    "combined_view_dvr_not_live": "שידור מצלמת הדרך אינו פעיל",
+    "combined_view_single_client": "הכל + DVR לא זמין: בדיקת המצלמות ברכב מצאה תמיכה רק בלקוח יחיד. השתמש ב'כל המצלמות' או ב-DVR בנפרד.",
+    "combined_view_unverified": "הכל + DVR לא אומת. באבחון > בדיקת מצלמה הפעל 'בדוק תמיכה בשתי מצלמות בעלייה הבאה', שמור את הגדרות מצלמת הדרך של היצרן, הפעל מחדש בזמן חניה, ואז טען מחדש את התצוגה החיה אחרי הבדיקה."
   },
   "auth": {
     "code_placeholder": "xxxxxxxx"
@@ -4652,7 +4681,11 @@
     "bluetooth_aria": "ה-Bluetooth של הרכב: {state}",
     "bluetooth_title": "ה-Bluetooth של הרכב: {state}. {detail}",
     "prefer_personalized_range": "העדף טווח מותאם אישית",
-    "range_preference_failed": "לא ניתן לשמור את העדפת תצוגת הטווח."
+    "range_preference_failed": "לא ניתן לשמור את העדפת תצוגת הטווח.",
+    "autostart_allowed": "הפעלה אוטומטית: בבדיקה האחרונה הייתה מותרת (המתג כבוי)",
+    "autostart_blocked": "הפעלה אוטומטית: בבדיקה האחרונה הייתה חסומה (המתג דלוק)",
+    "autostart_unknown": "הפעלה אוטומטית: לא אומת",
+    "autostart_offline": "הפעלה אוטומטית: הסטטוס לא זמין"
   },
   "oem_dashcam": {
     "title": "מצלמת דרך מקורית",
@@ -7005,7 +7038,10 @@
       "door_hood_unknown": "מכסה המנוע: מצב לא ידוע",
       "door_trunk_open": "תא המטען פתוח",
       "door_trunk_unknown": "תא המטען: מצב לא ידוע"
-    }
+    },
+    "parked_bluetooth_audio_warning": "כשההגדרה פעילה, שיחות Bluetooth ומדיה יכולים להישאר מחוברים, והקרנת טלפון אלחוטית יכולה להישאר פעילה בזמן חניה. קרבת טלפון דורשת חיבור Bluetooth פעיל; השמע וההקרנה לא מושהים בנפרד.",
+    "parked_phone_audio_off": "השאר שיחות ומוזיקה בטלפון בזמן חניה",
+    "parked_phone_audio_off_desc": "ניסיוני. כשהרכב כבוי, חיבור ה-Bluetooth שנשמר לקרבה מסרב לשמע שיחות ומנתק שמע מדיה, כך ששיחות ומוזיקה נשארות בטלפון. שניהם חוזרים כשהרכב נדלק. בחלק מהטלפונים הצלצול עדיין יישמע ברכב."
   },
   "widgetBuilder": {
     "title": "בונה הווידג'טים",

@@ -327,6 +327,47 @@ public class TariffManagerUsageReplayContractTest {
     }
 
     @Test
+    public void statusDisplayOrderUsesAllThreeKeysAndStableTies() throws Exception {
+        JSONArray tariffs = new JSONArray()
+                .put(displayProfile("older", 10, 3, 1))
+                .put(displayProfile("tie-first", 10, 3, 2))
+                .put(displayProfile("recent", 20, 0, 0))
+                .put(displayProfile("tie-second", 10, 3, 2))
+                .put(displayProfile("frequent", 10, 4, 0));
+        JSONObject root = new JSONObject().put("chargingAnalytics",
+                new JSONObject().put("tariffs", tariffs));
+
+        JSONArray ordered = TariffManager.getInstance().toStatusJson(root, 0, 0)
+                .getJSONArray("tariffs");
+        String[] expected = {"recent", "frequent", "tie-first", "tie-second", "older"};
+        assertEquals(expected.length, ordered.length());
+        for (int i = 0; i < expected.length; i++) {
+            assertEquals(expected[i], ordered.getJSONObject(i).getString("id"));
+        }
+        assertEquals("older", tariffs.getJSONObject(0).getString("id"));
+    }
+
+    @Test
+    public void statusDisplaySortingDoesNotChangeGeofenceTieWinner() throws Exception {
+        JSONArray tariffs = new JSONArray()
+                .put(displayProfile("first", 10, 1, 1))
+                .put(displayProfile("second", 20, 1, 2));
+        JSONObject root = new JSONObject().put("chargingAnalytics",
+                new JSONObject().put("tariffs", tariffs));
+
+        JSONObject status = TariffManager.getInstance().toStatusJson(root, 12, 77);
+        assertEquals("second", status.getJSONArray("tariffs").getJSONObject(0).getString("id"));
+        assertEquals("first", status.getString("matchedTariffId"));
+    }
+
+    private static JSONObject displayProfile(String id, long lastUsed, int count, long created)
+            throws Exception {
+        return new JSONObject().put("id", id).put("label", id)
+                .put("lastUsedAt", lastUsed).put("useCount", count).put("createdAt", created)
+                .put("lat", 12).put("lng", 77).put("radiusM", 50).put("acRate", 1.0);
+    }
+
+    @Test
     public void missingTariffSectionHasNoProfilesOrDefault() throws Exception {
         JSONObject status = TariffManager.getInstance().toStatusJson(new JSONObject(), 0, 0);
         assertEquals(0, status.getJSONArray("tariffs").length());

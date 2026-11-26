@@ -6,6 +6,7 @@
 
 #include "motion_pipeline_v2.h"
 #include "motion_flow_sad.h"
+#include "motion_sampled_luma.h"
 #include <jni.h>
 #include <android/log.h>
 
@@ -267,11 +268,15 @@ static bool isShadowPixel(
 static int stage2_blockAnalysis(
     const uint8_t* current,
     const uint8_t* reference,
+    const uint8_t* currentLuma,
+    const uint8_t* referenceLuma,
     const QuadrantState* qs,
     const PipelineConfigV2* config,
     bool activeBlocks[V2_TOTAL_BLOCKS],
     int* shadowSuppressedBlocks)
 {
+    static_assert(V2_BLOCK_SIZE == 32 && V2_BYTES_PER_PIXEL == 3,
+                  "Stage 2 expects eight stride-4 RGB samples per block row");
     int totalActive = 0;
     int totalShadowSuppressed = 0;
     bool shadowFilterEnabled = (config->shadowFilterMode > 0);
@@ -321,30 +326,22 @@ static int stage2_blockAnalysis(
                 int gy = startY + y;
                 if (gy >= V2_QUADRANT_HEIGHT) break;
                 
-                int rowIdx = gy * V2_QUADRANT_WIDTH * V2_BYTES_PER_PIXEL;
-                
+                const int rowIdx = gy * V2_QUADRANT_WIDTH * V2_BYTES_PER_PIXEL;
+                const int sampleBase = (gy / 4) * V2_SAMPLED_WIDTH + startX / 4;
+                // Quiet rows never reach the ratio, chroma or edge gates.
+                if (!motion_luma::rowHasChange(currentLuma + sampleBase,
+                        referenceLuma + sampleBase, config->shadowThreshold)) continue;
+
                 for (int x = 0; x < V2_BLOCK_SIZE; x += 4) {
-                    int gx = startX + x;
-                    if (gx >= V2_QUADRANT_WIDTH) break;
-                    
-                    int idx = rowIdx + gx * V2_BYTES_PER_PIXEL;
-                    
-                    // Current pixel
-                    int r1 = current[idx] & 0xFF;
-                    int g1 = current[idx + 1] & 0xFF;
-                    int b1 = current[idx + 2] & 0xFF;
-                    int luma1 = (r1 + (g1 << 1) + b1) >> 2;
-                    
-                    // Reference pixel
-                    int r2 = reference[idx] & 0xFF;
-                    int g2 = reference[idx + 1] & 0xFF;
-                    int b2 = reference[idx + 2] & 0xFF;
-                    int luma2 = (r2 + (g2 << 1) + b2) >> 2;
-                    
+                    const int gx = startX + x;
+                    const int sample = sampleBase + x / 4;
+                    const int luma1 = currentLuma[sample];
+                    const int luma2 = referenceLuma[sample];
+
                     // Gate 1: Luma difference + ratio
                     int lumaDiff = std::abs(luma1 - luma2);
                     if (lumaDiff <= config->shadowThreshold) continue;
-                    
+
                     int maxLuma = std::max(luma1, luma2);
                     int minLuma = std::min(luma1, luma2) + 1;
                     float ratio = (float)maxLuma / minLuma;
@@ -354,11 +351,15 @@ static int stage2_blockAnalysis(
                     totalChangedPixels++;
                     
                     // Shadow discrimination: check if this pixel change is shadow-like
-                    if (shadowFilterEnabled && isShadowPixel(r1, g1, b1, r2, g2, b2, chromaTol)) {
-                        shadowPixelCount++;
-                        continue;  // Skip shadow pixels — don't count toward motion
+                    if (shadowFilterEnabled) {
+                        const int idx = rowIdx + gx * V2_BYTES_PER_PIXEL;
+                        if (isShadowPixel(current[idx], current[idx + 1], current[idx + 2],
+                                reference[idx], reference[idx + 1], reference[idx + 2], chromaTol)) {
+                            shadowPixelCount++;
+                            continue;  // Skip shadow pixels — don't count toward motion
+                        }
                     }
-                    
+
                     lumaChangedCount++;
                     
                     // Gate 2: Edge movement
@@ -367,40 +368,18 @@ static int stage2_blockAnalysis(
                     // Horizontal gradient
                     int gxr = gx + 4;
                     if (gxr < V2_QUADRANT_WIDTH) {
-                        int idxR = rowIdx + gxr * V2_BYTES_PER_PIXEL;
-                        
-                        int r1r = current[idxR] & 0xFF;
-                        int g1r = current[idxR + 1] & 0xFF;
-                        int b1r = current[idxR + 2] & 0xFF;
-                        int luma1r = (r1r + (g1r << 1) + b1r) >> 2;
-                        int edgeH1 = std::abs(luma1 - luma1r);
-                        
-                        int r2r = reference[idxR] & 0xFF;
-                        int g2r = reference[idxR + 1] & 0xFF;
-                        int b2r = reference[idxR + 2] & 0xFF;
-                        int luma2r = (r2r + (g2r << 1) + b2r) >> 2;
-                        int edgeH2 = std::abs(luma2 - luma2r);
-                        
+                        int edgeH1 = std::abs(luma1 - currentLuma[sample + 1]);
+                        int edgeH2 = std::abs(luma2 - referenceLuma[sample + 1]);
+
                         maxEdgeDiff = std::abs(edgeH1 - edgeH2);
                     }
                     
                     // Vertical gradient
                     int gyb = gy + 4;
                     if (gyb < V2_QUADRANT_HEIGHT) {
-                        int idxB = gyb * V2_QUADRANT_WIDTH * V2_BYTES_PER_PIXEL + gx * V2_BYTES_PER_PIXEL;
-                        
-                        int r1b = current[idxB] & 0xFF;
-                        int g1b = current[idxB + 1] & 0xFF;
-                        int b1b = current[idxB + 2] & 0xFF;
-                        int luma1b = (r1b + (g1b << 1) + b1b) >> 2;
-                        int edgeV1 = std::abs(luma1 - luma1b);
-                        
-                        int r2b = reference[idxB] & 0xFF;
-                        int g2b = reference[idxB + 1] & 0xFF;
-                        int b2b = reference[idxB + 2] & 0xFF;
-                        int luma2b = (r2b + (g2b << 1) + b2b) >> 2;
-                        int edgeV2 = std::abs(luma2 - luma2b);
-                        
+                        int edgeV1 = std::abs(luma1 - currentLuma[sample + V2_SAMPLED_WIDTH]);
+                        int edgeV2 = std::abs(luma2 - referenceLuma[sample + V2_SAMPLED_WIDTH]);
+
                         int vertDiff = std::abs(edgeV1 - edgeV2);
                         if (vertDiff > maxEdgeDiff) maxEdgeDiff = vertDiff;
                     }
@@ -798,6 +777,15 @@ static int stage5_behaviorClassification(
 // Process single quadrant through all stages
 // ============================================================================
 
+static const uint8_t* sampledLumaForSlot(QuadrantState* qs, int slot) {
+    if (!qs->sampledLumaReady[slot]) {
+        motion_luma::sampleFrame<V2_QUADRANT_WIDTH, V2_QUADRANT_HEIGHT>(
+                qs->frameHistory[slot], qs->sampledLuma[slot]);
+        qs->sampledLumaReady[slot] = true;
+    }
+    return qs->sampledLuma[slot];
+}
+
 static void processQuadrant(
     QuadrantState* qs,
     const uint8_t* mosaic, int mosaicW, int mosaicH,
@@ -823,6 +811,7 @@ static void processQuadrant(
     int histIdx = qs->historyIndex;
     uint8_t* quadrantRgb = qs->frameHistory[histIdx];
     extractQuadrant(mosaic, mosaicW, mosaicH, quadrantIdx, quadrantRgb);
+    qs->sampledLumaReady[histIdx] = false;
 
     // --- Stage 1: Brightness check ---
     float meanLuma = 0;
@@ -945,7 +934,10 @@ static void processQuadrant(
     
     bool activeBlocks[V2_TOTAL_BLOCKS];
     int shadowSuppressed = 0;
-    int activeCount = stage2_blockAnalysis(quadrantRgb, referenceFrame, qs, &localConfig, activeBlocks, &shadowSuppressed);
+    const uint8_t* currentLuma = sampledLumaForSlot(qs, histIdx);
+    const uint8_t* referenceLuma = sampledLumaForSlot(qs, refIdx);
+    int activeCount = stage2_blockAnalysis(quadrantRgb, referenceFrame, currentLuma, referenceLuma,
+            qs, &localConfig, activeBlocks, &shadowSuppressed);
     result->activeBlocks = activeCount;
     
     // Diagnostic: log block analysis results every 50 frames

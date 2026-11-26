@@ -1,8 +1,8 @@
 package com.overdrive.app.analytics
 
 import com.overdrive.app.config.UnifiedConfigManager
+import com.overdrive.app.util.RotatingAnonymousId
 import org.json.JSONObject
-import java.util.UUID
 
 /**
  * Rotating anonymous INSTALL identity for the privacy-preserving DAU/MAU counter
@@ -42,6 +42,8 @@ object AnalyticsId {
     private const val ROTATE_DAYS = 180L
     private const val ROTATE_MS = ROTATE_DAYS * 24L * 60L * 60L * 1000L
 
+    private val identity = RotatingAnonymousId(SECTION, KEY_ID, KEY_MINTED, ROTATE_MS)
+
     /**
      * Current anonymous install id, minting or rotating as needed. [nowMs] injected
      * for testability. Returns a stable id within a rotation window.
@@ -51,26 +53,6 @@ object AnalyticsId {
      * [UnifiedConfigManager.forceReload] disk/cross-UID read on the same tick. When
      * null we load it ourselves.
      */
-    fun current(nowMs: Long, preloadedSection: JSONObject? = null): String {
-        val section = preloadedSection ?: try {
-            UnifiedConfigManager.forceReload().optJSONObject(SECTION)
-        } catch (_: Throwable) { null }
-        val existing = section?.optString(KEY_ID, "")?.ifEmpty { null }
-        val minted = section?.optLong(KEY_MINTED, 0L) ?: 0L
-
-        if (existing != null && (nowMs - minted) < ROTATE_MS) {
-            return existing
-        }
-        // Mint (first use) or rotate (window elapsed). updateSection MERGES onto
-        // the existing section (preserving sibling keys like `enabled`/`workerUrl`/
-        // `lastPingDay`), so we pass only the two keys we own — same as DeviceId.
-        val fresh = UUID.randomUUID().toString()
-        try {
-            UnifiedConfigManager.updateSection(
-                SECTION,
-                JSONObject().put(KEY_ID, fresh).put(KEY_MINTED, nowMs),
-            )
-        } catch (_: Throwable) { /* if persist fails we'll just mint again next time */ }
-        return fresh
-    }
+    fun current(nowMs: Long, preloadedSection: JSONObject? = null): String =
+        identity.current(nowMs, preloadedSection)
 }

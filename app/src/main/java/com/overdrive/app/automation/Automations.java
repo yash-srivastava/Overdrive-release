@@ -21,9 +21,6 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
 import java.util.List;
@@ -1533,25 +1530,9 @@ public class Automations {
             if (!AUTOMATION_HOME.exists()) AUTOMATION_HOME.mkdirs();
             // Snapshot to bytes under the lock so the persisted content is internally consistent.
             byte[] bytes = toJson().toString().getBytes(StandardCharsets.UTF_8);
-            try (FileOutputStream fos = new FileOutputStream(AUTOMATION_TMP)) {
-                fos.write(bytes);
-                fos.getFD().sync();
-            } catch (IOException e) {
-                logger.error("Failed to write automations scratch file");
-                return false;
-            }
-            // Promote the existing good file to the backup before replacing it, so a failure while the
-            // live file is momentarily gone still leaves a recoverable copy. Only a file that PARSES
-            // may become the backup: the live file is the thing suspected of being corrupt (that is
-            // why .bak exists), and copying it blind destroys the last known good — after which a
-            // second interruption loses every automation.
-            if (AUTOMATION_CONFIG.exists() && isParseable(AUTOMATION_CONFIG)) {
-                copyFile(AUTOMATION_CONFIG, AUTOMATION_BACKUP);
-            }
-            if (!AUTOMATION_TMP.renameTo(AUTOMATION_CONFIG)) {
-                logger.error("Failed to promote automations scratch file to live config");
-                return false;
-            }
+            // Only parseable live data may replace the last-known-good backup.
+            if (!AutomationStoreFiles.save(AUTOMATION_TMP, AUTOMATION_CONFIG, AUTOMATION_BACKUP,
+                    bytes, Automations::isParseable, "automations", logger::error)) return false;
             logger.info("Saved " + automations.size() + " Automations to " + AUTOMATION_CONFIG);
             return true;
         }
@@ -1560,28 +1541,11 @@ public class Automations {
     /** Whether a file holds parseable JSON, so it is fit to become the last-known-good backup. */
     private static boolean isParseable(File file) {
         try {
-            byte[] bytes = java.nio.file.Files.readAllBytes(file.toPath());
-            new JSONObject(new String(bytes, StandardCharsets.UTF_8));
+            AutomationStoreFiles.readObject(file);
             return true;
         } catch (Exception e) {
             logger.warn("Live automation config is unparseable — keeping the existing backup");
             return false;
-        }
-    }
-
-    /**
-     * Copy a file's bytes. Best-effort; failures are logged but not fatal (the backup is a safety net,
-     * not the source of truth).
-     */
-    private static void copyFile(File from, File to) {
-        try (FileInputStream in = new FileInputStream(from);
-             FileOutputStream out = new FileOutputStream(to)) {
-            byte[] buf = new byte[8192];
-            int n;
-            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
-            out.getFD().sync();
-        } catch (IOException e) {
-            logger.error("Failed to back up automations config");
         }
     }
 
@@ -1599,7 +1563,8 @@ public class Automations {
                     // Repair the live file NOW. Leaving it corrupt keeps the system one
                     // interruption away from total loss, and until it is repaired every save
                     // must decline to refresh the backup, so the .bak ages indefinitely.
-                    copyFile(AUTOMATION_BACKUP, AUTOMATION_CONFIG);
+                    AutomationStoreFiles.copy(AUTOMATION_BACKUP, AUTOMATION_CONFIG,
+                            "Failed to back up automations config", logger::error);
                     logger.info("Recovered automations from backup after live config was "
                             + "unreadable; restored the live config from it");
                     return;
@@ -1618,9 +1583,7 @@ public class Automations {
     private static boolean tryLoadFrom(File file) {
         if (!file.exists()) return false;
         try {
-            byte[] bytes = java.nio.file.Files.readAllBytes(file.toPath());
-            String content = new String(bytes, StandardCharsets.UTF_8);
-            JSONObject json = new JSONObject(content);
+            JSONObject json = AutomationStoreFiles.readObject(file);
             // Build into a scratch map first so a parse failure part-way can't leave the live map
             // half-populated on top of what was already loaded.
             Map<String, Automation> loaded = new java.util.HashMap<>();

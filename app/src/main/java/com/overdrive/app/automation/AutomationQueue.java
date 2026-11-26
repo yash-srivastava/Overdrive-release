@@ -1228,58 +1228,14 @@ public class AutomationQueue {
         synchronized (lock) {
             if (Automations.isServiceModeDisabled()) {
                 // Like disable-all, but nothing is retained for replay after End.
-                disabledWorker = automationWorker;
-                if (disabledWorker != null) {
-                    if (disabledWorker.isAlive()) {
-                        CancellationBarrier isolation = new CancellationBarrier(
-                                new ShutdownDrainGeneration(), disabledWorker);
-                        isolation.finished = true;
-                        isolateExecutorLocked(disabledWorker, isolation);
-                        inFlightActions.remove(disabledWorker);
-                    }
-                    if (automationWorker == disabledWorker) {
-                        automationWorker = null;
-                    }
-                    disabledWorker.interrupt();
-                }
-                if (workerRetryThread != null) {
-                    workerRetryThread.interrupt();
-                }
-                automationQueue.clear();
-                urgentReadyQueue.clear();
-                queueItems.clear();
-                if (shutdownDrainGeneration != null) {
-                    shutdownDrainGeneration.pending.clear();
-                }
+                disabledWorker = stopAndClearWorkerLocked();
                 disabledLatestStateReconciliations.clear();
                 enableReconciliationPending = false;
                 workerRetryAttempt = 0;
                 lock.notifyAll();
             } else if (Automations.isDisabled()) {
                 retainLatestStateReconciliationsLocked();
-                disabledWorker = automationWorker;
-                if (disabledWorker != null) {
-                    if (disabledWorker.isAlive()) {
-                        CancellationBarrier isolation = new CancellationBarrier(
-                                new ShutdownDrainGeneration(), disabledWorker);
-                        isolation.finished = true;
-                        isolateExecutorLocked(disabledWorker, isolation);
-                        inFlightActions.remove(disabledWorker);
-                    }
-                    if (automationWorker == disabledWorker) {
-                        automationWorker = null;
-                    }
-                    disabledWorker.interrupt();
-                }
-                if (workerRetryThread != null) {
-                    workerRetryThread.interrupt();
-                }
-                automationQueue.clear();
-                urgentReadyQueue.clear();
-                queueItems.clear();
-                if (shutdownDrainGeneration != null) {
-                    shutdownDrainGeneration.pending.clear();
-                }
+                disabledWorker = stopAndClearWorkerLocked();
                 enableReconciliationPending =
                         !disabledLatestStateReconciliations.isEmpty();
                 workerRetryAttempt = 0;
@@ -1314,6 +1270,49 @@ public class AutomationQueue {
             lock.notifyAll();
         }
         logQueuedReplacementReplays(replay);
+    }
+
+    /** Stop the current worker and clear queued work; caller holds lock. */
+    private static Thread stopAndClearWorkerLocked() {
+        Thread disabledWorker = automationWorker;
+        if (disabledWorker != null) {
+            if (disabledWorker.isAlive()) {
+                CancellationBarrier isolation = new CancellationBarrier(
+                        new ShutdownDrainGeneration(), disabledWorker);
+                isolation.finished = true;
+                isolateExecutorLocked(disabledWorker, isolation);
+                inFlightActions.remove(disabledWorker);
+            }
+            if (automationWorker == disabledWorker) {
+                automationWorker = null;
+            }
+            disabledWorker.interrupt();
+        }
+        if (workerRetryThread != null) {
+            workerRetryThread.interrupt();
+        }
+        automationQueue.clear();
+        urgentReadyQueue.clear();
+        queueItems.clear();
+        if (shutdownDrainGeneration != null) {
+            shutdownDrainGeneration.pending.clear();
+        }
+        return disabledWorker;
+    }
+
+    /** Apply the completion policy for either worker type; caller holds lock. */
+    private static void reconcileCompletedClaimLocked(DelayedAutomation item, boolean completed) {
+        if (Automations.isDisabled()) {
+            retainLatestStateReconciliationLocked(item);
+        } else if (!completed
+                && !isolatedExecutors.containsKey(
+                        Thread.currentThread())) {
+            requeueUnrunClaimLocked(item);
+        } else if (completed
+                && !isolatedExecutors.containsKey(
+                        Thread.currentThread())) {
+            releaseHeldRetriggerLocked(item);
+        }
     }
 
     private static boolean executeItem(DelayedAutomation item) {
@@ -1451,17 +1450,7 @@ public class AutomationQueue {
                         } finally {
                             java.util.List<String> replay;
                             synchronized (lock) {
-                                if (Automations.isDisabled()) {
-                                    retainLatestStateReconciliationLocked(item);
-                                } else if (!completed
-                                        && !isolatedExecutors.containsKey(
-                                                Thread.currentThread())) {
-                                    requeueUnrunClaimLocked(item);
-                                } else if (completed
-                                        && !isolatedExecutors.containsKey(
-                                                Thread.currentThread())) {
-                                    releaseHeldRetriggerLocked(item);
-                                }
+                                reconcileCompletedClaimLocked(item, completed);
                                 inFlightActions.remove(Thread.currentThread());
                                 if (!Automations.isDisabled()
                                         && enableReconciliationPending) {
@@ -1913,17 +1902,7 @@ public class AutomationQueue {
                                 java.util.List<String> replay;
                                 synchronized (lock) {
                                     generation.claims.remove(Thread.currentThread());
-                                    if (Automations.isDisabled()) {
-                                        retainLatestStateReconciliationLocked(item);
-                                    } else if (!completed
-                                            && !isolatedExecutors.containsKey(
-                                                    Thread.currentThread())) {
-                                        requeueUnrunClaimLocked(item);
-                                    } else if (completed
-                                            && !isolatedExecutors.containsKey(
-                                                    Thread.currentThread())) {
-                                        releaseHeldRetriggerLocked(item);
-                                    }
+                                    reconcileCompletedClaimLocked(item, completed);
                                     if (!Automations.isDisabled()
                                             && enableReconciliationPending) {
                                         forceDisabledLatestStateReconciliationsLocked();

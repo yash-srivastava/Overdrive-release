@@ -6,9 +6,6 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -279,19 +276,8 @@ public final class ActionGroups {
         synchronized (SAVE_LOCK) {
             if (!HOME.exists()) HOME.mkdirs();
             byte[] bytes = toJson().toString().getBytes(StandardCharsets.UTF_8);
-            try (FileOutputStream fos = new FileOutputStream(TMP)) {
-                fos.write(bytes);
-                fos.getFD().sync();
-            } catch (IOException e) {
-                logger.error("Failed to write action-groups scratch file");
-                return false;
-            }
-            if (CONFIG.exists()) copyFile(CONFIG, BACKUP);
-            if (!TMP.renameTo(CONFIG)) {
-                logger.error("Failed to promote action-groups scratch file");
-                return false;
-            }
-            return true;
+            return AutomationStoreFiles.save(TMP, CONFIG, BACKUP, bytes,
+                    file -> true, "action-groups", logger::error);
         }
     }
 
@@ -307,8 +293,7 @@ public final class ActionGroups {
     private static boolean tryLoadFrom(File file) {
         if (!file.exists()) return false;
         try {
-            byte[] bytes = java.nio.file.Files.readAllBytes(file.toPath());
-            JSONObject json = new JSONObject(new String(bytes, StandardCharsets.UTF_8));
+            JSONObject json = AutomationStoreFiles.readObject(file);
             Map<String, Group> loaded = new LinkedHashMap<>();
             java.util.Iterator<String> keys = json.keys();
             while (keys.hasNext()) {
@@ -327,18 +312,6 @@ public final class ActionGroups {
         } catch (Exception e) {
             logger.error("Failed to load action groups from " + file.getName());
             return false;
-        }
-    }
-
-    private static void copyFile(File from, File to) {
-        try (FileInputStream in = new FileInputStream(from);
-             FileOutputStream out = new FileOutputStream(to)) {
-            byte[] buf = new byte[8192];
-            int n;
-            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
-            out.getFD().sync();
-        } catch (IOException e) {
-            logger.error("Failed to back up action groups");
         }
     }
 }

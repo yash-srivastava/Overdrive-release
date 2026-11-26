@@ -675,6 +675,7 @@ public class HttpServer {
             String forwardedHostHeader = null;
             String secFetchSiteHeader = null;
             String stepUpHeader = null;
+            String statusViewHeader = null;
 
             while (!(line = head.readHeaderLine()).isEmpty()) {
                 framing.accept(line);
@@ -715,6 +716,8 @@ public class HttpServer {
                     secFetchSiteHeader = line.substring(15).trim();
                 } else if (lower.startsWith("x-od-stepup:")) {
                     stepUpHeader = line.substring(12).trim();
+                } else if (lower.startsWith("x-od-status-view:")) {
+                    statusViewHeader = line.substring("x-od-status-view:".length()).trim();
                 } else if (lower.startsWith("x-forwarded-for:")) {
                     hasTunnelHeaders = true;
                     forwardedFor = forwardedForValue(
@@ -1047,8 +1050,10 @@ public class HttpServer {
                     client.getInetAddress(), body));
             TimelineApiHandler.bindRequest(client, secFetchSiteHeader);
 
-            // Route to modular handlers first
-            if (routeToHandlers(method, path, body, rangeHeader, ifNoneMatchHeader, out)) {
+            // Negotiate a smaller, uncached response only after normal /status authentication.
+            if (isOverlayStatusRequest(method, path, statusViewHeader, socketLoopback, hasTunnelHeaders)) {
+                sendOverlayStatus(out);
+            } else if (routeToHandlers(method, path, body, rangeHeader, ifNoneMatchHeader, out)) {
                 // Handled by a modular handler
             }
             // Static pages
@@ -2112,6 +2117,22 @@ public class HttpServer {
         out.flush();
     }
 
+    static boolean isOverlayStatusRequest(String method, String path, String view,
+                                          boolean loopback, boolean tunnelRelayed) {
+        return loopback && !tunnelRelayed && "GET".equals(method)
+                && "/status".equals(path) && "overlay".equals(view);
+    }
+
+    private void sendOverlayStatus(OutputStream out) throws Exception {
+        JSONObject status = new JSONObject();
+        status.put("status", "ok");
+        // Preserve the client's legacy fallback if recordingStatus cannot be assembled.
+        status.put("recording", TcpCommandServer.getRecordingCameras());
+        status.put("acc", AccMonitor.isAccOn());
+        appendOverlayStatus(status);
+        HttpResponse.sendJsonNoCors(out, status.toString());
+    }
+
     private void sendStatus(OutputStream out) throws Exception {
         JSONObject status = new JSONObject();
         status.put("status", "ok");
@@ -2293,6 +2314,85 @@ public class HttpServer {
             // SOH not available
         }
         
+        appendOverlayStatus(status);
+
+        // GPS location
+        com.overdrive.app.monitor.GpsMonitor gps = com.overdrive.app.monitor.GpsMonitor.getInstance();
+        status.put("gps", gps.getLocationJson());
+
+        // Network info (WiFi SSID + IP or Mobile Data)
+        status.put("network", com.overdrive.app.monitor.NetworkMonitor.getNetworkInfo());
+        status.put("bluetooth", BluetoothRadioStatusReader.current());
+
+        // Pre-record buffer health — exposes byte-ring stats so the UI can
+        // detect a degraded session (post-OOM "no pre-record" mode, key
+        // drops under sustained pin-stall, etc.) and warn the user. Without
+        // this, all those degraded states are silent.
+        try {
+            com.overdrive.app.surveillance.GpuSurveillancePipeline preRecPipeline = CameraDaemon.getGpuPipeline();
+            if (preRecPipeline != null) {
+                com.overdrive.app.surveillance.HardwareEventRecorderGpu enc = preRecPipeline.getEncoder();
+                if (enc != null) {
+                    JSONObject preRec = new JSONObject();
+                    boolean preRecOn = enc.isPreRecordEnabled();
+                    preRec.put("preRecordEnabled", preRecOn);
+                    com.overdrive.app.surveillance.H264ByteRingBuffer ring = enc.getPreRecordBuffer();
+                    if (ring != null) {
+                        preRec.put("currentSeconds", Math.round(ring.getDurationSeconds() * 10) / 10.0);
+                        preRec.put("currentMB", Math.round(ring.storedBytes() / (1024.0 * 1024.0) * 10) / 10.0);
+                        preRec.put("maxSeconds", ring.getMaxDurationUs() / 1_000_000L);
+                        preRec.put("packetCount", ring.size());
+                        // Structured drop counters so the UI can warn on
+                        // sustained key drops without parsing the free-form
+                        // stats string. Negative-pressure indicators only —
+                        // healthy steady-state has all three at zero.
+                        preRec.put("totalAdds", ring.getTotalAdds());
+                        preRec.put("totalEvictions", ring.getTotalEvictions());
+                        preRec.put("totalKeyDrops", ring.getTotalKeyDrops());
+                        preRec.put("totalPDrops", ring.getTotalPDrops());
+                        preRec.put("stats", ring.getStats());
+                    } else {
+                        // Distinguish stream-only encoders (deliberately no
+                        // pre-record) from byte-ring allocation failures.
+                        boolean ooMd = enc.isPreRecordAllocFailed();
+                        preRec.put("degraded", ooMd);
+                        preRec.put("reason", ooMd
+                            ? "byte-ring allocation failed at boot — pre-record disabled this session"
+                            : "stream-only encoder (no pre-record by design)");
+                    }
+                    status.put("preRecord", preRec);
+                }
+            }
+        } catch (Exception e) {
+            // Pre-record stats are diagnostic; failure here mustn't block /status.
+        }
+
+        // The phone keeps an offline copy only for a tunnel host that survives restarts.
+        // Unknown leaves offlineCopy out: the service worker purges only on an explicit false.
+        CallerContext linkCaller = CALLER.get();
+        JSONObject link = new JSONObject();
+        Boolean offlineCopy = linkCaller == null || !linkCaller.tunnelRelayed
+                ? Boolean.FALSE : DaemonsApiHandler.stablePublicHostState(linkCaller.publicHost);
+        if (offlineCopy != null) link.put("offlineCopy", offlineCopy.booleanValue());
+        status.put("link", link);
+
+        // Status assembly below the charging block can be substantial. Revalidate immediately before
+        // serialization so a stop or taper-close during that work cannot leak the earlier positive.
+        if (chargingPublication != null
+                && chargingPublication.hasPositivePresentation()
+                && !chargingPublication.isStillCurrent()) {
+            chargingPublication =
+                com.overdrive.app.charging.ChargingApiHandler
+                    .readLivePublication(
+                        com.overdrive.app.monitor.SocHistoryDatabase.getInstance());
+            status.put("charging", chargingPublication.toStatusJson());
+        }
+        // No CORS: loopback callers need no session, so a page in the head unit's browser could read live GPS.
+        HttpResponse.sendJsonNoCors(out, status.toString());
+    }
+
+    /** Shared live recording, replay, trip and briefing state for both status views. */
+    private void appendOverlayStatus(JSONObject status) throws Exception {
         // GPU surveillance status — only true when actually in sentry/surveillance mode,
         // not when pipeline is running for normal recording (CONTINUOUS, PROXIMITY_GUARD)
         com.overdrive.app.surveillance.GpuSurveillancePipeline pipeline = CameraDaemon.getGpuPipeline();
@@ -2458,80 +2558,6 @@ public class HttpServer {
         } catch (Throwable t) {
             // Trip briefing not available
         }
-
-        // GPS location
-        com.overdrive.app.monitor.GpsMonitor gps = com.overdrive.app.monitor.GpsMonitor.getInstance();
-        status.put("gps", gps.getLocationJson());
-        
-        // Network info (WiFi SSID + IP or Mobile Data)
-        status.put("network", com.overdrive.app.monitor.NetworkMonitor.getNetworkInfo());
-        status.put("bluetooth", BluetoothRadioStatusReader.current());
-
-        // Pre-record buffer health — exposes byte-ring stats so the UI can
-        // detect a degraded session (post-OOM "no pre-record" mode, key
-        // drops under sustained pin-stall, etc.) and warn the user. Without
-        // this, all those degraded states are silent.
-        try {
-            com.overdrive.app.surveillance.GpuSurveillancePipeline preRecPipeline = CameraDaemon.getGpuPipeline();
-            if (preRecPipeline != null) {
-                com.overdrive.app.surveillance.HardwareEventRecorderGpu enc = preRecPipeline.getEncoder();
-                if (enc != null) {
-                    JSONObject preRec = new JSONObject();
-                    boolean preRecOn = enc.isPreRecordEnabled();
-                    preRec.put("preRecordEnabled", preRecOn);
-                    com.overdrive.app.surveillance.H264ByteRingBuffer ring = enc.getPreRecordBuffer();
-                    if (ring != null) {
-                        preRec.put("currentSeconds", Math.round(ring.getDurationSeconds() * 10) / 10.0);
-                        preRec.put("currentMB", Math.round(ring.storedBytes() / (1024.0 * 1024.0) * 10) / 10.0);
-                        preRec.put("maxSeconds", ring.getMaxDurationUs() / 1_000_000L);
-                        preRec.put("packetCount", ring.size());
-                        // Structured drop counters so the UI can warn on
-                        // sustained key drops without parsing the free-form
-                        // stats string. Negative-pressure indicators only —
-                        // healthy steady-state has all three at zero.
-                        preRec.put("totalAdds", ring.getTotalAdds());
-                        preRec.put("totalEvictions", ring.getTotalEvictions());
-                        preRec.put("totalKeyDrops", ring.getTotalKeyDrops());
-                        preRec.put("totalPDrops", ring.getTotalPDrops());
-                        preRec.put("stats", ring.getStats());
-                    } else {
-                        // Distinguish stream-only encoders (deliberately no
-                        // pre-record) from byte-ring allocation failures.
-                        boolean ooMd = enc.isPreRecordAllocFailed();
-                        preRec.put("degraded", ooMd);
-                        preRec.put("reason", ooMd
-                            ? "byte-ring allocation failed at boot — pre-record disabled this session"
-                            : "stream-only encoder (no pre-record by design)");
-                    }
-                    status.put("preRecord", preRec);
-                }
-            }
-        } catch (Exception e) {
-            // Pre-record stats are diagnostic; failure here mustn't block /status.
-        }
-
-        // The phone keeps an offline copy only for a tunnel host that survives restarts.
-        // Unknown leaves offlineCopy out: the service worker purges only on an explicit false.
-        CallerContext linkCaller = CALLER.get();
-        JSONObject link = new JSONObject();
-        Boolean offlineCopy = linkCaller == null || !linkCaller.tunnelRelayed
-                ? Boolean.FALSE : DaemonsApiHandler.stablePublicHostState(linkCaller.publicHost);
-        if (offlineCopy != null) link.put("offlineCopy", offlineCopy.booleanValue());
-        status.put("link", link);
-
-        // Status assembly below the charging block can be substantial. Revalidate immediately before
-        // serialization so a stop or taper-close during that work cannot leak the earlier positive.
-        if (chargingPublication != null
-                && chargingPublication.hasPositivePresentation()
-                && !chargingPublication.isStillCurrent()) {
-            chargingPublication =
-                com.overdrive.app.charging.ChargingApiHandler
-                    .readLivePublication(
-                        com.overdrive.app.monitor.SocHistoryDatabase.getInstance());
-            status.put("charging", chargingPublication.toStatusJson());
-        }
-        // No CORS: loopback callers need no session, so a page in the head unit's browser could read live GPS.
-        HttpResponse.sendJsonNoCors(out, status.toString());
     }
 
     static boolean resolveChargingPlugged(

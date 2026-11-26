@@ -9,6 +9,7 @@ import com.overdrive.app.storage.removable.RemovableStorageFs;
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.monitor.VehicleDataMonitor;
 import com.overdrive.app.storage.StorageManager;
+import com.overdrive.app.util.AnalyticsResponses;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -238,40 +239,13 @@ public class TripApiHandler {
         } catch (Exception e) {
             logger.error("Error building bootstrap response", e);
             // Ensure caller still gets a valid envelope even on partial failure.
-            try {
-                if (!response.has("success")) response.put("success", false);
-                if (!response.has("bootstrap")) response.put("bootstrap", bootstrap);
-                response.put("error", e.getMessage() != null ? e.getMessage() : "bootstrap failed");
-            } catch (Exception ignored) {}
+            AnalyticsResponses.completeBootstrapFailure(response, bootstrap, e);
         }
         return response;
     }
 
-    /**
-     * Functional helper for {@link #handleGetBootstrap}. Invokes the given
-     * section handler, removes the {@code success} and {@code _status}
-     * fields, and surfaces handler exceptions as a {@code {error: "..."}}
-     * stub so the bootstrap response always has a value for every section.
-     */
     private JSONObject invokeSectionStripped(java.util.function.Supplier<JSONObject> handler) {
-        JSONObject section;
-        try {
-            section = handler.get();
-        } catch (Exception e) {
-            logger.warn("Bootstrap section failed: " + e.getMessage());
-            JSONObject err = new JSONObject();
-            try { err.put("error", e.getMessage() != null ? e.getMessage() : "section failed"); }
-            catch (Exception ignored) {}
-            return err;
-        }
-        if (section == null) {
-            JSONObject err = new JSONObject();
-            try { err.put("error", "empty section"); } catch (Exception ignored) {}
-            return err;
-        }
-        section.remove("success");
-        section.remove("_status");
-        return section;
+        return AnalyticsResponses.section(handler, logger::warn);
     }
 
     /**
@@ -1542,18 +1516,7 @@ public class TripApiHandler {
         }
     }
 
-    /**
-     * Build an error response with the given message and HTTP status code.
-     */
     private JSONObject errorResponse(String message, int status) {
-        JSONObject response = new JSONObject();
-        try {
-            response.put("success", false);
-            response.put("error", message);
-            response.put("_status", status);
-        } catch (Exception e) {
-            logger.error("Error building error response", e);
-        }
-        return response;
+        return AnalyticsResponses.error(message, status, logger::error);
     }
 }
