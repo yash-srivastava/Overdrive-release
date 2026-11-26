@@ -164,4 +164,58 @@ public class WakePhraseMatcherTest {
         reject("ow dress");
         reject("ever drove");
     }
+    @Test
+    public void fusedCandidatesMatchFullMatrixReference() {
+        java.util.Random random = new java.util.Random(0x49);
+        for (int i = 0; i < 10_000; i++) {
+            StringBuilder word = new StringBuilder("overdrive");
+            int edits = random.nextInt(6);
+            for (int j = 0; j < edits; j++) {
+                int at = random.nextInt(word.length());
+                char letter = (char) ('a' + random.nextInt(26));
+                switch (random.nextInt(3)) {
+                    case 0: word.setCharAt(at, letter); break;
+                    case 1: word.insert(at, letter); break;
+                    case 2: word.deleteCharAt(at); break;
+                }
+            }
+            String candidate = word.toString();
+            // A rejected distance candidate first also exercises scratch-row reuse.
+            String prefix = "odrzzzzzz";
+            String text = prefix + " " + candidate;
+            String flat = text.replace(" ", "");
+            String expected = null;
+            for (String spelling : WakePhraseMatcher.WAKE_SPELLINGS) {
+                for (int at = flat.indexOf(spelling); at >= 0;
+                     at = flat.indexOf(spelling, at + 1)) {
+                    int end = at + spelling.length();
+                    if (spelling.length() >= 9 || end == prefix.length() || end == flat.length()) {
+                        expected = "spelling";
+                        break;
+                    }
+                }
+                if (expected != null) break;
+            }
+            if (expected == null && candidate.length() >= 7 && candidate.length() <= 10
+                    && candidate.charAt(0) == 'o'
+                    && (candidate.contains("dr") || candidate.contains("tr"))
+                    && fullMatrixDistance(candidate, "overdrive") <= 2) {
+                expected = "fused";
+            }
+            assertEquals(text, expected, WakePhraseMatcher.rule(text));
+        }
+    }
+
+    private static int fullMatrixDistance(String a, String b) {
+        int[][] d = new int[a.length() + 1][b.length() + 1];
+        for (int i = 0; i <= a.length(); i++) d[i][0] = i;
+        for (int j = 0; j <= b.length(); j++) d[0][j] = j;
+        for (int i = 1; i <= a.length(); i++) {
+            for (int j = 1; j <= b.length(); j++) {
+                d[i][j] = Math.min(Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1),
+                        d[i - 1][j - 1] + (a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1));
+            }
+        }
+        return d[a.length()][b.length()];
+    }
 }

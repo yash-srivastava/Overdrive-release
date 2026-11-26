@@ -49,11 +49,12 @@ final class WakePhraseMatcher {
         String clean = LETTERS.matcher(text.toLowerCase(Locale.ROOT)).replaceAll(" ").trim();
         if (clean.isEmpty()) return null;
         String[] words = clean.split("\\s+");
-        StringBuilder joined = new StringBuilder();
-        Set<Integer> wordEnds = new HashSet<>();
+        StringBuilder joined = new StringBuilder(clean.length());
+        // A flat offset cannot exceed the original text length. Avoid boxing each boundary.
+        boolean[] wordEnds = new boolean[clean.length() + 1];
         for (String w : words) {
             joined.append(w);
-            wordEnds.add(joined.length());
+            wordEnds[joined.length()] = true;
         }
         String flat = joined.toString();
         // E: a known spelling anywhere; the short ones must end on a word boundary so "over
@@ -62,15 +63,17 @@ final class WakePhraseMatcher {
             int from = 0;
             int idx;
             while ((idx = flat.indexOf(s, from)) >= 0) {
-                if (s.length() >= 9 || wordEnds.contains(idx + s.length())) return "spelling";
+                if (s.length() >= 9 || wordEnds[idx + s.length()]) return "spelling";
                 from = idx + 1;
             }
         }
         // S: one fused word within two edits of "overdrive".
+        int[] distanceRow = null;
         for (String w : words) {
             if (w.length() >= 7 && w.length() <= 10 && w.charAt(0) == 'o'
-                    && (w.contains("dr") || w.contains("tr")) && levenshtein(w, "overdrive") <= 2) {
-                return "fused";
+                    && (w.contains("dr") || w.contains("tr"))) {
+                if (distanceRow == null) distanceRow = new int["overdrive".length() + 1];
+                if (levenshtein(w, "overdrive", distanceRow) <= 2) return "fused";
             }
         }
         // T: "over" + "drive" split across two words.
@@ -98,17 +101,20 @@ final class WakePhraseMatcher {
         return null;
     }
 
-    private static int levenshtein(String a, String b) {
-        int[][] d = new int[a.length() + 1][b.length() + 1];
-        for (int i = 0; i <= a.length(); i++) d[i][0] = i;
-        for (int j = 0; j <= b.length(); j++) d[0][j] = j;
+    /** Only the previous row and the previous diagonal are needed for edit distance. */
+    private static int levenshtein(String a, String b, int[] row) {
+        for (int j = 0; j <= b.length(); j++) row[j] = j;
         for (int i = 1; i <= a.length(); i++) {
+            int diagonal = row[0];
+            row[0] = i;
             for (int j = 1; j <= b.length(); j++) {
+                int above = row[j];
                 int cost = a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1;
-                d[i][j] = Math.min(Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1), d[i - 1][j - 1] + cost);
+                row[j] = Math.min(Math.min(above + 1, row[j - 1] + 1), diagonal + cost);
+                diagonal = above;
             }
         }
-        return d[a.length()][b.length()];
+        return row[b.length()];
     }
 
     private static Set<String> set(String... values) {
