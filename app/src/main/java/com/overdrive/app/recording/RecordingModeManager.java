@@ -1500,14 +1500,23 @@ public class RecordingModeManager {
                 }
                 // Only warmup if pipeline isn't already running.
                 if (!pipeline.isRunning()) {
-                    if (!avcWarmup.warmupAndWait(
+                    final java.util.function.BooleanSupplier stillRequired =
                             () -> !shuttingDown
                                 && CameraDaemon.isCameraStartEpochCurrent(
                                     cameraStartEpoch)
                                 && accIsOn
                                 && currentMode == mode
                                 && (mode != Mode.DRIVE_MODE
-                                    || isDrivingGear(currentGear)))) {
+                                    || isDrivingGear(currentGear));
+                    // BYD100F: a cold open in R races the car's own reverse view
+                    // (#1001). Bounded wait on this worker; never skips recording.
+                    if (!com.overdrive.app.camera.ReverseViewCameraGate.awaitLeaveReverse(
+                            stillRequired::getAsBoolean, logger::info)) {
+                        logger.info("Camera no longer needed while waiting out R ("
+                            + reason + ") — skipping mode activation");
+                        return;
+                    }
+                    if (!avcWarmup.warmupAndWait(stillRequired)) {
                         logger.warn("AVC warmup interrupted (" + reason + ") — skipping mode activation");
                         return;
                     }

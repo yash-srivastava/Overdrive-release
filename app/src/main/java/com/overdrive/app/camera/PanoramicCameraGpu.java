@@ -145,7 +145,8 @@ public class PanoramicCameraGpu {
     // the native AVM losing its reverse-gear feed while we keep recording.
     //
     // Opt-in per vehicle via camera.decoupledEncoderLane (default false =
-    // shipped zero-copy behaviour, bit-identical). Applied at pipeline
+    // shipped zero-copy behaviour, bit-identical), except BYD100F where an
+    // unset flag defaults on (DecoupledEncoderLanePolicy, #1001). Applied at pipeline
     // construction like every other USE_* path selector — never hot-swapped.
     // Legacy path only: DiLink 5 already publishes app-owned 2D textures
     // (native DMA compositor) and DiLink 4's SurfaceTexture path has a
@@ -163,7 +164,8 @@ public class PanoramicCameraGpu {
         try {
             org.json.JSONObject cam = com.overdrive.app.config.UnifiedConfigManager
                 .loadConfig().optJSONObject("camera");
-            return cam != null && cam.optBoolean("decoupledEncoderLane", false);
+            // Unset = platform default (on for BYD100F, off elsewhere): DecoupledEncoderLanePolicy.
+            return DecoupledEncoderLanePolicy.resolve(cam);
         } catch (Throwable t) {
             return false;
         }
@@ -8930,11 +8932,15 @@ public class PanoramicCameraGpu {
                                 } else {
                                     // No native app — this is a HAL issue, restart camera
                                     consecutiveContentionStalls = 0;
-                                    postLegacyStallRestart(stallOpenSeq);
+                                    if (!holdStallRestartForReverseView()) {
+                                        postLegacyStallRestart(stallOpenSeq);
+                                    }
                                 }
                             } else {
                                 // No coordinator — just restart
-                                postLegacyStallRestart(stallOpenSeq);
+                                if (!holdStallRestartForReverseView()) {
+                                    postLegacyStallRestart(stallOpenSeq);
+                                }
                             }
                         } else if (nativeActive && timeSinceFrame < 500) {
                             // Frames are flowing despite native app — reset stall counter
@@ -10100,6 +10106,23 @@ public class PanoramicCameraGpu {
      * Legacy stall restart: none while a restart runs, and none once the camera has
      * reopened since {@code openSeq} (read when the stall was observed).
      */
+    // BYD100F only (#1001): a stall restart in R closes and reopens our camera
+    // while the car's own reverse view is opening on the same camera service.
+    // Watchdog-thread state. The stall clock was just reset, so a held restart
+    // retries on the next stall tick; the hold lapses after MAX_HOLD_MS in R.
+    private final ReverseViewCameraGate.Hold reverseStallHold =
+        new ReverseViewCameraGate.Hold(ReverseViewCameraGate.appliesHere());
+
+    private boolean holdStallRestartForReverseView() {
+        // Monotonic, like the gate's cap; the watchdog's own clock is wall time.
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (!reverseStallHold.holdNow(ReverseViewCameraGate.freshGear(), now)) return false;
+        logger.info("Frame stall in R: restart held " + reverseStallHold.heldMs(now)
+            + "ms (max " + ReverseViewCameraGate.MAX_HOLD_MS
+            + "ms) so the car's reverse view is not interrupted");
+        return true;
+    }
+
     private void postLegacyStallRestart(final long openSeq) {
         Handler handler = glHandler;
         if (handler == null) return;

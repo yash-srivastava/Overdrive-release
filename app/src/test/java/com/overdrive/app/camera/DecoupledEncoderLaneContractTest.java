@@ -14,7 +14,8 @@ import org.junit.Test;
  * (camera.decoupledEncoderLane — the BYD native-AVM starvation fix).
  *
  * Invariants protected here:
- *  1. FLAG-OFF INERTNESS: the flag defaults to false, is restricted to the
+ *  1. FLAG-OFF INERTNESS: the flag defaults to false (BYD100F: true, see
+ *     DecoupledEncoderLanePolicyTest), is restricted to the
  *     legacy ImageReader path, and the legacy PASS 1A block survives verbatim
  *     behind the flag branch — flag-off behaviour must stay bit-identical to
  *     the shipped zero-copy pipeline.
@@ -48,9 +49,10 @@ public class DecoupledEncoderLaneContractTest {
     public void flagDefaultsOffAndIsRestrictedToTheLegacyPath() throws IOException {
         String gpu = readRepositoryFile(GPU);
 
-        // Default-off config read, resolved once at construction like the
-        // other USE_* path selectors (never hot-swapped).
-        assertTrue(gpu.contains("optBoolean(\"decoupledEncoderLane\", false)"));
+        // Config read through the shared policy (default off except BYD100F),
+        // resolved once at construction like the other USE_* path selectors
+        // (never hot-swapped).
+        assertTrue(gpu.contains("return DecoupledEncoderLanePolicy.resolve(cam);"));
         assertOrdered(gpu,
                 "private final boolean USE_DECOUPLED_ENCODER_LANE =",
                 "!USE_OEM_SURFACE_TEXTURE_PATH",
@@ -339,7 +341,7 @@ public class DecoupledEncoderLaneContractTest {
         // to the legacy camera mode, write-through persistence off the UI
         // looper with a guarded revert on failure.
         assertOrdered(activity,
-                "\"decoupledEncoderLane\", false)",
+                "DecoupledEncoderLanePolicy.resolve(cameraSection)",
                 "decoupledLaneSwitch?.isEnabled = state.cameraMode == \"default\"",
                 "decoupledLaneSwitch?.isChecked = state.decoupledEncoderLaneEnabled",
                 "decoupledLaneSwitch?.setOnCheckedChangeListener",
