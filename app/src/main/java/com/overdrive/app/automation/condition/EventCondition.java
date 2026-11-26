@@ -88,7 +88,7 @@ public class EventCondition {
         try {
             json.put("type", TYPE);
             JSONArray variables = new JSONArray();
-            for (Type variable : getVariables()) {
+            for (Type variable : schemaVariables()) {
                 variables.put(variable.toJson());
             }
             json.put("variables", variables);
@@ -97,7 +97,7 @@ public class EventCondition {
             // cross-reference for users who wire automations and Home Assistant against the
             // same car. Cosmetic: never stored, never resolved against. Omitted (not null)
             // when the signal has no twin, so the UI can simply test for presence.
-            String mqtt = SignalMqttMap.forId(getLabel().getId());
+            String mqtt = mqttSchemaKey();
             if (mqtt != null) json.put("mqtt", mqtt);
             json.put("comparator", getValue().getComparators().toJson());
             json.put("value", getValue().toJson());
@@ -106,6 +106,14 @@ public class EventCondition {
         }
 
         return json;
+    }
+
+    protected List<? extends Type> schemaVariables() {
+        return getVariables();
+    }
+
+    protected String mqttSchemaKey() {
+        return SignalMqttMap.forId(getLabel().getId());
     }
 
     /**

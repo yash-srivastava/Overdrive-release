@@ -3,11 +3,11 @@ package com.overdrive.app.automation.type;
 import com.overdrive.app.automation.value.IntValue;
 import com.overdrive.app.automation.value.Label;
 
+import org.json.JSONException;
 import org.json.JSONObject;
 
-public class IntType extends BaseType<Integer> {
+public class IntType extends SchemaType<Integer> {
     private static final String TYPE = "int";
-    private final Label label;
 
     private final int min;
     private final int max;
@@ -21,18 +21,9 @@ public class IntType extends BaseType<Integer> {
      * @param max   The maximum value this int can be (inclusive)
      */
     public IntType(Label label, int min, int max) {
-        this.label = label;
+        super(label, TYPE);
         this.min = min;
         this.max = max;
-    }
-
-    /**
-     * The label that was stored when this int was initialized
-     *
-     * @return The Label for this int
-     */
-    public Label getLabel() {
-        return label;
     }
 
     /**
@@ -74,23 +65,9 @@ public class IntType extends BaseType<Integer> {
         return value.compareTo(getMin()) >= 0 && value.compareTo(getMax()) <= 0;
     }
 
-    /**
-     * Create a JSON representation of this int to display in the frontend
-     * Will contain the min and max values
-     *
-     * @return JSON representation of this int
-     */
-    public JSONObject toJson() {
-        JSONObject json = getLabel().toJson();
-
-        try {
-            json.put("type", TYPE);
-            json.put("min", getMin());
-            json.put("max", getMax());
-        } catch (Exception e) {
-            // JSONObject.put only throws on null key
-        }
-
-        return json;
+    @Override
+    protected void appendSchemaFields(JSONObject json) throws JSONException {
+        json.put("min", getMin());
+        json.put("max", getMax());
     }
 }

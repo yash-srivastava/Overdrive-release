@@ -1,9 +1,9 @@
 package com.overdrive.app.automation.type;
 
 import com.overdrive.app.automation.value.Label;
-import com.overdrive.app.automation.value.StringValue;
 
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.Arrays;
@@ -11,10 +11,9 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-public class EnumType extends BaseType<String> {
+public class EnumType extends StringSchemaType {
     private static final String TYPE = "enum";
 
-    private final Label label;
     private final Set<Label> options;
     private final Set<String> ids;
 
@@ -27,22 +26,13 @@ public class EnumType extends BaseType<String> {
      * @param options A list of options which can be selected
      */
     public EnumType(Label label, Label... options) {
-        this.label = label;
+        super(label, TYPE);
         // Maintain the order of the options but ensure they are unique
         this.options = new LinkedHashSet<>(Arrays.asList(options));
         // Maintain a set of ids for quick lookup instead of having to make a label to lookup the options set
         this.ids = this.options.stream()
                 .map(Label::getId)
                 .collect(Collectors.toSet());
-    }
-
-    /**
-     * The label that was stored when this enum was initialized
-     *
-     * @return The Label for this enum
-     */
-    public Label getLabel() {
-        return label;
     }
 
     /**
@@ -55,16 +45,6 @@ public class EnumType extends BaseType<String> {
     }
 
     /**
-     * The comparators for this enum
-     * These will be the same as string comparators as enum is a limited string type
-     *
-     * @return The comparators for this enum
-     */
-    public EnumType getComparators() {
-        return StringValue.COMPARATORS;
-    }
-
-    /**
      * Lookup the value in the ids set to see if this enum accepts this option
      *
      * @param value The value to check
@@ -74,26 +54,12 @@ public class EnumType extends BaseType<String> {
         return this.ids.contains(value);
     }
 
-    /**
-     * Create a JSON representation of this enum to display in the frontend
-     * Will have a list of allowed options
-     *
-     * @return JSON representation of this enum
-     */
-    public JSONObject toJson() {
-        JSONObject json = getLabel().toJson();
-
-        try {
-            json.put("type", TYPE);
-            JSONArray opt = new JSONArray();
-            for (Label option : getOptions()) {
-                opt.put(option.toJson());
-            }
-            json.put("options", opt);
-        } catch (Exception e) {
-            // JSONObject.put only throws on null key
+    @Override
+    protected void appendSchemaFields(JSONObject json) throws JSONException {
+        JSONArray opt = new JSONArray();
+        for (Label option : getOptions()) {
+            opt.put(option.toJson());
         }
-
-        return json;
+        json.put("options", opt);
     }
 }
