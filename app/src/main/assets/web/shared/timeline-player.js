@@ -240,9 +240,35 @@
 
     function hasKey(set, s) { return !!set && !!s && set.has(s.id + '|' + s.fp); }
 
-    function sourcesAt(segs, w, blocked) {
+    // The player owns a sorted segment snapshot until the next _setData/load.
+    // Prefix maxima are monotonic even when clips overlap or nest. Include
+    // unavailable clips too: availability/blocking is checked live by callers.
+    function buildSegmentEnds(segs) {
+        const ends = new Float64Array(segs.length);
+        let maxEnd = -Infinity;
+        for (let i = 0; i < segs.length; i++) {
+            if (isNum(segs[i].end)) maxEnd = Math.max(maxEnd, segs[i].end);
+            ends[i] = maxEnd;
+        }
+        return ends;
+    }
+
+    // Every earlier segment ends at or before the query threshold. Preserve
+    // start-order traversal and ties among the remaining candidates.
+    function firstSegmentAfter(ends, threshold) {
+        if (!ends || !isNum(threshold)) return 0;
+        let lo = 0, hi = ends.length;
+        while (lo < hi) {
+            const mid = lo + Math.floor((hi - lo) / 2);
+            if (ends[mid] <= threshold) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
+    }
+
+    function sourcesAt(segs, w, blocked, ends) {
         const fam = {};
-        for (let i = 0; i < (segs ? segs.length : 0); i++) {
+        for (let i = firstSegmentAfter(ends, w); i < (segs ? segs.length : 0); i++) {
             const s = segs[i];
             if (s.start > w) break;
             if (isPlayable(s) && s.end > w && !hasKey(blocked, s)) fam[familyOf(s)] = true;
@@ -347,9 +373,9 @@
     }
 
     // Where playback lands for wall w: inside playable footage -> w, else the next playable start.
-    function landing(w, segs, blocked) {
+    function landing(w, segs, blocked, ends) {
         let hit = null, blockedSeg = null, next = null;
-        for (let i = 0; i < (segs ? segs.length : 0); i++) {
+        for (let i = firstSegmentAfter(ends, w); i < (segs ? segs.length : 0); i++) {
             const s = segs[i];
             if (!isPlayable(s)) continue;
             if (s.start > w) {
@@ -365,9 +391,9 @@
         return { wall: w, seg: null, blockedSeg: blockedSeg };
     }
 
-    function nextPlayableStart(segs, after, blocked) {
+    function nextPlayableStart(segs, after, blocked, ends) {
         let best = null;
-        for (let i = 0; i < (segs ? segs.length : 0); i++) {
+        for (let i = firstSegmentAfter(ends, after + SEAM_MS); i < (segs ? segs.length : 0); i++) {
             const s = segs[i];
             if (best !== null && s.start >= best) break;
             if (!isPlayable(s) || s.end <= after + SEAM_MS || hasKey(blocked, s)) continue;
@@ -377,8 +403,8 @@
         return best;
     }
 
-    function hasFootage(segs, a, b, blocked) {
-        for (let i = 0; i < (segs ? segs.length : 0); i++) {
+    function hasFootage(segs, a, b, blocked, ends) {
+        for (let i = firstSegmentAfter(ends, a); i < (segs ? segs.length : 0); i++) {
             const s = segs[i];
             if (s.start >= b) break;
             if (isPlayable(s) && s.end > a && !hasKey(blocked, s)) return true;
@@ -412,7 +438,7 @@
     }
 
     // Scrub frame request for wall w: one key per GOP inside the playlist, 1 s buckets elsewhere.
-    function frameTarget(tb, segById, segs, w) {
+    function frameTarget(tb, segById, segs, w, ends) {
         if (tb && tb.n && w >= tb.ws[0] - SEAM_MS && w <= tb.we[tb.n - 1] + SEAM_MS) {
             const r = wallToMedia(tb, w);
             const it = tb.items[tb.itemOf[r.i]];
@@ -424,7 +450,7 @@
                 return { id: it.id, fp: it.fp, at: clamp(Math.round(mid - base), 0, AT_MAX_MS), key: it.key + '|g' + Math.round(tb.ws[r.i]) };
             }
         }
-        const land = landing(w, segs, null);
+        const land = landing(w, segs, null, ends);
         const s = land.seg;
         if (!s || !s.id) return null;
         const x = Math.max(0, land.wall - s.start);
@@ -649,6 +675,7 @@
         this.dataReady = false;
         this.dataFailed = false;
         this.segs = [];
+        this.segmentEnds = null;
         this.segById = new Map();
         this.busy = [];
         this.blocked = new Map();
@@ -824,6 +851,7 @@
         this.dataReady = false;
         this.dataFailed = false;
         this.segs = [];
+        this.segmentEnds = null;
         this.segById = new Map();
         this.busy = [];
         this.reloads = [];
@@ -855,7 +883,7 @@
         if (this.gapHold) {
             const g = this.gapHold;
             if (!g.item && !isNum(g.wall) && isNum(g.from)) {
-                const nx = this.dataReady ? nextPlayableStart(this.segs, g.from, this.blocked) : null;
+                const nx = this.dataReady ? nextPlayableStart(this.segs, g.from, this.blocked, this.segmentEnds) : null;
                 if (nx === null || !this.outer || nx >= this.outer.to) {
                     // Nothing recorded after the hold in this day: stay put, and say so.
                     this.intent = 'pause';
@@ -946,7 +974,7 @@
         if (!this.scrub) this.beginScrub();
         ms = clamp(ms, this.outer.from, this.outer.to);
         this.scrub.wall = ms;
-        const tgt = frameTarget(this.tb, this.segById, this.segs, ms);
+        const tgt = frameTarget(this.tb, this.segById, this.segs, ms, this.segmentEnds);
         if (!tgt) return;
         tgt.w = frameWidth(this.el.clientWidth, root.devicePixelRatio || 1);
         tgt.key += '|w' + tgt.w + (isNum(this.strength) ? '|s' + this.strength : '');
@@ -1159,13 +1187,14 @@
         segs.sort(function (a, b) { return a.start - b.start; });
         this.data = json;
         this.segs = segs;
+        this.segmentEnds = buildSegmentEnds(segs);
         this.segById = new Map(segs.map(function (s) { return [s.id, s]; }));
         this.busy = busyIntervals({ marks: json && json.marks, road: json && json.road, segments: segs });
         this.dataReady = true;
         const h = this.gapHold;
         if (h && !h.item && !isNum(h.wall) && isNum(h.from) && this.outer) {
             // The hold came before the clip list: now the next footage is known.
-            const nx = nextPlayableStart(segs, h.from, this.blocked);
+            const nx = nextPlayableStart(segs, h.from, this.blocked, this.segmentEnds);
             if (nx !== null && nx < this.outer.to) {
                 h.wall = nx;
                 this._emit('gap', { from: h.from, to: nx, user: true });
@@ -1198,7 +1227,7 @@
         let target = this.pendingWall;
         if (target === null) {
             if (!this.dataReady && !this.dataFailed) return;
-            target = this.dataReady ? nextPlayableStart(this.segs, this.outer.from - SEAM_MS - 1, this.blocked) : this.outer.from;
+            target = this.dataReady ? nextPlayableStart(this.segs, this.outer.from - SEAM_MS - 1, this.blocked, this.segmentEnds) : this.outer.from;
             if (target === null || target >= this.outer.to) { this._setEmpty(); return; }
         }
         this._openWindow(target);
@@ -1216,7 +1245,7 @@
 
     Player.prototype._openWindow = function (wall) {
         if (this.dead || !this.outer) return;
-        const land = this.dataReady ? landing(wall, this.segs, this.blocked) : { wall: wall, blockedSeg: null };
+        const land = this.dataReady ? landing(wall, this.segs, this.blocked, this.segmentEnds) : { wall: wall, blockedSeg: null };
         this.pendingOverlay = land.blockedSeg && land.blockedSeg.start <= wall ? { seg: land.blockedSeg, wall: wall } : null;
         this.win = playbackWindow(land.wall, this.outer);
         this._openSource(land.wall);
@@ -1523,11 +1552,11 @@
         let next = null;
         if (ur.past) {
             if (!(uw > tb.we[tb.n - 1])) return false;
-            next = this.dataReady ? nextPlayableStart(this.segs, Math.max(uw, tb.we[tb.n - 1]), this.blocked) : null;
+            next = this.dataReady ? nextPlayableStart(this.segs, Math.max(uw, tb.we[tb.n - 1]), this.blocked, this.segmentEnds) : null;
         } else if (ur.gap) {
             if (tb.items[tb.itemOf[ur.i]].ws - uw < SEAM_MS) return false;
             if (this.dataReady) {
-                const land = landing(uw, this.segs, this.blocked);
+                const land = landing(uw, this.segs, this.blocked, this.segmentEnds);
                 if (land.blockedSeg && land.blockedSeg.start <= uw) return false;
             }
             next = tb.items[tb.itemOf[ur.i]].ws;
@@ -1565,7 +1594,7 @@
         const r = wallToMedia(tb, ms);
         if (!r) return;
         if (r.past) {
-            const next = this.dataReady ? nextPlayableStart(this.segs, Math.max(ms, tb.we[tb.n - 1]), this.blocked) : null;
+            const next = this.dataReady ? nextPlayableStart(this.segs, Math.max(ms, tb.we[tb.n - 1]), this.blocked, this.segmentEnds) : null;
             if (user && ms > tb.we[tb.n - 1]) {
                 this._holdInGap(ms, next !== null && next < this.outer.to ? next : null);
                 return;
@@ -1584,7 +1613,7 @@
         }
         const it = tb.items[tb.itemOf[r.i]];
         if (r.gap && this.dataReady) {
-            const land = landing(ms, this.segs, this.blocked);
+            const land = landing(ms, this.segs, this.blocked, this.segmentEnds);
             if (land.blockedSeg && land.blockedSeg.start <= ms) {
                 this._enterBlocked(this._segItem(land.blockedSeg), ms, it.ws);
                 return;
@@ -1622,8 +1651,8 @@
         if (!this.dataReady) return true;
         const d = slideDir(w, this.win, this.outer);
         const nw = playbackWindow(w, this.outer);
-        if (d === -1 || (d === 2 && w < this.win.from)) return hasFootage(this.segs, nw.from, this.win.from, this.blocked);
-        if (d === 1 || d === 2) return hasFootage(this.segs, this.win.to, nw.to, this.blocked);
+        if (d === -1 || (d === 2 && w < this.win.from)) return hasFootage(this.segs, nw.from, this.win.from, this.blocked, this.segmentEnds);
+        if (d === 1 || d === 2) return hasFootage(this.segs, this.win.to, nw.to, this.blocked, this.segmentEnds);
         return false;
     };
 
@@ -1639,14 +1668,14 @@
             // A user seek into a window with no footage at all holds where the user put it. The empty
             // window is dropped, so the next seek or Play opens a fresh one instead of waiting on it.
             this.pendingUser = null;
-            const nx = this.dataReady ? nextPlayableStart(this.segs, u.wall, this.blocked) : null;
+            const nx = this.dataReady ? nextPlayableStart(this.segs, u.wall, this.blocked, this.segmentEnds) : null;
             this._closeSource();
             this.win = null;
             this.tb = null;
             this._holdInGap(u.wall, nx !== null && nx < this.outer.to ? nx : null);
             return;
         }
-        const next = this.dataReady ? nextPlayableStart(this.segs, lastWall, this.blocked) : null;
+        const next = this.dataReady ? nextPlayableStart(this.segs, lastWall, this.blocked, this.segmentEnds) : null;
         if (next !== null && next < this.outer.to) {
             if (!emptyPlaylist && !this.continueNext && next - lastWall > SEAM_MS) {
                 this.video.pause();
@@ -2034,7 +2063,7 @@
         }
         const after = isNum(it.we) ? it.we : (tb && tb.n ? tb.we[tb.n - 1] : null);
         if (after === null || !this.dataReady) return null;
-        const next = nextPlayableStart(this.segs, after, this.blocked);
+        const next = nextPlayableStart(this.segs, after, this.blocked, this.segmentEnds);
         return next !== null && next < this.outer.to ? next : null;
     };
 
@@ -2214,7 +2243,7 @@
         if (!force && now - this.sourcesAt < SOURCES_INTERVAL_MS) return;
         this.sourcesAt = now;
         const w = this._currentWall();
-        const families = this.dataReady && isNum(w) ? sourcesAt(this.segs, w, this.blocked) : [];
+        const families = this.dataReady && isNum(w) ? sourcesAt(this.segs, w, this.blocked, this.segmentEnds) : [];
         const it = this.curItem;
         const active = it && it.type ? familyOf(it.seg || { type: it.type }) : null;
         const key = families.join(',') + '|' + active + '|' + this.prefer;
@@ -2723,7 +2752,7 @@
             parseIsoMs: parseIsoMs, parsePlaylist: parsePlaylist, buildTable: buildTable, idFromUrl: idFromUrl,
             skimOfUrl: skimOfUrl, fragIndexAtMedia: fragIndexAtMedia, itemAtMedia: itemAtMedia,
             mediaToWall: mediaToWall, wallToMedia: wallToMedia, familyOf: familyOf, isPlayable: isPlayable,
-            sourcesAt: sourcesAt, mergeIntervals: mergeIntervals, busyIntervals: busyIntervals, inIntervals: inIntervals,
+            buildSegmentEnds: buildSegmentEnds, sourcesAt: sourcesAt, mergeIntervals: mergeIntervals, busyIntervals: busyIntervals, inIntervals: inIntervals,
             newQuietState: newQuietState, skipQuietStep: skipQuietStep, playbackWindow: playbackWindow, slideDir: slideDir,
             landing: landing, nextPlayableStart: nextPlayableStart, hasFootage: hasFootage, timelineUrl: timelineUrl,
             apiUrl: apiUrl, apiWindow: apiWindow, frameUrl: frameUrl, frameWidth: frameWidth, frameTarget: frameTarget,
