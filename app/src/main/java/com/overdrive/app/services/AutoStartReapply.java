@@ -23,8 +23,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <p>On DiLink 3, BYD wipes the auto-start whitelist on every install/update,
  * and only its own dialog can change it ({@code ACCESS_APPOPSDATA} is signature-only).
- * This drives {@link AutoStartEnabler} after install and at two delayed checkpoints:
- * screen on, parked, bounded attempts per phase, then the setup guide takes over again.
+ * This drives {@link AutoStartEnabler} once per install: screen on, parked,
+ * at most {@link #MAX_ATTEMPTS} attempts, then the setup guide takes over again.
  */
 public final class AutoStartReapply {
 
@@ -32,10 +32,6 @@ public final class AutoStartReapply {
     private static final String PREFS = "overdrive_setup";
     private static final String KEY_ENABLED = "autostart_reapply_enabled";
     private static final String KEY_DONE_INSTALL = "autostart_reapply_done_install";
-    private static final String KEY_FIRST_CONFIRM_INSTALL = "autostart_first_confirm_install";
-    private static final String KEY_FIRST_CONFIRM_AT = "autostart_first_confirm_at";
-    private static final String KEY_RECHECK_DONE_INSTALL = "autostart_recheck_done_install";
-    private static final String KEY_FINAL_CHECK_INSTALL = "autostart_final_check_install";
     private static final String KEY_ATTEMPT_INSTALL = "autostart_reapply_attempt_install";
     private static final String KEY_ATTEMPTS = "autostart_reapply_attempts";
 
@@ -80,9 +76,9 @@ public final class AutoStartReapply {
     public static void setEnabled(Context context, boolean enabled) {
         prefs(context).edit().putBoolean(KEY_ENABLED, enabled).apply();
         Log.i(TAG, "re-apply after updates " + (enabled ? "enabled" : "disabled"));
-        MAIN.removeCallbacks(CHECK);
         // The guide owns the initial step when enabling on an unconfirmed install.
-        if (enabled && isDoneForCurrentInstall(context)) schedule(FIRST_CHECK_DELAY_MS);
+        // Disabling also cancels any queued automatic check.
+        MAIN.removeCallbacks(CHECK);
     }
 
     /** Opted in and able to act on this install: the service is enabled and it hasn't given up. */
@@ -102,26 +98,8 @@ public final class AutoStartReapply {
     public static void markDoneForCurrentInstall(Context context) {
         long install = currentInstall(context);
         if (install <= 0L) return;
-        SharedPreferences p = prefs(context);
-        SharedPreferences.Editor edit = p.edit().putLong(KEY_DONE_INSTALL, install);
-        if (p.getLong(KEY_FIRST_CONFIRM_INSTALL, 0L) != install) {
-            // A successful first observation starts a separate retry budget for the follow-up.
-            edit.putLong(KEY_FIRST_CONFIRM_INSTALL, install)
-                    .putLong(KEY_FIRST_CONFIRM_AT, System.currentTimeMillis())
-                    .putLong(KEY_ATTEMPT_INSTALL, install)
-                    .putInt(KEY_ATTEMPTS, 0);
-        } else if (followUpDelay(p, install) == 0L) {
-            edit.putLong(KEY_RECHECK_DONE_INSTALL, install)
-                    .putLong(KEY_ATTEMPT_INSTALL, install)
-                    .putInt(KEY_ATTEMPTS, 0);
-            if (AutoStartCheckpointPolicy.completesFinalCheckpoint(
-                    p.getLong(KEY_FIRST_CONFIRM_AT, 0L), System.currentTimeMillis(),
-                    p.getLong(KEY_RECHECK_DONE_INSTALL, 0L) == install)) {
-                edit.putLong(KEY_FINAL_CHECK_INSTALL, install);
-            }
-        }
-        edit.apply();
-        schedule(FIRST_CHECK_DELAY_MS);
+        prefs(context).edit().putLong(KEY_DONE_INSTALL, install).apply();
+        MAIN.removeCallbacks(CHECK);
     }
 
     /** Called on the main thread once the accessibility service is wired. */
@@ -136,19 +114,14 @@ public final class AutoStartReapply {
     private static boolean isPending(Context context) {
         if (!isEnabled(context) || !isAvailable(context)) return false;
         long install = currentInstall(context);
-        if (install <= 0L || attemptsFor(context, install) >= MAX_ATTEMPTS) return false;
-        return prefs(context).getLong(KEY_FINAL_CHECK_INSTALL, 0L) != install;
+        if (install <= 0L || prefs(context).getLong(KEY_DONE_INSTALL, 0L) == install) return false;
+        return attemptsFor(context, install) < MAX_ATTEMPTS;
     }
 
     private static void check() {
         final KeepAliveAccessibilityService service = KeepAliveAccessibilityService.getInstance();
         if (service == null || !isPending(service)) return;
         final long install = currentInstall(service);
-        long delay = followUpDelay(prefs(service), install);
-        if (delay > 0L) {
-            schedule(Math.min(delay, GATE_RECHECK_MS));
-            return;
-        }
         if (SystemClock.elapsedRealtime() - lastAttemptElapsed < MIN_ATTEMPT_SPACING_MS
                 || !IN_FLIGHT.compareAndSet(false, true)) {
             schedule(RECHECK_MS);
@@ -159,8 +132,7 @@ public final class AutoStartReapply {
             MAIN.post(() -> {
                 if (KeepAliveAccessibilityService.getInstance() != service || !isPending(service)
                         || currentInstall(service) != install
-                        || blocked != null || !isScreenOn(service)
-                        || followUpDelay(prefs(service), install) > 0L) {
+                        || blocked != null || !isScreenOn(service)) {
                     IN_FLIGHT.set(false);
                     if (blocked != null) Log.i(TAG, "deferred: " + blocked);
                     schedule(GATE_RECHECK_MS);
@@ -206,9 +178,6 @@ public final class AutoStartReapply {
                 Log.i(TAG, "done (result=" + result + ")");
                 return;
             }
-            // A failed follow-up no longer supports the guide's previous green check.
-            // Keep the first-confirmation timestamp so retries stay in this phase.
-            prefs(context).edit().remove(KEY_DONE_INSTALL).apply();
             boolean terminal = result == AutoStartEnabler.Result.NOT_THIS_FIRMWARE
                     || attempt >= MAX_ATTEMPTS;
             if (terminal) {
@@ -221,13 +190,6 @@ public final class AutoStartReapply {
             Log.w(TAG, "attempt " + attempt + " failed (result=" + result + "); will retry");
             schedule(RECHECK_MS);
         });
-    }
-
-    private static long followUpDelay(SharedPreferences p, long install) {
-        if (p.getLong(KEY_FIRST_CONFIRM_INSTALL, 0L) != install) return 0L;
-        return AutoStartCheckpointPolicy.delayUntilNextCheckpoint(
-                p.getLong(KEY_FIRST_CONFIRM_AT, 0L), System.currentTimeMillis(),
-                p.getLong(KEY_RECHECK_DONE_INSTALL, 0L) == install);
     }
 
     private static void schedule(long delay) {

@@ -30,8 +30,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <p>This runs when the user taps the autostart button in the setup wizard
  * ({@link com.overdrive.app.overlay.SetupGuideDialog}), or, when the user opted in,
- * from {@link AutoStartReapply}: after install and at bounded follow-up checkpoints,
- * screen on and parked. The earlier unconditional onServiceConnected trigger was removed
+ * from {@link AutoStartReapply}: once per install, screen on and parked,
+ * with at most three attempts. The earlier unconditional onServiceConnected trigger was removed
  * because it re-fired on every a11y reconnect / app churn and repeatedly popped the
  * BYD dialog.
  *
