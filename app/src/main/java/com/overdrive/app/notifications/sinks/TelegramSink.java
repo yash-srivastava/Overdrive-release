@@ -52,7 +52,10 @@ public final class TelegramSink implements NotificationBus.Sink {
             if (com.overdrive.app.remoteaccess.RemoteAccessNotifications.isRemoteAccess(event)) {
                 if (com.overdrive.app.remoteaccess.RemoteAccessNotifications
                         .canDeliver(event, "telegram")) {
-                    TelegramNotifier.sendRemoteAccess("🔑 *" + md(event.title) + "*\n"
+                    String action = event.data != null ? event.data.optString("action", "") : "";
+                    String outcome = event.data != null ? event.data.optString("outcome", "") : "";
+                    String lead = remoteAccessTelegramLead(action, outcome);
+                    TelegramNotifier.sendRemoteAccess(lead + "*" + md(event.title) + "*\n"
                             + md(event.body), event.data);
                 }
                 return;
@@ -145,6 +148,14 @@ public final class TelegramSink implements NotificationBus.Sink {
         String icon = "parking.session.ended".equals(event.category) ? "🚗" : "🅿️";
         TelegramNotifier.notifyParking(icon + " " + (event.title == null ? "" : event.title),
                 body, photo, buttons);
+    }
+
+    /** Lock/unlock icon only when the car confirmed the new state; a warning otherwise. */
+    static String remoteAccessTelegramLead(String action, String outcome) {
+        boolean lock = "lock".equals(action);
+        if (!lock && !"unlock".equals(action)) return "🔑 ";
+        if (!"confirmed".equals(outcome)) return "⚠️ ";
+        return lock ? "🔒 " : "🔓 ";
     }
 
     /**

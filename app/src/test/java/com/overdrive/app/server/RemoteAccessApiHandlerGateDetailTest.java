@@ -93,7 +93,7 @@ public class RemoteAccessApiHandlerGateDetailTest {
             assertFalse(call, call.contains("describe("));
         }
         // Other blocked/confirmed texts are unchanged.
-        assertTrue(handler.contains("recordAction(action, \"confirmed\", \"Driver-door lock state confirmed\");"));
+        assertTrue(handler.contains("recordAction(action, \"confirmed\", confirmed);"));
         assertTrue(handler.contains(
                 "recordAction(action, \"blocked\", decision.blockedReason(\"Signal or lock state expired before command\"));"));
     }

@@ -245,14 +245,15 @@ public class RemoteAccessApiHandlerBluetoothAliasApplyTest {
         assertEquals(1, count(decision, "seedKeyFobArmingAfterProximityLock("));
         assertEquals(0, count(gate, "seedKeyFobArmingAfterProximityLock("));
         assertTrue(decision.contains(
-                "                recordAction(action, \"confirmed\", \"Driver-door lock state confirmed\");\n"
+                "                recordAction(action, \"confirmed\", confirmed);\n"
                 + "                if (\"lock\".equals(action)) seedKeyFobArmingAfterProximityLock(decision);\n"
-                + "                notifyOutcome(decision, settings, \"confirmed\", \"Driver-door lock state confirmed\");"));
+                + "                notifyOutcome(decision, settings, \"confirmed\", confirmed);"));
         // The pinned confirmation block stays contiguous; the seed is strictly after it.
         int confirmed = decision.indexOf("if (confirmation == DiLink5GateActuationPolicy.Confirmation.CONFIRMED) {\n"
                 + "                lastCommandConfirmed = true;\n"
                 + "                decision.satisfied();\n"
-                + "                recordAction(action, \"confirmed\", \"Driver-door lock state confirmed\");");
+                + "                String confirmed = driverDoorStateConfirmed(action);\n"
+                + "                recordAction(action, \"confirmed\", confirmed);");
         int seed = decision.indexOf("seedKeyFobArmingAfterProximityLock(decision);", confirmed);
         int notify = decision.indexOf("notifyOutcome(decision, settings, \"confirmed\"", seed);
         assertTrue(confirmed > 0 && seed > confirmed && notify > seed);
