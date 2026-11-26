@@ -383,8 +383,8 @@ class WarningCoordinator(
 
 /**
  * Default [WarningCoordinator.AudioCue] backed by [ToneGenerator] on STREAM_MUSIC
- * — same approach as the project's AudioTestApiHandler. Severity → distinct tone
- * so the chime itself conveys urgency. The generator is created lazily and reused;
+ * with a distinct tone for each severity so the chime itself conveys urgency.
+ * The generator is created lazily and reused;
  * [release] frees it when the feature stops.
  */
 class ToneAudioCue : WarningCoordinator.AudioCue {
