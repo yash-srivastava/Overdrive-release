@@ -2032,14 +2032,34 @@
         V.userScrollAt = 0;
         seekTo(m.start, { glide: true, play: true });
     }
-    function sortedNav() {
-        return V.moments.filter(function (m) { return momentPasses(m, V.filter); }).sort(function (a, b) { return a.start - b.start; });
+    // Store refreshes replace the moments array; language changes only edit labels.
+    // Keep just the current filtered order, not one copy for every filter.
+    function MomentNavigation() {
+        this.source = null;
+        this.filter = null;
+        this.list = [];
     }
+    MomentNavigation.prototype.find = function (moments, filter, t, dir) {
+        if (this.source !== moments || this.filter !== filter) {
+            this.list = moments.filter(function (m) { return momentPasses(m, filter); })
+                .sort(function (a, b) { return a.start - b.start; });
+            this.source = moments;
+            this.filter = filter;
+        }
+        var list = this.list, lo = 0, hi = list.length;
+        var forward = dir > 0, threshold = forward ? t + SEC : t - 2 * SEC;
+        // Preserve strict thresholds and the original first/last tie selection.
+        while (lo < hi) {
+            var mid = lo + Math.floor((hi - lo) / 2);
+            if (forward ? !(list[mid].start > threshold) : list[mid].start < threshold) lo = mid + 1;
+            else hi = mid;
+        }
+        var i = forward ? lo : lo - 1;
+        return i >= 0 && i < list.length ? list[i] : null;
+    };
+    var momentNavigation = new MomentNavigation();
     function findMoment(dir) {
-        var list = sortedNav(), t = V.playhead, i;
-        if (dir > 0) { for (i = 0; i < list.length; i++) if (list[i].start > t + SEC) return list[i]; return null; }
-        for (i = list.length - 1; i >= 0; i--) if (list[i].start < t - 2 * SEC) return list[i];
-        return null;
+        return momentNavigation.find(V.moments, V.filter, V.playhead, dir);
     }
     function jumpMoment(dir, animate) {
         var m = findMoment(dir);
@@ -2653,7 +2673,7 @@
             addDaysKey: addDaysKey, parseFilename: parseFilename, matchFileSegment: matchFileSegment,
             buildMoments: buildMoments, momentKind: momentKind, momentPasses: momentPasses, momentMeta: momentMeta,
             segClasses: segClasses, pushRows: pushRows, fmtSpan: fmtSpan, fmtClipDur: fmtClipDur, FILTERS: FILTERS,
-            Store: Store, normalizeWindow: normalizeWindow
+            Store: Store, normalizeWindow: normalizeWindow, MomentNavigation: MomentNavigation
         }
     };
 
