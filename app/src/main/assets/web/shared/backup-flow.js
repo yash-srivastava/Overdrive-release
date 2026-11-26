@@ -174,8 +174,9 @@
                         ((data && data.error) || ('HTTP ' + resp.status)), 'error');
                     return;
                 }
-                triggerDownload(resp.body, buildFilename(data));
-                toast(t('backup.export_done', 'Backup downloaded'), 'success');
+                if (triggerDownload(resp.body, buildFilename(data))) {
+                    toast(t('backup.export_done', 'Backup downloaded'), 'success');
+                }
             })
             .catch(function (e) {
                 done();
@@ -197,27 +198,38 @@
 
     // Blob download — supported on the Chrome 58 head-unit WebView.
     function triggerDownload(text, filename) {
+        var url, a;
+        function cleanup() {
+            try {
+                if (a && a.parentNode) a.parentNode.removeChild(a);
+            } finally {
+                if (url) URL.revokeObjectURL(url);
+            }
+        }
         try {
             var blob = new Blob([text], { type: 'application/json' });
-            var url = URL.createObjectURL(blob);
-            var a = document.createElement('a');
+            url = URL.createObjectURL(blob);
+            a = document.createElement('a');
             a.href = url;
             a.download = filename;
             document.body.appendChild(a);
             a.click();
-            setTimeout(function () {
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-            }, 1000);
+            setTimeout(cleanup, 1000);
+            return true;
         } catch (e) {
+            cleanup();
             // Fallback: open the JSON in a new tab so the user can save manually.
             try {
                 var w = window.open('', '_blank');
-                if (w) { w.document.title = filename; w.document.body.textContent = text; }
-            } catch (e2) {
-                toast(t('backup.download_unsupported',
-                    'Could not start the download on this browser.'), 'error');
-            }
+                if (w) {
+                    w.document.title = filename;
+                    w.document.body.textContent = text;
+                    return false;
+                }
+            } catch (e2) { /* fallback unavailable */ }
+            toast(t('backup.download_unsupported',
+                'Could not start the download on this browser.'), 'error');
+            return false;
         }
     }
 
