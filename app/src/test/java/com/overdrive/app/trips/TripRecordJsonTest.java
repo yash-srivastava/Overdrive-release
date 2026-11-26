@@ -3,6 +3,8 @@ package com.overdrive.app.trips;
 import org.json.JSONObject;
 import org.junit.Test;
 
+import java.util.Iterator;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -32,7 +34,7 @@ public class TripRecordJsonTest {
         assertEquals("trip.jsonl.gz", full.remove("telemetryFilePath"));
         assertFalse(summary.has("microMomentsJson"));
         assertFalse(summary.has("telemetryFilePath"));
-        assertTrue(full.similar(summary));
+        assertSameFields(full, summary);
         assertEquals(42, summary.getLong("id"));
         assertEquals(2.0, summary.getDouble("energyUsedKwh"), 0.0);
         assertEquals(2.0, summary.getDouble("signedEnergyKwh"), 0.0);
@@ -55,7 +57,7 @@ public class TripRecordJsonTest {
     }
 
     @Test
-    public void nonFiniteFieldPreservesPartialObjectAndDoesNotAppendDetails() {
+    public void nonFiniteFieldPreservesPartialObjectAndDoesNotAppendDetails() throws Exception {
         TripRecord trip = new TripRecord();
         trip.id = 7;
         trip.distanceKm = Double.NaN;
@@ -65,6 +67,15 @@ public class TripRecordJsonTest {
         assertEquals(7, full.optLong("id"));
         assertFalse(full.has("distanceKm"));
         assertFalse(full.has("microMomentsJson"));
-        assertTrue(full.similar(summary));
+        assertSameFields(full, summary);
+    }
+
+    // JSONObject.similar is not in the Android API the tests compile against.
+    private static void assertSameFields(JSONObject expected, JSONObject actual) throws Exception {
+        assertEquals(expected.length(), actual.length());
+        for (Iterator<String> it = expected.keys(); it.hasNext(); ) {
+            String key = it.next();
+            assertEquals(key, expected.get(key), actual.get(key));
+        }
     }
 }
