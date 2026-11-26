@@ -299,7 +299,8 @@ class RoadSenseImuSidecarService : Service(), SensorEventListener {
      * is all the server needs). Runs on ioHandler's thread only.
      */
     private fun sendLine(line: String): Boolean {
-        val payload = (line + "\n").toByteArray()  // newline-delimit so the server's readLine() frames it
+        // IMU batches are already newline-terminated; status messages are not.
+        val payload = (if (line.endsWith('\n')) line else line + "\n").toByteArray()
         // First attempt on the existing connection; if the write fails (daemon
         // restarted / socket reset), reconnect once and retry. A failure after
         // reconnect just drops the batch — the next batch reconnects again.

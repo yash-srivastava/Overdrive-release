@@ -1,6 +1,6 @@
 package com.overdrive.app.roadsense.detect
 
-import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 
 /**
@@ -64,20 +64,53 @@ object ImuFrameCodec {
         gyro: List<ImuGyroSample>,
         periodMs: Float? = null,
     ): String {
-        val obj = JSONObject()
-        obj.put(KEY_COMMAND, COMMAND)
-        val a = JSONArray()
+        // Keys are fixed and all values are numeric: no general JSON object tree or
+        // escaping pass is needed. Cap only the initial capacity, not the input.
+        val rows = minOf(accel.size, MAX_SAMPLES_PER_FRAME) + minOf(gyro.size, MAX_SAMPLES_PER_FRAME)
+        val out = StringBuilder(64 + rows * 48)
+        out.append("{\"$KEY_COMMAND\":\"$COMMAND\",\"$KEY_ACCEL\":[")
+        var first = true
         for (s in accel) {
-            a.put(JSONArray().put(s.tMs).put(s.ax.toDouble()).put(s.ay.toDouble()).put(s.az.toDouble()))
+            if (!first) out.append(',')
+            first = false
+            out.appendSample(s.tMs, s.ax, s.ay, s.az)
         }
-        val g = JSONArray()
+        out.append("],\"$KEY_GYRO\":[")
+        first = true
         for (s in gyro) {
-            g.put(JSONArray().put(s.tMs).put(s.gx.toDouble()).put(s.gy.toDouble()).put(s.gz.toDouble()))
+            if (!first) out.append(',')
+            first = false
+            out.appendSample(s.tMs, s.gx, s.gy, s.gz)
         }
-        obj.put(KEY_ACCEL, a)
-        obj.put(KEY_GYRO, g)
-        if (periodMs != null) obj.put(KEY_PERIOD, Math.round(periodMs * 10f) / 10.0)
-        return obj.toString() + "\n"
+        out.append(']')
+        if (periodMs != null) out.append(",\"$KEY_PERIOD\":").append(Math.round(periodMs * 10f) / 10.0)
+        return out.append("}\n").toString()
+    }
+
+    private fun StringBuilder.appendSample(tMs: Long, x: Float, y: Float, z: Float) {
+        append('[').append(tMs).append(',')
+        appendComponent(x)
+        append(',')
+        appendComponent(y)
+        append(',')
+        appendComponent(z)
+        append(']')
+    }
+
+    private fun StringBuilder.appendComponent(value: Float) {
+        // Preserve JSONArray.put(double)'s rejection of invalid JSON numbers.
+        if (!value.isFinite()) throw JSONException("Forbidden numeric value: $value")
+        // Keep the legacy zero spelling (including negative zero). decode() reads
+        // optDouble().toFloat(); the short Float text survives that double rounding
+        // for every finite float except +-7.038531E-26, which lands on the next
+        // float, so that one keeps the exact widened Double text.
+        if (value == 0f) {
+            if (value.toRawBits() < 0) append("-0") else append('0')
+        } else if ((value.toRawBits() and 0x7fffffff) == 0x15ae43fd) {
+            append(value.toDouble())
+        } else {
+            append(value)
+        }
     }
 
     /** Decoded frame: the two sample lists pulled off the wire. */
