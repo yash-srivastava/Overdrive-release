@@ -94,7 +94,10 @@ const NetworkPage = {
                     : this.t('network.state_off', 'Off');
             }
             const desc = document.getElementById('hsStateDesc');
-            if (desc && s.lastError && !on) desc.textContent = s.lastError;
+            if (desc) {
+                desc.textContent = s.lastError && !on ? s.lastError
+                    : this.t('network.enable_desc', "Turns the head unit into a WiFi access point that shares the built-in SIM's internet.");
+            }
 
             // Vehicle-owned credentials: always safe to repaint, nothing editable.
             this._ssid = s.activeSsid || s.ssid || '';
