@@ -82,15 +82,8 @@ class CommunitySyncProvider(
         actionGroups: JSONObject? = null,
     ): Result {
         val base = baseUrl() ?: return fail("no community worker URL configured")
-        val payload = JSONObject()
-            .put("deviceId", deviceId)
-            .put("authorName", authorName)
-            .put("name", name)
-            .put("description", description)
-            .put("category", category)
-            .put("schemaVersion", schemaVersion)
-            .put("rules", rules)
-        if (actionGroups != null && actionGroups.length() > 0) payload.put("actionGroups", actionGroups)
+        val payload = submissionPayload(deviceId, authorName, name, description,
+            category, rules, schemaVersion, actionGroups)
         return post("$base/automations", deviceId, payload)
     }
 
@@ -108,15 +101,8 @@ class CommunitySyncProvider(
         actionGroups: JSONObject? = null,
     ): Result {
         val base = baseUrl() ?: return fail("no community worker URL configured")
-        val payload = JSONObject()
-            .put("deviceId", deviceId)
-            .put("authorName", authorName)
-            .put("name", name)
-            .put("description", description)
-            .put("category", category)
-            .put("schemaVersion", schemaVersion)
-            .put("rules", rules)
-        if (actionGroups != null && actionGroups.length() > 0) payload.put("actionGroups", actionGroups)
+        val payload = submissionPayload(deviceId, authorName, name, description,
+            category, rules, schemaVersion, actionGroups)
         return try {
             val req = Request.Builder()
                 .url("$base/automations/${enc(id)}")
@@ -164,6 +150,22 @@ class CommunitySyncProvider(
         }
     }
 
+    private fun submissionPayload(
+        deviceId: String, authorName: String, name: String, description: String,
+        category: String, rules: JSONObject, schemaVersion: Int, actionGroups: JSONObject?,
+    ): JSONObject {
+        val payload = JSONObject()
+            .put("deviceId", deviceId)
+            .put("authorName", authorName)
+            .put("name", name)
+            .put("description", description)
+            .put("category", category)
+            .put("schemaVersion", schemaVersion)
+            .put("rules", rules)
+        if (actionGroups != null && actionGroups.length() > 0) payload.put("actionGroups", actionGroups)
+        return payload
+    }
+
     // ── HTTP plumbing ────────────────────────────────────────────────────────
 
     private fun httpGet(url: String, viewerDeviceId: String? = null): Result = try {
@@ -186,24 +188,12 @@ class CommunitySyncProvider(
      *  the Worker's `{error:...}` message reaches the user (e.g. the no-shell rejection). */
     private fun exec(req: Request): Result {
         httpClient.newCall(req).execute().use { resp ->
-            val raw = resp.body?.string()
-            val parsed = raw?.let {
-                try { JSONObject(it) } catch (_: Throwable) { null }
-            }
-            return if (resp.isSuccessful) {
-                Result(true, parsed, null, resp.code)
-            } else {
-                val msg = parsed?.optString("error", "")?.ifEmpty { null } ?: "HTTP ${resp.code}"
-                Result(false, parsed, msg, resp.code)
-            }
+            return communityResponse(resp.body?.string(), resp.isSuccessful, resp.code)
         }
     }
 
     /** Normalized base URL (trailing slash stripped), or null if unset/blank. */
-    private fun baseUrl(): String? {
-        val u = workerUrlSupplier()?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        return u.trimEnd('/')
-    }
+    private fun baseUrl(): String? = communityBaseUrl(workerUrlSupplier())
 
     private fun fail(msg: String): Result {
         logger.warn("community call failed: $msg")
@@ -226,3 +216,16 @@ class CommunitySyncProvider(
             .build()
     }
 }
+
+/** Shared Worker result mapping; callers retain their own response-body read policy. */
+internal fun communityResponse(raw: String?, successful: Boolean, code: Int): CommunitySyncProvider.Result {
+    val parsed = raw?.let {
+        try { JSONObject(it) } catch (_: Throwable) { null }
+    }
+    if (successful) return CommunitySyncProvider.Result(true, parsed, null, code)
+    val message = parsed?.optString("error", "")?.ifEmpty { null } ?: "HTTP $code"
+    return CommunitySyncProvider.Result(false, parsed, message, code)
+}
+
+internal fun communityBaseUrl(url: String?): String? =
+    url?.trim()?.takeIf { it.isNotEmpty() }?.trimEnd('/')
