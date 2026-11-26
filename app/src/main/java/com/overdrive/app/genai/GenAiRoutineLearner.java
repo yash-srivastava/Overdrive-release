@@ -10,7 +10,6 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.LocalDate;
@@ -553,12 +552,7 @@ public final class GenAiRoutineLearner {
         loaded = true;
         observations.clear();
         decisions.clear();
-        makeOwnerOnly(home(), true);
-        makeOwnerOnly(storeFile(), false);
-        makeOwnerOnly(backupFile(), false);
-
-        JSONObject root = GenAiStoreReader.read(storeFile(), MAX_STORE_BYTES);
-        if (root == null) root = GenAiStoreReader.read(backupFile(), MAX_STORE_BYTES);
+        JSONObject root = store().load(MAX_STORE_BYTES);
         if (root == null
                 || root.optInt("version", STORE_VERSION) != STORE_VERSION) {
             return;
@@ -673,13 +667,7 @@ public final class GenAiRoutineLearner {
     }
 
     private static boolean saveStoreLocked() {
-        File home = home();
-        if (!home.exists() && !home.mkdirs()) return false;
-        makeOwnerOnly(home, true);
-        File file = storeFile();
-        File tmp = tempFile();
-        File backup = backupFile();
-        try {
+        return store().save(() -> {
             JSONArray storedObservations = new JSONArray();
             for (JSONObject observation : observations) {
                 storedObservations.put(observation);
@@ -688,65 +676,15 @@ public final class GenAiRoutineLearner {
             for (JSONObject decision : decisions.values()) {
                 storedDecisions.put(decision);
             }
-            byte[] bytes = new JSONObject()
+            return new JSONObject()
                     .put("version", STORE_VERSION)
                     .put("observations", storedObservations)
-                    .put("decisions", storedDecisions)
-                    .toString()
-                    .getBytes(StandardCharsets.UTF_8);
-            if (bytes.length > MAX_STORE_BYTES) return false;
-
-            if (tmp.exists() && !tmp.delete()) return false;
-            if (!tmp.createNewFile()) return false;
-            makeOwnerOnly(tmp, false);
-            try (FileOutputStream out =
-                         new FileOutputStream(tmp, false)) {
-                out.write(bytes);
-                out.flush();
-                out.getFD().sync();
-            }
-            if (backup.exists() && !backup.delete()) return false;
-            if (file.exists() && !file.renameTo(backup)) return false;
-            if (!tmp.renameTo(file)) {
-                if (backup.exists()) backup.renameTo(file);
-                return false;
-            }
-            makeOwnerOnly(file, false);
-            makeOwnerOnly(backup, false);
-            return true;
-        } catch (Exception ignored) {
-            return false;
-        } finally {
-            if (tmp.exists()) tmp.delete();
-        }
+                    .put("decisions", storedDecisions);
+        }, MAX_STORE_BYTES, true);
     }
 
-    private static void makeOwnerOnly(File file, boolean directory) {
-        if (file == null || !file.exists()) return;
-        file.setReadable(false, false);
-        file.setWritable(false, false);
-        file.setExecutable(false, false);
-        file.setReadable(true, true);
-        file.setWritable(true, true);
-        if (directory) file.setExecutable(true, true);
-    }
-
-    private static File home() {
-        return new File(System.getProperty(
-                GenAiInsights.HOME_PROPERTY,
-                com.overdrive.app.util.ScratchRoot.path(".genai")));
-    }
-
-    private static File storeFile() {
-        return new File(home(), "routine-learning.json");
-    }
-
-    private static File backupFile() {
-        return new File(home(), "routine-learning.json.bak");
-    }
-
-    private static File tempFile() {
-        return new File(home(), "routine-learning.json.tmp");
+    private static GenAiStoreFiles store() {
+        return GenAiStoreFiles.forName("routine-learning.json");
     }
 
     interface AutomationSaver {
@@ -787,7 +725,7 @@ public final class GenAiRoutineLearner {
     }
 
     static File storeFileForTest() {
-        return storeFile();
+        return store().file();
     }
 
     private static final class Candidate {

@@ -8,25 +8,21 @@ import com.overdrive.app.automation.type.Type;
 import com.overdrive.app.automation.value.Label;
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.server.HttpServer;
-import com.overdrive.app.server.Messages;
 
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class ApiAction extends BaseAction {
+public class ApiAction extends DeclaredAction {
     private static final String TYPE = "api";
     // Regex to match ${variable}
     private static final Pattern p = Pattern.compile("\\$\\{([^}]+)\\}");
     private static final Pattern WHOLE_NUMBER = Pattern.compile("-?\\d{1,9}(?:\\.0+)?");
 
-    private final Label label;
-    private final String description;
     private final String method;
     private final String path;
     private final String body;
-    private final List<Type> variables;
 
     /**
      * An action to send an API event
@@ -42,40 +38,10 @@ public class ApiAction extends BaseAction {
      * @param variables   The variables to concatenate for the payload
      */
     public ApiAction(Label label, String description, String method, String path, String body, Type... variables) {
-        this.label = label;
-        this.description = description;
+        super(TYPE, label, description, List.of(variables));
         this.method = method;
         this.path = path;
         this.body = body;
-        this.variables = List.of(variables);
-    }
-
-    /**
-     * A string id for this action
-     *
-     * @return String representing this action
-     */
-    public String getType() {
-        return TYPE;
-    }
-
-    /**
-     * The label that was stored when this Action was initialized
-     *
-     * @return The Label for this action
-     */
-    public Label getLabel() {
-        return label;
-    }
-
-    /**
-     * The description for this action
-     * Will be translated using the language files
-     *
-     * @return The description for this action
-     */
-    public String getDescription() {
-        return Messages.get(description);
     }
 
     /**
@@ -106,15 +72,6 @@ public class ApiAction extends BaseAction {
      */
     private String getBody() {
         return body;
-    }
-
-    /**
-     * The variables for this action
-     *
-     * @return The variables for this action
-     */
-    public List<Type> getVariables() {
-        return variables;
     }
 
     /**

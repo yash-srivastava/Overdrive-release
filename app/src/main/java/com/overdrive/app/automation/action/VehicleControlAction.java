@@ -10,18 +10,13 @@ import com.overdrive.app.byd.BydDataCollector;
 import com.overdrive.app.byd.BydVehicleData;
 import com.overdrive.app.byd.routing.VehicleCommandRouter;
 import com.overdrive.app.mqtt.VehicleControlCatalog;
-import com.overdrive.app.server.Messages;
 
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
-public class VehicleControlAction extends BaseAction {
+public class VehicleControlAction extends DeclaredAction {
     private static final String TYPE = "vehicle-control";
-
-    private final Label label;
-    private final String description;
-    private final List<Type> variables;
 
     /**
      * An action to send a vehicle control event
@@ -36,46 +31,7 @@ public class VehicleControlAction extends BaseAction {
      */
     @Deprecated
     public VehicleControlAction(Label label, String description, Type... variables) {
-        this.label = label;
-        this.description = description;
-        this.variables = List.of(variables);
-    }
-
-    /**
-     * A string id for this action
-     *
-     * @return String representing this action
-     */
-    public String getType() {
-        return TYPE;
-    }
-
-    /**
-     * The label that was stored when this Action was initialized
-     *
-     * @return The Label for this action
-     */
-    public Label getLabel() {
-        return label;
-    }
-
-    /**
-     * The description for this action
-     * Will be translated using the language files
-     *
-     * @return The description for this action
-     */
-    public String getDescription() {
-        return Messages.get(description);
-    }
-
-    /**
-     * The variables for this action
-     *
-     * @return The variables for this action
-     */
-    public List<Type> getVariables() {
-        return variables;
+        super(TYPE, label, description, List.of(variables));
     }
 
     /**
@@ -162,7 +118,7 @@ public class VehicleControlAction extends BaseAction {
         VehicleControlCatalog.ControlEntity entity = null;
         if (automationAction.getVariables().size() > 1) {
             // Add variables other than the key to the vehicle control id to allow seat_heat_driver and others to be built with variables
-            String suffix = this.variables.stream()
+            String suffix = super.getVariables().stream()
                     .filter(variable -> !"payload".equals(variable.getLabel().getId()))
                     .map(variable -> Objects.requireNonNullElse(automationAction.getVariables().get(variable.getLabel().getId()), "").toString())
                     .filter(variable -> !variable.isBlank())

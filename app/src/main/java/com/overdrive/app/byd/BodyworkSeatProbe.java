@@ -32,9 +32,7 @@ import java.util.Map;
  * uses ({@link HazardLightProbe}): obtain the device singleton, swap a
  * {@link PermissiveContext} into its cached {@code mContext} so the in-process
  * gate-3 permission check is neutralised, then call the generic
- * {@code get(int[], Class)} through {@link BydDeviceHelper}. {@code BatteryVoltageMonitor}
- * already reads bodywork getters this way, so the read path itself is proven —
- * this only exposes it for arbitrary ids over HTTP.
+ * {@code get(int[], Class)} through {@link BydDeviceHelper}.
  *
  * <p>NOTHING here writes. There is no {@code set()} call and no {@code confirm}
  * gate because there is nothing to actuate — every method reads. The seat does

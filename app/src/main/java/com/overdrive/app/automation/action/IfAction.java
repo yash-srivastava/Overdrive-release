@@ -7,10 +7,8 @@ import com.overdrive.app.automation.condition.EventData;
 import com.overdrive.app.automation.type.DynamicIntType;
 import com.overdrive.app.automation.type.SignalAddressType;
 import com.overdrive.app.automation.type.StringType;
-import com.overdrive.app.automation.type.Type;
 import com.overdrive.app.automation.value.IntValue;
 import com.overdrive.app.automation.value.Label;
-import com.overdrive.app.server.Messages;
 
 import org.json.JSONObject;
 
@@ -35,12 +33,8 @@ import java.util.Map;
  * ${signal:…}}/constant), so an If can compare a signal or variable against a constant,
  * another variable, or another signal.
  */
-public class IfAction extends BaseAction {
+public class IfAction extends DeclaredAction {
     private static final String TYPE = "if";
-
-    private final Label label;
-    private final String description;
-    private final List<Type> variables;
 
     // The optional free-text variable-name field, shown by the frontend only when the
     // LHS "event" picker is set to "variable". Handled BESPOKE (emitted in toJson, read in
@@ -51,9 +45,7 @@ public class IfAction extends BaseAction {
             new StringType(new Label("name", "automation.variable_name"), SetVariableAction.MAX_NAME);
 
     public IfAction(Label label, String description) {
-        this.label = label;
-        this.description = description;
-        this.variables = List.of(
+        super(TYPE, label, description, List.of(
                 // The LHS is an ADDRESS into the shared condition catalog, so an If can test
                 // ANY of the ~58 conditions (including attributed ones like a specific door,
                 // seat or light) instead of the 9 signals this action used to hardcode. The
@@ -61,13 +53,8 @@ public class IfAction extends BaseAction {
                 // "variable" still addresses a user variable via the bespoke "name" field.
                 new SignalAddressType(new Label("event", "automation.wait_signal")),
                 IntValue.COMPARATORS,
-                new DynamicIntType(new Label("value", "automation.value"), -540, 1000));
+                new DynamicIntType(new Label("value", "automation.value"), -540, 1000)));
     }
-
-    public String getType() { return TYPE; }
-    public Label getLabel() { return label; }
-    public String getDescription() { return Messages.get(description); }
-    public List<Type> getVariables() { return variables; }
 
     /** Carries then/else nested action lists. */
     @Override public boolean hasChildActions() { return true; }

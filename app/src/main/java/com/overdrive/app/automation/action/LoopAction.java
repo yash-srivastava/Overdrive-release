@@ -8,10 +8,8 @@ import com.overdrive.app.automation.type.DynamicIntType;
 import com.overdrive.app.automation.type.EnumType;
 import com.overdrive.app.automation.type.IntType;
 import com.overdrive.app.automation.type.SignalAddressType;
-import com.overdrive.app.automation.type.Type;
 import com.overdrive.app.automation.value.IntValue;
 import com.overdrive.app.automation.value.Label;
-import com.overdrive.app.server.Messages;
 
 import java.util.List;
 import java.util.Map;
@@ -31,20 +29,14 @@ import java.util.Map;
  * disable-all still kills the worker mid-loop). while/until re-evaluate the condition
  * against the SAME live state ({@link Automations#getStateValue}) every iteration.
  */
-public class LoopAction extends BaseAction {
+public class LoopAction extends DeclaredAction {
     private static final String TYPE = "loop";
 
     private static final int MAX_ITERATIONS = 1000;
     private static final long MAX_WALL_MS = 15 * 60 * 1000L; // 15 min total ceiling
 
-    private final Label label;
-    private final String description;
-    private final List<Type> variables;
-
     public LoopAction(Label label, String description) {
-        this.label = label;
-        this.description = description;
-        this.variables = List.of(
+        super(TYPE, label, description, List.of(
                 new EnumType(new Label("mode", "automation.loop_mode"),
                         new Label("count", "automation.loop_count_mode"),
                         new Label("while", "automation.loop_while"),
@@ -57,13 +49,8 @@ public class LoopAction extends BaseAction {
                 // ids still resolve — see AutomationCondition.resolveSignalAddress.
                 new SignalAddressType(new Label("event", "automation.wait_signal")),
                 IntValue.COMPARATORS,
-                new DynamicIntType(new Label("value", "automation.value"), -540, 1000));
+                new DynamicIntType(new Label("value", "automation.value"), -540, 1000)));
     }
-
-    public String getType() { return TYPE; }
-    public Label getLabel() { return label; }
-    public String getDescription() { return Messages.get(description); }
-    public List<Type> getVariables() { return variables; }
 
     /** This action carries a nested loop-body action list. */
     @Override public boolean hasChildActions() { return true; }

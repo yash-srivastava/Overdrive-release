@@ -3,10 +3,8 @@ package com.overdrive.app.automation.action;
 import com.overdrive.app.automation.AutomationAction;
 import com.overdrive.app.automation.ExpressionEvaluator;
 import com.overdrive.app.automation.type.StringType;
-import com.overdrive.app.automation.type.Type;
 import com.overdrive.app.automation.value.Label;
 import com.overdrive.app.config.UnifiedConfigManager;
-import com.overdrive.app.server.Messages;
 
 import java.util.List;
 
@@ -37,17 +35,8 @@ import java.util.List;
  * privileged command line. For arithmetic, compute it in a Calculate Variable action and
  * reference the result — the shell's own {@code $((…))} is left to the shell.
  */
-public class ShellAction extends BaseAction {
+public class ShellAction extends DeclaredAction {
     private static final String TYPE = "shell";
-
-    private final Label label;
-    private final String description;
-    // Single free-text variable: the command line. 500 chars is generous for a
-    // one-liner while bounding a pathological paste. Carries a warning key so the
-    // form renders the same amber "runs unattended" caution as the key-mapping
-    // shell field.
-    private final List<Type> variables = List.of(
-            new StringType(new Label("command", "automation.shell_command"), 500, "automation.shell_warning"));
 
     // The only two token forms this action substitutes. Everything else that looks like
     // shell expansion (${HOME}, $((1+2)), $(cmd), $VAR) is left for sh, so a command
@@ -56,24 +45,12 @@ public class ShellAction extends BaseAction {
     private static final String SIGNAL_PREFIX = "${signal:";
 
     public ShellAction(Label label, String description) {
-        this.label = label;
-        this.description = description;
-    }
-
-    public String getType() {
-        return TYPE;
-    }
-
-    public Label getLabel() {
-        return label;
-    }
-
-    public String getDescription() {
-        return Messages.get(description);
-    }
-
-    public List<Type> getVariables() {
-        return variables;
+        // Single free-text variable: the command line. 500 chars is generous for a
+        // one-liner while bounding a pathological paste. Carries a warning key so the
+        // form renders the same amber "runs unattended" caution as the key-mapping
+        // shell field.
+        super(TYPE, label, description, List.of(
+                new StringType(new Label("command", "automation.shell_command"), 500, "automation.shell_warning")));
     }
 
     /**

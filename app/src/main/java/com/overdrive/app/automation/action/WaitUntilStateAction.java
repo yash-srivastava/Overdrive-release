@@ -8,10 +8,8 @@ import com.overdrive.app.automation.condition.EventData;
 import com.overdrive.app.automation.type.IntType;
 import com.overdrive.app.automation.type.SignalAddressType;
 import com.overdrive.app.automation.type.StringType;
-import com.overdrive.app.automation.type.Type;
 import com.overdrive.app.automation.value.Label;
 import com.overdrive.app.automation.value.Value;
-import com.overdrive.app.server.Messages;
 
 import java.util.List;
 import java.util.Map;
@@ -34,7 +32,7 @@ import java.util.Map;
  * and is bounded by a timeout so a never-satisfied state can't park the worker forever.
  * It polls the SAME live automation state the triggers/conditions evaluate against.
  */
-public class WaitUntilStateAction extends BaseAction {
+public class WaitUntilStateAction extends DeclaredAction {
     private static final String TYPE = "waitUntilState";
 
     private static final long POLL_MS = 250L;
@@ -48,16 +46,10 @@ public class WaitUntilStateAction extends BaseAction {
     /** Bound for the awaited state word (longest catalog vocabulary word is well under this). */
     private static final int MAX_STATE_LEN = 32;
 
-    private final Label label;
-    private final String description;
-    private final List<Type> variables;
-
     public WaitUntilStateAction(Label label, String description) {
-        this.label = label;
-        this.description = description;
         // event: which on/off signal to watch. ids MUST match the resolveEvent switch.
         // state: the target on/off value. timeout: bounded wait ceiling.
-        this.variables = List.of(
+        super(TYPE, label, description, List.of(
                 // LHS = an ADDRESS into the shared condition catalog, so this can wait on ANY
                 // condition (a specific door, seat, gear, window…), not just the 12 on/off
                 // signals it used to hardcode. Legacy stored ids — turnLeft, lowBeam, … — still
@@ -72,16 +64,8 @@ public class WaitUntilStateAction extends BaseAction {
                 // valid values of this type.
                 new StringType(new Label("state", "automation.state"), MAX_STATE_LEN),
                 // 0 = wait the full ceiling (see clampTimeout), matching WaitUntilAction.
-                new IntType(new Label("timeout", "automation.wait_timeout"), 0, MAX_TIMEOUT_S));
+                new IntType(new Label("timeout", "automation.wait_timeout"), 0, MAX_TIMEOUT_S)));
     }
-
-    public String getType() { return TYPE; }
-
-    public Label getLabel() { return label; }
-
-    public String getDescription() { return Messages.get(description); }
-
-    public List<Type> getVariables() { return variables; }
 
     /**
      * Resolve a stored LHS address to its state key. Delegates to the shared grammar

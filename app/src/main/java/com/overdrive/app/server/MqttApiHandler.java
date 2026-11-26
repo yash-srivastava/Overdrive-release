@@ -4,12 +4,7 @@ import com.overdrive.app.logging.DaemonLogger;
 
 import org.json.JSONObject;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.io.PrintWriter;
-import java.net.Socket;
-import java.util.Iterator;
 
 /**
  * MQTT API Handler - proxies HTTP API requests to IPC commands on port 19877.
@@ -26,6 +21,7 @@ public class MqttApiHandler {
 
     private static final String TAG = "MqttApiHandler";
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
+    private static final DaemonIpcHttpProxy ipc = new DaemonIpcHttpProxy(logger, "");
 
     /**
      * Handle MQTT API requests.
@@ -34,14 +30,14 @@ public class MqttApiHandler {
     public static boolean handle(String method, String path, String body, OutputStream out) throws Exception {
         // GET /api/mqtt/connections — list all
         if (path.equals("/api/mqtt/connections") && method.equals("GET")) {
-            handleGetConnections(out);
+            ipc.send(out, "GET_MQTT_CONNECTIONS", null, null);
             return true;
         }
 
         // POST /api/mqtt/connections — add new
         if (path.equals("/api/mqtt/connections") && method.equals("POST")) {
             if (!StepUpGate.requireBundle("config", "Change MQTT connections", out)) return true;
-            handleAddConnection(out, body);
+            handleConnectionChange(out, "ADD_MQTT_CONNECTION", null, body);
             return true;
         }
 
@@ -53,7 +49,7 @@ public class MqttApiHandler {
                 return true;
             }
             if (!StepUpGate.requireBundle("config", "Change MQTT connections", out)) return true;
-            handleUpdateConnection(out, id, body);
+            handleConnectionChange(out, "UPDATE_MQTT_CONNECTION", id, body);
             return true;
         }
 
@@ -70,52 +66,25 @@ public class MqttApiHandler {
 
         // GET /api/mqtt/status — all connections with live stats
         if (path.equals("/api/mqtt/status") && method.equals("GET")) {
-            handleGetStatus(out);
+            ipc.send(out, "GET_MQTT_STATUS", null, null);
             return true;
         }
 
         // GET /api/mqtt/telemetry — latest telemetry snapshot
         if (path.equals("/api/mqtt/telemetry") && method.equals("GET")) {
-            handleGetTelemetry(out);
+            ipc.send(out, "GET_MQTT_TELEMETRY", null, null);
             return true;
         }
 
         return false;
     }
 
-    private static void handleGetConnections(OutputStream out) throws Exception {
-        JSONObject ipcResponse = sendIpcCommand("GET_MQTT_CONNECTIONS", null);
-        if (ipcResponse != null) {
-            HttpResponse.sendJson(out, ipcResponse.toString());
-        } else {
-            HttpResponse.sendJsonError(out, Messages.get("errors.ipc_communication_failed"));
-        }
-    }
-
-    private static void handleAddConnection(OutputStream out, String body) throws Exception {
+    private static void handleConnectionChange(OutputStream out, String command, String id,
+                                               String body) throws Exception {
         try {
             JSONObject bodyJson = new JSONObject(body);
-            JSONObject ipcResponse = sendIpcCommand("ADD_MQTT_CONNECTION", bodyJson);
-            if (ipcResponse != null) {
-                HttpResponse.sendJson(out, ipcResponse.toString());
-            } else {
-                HttpResponse.sendJsonError(out, Messages.get("errors.ipc_communication_failed"));
-            }
-        } catch (Exception e) {
-            HttpResponse.sendJsonError(out, Messages.get("errors.invalid_request_body_with_detail", e.getMessage()));
-        }
-    }
-
-    private static void handleUpdateConnection(OutputStream out, String id, String body) throws Exception {
-        try {
-            JSONObject bodyJson = new JSONObject(body);
-            bodyJson.put("id", id);
-            JSONObject ipcResponse = sendIpcCommand("UPDATE_MQTT_CONNECTION", bodyJson);
-            if (ipcResponse != null) {
-                HttpResponse.sendJson(out, ipcResponse.toString());
-            } else {
-                HttpResponse.sendJsonError(out, Messages.get("errors.ipc_communication_failed"));
-            }
+            if (id != null) bodyJson.put("id", id);
+            ipc.send(out, command, bodyJson, null);
         } catch (Exception e) {
             HttpResponse.sendJsonError(out, Messages.get("errors.invalid_request_body_with_detail", e.getMessage()));
         }
@@ -124,59 +93,6 @@ public class MqttApiHandler {
     private static void handleDeleteConnection(OutputStream out, String id) throws Exception {
         JSONObject extra = new JSONObject();
         extra.put("id", id);
-        JSONObject ipcResponse = sendIpcCommand("DELETE_MQTT_CONNECTION", extra);
-        if (ipcResponse != null) {
-            HttpResponse.sendJson(out, ipcResponse.toString());
-        } else {
-            HttpResponse.sendJsonError(out, Messages.get("errors.ipc_communication_failed"));
-        }
-    }
-
-    private static void handleGetStatus(OutputStream out) throws Exception {
-        JSONObject ipcResponse = sendIpcCommand("GET_MQTT_STATUS", null);
-        if (ipcResponse != null) {
-            HttpResponse.sendJson(out, ipcResponse.toString());
-        } else {
-            HttpResponse.sendJsonError(out, Messages.get("errors.ipc_communication_failed"));
-        }
-    }
-
-    private static void handleGetTelemetry(OutputStream out) throws Exception {
-        JSONObject ipcResponse = sendIpcCommand("GET_MQTT_TELEMETRY", null);
-        if (ipcResponse != null) {
-            HttpResponse.sendJson(out, ipcResponse.toString());
-        } else {
-            HttpResponse.sendJsonError(out, Messages.get("errors.ipc_communication_failed"));
-        }
-    }
-
-    /**
-     * Send an IPC command to the daemon on port 19877.
-     */
-    private static JSONObject sendIpcCommand(String command, JSONObject extraFields) {
-        try {
-            Socket socket = new Socket("127.0.0.1", 19877);
-            socket.setSoTimeout(3000);
-            PrintWriter writer = new PrintWriter(socket.getOutputStream(), true);
-            BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-
-            JSONObject request = new JSONObject();
-            request.put("command", command);
-            if (extraFields != null) {
-                Iterator<String> keys = extraFields.keys();
-                while (keys.hasNext()) {
-                    String key = keys.next();
-                    request.put(key, extraFields.get(key));
-                }
-            }
-            writer.println(request.toString());
-
-            String response = reader.readLine();
-            socket.close();
-            return response != null ? new JSONObject(response) : null;
-        } catch (Exception e) {
-            logger.error("IPC communication error: " + e.getMessage());
-            return null;
-        }
+        ipc.send(out, "DELETE_MQTT_CONNECTION", extra, null);
     }
 }

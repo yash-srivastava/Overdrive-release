@@ -13679,13 +13679,12 @@ public class BydDataCollector {
      * Called from collectAllFull() only (display-only, on-demand).
      */
     /**
-     * Read the live steering-wheel angle into the builder. Extracted so the periodic
-     * poll ({@link #collectAll}) can refresh it every cycle — {@code
-     * collectBodyworkExtended} runs ONLY at init ({@code collectAllFull}), and the
-     * steering-angle listener is not registered, so without this the
-     * angle was seeded once at boot (wheel centered → 0) and carried forward forever:
-     * the "steeringAngle" automation event never saw a transition and could never
-     * fire. Guards the SDK sentinel + the same ±780° sanity range the listener uses.
+     * Read the live steering-wheel angle into the builder. The periodic poll
+     * ({@link #collectAll}) calls this directly while ACC is on, in addition
+     * to the call from {@code collectBodyworkExtended}.
+     * This avoids carrying the boot-time value forward indefinitely and lets
+     * the "steeringAngle" automation event observe transitions.
+     * Rejects the SDK sentinel and readings outside the ±780° sanity range.
      */
     private void collectSteeringAngle(BydVehicleData.Builder b) {
         if (bodyworkDevice == null) return;

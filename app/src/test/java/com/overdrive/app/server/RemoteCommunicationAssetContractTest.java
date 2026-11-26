@@ -199,7 +199,7 @@ public class RemoteCommunicationAssetContractTest {
         assertTrue(frames.contains(
                 "class IdleReadTimeout extends SocketTimeoutException"));
         assertTrue(websocket.contains("WebSocketFrames.readFrame("));
-        assertTrue(websocket.contains("RemoteCommunicationPolicy.MAX_PCM_FRAME_BYTES"));
+        assertTrue(websocket.contains("input, RemoteCommunicationPolicy.MAX_PCM_FRAME_BYTES)"));
         assertFalse(browser.contains("MediaRecorder"));
         assertFalse(browser.contains("Blob("));
     }

@@ -2,11 +2,9 @@ package com.overdrive.app.automation.action;
 
 import com.overdrive.app.automation.AutomationAction;
 import com.overdrive.app.automation.type.IntType;
-import com.overdrive.app.automation.type.Type;
 import com.overdrive.app.automation.value.Label;
 import com.overdrive.app.recording.ManualClipService;
 import com.overdrive.app.recording.ManualClipWindow;
-import com.overdrive.app.server.Messages;
 
 import org.json.JSONObject;
 
@@ -27,39 +25,18 @@ import java.util.List;
  * (no ACC-on recording mode active), the request is refused and logged — an
  * automation binding never keeps the pipeline alive on its own.
  */
-public class ManualClipAction extends BaseAction {
+public class ManualClipAction extends DeclaredAction {
     private static final String TYPE = "manualClip";
 
-    private final Label label;
-    private final String description;
-    // Two whole-second dimensions. IntType bounds each 0..60; the combined
-    // 1..60 total is enforced in fromJson via ManualClipWindow.create so a
-    // saved automation can never carry an out-of-contract window.
-    private final List<Type> variables = List.of(
-            new IntType(new Label("beforeSeconds", "automation.clip_before"),
-                    0, ManualClipWindow.MAX_SECONDS),
-            new IntType(new Label("afterSeconds", "automation.clip_after"),
-                    0, ManualClipWindow.MAX_SECONDS));
-
     public ManualClipAction(Label label, String description) {
-        this.label = label;
-        this.description = description;
-    }
-
-    public String getType() {
-        return TYPE;
-    }
-
-    public Label getLabel() {
-        return label;
-    }
-
-    public String getDescription() {
-        return Messages.get(description);
-    }
-
-    public List<Type> getVariables() {
-        return variables;
+        // Two whole-second dimensions. IntType bounds each 0..60; the combined
+        // 1..60 total is enforced in fromJson via ManualClipWindow.create so a
+        // saved automation can never carry an out-of-contract window.
+        super(TYPE, label, description, List.of(
+                new IntType(new Label("beforeSeconds", "automation.clip_before"),
+                        0, ManualClipWindow.MAX_SECONDS),
+                new IntType(new Label("afterSeconds", "automation.clip_after"),
+                        0, ManualClipWindow.MAX_SECONDS)));
     }
 
     /**

@@ -1664,25 +1664,11 @@ class RecordingsFragment : Fragment() {
     }
 
     private fun updateDateHeader(view: View) {
-        val selectedCal = Calendar.getInstance().apply {
-            set(calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH), selectedDay, 0, 0, 0)
-            set(Calendar.MILLISECOND, 0)
-        }
-        val today = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-        }
-        val yesterday = (today.clone() as Calendar).apply {
-            add(Calendar.DAY_OF_YEAR, -1)
-        }
-
-        view.findViewById<TextView>(R.id.tvSelectedDate)?.text = when {
-            !dateNarrowed -> getString(R.string.recording_lib_date_all_days)
-            selectedCal.timeInMillis == today.timeInMillis ->
-                getString(R.string.recording_lib_date_today)
-            selectedCal.timeInMillis == yesterday.timeInMillis ->
-                getString(R.string.recording_lib_date_yesterday)
-            else -> dayHeaderFormat.format(Date(selectedCal.timeInMillis))
+        val header = RecordingDateSelection.dayHeader(calendar, selectedDay)
+        view.findViewById<TextView>(R.id.tvSelectedDate)?.text = if (!dateNarrowed) {
+            getString(R.string.recording_lib_date_all_days)
+        } else {
+            header.selectionLabel(dayHeaderFormat, ::getString)
         }
 
         // Prev/next day chevrons only mean something while a single day is
@@ -1692,7 +1678,7 @@ class RecordingsFragment : Fragment() {
             if (dateNarrowed) View.VISIBLE else View.GONE
         view.findViewById<MaterialButton>(R.id.btnNextDay)?.let {
             it.visibility = if (dateNarrowed) View.VISIBLE else View.GONE
-            it.isEnabled = selectedCal.timeInMillis < today.timeInMillis
+            it.isEnabled = header.canAdvance
             it.alpha = if (it.isEnabled) 1f else 0.4f
         }
 
@@ -1760,7 +1746,7 @@ class RecordingsFragment : Fragment() {
             // scanner (it owns its own API-then-FS fallback ladder) so we
             // don't duplicate the FS walk here.
             if (stats == null) {
-                val today0 = startOfTodayMillis()
+                val today0 = RecordingDateSelection.startOfTodayMillis()
                 val all = RecordingScanner.scanRecordings(ctx)
                 val dashcam = all.filter {
                     it.type == RecordingFile.RecordingType.NORMAL ||
@@ -2119,16 +2105,6 @@ class RecordingsFragment : Fragment() {
         return DirStats(total, today, bytes)
     }
 
-    private fun startOfTodayMillis(): Long {
-        val cal = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }
-        return cal.timeInMillis
-    }
-
     // -----------------------------------------------------------------
     // List | Timeline
     // -----------------------------------------------------------------
@@ -2351,25 +2327,14 @@ class RecordingsFragment : Fragment() {
     private fun updateTimelineDatePill(root: View, dayMs: Long) {
         val pill = root.findViewById<MaterialButton>(R.id.btnTimelineDate) ?: return
         val locale = Locale.getDefault()
-        val dayStart = Calendar.getInstance().apply {
-            timeInMillis = dayMs
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }.timeInMillis
-        val today = startOfTodayMillis()
-        val yesterday = Calendar.getInstance().apply {
-            timeInMillis = today
-            add(Calendar.DAY_OF_YEAR, -1)
-        }.timeInMillis
+        val header = RecordingDateSelection.dayHeader(dayMs)
         val date = SimpleDateFormat(
             android.text.format.DateFormat.getBestDateTimePattern(locale, "EEEdMMM"), locale
         ).format(Date(dayMs))
-        val relative = when (dayStart) {
-            today -> getString(R.string.timeline_today)
-            yesterday -> getString(R.string.timeline_yesterday)
-            else -> null
+        val relative = when (header.relativeDay) {
+            RecordingDateSelection.RelativeDay.TODAY -> getString(R.string.timeline_today)
+            RecordingDateSelection.RelativeDay.YESTERDAY -> getString(R.string.timeline_yesterday)
+            RecordingDateSelection.RelativeDay.OTHER -> null
         }
         pill.text = if (relative != null) getString(R.string.timeline_gap_fmt, relative, date) else date
     }

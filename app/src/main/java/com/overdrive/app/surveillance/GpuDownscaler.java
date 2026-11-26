@@ -93,27 +93,51 @@ public class GpuDownscaler {
         0.75f, 0.50f, 0.00f, 0.25f
     };
 
-    // Shader program
+    // Separate shader bindings for the child EGL context and the caller's GL context.
     private int programId;
-    private int aPositionLocation;
-    private int aTexCoordLocation;
-    private int uCameraTexLocation;
-    private int uTexMatrixLocation;
-    private int uApaModeLocation;
-    private int uApplyManualYFlipLocation;
-    // Per-role producer corner + flip uniforms — main programId.
-    private int uProducerForFrontLocation = -1;
-    private int uProducerForRightLocation = -1;
-    private int uProducerForRearLocation = -1;
-    private int uProducerForLeftLocation = -1;
-    private int uFlipForFrontLocation = -1;
-    private int uFlipForRightLocation = -1;
-    private int uFlipForRearLocation = -1;
-    private int uFlipForLeftLocation = -1;
-    private int uRedMaskStrengthLocation = -1;
+    private final MosaicBindings readerBindings = new MosaicBindings();
+    private final MosaicBindings directBindings = new MosaicBindings();
     private volatile boolean redMaskEnabled = false;
-    private int uApaCenterInsetLocation = -1;
     private volatile float apaCenterInset = 0.0f;
+
+    private static final class MosaicBindings {
+        private int aPosition = -1;
+        private int aTexCoord = -1;
+        private int uCameraTex = -1;
+        private int uTexMatrix = -1;
+        private int uApaMode = -1;
+        private int uApplyManualYFlip = -1;
+        private int uProducerForFront = -1;
+        private int uProducerForRight = -1;
+        private int uProducerForRear = -1;
+        private int uProducerForLeft = -1;
+        private int uFlipForFront = -1;
+        private int uFlipForRight = -1;
+        private int uFlipForRear = -1;
+        private int uFlipForLeft = -1;
+        private int uRedMaskStrength = -1;
+        private int uApaCenterInset = -1;
+
+        private void load(int programId) {
+            aPosition = GLES20.glGetAttribLocation(programId, "aPosition");
+            aTexCoord = GLES20.glGetAttribLocation(programId, "aTexCoord");
+            uCameraTex = GLES20.glGetUniformLocation(programId, "uCameraTex");
+            uTexMatrix = GLES20.glGetUniformLocation(programId, "uTexMatrix");
+            uApaMode = GLES20.glGetUniformLocation(programId, "uApaMode");
+            uApplyManualYFlip = GLES20.glGetUniformLocation(programId, "uApplyManualYFlip");
+            uProducerForFront = GLES20.glGetUniformLocation(programId, "uProducerForFront");
+            uProducerForRight = GLES20.glGetUniformLocation(programId, "uProducerForRight");
+            uProducerForRear  = GLES20.glGetUniformLocation(programId, "uProducerForRear");
+            uProducerForLeft  = GLES20.glGetUniformLocation(programId, "uProducerForLeft");
+            uFlipForFront = GLES20.glGetUniformLocation(programId, "uFlipForFront");
+            uFlipForRight = GLES20.glGetUniformLocation(programId, "uFlipForRight");
+            uFlipForRear  = GLES20.glGetUniformLocation(programId, "uFlipForRear");
+            uFlipForLeft  = GLES20.glGetUniformLocation(programId, "uFlipForLeft");
+            uRedMaskStrength = GLES20.glGetUniformLocation(programId, "uRedMaskStrength");
+            uApaCenterInset = GLES20.glGetUniformLocation(programId, "uApaCenterInset");
+        }
+    }
+
     // Producer-corner remap + per-role X/Y flip flags (Variant A on
     // DiLink 4). UI thread writes via setProducerCornerMap/setFlipFlags;
     // GL thread reads in drawFrame paths under producerCornerMapLock.
@@ -210,11 +234,8 @@ public class GpuDownscaler {
             EGLContext mainThreadContext,
             float[] quadrantStripOffsetX,
             boolean isTexture2D) {
+        this(quadrantStripOffsetX, isTexture2D);
         this.sharedContext = mainThreadContext;
-        this.isTexture2D = isTexture2D;
-        this.quadrantStripOffsetX = normalizeOffsets(quadrantStripOffsetX);
-        this.fragmentShader = buildFragmentShader(
-            this.quadrantStripOffsetX, isTexture2D);
 
         // Start background thread
         renderThread = new HandlerThread("GpuDownscalerThread");
@@ -419,22 +440,7 @@ public class GpuDownscaler {
             throw new RuntimeException("Failed to create shader program");
         }
         
-        aPositionLocation = GLES20.glGetAttribLocation(programId, "aPosition");
-        aTexCoordLocation = GLES20.glGetAttribLocation(programId, "aTexCoord");
-        uCameraTexLocation = GLES20.glGetUniformLocation(programId, "uCameraTex");
-        uTexMatrixLocation = GLES20.glGetUniformLocation(programId, "uTexMatrix");
-        uApaModeLocation = GLES20.glGetUniformLocation(programId, "uApaMode");
-        uApplyManualYFlipLocation = GLES20.glGetUniformLocation(programId, "uApplyManualYFlip");
-        uProducerForFrontLocation = GLES20.glGetUniformLocation(programId, "uProducerForFront");
-        uProducerForRightLocation = GLES20.glGetUniformLocation(programId, "uProducerForRight");
-        uProducerForRearLocation  = GLES20.glGetUniformLocation(programId, "uProducerForRear");
-        uProducerForLeftLocation  = GLES20.glGetUniformLocation(programId, "uProducerForLeft");
-        uFlipForFrontLocation = GLES20.glGetUniformLocation(programId, "uFlipForFront");
-        uFlipForRightLocation = GLES20.glGetUniformLocation(programId, "uFlipForRight");
-        uFlipForRearLocation  = GLES20.glGetUniformLocation(programId, "uFlipForRear");
-        uFlipForLeftLocation  = GLES20.glGetUniformLocation(programId, "uFlipForLeft");
-        uRedMaskStrengthLocation = GLES20.glGetUniformLocation(programId, "uRedMaskStrength");
-        uApaCenterInsetLocation = GLES20.glGetUniformLocation(programId, "uApaCenterInset");
+        readerBindings.load(programId);
 
         vertexBuffer = GlUtil.createFloatBuffer(VERTEX_COORDS);
         texCoordBuffer = GlUtil.createFloatBuffer(TEX_COORDS);
@@ -476,65 +482,71 @@ public class GpuDownscaler {
     private void drawFrame(int textureId) {
         if (!initialized) return;
         
+        drawMosaic(textureId, programId, readerBindings, null, null);
+
+        // Swap to ImageReader (DMA transfer)
+        EGL14.eglSwapBuffers(eglDisplay, eglSurface);
+    }
+
+    /** Draw into the target already selected by the caller on its owning GL thread. */
+    private void drawMosaic(int textureId, int program, MosaicBindings bindings,
+                            float[] corners, float[] flips) {
         GLES20.glViewport(0, 0, WIDTH, HEIGHT);
         GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
-        
-        GLES20.glUseProgram(programId);
-        
-        // Bind main thread's camera texture (allowed via shared context)
+
+        GLES20.glUseProgram(program);
+
+        // Bind the camera texture in the current GL context.
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
         GLES20.glBindTexture(
             isTexture2D ? GLES20.GL_TEXTURE_2D
                         : GLES11Ext.GL_TEXTURE_EXTERNAL_OES,
             textureId);
-        GLES20.glUniform1i(uCameraTexLocation, 0);
-        if (uTexMatrixLocation >= 0) {
-            GLES20.glUniformMatrix4fv(uTexMatrixLocation, 1, false, currentTexMatrix, 0);
+        GLES20.glUniform1i(bindings.uCameraTex, 0);
+        if (bindings.uTexMatrix >= 0) {
+            GLES20.glUniformMatrix4fv(bindings.uTexMatrix, 1, false, currentTexMatrix, 0);
         }
-        if (uApaModeLocation >= 0) {
-            GLES20.glUniform1f(uApaModeLocation, (float) cameraLayout);
+        if (bindings.uApaMode >= 0) {
+            GLES20.glUniform1f(bindings.uApaMode, (float) cameraLayout);
         }
-        if (uApplyManualYFlipLocation >= 0) {
-            GLES20.glUniform1f(uApplyManualYFlipLocation,
+        if (bindings.uApplyManualYFlip >= 0) {
+            GLES20.glUniform1f(bindings.uApplyManualYFlip,
                 (cameraLayout == 1 || cameraLayout == 3) ? 0.0f : 1.0f);
         }
-        if (uProducerForFrontLocation >= 0) {
-            float[] m = new float[8];
-            float[] f = new float[8];
+        if (bindings.uProducerForFront >= 0) {
+            float[] m = corners != null ? corners : new float[8];
+            float[] f = flips != null ? flips : new float[8];
             snapshotProducerCornersAndFlips(m, f);
-            GLES20.glUniform2f(uProducerForFrontLocation, m[0], m[1]);
-            GLES20.glUniform2f(uProducerForRightLocation, m[2], m[3]);
-            GLES20.glUniform2f(uProducerForRearLocation,  m[4], m[5]);
-            GLES20.glUniform2f(uProducerForLeftLocation,  m[6], m[7]);
-            if (uFlipForFrontLocation >= 0) {
-                GLES20.glUniform2f(uFlipForFrontLocation, f[0], f[1]);
-                GLES20.glUniform2f(uFlipForRightLocation, f[2], f[3]);
-                GLES20.glUniform2f(uFlipForRearLocation,  f[4], f[5]);
-                GLES20.glUniform2f(uFlipForLeftLocation,  f[6], f[7]);
+            GLES20.glUniform2f(bindings.uProducerForFront, m[0], m[1]);
+            GLES20.glUniform2f(bindings.uProducerForRight, m[2], m[3]);
+            GLES20.glUniform2f(bindings.uProducerForRear,  m[4], m[5]);
+            GLES20.glUniform2f(bindings.uProducerForLeft,  m[6], m[7]);
+            if (bindings.uFlipForFront >= 0) {
+                GLES20.glUniform2f(bindings.uFlipForFront, f[0], f[1]);
+                GLES20.glUniform2f(bindings.uFlipForRight, f[2], f[3]);
+                GLES20.glUniform2f(bindings.uFlipForRear,  f[4], f[5]);
+                GLES20.glUniform2f(bindings.uFlipForLeft,  f[6], f[7]);
             }
         }
-        if (uRedMaskStrengthLocation >= 0) {
-            GLES20.glUniform1f(uRedMaskStrengthLocation, redMaskEnabled ? 1.0f : 0.0f);
+        if (bindings.uRedMaskStrength >= 0) {
+            GLES20.glUniform1f(bindings.uRedMaskStrength, redMaskEnabled ? 1.0f : 0.0f);
         }
-        if (uApaCenterInsetLocation >= 0) {
-            GLES20.glUniform1f(uApaCenterInsetLocation, apaCenterInset);
+        if (bindings.uApaCenterInset >= 0) {
+            GLES20.glUniform1f(bindings.uApaCenterInset, apaCenterInset);
         }
 
         // Draw quad
-        GLES20.glEnableVertexAttribArray(aPositionLocation);
-        GLES20.glVertexAttribPointer(aPositionLocation, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer);
+        GLES20.glEnableVertexAttribArray(bindings.aPosition);
+        GLES20.glVertexAttribPointer(bindings.aPosition, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer);
 
-        GLES20.glEnableVertexAttribArray(aTexCoordLocation);
-        GLES20.glVertexAttribPointer(aTexCoordLocation, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer);
+        GLES20.glEnableVertexAttribArray(bindings.aTexCoord);
+        GLES20.glVertexAttribPointer(bindings.aTexCoord, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer);
 
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
-        
-        GLES20.glDisableVertexAttribArray(aPositionLocation);
-        GLES20.glDisableVertexAttribArray(aTexCoordLocation);
-        
-        // Swap to ImageReader (DMA transfer)
-        EGL14.eglSwapBuffers(eglDisplay, eglSurface);
+
+        GLES20.glDisableVertexAttribArray(bindings.aPosition);
+        GLES20.glDisableVertexAttribArray(bindings.aTexCoord);
     }
 
     /** Receives one road view on the render thread: RGBA rows, top first. Copy before returning. */
@@ -819,25 +831,8 @@ public class GpuDownscaler {
     // SOTA: Direct GL-thread readback (bypasses broken async ImageReader path)
     // ========================================================================
     
-    private int directFbo = -1;
-    private int directTexture = -1;
+    private final MosaicTarget directTarget = new MosaicTarget();
     private int directProgram = -1;
-    private int directAPosition = -1;
-    private int directATexCoord = -1;
-    private int directUCameraTex = -1;
-    private int directUTexMatrix = -1;
-    private int directUApaMode = -1;
-    private int directUApplyManualYFlip = -1;
-    private int directUProducerForFront = -1;
-    private int directUProducerForRight = -1;
-    private int directUProducerForRear = -1;
-    private int directUProducerForLeft = -1;
-    private int directUFlipForFront = -1;
-    private int directUFlipForRight = -1;
-    private int directUFlipForRear = -1;
-    private int directUFlipForLeft = -1;
-    private int directURedMaskStrength = -1;
-    private int directUApaCenterInset = -1;
     private DirectRgbReadback directReadback;
     private DirectReadbackDiagnostics directDiagnostics;
     private boolean directInitialized = false;
@@ -866,8 +861,7 @@ public class GpuDownscaler {
     // point, so the bytes are guaranteed valid on return. Independent
     // FBO/texture from the async path so the AI lane's PBO ring state
     // isn't disturbed.
-    private int syncFbo = -1;
-    private int syncTexture = -1;
+    private final MosaicTarget syncTarget = new MosaicTarget();
     private ByteBuffer syncReadBuffer = null;
     private byte[] syncRgbBuffer = null;
     private final RgbaReadback syncReadback = new RgbaReadback(WIDTH, HEIGHT);
@@ -928,59 +922,8 @@ public class GpuDownscaler {
 
     private byte[] renderAndReadPixelsDirect(int cameraTextureId) {
         // ---- 1. Render the current camera frame into the FBO ----
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, directFbo);
-        GLES20.glViewport(0, 0, WIDTH, HEIGHT);
-        GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
-
-        GLES20.glUseProgram(directProgram);
-        GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-        GLES20.glBindTexture(
-            isTexture2D ? GLES20.GL_TEXTURE_2D
-                        : GLES11Ext.GL_TEXTURE_EXTERNAL_OES,
-            cameraTextureId);
-        GLES20.glUniform1i(directUCameraTex, 0);
-        if (directUTexMatrix >= 0) {
-            GLES20.glUniformMatrix4fv(directUTexMatrix, 1, false, currentTexMatrix, 0);
-        }
-        if (directUApaMode >= 0) {
-            GLES20.glUniform1f(directUApaMode, (float) cameraLayout);
-        }
-        if (directUApplyManualYFlip >= 0) {
-            GLES20.glUniform1f(directUApplyManualYFlip,
-                (cameraLayout == 1 || cameraLayout == 3) ? 0.0f : 1.0f);
-        }
-        if (directUProducerForFront >= 0) {
-            float[] m = drawProducerCorners;
-            float[] f = drawFlipFlags;
-            snapshotProducerCornersAndFlips(m, f);
-            GLES20.glUniform2f(directUProducerForFront, m[0], m[1]);
-            GLES20.glUniform2f(directUProducerForRight, m[2], m[3]);
-            GLES20.glUniform2f(directUProducerForRear,  m[4], m[5]);
-            GLES20.glUniform2f(directUProducerForLeft,  m[6], m[7]);
-            if (directUFlipForFront >= 0) {
-                GLES20.glUniform2f(directUFlipForFront, f[0], f[1]);
-                GLES20.glUniform2f(directUFlipForRight, f[2], f[3]);
-                GLES20.glUniform2f(directUFlipForRear,  f[4], f[5]);
-                GLES20.glUniform2f(directUFlipForLeft,  f[6], f[7]);
-            }
-        }
-        if (directURedMaskStrength >= 0) {
-            GLES20.glUniform1f(directURedMaskStrength, redMaskEnabled ? 1.0f : 0.0f);
-        }
-        if (directUApaCenterInset >= 0) {
-            GLES20.glUniform1f(directUApaCenterInset, apaCenterInset);
-        }
-
-        GLES20.glEnableVertexAttribArray(directAPosition);
-        GLES20.glVertexAttribPointer(directAPosition, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer);
-        GLES20.glEnableVertexAttribArray(directATexCoord);
-        GLES20.glVertexAttribPointer(directATexCoord, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer);
-
-        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
-
-        GLES20.glDisableVertexAttribArray(directAPosition);
-        GLES20.glDisableVertexAttribArray(directATexCoord);
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, directTarget.fbo);
+        drawMosaic(cameraTextureId, directProgram, directBindings, drawProducerCorners, drawFlipFlags);
 
         // GLES2 fallback: synchronous read into a direct buffer.
         if (!directGles3Available) {
@@ -1072,37 +1015,28 @@ public class GpuDownscaler {
         return result;
     }
     
-    private void initDirectFbo() {
-        try {
-            // Reuse the program if initSyncFbo already compiled it. Both
-            // paths use the same vertex+fragment shader source, so a second
-            // compile here would just leak the first program object.
-            if (directProgram <= 0) {
-                directProgram = GlUtil.createProgram(VERTEX_SHADER, fragmentShader);
-                if (directProgram == 0) { logger.error("Direct FBO shader failed"); return; }
-                directAPosition = GLES20.glGetAttribLocation(directProgram, "aPosition");
-                directATexCoord = GLES20.glGetAttribLocation(directProgram, "aTexCoord");
-                directUCameraTex = GLES20.glGetUniformLocation(directProgram, "uCameraTex");
-                directUTexMatrix = GLES20.glGetUniformLocation(directProgram, "uTexMatrix");
-                directUApaMode = GLES20.glGetUniformLocation(directProgram, "uApaMode");
-                directUApplyManualYFlip = GLES20.glGetUniformLocation(directProgram, "uApplyManualYFlip");
-                directUProducerForFront = GLES20.glGetUniformLocation(directProgram, "uProducerForFront");
-                directUProducerForRight = GLES20.glGetUniformLocation(directProgram, "uProducerForRight");
-                directUProducerForRear  = GLES20.glGetUniformLocation(directProgram, "uProducerForRear");
-                directUProducerForLeft  = GLES20.glGetUniformLocation(directProgram, "uProducerForLeft");
-                directUFlipForFront = GLES20.glGetUniformLocation(directProgram, "uFlipForFront");
-                directUFlipForRight = GLES20.glGetUniformLocation(directProgram, "uFlipForRight");
-                directUFlipForRear  = GLES20.glGetUniformLocation(directProgram, "uFlipForRear");
-                directUFlipForLeft  = GLES20.glGetUniformLocation(directProgram, "uFlipForLeft");
-                directURedMaskStrength = GLES20.glGetUniformLocation(directProgram, "uRedMaskStrength");
-                directUApaCenterInset = GLES20.glGetUniformLocation(directProgram, "uApaCenterInset");
-            }
+    // Sync and direct readback already share this program on the caller's GL context.
+    private boolean ensureDirectProgram(String path) {
+        if (directProgram > 0) return true;
+        directProgram = GlUtil.createProgram(VERTEX_SHADER, fragmentShader);
+        if (directProgram == 0) {
+            logger.error(path + " FBO shader failed");
+            return false;
+        }
+        directBindings.load(directProgram);
+        return true;
+    }
 
-            // Single render FBO.
+    /** A separate RGBA framebuffer/texture pair for each readback mode. */
+    private static final class MosaicTarget {
+        private int fbo = -1;
+        private int texture = -1;
+
+        private boolean init(String path) {
             int[] texIds = new int[1];
             GLES20.glGenTextures(1, texIds, 0);
-            directTexture = texIds[0];
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, directTexture);
+            texture = texIds[0];
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture);
             GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, WIDTH, HEIGHT, 0,
                     GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null);
             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
@@ -1110,16 +1044,35 @@ public class GpuDownscaler {
 
             int[] fboIds = new int[1];
             GLES20.glGenFramebuffers(1, fboIds, 0);
-            directFbo = fboIds[0];
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, directFbo);
+            fbo = fboIds[0];
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo);
             GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
-                    GLES20.GL_TEXTURE_2D, directTexture, 0);
+                    GLES20.GL_TEXTURE_2D, texture, 0);
             int status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER);
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
             if (status != GLES20.GL_FRAMEBUFFER_COMPLETE) {
-                logger.error("Direct FBO incomplete: " + status);
-                return;
+                logger.error(path + " FBO incomplete: " + status);
+                return false;
             }
+            return true;
+        }
+
+        private void release() {
+            if (fbo >= 0) {
+                try { GLES20.glDeleteFramebuffers(1, new int[]{fbo}, 0); } catch (Throwable ignored) {}
+                fbo = -1;
+            }
+            if (texture >= 0) {
+                try { GLES20.glDeleteTextures(1, new int[]{texture}, 0); } catch (Throwable ignored) {}
+                texture = -1;
+            }
+        }
+    }
+
+    private void initDirectFbo() {
+        try {
+            if (!ensureDirectProgram("Direct")) return;
+            if (!directTarget.init("Direct")) return;
 
             // The debug property overrides the Camera probe setting and adds timing logs.
             DirectRgbReadback.Mode override = DirectReadbackDiagnostics.readMode();
@@ -1199,60 +1152,9 @@ public class GpuDownscaler {
         GLES20.glGetIntegerv(GLES20.GL_VIEWPORT, savedViewport, 0);
 
         try {
-            // Render the camera OES texture into the sync FBO.
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, syncFbo);
-            GLES20.glViewport(0, 0, WIDTH, HEIGHT);
-            GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
-
-            GLES20.glUseProgram(directProgram);
-            GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-            GLES20.glBindTexture(
-                isTexture2D ? GLES20.GL_TEXTURE_2D
-                            : GLES11Ext.GL_TEXTURE_EXTERNAL_OES,
-                cameraTextureId);
-            GLES20.glUniform1i(directUCameraTex, 0);
-            if (directUTexMatrix >= 0) {
-                GLES20.glUniformMatrix4fv(directUTexMatrix, 1, false, currentTexMatrix, 0);
-            }
-            if (directUApaMode >= 0) {
-                GLES20.glUniform1f(directUApaMode, (float) cameraLayout);
-            }
-            if (directUApplyManualYFlip >= 0) {
-                GLES20.glUniform1f(directUApplyManualYFlip,
-                    (cameraLayout == 1 || cameraLayout == 3) ? 0.0f : 1.0f);
-            }
-            if (directUProducerForFront >= 0) {
-                float[] m = new float[8];
-                float[] f = new float[8];
-                snapshotProducerCornersAndFlips(m, f);
-                GLES20.glUniform2f(directUProducerForFront, m[0], m[1]);
-                GLES20.glUniform2f(directUProducerForRight, m[2], m[3]);
-                GLES20.glUniform2f(directUProducerForRear,  m[4], m[5]);
-                GLES20.glUniform2f(directUProducerForLeft,  m[6], m[7]);
-                if (directUFlipForFront >= 0) {
-                    GLES20.glUniform2f(directUFlipForFront, f[0], f[1]);
-                    GLES20.glUniform2f(directUFlipForRight, f[2], f[3]);
-                    GLES20.glUniform2f(directUFlipForRear,  f[4], f[5]);
-                    GLES20.glUniform2f(directUFlipForLeft,  f[6], f[7]);
-                }
-            }
-            if (directURedMaskStrength >= 0) {
-                GLES20.glUniform1f(directURedMaskStrength, redMaskEnabled ? 1.0f : 0.0f);
-            }
-            if (directUApaCenterInset >= 0) {
-                GLES20.glUniform1f(directUApaCenterInset, apaCenterInset);
-            }
-
-            GLES20.glEnableVertexAttribArray(directAPosition);
-            GLES20.glVertexAttribPointer(directAPosition, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer);
-            GLES20.glEnableVertexAttribArray(directATexCoord);
-            GLES20.glVertexAttribPointer(directATexCoord, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer);
-
-            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
-
-            GLES20.glDisableVertexAttribArray(directAPosition);
-            GLES20.glDisableVertexAttribArray(directATexCoord);
+            // Render the camera texture into the sync FBO.
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, syncTarget.fbo);
+            drawMosaic(cameraTextureId, directProgram, directBindings, null, null);
 
             // Read back from the FBO we just rendered to. glReadPixels is a
             // synchronization point — the GPU finishes the draw before this
@@ -1274,56 +1176,8 @@ public class GpuDownscaler {
 
     private void initSyncFbo() {
         try {
-            // Reuse the async path's compiled program if it exists. Otherwise
-            // compile our own copy from the shared shader source. The async
-            // and sync paths share the same vertex+fragment shader so this is
-            // safe regardless of which lazy-inits first.
-            if (directProgram <= 0) {
-                directProgram = GlUtil.createProgram(VERTEX_SHADER, fragmentShader);
-                if (directProgram == 0) {
-                    logger.error("Sync FBO shader failed");
-                    return;
-                }
-                directAPosition = GLES20.glGetAttribLocation(directProgram, "aPosition");
-                directATexCoord = GLES20.glGetAttribLocation(directProgram, "aTexCoord");
-                directUCameraTex = GLES20.glGetUniformLocation(directProgram, "uCameraTex");
-                directUTexMatrix = GLES20.glGetUniformLocation(directProgram, "uTexMatrix");
-                directUApaMode = GLES20.glGetUniformLocation(directProgram, "uApaMode");
-                directUApplyManualYFlip = GLES20.glGetUniformLocation(directProgram, "uApplyManualYFlip");
-                directUProducerForFront = GLES20.glGetUniformLocation(directProgram, "uProducerForFront");
-                directUProducerForRight = GLES20.glGetUniformLocation(directProgram, "uProducerForRight");
-                directUProducerForRear  = GLES20.glGetUniformLocation(directProgram, "uProducerForRear");
-                directUProducerForLeft  = GLES20.glGetUniformLocation(directProgram, "uProducerForLeft");
-                directUFlipForFront = GLES20.glGetUniformLocation(directProgram, "uFlipForFront");
-                directUFlipForRight = GLES20.glGetUniformLocation(directProgram, "uFlipForRight");
-                directUFlipForRear  = GLES20.glGetUniformLocation(directProgram, "uFlipForRear");
-                directUFlipForLeft  = GLES20.glGetUniformLocation(directProgram, "uFlipForLeft");
-                directURedMaskStrength = GLES20.glGetUniformLocation(directProgram, "uRedMaskStrength");
-                directUApaCenterInset = GLES20.glGetUniformLocation(directProgram, "uApaCenterInset");
-            }
-
-            int[] texIds = new int[1];
-            GLES20.glGenTextures(1, texIds, 0);
-            syncTexture = texIds[0];
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, syncTexture);
-            GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, WIDTH, HEIGHT, 0,
-                    GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null);
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
-
-            int[] fboIds = new int[1];
-            GLES20.glGenFramebuffers(1, fboIds, 0);
-            syncFbo = fboIds[0];
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, syncFbo);
-            GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
-                    GLES20.GL_TEXTURE_2D, syncTexture, 0);
-
-            int status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER);
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
-            if (status != GLES20.GL_FRAMEBUFFER_COMPLETE) {
-                logger.error("Sync FBO incomplete: " + status);
-                return;
-            }
+            if (!ensureDirectProgram("Sync")) return;
+            if (!syncTarget.init("Sync")) return;
 
             syncReadBuffer = ByteBuffer.allocateDirect(WIDTH * HEIGHT * 4);
             syncReadBuffer.order(java.nio.ByteOrder.nativeOrder());
@@ -1482,22 +1336,8 @@ public class GpuDownscaler {
             try { GLES30.glDeleteBuffers(DIRECT_PBO_RING_SIZE, directPboIds, 0); } catch (Throwable ignored) {}
             for (int i = 0; i < DIRECT_PBO_RING_SIZE; i++) directPboIds[i] = 0;
         }
-        if (directFbo >= 0) {
-            try { GLES20.glDeleteFramebuffers(1, new int[]{directFbo}, 0); } catch (Throwable ignored) {}
-            directFbo = -1;
-        }
-        if (directTexture >= 0) {
-            try { GLES20.glDeleteTextures(1, new int[]{directTexture}, 0); } catch (Throwable ignored) {}
-            directTexture = -1;
-        }
-        if (syncFbo >= 0) {
-            try { GLES20.glDeleteFramebuffers(1, new int[]{syncFbo}, 0); } catch (Throwable ignored) {}
-            syncFbo = -1;
-        }
-        if (syncTexture >= 0) {
-            try { GLES20.glDeleteTextures(1, new int[]{syncTexture}, 0); } catch (Throwable ignored) {}
-            syncTexture = -1;
-        }
+        directTarget.release();
+        syncTarget.release();
         if (directProgram > 0) {
             try { GLES20.glDeleteProgram(directProgram); } catch (Throwable ignored) {}
             directProgram = -1;
@@ -1733,10 +1573,6 @@ public class GpuDownscaler {
      * Build the downscaler fragment shader with the four per-quadrant
      * strip-X offsets baked in. Order: {Front=TL, Right=TR, Rear=BL, Left=BR}.
      */
-    private static String buildFragmentShader(float[] offsets) {
-        return buildFragmentShader(offsets, false);
-    }
-
     private static String buildFragmentShader(
             float[] offsets,
             boolean isTexture2D) {

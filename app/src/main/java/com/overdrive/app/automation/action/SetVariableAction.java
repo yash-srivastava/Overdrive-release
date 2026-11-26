@@ -6,9 +6,7 @@ import com.overdrive.app.automation.condition.BydEvent;
 import com.overdrive.app.automation.condition.EventData;
 import com.overdrive.app.automation.type.DynamicStringType;
 import com.overdrive.app.automation.type.StringType;
-import com.overdrive.app.automation.type.Type;
 import com.overdrive.app.automation.value.Label;
-import com.overdrive.app.server.Messages;
 
 import java.util.List;
 import java.util.Map;
@@ -32,33 +30,20 @@ import java.util.Map;
  * text — the user's choice), compared with string eq/neq, so
  * {@code if Parking_Mode <> true} works exactly as written.
  */
-public class SetVariableAction extends BaseAction {
+public class SetVariableAction extends DeclaredAction {
     private static final String TYPE = "setVariable";
     // Bound both fields so a hand-edited config can't bloat the state map. Public so
     // VariableCondition (a different package) validates the name/value identically.
     public static final int MAX_NAME = 40;
     public static final int MAX_VALUE = 64;
 
-    private final Label label;
-    private final String description;
-    private final List<Type> variables = List.of(
-            new StringType(new Label("name", "automation.variable_name"), MAX_NAME),
-            // Value is dynamic-capable: a constant, or ${signal:TYPE}/${var:NAME} captured
-            // live at fire time ("Set variable from state"). Resolved in trigger().
-            new DynamicStringType(new Label("value", "automation.variable_value"), MAX_VALUE));
-
     public SetVariableAction(Label label, String description) {
-        this.label = label;
-        this.description = description;
+        super(TYPE, label, description, List.of(
+                new StringType(new Label("name", "automation.variable_name"), MAX_NAME),
+                // Value is dynamic-capable: a constant, or ${signal:TYPE}/${var:NAME} captured
+                // live at fire time ("Set variable from state"). Resolved in trigger().
+                new DynamicStringType(new Label("value", "automation.variable_value"), MAX_VALUE)));
     }
-
-    public String getType() { return TYPE; }
-
-    public Label getLabel() { return label; }
-
-    public String getDescription() { return Messages.get(description); }
-
-    public List<Type> getVariables() { return variables; }
 
     /**
      * Build the {@link EventData} for a variable of the given name. Package-private so

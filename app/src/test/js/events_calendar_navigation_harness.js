@@ -26,6 +26,8 @@ function element() {
 }
 
 const grid = element();
+// Model a DOM collection without an iterator while retaining array helpers for assertions.
+grid.children[Symbol.iterator] = undefined;
 const title = element();
 const BYD = { i18n: { getLang: () => 'en-US' } };
 // Freeze today so the adjacent-month and disabled-day cases are deterministic.
