@@ -921,6 +921,7 @@ class DashboardFragment : Fragment() {
                 val gear = snapshot.gear
                 val speed = snapshot.speedKmh
                 val isRecording = snapshot.isRecording == true
+                recordingViewModel.reconcileWithStatus(snapshot.activeRecordingCameras)
                 val isSentry = snapshot.isGpuSurveillance == true
 
                 heroSubtitle.text = when {

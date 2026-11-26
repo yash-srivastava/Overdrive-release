@@ -147,6 +147,8 @@ class RecordingViewModel(app: Application) : AndroidViewModel(app) {
                         // Recording was already in progress
                         recordingStartTime = System.currentTimeMillis()
                         handler.post(durationUpdater)
+                    } else if (recording.isEmpty()) {
+                        recordingStartTime = 0L
                     }
                 }
             }
@@ -157,6 +159,17 @@ class RecordingViewModel(app: Application) : AndroidViewModel(app) {
         })
     }
     
+    /**
+     * The state above is read once when the view model is created, often before the
+     * daemon starts recording. Re-read it when the dashboard's status poll disagrees.
+     */
+    fun reconcileWithStatus(activeRecordingCameras: Int?) {
+        if (activeRecordingCameras == null) return
+        if ((activeRecordingCameras > 0) != (_isRecording.value == true)) {
+            refreshRecordingStatus()
+        }
+    }
+
     fun updateStorageInfo() {
         if (storageExecutor.isShutdown) return
         storageExecutor.execute {
