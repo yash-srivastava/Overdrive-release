@@ -1752,6 +1752,8 @@ public class StatusOverlayService extends Service {
         try {
             conn = com.overdrive.app.util.DaemonHttpClient.open(
                 "/status", "GET", 2000, 2000);
+            // Older daemons ignore the header and still return the full status schema.
+            conn.setRequestProperty("X-OD-Status-View", "overlay");
             if (conn.getResponseCode() == 200) {
                 BufferedReader reader = new BufferedReader(
                         new InputStreamReader(conn.getInputStream()));
