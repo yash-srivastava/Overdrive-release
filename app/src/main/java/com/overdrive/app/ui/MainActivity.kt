@@ -2941,7 +2941,7 @@ open class MainActivity : AppCompatActivity() {
         // Opt-in for the decoupled encoder pipeline
         // (camera.decoupledEncoderLane) — the native-AVM reverse-camera
         // starvation fix. Legacy camera mode only; applied at the next
-        // camera restart. Default false = shipped zero-copy behaviour.
+        // camera restart. Unset = platform default (on for BYD100F, else off).
         val decoupledEncoderLaneEnabled: Boolean,
         // Recording engine preference (camera.recordingEngine, default CPU on
         // DiLink 3) and what the running pipeline uses ("cpu"/"gpu"/"") + why.
@@ -3075,8 +3075,8 @@ open class MainActivity : AppCompatActivity() {
                 "oemDashcamManualOverride", false)
             val concurrentAvmProbeEnabled = cameraSection.optBoolean(
                 "concurrentAvmProbeEnabled", false)
-            val decoupledEncoderLaneEnabled = cameraSection.optBoolean(
-                "decoupledEncoderLane", false)
+            val decoupledEncoderLaneEnabled = com.overdrive.app.camera
+                .DecoupledEncoderLanePolicy.resolve(cameraSection)
             val recordingEngineCpu = com.overdrive.app.surveillance.RecordingEngine.prefersCpu()
 
             CameraMappingState(
