@@ -25,11 +25,25 @@ to a temporary file before being rejected. The bridge remains synchronous and
 continues to use the original connection, timeout, redirect and URL checks.
 Replacement relies on same-directory rename; if the filesystem refuses it,
 the download fails instead of deleting the previous file and retrying.
-Partial data can be present in the hidden temporary file during transfer;
-interrupted process cleanup is not guaranteed. No change is made to export
-formats, authentication, recording or telemetry collection.
+Partial data can be present in the hidden temporary file during transfer.
+If the UI process is killed before `finally`, a later native export attempts
+to remove regular `.od-export-*.part` files in that same directory whose
+last-modified time is at least 24 hours old. Completed exports, unrelated
+names, directories, symbolic links and younger or future-dated parts are
+left alone. Creation/registration and the sweep share a short in-process lock;
+active parts are excluded even if old, and streaming does not hold the lock.
+
+This is lazy, best-effort recovery, not a startup task or background timer.
+Fresh abandoned parts remain until an eligible later export; storage errors
+can leave parts behind for a subsequent attempt. The age check is a conservative
+wall-clock heuristic, not a cross-process lock; it does not guarantee protection
+for an independent writer using this reserved namespace with an old timestamp.
+No change is made to export formats, authentication, recording or telemetry
+collection.
 
 Regression coverage: `BridgeDownloadFileTest` exercises short reads, the exact
-limit, oversized streams, I/O failure, rename failure, overlapping writes and empty downloads.
+limit, oversized streams, I/O failure, rename failure, overlapping writes and empty downloads, plus stale-part
+recovery, preservation of fresh/unrelated files and symbolic links, and
+protection of an artificially aged active part during an overlapping save.
 Validate actual exports and repeated saves on a parked head unit; compare
 bytes and profile UI-process allocations using large trips.
