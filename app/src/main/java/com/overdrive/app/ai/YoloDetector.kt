@@ -663,28 +663,7 @@ class YoloDetector(private val context: Context) {
         val quadrantHeight = imgHeight
         val quadrantWidth = imgWidth
 
-        // Class-membership bitmask. Every COCO class we care about has id < 24,
-        // so a single Long bit-tests in O(1) without allocating an IntRange or
-        // a List inside the per-detection loop.
-        // MOTORCYCLE belongs to the Bike toggle (audit R3b Ext-11): the API
-        // doc, the engine's classFilter taxonomy (Bike = {1 bicycle, 3
-        // motorcycle}), the size gates and the canonical-class collapse all
-        // put motorcycle under Bike — this mask was the single inconsistent
-        // site, so Bike ON + Car OFF silently dropped every motorcycle (and
-        // Car ON + Bike OFF leaked them).
-        var wantedMask = 0L
-        if (detectPerson) wantedMask = wantedMask or (1L shl CLASS_PERSON)
-        if (detectCar) {
-            wantedMask = wantedMask or (1L shl CLASS_CAR) or (1L shl CLASS_BUS) or
-                    (1L shl CLASS_TRUCK) or (1L shl CLASS_TRAIN) or
-                    (1L shl CLASS_BOAT) or (1L shl CLASS_AIRPLANE)
-        }
-        if (detectBike) wantedMask = wantedMask or (1L shl CLASS_BICYCLE) or
-                (1L shl CLASS_MOTORCYCLE)
-        if (detectAnimal) {
-            // 14..23 inclusive
-            for (c in CLASS_BIRD..CLASS_GIRAFFE) wantedMask = wantedMask or (1L shl c)
-        }
+        val wantedMask = wantedClassMask(detectPerson, detectCar, detectAnimal, detectBike)
 
         // Pre-thresholded distance filter values. minRelativeHeight is the
         // base; cars use 1.33×, bikes 0.7× — compute once, compare in loop.
@@ -864,50 +843,7 @@ class YoloDetector(private val context: Context) {
         //
         // Measured post-NMS counts on real device crops are 1-3, so this branch is
         // effectively unreachable today; it is insurance, not a hot path.
-        val final = if (filtered.size > 50) {
-            logger.warn("Ghost filter: ${filtered.size} > 50, keeping top 50 by confidence")
-            filtered.take(50)
-        } else {
-            filtered
-        }
-
-        // Class-distribution counts. Single pass with bitmask membership tests
-        // — replaces four `final.count { ... }` lambda allocations.
-        var personCount = 0
-        var carCount = 0
-        var bikeCount = 0
-        var animalCount = 0
-        var bestKeptConf = 0f
-        var bestKeptClass = -1
-        // Mirrors the vehicle set in `wantedMask` above (motorcycle counts
-        // under Bike — R3b Ext-11).
-        val carMask = (1L shl CLASS_CAR) or (1L shl CLASS_BUS) or
-                (1L shl CLASS_TRUCK) or (1L shl CLASS_TRAIN) or
-                (1L shl CLASS_BOAT) or (1L shl CLASS_AIRPLANE)
-        var animalMask = 0L
-        for (c in CLASS_BIRD..CLASS_GIRAFFE) animalMask = animalMask or (1L shl c)
-        for (idx in final.indices) {
-            val det = final[idx]
-            val cid = det.classId
-            if (cid == CLASS_PERSON) personCount++
-            if (cid == CLASS_BICYCLE || cid == CLASS_MOTORCYCLE) bikeCount++
-            if (cid in 0..63) {
-                val bit = 1L shl cid
-                if ((bit and carMask) != 0L) carCount++
-                if ((bit and animalMask) != 0L) animalCount++
-            }
-            if (det.confidence > bestKeptConf) {
-                bestKeptConf = det.confidence
-                bestKeptClass = cid
-            }
-        }
-
-        // An empty result is DEBUG: the raw-funnel line below already reports it at INFO.
-        if (final.isNotEmpty()) {
-            logger.info("Detected ${final.size} objects: person=$personCount car=$carCount bike=$bikeCount animal=$animalCount (max_conf=${"%.3f".format(bestKeptConf)} class=$bestKeptClass)")
-        } else {
-            logger.debug("Detected 0 objects: person=$personCount car=$carCount bike=$bikeCount animal=$animalCount (max_conf=${"%.3f".format(bestKeptConf)} class=$bestKeptClass)")
-        }
+        val final = summarizeDetections(filtered, "")
 
         // Raw-funnel line — only when NOTHING survived, which is the case that was
         // previously unattributable. `raw` is the model's true peak before any gate,
@@ -941,7 +877,8 @@ class YoloDetector(private val context: Context) {
      * implausible-class confidence floor, quadrant-relative size gates,
      * ghost cap, and the raw-funnel diagnostics — in the same order, so the
      * two heads differ only in what the graph already did (anchor decode +
-     * NMS). Any change to a gate here must be mirrored in [parseOutput].
+     * NMS). Confidence and size gates remain local to each parser; changes to
+     * those gates must be mirrored in [parseOutput].
      *
      * Coordinate units: Ultralytics end-to-end TFLite exports have emitted
      * both normalized [0,1] and input-pixel xyxy depending on version.
@@ -974,20 +911,8 @@ class YoloDetector(private val context: Context) {
         val quadrantHeight = imgHeight
         val quadrantWidth = imgWidth
 
-        // Class-membership bitmask — mirrors parseOutput exactly (incl. the
-        // R3b Ext-11 motorcycle-under-Bike fix; see parseOutput's comment).
-        var wantedMask = 0L
-        if (detectPerson) wantedMask = wantedMask or (1L shl CLASS_PERSON)
-        if (detectCar) {
-            wantedMask = wantedMask or (1L shl CLASS_CAR) or (1L shl CLASS_BUS) or
-                    (1L shl CLASS_TRUCK) or (1L shl CLASS_TRAIN) or
-                    (1L shl CLASS_BOAT) or (1L shl CLASS_AIRPLANE)
-        }
-        if (detectBike) wantedMask = wantedMask or (1L shl CLASS_BICYCLE) or
-                (1L shl CLASS_MOTORCYCLE)
-        if (detectAnimal) {
-            for (c in CLASS_BIRD..CLASS_GIRAFFE) wantedMask = wantedMask or (1L shl c)
-        }
+        // Same class-membership policy as the legacy parser.
+        val wantedMask = wantedClassMask(detectPerson, detectCar, detectAnimal, detectBike)
 
         val carWidthThreshold = minRelativeHeight * 1.33f
         val bikeHeightThreshold = minRelativeHeight * 0.7f
@@ -1100,21 +1025,71 @@ class YoloDetector(private val context: Context) {
         // clear — same insurance as the legacy path. E2E rows arrive in
         // descending-score order from the export's TopK, so take() keeps the
         // most probable ones.
-        val final = if (detections.size > 50) {
-            logger.warn("Ghost filter: ${detections.size} > 50, keeping top 50 by confidence")
-            detections.take(50)
-        } else {
-            detections
+        val final = summarizeDetections(detections, " [e2e]")
+
+        if (final.isEmpty()) {
+            logger.info(("YOLO raw funnel [e2e]: raw=%.3f class=%d person=%.3f | " +
+                    "rej conf=%d implausible=%d unwanted=%d size=%d | " +
+                    "confThr=%.2f minRelH=%.3f in=%dx%d quad=%dx%d")
+                .format(rawPeakConf, rawPeakClass, peakPersonConf,
+                        rejConf, rejImplausible, rejUnwanted, rejSize,
+                        confThreshold, minRelativeHeight,
+                        imgWidth, imgHeight, quadrantWidth, quadrantHeight))
         }
 
-        // Class-distribution counts — same log contract as parseOutput
-        // (motorcycle counts under Bike — R3b Ext-11).
+        return final
+    }
+
+    private fun wantedClassMask(
+        detectPerson: Boolean,
+        detectCar: Boolean,
+        detectAnimal: Boolean,
+        detectBike: Boolean
+    ): Long {
+        // Class-membership bitmask. Every COCO class we care about has id < 24,
+        // so a single Long bit-tests in O(1) without allocating an IntRange or
+        // a List inside the per-detection loop.
+        // MOTORCYCLE belongs to the Bike toggle (audit R3b Ext-11): the API
+        // doc, the engine's classFilter taxonomy (Bike = {1 bicycle, 3
+        // motorcycle}), the size gates and the canonical-class collapse all
+        // put motorcycle under Bike — this mask was the single inconsistent
+        // site, so Bike ON + Car OFF silently dropped every motorcycle (and
+        // Car ON + Bike OFF leaked them).
+        var wantedMask = 0L
+        if (detectPerson) wantedMask = wantedMask or (1L shl CLASS_PERSON)
+        if (detectCar) {
+            wantedMask = wantedMask or (1L shl CLASS_CAR) or (1L shl CLASS_BUS) or
+                    (1L shl CLASS_TRUCK) or (1L shl CLASS_TRAIN) or
+                    (1L shl CLASS_BOAT) or (1L shl CLASS_AIRPLANE)
+        }
+        if (detectBike) wantedMask = wantedMask or (1L shl CLASS_BICYCLE) or
+                (1L shl CLASS_MOTORCYCLE)
+        if (detectAnimal) {
+            // 14..23 inclusive
+            for (c in CLASS_BIRD..CLASS_GIRAFFE) wantedMask = wantedMask or (1L shl c)
+        }
+        return wantedMask
+    }
+
+    // Both parsers supply confidence-ordered results; E2E already resolved NMS in the graph.
+    private fun summarizeDetections(filtered: List<Detection>, logSuffix: String): List<Detection> {
+        val final = if (filtered.size > 50) {
+            logger.warn("Ghost filter: ${filtered.size} > 50, keeping top 50 by confidence")
+            filtered.take(50)
+        } else {
+            filtered
+        }
+
+        // Class-distribution counts. Single pass with bitmask membership tests
+        // — replaces four `final.count { ... }` lambda allocations.
         var personCount = 0
         var carCount = 0
         var bikeCount = 0
         var animalCount = 0
         var bestKeptConf = 0f
         var bestKeptClass = -1
+        // Mirrors the vehicle set in wantedClassMask() (motorcycle counts
+        // under Bike — R3b Ext-11).
         val carMask = (1L shl CLASS_CAR) or (1L shl CLASS_BUS) or
                 (1L shl CLASS_TRUCK) or (1L shl CLASS_TRAIN) or
                 (1L shl CLASS_BOAT) or (1L shl CLASS_AIRPLANE)
@@ -1136,20 +1111,11 @@ class YoloDetector(private val context: Context) {
             }
         }
 
+        // An empty result is DEBUG: each parser reports its raw funnel at INFO.
         if (final.isNotEmpty()) {
-            logger.info("Detected ${final.size} objects: person=$personCount car=$carCount bike=$bikeCount animal=$animalCount (max_conf=${"%.3f".format(bestKeptConf)} class=$bestKeptClass) [e2e]")
+            logger.info("Detected ${final.size} objects: person=$personCount car=$carCount bike=$bikeCount animal=$animalCount (max_conf=${"%.3f".format(bestKeptConf)} class=$bestKeptClass)$logSuffix")
         } else {
-            logger.debug("Detected 0 objects: person=$personCount car=$carCount bike=$bikeCount animal=$animalCount (max_conf=${"%.3f".format(bestKeptConf)} class=$bestKeptClass) [e2e]")
-        }
-
-        if (final.isEmpty()) {
-            logger.info(("YOLO raw funnel [e2e]: raw=%.3f class=%d person=%.3f | " +
-                    "rej conf=%d implausible=%d unwanted=%d size=%d | " +
-                    "confThr=%.2f minRelH=%.3f in=%dx%d quad=%dx%d")
-                .format(rawPeakConf, rawPeakClass, peakPersonConf,
-                        rejConf, rejImplausible, rejUnwanted, rejSize,
-                        confThreshold, minRelativeHeight,
-                        imgWidth, imgHeight, quadrantWidth, quadrantHeight))
+            logger.debug("Detected 0 objects: person=$personCount car=$carCount bike=$bikeCount animal=$animalCount (max_conf=${"%.3f".format(bestKeptConf)} class=$bestKeptClass)$logSuffix")
         }
 
         return final
