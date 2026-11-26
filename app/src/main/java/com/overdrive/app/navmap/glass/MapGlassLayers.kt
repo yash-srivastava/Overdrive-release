@@ -1276,15 +1276,29 @@ internal class GradientBuilder {
         val p1 = p1In - shift - inset
         val trim = !p0.isNaN() && !p1.isNaN() && p1 > p0
         if (events.size < 2 * pieces.n + 2) events = DoubleArray(2 * pieces.n + 2)
-        for (k in 0 until pieces.n) { pieces.u[k] -= shift; pieces.v[k] -= shift }
+        // Pieces are normally ordered and non-overlapping (including after
+        // conversion to line-progress units). Validate while collecting events
+        // so malformed or overlapping input can retain the original lookup.
+        var ordered = true
         var m = 0
-        for (k in 0 until pieces.n) { events[m++] = pieces.u[k]; events[m++] = pieces.v[k] }
+        for (k in 0 until pieces.n) {
+            pieces.u[k] -= shift
+            pieces.v[k] -= shift
+            val u = pieces.u[k]
+            val v = pieces.v[k]
+            if (!u.isFinite() || !v.isFinite() || u > v || (k > 0 && u < pieces.v[k - 1])) {
+                ordered = false
+            }
+            events[m++] = u
+            events[m++] = v
+        }
         if (trim) { events[m++] = p0; events[m++] = p1 }
         Arrays.sort(events, 0, m)
         val clearSlot = if (trim) slotAt(pieces, max(0.0, p0)) else 0
         val a0 = alpha(trim, p0, p1, 0.0)
         out.add(0.0, if (a0 <= 0.0) clearSlot else slotAt(pieces, 0.0), a0)
         var prev = Double.NaN
+        var cursor = 0
         for (q in 0 until m) {
             val e = events[q]
             if (!(e > 0.0 && e < 1.0) || e == prev) continue
@@ -1293,8 +1307,22 @@ internal class GradientBuilder {
                 if (e == p0) out.add(e, clearSlot, 0.0)
                 continue
             }
-            val before = slotBefore(pieces, e)
-            val after = slotAt(pieces, e)
+            val before: Int
+            val after: Int
+            if (ordered) {
+                // Events are sorted. Each piece can be passed at most once.
+                // The left limit includes an ending piece; the right limit
+                // excludes it. Empty pieces at a shared boundary match neither.
+                while (cursor < pieces.n && pieces.v[cursor] < e) cursor++
+                before = if (cursor < pieces.n && pieces.u[cursor] < e) pieces.level[cursor]
+                    else SpanSet.NONE
+                while (cursor < pieces.n && pieces.v[cursor] <= e) cursor++
+                after = if (cursor < pieces.n && pieces.u[cursor] <= e) pieces.level[cursor]
+                    else SpanSet.NONE
+            } else {
+                before = slotBefore(pieces, e)
+                after = slotAt(pieces, e)
+            }
             if (before != after) out.add(e - STEP, before, alpha(trim, p0, p1, e - STEP))
             out.add(e, after, alpha(trim, p0, p1, e))
         }
