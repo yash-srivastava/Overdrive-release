@@ -2,12 +2,16 @@ package com.overdrive.app.server;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.fail;
 
+import java.io.BufferedInputStream;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.net.Socket;
 import java.net.SocketTimeoutException;
 
 import org.junit.Test;
@@ -115,6 +119,111 @@ public class RemoteCommunicationWebSocketFrameTest {
         assertEquals(3, payload[0]);
         assertEquals((byte) 0xE8, payload[1]);
         for (int i = 2; i < payload.length; i++) assertEquals('x', payload[i]);
+    }
+
+    @Test
+    public void reusesHttpReadAheadAcrossUpgrade() throws Exception {
+        byte[] wire = {'H', '\r', '\n', (byte) 0x82, (byte) 0x81, 1, 2, 3, 4, 11,
+                (byte) 0x89, (byte) 0x80, 1, 2, 3, 4};
+        ByteArrayInputStream raw = new ByteArrayInputStream(wire);
+        InputStream http = new BufferedInputStream(raw, 8192);
+        assertEquals('H', http.read());
+        assertEquals('\r', http.read());
+        assertEquals('\n', http.read());
+        assertEquals(0, raw.available()); // both frames already buffered by HTTP
+        Socket socket = new Socket() {
+            @Override public InputStream getInputStream() {
+                throw new AssertionError("must not reopen socket input after upgrade");
+            }
+        };
+        InputStream upgraded = WebSocketFrames.sessionInput(socket, http);
+        assertSame(http, upgraded);
+        WebSocketFrames.Frame first = readFrame(upgraded);
+        assertEquals(0x2, first.opcode);
+        assertArrayEquals(new byte[]{10}, first.payload);
+        WebSocketFrames.Frame second = readFrame(upgraded);
+        assertEquals(0x9, second.opcode);
+        assertEquals(0, second.payload.length);
+        assertEquals(null, readFrame(upgraded));
+    }
+
+    @Test
+    public void standaloneInputReadsCompleteSmallFramesInOneBulkRead() throws Exception {
+        byte[] wire = {(byte) 0x82, (byte) 0x81, 1, 2, 3, 4, 11,
+                (byte) 0x89, (byte) 0x80, 1, 2, 3, 4};
+        int[] reads = {0};
+        ByteArrayInputStream raw = new ByteArrayInputStream(wire) {
+            @Override public synchronized int read(byte[] b, int off, int len) {
+                reads[0]++;
+                return super.read(b, off, len);
+            }
+            @Override public synchronized int read() {
+                throw new AssertionError("unexpected single-byte socket read");
+            }
+        };
+        Socket socket = new Socket() {
+            @Override public InputStream getInputStream() { return raw; }
+        };
+        InputStream input = WebSocketFrames.sessionInput(socket, null);
+        assertArrayEquals(new byte[]{10}, readFrame(input).payload);
+        assertEquals(0x9, readFrame(input).opcode);
+        assertEquals(1, reads[0]);
+    }
+
+    @Test
+    public void bufferedOutputCoalescesSmallFramesWithoutDelayingThem() throws Exception {
+        ByteArrayOutputStream wire = new ByteArrayOutputStream();
+        int[] writes = {0};
+        int[] flushes = {0};
+        OutputStream raw = new OutputStream() {
+            @Override public void write(int b) { throw new AssertionError("single byte write"); }
+            @Override public void write(byte[] b, int off, int len) {
+                writes[0]++;
+                wire.write(b, off, len);
+            }
+            @Override public void flush() { flushes[0]++; }
+        };
+        Socket socket = new Socket() {
+            @Override public OutputStream getOutputStream() { return raw; }
+        };
+        OutputStream output = WebSocketFrames.sessionOutput(socket);
+        Object lock = new Object();
+        byte[] pcm = new byte[640];
+        pcm[639] = 42;
+        WebSocketFrames.writeFrame(output, lock, 0x2, pcm);
+        assertEquals(1, writes[0]);
+        assertEquals(1, flushes[0]);
+        assertEquals(644, wire.size());
+        byte[] expected = new byte[644];
+        expected[0] = (byte) 0x82;
+        expected[1] = 126;
+        expected[2] = 2;
+        expected[3] = (byte) 128;
+        System.arraycopy(pcm, 0, expected, 4, pcm.length);
+        assertArrayEquals(expected, wire.toByteArray());
+        WebSocketFrames.writeFrame(output, lock, 0xA, new byte[0]);
+        assertEquals(2, writes[0]);
+        assertEquals(2, flushes[0]);
+        assertEquals(646, wire.size());
+    }
+
+    @Test
+    public void bufferedOutputPreservesLargeFrameAndPooledPrefix() throws Exception {
+        ByteArrayOutputStream wire = new ByteArrayOutputStream();
+        Socket socket = new Socket() {
+            @Override public OutputStream getOutputStream() { return wire; }
+        };
+        OutputStream output = WebSocketFrames.sessionOutput(socket);
+        byte[] payload = new byte[70_000];
+        payload[65_535] = 42;
+        payload[65_536] = 99; // outside valid prefix
+        WebSocketFrames.writeFrame(output, new Object(), 0x2, payload, 65_536);
+        byte[] expected = new byte[65_546];
+        expected[0] = (byte) 0x82;
+        expected[1] = 127;
+        expected[7] = 1;
+        System.arraycopy(payload, 0, expected, 10, 65_536);
+        assertArrayEquals(expected, wire.toByteArray());
     }
 
     private static Throwable invokeFailure(InputStream input) throws Exception {

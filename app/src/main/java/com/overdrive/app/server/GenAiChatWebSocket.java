@@ -30,9 +30,13 @@ public final class GenAiChatWebSocket {
     }
 
     public static void handle(Socket client, String websocketKey) {
+        handle(client, websocketKey, null);
+    }
+
+    static void handle(Socket client, String websocketKey, InputStream upgradedInput) {
         Session session = new Session(client);
         try {
-            session.run(websocketKey);
+            session.run(websocketKey, upgradedInput);
         } catch (Throwable error) {
             logger.warn("Streaming chat failed: " + error.getMessage());
             session.sendFailure("stream_failed",
@@ -55,9 +59,9 @@ public final class GenAiChatWebSocket {
             this.socket = socket;
         }
 
-        void run(String key) throws Exception {
-            input = socket.getInputStream();
-            output = socket.getOutputStream();
+        void run(String key, InputStream upgradedInput) throws Exception {
+            input = WebSocketFrames.sessionInput(socket, upgradedInput);
+            output = WebSocketFrames.sessionOutput(socket);
             WebSocketFrames.handshake(socket, output, key);
 
             JSONObject request = readInitialRequest();

@@ -10,7 +10,6 @@ import com.overdrive.app.server.WebSocketFrames.IdleReadTimeout;
 
 import org.json.JSONObject;
 
-import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -53,9 +52,13 @@ public final class CabinAudioWebSocket {
     }
 
     public static void handle(Socket client, String websocketKey) {
+        handle(client, websocketKey, null);
+    }
+
+    static void handle(Socket client, String websocketKey, InputStream upgradedInput) {
         Session session = new Session(client);
         try {
-            session.handshake(websocketKey);
+            session.handshake(websocketKey, upgradedInput);
             if (!ACTIVE.compareAndSet(null, session)) {
                 session.failAndClose(
                         "Another cabin listener is already active", 1013);
@@ -112,9 +115,9 @@ public final class CabinAudioWebSocket {
             }
         }
 
-        void handshake(String key) throws Exception {
-            input = socket.getInputStream();
-            output = new BufferedOutputStream(socket.getOutputStream(), 16 * 1024);
+        void handshake(String key, InputStream upgradedInput) throws Exception {
+            input = WebSocketFrames.sessionInput(socket, upgradedInput);
+            output = WebSocketFrames.sessionOutput(socket);
             WebSocketFrames.handshake(socket, output, key);
         }
 

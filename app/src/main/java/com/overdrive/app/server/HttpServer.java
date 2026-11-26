@@ -843,9 +843,10 @@ public class HttpServer {
                     }
                     RemoteDevViewWebSocketStream.handle(client, websocketKey, devViewSession);
                 } else if (wsPathOnly.equals("/ws/communicate")) {
-                    RemoteCommunicationWebSocket.handle(client, websocketKey);
+                    // Keep HTTP read-ahead across audio/AI WebSocket upgrades.
+                    RemoteCommunicationWebSocket.handle(client, websocketKey, input);
                 } else if (wsPathOnly.equals("/ws/cabin-audio")) {
-                    CabinAudioWebSocket.handle(client, websocketKey);
+                    CabinAudioWebSocket.handle(client, websocketKey, input);
                 } else if (wsPathOnly.equals(GenAiVoiceWebSocket.PATH)) {
                     // Voice commands run on another thread, so the exemption is captured here.
                     boolean voiceExempt;
@@ -859,9 +860,9 @@ public class HttpServer {
                             GenAiApiHandler.queryParam(path, "lang"),
                             GenAiApiHandler.queryParam(path, "mic"),
                             GenAiApiHandler.queryParam(path, "brief"),
-                            voiceExempt);
+                            voiceExempt, input);
                 } else if (wsPathOnly.equals(GenAiChatWebSocket.PATH)) {
-                    GenAiChatWebSocket.handle(client, websocketKey);
+                    GenAiChatWebSocket.handle(client, websocketKey, input);
                 } else {
                     handleWebSocketUpgrade(
                             client,
