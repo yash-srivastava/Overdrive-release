@@ -5598,6 +5598,24 @@ const TRIPS = {
 
     // ==================== SPEED HISTOGRAM ====================
 
+    // Keep bucket counts and moving-speed summary in one pass over the telemetry.
+    _speedHistogramStats(telemetry) {
+        const counts = new Array(15).fill(0); // 0–139 km/h in tens, then 140+
+        let total = 0, moving = 0, low = 0, high = 0;
+        telemetry.forEach(s => {
+            const speed = s.s || 0;
+            total++;
+            const bucket = speed >= 140 ? 14 : Math.floor(speed / 10);
+            if (bucket >= 0 && bucket < counts.length) counts[bucket]++;
+            if (speed > 0) {
+                moving++;
+                if (speed < 40) low++;
+                if (speed > 80) high++;
+            }
+        });
+        return { counts, total, moving, low, high };
+    },
+
     renderSpeedHistogram(canvas, telemetry) {
         const dpr = window.devicePixelRatio || 1;
         const rect = canvas.getBoundingClientRect();
@@ -5617,40 +5635,28 @@ const TRIPS = {
         ctx.clearRect(0, 0, w, h);
         if (!telemetry || telemetry.length === 0) return;
 
-        const bucketSize = 10;
-        const buckets = {};
-        const labels = [];
-        for (let i = 0; i <= 130; i += bucketSize) {
-            const label = i + '-' + (i + bucketSize);
-            labels.push(label);
-            buckets[label] = 0;
+        const stats = this._speedHistogramStats(telemetry);
+        const visible = [];
+        let maxCount = 0;
+        for (let i = 0; i < stats.counts.length; i++) {
+            const count = stats.counts[i];
+            if (count > 0) {
+                visible.push(i);
+                maxCount = Math.max(maxCount, count);
+            }
         }
-        labels.push('140+');
-        buckets['140+'] = 0;
+        if (visible.length === 0) return;
 
-        let totalSamples = 0;
-        telemetry.forEach(s => {
-            const speed = s.s || 0;
-            totalSamples++;
-            if (speed >= 140) { buckets['140+']++; return; }
-            const idx = Math.floor(speed / bucketSize) * bucketSize;
-            const label = idx + '-' + (idx + bucketSize);
-            if (buckets[label] !== undefined) buckets[label]++;
-        });
+        const barH = Math.min(22, ch / visible.length - 4);
 
-        const filteredLabels = labels.filter(l => buckets[l] > 0);
-        if (filteredLabels.length === 0) return;
-
-        const maxCount = Math.max(...filteredLabels.map(l => buckets[l]));
-        const barH = Math.min(22, ch / filteredLabels.length - 4);
-
-        filteredLabels.forEach((label, i) => {
-            const count = buckets[label];
+        visible.forEach((bucket, i) => {
+            const speedVal = bucket * 10;
+            const label = bucket === 14 ? '140+' : speedVal + '-' + (speedVal + 10);
+            const count = stats.counts[bucket];
             const barW = (count / maxCount) * cw;
             const y = pad.top + i * (barH + 4);
-            const pct = totalSamples > 0 ? Math.round(count / totalSamples * 100) : 0;
+            const pct = stats.total > 0 ? Math.round(count / stats.total * 100) : 0;
 
-            const speedVal = parseInt(label);
             let color = this.colors.speedGreen;
             if (speedVal < 40) color = this.colors.speedYellow;
             else if (speedVal > 80) color = this.colors.speedRed;
@@ -5672,9 +5678,7 @@ const TRIPS = {
                 if (label === '140+') {
                     displayLabel = Math.round(140 * BYD.units.KM_TO_MI) + '+';
                 } else {
-                    var lo = parseInt(label.split('-')[0]);
-                    var hi = parseInt(label.split('-')[1]);
-                    displayLabel = Math.round(lo * BYD.units.KM_TO_MI) + '-' + Math.round(hi * BYD.units.KM_TO_MI);
+                    displayLabel = Math.round(speedVal * BYD.units.KM_TO_MI) + '-' + Math.round((speedVal + 10) * BYD.units.KM_TO_MI);
                 }
             } else {
                 displayLabel = label;
@@ -5692,10 +5696,8 @@ const TRIPS = {
         if (tripData || telemetry.length > 0) {
             const avg = tripData ? Math.round(tripData.avgSpeedKmh || tripData.avg_speed_kmh || 0) : 0;
             const max = tripData ? Math.round(tripData.maxSpeedKmh || tripData.max_speed_kmh || 0) : 0;
-            const allSpeeds = telemetry.map(s => s.s || 0);
-            const movingSamples = allSpeeds.filter(s => s > 0);
-            const lowPct = movingSamples.length > 0 ? Math.round(movingSamples.filter(s => s < 40).length / movingSamples.length * 100) : 0;
-            const highPct = movingSamples.length > 0 ? Math.round(movingSamples.filter(s => s > 80).length / movingSamples.length * 100) : 0;
+            const lowPct = stats.moving > 0 ? Math.round(stats.low / stats.moving * 100) : 0;
+            const highPct = stats.moving > 0 ? Math.round(stats.high / stats.moving * 100) : 0;
 
             const summaryEl = document.getElementById('speedHistSummary');
             if (summaryEl) {
