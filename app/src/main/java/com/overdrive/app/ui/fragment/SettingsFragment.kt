@@ -35,8 +35,8 @@ import com.overdrive.app.ui.fragment.settings.SettingsSecurityFragment
 import com.overdrive.app.ui.fragment.settings.SettingsStorageFragment
 import com.overdrive.app.ui.fragment.settings.SettingsSurveillanceFragment
 import com.overdrive.app.ui.util.PreferencesManager
+import com.overdrive.app.ui.util.currentLocaleDisplay
 import com.overdrive.app.ui.util.navigateDrillDown
-import java.util.Locale
 
 /**
  * Settings entry point.
@@ -326,21 +326,6 @@ class SettingsFragment : Fragment() {
         view.findViewById<View>(R.id.cardLanguage)?.setOnClickListener {
             val activity = activity ?: return@setOnClickListener
             LanguagePickerDialog.show(activity) { activity.recreate() }
-        }
-    }
-
-    private fun currentLocaleDisplay(): String {
-        val locales = AppCompatDelegate.getApplicationLocales()
-        val tag = if (!locales.isEmpty) locales[0]?.toLanguageTag() else null
-        val displayLocale = resources.configuration.locales[0]
-        return if (tag.isNullOrEmpty()) {
-            getString(R.string.settings_theme_auto).substringBefore('(').trim()
-                .ifEmpty { displayLocale.displayLanguage }
-        } else {
-            Locale.forLanguageTag(tag).getDisplayName(displayLocale)
-                .replaceFirstChar {
-                    if (it.isLowerCase()) it.titlecase(displayLocale) else it.toString()
-                }
         }
     }
 

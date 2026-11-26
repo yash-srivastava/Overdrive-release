@@ -68,18 +68,30 @@ public class LocaleIsolationContractTest {
                 "app/src/main/java/com/overdrive/app/ui/fragment/settings/"
                         + "SettingsAppearanceFragment.kt");
 
+        String languageLabel = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/ui/util/SettingsLanguageLabel.kt");
+
         assertTrue(roadSense.contains(
                 "private fun localizedString(resId: Int, vararg formatArgs: Any)"));
         assertTrue(roadSense.contains(
                 "private fun severityLabel(sev: Int): String = localizedString("));
         assertFalse(roadSense.contains("LocaleList.setDefault("));
 
-        assertTrue(settings.contains(
+        for (String screen : new String[] {settings, appearance}) {
+            assertTrue(screen.contains("import com.overdrive.app.ui.util.currentLocaleDisplay"));
+            assertTrue(screen.contains("tvValue.text = currentLocaleDisplay()"));
+            assertFalse(screen.contains("private fun currentLocaleDisplay("));
+            assertFalse(screen.contains("getDisplayName(Locale.getDefault())"));
+            assertFalse(screen.contains("LocaleList.setDefault("));
+        }
+        assertTrue(languageLabel.contains("internal fun Fragment.currentLocaleDisplay()"));
+        assertTrue(languageLabel.contains("AppCompatDelegate.getApplicationLocales()"));
+        assertTrue(languageLabel.contains(
                 "val displayLocale = resources.configuration.locales[0]"));
-        assertTrue(appearance.contains(
-                "val displayLocale = resources.configuration.locales[0]"));
-        assertFalse(settings.contains("getDisplayName(Locale.getDefault())"));
-        assertFalse(appearance.contains("getDisplayName(Locale.getDefault())"));
+        assertTrue(languageLabel.contains("getDisplayName(displayLocale)"));
+        assertTrue(languageLabel.contains("it.titlecase(displayLocale)"));
+        assertFalse(languageLabel.contains("Locale.getDefault()"));
+        assertFalse(languageLabel.contains("LocaleList.setDefault("));
     }
 
     private static String readRepositoryFile(String relativePath) throws Exception {
