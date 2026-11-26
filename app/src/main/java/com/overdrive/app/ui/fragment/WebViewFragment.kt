@@ -1925,9 +1925,7 @@ class WebViewFragment : Fragment() {
                 if (conn.responseCode != 200 || conn.contentLengthLong > MAX_BRIDGE_DOWNLOAD_BYTES) {
                     return ""
                 }
-                val bytes = conn.inputStream.use { readCapped(it, MAX_BRIDGE_DOWNLOAD_BYTES) }
-                    ?: return ""
-                writeDownload(filename, bytes)
+                conn.inputStream.use { input -> writeDownload(filename, input) }
             } catch (_: Throwable) {
                 ""
             } finally {
@@ -1935,22 +1933,8 @@ class WebViewFragment : Fragment() {
             }
         }
 
-        private fun readCapped(input: java.io.InputStream, cap: Long): ByteArray? {
-            val out = java.io.ByteArrayOutputStream()
-            val buf = ByteArray(16 * 1024)
-            var total = 0L
-            while (true) {
-                val n = input.read(buf)
-                if (n < 0) break
-                total += n
-                if (total > cap) return null
-                out.write(buf, 0, n)
-            }
-            return out.toByteArray()
-        }
-
-        /** Temp file + rename so a half-written export never shows up under its real name. */
-        private fun writeDownload(filename: String?, bytes: ByteArray): String {
+        /** Stream to a temporary file; publish only a completed, size-checked export. */
+        private fun writeDownload(filename: String?, input: java.io.InputStream): String {
             val name = (filename ?: "")
                 .replace(Regex("[^A-Za-z0-9._-]"), "_")
                 .trimStart('.')
@@ -1964,20 +1948,9 @@ class WebViewFragment : Fragment() {
             )
             if (!dir.isDirectory && !dir.mkdirs()) return ""
             val target = java.io.File(dir, name)
-            val tmp = java.io.File(dir, ".$name.part")
-            try {
-                java.io.FileOutputStream(tmp).use { out ->
-                    out.write(bytes)
-                    out.fd.sync()
-                }
-                if (!tmp.renameTo(target)) {
-                    target.delete()
-                    if (!tmp.renameTo(target)) return ""
-                }
-                return target.absolutePath
-            } finally {
-                if (tmp.exists()) tmp.delete()
-            }
+            return if (BridgeDownloadFile.write(input, target, MAX_BRIDGE_DOWNLOAD_BYTES)) {
+                target.absolutePath
+            } else ""
         }
 
         private fun deliverAsyncHttpResponse(callbackId: String, raw: String) {
