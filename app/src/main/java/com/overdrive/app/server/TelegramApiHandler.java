@@ -33,8 +33,7 @@ public class TelegramApiHandler {
 
     // SecureRandom (not Math.random()) — the PIN gates Telegram pairing,
     // which is the only authentication boundary between an attacker who
-    // can reach the bot and our device. Use the same RNG flavor that
-    // PairingManager uses for its in-memory PIN.
+    // can reach the bot and our device.
     private static final java.security.SecureRandom PIN_RNG =
             new java.security.SecureRandom();
 
