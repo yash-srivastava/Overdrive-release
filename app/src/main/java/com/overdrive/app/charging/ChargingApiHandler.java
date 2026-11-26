@@ -16,6 +16,7 @@ import com.overdrive.app.monitor.SocHistoryDatabase;
 import com.overdrive.app.monitor.VehicleDataMonitor;
 import com.overdrive.app.trips.TripAnalyticsManager;
 import com.overdrive.app.trips.TripConfig;
+import com.overdrive.app.util.AnalyticsResponses;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -213,11 +214,7 @@ public class ChargingApiHandler {
             response.put("bootstrap", bootstrap);
         } catch (Exception e) {
             logger.error("Error building charging bootstrap", e);
-            try {
-                if (!response.has("success")) response.put("success", false);
-                if (!response.has("bootstrap")) response.put("bootstrap", bootstrap);
-                response.put("error", e.getMessage() != null ? e.getMessage() : "bootstrap failed");
-            } catch (Exception ignored) {}
+            AnalyticsResponses.completeBootstrapFailure(response, bootstrap, e);
         }
         return response;
     }
@@ -368,23 +365,7 @@ public class ChargingApiHandler {
     }
 
     private JSONObject invokeSectionStripped(java.util.function.Supplier<JSONObject> handler) {
-        JSONObject section;
-        try {
-            section = handler.get();
-        } catch (Exception e) {
-            logger.warn("Bootstrap section failed: " + e.getMessage());
-            JSONObject err = new JSONObject();
-            try { err.put("error", e.getMessage() != null ? e.getMessage() : "section failed"); } catch (Exception ignored) {}
-            return err;
-        }
-        if (section == null) {
-            JSONObject err = new JSONObject();
-            try { err.put("error", "empty section"); } catch (Exception ignored) {}
-            return err;
-        }
-        section.remove("success");
-        section.remove("_status");
-        return section;
+        return AnalyticsResponses.section(handler, logger::warn);
     }
 
     /**
@@ -1616,14 +1597,6 @@ public class ChargingApiHandler {
     }
 
     private JSONObject errorResponse(String message, int status) {
-        JSONObject response = new JSONObject();
-        try {
-            response.put("success", false);
-            response.put("error", message);
-            response.put("_status", status);
-        } catch (Exception e) {
-            logger.error("Error building error response", e);
-        }
-        return response;
+        return AnalyticsResponses.error(message, status, logger::error);
     }
 }
