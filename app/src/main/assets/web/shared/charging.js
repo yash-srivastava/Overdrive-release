@@ -3041,13 +3041,7 @@ var CHARGING = {
             }
             var rect = g.canvas.getBoundingClientRect();
             var px = clientX - rect.left;
-            // Find nearest sample by x.
-            var best = -1, bestDx = 1e9;
-            for (var i = 0; i < g.list.length; i++) {
-                var sx = g.pad.l + ((g.list[i].t - g.t0) / g.tSpan) * g.plotW;
-                var dx = Math.abs(sx - px);
-                if (dx < bestDx) { bestDx = dx; best = i; }
-            }
+            var best = self._nearestHoverSample(g, g.list, px);
             if (best >= 0 && (self._socHoverIdx !== best || !canvas._chargingHoverPainted)) {
                 self._socHoverIdx = best;
                 self._drawSocHover(best);
@@ -3375,6 +3369,73 @@ var CHARGING = {
         });
     },
 
+    // Search the same projected coordinates used for drawing, not inverse time
+    // coordinates (rounding and duplicate timestamps can affect nearest ties).
+    // Each render replaces its geometry and sample series together.
+    _nearestHoverSample: function (g, samples, px) {
+        if (!isFinite(px)) return -1;
+        var n = samples.length;
+        var i, sx, dx;
+        var best = -1, bestDx = 1e9;
+        if (g._hoverOrdered === undefined) {
+            var prev = -Infinity;
+            g._hoverOrdered = true;
+            for (i = 0; i < n; i++) {
+                if (samples[i] == null || samples[i].t == null) {
+                    g._hoverOrdered = false;
+                    break;
+                }
+                sx = g.pad.l + ((samples[i].t - g.t0) / g.tSpan) * g.plotW;
+                if (!isFinite(sx) || sx < prev) {
+                    g._hoverOrdered = false;
+                    break;
+                }
+                prev = sx;
+            }
+        }
+        // Unordered, missing or non-finite points retain the linear selection.
+        if (!g._hoverOrdered) {
+            for (i = 0; i < n; i++) {
+                if (samples[i] == null || samples[i].t == null) continue;
+                sx = g.pad.l + ((samples[i].t - g.t0) / g.tSpan) * g.plotW;
+                dx = Math.abs(sx - px);
+                if (dx < bestDx) { bestDx = dx; best = i; }
+            }
+            return best;
+        }
+        // First projected coordinate at or to the right of the pointer.
+        var lo = 0, hi = n, mid;
+        while (lo < hi) {
+            mid = lo + Math.floor((hi - lo) / 2);
+            sx = g.pad.l + ((samples[mid].t - g.t0) / g.tSpan) * g.plotW;
+            if (sx < px) lo = mid + 1; else hi = mid;
+        }
+        var right = lo;
+        if (right < n) {
+            sx = g.pad.l + ((samples[right].t - g.t0) / g.tSpan) * g.plotW;
+            dx = Math.abs(sx - px);
+            if (dx < bestDx) { bestDx = dx; best = right; }
+        }
+        if (right > 0) {
+            sx = g.pad.l + ((samples[right - 1].t - g.t0) / g.tSpan) * g.plotW;
+            dx = Math.abs(sx - px);
+            if (dx < 1e9 && dx <= bestDx) {
+                // Preserve the original first-index tie rule, even for a
+                // plateau caused by floating-point subtraction, not just
+                // identical timestamps or projected coordinates.
+                bestDx = dx;
+                lo = 0; hi = right - 1;
+                while (lo < hi) {
+                    mid = lo + Math.floor((hi - lo) / 2);
+                    sx = g.pad.l + ((samples[mid].t - g.t0) / g.tSpan) * g.plotW;
+                    if (Math.abs(sx - px) > bestDx) lo = mid + 1; else hi = mid;
+                }
+                best = lo;
+            }
+        }
+        return best;
+    },
+
     // ---- Shared detail-chart hover --------------------------------------
     // One implementation drives the power / ramp / temp charts. `spec` carries
     // the chart's geometry + sample array plus three callbacks: render() to
@@ -3403,13 +3464,7 @@ var CHARGING = {
             }
             var rect = canvas.getBoundingClientRect();
             var px = clientX - rect.left;
-            var best = -1, bestDx = 1e9;
-            for (var i = 0; i < g.samples.length; i++) {
-                if (g.samples[i] == null || g.samples[i].t == null) continue;
-                var sx = g.pad.l + ((g.samples[i].t - g.t0) / g.tSpan) * g.plotW;
-                var dx = Math.abs(sx - px);
-                if (dx < bestDx) { bestDx = dx; best = i; }
-            }
+            var best = self._nearestHoverSample(g, g.samples, px);
             if (best >= 0 && (canvas._chgHoverIdx !== best || !canvas._chargingHoverPainted)) {
                 canvas._chgHoverIdx = best;
                 self._drawDetailHover(canvas);
