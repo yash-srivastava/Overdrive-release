@@ -110,13 +110,11 @@ public final class LensTag {
         int w = src.getWidth(), h = src.getHeight();
         int tw = w / 2, th = h / 2;
         if (tw < 2 || th < 2) return src;
-        double t = Math.min(100, strength) / 100.0;
-        double k1 = 0.30 * t, k2 = 0.10 * t;
-        double a2 = aspect * aspect;
-        double zoom = 1 + k1 * a2 + k2 * a2 * a2;
         int stripRows = (int) Math.round(stripFraction(tag) * h);
+        android.graphics.Bitmap out = null;
         try {
-            android.graphics.Bitmap out = src.copy(android.graphics.Bitmap.Config.ARGB_8888, true);
+            PreviewLensWarp warp = PreviewLensWarp.forTile(tw, th, aspect, strength);
+            out = src.copy(android.graphics.Bitmap.Config.ARGB_8888, true);
             if (out == null) return src;
             int[] in = new int[tw * th];
             int[] px = new int[tw * th];
@@ -125,27 +123,13 @@ public final class LensTag {
                 int strip = ty == 0 ? Math.min(stripRows, th - 1) : 0;
                 for (int tx = 0; tx < 2; tx++) {
                     src.getPixels(in, 0, tw, tx * tw, ty * th, tw, th);
-                    for (int y = 0; y < th; y++) {
-                        if (y < strip) {
-                            System.arraycopy(in, y * tw, px, y * tw, tw);
-                            continue;
-                        }
-                        double ny = ((y + 0.5) / th) * 2 - 1;
-                        for (int x = 0; x < tw; x++) {
-                            double nx = ((x + 0.5) / tw) * 2 - 1;
-                            double ay = ny * aspect;
-                            double r2 = nx * nx + ay * ay;
-                            double inv = zoom / (1 + k1 * r2 + k2 * r2 * r2);
-                            double u = Math.max(0, Math.min(1, nx * inv * 0.5 + 0.5)) * tw - 0.5;
-                            double v = Math.max(0, Math.min(1, ny * inv * 0.5 + 0.5)) * th - 0.5;
-                            px[y * tw + x] = bilinear(in, tw, th, u, Math.max(v, strip));
-                        }
-                    }
+                    warp.apply(in, px, strip);
                     out.setPixels(px, 0, tw, tx * tw, ty * th, tw, th);
                 }
             }
             return out;
         } catch (Throwable oom) {
+            if (out != null && out != src) out.recycle();
             return src;
         }
     }
@@ -174,22 +158,6 @@ public final class LensTag {
         android.graphics.Bitmap out = dewarpFrame(src, tag, strength);
         if (out != src) src.recycle();
         return out;
-    }
-
-    private static int bilinear(int[] p, int w, int h, double u, double v) {
-        u = Math.max(0, Math.min(w - 1, u));
-        v = Math.max(0, Math.min(h - 1, v));
-        int x0 = (int) u, y0 = (int) v;
-        int x1 = Math.min(x0 + 1, w - 1), y1 = Math.min(y0 + 1, h - 1);
-        double fx = u - x0, fy = v - y0;
-        int c00 = p[y0 * w + x0], c10 = p[y0 * w + x1], c01 = p[y1 * w + x0], c11 = p[y1 * w + x1];
-        int r = 0;
-        for (int shift = 0; shift <= 24; shift += 8) {
-            double top = ((c00 >>> shift) & 0xff) * (1 - fx) + ((c10 >>> shift) & 0xff) * fx;
-            double bot = ((c01 >>> shift) & 0xff) * (1 - fx) + ((c11 >>> shift) & 0xff) * fx;
-            r |= ((int) Math.round(top * (1 - fy) + bot * fy) & 0xff) << shift;
-        }
-        return r;
     }
 
     /** Tag for a clip whose frames were raw grid tiles from this recorder (the encoder decides which clips). */
