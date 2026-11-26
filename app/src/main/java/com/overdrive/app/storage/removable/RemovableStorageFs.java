@@ -317,6 +317,34 @@ public final class RemovableStorageFs {
         }
     }
 
+    /** Lightweight recording-index listing; null preserves the caller's previous baseline. */
+    public static RecordingListingSnapshot listRecordingSnapshot(File dir,
+            RecordingListingSnapshot previous) {
+        if (isRouted(dir)) {
+            try {
+                return MediaStoreBackend.listRecordingSnapshot(dir.getAbsolutePath(), previous);
+            } catch (IOException e) {
+                logError("list " + dir, e);
+                return null;
+            }
+        }
+        // A volume can change routing between polls. Preserve the ordinary File fallback.
+        File[] kids = dir.listFiles();
+        if (kids == null) return null;
+        RecordingListingSnapshot out = new RecordingListingSnapshot();
+        for (File kid : kids) {
+            String name = kid.getName();
+            if (!RecordingListingSnapshot.accepts(name)) continue;
+            if (kid instanceof ListedFile) {
+                Stat snap = ((ListedFile) kid).rawSnapshot();
+                out.add(name, snap.length, snap.mtime, previous);
+            } else {
+                out.add(name, length(kid), lastModified(kid), previous);
+            }
+        }
+        return out;
+    }
+
     public static File[] listFiles(File dir, FilenameFilter filter) {
         if (!isRouted(dir)) return dir.listFiles(filter);
         File[] all = listFiles(dir);

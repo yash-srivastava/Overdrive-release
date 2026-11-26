@@ -34,6 +34,7 @@ final class MediaStoreBackend {
     private static final int FORMAT_DIRECTORY = 0x3001;
     private static final String[] STAT_COLUMNS = {"_id", "format", "_size", "date_modified"};
     private static final String[] LIST_COLUMNS = {"_display_name", "format", "_size", "date_modified", "mime_type"};
+    private static final String[] RECORDING_LIST_COLUMNS = {"_display_name", "format", "_size", "date_modified"};
     private static final long VOLUMES_TTL_MS = 3_000;
     private static final long FSSTAT_TTL_MS = 2_000;
 
@@ -300,6 +301,31 @@ final class MediaStoreBackend {
                             && !cur.isNull(2) && cur.getLong(2) > 0);
                     out.add(new Entry(name, dir, dir || cur.isNull(2) ? 0L : cur.getLong(2),
                             cur.getLong(3) * 1000L, trusted));
+                }
+            }
+            return out;
+        });
+    }
+
+    /** Watcher-only listing: compare raw metadata without materializing File wrappers or MIME. */
+    static RecordingListingSnapshot listRecordingSnapshot(String dirPath,
+            RecordingListingSnapshot previous) throws IOException {
+        Volume v = volumeOf(dirPath);
+        if (v == null || !stat(dirPath, false).dir) return null;
+        String childRel = childrenRelativePath(v, dirPath);
+        return call(v, c -> {
+            RecordingListingSnapshot out = new RecordingListingSnapshot();
+            try (Cursor cur = query(c, v, RECORDING_LIST_COLUMNS, "relative_path=?",
+                    new String[]{childRel}, 0)) {
+                while (cur != null && cur.moveToNext()) {
+                    String name = cur.getString(0);
+                    if (name == null || name.isEmpty()) continue;
+                    // Match ListedFile.getName() even for an unexpected path-like display name.
+                    if (name.indexOf('/') >= 0) name = new File(dirPath, name).getName();
+                    if (!RecordingListingSnapshot.accepts(name)) continue;
+                    boolean dir = cur.getInt(1) == FORMAT_DIRECTORY;
+                    out.add(name, dir || cur.isNull(2) ? 0L : cur.getLong(2),
+                            cur.getLong(3) * 1000L, previous);
                 }
             }
             return out;
