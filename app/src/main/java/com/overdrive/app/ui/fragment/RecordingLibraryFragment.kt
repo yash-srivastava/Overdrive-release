@@ -38,7 +38,6 @@ import com.overdrive.app.R
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
-import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -890,32 +889,12 @@ class RecordingLibraryFragment : Fragment() {
     }
 
     private fun updateDateHeader() {
-        val selectedCal = Calendar.getInstance().apply {
-            set(
-                calendar.get(Calendar.YEAR),
-                calendar.get(Calendar.MONTH),
-                selectedDay,
-                0, 0, 0
-            )
-            set(Calendar.MILLISECOND, 0)
-        }
-        val today = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-        }
-        val yesterday = (today.clone() as Calendar).apply {
-            add(Calendar.DAY_OF_YEAR, -1)
-        }
-
-        tvSelectedDate?.text = when (selectedCal.timeInMillis) {
-            today.timeInMillis -> getString(R.string.recording_lib_date_today)
-            yesterday.timeInMillis -> getString(R.string.recording_lib_date_yesterday)
-            else -> dayHeaderFormat.format(Date(selectedCal.timeInMillis))
-        }
+        val header = RecordingDateSelection.dayHeader(calendar, selectedDay)
+        tvSelectedDate?.text = header.selectionLabel(dayHeaderFormat, ::getString)
 
         // Disable forward-day button when we're already on today.
         btnNextDay?.let {
-            it.isEnabled = selectedCal.timeInMillis < today.timeInMillis
+            it.isEnabled = header.canAdvance
             it.alpha = if (it.isEnabled) 1f else 0.4f
         }
     }
