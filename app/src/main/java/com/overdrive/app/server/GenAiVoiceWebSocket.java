@@ -167,11 +167,16 @@ public final class GenAiVoiceWebSocket {
     /** {@code stepUpExempt} false: a remote session, so step-up gated commands are refused. */
     public static void handle(Socket client, String websocketKey, String language, String mic,
                               String brief, boolean stepUpExempt) {
+        handle(client, websocketKey, language, mic, brief, stepUpExempt, null);
+    }
+
+    static void handle(Socket client, String websocketKey, String language, String mic,
+                       String brief, boolean stepUpExempt, InputStream upgradedInput) {
         boolean farField = "far".equals(mic);
         Session session = new Session(client, language, farField,
                 farField ? com.overdrive.app.genai.GenAiTripBriefing.parse(brief) : null, stepUpExempt);
         try {
-            session.handshake(websocketKey);
+            session.handshake(websocketKey, upgradedInput);
             if (!ACTIVE.compareAndSet(null, session)) {
                 // A far-field session still waiting for its provider is replaced, not refused: the
                 // hands-free client re-opens after a dropped turn and must not be told "busy" by
@@ -659,9 +664,9 @@ public final class GenAiVoiceWebSocket {
                     System.currentTimeMillis() - startedAt, utf8Bytes(result), status));
         }
 
-        void handshake(String key) throws Exception {
-            input = socket.getInputStream();
-            output = socket.getOutputStream();
+        void handshake(String key, InputStream upgradedInput) throws Exception {
+            input = WebSocketFrames.sessionInput(socket, upgradedInput);
+            output = WebSocketFrames.sessionOutput(socket);
             WebSocketFrames.handshake(socket, output, key);
         }
 

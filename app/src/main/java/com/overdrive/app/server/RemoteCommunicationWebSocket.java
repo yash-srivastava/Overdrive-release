@@ -40,9 +40,13 @@ public final class RemoteCommunicationWebSocket {
     }
 
     public static void handle(Socket client, String websocketKey) {
+        handle(client, websocketKey, null);
+    }
+
+    static void handle(Socket client, String websocketKey, InputStream upgradedInput) {
         Session session = new Session(client);
         try {
-            session.handshake(websocketKey);
+            session.handshake(websocketKey, upgradedInput);
             if (!ACTIVE.compareAndSet(null, session)) {
                 session.failAndClose("Another talk session is already active", 1013);
                 return;
@@ -82,9 +86,9 @@ public final class RemoteCommunicationWebSocket {
             this.socket = socket;
         }
 
-        void handshake(String key) throws Exception {
-            input = socket.getInputStream();
-            output = socket.getOutputStream();
+        void handshake(String key, InputStream upgradedInput) throws Exception {
+            input = WebSocketFrames.sessionInput(socket, upgradedInput);
+            output = WebSocketFrames.sessionOutput(socket);
             WebSocketFrames.handshake(socket, output, key);
         }
 

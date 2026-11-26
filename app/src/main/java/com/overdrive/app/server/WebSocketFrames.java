@@ -2,6 +2,8 @@ package com.overdrive.app.server;
 
 import android.util.Base64;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
@@ -17,6 +19,17 @@ final class WebSocketFrames {
             "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
     private WebSocketFrames() {}
+
+    /** Keep HTTP read-ahead across the upgrade; standalone callers get the same buffering. */
+    static InputStream sessionInput(Socket socket, InputStream upgradedInput) throws IOException {
+        return upgradedInput != null ? upgradedInput
+                : new BufferedInputStream(socket.getInputStream(), 8192);
+    }
+
+    /** Coalesce header and small payload writes; writeFrame still flushes every frame. */
+    static OutputStream sessionOutput(Socket socket) throws IOException {
+        return new BufferedOutputStream(socket.getOutputStream(), 16 * 1024);
+    }
 
     static void handshake(Socket socket, OutputStream output, String key)
             throws Exception {
