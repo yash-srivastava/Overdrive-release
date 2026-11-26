@@ -9,8 +9,10 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
+import java.nio.file.attribute.FileTime;
 import java.util.Arrays;
 import java.util.Random;
+import java.util.concurrent.TimeUnit;
 
 public class BridgeDownloadFileTest {
     private static final long CAP = 32L * 1024 * 1024;
@@ -119,6 +121,64 @@ public class BridgeDownloadFileTest {
     }
 
     @Test
+    public void newExportRemovesOnlyOldReservedRegularParts() throws Exception {
+        File dir = Files.createTempDirectory("bridge-download").toFile();
+        try {
+            File target = new File(dir, "trip.csv");
+            File stale = File.createTempFile(".od-export-", ".part", dir);
+            File fresh = File.createTempFile(".od-export-", ".part", dir);
+            File future = File.createTempFile(".od-export-", ".part", dir);
+            File completed = new File(dir, "previous.gpx");
+            File unrelated = new File(dir, ".other-123.part");
+            File wrongSuffix = new File(dir, ".od-export-123.txt");
+            File emptyName = new File(dir, ".od-export-.part");
+            File matchingDirectory = new File(dir, ".od-export-directory.part");
+            assertTrue(matchingDirectory.mkdir());
+            FileTime old = oldPartTime();
+            for (File file : new File[]{stale, completed, unrelated, wrongSuffix, emptyName}) {
+                Files.write(file.toPath(), new byte[]{7});
+                Files.setLastModifiedTime(file.toPath(), old);
+            }
+            Files.setLastModifiedTime(matchingDirectory.toPath(), old);
+            Files.setLastModifiedTime(future.toPath(),
+                    FileTime.fromMillis(System.currentTimeMillis() + TimeUnit.DAYS.toMillis(2)));
+
+            assertTrue(BridgeDownloadFile.write(generated(1), target, CAP));
+            assertFalse(stale.exists());
+            for (File file : new File[]{fresh, future, completed, unrelated, wrongSuffix, emptyName}) {
+                assertTrue(file.getName(), file.isFile());
+            }
+            assertArrayEquals(new byte[]{7}, Files.readAllBytes(completed.toPath()));
+            assertTrue(matchingDirectory.isDirectory());
+            assertEquals(1L, target.length());
+        } finally {
+            deleteTree(dir);
+        }
+    }
+
+    @Test
+    public void sweepDoesNotFollowSymbolicLinks() throws Exception {
+        File dir = Files.createTempDirectory("bridge-download").toFile();
+        try {
+            File completed = new File(dir, "previous.csv");
+            Files.write(completed.toPath(), new byte[]{7});
+            Files.setLastModifiedTime(completed.toPath(), oldPartTime());
+            File link = new File(dir, ".od-export-link.part");
+            try {
+                Files.createSymbolicLink(link.toPath(), completed.toPath());
+            } catch (IOException | UnsupportedOperationException | SecurityException unavailable) {
+                org.junit.Assume.assumeNoException(unavailable);
+            }
+
+            assertTrue(BridgeDownloadFile.write(generated(1), new File(dir, "trip.csv"), CAP));
+            assertTrue(Files.isSymbolicLink(link.toPath()));
+            assertArrayEquals(new byte[]{7}, Files.readAllBytes(completed.toPath()));
+        } finally {
+            deleteTree(dir);
+        }
+    }
+
+    @Test
     public void overlappingWritesUseSeparateTemporaryFiles() throws Exception {
         File dir = Files.createTempDirectory("bridge-download").toFile();
         try {
@@ -134,9 +194,14 @@ public class BridgeDownloadFileTest {
                     }
                     if (reads == 2) {
                         assertArrayEquals(new byte[]{1}, Files.readAllBytes(target.toPath()));
+                        File[] parts = dir.listFiles((d, name) -> name.startsWith(".od-export-"));
+                        assertNotNull(parts);
+                        assertEquals(1, parts.length);
+                        Files.setLastModifiedTime(parts[0].toPath(), oldPartTime());
                         assertTrue(BridgeDownloadFile.write(
                                 new ByteArrayInputStream(new byte[]{3, 4}), target, CAP));
                         assertArrayEquals(new byte[]{3, 4}, Files.readAllBytes(target.toPath()));
+                        assertTrue("Active part must survive the sweep", parts[0].isFile());
                         b[off] = 5;
                         return 1;
                     }
@@ -162,6 +227,10 @@ public class BridgeDownloadFileTest {
         } finally {
             deleteTree(dir);
         }
+    }
+
+    private static FileTime oldPartTime() {
+        return FileTime.fromMillis(System.currentTimeMillis() - TimeUnit.DAYS.toMillis(2));
     }
 
     private static InputStream generated(long size) {
