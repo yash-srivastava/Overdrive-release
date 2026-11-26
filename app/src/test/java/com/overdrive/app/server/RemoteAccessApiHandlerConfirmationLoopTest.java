@@ -207,6 +207,7 @@ public class RemoteAccessApiHandlerConfirmationLoopTest {
         assertTrue(body.contains("if (confirmation == DiLink5GateActuationPolicy.Confirmation.CONFIRMED) {\n"
                 + "                lastCommandConfirmed = true;\n"
                 + "                decision.satisfied();\n"
+                + "                String confirmed = driverDoorStateConfirmed(action);\n"
                 + "                recordAction(action, \"confirmed\", confirmed);"));
         assertTrue(body.contains(
                 "recordAction(action, \"unconfirmed\", \"Command accepted; driver-door change could not be confirmed\");"));
