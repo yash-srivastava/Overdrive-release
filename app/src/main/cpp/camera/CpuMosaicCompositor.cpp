@@ -718,6 +718,84 @@ static void gatherUV(const RemapSource& sr, int n, const int32_t* __restrict lu,
     }
 }
 
+// Only bypass the general sampler when every horizontal coordinate is an
+// in-bounds integer texel in a contiguous run. Check once per column plan,
+// not once per output row; rounding and nonstandard offsets retain the fallback.
+static int contiguousStart(const int32_t* u, int n, int off, int width) {
+    if (n <= 0 || n > width) return -1;
+    const int64_t first = (int64_t) u[0] + off;
+    if (first < 0 || (first & 255) || first / 256 > width - n) return -1;
+    for (int i = 1; i < n; i++) {
+        if ((int64_t) u[i] + off != first + (int64_t) i * 256) return -1;
+    }
+    return (int) (first / 256);
+}
+
+static inline uint8_t verticalSample(uint8_t a, uint8_t b, int fy) {
+    return (uint8_t) ((a * (256 - fy) + b * fy + 128) >> 8);
+}
+
+// With fx=0, lerp2 reduces exactly to one rounded vertical blend. No gather,
+// coordinate loads or per-pixel address calculations are needed for packed rows.
+static void verticalBytes(const uint8_t* a, const uint8_t* b, uint8_t* out,
+                          int n, int fy, bool swap = false) {
+    if (fy == 0 || a == b) {
+        if (swap) swapPairs(out, a, n);
+        else memcpy(out, a, (size_t) n);
+        return;
+    }
+    int i = 0;
+#ifdef OD_CPU_MOSAIC_NEON
+    for (; i + 8 <= n; i += 8) {
+        const uint16x8_t av = vmovl_u8(vld1_u8(a + i));
+        const uint16x8_t bv = vmovl_u8(vld1_u8(b + i));
+        const uint16x8_t sum = vmlaq_n_u16(vmulq_n_u16(av, (uint16_t) (256 - fy)),
+                                           bv, (uint16_t) fy);
+        const uint8x8_t blended = vrshrn_n_u16(sum, 8);
+        vst1_u8(out + i, swap ? vrev16_u8(blended) : blended);
+    }
+#endif
+    for (; i < n; i++) {
+        const int j = swap ? (i ^ 1) : i;  // swap is only used for complete UV pairs
+        out[i] = verticalSample(a[j], b[j], fy);
+    }
+}
+
+static void verticalY(const RemapSource& sr, int x, int n, int vf, uint8_t* out) {
+    const int y = vf >> 8;
+    const uint8_t* a = sr.pl.y + (size_t) y * sr.pl.rowY + x;
+    const uint8_t* b = y < sr.h - 1 ? a + sr.pl.rowY : a;
+    verticalBytes(a, b, out, n, vf & 255);
+}
+
+static void verticalUV(const RemapSource& sr, int x, int n, int vf,
+                       uint8_t* ou, uint8_t* ov, int dPix) {
+    const Planes& s = sr.pl;
+    const int y = vf >> 8, fy = vf & 255;
+    const size_t start = (size_t) y * s.rowUV + (size_t) x * s.pixUV;
+    const size_t next = y < sr.h / 2 - 1 ? (size_t) s.rowUV : 0;
+    const uint8_t* au = s.u + start;
+    const uint8_t* av = s.v + start;
+    const Chroma sc = chromaOf(au, av, s.pixUV);
+    const Chroma dc = chromaOf(ou, ov, dPix);
+    if (sc != kStrided && dc != kStrided) {
+        const uint8_t* a = sc == kNv12 ? au : av;
+        verticalBytes(a, a + next, dc == kNv12 ? ou : ov, n * 2, fy, sc != dc);
+    } else if (s.pixUV == 1 && dPix == 1) {
+        verticalBytes(au, au + next, ou, n, fy);
+        verticalBytes(av, av + next, ov, n, fy);
+    } else if (fy == 0 || next == 0) {
+        copyChromaRow(au, av, s.pixUV, sc, ou, ov, dPix, dc, n);
+    } else {
+        // Mixed or unusual strides: blend only actual U/V samples, not padding.
+        for (int i = 0; i < n; i++) {
+            const size_t si = (size_t) i * s.pixUV, di = (size_t) i * dPix;
+            ou[di] = verticalSample(au[si], au[next + si], fy);
+            ov[di] = verticalSample(av[si], av[next + si], fy);
+        }
+    }
+}
+
 // Linear (windshield) coords: u = (x0 + i) * du + u0 texels, fixed v.
 static void linearX(int n, float u0, float du, int uSize, int32_t* lu) {
     const float uMax = (float) (uSize - 1);
@@ -751,27 +829,39 @@ static void gridRows(const RemapSpec& p, const RemapSource& sr, const Planes& d,
                          offsetFx(p.off[2], sr.w), offsetFx(p.off[3], sr.w)};
     const int offC[4] = {offsetFx(p.off[0], sr.w / 2), offsetFx(p.off[1], sr.w / 2),
                          offsetFx(p.off[2], sr.w / 2), offsetFx(p.off[3], sr.w / 2)};
+    int startY[4] = {-1, -1, -1, -1}, startC[4] = {-1, -1, -1, -1};
+    if (identity) {
+        for (int q = 0; q < 4; q++) {
+            startY[q] = contiguousStart(lu, tw, offY[q], sr.w);
+            startC[q] = contiguousStart(chromaLu, tw / 2, offC[q], sr.w / 2);
+        }
+    }
+    const bool allY = std::all_of(startY, startY + 4, [](int x) { return x >= 0; });
+    const bool allC = std::all_of(startC, startC + 4, [](int x) { return x >= 0; });
     for (int y = ty0; y < ty1; y++) {
         const float ty = ((float) y + 0.5f) / (float) th;
-        if (identity) identityY(tw, ty, p.aspect, (float) sr.h, lv);
+        if (identity) identityY(allY ? 1 : tw, ty, p.aspect, (float) sr.h, lv);
         else rectifyRow(p, tw, 0.5f / (float) tw, 1.f / (float) tw, ty,
                         0.25f * (float) sr.w, (float) sr.h, lu, lv);
         for (int q = 0; q < 4; q++) {
             uint8_t* out = d.y + (size_t) (y + (q >> 1) * th) * d.rowY + (size_t) (q & 1) * tw;
-            gatherY(sr, tw, lu, lv, offY[q], out);
+            if (startY[q] >= 0) verticalY(sr, startY[q], tw, lv[0], out);
+            else gatherY(sr, tw, lu, lv, offY[q], out);
         }
         if (y & 1) continue;
         const int yc = y / 2;
         const int tcw = tw / 2, tch = th / 2;
         const float cty = (float) (2 * yc + 1) / (float) th;
-        if (identity) identityY(tcw, cty, p.aspect, (float) (sr.h / 2), lv);
+        if (identity) identityY(allC ? 1 : tcw, cty, p.aspect, (float) (sr.h / 2), lv);
         else rectifyRow(p, tcw, 1.f / (float) tw, 2.f / (float) tw, cty,
                         0.25f * (float) (sr.w / 2), (float) (sr.h / 2), lu, lv);
         for (int q = 0; q < 4; q++) {
             const size_t rowOff = (size_t) (yc + (q >> 1) * tch) * d.rowUV;
             const size_t colOff = (size_t) ((q & 1) * tcw) * d.pixUV;
-            gatherUV(sr, tcw, identity ? chromaLu : lu, lv, offC[q],
-                     d.u + rowOff + colOff, d.v + rowOff + colOff, d.pixUV);
+            uint8_t* ou = d.u + rowOff + colOff;
+            uint8_t* ov = d.v + rowOff + colOff;
+            if (startC[q] >= 0) verticalUV(sr, startC[q], tcw, lv[0], ou, ov, d.pixUV);
+            else gatherUV(sr, tcw, identity ? chromaLu : lu, lv, offC[q], ou, ov, d.pixUV);
         }
     }
 }
@@ -807,6 +897,7 @@ struct DashcamColumns {
     int32_t topY[kMaxRow], topC[kMaxRow / 2];
     int32_t bottomY[kMaxRow], bottomC[kMaxRow / 2];
     bool topReady, bottomReady;
+    int topStart[2], bottomStart[2][3];  // luma/chroma, then cell
 };
 
 static void dashcamColumns(const RemapSpec& p, const RemapSource* src,
@@ -826,6 +917,12 @@ static void dashcamColumns(const RemapSpec& p, const RemapSource* src,
         } else if (cols.topReady) {
             identityX(n, vx0, dvx, 0.25f * (float) sw, top);
         }
+        const int plane = div - 1;
+        const int topWidth = p.windshield ? src[1].w / div : sw;
+        const int topOff = p.windshield ? 0 : offsetFx(p.off[0], sw);
+        cols.topStart[plane] = cols.topReady
+                ? contiguousStart(top, n, topOff, topWidth) : -1;
+        std::fill_n(cols.bottomStart[plane], 3, -1);
         if (!cols.bottomReady) continue;
         const int* bounds = div == 1 ? cb.luma : cb.chroma;
         for (int c = 0; c < 3; c++) {
@@ -833,6 +930,8 @@ static void dashcamColumns(const RemapSpec& p, const RemapSource* src,
             if (b <= a) continue;
             const float tx0 = (vx0 + (float) a * dvx) * 3.f - (float) c;
             identityX(b - a, tx0, dvx * 3.f, 0.25f * (float) sw, bottom + a);
+            cols.bottomStart[plane][c] = contiguousStart(bottom + a, b - a,
+                    offsetFx(p.off[3 - c], sw), sw);
         }
     }
 }
@@ -859,21 +958,29 @@ static void dashcamRow(const RemapSpec& p, const RemapSource* src, const Planes&
             const RemapSource& ws = src[1];
             const int wh = ws.h / div;
             const float t = p.cropY + ly * (1.f - p.cropY * 2.f);
-            linearY(n, t * (float) wh - 0.5f, wh, lv);
+            const int start = cols.topStart[div - 1];
+            linearY(start >= 0 ? 1 : n, t * (float) wh - 0.5f, wh, lv);
             const int32_t* u = chroma ? cols.topC : cols.topY;
-            if (chroma) gatherUV(ws, n, u, lv, 0, ou, ov, d.pixUV);
+            if (start >= 0) {
+                if (chroma) verticalUV(ws, start, n, lv[0], ou, ov, d.pixUV);
+                else verticalY(ws, start, n, lv[0], oy);
+            } else if (chroma) gatherUV(ws, n, u, lv, 0, ou, ov, d.pixUV);
             else gatherY(ws, n, u, lv, 0, oy);
             return;
         }
         const int32_t* u = lu;
+        const int start = cols.topStart[div - 1];
         if (cols.topReady) {
             u = chroma ? cols.topC : cols.topY;
-            identityY(n, ly, p.aspect, (float) sh, lv);
+            identityY(start >= 0 ? 1 : n, ly, p.aspect, (float) sh, lv);
         } else {
             rectifyRow(p, n, vx0, dvx, ly, 0.25f * (float) sw, (float) sh, lu, lv);
         }
         const int off = offsetFx(p.off[0], sw);
-        if (chroma) gatherUV(strip, n, u, lv, off, ou, ov, d.pixUV);
+        if (start >= 0) {
+            if (chroma) verticalUV(strip, start, n, lv[0], ou, ov, d.pixUV);
+            else verticalY(strip, start, n, lv[0], oy);
+        } else if (chroma) gatherUV(strip, n, u, lv, off, ou, ov, d.pixUV);
         else gatherY(strip, n, u, lv, off, oy);
         return;
     }
@@ -885,14 +992,19 @@ static void dashcamRow(const RemapSpec& p, const RemapSource* src, const Planes&
         if (b <= a) continue;
         const float tx0 = (vx0 + (float) a * dvx) * 3.f - (float) c;
         const int32_t* u = lu;
+        const int start = cols.bottomStart[div - 1][c];
         if (cols.bottomReady) {
             u = (chroma ? cols.bottomC : cols.bottomY) + a;
-            identityY(b - a, by, p.aspect, (float) sh, lv);
+            identityY(start >= 0 ? 1 : b - a, by, p.aspect, (float) sh, lv);
         } else {
             rectifyRow(p, b - a, tx0, dvx * 3.f, by, 0.25f * (float) sw, (float) sh, lu, lv);
         }
         const int off = offsetFx(cellOff[c], sw);
-        if (chroma) gatherUV(strip, b - a, u, lv, off, ou + (size_t) a * d.pixUV, ov + (size_t) a * d.pixUV, d.pixUV);
+        if (start >= 0) {
+            if (chroma) verticalUV(strip, start, b - a, lv[0],
+                    ou + (size_t) a * d.pixUV, ov + (size_t) a * d.pixUV, d.pixUV);
+            else verticalY(strip, start, b - a, lv[0], oy + a);
+        } else if (chroma) gatherUV(strip, b - a, u, lv, off, ou + (size_t) a * d.pixUV, ov + (size_t) a * d.pixUV, d.pixUV);
         else gatherY(strip, b - a, u, lv, off, oy + a);
     }
 }
