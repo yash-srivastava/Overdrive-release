@@ -511,7 +511,7 @@ The latest release in full, then earlier highlights. APKs and per-release notes 
 - **Timeline sharing** — A successful share no longer also copies a link or downloads the clip, and fallbacks use the clip you tapped.
 - **No more stuck pages** — The Notification Log shows load errors with a retry instead of an empty list. Parking history, Community Automations, the SoC history chart, hotspot status, search and SafeKeep badges no longer get stuck on old or failed answers. Backups no longer report success when the download failed.
 - **Security** — The MQTT settings pages can no longer be used to run other daemon commands.
-- **And more** — The language picker, themes in embedded pages, duplicate Community Widgets, and the layout of the parked-audio setting.
+- **And more** — The dashboard's recording chip stays in sync with the camera, Recent activity follows the app's language, and fixes to the language picker, themes in embedded pages, duplicate Community Widgets and the layout of the parked-audio setting.
 
 ### Earlier releases
 
