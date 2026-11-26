@@ -35,7 +35,7 @@ function assertFailed(f) {
     assert.strictEqual(f.elements.nlSkeleton.style.display, 'none');
     assert.strictEqual(f.elements.nlEmpty.style.display, 'none', 'failure must not claim an empty log');
     assert.strictEqual(f.elements.nlLoadError.style.display, '', 'retryable error is visible');
-    assert.strictEqual(f.elements.nlCount.style.display, 'none', 'failure must not claim a zero count');
+    assert.strictEqual(f.elements.nlCount.style.visibility, 'hidden', 'failure must not claim a zero count');
     assert.strictEqual(f.elements.nlPagination.style.display, 'none');
     assert.deepStrictEqual(f.toasts, [{ message: 'Could not load notifications', kind: 'error' }]);
 }
@@ -78,7 +78,7 @@ async function main() {
     assert.strictEqual(f.elements.nlLoadError.style.display, 'none');
     assert.strictEqual(f.elements.nlEmpty.style.display, 'none');
     assert.strictEqual(f.elements.nlCount.textContent, '1 notification');
-    assert.strictEqual(f.elements.nlCount.style.display, '');
+    assert.strictEqual(f.elements.nlCount.style.visibility, '');
     console.log('PASS retry recovers populated list and count');
 
     const g = fixture();

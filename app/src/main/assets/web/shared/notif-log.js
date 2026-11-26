@@ -147,11 +147,11 @@ var NOTIFLOG = {
     _updateCount: function () {
         var el = document.getElementById('nlCount');
         if (!el) return;
-        if (this._loadState === 'failed' || (this._loadState === 'loading' && !this.notifications.length)) {
-            el.style.display = 'none';
-            return;
-        }
+        // Hide the label but keep its slot, so the header actions stay at the end.
+        var hidden = this._loadState === 'failed' || (this._loadState === 'loading' && !this.notifications.length);
         el.style.display = '';
+        el.style.visibility = hidden ? 'hidden' : '';
+        if (hidden) return;
         if (!this.total) {
             // Header count doubles as a compact empty label so the header never
             // collapses. The big empty-state block (#nlEmpty) still shows below.
