@@ -446,10 +446,12 @@ public class RecordingsApiHandler {
         return recordingId != null && recordingId.matches("[0-9a-f]{32}");
     }
     
-    // Background thumbnail generator
-    private static final java.util.concurrent.ExecutorService thumbExecutor = 
-        java.util.concurrent.Executors.newSingleThreadExecutor();
-    private static final Set<String> pendingThumbs = java.util.Collections.synchronizedSet(new HashSet<>());
+    // One decoder, with a bounded total of running and queued cache misses.
+    private static final int MAX_PENDING_THUMBNAILS = 17;
+    private static final ThumbnailWorkQueue thumbQueue = new ThumbnailWorkQueue(MAX_PENDING_THUMBNAILS,
+            new java.util.concurrent.ThreadPoolExecutor(0, 1, 30L,
+                    java.util.concurrent.TimeUnit.SECONDS,
+                    new java.util.concurrent.ArrayBlockingQueue<>(MAX_PENDING_THUMBNAILS)));
     
     /**
      * Serve a cached thumbnail for a video file.
@@ -531,31 +533,8 @@ public class RecordingsApiHandler {
             return;
         }
 
-        // Queue background generation if not already pending. add() returns
-        // false when the element was already present, so a single atomic
-        // call avoids the check-then-act race where two concurrent requests
-        // both pass `contains()` and submit overlapping FileOutputStreams to
-        // the same thumb file.
-        if (pendingThumbs.add(cacheKey)) {
-            final File vf = videoFile;
-            final File tf = thumbFile;
-            final String pendingKey = cacheKey;
-            thumbExecutor.submit(() -> {
-                try {
-                    byte[] data = generateThumbnail(vf);
-                    if (data != null) {
-                        try (FileOutputStream fos = RemovableStorageFs.openOutput(tf)) {
-                            fos.write(data);
-                        }
-                    }
-                } catch (Exception e) {
-                    CameraDaemon.log("Background thumb gen failed: " + e.getMessage());
-                } finally {
-                    pendingThumbs.remove(pendingKey);
-                }
-            });
-        }
-        
+        queueThumbnail(cacheKey, videoFile, thumbFile);
+
         // Return 202 Accepted with retry hint - client should retry
         sendThumbnailGenerating(out);
     }
@@ -599,23 +578,28 @@ public class RecordingsApiHandler {
             HttpResponse.sendImage(out, thumbFile, "image/jpeg");
             return;
         }
-        if (pendingThumbs.add(recordingId)) {
-            thumbExecutor.submit(() -> {
-                try {
-                    byte[] data = generateThumbnail(videoFile);
-                    if (data != null) {
-                        try (FileOutputStream output = RemovableStorageFs.openOutput(thumbFile)) {
-                            output.write(data);
-                        }
-                    }
-                } catch (Exception failure) {
-                    CameraDaemon.log("ID thumbnail generation failed: " + failure.getMessage());
-                } finally {
-                    pendingThumbs.remove(recordingId);
-                }
-            });
-        }
+        queueThumbnail(recordingId, videoFile, thumbFile);
         sendThumbnailGenerating(out);
+    }
+
+    private static void queueThumbnail(String key, File videoFile, File thumbFile) {
+        // A saturated queue leaves the key unreserved: the next 202 retry can try again.
+        thumbQueue.submit(key, () -> {
+            try {
+                // A previous request may have populated the cache before this job ran.
+                if (RemovableStorageFs.isFile(thumbFile) && RemovableStorageFs.length(thumbFile) > 0) {
+                    return;
+                }
+                byte[] data = generateThumbnail(videoFile);
+                if (data != null) {
+                    try (FileOutputStream output = RemovableStorageFs.openOutput(thumbFile)) {
+                        output.write(data);
+                    }
+                }
+            } catch (Exception failure) {
+                CameraDaemon.log("Thumbnail generation failed: " + failure.getMessage());
+            }
+        });
     }
 
     /** True when the thumbnail source is a recording still being written. */
@@ -641,7 +625,7 @@ public class RecordingsApiHandler {
     
     /**
      * Generate a thumbnail from a video file using MediaMetadataRetriever.
-     * Extracts frame at 1 second mark, scales to 160x90 for efficiency.
+     * Extracts a thumbnail-sized frame at 1 second, falling back to the first frame.
      */
     private static byte[] generateThumbnail(File videoFile) {
         MediaMetadataRetriever retriever = new MediaMetadataRetriever();
@@ -666,7 +650,8 @@ public class RecordingsApiHandler {
 
             // Scale down to thumbnail size (320x180 for 16:9 aspect).
             scaled = Bitmap.createScaledBitmap(frame, 320, 180, true);
-            if (scaled == frame) scaled = scaled.copy(Bitmap.Config.ARGB_8888, false);
+            // Release the full-size frame early.
+            if (scaled != frame) frame.recycle();
             // Raw (player-dewarped) clips get the same lens correction as playback.
             if (scaled != null) {
                 scaled = com.overdrive.app.surveillance.LensTag.dewarpFrameForClip(scaled, videoFile);
@@ -697,6 +682,7 @@ public class RecordingsApiHandler {
             } catch (Exception e) {}
         }
     }
+
     /**
      * Reports whether a given filename is currently being written by the
      * encoder as {@code <filename>.tmp}. Used by the events page to display
