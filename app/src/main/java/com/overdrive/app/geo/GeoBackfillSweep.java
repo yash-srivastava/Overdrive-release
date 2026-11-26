@@ -1,16 +1,17 @@
 package com.overdrive.app.geo;
 
-import com.overdrive.app.storage.removable.RemovableStorageFs;
-
+import com.overdrive.app.config.UnifiedConfigManager;
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.storage.StorageManager;
+import com.overdrive.app.storage.removable.RemovableStorageFs;
 
 import org.json.JSONObject;
 
 import java.io.File;
-import java.io.FileReader;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.BiPredicate;
+import java.util.function.Function;
 
 /**
  * Retroactive place-name backfill for recordings whose sidecar has a GPS fix
@@ -29,18 +30,17 @@ import java.util.List;
  * <p>DESIGN — conservative and idempotent:
  * <ul>
  *   <li>Only touches sidecars that HAVE a {@code geo} fix and LACK
- *       {@code geo.place} — already-tagged and fix-less clips are skipped, so
- *       a steady-state library is a cheap stat-only pass.</li>
+ *       {@code geo.place} — already-tagged and fix-less clips are skipped.</li>
  *   <li>Only recent files (within {@link #MAX_AGE_MS}) — we don't re-walk an
- *       entire historical library every tick; a months-old untagged clip is not
- *       worth the geocode budget.</li>
+ *       historical library's JSON every tick; older files are skipped using
+ *       listing metadata.</li>
  *   <li>Per-sweep work cap ({@link #MAX_RESOLVES_PER_SWEEP}) so a backlog drains
  *       gradually instead of hammering Nominatim; the resolver's own
  *       {@code NominatimRateLimiter} (1 req/s + persisted cooldown) is the hard
  *       throttle underneath.</li>
- *   <li>Online gate respected: {@code resolveBlocking} applies the per-flow
- *       {@code geocoding} enable + {@code allowOnline} toggles and returns null
- *       when disabled, so a user who turned geocoding off gets no network I/O.</li>
+ *   <li>Disabled flows are skipped before opening sidecars. The resolver still
+ *       applies the live enable and {@code allowOnline} gates; offline tiers
+ *       remain available when only online geocoding is disabled.</li>
  *   <li>Every failure is swallowed — a backfill miss leaves the sidecar exactly
  *       as it was (untagged), never breaks recording/playback.</li>
  * </ul>
@@ -56,7 +56,7 @@ public final class GeoBackfillSweep {
     /** Only backfill clips finalized within this window (sidecar mtime). */
     private static final long MAX_AGE_MS = 6L * 60L * 60L * 1000L;  // 6 hours
 
-    /** Max online resolves per sweep — drains a backlog gradually. */
+    /** Max resolver attempts per sweep — drains a backlog gradually. */
     private static final int MAX_RESOLVES_PER_SWEEP = 8;
 
     /** After a resolve MISS (coords with no Nominatim address — offshore/
@@ -78,14 +78,12 @@ public final class GeoBackfillSweep {
      */
     public static int run() {
         int merged = 0;
-        // Count online resolve ATTEMPTS, not just successful merges, against the
-        // per-sweep budget. A fix-bearing clip whose coords are genuinely
-        // unresolvable (offshore/unsurveyed → Nominatim 200 with no address) returns
-        // null AND clears the rate-limiter cooldown (recordSuccess), so without an
-        // attempt-cap it would re-hit Nominatim on every clip every sweep. Capping
-        // attempts bounds network I/O regardless of outcome.
-        int attempts = 0;
         try {
+            // Snapshot the flow gates once per sweep. The resolver still checks the
+            // live setting before each lookup; newly enabled flows join next tick.
+            boolean recordingEnabled = UnifiedConfigManager.isGeocodingEnabledForFlow("recording");
+            boolean surveillanceEnabled = UnifiedConfigManager.isGeocodingEnabledForFlow("surveillance");
+            if (!recordingEnabled && !surveillanceEnabled) return 0;
             StorageManager sm = StorageManager.getInstance();
             long now = System.currentTimeMillis();
 
@@ -96,117 +94,26 @@ public final class GeoBackfillSweep {
 
             GeocodingResolver resolver = GeocodingResolver.getInstance();
 
-            // PHASE 1 — gather candidates (NO network). A candidate is a recent
-            // sidecar with a usable geo fix and no resolved place. We then sort
-            // NEWEST-mtime-first so the per-sweep online budget always goes to the
-            // freshest clips: dir.listFiles() returns raw OS order, so without this
-            // a backlog of older UNRESOLVABLE clips (open-water GPS → empty-address
-            // 200, which returns null and re-qualifies every sweep) could burn the
-            // 8-attempt budget ahead of a just-recorded resolvable clip, delaying
-            // its tag by up to MAX_AGE_MS. Phase 1 is the cheap stat/parse pass the
-            // class is designed around.
-            List<Candidate> candidates = new ArrayList<>();
+            // Collect only listing metadata first. Sort before opening JSON so older
+            // sidecars need not be read after the resolve budget is exhausted.
+            List<RecentSidecar> recent = new ArrayList<>();
             for (File dir : dirs) {
                 File[] sidecars = sm.listFilesWithFallback(dir, ".json");
                 if (sidecars == null) continue;
                 for (File sidecar : sidecars) {
                     try {
+                        String flow = inferFlow(sidecar.getName());
+                        if ("surveillance".equals(flow) ? !surveillanceEnabled : !recordingEnabled) continue;
                         long mtime = RemovableStorageFs.listedLastModified(sidecar);
-                        if (mtime <= 0L || now - mtime < 0L) continue;
-                        // STAT-ONLY fast skip (the "cheap pass" this class promises):
-                        // a clip whose mtime is already older than MAX_AGE_MS can
-                        // never be eligible — drop it WITHOUT a read+parse. Safe for
-                        // marked clips too: markPlaceUnresolved rewrites the sidecar
-                        // (resetting mtime to ~now) and the marker is retried only
-                        // within the 6h window, so a still-eligible marked clip
-                        // always has mtime <= MAX_AGE_MS here; the precise
-                        // marker-anchored age gate below still governs it. This
-                        // turns the steady-state historical library into a true
-                        // stat-only pass instead of re-parsing every sidecar/tick.
-                        if (now - mtime > MAX_AGE_MS) continue;
-
-                        JSONObject root = readSidecar(sidecar);
-                        if (root == null) continue;
-                        JSONObject geo = root.optJSONObject("geo");
-                        if (geo == null) continue;                    // no fix → nothing to tag
-                        if (geo.has("place")) continue;               // already tagged → skip
-
-                        long unresolvedAt = geo.optLong("placeUnresolvedAtMs", 0L);
-                        // AGE GATE. For a marked clip, age against the STABLE
-                        // first-seen marker (the rewrite bumped mtime, so mtime
-                        // would never expire); for an unmarked clip, age against
-                        // mtime (its finalize time). Either way, stop at MAX_AGE_MS.
-                        long ageBasis = unresolvedAt > 0L ? unresolvedAt : mtime;
-                        if (now - ageBasis > MAX_AGE_MS) continue;
-                        // Cooldown: skip a recently-failed clip until it elapses,
-                        // so an unresolvable fix doesn't re-consume the budget.
-                        if (unresolvedAt > 0L && (now - unresolvedAt) < UNRESOLVED_COOLDOWN_MS) continue;
-                        double[] ll = extractLatLng(geo);
-                        if (ll == null) continue;                     // no usable coords
-
-                        candidates.add(new Candidate(sidecar, ll[0], ll[1], mtime));
+                        if (mtime <= 0L || now - mtime < 0L || now - mtime > MAX_AGE_MS) continue;
+                        recent.add(new RecentSidecar(sidecar, mtime, flow));
                     } catch (Throwable t) {
                         logger.warn("Backfill scan failed for " + sidecar.getName() + ": " + t.getMessage());
                     }
                 }
             }
-            // Newest first.
-            candidates.sort((a, b) -> Long.compare(b.mtime, a.mtime));
-
-            // PHASE 2 — resolve newest-first, capped on ATTEMPTS (network calls),
-            // not just successes.
-            for (Candidate c : candidates) {
-                if (attempts >= MAX_RESOLVES_PER_SWEEP) break;
-                try {
-                    String flow = inferFlow(c.sidecar.getName());
-                    // Let the 1-token/s bucket REFILL before a throttled candidate so
-                    // this sweep can do up to MAX_RESOLVES_PER_SWEEP real resolves,
-                    // not just one. Without this, candidate #1 takes the only token
-                    // and #2..#8 throttle-skip but still burn the attempt budget —
-                    // so with newest-first ordering, older first-visit clips on a
-                    // road trip starve and age out untagged at 6h. Safe to block:
-                    // this runs on the dedicated GeoBackfill daemon thread (off the
-                    // memory-watchdog scheduler); shutdownNow() interrupts the sleep.
-                    // Still <=8 calls/sweep and <=1 req/s → OSM-compliant.
-                    if (NominatimRateLimiter.isThrottled()) {
-                        try { Thread.sleep(1100L); }
-                        catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
-                    }
-                    attempts++;   // count the online attempt regardless of outcome
-                    // reached[0] is set true ONLY when our own call won the
-                    // rate-limiter token and issued the HTTP request — so a null
-                    // with reached[0]==true is a GENUINE reach-but-empty-address
-                    // miss (offshore/unsurveyed), the only case worth pinning.
-                    boolean[] reached = new boolean[1];
-                    PlaceResult place = resolver.resolveBlocking(c.lat, c.lng, flow, reached);
-                    if (place == null) {
-                        // Mark unresolved ONLY for a genuine reach-but-empty miss.
-                        // Every "didn't actually reach Nominatim" null — token raced
-                        // away by a concurrent live resolve, active cooldown, offline
-                        // mode, or geocoding disabled — is transient and must be
-                        // retried next tick, NOT pinned for an hour. The explicit
-                        // reached flag replaces the earlier racy rate-limiter probes
-                        // (isThrottled was polluted by our own just-consumed token).
-                        boolean genuineEmptyMiss = reached[0]
-                                && NominatimRateLimiter.getCooldownUntilMs() <= System.currentTimeMillis();
-                        if (genuineEmptyMiss) {
-                            try { SidecarGeoUpdater.markPlaceUnresolved(c.sidecar, now); } catch (Throwable ignored) {}
-                        }
-                        continue;
-                    }
-
-                    File mp4 = mp4SiblingOf(c.sidecar);
-                    if (mp4 != null) {
-                        SidecarGeoUpdater.mergePlaceForMp4(mp4, place); // routes through H2 index upsert
-                    } else {
-                        SidecarGeoUpdater.mergePlace(c.sidecar, place);
-                    }
-                    merged++;
-                    logger.info("Backfilled place for " + c.sidecar.getName());
-                } catch (Throwable t) {
-                    logger.warn("Backfill failed for " + c.sidecar.getName() + ": " + t.getMessage());
-                }
-            }
+            merged = scanRecent(recent, now, GeoBackfillSweep::readSidecar,
+                    (entry, ll) -> resolveCandidate(resolver, entry, ll, now));
             if (merged > 0) logger.info("Geo backfill sweep merged " + merged + " place tag(s)");
         } catch (Throwable t) {
             logger.warn("Geo backfill sweep error: " + t.getMessage());
@@ -214,14 +121,77 @@ public final class GeoBackfillSweep {
         return merged;
     }
 
-    /** A scanned untagged-but-fix-bearing sidecar awaiting online resolve. */
-    private static final class Candidate {
+    // Inject reads and resolutions so the work budget can be tested without disk/network I/O.
+    static int scanRecent(List<RecentSidecar> recent, long now,
+                          Function<File, JSONObject> reader,
+                          BiPredicate<RecentSidecar, double[]> resolve) {
+        // List.sort is stable, preserving listing order for equal mtimes.
+        recent.sort((a, b) -> Long.compare(b.mtime, a.mtime));
+        int attempts = 0;
+        int merged = 0;
+        for (RecentSidecar entry : recent) {
+            if (attempts >= MAX_RESOLVES_PER_SWEEP || Thread.currentThread().isInterrupted()) break;
+            try {
+                JSONObject root = reader.apply(entry.sidecar);
+                if (root == null) continue;
+                JSONObject geo = root.optJSONObject("geo");
+                if (geo == null || geo.has("place")) continue;
+                // Rewrites refresh mtime, but the first unresolved marker anchors
+                // the retry window and cooldown, just as before.
+                long unresolvedAt = geo.optLong("placeUnresolvedAtMs", 0L);
+                long ageBasis = unresolvedAt > 0L ? unresolvedAt : entry.mtime;
+                if (now - ageBasis > MAX_AGE_MS) continue;
+                if (unresolvedAt > 0L && now - unresolvedAt < UNRESOLVED_COOLDOWN_MS) continue;
+                double[] ll = extractLatLng(geo);
+                if (ll == null) continue;
+
+                // Count attempts, including misses/errors, not just successful merges.
+                attempts++;
+                if (resolve.test(entry, ll)) merged++;
+            } catch (Throwable t) {
+                logger.warn("Backfill failed for " + entry.sidecar.getName() + ": " + t.getMessage());
+            }
+        }
+        return merged;
+    }
+
+    private static boolean resolveCandidate(GeocodingResolver resolver, RecentSidecar entry,
+                                            double[] ll, long now) {
+        // Allow the token bucket to refill, on the dedicated backfill worker only.
+        if (NominatimRateLimiter.isThrottled()) {
+            try { Thread.sleep(1100L); }
+            catch (InterruptedException ie) { Thread.currentThread().interrupt(); return false; }
+        }
+        boolean[] reached = new boolean[1];
+        PlaceResult place = resolver.resolveBlocking(ll[0], ll[1], entry.flow, reached);
+        if (place == null) {
+            // Only a genuine online empty-address miss warrants an unresolved marker.
+            boolean genuineEmptyMiss = reached[0]
+                    && NominatimRateLimiter.getCooldownUntilMs() <= System.currentTimeMillis();
+            if (genuineEmptyMiss) {
+                try { SidecarGeoUpdater.markPlaceUnresolved(entry.sidecar, now); } catch (Throwable ignored) {}
+            }
+            return false;
+        }
+        File mp4 = mp4SiblingOf(entry.sidecar);
+        if (mp4 != null) {
+            SidecarGeoUpdater.mergePlaceForMp4(mp4, place); // routes through H2 index upsert
+        } else {
+            SidecarGeoUpdater.mergePlace(entry.sidecar, place);
+        }
+        logger.info("Backfilled place for " + entry.sidecar.getName());
+        return true;
+    }
+
+    /** Recent listing metadata; no JSON or coordinates retained during sorting. */
+    static final class RecentSidecar {
         final File sidecar;
-        final double lat;
-        final double lng;
         final long mtime;
-        Candidate(File sidecar, double lat, double lng, long mtime) {
-            this.sidecar = sidecar; this.lat = lat; this.lng = lng; this.mtime = mtime;
+        final String flow;
+        RecentSidecar(File sidecar, long mtime, String flow) {
+            this.sidecar = sidecar;
+            this.mtime = mtime;
+            this.flow = flow;
         }
     }
 
