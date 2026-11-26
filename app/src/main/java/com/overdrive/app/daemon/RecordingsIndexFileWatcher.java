@@ -5,6 +5,8 @@ import android.os.FileObserver;
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.server.RecordingsIndex;
 import com.overdrive.app.storage.StorageManager;
+import com.overdrive.app.storage.removable.RecordingListingSnapshot;
+import com.overdrive.app.storage.removable.RemovableStorageFs;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -276,46 +278,24 @@ public final class RecordingsIndexFileWatcher {
                 return t;
             });
         }
-        final java.util.Map<String, String> previous = new java.util.HashMap<>();
-        final boolean[] baseline = {false};
+        final RecordingListingSnapshot[] previous = {null};
         Runnable poll = () -> {
             try {
-                File[] kids = com.overdrive.app.storage.removable.RemovableStorageFs.listFiles(dir);
-                if (kids == null) return;  // volume gone or unreadable: keep the last state
-                java.util.Map<String, String> now = new java.util.HashMap<>();
-                for (File k : kids) {
-                    String name = k.getName();
-                    if (!name.endsWith(".mp4") && !name.endsWith(".json")) continue;
-                    // The listing's own metadata: no per-file lookups on every tick.
-                    now.put(name, com.overdrive.app.storage.removable.RemovableStorageFs.listingSignature(k));
-                }
-                boolean listedMp4 = false;
-                for (String n : now.keySet()) listedMp4 |= n.endsWith(".mp4");
-                boolean hadMp4 = false;
-                for (String n : previous.keySet()) hadMp4 |= n.endsWith(".mp4");
-                // A listing without any clip after one with clips is more likely a MediaStore hiccup.
-                if (baseline[0] && hadMp4 && !listedMp4) return;
-                if (baseline[0]) {
-                    for (java.util.Map.Entry<String, String> e : now.entrySet()) {
-                        if (e.getValue().equals(previous.get(e.getKey()))) continue;
-                        String name = e.getKey();
-                        String mp4 = name.endsWith(".json")
-                                ? name.substring(0, name.length() - ".json".length()) + ".mp4" : name;
-                        queue.submit(new File(dir, mp4).getAbsolutePath(),
-                                RecordingIndexEventQueue.Change.REFRESH);
+                RecordingListingSnapshot now = RemovableStorageFs.listRecordingSnapshot(dir, previous[0]);
+                if (now == null) return;  // volume gone or unreadable: keep the last state
+                if (now.dispatchChanges(previous[0], name -> {
+                    String mp4 = name.endsWith(".json")
+                            ? name.substring(0, name.length() - ".json".length()) + ".mp4" : name;
+                    queue.submit(new File(dir, mp4).getAbsolutePath(),
+                            RecordingIndexEventQueue.Change.REFRESH);
+                }, gone -> {
+                    File file = new File(dir, gone);
+                    if (RemovableStorageFs.isConfirmedAbsent(file)) {
+                        queue.submit(file.getAbsolutePath(), RecordingIndexEventQueue.Change.REMOVE);
                     }
-                    for (String gone : previous.keySet()) {
-                        if (gone.endsWith(".mp4") && !now.containsKey(gone)
-                                && com.overdrive.app.storage.removable.RemovableStorageFs
-                                        .isConfirmedAbsent(new File(dir, gone))) {
-                            queue.submit(new File(dir, gone).getAbsolutePath(),
-                                    RecordingIndexEventQueue.Change.REMOVE);
-                        }
-                    }
+                })) {
+                    previous[0] = now;
                 }
-                previous.clear();
-                previous.putAll(now);
-                baseline[0] = true;
             } catch (Throwable t) {
                 logger.warn("Routed poll failed for " + dir + ": " + t.getMessage());
             }
