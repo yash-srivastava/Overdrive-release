@@ -154,10 +154,26 @@ private class PointTree(private val lat: DoubleArray, private val lng: DoubleArr
             val b = nd * 6
             if (minDist2(b, k) > hi2) continue
             val all = maxDist2(b, k) < lo2
-            if (all || left[nd] < 0) {
+            if (all) {
+                // The whole subtree is inside the radius. Its live count is exact, so
+                // update ancestors once instead of walking from every claimed leaf.
                 for (t in from[nd] until to[nd]) {
                     val q = idx[t]
-                    if (assign[q] < 0 && (all || near(k, q))) {
+                    if (assign[q] < 0) assign[q] = place
+                }
+                val claimed = unclaimed[nd]
+                unclaimed[nd] = 0
+                // Descendant counts may now be stale: claim() never enters a zero-count
+                // subtree again, and consume() is only called for unassigned points.
+                var ancestor = parent[nd]
+                while (ancestor >= 0) {
+                    unclaimed[ancestor] -= claimed
+                    ancestor = parent[ancestor]
+                }
+            } else if (left[nd] < 0) {
+                for (t in from[nd] until to[nd]) {
+                    val q = idx[t]
+                    if (assign[q] < 0 && near(k, q)) {
                         assign[q] = place
                         consume(q)
                     }
@@ -214,15 +230,18 @@ private class PointTree(private val lat: DoubleArray, private val lng: DoubleArr
             if (z[p] < box[b + 4]) box[b + 4] = z[p]
             if (z[p] > box[b + 5]) box[b + 5] = z[p]
         }
-        if (end - start <= LEAF) {
+        val ex = box[b + 1] - box[b]
+        val ey = box[b + 3] - box[b + 2]
+        val ez = box[b + 5] - box[b + 4]
+        // All query centres are input points. If the root box's diagonal is
+        // strictly inside the conservative radius, every query accepts the root.
+        // Only the root can use this shortcut: outside queries may cut child boxes.
+        if (end - start <= LEAF || (up < 0 && sq(ex) + sq(ey) + sq(ez) < lo2)) {
             left[nd] = -1
             right[nd] = -1
             for (t in start until end) leafOf[idx[t]] = nd
             return nd
         }
-        val ex = box[b + 1] - box[b]
-        val ey = box[b + 3] - box[b + 2]
-        val ez = box[b + 5] - box[b + 4]
         val c = if (ex >= ey && ex >= ez) x else if (ey >= ez) y else z
         val mid = (start + end) ushr 1
         select(start, end - 1, mid, c)
@@ -231,7 +250,7 @@ private class PointTree(private val lat: DoubleArray, private val lng: DoubleArr
         return nd
     }
 
-    /** Partial sort of idx[l..r] so that position [k] holds its rank-k element by [c]. */
+    /** Partial sort of the index range l through r so that position [k] holds its rank-k element by [c]. */
     private fun select(l0: Int, r0: Int, k: Int, c: DoubleArray) {
         var l = l0
         var r = r0
