@@ -17,6 +17,8 @@ Read CONTRIBUTING.md first; this file only adds what coding agents get wrong.
 
 ## Code rules
 - Never name other third-party car apps in code, comments, strings or docs. Describe the behaviour instead.
+- Do not create `.md` files (design notes, audits, reports, `docs/*.md`). Put the reasoning in the PR description
+  and commit message, and keep code comments short. Edit an existing doc only when user-facing behaviour changes.
 - New daemon paths go through `ScratchRoot`, not hard-coded `/data/local/tmp` paths.
 - Translations: edit `values/strings.xml` and `web/i18n/en.json` only; other locales come from the translation sheets.
 - Keep PRs small and single-purpose, and say in the PR how you verified the change (build, tests, device).

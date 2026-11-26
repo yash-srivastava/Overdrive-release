@@ -181,7 +181,9 @@ Look for issues labeled `good first issue` or `help wanted`. These are a great s
 1. **Branch naming**: Use descriptive branch names like `fix/camera-crash`, `feature/trip-export`, or `docs/update-readme`.
 2. **Keep PRs focused**: One feature or fix per PR. Smaller PRs are easier to review and merge.
 3. **Write a clear description**: Explain what changed, why, and how to test it.
-4. **Update documentation**: If your change affects behavior, update relevant docs.
+4. **Update documentation**: If your change affects behavior, update the existing docs it touches (README, CONTRIBUTING).
+   Do not add new Markdown files (in `docs/` or anywhere else) to describe a change. The reasoning goes in the
+   PR description and commit message, and short notes go in code comments next to the code they explain.
 5. **Ensure the build passes**: Run `./gradlew assembleDebug` and `./gradlew test` before submitting.
 6. **Respond to feedback**: Be open to review comments and iterate on your changes.
 
