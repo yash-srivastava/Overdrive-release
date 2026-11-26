@@ -1255,8 +1255,10 @@ var VC = {
             this._lastRenderFrame = now;
         }
         if (this.controls) this.controls.update();
-        // Update canvas texture each frame when 3D view is active
-        if (this._3dViewActive && this._videoTexture) {
+        // Current players mark the texture only when the canvas changes.
+        // Keep the old upload behavior if a cached older player is in use.
+        if (this._3dViewActive && this._videoTexture &&
+                (!this._sotaPlayer || typeof this._sotaPlayer.onCanvasChanged !== 'function')) {
             this._videoTexture.needsUpdate = true;
         }
         if (this.renderer && this.scene && this.camera) {
@@ -6544,10 +6546,16 @@ var VC = {
                     if (self._3dTimeout) { clearTimeout(self._3dTimeout); self._3dTimeout = null; }
                     self.toast(BYD.i18n.t('vehicle.stream_3d_connected'), 'success');
                 };
-                this._sotaPlayer.onFrame = function() {
-                    // Mark texture as needing update on each decoded frame
-                    if (self._videoTexture) self._videoTexture.needsUpdate = true;
-                };
+                var player = this._sotaPlayer;
+                if ('onCanvasChanged' in player) {
+                    player.onCanvasChanged = function() {
+                        // A retired player must not dirty a replacement texture.
+                        if (self._sotaPlayer === player && self._videoTexture &&
+                                self._3dCanvas === player.canvas) {
+                            self._videoTexture.needsUpdate = true;
+                        }
+                    };
+                }
                 this._sotaPlayer.onDisconnected = function() {
                     console.log('[VC] 3D WebCodecs stream disconnected');
                 };
