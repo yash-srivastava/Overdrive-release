@@ -35,7 +35,7 @@ import java.lang.reflect.Field;
 public final class BluetoothAccessMonitor {
     private static final String TAG = "BluetoothAccessMonitor";
     private static final long CONNECTED_INTERVAL_MS = 1000;
-    private static BluetoothAccessMonitor instance;
+    private static volatile BluetoothAccessMonitor instance;
     private final JSONObject config;
     private final Context context;
     private final String instanceId = UUID.randomUUID().toString();
@@ -171,6 +171,7 @@ public final class BluetoothAccessMonitor {
         if (current == null) return;
         current.running = false;
         current.reconnect.stop();
+        restoreParkedPhoneAudio(current.context);
         Log.i(TAG, "Monitoring stopping for " + current.workers.size() + " trusted phone(s)");
         for (PhoneWorker worker : current.workers) {
             worker.thread.interrupt();
@@ -188,6 +189,35 @@ public final class BluetoothAccessMonitor {
         boolean stopped = true;
         for (PhoneWorker worker : current.workers) stopped &= !worker.thread.isAlive();
         if (stopped) instance = null;
+    }
+
+    /** True while a running collector keeps the parked phone's audio on the phone. */
+    static boolean parkedPhoneAudioWanted(Context context) {
+        BluetoothAccessMonitor current = instance;
+        if (current == null || !current.running) return false;
+        try {
+            JSONObject persisted = RemoteAccessSettings.read();
+            return persisted.optBoolean("enabled") && persisted.optBoolean("keepBluetoothOn")
+                    && RemoteAccessSettings.parkedPhoneAudioOff(persisted)
+                    && !com.overdrive.app.config.ServiceModeFeatureGate.isPausedInConfig("proximity")
+                    && VehiclePowerReader.readNow(context) == 0;
+        } catch (Throwable unavailable) {
+            return false;
+        }
+    }
+
+    /** App start: undo a parked-audio change a crash or kill left behind. Never blocks. */
+    public static void restoreParkedPhoneAudioOnStartup(Context context) {
+        AndroidParkedPhoneAudio.restoreOnStartup(context);
+    }
+
+    private static void restoreParkedPhoneAudio(Context context) {
+        try {
+            AndroidParkedPhoneAudio.shared(context)
+                    .restoreAllAsync(() -> parkedPhoneAudioWanted(context));
+        } catch (Throwable unavailable) {
+            Log.w(TAG, "Parked phone audio restore unavailable: " + unavailable.getClass().getSimpleName());
+        }
     }
 
     private static JSONObject runtime(Context context) throws Exception {
@@ -369,6 +399,7 @@ public final class BluetoothAccessMonitor {
                 try { reconnect.tick(address, connected); }
                 catch (Throwable unavailable) { reconnect.stopAfterUnexpectedFailure(unavailable); }
                 if (!running || Thread.currentThread().isInterrupted()) break;
+                submitParkedPhoneAudio(persisted, radioPower, connected);
                 reportDiagnostic(reason);
                 boolean directiveReceived = publish(raw, connected, reason, observedAtElapsedMs, connectionProof);
                 // A successful authenticated relay response refreshes the camera-daemon
@@ -405,8 +436,25 @@ public final class BluetoothAccessMonitor {
             if (activeWorkers.decrementAndGet() == 0) {
                 running = false;
                 reconnect.stop();
+                restoreParkedPhoneAudio(context);
                 Log.i(TAG, "Monitoring workers stopped");
             }
+        }
+    }
+
+    /**
+     * Hands this tick to the parked-audio guard, which works on its own thread. Its result never
+     * feeds back into proximity: a failure here cannot block sampling, locking or unlocking.
+     */
+    private void submitParkedPhoneAudio(JSONObject persisted, Integer knownPower, boolean connected) {
+        try {
+            final Integer power = knownPower;
+            AndroidParkedPhoneAudio.shared(context).submit(address,
+                    RemoteAccessSettings.parkedPhoneAudioOff(persisted),
+                    () -> running && instance == BluetoothAccessMonitor.this,
+                    () -> power != null ? power : VehiclePowerReader.readNow(context), connected);
+        } catch (Throwable unavailable) {
+            Log.w(TAG, "Parked phone audio unavailable: " + unavailable.getClass().getSimpleName());
         }
     }
 
@@ -440,6 +488,7 @@ public final class BluetoothAccessMonitor {
                     .put("connectionObservedAtElapsedMs", connectionProof.connectionObservedAtElapsedMs)
                     .put("connectionModeGeneration", connectionProof.connectionModeGeneration)
                     .put("reconnect", reconnectSnapshot(address))
+                    .put("parkedAudio", parkedAudioSnapshot())
                     .put("observedAtElapsedMs", observedAtElapsedMs)
                     .put("runtime", new JSONObject().put("active", running)
                             .put("readerRegistered", reader != null && reader.isRegistered())
@@ -476,6 +525,11 @@ public final class BluetoothAccessMonitor {
             relay = null;
             if (connection != null) connection.disconnect();
         }
+    }
+
+    private JSONObject parkedAudioSnapshot() {
+        try { return AndroidParkedPhoneAudio.shared(context).snapshot(address); }
+        catch (Throwable unavailable) { return new JSONObject(); }
     }
 
     private synchronized void releaseReader() {

@@ -62,13 +62,14 @@ public class RemoteAccessCollectorStateAssetTest {
         String html = readRepositoryFile(PAGE);
         // 18 Oct snappy-proximity run bumped the script (new Advanced fields and the sent outcome label);
         // 19 Oct bumped it again for the keyfob unlock-trigger switch; 20 Oct for the snappy-locks controls.
-        assertTrue(html.contains("<script src=\"../shared/remote-access.js?v=31\"></script>"));
+        assertTrue(html.contains("<script src=\"../shared/remote-access.js?v=32\"></script>"));
         assertFalse(html.contains("remote-access.js?v=23"));
         assertFalse(html.contains("remote-access.js?v=24"));
         assertFalse(html.contains("remote-access.js?v=25"));
         assertFalse(html.contains("remote-access.js?v=27")); // 2 Nov: Hebrew i18n wiring
         assertFalse(html.contains("remote-access.js?v=28")); // 7 Nov: roster awaiting-connection label
         assertFalse(html.contains("remote-access.js?v=30")); // 18 Nov: parked Bluetooth safe zones (#792)
+        assertFalse(html.contains("remote-access.js?v=31")); // 26 Nov: parked phone audio (#1084)
         assertEquals(1, count(html, "remote-access.js?v="));
     }
 

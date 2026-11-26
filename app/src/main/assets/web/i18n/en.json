@@ -6446,6 +6446,8 @@
     "phone_priority_desc": "While a trusted phone is confirmed near the car, keyfob departure does not lock it. Leave this off if a phone often stays in the car: it would then stop keyfob walk-away locking.",
     "lock_with_key_inside": "Lock with the key left inside",
     "lock_with_key_inside_desc": "A phone departure locks the car even when the key is detected inside, without waiting for the key search. The key then cannot unlock the car until it is unlocked another way, such as a trusted phone returning or the key's own button.",
+    "parked_phone_audio_off": "Keep calls and music on the phone while parked",
+    "parked_phone_audio_off_desc": "Experimental. While the car is off, the Bluetooth link kept for proximity refuses call audio and disconnects media audio, so calls and music stay on your phone. Both come back when the car powers on. Some phones may still ring in the car.",
     "keyfob_key_inside_locked": "The key was left inside after a phone lock. It will not unlock the car until the car is unlocked another way, such as a trusted phone returning.",
     "confirm_with_vehicle": "Confirm with the car's lock state",
     "confirm_with_vehicle_desc": "After a proximity command is sent, read the driver-door lock state back from the car and record whether it changed. This runs in the background and never delays the next decision. Turning it off records every command as sent without checking the car and also disables the cloud fallback, which needs that check to know when it is required.",
