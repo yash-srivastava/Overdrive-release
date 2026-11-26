@@ -37,16 +37,22 @@ public final class ConnectedComponents {
         List<Component> out = new ArrayList<>();
         if (score == null || w <= 0 || h <= 0 || (long) w * h > score.length) return out;
         int pixels = w * h;
-        BitSet visited = new BitSet(pixels);
+        // Classify once; a set bit is a foreground pixel not yet queued.
+        // Keep the original < test (NaN scores also count as foreground).
+        BitSet remaining = new BitSet(pixels);
+        for (int i = 0; i < pixels; i++) {
+            if (!(score[i] < thresh)) remaining.set(i);
+        }
+        int start = remaining.nextSetBit(0);
+        if (start < 0) return out;
         // Only pending pixels need queue storage, not the entire component or map.
         PixelQueue queue = new PixelQueue(pixels);
-        for (int start = 0; start < pixels; start++) {
-            if (visited.get(start) || score[start] < thresh) continue;
+        for (; start >= 0; start = remaining.nextSetBit(start + 1)) {
             Component c = new Component();
             c.minX = c.maxX = start % w;
             c.minY = c.maxY = start / w;
             queue.add(start);
-            visited.set(start);
+            remaining.clear(start);
             while (!queue.isEmpty()) {
                 int idx = queue.remove();
                 int x = idx % w, y = idx / w;
@@ -64,8 +70,8 @@ public final class ConnectedComponents {
                         int nx = x + dx;
                         if (nx < 0 || nx >= w) continue;
                         int n = ny * w + nx;
-                        if (visited.get(n) || score[n] < thresh) continue;
-                        visited.set(n);
+                        if (!remaining.get(n)) continue;
+                        remaining.clear(n);
                         queue.add(n);
                     }
                 }
