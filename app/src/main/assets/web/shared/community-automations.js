@@ -44,6 +44,7 @@ BYD.communityAutomations = {
     _searchTimer: null,
     _loading: false,
     _listRequestId: 0,
+    _detailRequestId: 0,
     // {localAutomationId: communityRowId} from the daemon — which local automation owns
     // which published row. Populated by _loadPublishedIds; {} until then.
     _publishedIds: {},
@@ -67,6 +68,7 @@ BYD.communityAutomations = {
         document.addEventListener('ot-tabs:active-changed', function (ev) {
             var id = (ev && ev.detail) ? ev.detail.id : null;
             if (id === 'community') self.loadPage(self.currentPage || 1);
+            else if (id) self._detailRequestId++; // Discard pending previews when leaving the tab.
         });
         // Augment each existing automation card (rendered by automations.js) with a
         // Publish button. Two mechanisms, both idempotent via the data-community-augmented
@@ -460,16 +462,21 @@ BYD.communityAutomations = {
 
     openDetail: function (id) {
         var self = this;
+        var requestId = ++this._detailRequestId;
         fetch('/api/community/automation/' + encodeURIComponent(id), { cache: 'no-store' })
             .then(function (r) { return r.json(); })
             .then(function (data) {
+                // A newer selection or tab change owns the detail UI now.
+                if (requestId !== self._detailRequestId) return;
                 if (!data || data.error || !data.automation) {
                     self._toast(self._t('community.load_failed'), 'error');
                     return;
                 }
                 self._showDetailModal(data.automation);
             })
-            .catch(function () { self._toast(self._t('community.load_failed'), 'error'); });
+            .catch(function () {
+                if (requestId === self._detailRequestId) self._toast(self._t('community.load_failed'), 'error');
+            });
     },
 
     _showDetailModal: function (a) {
