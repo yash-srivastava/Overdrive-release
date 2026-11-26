@@ -143,18 +143,9 @@ public final class CameraPreviewHelper {
      * Crop the panoramic mosaic JPEG into the slice quadrant. Single-flight,
      * zero camera open.
      *
-     * <p>Two sources of the mosaic JPEG, in order of preference:
-     * <ol>
-     *   <li>Surveillance engine's pre-encoded {@code latestMosaicJpeg} —
-     *       published every 15 frames in {@code processFrame}, but ONLY when
-     *       sentry is active. Free read.</li>
-     *   <li>Sync GL readback from {@code PanoramicCameraGpu.getLatestJpegFrame(0)}
-     *       — works whenever the camera pipeline is running, regardless of
-     *       sentry state. Costs ~150 ms (FBO render + glReadPixels + JPEG).
-     *       This is the fallback path for proximity-guard mode where
-     *       surveillance is idle but the camera is still streaming.</li>
-     * </ol>
-     * Returns null when neither source can produce a frame (pipeline cold).
+     * <p>Prefer a full-resolution GL slice from the live pipeline. If that
+     * is unavailable, crop the engine's pre-encoded mosaic while it is current.
+     * Returns null when neither source can produce a frame.
      */
     public static byte[] capturePanoramicSliceJpeg(PanoramicSlice slice) {
         if (slice == null) return null;
@@ -376,26 +367,6 @@ public final class CameraPreviewHelper {
             if (engine == null) return null;
             return engine.getLatestMosaicJpeg();
         } catch (Exception e) {
-            return null;
-        }
-    }
-
-    /**
-     * Fallback when the engine isn't running (proximity-guard mode): post a
-     * sync GL readback to the camera's glHandler, encode JPEG. Costs ~150 ms
-     * but works whenever the camera pipeline is alive.
-     */
-    private static byte[] liveDownscalerMosaicJpeg() {
-        try {
-            com.overdrive.app.surveillance.GpuSurveillancePipeline p =
-                com.overdrive.app.daemon.CameraDaemon.getGpuPipeline();
-            if (p == null) return null;
-            com.overdrive.app.camera.PanoramicCameraGpu cam = p.getCamera();
-            if (cam == null) return null;
-            // cameraId=0 is the "full mosaic" code path in getLatestJpegFrame.
-            return cam.getLatestJpegFrame(0);
-        } catch (Exception e) {
-            logger.warn("liveDownscalerMosaicJpeg failed: " + e.getMessage());
             return null;
         }
     }

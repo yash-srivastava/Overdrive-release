@@ -416,9 +416,6 @@ open class MainActivity : AppCompatActivity() {
             android.util.Log.w("MainActivity", "ProcessRevivalReceiver.schedule failed: ${e.message}")
         }
         
-        // Setup privileged shell (UID 1000) - required for daemon management
-        // setupPrivilegedShell()
-        
         // Start daemons and services
         // Device ID is already synced above via generateDeviceId() which writes to file async
         // The daemon will reload from file when getState() is called
@@ -1726,40 +1723,6 @@ open class MainActivity : AppCompatActivity() {
                 logsViewModel.error("Location", "Failed to start Location Sidecar: $error")
             }
         })
-    }
-    
-    /**
-     * Setup the privileged shell (UID 1000) for daemon management.
-     * This must be done before starting any daemons that need elevated privileges.
-     */
-    private fun setupPrivilegedShell() {
-        logsViewModel.info("Shell", "Setting up privileged shell...")
-        
-        // PrivilegedShellSetup disabled — all daemons now run via ADB shell (UID 2000)
-        // PrivilegedShellSetup.init(this)
-        // 
-        // PrivilegedShellSetup.setup(object : PrivilegedShellSetup.SetupCallback {
-        //     override fun onSuccess() {
-        //         runOnUiThread {
-        //             logsViewModel.info("Shell", "✓ Privileged shell ready (UID 1000)")
-        //             daemonStartupManager.checkAllDaemonStatuses()
-        //         }
-        //     }
-        //     
-        //     override fun onFailure(reason: String) {
-        //         runOnUiThread {
-        //             logsViewModel.warn("Shell", "⚠ Privileged shell setup failed: $reason")
-        //             logsViewModel.info("Shell", "Falling back to ADB shell for daemon management")
-        //             daemonStartupManager.checkAllDaemonStatuses()
-        //         }
-        //     }
-        //     
-        //     override fun onProgress(message: String) {
-        //         runOnUiThread {
-        //             logsViewModel.debug("Shell", "→ $message")
-        //         }
-        //     }
-        // })
     }
     
     private fun initViews() {

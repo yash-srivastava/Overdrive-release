@@ -3680,7 +3680,7 @@ public class SurveillanceEngineGpu {
             if (postParkVigilanceEnabled) {
                 int vq = pipelineV2.getHighestThreatQuadrant();
                 if (vq >= 0 && results[vq] != null && results[vq].componentSize > 0) {
-                    // Block-centre convention (+0.5) matches estimateDistanceFromCentroid:
+                    // Block-centre convention (+0.5):
                     // pixel = blockCoord * 32 + 16.
                     float vnx = ((results[vq].centroidX + 0.5f) * MotionPipelineV2.BLOCK_SIZE)
                             / (THUMBNAIL_WIDTH / 2f);
@@ -7559,32 +7559,6 @@ public class SurveillanceEngineGpu {
                 // create a trigger: motionDetected/threatLevel are untouched here.
             }
         }
-    }
-
-    /**
-     * Estimate real-world distance from a centroid Y position in block coordinates.
-     * 
-     * The centroid Y is in block coordinates (0 = top row / far, GRID_ROWS-1 = bottom / close).
-     * We convert to pixel coordinates in the full mosaic, then use SurveillanceConfig's
-     * camera calibration to estimate distance in meters.
-     * 
-     * @param quadrant Quadrant index (0=front, 1=right, 2=rear, 3=left)
-     * @param centroidBlockY Centroid Y in block-center coordinates (0-6.75)
-     * @return Estimated distance in meters, or -1 if unavailable
-     */
-    private float estimateDistanceFromCentroid(int quadrant, float centroidBlockY) {
-        if (config == null) return -1;
-
-        // Convert block Y to pixel Y within the quadrant
-        // Block size is 32px, centroid is center of the block cluster
-        float pixelY = centroidBlockY * GRID_BLOCK_SIZE + (GRID_BLOCK_SIZE / 2.0f);
-
-        // Convert quadrant-local pixel Y to global mosaic Y
-        // Mosaic layout: top row = quadrants 0,1; bottom row = quadrants 2,3
-        int quadrantOffsetY = (quadrant >= 2) ? (THUMBNAIL_HEIGHT / 2) : 0;
-        int globalY = quadrantOffsetY + (int) pixelY;
-
-        return config.estimateDistanceForQuadrant(quadrant, globalY);
     }
 
     // ===== SOTA proximity estimation =====

@@ -1409,17 +1409,6 @@ public class PanoramicCameraGpu {
     private long stageWorstBindNs = 0;
     private long stageWorstLagNs = 0;
 
-    // AI readback throttle — frame-counter modulo, NOT wall-clock.
-    // Wall-clock throttling is fragile when readback duration approaches the
-    // interval: the GL thread spends ~117ms per frame (mosaic+swap+readback),
-    // which guarantees `now - lastReadback >= 95ms` on every loop, so 100% of
-    // frames trigger readback and the pipeline collapses to ~8 fps.
-    // Frame-modulo couples AI rate directly to HAL emission rate. With HAL
-    // emitting at ~26 fps (ImageReader path), every 3rd frame is ~8.6 AI fps,
-    // matching V2 motion's 10 fps internal cadence. If HAL rate changes, AI
-    // rate scales proportionally and the GL thread budget stays balanced.
-    private static final int AI_READBACK_FRAME_MODULO = 3;
-
     private int targetFps = 15;  // Desired frame rate for camera
 
     // Cached AI-lane readback pacing (parked-idle throttle). The AiLaneGl is

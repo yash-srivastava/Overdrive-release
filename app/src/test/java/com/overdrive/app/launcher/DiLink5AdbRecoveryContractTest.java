@@ -87,7 +87,7 @@ public class DiLink5AdbRecoveryContractTest {
 
         String recoveryRegion = between(source,
                 "private static void recoverDilink5AdbIfNeeded",
-                "private static String lastAdbRecoveryLeaseDeferral");
+                "private static boolean isLoopbackPortOpen");
         assertTrue(recoveryRegion.contains("waiting for coordinated app-process recovery"));
         assertFalse(recoveryRegion.contains("settings put global adb_enabled"));
         assertFalse(recoveryRegion.contains("settings put global adb_wifi_enabled"));
