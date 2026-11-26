@@ -2442,11 +2442,6 @@ BYD.events = {
         }
     },
 
-    onThumbError(el) {
-        const container = el.parentElement;
-        container.innerHTML = '<div class="thumb-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><span>' + BYD.i18n.t('events.no_preview') + '</span></div><div class="play-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>';
-    },
-    
     _cancelWatchedTimer() {
         if (this._watchTimer !== null) clearTimeout(this._watchTimer);
         this._watchTimer = null;

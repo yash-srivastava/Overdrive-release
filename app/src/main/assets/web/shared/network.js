@@ -384,16 +384,5 @@ const NetworkPage = {
         const s = seconds % 60;
         const pad = n => (n < 10 ? '0' + n : String(n));
         return h > 0 ? (h + ':' + pad(m) + ':' + pad(s)) : (m + ':' + pad(s));
-    },
-
-    fmtAge(seconds) {
-        seconds = Math.max(0, Math.floor(Number(seconds) || 0));
-        function ago(key, n, fallback) {
-            var phrase = (window.BYD && BYD.i18n && BYD.i18n.t) ? BYD.i18n.t(key, { n: n }) : null;
-            if (phrase && phrase !== key) return phrase;
-            return fallback;
-        }
-        if (seconds < 60) return ago('dashboard.time_seconds_ago', seconds, seconds + 's ago');
-        return ago('dashboard.time_minutes_ago', Math.floor(seconds / 60), Math.floor(seconds / 60) + 'm ago');
     }
 };
