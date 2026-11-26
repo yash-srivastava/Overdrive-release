@@ -51,7 +51,7 @@ public class MqttConnectionManager {
 
     // Serial executor for connection lifecycle (connect/disconnect). Paho's connect blocks up to
     // ~10s and disconnect up to 5s; running them on the caller's thread would blow the IPC socket's
-    // 3s read timeout (MqttApiHandler) and make add/update/delete look like they failed. Offloading
+    // 3s read timeout (DaemonIpcHttpProxy) and make add/update/delete look like they failed. Offloading
     // here lets the IPC call return immediately while the broker is (re)connected in the background.
     private final ExecutorService controlExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "MQTT-control");
