@@ -517,11 +517,11 @@ public final class TimelineApiHandler {
         }
         File file = new File(clip.absPath);
         if (!RecordingsApiHandler.indexPathAllowed(file)) throw new Reject(404, "not_found");
-        if (!RemovableStorageFs.isFile(file) || !RemovableStorageFs.canRead(file)) throw new Reject(410, "gone");
         // URLs carry the fingerprint and are cached for a day: bytes must match it.
-        if (RemovableStorageFs.length(file) != clip.sizeBytes || RemovableStorageFs.lastModified(file) != clip.mp4Mtime) {
-            throw new Reject(409, "stale");
-        }
+        RemovableStorageFs.FileMatch match = RemovableStorageFs.matchReadableFile(
+                file, clip.sizeBytes, clip.mp4Mtime);
+        if (match == RemovableStorageFs.FileMatch.GONE) throw new Reject(410, "gone");
+        if (match == RemovableStorageFs.FileMatch.STALE) throw new Reject(409, "stale");
         return file;
     }
 

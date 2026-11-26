@@ -32,13 +32,14 @@ final class RecordingFileFingerprint {
     /** Reuse the identity already computed for this file by the root scan. */
     static RecordingFileFingerprint from(File mp4, RecordingIdentity identity) {
         File sidecar = sidecarFor(mp4);
+        RemovableStorageFs.FileStamp stamp = RemovableStorageFs.fileStamp(mp4);
         return new RecordingFileFingerprint(
                 mp4,
                 identity.recordingId,
                 mp4.getAbsolutePath(),
-                RemovableStorageFs.length(mp4),
-                RemovableStorageFs.lastModified(mp4),
-                RemovableStorageFs.canRead(sidecar) ? RemovableStorageFs.lastModified(sidecar) : 0L);
+                stamp.length,
+                stamp.mtime,
+                RemovableStorageFs.readableLastModified(sidecar));
     }
 
     static File sidecarFor(File mp4) {
