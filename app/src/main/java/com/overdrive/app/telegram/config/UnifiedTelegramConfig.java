@@ -508,7 +508,7 @@ public final class UnifiedTelegramConfig {
 
         File legacy = new File(LEGACY_PROPS_PATH);
         if (!RemovableStorageFs.exists(legacy)) {
-            // Nothing to import. Don't fire a stampMigrated() write just to
+            // Nothing to import. Don't write a migration marker just to
             // record that fact — when the app UID can't write to
             // /data/local/tmp, that write fails anyway, and the in-process
             // latch below covers the common case (no legacy file, never
@@ -644,12 +644,6 @@ public final class UnifiedTelegramConfig {
 
         UnifiedConfigManager.updateSection(SECTION, delta);
         tierMigrationCheckedThisProcess = true;
-    }
-
-    private static void stampMigrated() {
-        JSONObject delta = new JSONObject();
-        try { delta.put(K_MIGRATED, true); } catch (Exception ignored) {}
-        UnifiedConfigManager.updateSection(SECTION, delta);
     }
 
     private static void putIfPresent(Properties src, JSONObject dst,

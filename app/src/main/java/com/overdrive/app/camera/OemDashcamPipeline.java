@@ -17,7 +17,6 @@ import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.surveillance.HardwareEventRecorderGpu;
 import com.overdrive.app.telemetry.OverlayBitmapRenderer;
 import com.overdrive.app.telemetry.TelemetryDataCollector;
-import com.overdrive.app.telemetry.TelemetrySnapshot;
 import android.opengl.GLUtils;
 
 import org.json.JSONObject;

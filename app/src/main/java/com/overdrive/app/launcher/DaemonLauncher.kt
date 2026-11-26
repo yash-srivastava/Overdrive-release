@@ -2347,13 +2347,7 @@ class DaemonLauncher(
                 command = "echo 'id' | nc localhost 1234 2>/dev/null | head -1",
                 callback = object : AdbShellExecutor.ShellCallback {
                     override fun onSuccess(output: String) {
-                        /*if (output.contains("uid=1000")) {
-                            logManager.info(TAG, "Privileged shell available (UID 1000 confirmed)")
-                            callback.onLog("Using privileged shell (UID 1000)...")
-                            // For privileged shell, redirect to /dev/null since system user can't write to /data/local/tmp
-                            val privCmd = "nohup sh -c '$innerCmd' > /dev/null 2>&1 &"
-                            launchProxyDaemonViaPrivilegedShell(privCmd, callback)
-                        } else*/ if (output.contains("uid=")) {
+                        if (output.contains("uid=")) {
                             logManager.warn(TAG, "Shell available but not UID 1000: $output")
                             callback.onLog("Shell not UID 1000, using ADB shell...")
                             val adbCmd = "nohup sh -c '$innerCmd' > $PROXY_DAEMON_LOG 2>&1 &"
@@ -2378,35 +2372,6 @@ class DaemonLauncher(
             val adbCmd = "nohup sh -c '$innerCmd' > $PROXY_DAEMON_LOG 2>&1 &"
             launchProxyDaemonViaAdb(adbCmd, callback)
         }
-    }
-    
-    private fun launchProxyDaemonViaPrivilegedShell(cmd: String, callback: LaunchCallback) {
-        // Escape single quotes for piping through nc
-        // Replace ' with '\'' (end quote, escaped quote, start quote)
-        val escapedCmd = cmd.replace("'", "'\\''")
-        val ncCmd = "echo '$escapedCmd' | nc localhost 1234"
-        
-        logManager.debug(TAG, "Executing via privileged shell: $ncCmd")
-        
-        adbShellExecutor.execute(
-            command = ncCmd,
-            callback = object : AdbShellExecutor.ShellCallback {
-                override fun onSuccess(output: String) {
-                    logManager.info(TAG, "ProxyDaemon launch via privileged shell: $output")
-                    callback.onLog("Launch command sent via privileged shell, verifying...")
-                    
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                        verifyDaemonRunning(PROXY_DAEMON_PROCESS, "ProxyDaemon", PROXY_DAEMON_LOG, callback)
-                    }, 2000)
-                }
-                
-                override fun onError(error: String) {
-                    logManager.error(TAG, "Privileged shell launch failed: $error, falling back to ADB")
-                    callback.onLog("Privileged shell failed, using ADB shell...")
-                    launchProxyDaemonViaAdb(cmd, callback)
-                }
-            }
-        )
     }
     
     private fun launchProxyDaemonViaAdb(cmd: String, callback: LaunchCallback) {

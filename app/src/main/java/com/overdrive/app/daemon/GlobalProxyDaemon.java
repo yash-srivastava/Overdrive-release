@@ -53,18 +53,6 @@ public class GlobalProxyDaemon {
     private static String SINGBOX_NAME() { return Safe.s("DctRKb8o3mNJ2B6M4PEoFg=="); }
     /** pgrep -f sing-box */
     private static String PGREP_SINGBOX() { return Safe.s("9ipr8gAWZBFa60ui235T/rrplvZH34LqrU8QEESPJhQ="); }
-    /** pkill -9 -f sing-box */
-    private static String KILL_SINGBOX() { return Safe.s("nmb9om2QcwiF1T7zMRJPyl8AlCmIEFx3vJQ/XJLYoW4="); }
-    /** settings put global http_proxy */
-    private static String SETTINGS_HTTP_PROXY() { return Safe.s("kSl507BgPZXbv0JUusGzZtZZFBcjQ2R+d3/C7e8ZtUQuYsjHLD46mEwmaY7YR2cV"); }
-    /** settings put global global_http_proxy_host */
-    private static String SETTINGS_PROXY_HOST() { return Safe.s("kSl507BgPZXbv0JUusGzZnGKkVWqt0LyYis5GQNSnGHkz6qPd6BcemXYwtnBTDajEUEt+3yL2O7fuOSB90onng=="); }
-    /** settings put global global_http_proxy_port */
-    private static String SETTINGS_PROXY_PORT() { return Safe.s("kSl507BgPZXbv0JUusGzZnGKkVWqt0LyYis5GQNSnGH6LFCzLqbGFlD2EngMGefa"); }
-    /** settings put global global_http_proxy_exclusion_list */
-    private static String SETTINGS_PROXY_EXCLUSION() { return Safe.s("kSl507BgPZXbv0JUusGzZnGKkVWqt0LyYis5GQNSnGGOecWapYNZORy+W9AwDB7WjWi7RBAdzApKbsHlHhozKw=="); }
-    /** localhost,127.0.0.1,*.local,10.*,192.168.* */
-    private static String PROXY_EXCLUSIONS() { return Safe.s("W7U2p2zXmYFyuvgULJIqsoxZjUDWIXt7EPxQTiIZSC2LArvfp3HcABvEZcmXXayC"); }
 
     // ==================== VLESS SERVER CREDENTIALS (encrypted) ====================
     /** [VLESS server IP] */
@@ -328,12 +316,6 @@ public class GlobalProxyDaemon {
         // - ABRP/Telegram/Updater: ProxyHelper.getHttpProxy() via OkHttp
         // - MQTT: ProxyHelper.getMqttSocketFactory() via Paho
         // - Zrok/Cloudflared: HTTP_PROXY env var set per-process at launch
-        //
-        // execShell(SETTINGS_HTTP_PROXY() + PROXY_PORT);
-        // execShell(SETTINGS_PROXY_HOST());
-        // execShell(SETTINGS_PROXY_PORT() + PROXY_PORT);
-        // execShell(SETTINGS_PROXY_EXCLUSION() + PROXY_EXCLUSIONS() + "\"");
-        
         // Clear any stale proxy settings from previous versions
         execShell("settings delete global http_proxy 2>/dev/null");
         execShell("settings delete global global_http_proxy_host 2>/dev/null");

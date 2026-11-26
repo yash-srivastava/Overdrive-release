@@ -85,7 +85,7 @@ public class AccSentryDiLink5PanelContractTest {
         assertTrue(adbBackoff > adbPortCheck);
         assertTrue(adbObservation > adbBackoff);
         String adbRecoveryBody = source.substring(adbRecovery,
-                source.indexOf("private static String lastAdbRecoveryLeaseDeferral", adbRecovery));
+                source.indexOf("private static boolean isLoopbackPortOpen", adbRecovery));
         assertFalse(adbRecoveryBody.contains("settings put global adb_enabled"));
         assertFalse(adbRecoveryBody.contains("settings put global adb_wifi_enabled"));
         assertFalse(adbRecoveryBody.contains("settings put global adb_allowed_connection_time"));

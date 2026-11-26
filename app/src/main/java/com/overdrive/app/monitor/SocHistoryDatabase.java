@@ -8012,42 +8012,6 @@ public class SocHistoryDatabase {
     }
 
     /**
-     * Electricity rate snapshot. Read-through to the Trips analytics config
-     * section so the per-kWh cost matches the Trips page (single source of
-     * truth — see ChargingConfig). Returns -1 when unset.
-     */
-    private double getElectricityRate() {
-        try {
-            org.json.JSONObject cfg = com.overdrive.app.config.UnifiedConfigManager.loadConfig();
-            org.json.JSONObject trips = cfg != null ? cfg.optJSONObject("tripAnalytics") : null;
-            if (trips != null) {
-                double r = trips.optDouble("electricityRate", -1);
-                if (r > 0) return r;
-            }
-        } catch (Exception ignored) {}
-        return -1;
-    }
-
-    /**
-     * Optional separate DC-fast tariff (per kWh), read-through to the
-     * {@code chargingAnalytics} config section (its owner — see ChargingConfig).
-     * DC fast-charging is often billed at a higher public rate than home AC, so
-     * a user can set this to price DC sessions correctly. Returns 0 when unset,
-     * which the caller treats as "fall back to the base rate".
-     */
-    private double getDcRate() {
-        try {
-            org.json.JSONObject cfg = com.overdrive.app.config.UnifiedConfigManager.loadConfig();
-            org.json.JSONObject charging = cfg != null ? cfg.optJSONObject("chargingAnalytics") : null;
-            if (charging != null) {
-                double r = charging.optDouble("dcRate", 0);
-                if (r > 0) return r;
-            }
-        } catch (Exception ignored) {}
-        return 0;
-    }
-
-    /**
      * The tariff + rate + currency that price one session — the SINGLE
      * rate-selection point every cost-writing path shares, so AC/DC and
      * mapped/unmapped sessions can't diverge.
@@ -8121,8 +8085,8 @@ public class SocHistoryDatabase {
     /**
      * Global (non-tariff) pricing resolved from a SINGLE config read.
      *
-     * <p>getElectricityRate/getDcRate/getCurrencySymbol each call loadConfig()
-     * separately, so composing them did up to 3 reads per priced row - and both
+     * <p>The previous separate rate and currency lookups loaded config up to
+     * three times per priced row - and both
      * repriceSessionsForTariff and the live session-list render call the pricing
      * path once PER ROW. Same values, one read.
      *
@@ -10355,34 +10319,6 @@ public class SocHistoryDatabase {
             }
         } catch (Exception ignored) {}
         return 0;
-    }
-
-    /**
-     * Energy added so far (kWh) for a session, by trapezoidal integration of its
-     * recorded power samples: Σ (P_i + P_{i+1})/2 · Δt. Returns 0 when there are
-     * fewer than 2 samples. This is robust for slow charges where SOC hasn't
-     * ticked a whole percent yet (the SOC-delta estimate would read 0).
-     */
-    /**
-     * Timestamp (epoch-ms) of the most recent recorded power sample for the
-     * session, or -1 if none. Used to bucket a force-closed session into the
-     * day it actually ended rather than the wall-clock close moment.
-     */
-    private long getLastChargingSampleTime(long sessionStartTime) {
-        if (!isInitialized || connection == null || sessionStartTime <= 0) return -1;
-        try (PreparedStatement pstmt = connection.prepareStatement(
-                "SELECT MAX(t) FROM " + TABLE_CPS + " WHERE session_start_time = ?;")) {
-            pstmt.setLong(1, sessionStartTime);
-            try (ResultSet rs = pstmt.executeQuery()) {
-                if (rs.next()) {
-                    long t = rs.getLong(1);
-                    return rs.wasNull() ? -1 : t;
-                }
-            }
-        } catch (Exception e) {
-            logger.debug("getLastChargingSampleTime failed: " + e.getMessage());
-        }
-        return -1;
     }
 
     /**
