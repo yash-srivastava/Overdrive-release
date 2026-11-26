@@ -5743,6 +5743,44 @@ const TRIPS = {
             + this.esc(msg) + '</div>';
     },
 
+    _renderRouteRibbon(points, map) {
+        if (points.length < 2) return;
+        var coords = points.map(function (p) { return [p.la, p.lo]; });
+        // One missing speed disables the speed legend for the entire ribbon.
+        for (var i = 0; i < points.length; i++) {
+            if (typeof points[i].s !== 'number' || !isFinite(points[i].s)) {
+                L.polyline(coords, { color: this.colors.brand, weight: 4, opacity: 0.85 }).addTo(map);
+                return;
+            }
+        }
+
+        // Each edge keeps its destination sample's speed band. Batch disjoint
+        // runs of the same color as separate subpaths of a single Leaflet layer.
+        // This bounds layer/DOM count to three without joining unrelated runs.
+        var bands = Object.create(null);
+        var order = [];
+        var runColor = null;
+        var run = null;
+        for (var j = 1; j < coords.length; j++) {
+            var color = this._speedColorForRoute(points[j].s);
+            if (color !== runColor) {
+                if (!bands[color]) {
+                    bands[color] = [];
+                    order.push(color);
+                }
+                run = [coords[j - 1]];
+                bands[color].push(run);
+                runColor = color;
+            }
+            run.push(coords[j]);
+        }
+        // First-seen band order preserves the old stacking for non-repeated bands.
+        for (var k = 0; k < order.length; k++) {
+            var band = order[k];
+            L.polyline(bands[band], { color: band, weight: 4, opacity: 0.85 }).addTo(map);
+        }
+    },
+
     renderRouteMap(container, telemetry, detailRequest) {
         if (detailRequest && !this._isCurrentDetailRequest(detailRequest)) return;
         const isCurrentMap = () => {
@@ -5844,43 +5882,7 @@ const TRIPS = {
 
         console.log('[Trips] Map created successfully, tiles added, bounds set');
 
-        // Route ribbon, colored by speed (matches the map legend: green <40,
-        // yellow 40–80, red >80 km/h). Leaflet can't gradient a single polyline,
-        // so we walk the points and emit one polyline per RUN of same-colored
-        // samples — merging consecutive same-band points keeps the layer count
-        // near the number of band transitions instead of one-per-sample, which
-        // matters on the old WebView for long/dense trips. Each run is seeded
-        // with the previous point so the bands stay visually joined (no gaps).
-        //
-        // Fallback: only color when EVERY retained point carries a numeric speed.
-        // A trip with any missing `.s` would otherwise mix in the brand color and
-        // show an undocumented 4th band, so in that case we draw the original
-        // single flat-brand ribbon exactly as before.
-        var coords = points.map(function (p) { return [p.la, p.lo]; });
-        var hasAllSpeeds = true;
-        for (var si = 0; si < points.length; si++) {
-            if (typeof points[si].s !== 'number' || !isFinite(points[si].s)) { hasAllSpeeds = false; break; }
-        }
-        if (!hasAllSpeeds) {
-            L.polyline(coords, { color: this.colors.brand, weight: 4, opacity: 0.85 }).addTo(this.leafletMap);
-        } else {
-            var runStart = 0;
-            var runColor = this._speedColorForRoute(points[0].s);
-            for (var i = 1; i <= points.length; i++) {
-                var segColor = (i < points.length) ? this._speedColorForRoute(points[i].s) : null;
-                // Flush the run when the color changes or we reach the end.
-                if (i === points.length || segColor !== runColor) {
-                    L.polyline(coords.slice(runStart, i), {
-                        color: runColor,
-                        weight: 4,
-                        opacity: 0.85
-                    }).addTo(this.leafletMap);
-                    // Start the next run one point back so it connects to this one.
-                    runStart = i - 1;
-                    runColor = segColor;
-                }
-            }
-        }
+        this._renderRouteRibbon(points, this.leafletMap);
 
         // Start marker
         var startIcon = L.divIcon({
