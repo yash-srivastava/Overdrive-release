@@ -36,7 +36,7 @@ function setup(touch) {
                 contains: name => classes.has(name) },
             setAttribute() {},
             addEventListener(type, fn) { handlers[type] = fn; },
-            fire(type, event) { handlers[type](event); }
+            fire(type, event) { handlers[type].call(this, event); }
         };
     }
 
@@ -46,7 +46,15 @@ function setup(touch) {
     const search = node();
     let focusCount = 0;
     search.focus = () => { focusCount++; };
-    const list = { querySelectorAll: () => [] };
+    const rows = ['de', 'fr', 'auto'].map(code => Object.assign(node(), {
+        getAttribute(name) {
+            if (name === 'data-action') return code === 'auto' ? 'auto' : null;
+            if (name === 'data-lang') return code === 'auto' ? null : code;
+            return null;
+        }
+    }));
+    const list = { querySelectorAll: () => rows };
+    const requests = [];
     sheet.querySelector = selector => ({
         '.lang-sheet-close': close,
         '.lang-sheet-title': node(),
@@ -72,12 +80,16 @@ function setup(touch) {
     const BYD = { i18n: {
         supported: () => ['en', 'de', 'fr', 'it', 'es', 'nl', 'ja', 'ko', 'tr', 'ar', 'he'],
         getLang: () => 'en', getDisplayName: code => code,
-        t: key => key, onChange() {}
+        t: key => key, onChange() {},
+        setLang(lang) {
+            return new Promise(resolve => requests.push({ lang, resolve }));
+        }
     } };
     const window = { BYD };
     if (touch) window.ontouchstart = null;
     vm.runInNewContext(src, {
         window, document, BYD, console,
+        navigator: { language: 'en-US' }, localStorage: { removeItem() {} },
         setTimeout(run, ms) { const id = nextId++; timers.set(id, { at: now + ms, run }); return id; },
         clearTimeout(id) { timers.delete(id); }
     });
@@ -85,6 +97,8 @@ function setup(touch) {
         open: () => chip.fire('click'), close: () => close.fire('click'),
         escape: () => document.fire('keydown', { key: 'Escape' }),
         backdrop: () => sheet.fire('click', { target: sheet }),
+        pick: code => rows[['de', 'fr', 'auto'].indexOf(code)].fire('click'),
+        requests,
         advance, attached: () => sheet.parentNode === body,
         visible: () => sheet.classList.contains('open'), focused: () => focusCount
     };
@@ -128,4 +142,50 @@ function setup(touch) {
     p.open(); p.advance(500); assert.strictEqual(p.focused(), 0);
     p.backdrop(); p.advance(280); assert.ok(!p.attached());
 }
-console.log('lang_picker_lifecycle_harness: 4 scenarios passed');
+async function selectionScenarios() {
+    // Both explicit and automatic choices may finish after a close/reopen.
+    for (const code of ['de', 'auto']) {
+        const p = setup(false);
+        p.open(); p.pick(code);
+        assert.strictEqual(p.requests[0].lang, code === 'auto' ? 'en-US' : code);
+        p.escape(); p.advance(100); p.open();
+        p.requests[0].resolve();
+        await Promise.resolve();
+        p.advance(280);
+        assert.ok(p.attached() && p.visible(), 'old selection must not close a reopened sheet');
+        p.pick('fr');
+        p.requests[1].resolve();
+        await Promise.resolve();
+        assert.ok(!p.visible(), 'current selection should still close the sheet');
+        p.advance(280);
+        assert.ok(!p.attached());
+    }
+
+    // Superseding a selection in the same sheet invalidates the earlier completion.
+    {
+        const p = setup(false);
+        p.open(); p.pick('de'); p.pick('fr');
+        p.requests[0].resolve();
+        await Promise.resolve();
+        assert.ok(p.visible(), 'earlier choice must not close while latest choice loads');
+        p.requests[1].resolve();
+        await Promise.resolve();
+        assert.ok(!p.visible());
+    }
+
+    // An exiting sheet is still attached, but should not start another selection.
+    {
+        const p = setup(false);
+        p.open(); p.close(); p.pick('de');
+        assert.strictEqual(p.requests.length, 0);
+        p.advance(280);
+        assert.ok(!p.attached());
+    }
+}
+
+selectionScenarios().then(() => {
+    console.log('lang_picker_lifecycle_harness: 8 scenarios passed');
+}).catch(err => {
+    console.error(err);
+    process.exitCode = 1;
+});

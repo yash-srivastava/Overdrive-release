@@ -75,6 +75,7 @@
     var sheetVisible = false;
     var removalTimer = null;
     var focusTimer = null;
+    var selectionRevision = 0;
 
     function openSheet() {
         if (sheetVisible) return;
@@ -115,6 +116,7 @@
     function closeSheet() {
         if (!sheetVisible || !sheet) return;
         sheetVisible = false;
+        selectionRevision++;
         if (focusTimer !== null) {
             clearTimeout(focusTimer);
             focusTimer = null;
@@ -214,16 +216,23 @@
     }
 
     function onPick(e) {
+        if (!sheetVisible) return;
         var action = this.getAttribute('data-action');
         var lang = this.getAttribute('data-lang');
+        if (action !== 'auto' && !lang) return;
+        var revision = ++selectionRevision;
+        function closeIfCurrent() {
+            // A dismissed sheet or a newer choice owns the picker now.
+            if (sheetVisible && revision === selectionRevision) closeSheet();
+        }
         if (action === 'auto') {
             try { localStorage.removeItem('overdrive_locale'); } catch (err) {}
             // Re-detect from navigator.language
             var detected = navigator.language || 'en';
-            BYD.i18n.setLang(detected).then(closeSheet);
+            BYD.i18n.setLang(detected).then(closeIfCurrent);
             return;
         }
-        if (lang) BYD.i18n.setLang(lang).then(closeSheet);
+        BYD.i18n.setLang(lang).then(closeIfCurrent);
     }
 
     function esc(s) {
