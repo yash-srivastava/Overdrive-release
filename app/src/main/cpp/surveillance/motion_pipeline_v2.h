@@ -22,6 +22,7 @@
 #include <cstring>
 #include <cmath>
 #include <algorithm>
+#include "motion_pixel_gates.h"
 
 // ============================================================================
 // Constants
@@ -221,6 +222,7 @@ struct QuadrantState {
     // Stage 2: ROI mask (future: per-quadrant user-drawn polygon)
     bool  blockRoiMask[V2_TOTAL_BLOCKS];
     bool  hasCustomRoi;
+    motion_pixels::LumaRatioGate lumaRatioGate;
     
     // Stage 3: Per-block temporal confidence
     float blockConfidence[V2_TOTAL_BLOCKS];

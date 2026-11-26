@@ -202,14 +202,20 @@ static bool stage1_brightnessCheck(
  * current and reference pixels. If the chrominance shift is below tolerance,
  * the change is classified as shadow/lighting, not real motion.
  * 
- * Additional check: shadows always darken (luma decreases) or lighten uniformly.
- * We verify that all channels shift in the same direction (all darker or all brighter).
+ * Additional check: shadows must darken the surface (with a small noise
+ * tolerance for each channel). Brightening and mixed-direction changes are
+ * not classified as shadows, even if their chrominance is preserved.
  */
 static bool isShadowPixel(
     int r1, int g1, int b1,  // current pixel
     int r2, int g2, int b2,  // reference pixel
     float chromaTolerance)
 {
+    // A brighter or mixed-direction pixel cannot be a shadow under the
+    // existing policy. Reject it before computing sums and chrominance.
+    // This also keeps headlight sweeps out of the shadow classification.
+    if (!motion_pixels::shadowDirection(r1, g1, b1, r2, g2, b2)) return false;
+
     // Need minimum brightness to compute meaningful ratios
     int sum1 = r1 + g1 + b1;
     int sum2 = r2 + g2 + b2;
@@ -229,32 +235,6 @@ static bool isShadowPixel(
     
     if (chromaDist > chromaTolerance) {
         return false;  // Color changed — real object, not shadow
-    }
-    
-    // Verify uniform direction: all channels should shift the same way.
-    // FIX: "Headlight False-Positive" — Shadows ONLY darken surfaces. If the
-    // pixel got brighter, it's illumination (headlights, streetlights), not a
-    // shadow. Previously, "allBrighter" was accepted as shadow-like, which caused
-    // headlight sweeps (which also preserve chroma ratios for white/warm light)
-    // to be classified as shadows. The pipeline then rejected them, treating the
-    // remaining non-shadow pixels as a physical object → false THREAT_HIGH alarms
-    // every time a car turned a corner at night.
-    //
-    // Only accept "allDarker" as shadow. "allBrighter" is illumination change
-    // and should be handled by the brightness suppression stage, not shadow filter.
-    int dr = r1 - r2;
-    int dg = g1 - g2;
-    int db = b1 - b2;
-    
-    // Check if all channels got darker (current < reference, so delta is negative)
-    // Allow small counter-movements (±5) for noise tolerance
-    bool allDarker = (dr <= 5) && (dg <= 5) && (db <= 5);
-    
-    // Must have gotten meaningfully darker (not just noise)
-    bool meaningfulDarkening = (dr < -5) || (dg < -5) || (db < -5);
-    
-    if (!allDarker || !meaningfulDarkening) {
-        return false;  // Not a shadow — either got brighter or mixed direction
     }
     
     return true;  // Shadow-like: chrominance preserved, uniform direction
@@ -347,8 +327,7 @@ static int stage2_blockAnalysis(
                     
                     int maxLuma = std::max(luma1, luma2);
                     int minLuma = std::min(luma1, luma2) + 1;
-                    float ratio = (float)maxLuma / minLuma;
-                    if (ratio < config->lumaRatioThreshold) continue;
+                    if (qs->lumaRatioGate.rejects(maxLuma, minLuma)) continue;
                     
                     // Luma gate passed — this pixel changed significantly
                     totalChangedPixels++;
@@ -943,6 +922,8 @@ static void processQuadrant(
         localConfig.lumaRatioThreshold = std::max(1.05f, localConfig.lumaRatioThreshold * 0.88f);
     }
     
+    // Rebuild only when the effective (day/night-scaled) ratio changes.
+    qs->lumaRatioGate.update(localConfig.lumaRatioThreshold);
     bool activeBlocks[V2_TOTAL_BLOCKS];
     int shadowSuppressed = 0;
     int activeCount = stage2_blockAnalysis(quadrantRgb, referenceFrame, qs, &localConfig, activeBlocks, &shadowSuppressed);
