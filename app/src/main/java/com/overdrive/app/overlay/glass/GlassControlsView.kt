@@ -8,7 +8,6 @@ import android.graphics.LinearGradient
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
 import android.os.SystemClock
@@ -79,7 +78,6 @@ class GlassControlsView(context: Context, env: GlassEnv, ticker: GlassTicker) : 
 
     private val p = Paint(Paint.ANTI_ALIAS_FLAG)
     private val s = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
-    private val m = Matrix()
     private val r = RectF()
     private val b = RectF()
 
@@ -123,14 +121,9 @@ class GlassControlsView(context: Context, env: GlassEnv, ticker: GlassTicker) : 
     }
 
     // theme shaders, unit-sized and placed on each element's bounding box like SVG objectBoundingBox fills
-    private var shaderNight: Boolean? = null
-    private lateinit var keyBody: LinearGradient
-    private lateinit var rimSh: LinearGradient
+    private val keyShaders = GlassKeyShaders()
     private lateinit var metal: LinearGradient
     private lateinit var glass: LinearGradient
-    private lateinit var shadowSh: RadialGradient
-    private lateinit var glowAccent: RadialGradient
-    private lateinit var glowWarn: RadialGradient
 
     private val parked get() = !env.driving
     private val spinning get() = state.climate == true && parked && env.allows(GlassEnv.Loop.AMBIENT, stale)
@@ -290,7 +283,7 @@ class GlassControlsView(context: Context, env: GlassEnv, ticker: GlassTicker) : 
         super.envChanged()
     }
 
-    override fun onThemeChanged() { shaderNight = null; labelCaptions(state) }
+    override fun onThemeChanged() { keyShaders.invalidate(); labelCaptions(state) }
 
     // Also re-run on a theme/language change: bind() skips unchanged data.
     private fun labelCaptions(st: State) {
@@ -303,25 +296,15 @@ class GlassControlsView(context: Context, env: GlassEnv, ticker: GlassTicker) : 
     // ── drawing ──────────────────────────────────────────────────────────────
 
     private fun ensureShaders(t: GlassTheme) {
-        if (shaderNight == t.night) return
-        shaderNight = t.night
+        if (!keyShaders.ensure(t)) return
         val night = t.night
         val white = 0xFFFFFFFF.toInt()
-        keyBody = LinearGradient(0f, 0f, 0.6f, 1f,
-            if (night) intArrayOf(GlassColor.alpha(white, 0.13f), GlassColor.alpha(white, 0.04f), 0x40000000) else intArrayOf(white, 0xFFF1F5F2.toInt(), 0xFFD9E1DC.toInt()),
-            floatArrayOf(0f, if (night) 0.45f else 0.5f, 1f), Shader.TileMode.CLAMP)
-        rimSh = LinearGradient(0f, 0f, 1f, 1f,
-            if (night) intArrayOf(GlassColor.alpha(white, 0.55f), GlassColor.alpha(white, 0.1f), 0x80000000.toInt()) else intArrayOf(white, 0x1A0B281E, 0x4D0B281E),
-            floatArrayOf(0f, if (night) 0.4f else 0.5f, 1f), Shader.TileMode.CLAMP)
         metal = LinearGradient(0f, 0f, 0.7f, 1f,
             if (night) intArrayOf(0xFFB8C4C0.toInt(), 0xFF6E7B77.toInt(), 0xFF2E3735.toInt()) else intArrayOf(white, 0xFFAEB8B4.toInt(), 0xFF5E6966.toInt()),
             floatArrayOf(0f, 0.45f, 1f), Shader.TileMode.CLAMP)
         glass = LinearGradient(0f, 0f, 0f, 1f,
             if (night) intArrayOf(0xFFD5E6F2.toInt(), 0xFF7F9BB0.toInt(), 0xFF34495A.toInt()) else intArrayOf(0xFFF4FAFF.toInt(), 0xFF9DB4C4.toInt(), 0xFF56707F.toInt()),
             floatArrayOf(0f, if (night) 0.3f else 0.35f, 1f), Shader.TileMode.CLAMP)
-        shadowSh = RadialGradient(0f, 0f, 1f, GlassColor.alpha(t.shadow, t.shadowA), GlassColor.clear(t.shadow), Shader.TileMode.CLAMP)
-        fun glow(c: Int) = RadialGradient(0f, 0f, 1f, intArrayOf(GlassColor.alpha(c, 0.8f), GlassColor.alpha(c, 0.3f), GlassColor.clear(c)), floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP)
-        glowAccent = glow(t.glowAccent); glowWarn = glow(t.glowWarn)
     }
 
     override fun drawBack(c: Canvas) {
@@ -373,20 +356,20 @@ class GlassControlsView(context: Context, env: GlassEnv, ticker: GlassTicker) : 
         if (dim) c.saveLayerAlpha(null, 107)
         val on = when (i) { 0 -> state.locked == true; 1 -> state.climate == true; 2 -> state.boot == true; else -> false }
         val haloA = if (i == 3) 0.8f * flashS.value else if (on && parked) 0.55f else 0f
-        if (haloA > 0.004f) c.unitOval(p, if ((i == 2 && on) || i == 3) glowWarn else glowAccent, cx, CY, KS * 0.62f, KS * 0.62f, (haloA * 255f).roundToInt())
+        if (haloA > 0.004f) c.unitOval(p, if ((i == 2 && on) || i == 3) keyShaders.glowWarn else keyShaders.glowAccent, cx, CY, KS * 0.62f, KS * 0.62f, (haloA * 255f).roundToInt())
         // the key's shadow: a rounded square filled with an elliptical fade, drawn in the unit space of that fade
         c.save(); c.translate(x + 4f + KS / 2f, KY + 8f + KS / 2f); c.scale(KS / 2f, KS / 2f)
         r.set(-1f, -1f, 1f, 1f)
-        c.drawRoundRect(r, 22f / (KS / 2f), 22f / (KS / 2f), p.shade(shadowSh))
+        c.drawRoundRect(r, 22f / (KS / 2f), 22f / (KS / 2f), p.shade(keyShaders.shadowSh))
         c.restore()
         val pressing = pressed == i
         if (pressing) { c.save(); c.scale(0.96f, 0.96f, cx, CY) }
         r.set(x, KY, x + KS, KY + KS)
-        bbox(keyBody, r)
-        c.drawRoundRect(r, 22f, 22f, p.shade(keyBody))
+        keyShaders.mapToBounds(keyShaders.keyBody, r)
+        c.drawRoundRect(r, 22f, 22f, p.shade(keyShaders.keyBody))
         r.set(x + 0.6f, KY + 0.6f, x + KS - 0.6f, KY + KS - 0.6f)
-        bbox(rimSh, r)
-        s.shade(rimSh); s.strokeWidth = 1.2f; s.strokeCap = Paint.Cap.BUTT
+        keyShaders.mapToBounds(keyShaders.rimSh, r)
+        s.shade(keyShaders.rimSh); s.strokeWidth = 1.2f; s.strokeCap = Paint.Cap.BUTT
         c.drawRoundRect(r, 21.5f, 21.5f, s)
         s.shader = null; s.strokeCap = Paint.Cap.ROUND
         s.color = GlassColor.alpha(0xFFFFFFFF.toInt(), if (night) 0.5f else 1f)
@@ -516,23 +499,23 @@ class GlassControlsView(context: Context, env: GlassEnv, ticker: GlassTicker) : 
     private fun drawWindows(c: Canvas, t: GlassTheme) {
         val night = t.night
         r.set(PX, KY, PX + PW, KY + PH)
-        bbox(keyBody, r)
-        p.shade(keyBody); p.alpha = if (night) 140 else 153
+        keyShaders.mapToBounds(keyShaders.keyBody, r)
+        p.shade(keyShaders.keyBody); p.alpha = if (night) 140 else 153
         c.drawRoundRect(r, 20f, 20f, p)
         p.alpha = 255
         r.set(PX + 0.6f, KY + 0.6f, PX + PW - 0.6f, KY + PH - 0.6f)
-        bbox(rimSh, r)
-        s.shade(rimSh); s.strokeWidth = 1f; s.strokeCap = Paint.Cap.BUTT
+        keyShaders.mapToBounds(keyShaders.rimSh, r)
+        s.shade(keyShaders.rimSh); s.strokeWidth = 1f; s.strokeCap = Paint.Cap.BUTT
         c.drawRoundRect(r, 19.5f, 19.5f, s)
         s.shader = null
-        c.unitOval(p, shadowSh, WCX + 4f, wy(-6f), LC * 0.5f, 4f)
+        c.unitOval(p, keyShaders.shadowSh, WCX + 4f, wy(-6f), LC * 0.5f, 4f)
         GlassGlyphs.draw(c, carSlot.get(K_CAR, t, d, GlassGlyphs.Tone.CHROME) { Path(carBody) })
         for (f in CAR_WHEELS) {
             val x = wx(f); val y = wy(0f)
             p.shader = null; p.color = if (night) 0xFF0A0F0D.toInt() else 0xFF27322E.toInt()
             c.drawCircle(x, y, 7.5f, p)
             b.set(x - 7.5f, y - 7.5f, x + 7.5f, y + 7.5f)
-            bbox(metal, b)
+            keyShaders.mapToBounds(metal, b)
             s.shade(metal); s.strokeWidth = 1.8f
             c.drawCircle(x, y, 7.5f, s)
         }
@@ -544,7 +527,7 @@ class GlassControlsView(context: Context, env: GlassEnv, ticker: GlassTicker) : 
             c.save()
             c.clipPath(w)
             r.set(wx(-0.42f), wy(W_TOP) + drop * (W_TOP - W_BOT), wx(-0.42f) + LC * 0.66f, wy(W_TOP) + drop * (W_TOP - W_BOT) + (W_TOP - W_BOT + 2f))
-            bbox(glass, r)
+            keyShaders.mapToBounds(glass, r)
             c.drawRect(r, p.shade(glass))
             c.restore()
             s.color = GlassColor.alpha(0xFFFFFFFF.toInt(), if (night) 0.35f else 0.8f); s.strokeWidth = 0.9f; s.strokeJoin = Paint.Join.MITER
@@ -585,13 +568,6 @@ class GlassControlsView(context: Context, env: GlassEnv, ticker: GlassTicker) : 
         s.shader = null; s.color = t.text2; s.strokeWidth = 1f
         c.drawRoundRect(r, 12.5f, 12.5f, s)
         c.drawText(CHIP, 310f, top + 4f + (18f - (fm.descent - fm.ascent)) / 2f - fm.ascent, capPaint)
-    }
-
-    /** Stretch a unit shader over [box]: linear ones span it, radial ones fill it as an ellipse. */
-    private fun bbox(sh: Shader, box: RectF, radial: Boolean = false) {
-        if (radial) { m.setScale(box.width() / 2f, box.height() / 2f); m.postTranslate(box.centerX(), box.centerY()) }
-        else { m.setScale(box.width(), box.height()); m.postTranslate(box.left, box.top) }
-        sh.setLocalMatrix(m)
     }
 
     companion object {
