@@ -2182,15 +2182,16 @@ public class TripDatabase {
         // scoreable data (1 Hz rows) leaves the trip unscored, the UI's "no data".
         double[] elevation = diLink5 ? TripScoreEngine.journalElevation(samples, Long.MAX_VALUE) : null;
         // DI5: 1 Hz rows stand in for their 5 Hz samples, for the coverage gate as for the engine.
-        if (diLink5) scoring = TripScoreEngine.diLink5At5Hz(scoring);
-        if (scoring.isEmpty() || (diLink5 && !TripScoreEngine.hasDiLink5ScoringCoverage(
-                TripScoreEngine.scoreableSeconds(scoring), target.durationSeconds))) {
+        TripScoreEngine.ExpandedScoringSamples expanded = diLink5
+                ? new TripScoreEngine.ExpandedScoringSamples(scoring) : null;
+        if (scoring.isEmpty() || (expanded != null && !TripScoreEngine.hasDiLink5ScoringCoverage(
+                expanded.seconds, target.durationSeconds))) {
             if (elevation != null) TripScoreEngine.applyElevation(target, elevation[0], elevation[1]);
             return;
         }
         try {
             if (elevation != null) {
-                new TripScoreEngine().computeSummary(target, scoring, elevation[0], elevation[1]);
+                new TripScoreEngine().computeExpandedSummary(target, expanded, elevation[0], elevation[1]);
             } else {
                 new TripScoreEngine().computeSummary(target, scoring);
             }
