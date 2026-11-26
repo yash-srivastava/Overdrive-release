@@ -26,6 +26,40 @@ at least one selected zone. The handler revalidates the selected geometry and
 settings before a command; changing settings can invalidate an existing
 decision. Keep an independent way to access the vehicle during acceptance.
 
+## Calls, media and wireless phone projection while parked
+
+**Keep Bluetooth on while parked** is a shared radio setting, not a
+proximity-only Bluetooth mode. On some head units, hands-free calls, media
+and wireless phone projection can remain connected after switch-off. A call
+may therefore be routed to the parked car instead of the handset. This can
+occur even with Proximity monitoring off because the radio setting is independent.
+
+The current phone collector reads RSSI only for a live connection to the
+approved phone (`BluetoothAccessMonitor`, `BluetoothRssiReader`). Its parked
+recovery path (`BluetoothPhoneReconnectController`) uses the car's hands-free
+client profile to reconnect bonded phones where supported. Disconnecting that
+profile can remove the link used for proximity, and recovery may reconnect it.
+There is no independently verified proximity-only transport or wireless phone
+projection session-control path in this implementation. Leaving the radio on
+alone does not guarantee usable proximity observations.
+
+If affected, use the handset's audio output selector for an immediate call.
+Turning off the shared parked Bluetooth setting is an alternative only if
+parked phone proximity is not required; it also affects other users of the
+shared setting. Supported key fob rules are independent of phone reconnect.
+Do not rely on automatic phone locking or unlocking after changing Bluetooth
+profiles until supervised acceptance with Learning mode and an independent key.
+
+For a diagnostic report, record the head-unit model and firmware, phone model
+and OS, app version, operating mode, whether wireless projection and call/media
+profiles remain connected after switch-off, whether proximity still receives
+fresh RSSI, and whether normal connections return after power-on. Include the
+Proximity status and relevant `Phone observation:` log entries around those
+transitions, with device addresses and other personal details redacted.
+A future profile-separation implementation needs an independently validated
+proximity link and a supported projection lifecycle on the target firmware
+before suspending audio connections.
+
 ## What a decision and its result mean
 
 The phone, fob-event and fob-presence evaluators produce different observations.

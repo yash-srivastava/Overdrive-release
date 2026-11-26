@@ -6431,6 +6431,7 @@
     "phone_vehicle_on_detail": "Proximity resumes when the car is switched off.",
     "proximity_sources_paused": "No active proximity source. Enable parked Bluetooth or supported keyfob detection.",
     "keyfob_priority_approach_desc": "Detect your fob while parked for automatic unlock and optional departure locking. Verified keyfob signals take priority wherever supported.",
+    "parked_bluetooth_audio_warning": "When enabled, Bluetooth calls and media may stay connected, and wireless phone projection may remain active while parked. Phone proximity requires a live Bluetooth connection; audio and projection are not suspended separately.",
     "bluetooth_shared_keyfob_desc": "Shared with Surveillance, Automations and key bindings. Saves immediately. Turning this off stops parked phone proximity and reconnect; enabled keyfob rules remain active.",
     "keyfob_lock_window": "Keyfob locking window",
     "keyfob_lock_window_hint": "Searches run every 5 seconds, or every 10 seconds when the window is a multiple of 10 seconds (5–300 seconds, in 5-second steps). With 2–3 absence results required, the results must also span the window. Normal mode uses 5 seconds.",
