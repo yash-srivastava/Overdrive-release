@@ -14,9 +14,7 @@ import com.overdrive.app.server.LocaleManager;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.DayOfWeek;
@@ -48,6 +46,7 @@ public final class GenAiInsights {
             DaemonLogger.getInstance("GenAiInsights");
     private static final Object STORE_LOCK = new Object();
     private static final AtomicBoolean GENERATING = new AtomicBoolean(false);
+    private static final int MAX_STORE_BYTES = 2 * 1024 * 1024;
     private static final int MAX_ITEMS = 50;
     private static final int MAX_TEXT_CHARS = 12_000;
     private static final int MAX_TITLE_CHARS = 120;
@@ -617,8 +616,8 @@ public final class GenAiInsights {
         makeOwnerOnly(home(), true);
         makeOwnerOnly(storeFile(), false);
         makeOwnerOnly(backupFile(), false);
-        JSONObject root = readStore(storeFile());
-        if (root == null) root = readStore(backupFile());
+        JSONObject root = GenAiStoreReader.read(storeFile(), MAX_STORE_BYTES);
+        if (root == null) root = GenAiStoreReader.read(backupFile(), MAX_STORE_BYTES);
         JSONArray stored = root == null
                 ? null : root.optJSONArray("items");
         if (stored == null) return;
@@ -629,26 +628,6 @@ public final class GenAiInsights {
                     && !item.optString("text", "").trim().isEmpty()) {
                 items.add(sanitizeItem(item));
             }
-        }
-    }
-
-    private static JSONObject readStore(File file) {
-        if (!file.isFile() || file.length() <= 0
-                || file.length() > 2 * 1024 * 1024) {
-            return null;
-        }
-        try (FileInputStream in = new FileInputStream(file);
-             ByteArrayOutputStream out = new ByteArrayOutputStream(
-                     (int) file.length())) {
-            byte[] buffer = new byte[4096];
-            int count;
-            while ((count = in.read(buffer)) >= 0) {
-                if (count > 0) out.write(buffer, 0, count);
-            }
-            return new JSONObject(new String(
-                    out.toByteArray(), StandardCharsets.UTF_8));
-        } catch (Exception e) {
-            return null;
         }
     }
 

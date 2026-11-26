@@ -9,9 +9,7 @@ import com.overdrive.app.automation.condition.BydEvent;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -559,8 +557,8 @@ public final class GenAiRoutineLearner {
         makeOwnerOnly(storeFile(), false);
         makeOwnerOnly(backupFile(), false);
 
-        JSONObject root = readStore(storeFile());
-        if (root == null) root = readStore(backupFile());
+        JSONObject root = GenAiStoreReader.read(storeFile(), MAX_STORE_BYTES);
+        if (root == null) root = GenAiStoreReader.read(backupFile(), MAX_STORE_BYTES);
         if (root == null
                 || root.optInt("version", STORE_VERSION) != STORE_VERSION) {
             return;
@@ -669,26 +667,6 @@ public final class GenAiRoutineLearner {
                 out.put("automationId", automationId);
             }
             return out;
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    private static JSONObject readStore(File file) {
-        if (!file.isFile() || file.length() <= 0
-                || file.length() > MAX_STORE_BYTES) {
-            return null;
-        }
-        try (FileInputStream in = new FileInputStream(file);
-             ByteArrayOutputStream out = new ByteArrayOutputStream(
-                     (int) file.length())) {
-            byte[] buffer = new byte[4096];
-            int count;
-            while ((count = in.read(buffer)) >= 0) {
-                if (count > 0) out.write(buffer, 0, count);
-            }
-            return new JSONObject(new String(
-                    out.toByteArray(), StandardCharsets.UTF_8));
         } catch (Exception ignored) {
             return null;
         }
