@@ -7,6 +7,7 @@ import static org.junit.Assert.fail;
 
 import java.io.BufferedInputStream;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import org.junit.Test;
@@ -141,6 +142,67 @@ public class HttpRequestHeadTest {
                 new ByteArrayInputStream(new byte[0]), 0));
         failsWith(400, () -> HttpRequestHead.readUtf8Body(
                 new ByteArrayInputStream("small".getBytes(StandardCharsets.UTF_8)), 9));
+    }
+
+    @Test public void reusedHeaderBufferKeepsStringsIndependentAndValidatesShorterLines()
+            throws Exception {
+        String large = "X-Large: " + repeat('a', 16000) + "é";
+        HttpRequestHead head = reader("GET / HTTP/1.1\r\n" + large
+                + "\r\nX-Small: \tvalue\n\r\n!");
+        assertEquals("GET / HTTP/1.1", head.readRequestLine());
+        String first = head.readHeaderLine();
+        assertEquals("X-Small: \tvalue", head.readHeaderLine());
+        assertEquals("", head.readHeaderLine());
+        assertEquals(large, first);
+
+        HttpRequestHead invalid = reader("GET / HTTP/1.1\r\n" + large
+                + "\r\nX: \u0000\r\n\r\n");
+        invalid.readRequestLine();
+        invalid.readHeaderLine();
+        failsWith(400, invalid::readHeaderLine);
+    }
+
+    @Test public void chunkedBodyDecodesUtf8AcrossChunksAndLeavesFollowingBytes()
+            throws Exception {
+        String content = repeat('A', 8191) + "🚗é" + repeat('z', 32000);
+        byte[] payload = content.getBytes(StandardCharsets.UTF_8);
+        ByteArrayOutputStream wire = new ByteArrayOutputStream();
+        // Split within the four-byte emoji, then within the two-byte accent.
+        int[] lengths = {8192, 4, payload.length - 8196};
+        int offset = 0;
+        for (int length : lengths) {
+            wire.write((Integer.toHexString(length) + ";ext=test\r\n")
+                    .getBytes(StandardCharsets.US_ASCII));
+            wire.write(payload, offset, length);
+            wire.write('\r');
+            wire.write('\n');
+            offset += length;
+        }
+        wire.write(("0\nX-Trailer: " + repeat('x', 1024) + "\r\nX: y\n\n!")
+                .getBytes(StandardCharsets.US_ASCII));
+        InputStream input = new BufferedInputStream(new ByteArrayInputStream(wire.toByteArray()), 17);
+        assertEquals(content, HttpRequestHead.readChunkedUtf8Body(input, payload.length));
+        assertEquals('!', input.read());
+    }
+
+    @Test public void chunkedBodyRejectsMalformedFramingAndPreservesEmptyAndInvalidUtf8()
+            throws Exception {
+        assertNull(chunked("0\r\n\r\n", 0));
+        assertEquals("abc", chunked("3\nabc\n0\n\n", 3));
+        failsWith(413, () -> chunked("2\r\nab\r\n2\r\ncd\r\n0\r\n\r\n", 3));
+        failsWith(400, () -> chunked("2\r\na", 4));
+        failsWith(400, () -> chunked("1\r\naX\r\n0\r\n\r\n", 4));
+        failsWith(400, () -> chunked("1\r\na\r\n0\r\nX: \rX\r\n\r\n", 4));
+        failsWith(400, () -> chunked("0\r\nX: y\r\n", 4));
+        failsWith(431, () -> chunked("0\r\n" + repeat("X: y\r\n", 101) + "\r\n", 4));
+        byte[] malformed = {'2', '\n', (byte) 0xc3, 'x', '\n', '0', '\n', '\n'};
+        assertEquals(new String(new byte[]{(byte) 0xc3, 'x'}, StandardCharsets.UTF_8),
+                HttpRequestHead.readChunkedUtf8Body(new ByteArrayInputStream(malformed), 2));
+    }
+
+    private static String chunked(String wire, int limit) throws Exception {
+        return HttpRequestHead.readChunkedUtf8Body(
+                new ByteArrayInputStream(wire.getBytes(StandardCharsets.UTF_8)), limit);
     }
 
     private static String repeat(char ch, int count) {
