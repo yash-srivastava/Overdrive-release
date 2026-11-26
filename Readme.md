@@ -483,32 +483,39 @@ Developers can still send pull requests on the language files: `app/src/main/ass
 The latest release in full, then earlier highlights. APKs and per-release notes are on
 [GitHub Releases](https://github.com/yash-srivastava/Overdrive-release/releases).
 
-### v65.2: Lighter Surveillance, Smoother Live View & 60+ Fixes
+### v65.4: Calls Stay on Your Phone, Richer Custom Layouts & 80+ Fixes
+
+#### ✨ New
+
+- **Keep calls and music on your phone while parked** — A new, optional Proximity rule. With the car off, phone proximity keeps working, but calls and media stay on your phone instead of the parked car.
+- **More on every Custom Layout** — The car's regeneration level, a status rail (clock, drive mode, outside and cabin temperature, compass, odometer, Trip A and Trip B) and a detailed trip wherever there's room, with no fact shown twice. The Motorcourt ring now glows, lamps follow the curved lens, and Navigator can host any map app.
+- **Full cluster on more DiLink 3 cars** — The full-cluster takeover now works on more DiLink 3 firmwares.
+- **Auto theme follows the sun** — Custom Layouts' Auto theme now changes with the time of day instead of turning dark whenever the headlamps come on in rain or shade.
+- **Trip B** — The cluster's "since reset" trip meter is now available.
+- **Codec support at a glance** — Recording and Surveillance settings show whether your car supports H.264 and H.265 in hardware, and which codec is recording.
 
 #### ⚡ Optimizations
 
-- **Lighter surveillance** — Motion analysis, object tracking and AI detection do less work per frame, so parked guarding uses less CPU.
-- **Smoother Live View** — The live stream reuses its buffers instead of allocating new ones for every frame.
-- **Faster recording and preview** — The recording compositor and the camera preview copy less data.
-- **Quicker playback** — Recordings start and seek faster in the browser.
-- **Faster everywhere else** — Wake word, navigation guidance, route hazards, the trip timeline and elevation all compute more efficiently.
+- **Faster AI frames** — Camera frames reach the AI detector about twice as fast (measured on DiLink 3), including zoomed AI crops. You can switch this in Camera probe → AI frame copy.
+- **Quicker thumbnails** — Busy Events and Timeline pages no longer queue up old thumbnail work.
+- **Lighter live view in the browser** — Fewer full-frame copies, so phones and laptops work less.
+- **Smaller improvements everywhere** — Recording, playback, the timeline, trips, voice, OCR and the web server all do less work.
 
 #### 🛠️ Fixes
 
-- **No more stale screens** — When you change a filter or page quickly, a slow old answer no longer replaces the new one. Fixed across Search, Parking, Timeline, Data Usage, Sessions, Community, Backup, Factory DVR and more.
-- **Clock changes** — Caches, timers and update checks keep working when the car's clock jumps.
-- **GPS** — Positions at 0° latitude or longitude are no longer ignored.
-- **Phone languages** — Lookups that broke on some languages, such as Turkish, now work.
-- **Calendars** — Month-end navigation in Events, and full date pickers in Trips and Charging.
-- **Diagnostics** — Thermal sensors, late CPU cores, process lists and Wi-Fi details now show correctly.
-- **Data** — Bad battery or fuel readings no longer skew charging calibration or trip costs.
-
-#### ♿ Accessibility
-
-- Keyboard navigation in settings tabs and collapsible cards, keyboard Delete in Notifications, and screen-reader labels for widgets, audio files and the sidebar.
+- **DiLink 100** — Screen brightness comes back as you set it, not at 50%. BYD's own apps, Service Mode and the config backup now use the driver's account. The reverse camera stays live while OverDrive records, and setup skips the auto-start step when the car doesn't need it.
+- **Pre-heat** — If the car ignores the remote power-on, climate control falls back to the cloud.
+- **Walk-away lock** — Phone proximity keeps working after switch-off, even if the head unit closes the app.
+- **Trip timeline** — Shows the real battery level along the trip instead of a straight line.
+- **DiLink 5 recordings** — The video overlay shows the real gear instead of P.
+- **Tyre limits** — Limits are shown and edited in your chosen unit (PSI or bar).
+- **Watched clips** — Stay in sync between local and remote access.
+- **Live View** — All + DVR explains why it's unavailable, and older viewers recover at the next keyframe instead of disconnecting.
+- **And more** — Charging chart hover after rotating, 3D car page memory use, leftover export files, the AVM camera probe, and a warning about Bluetooth audio while parked.
 
 ### Earlier releases
 
+- **v65.2** — Lighter Surveillance, Smoother Live View & 60+ Fixes
 - **v65.0** — Take Control of Your Full Driver Cluster + Face ID Lock
 - **v64.3** — Living Layouts & Drive-Start Fixes
 - **v64.0** — Pick Your Dashboard or Build Your Own
