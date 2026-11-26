@@ -88,20 +88,96 @@ window.BYD = { clock: { time: function (date) { return date.toISOString().slice(
             leave(el);
             check(c._hoverBase === null, el.id + ': cache retained after leave');
             equal(base, pixels(el), el.id + ': leave restores base');
+            // Resize without a data refresh, including the same-index fast path.
+            move(el, 0);
+            var oldIndex = el === soc ? c._socHoverIdx : (el._barSpec ? el._barIdx : el._chgHoverIdx);
+            el.style.width = '420px';
+            before = setups;
+            move(el, 0);
+            check(setups === before + 1 && !c._hoverLayoutStale(el), el.id + ': same-index resize repaint');
+            check(oldIndex === (el === soc ? c._socHoverIdx : (el._barSpec ? el._barIdx : el._chgHoverIdx)),
+                el.id + ': same selection after resize');
+            check(c._hoverBase && c._hoverBase.canvas === el && c._hoverBase.image.width === el.width,
+                el.id + ': resized cache');
+            before = setups;
+            move(el, 0);
+            check(setups === before, el.id + ': same-index skip after resize');
+
+            // A changed width can also change which sample is nearest to the finger.
+            el.style.width = '600px';
+            before = setups;
+            move(el, 300);
+            check(setups === before + 1, el.id + ': changed-index resize repaint');
+            var resized = pixels(el);
+            leave(el);
+            render();
+            move(el, 300);
+            equal(resized, pixels(el), el.id + ': resized hit-test vs fresh render');
+
+            // Leave must rebuild a stale base, not restore old backing pixels.
+            el.style.width = '480px';
+            before = setups;
+            leave(el);
+            check(setups === before + 1 && !c._hoverLayoutStale(el) && c._hoverBase === null,
+                el.id + ': resize on leave');
+            var resizedBase = pixels(el);
+            render();
+            equal(resizedBase, pixels(el), el.id + ': resized leave vs fresh render');
+
+            // Simulate a browser zoom / DPR change while CSS width stays fixed.
+            var dprDescriptor = Object.getOwnPropertyDescriptor(window, 'devicePixelRatio');
+            var changedDpr = window.devicePixelRatio === 1 ? 1.25 : 1;
+            try {
+                move(el, 0);
+                Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: changedDpr });
+                before = setups;
+                move(el, 0);
+                check(setups === before + 1 && el.width === Math.round(el.clientWidth * changedDpr),
+                    el.id + ': same-index DPR repaint');
+                var zoomed = pixels(el);
+                leave(el);
+                render();
+                move(el, 0);
+                equal(zoomed, pixels(el), el.id + ': DPR hover vs fresh render');
+            } finally {
+                if (dprDescriptor) Object.defineProperty(window, 'devicePixelRatio', dprDescriptor);
+                else delete window.devicePixelRatio;
+            }
+            before = setups;
+            leave(el);
+            check(setups === before + 1 && !c._hoverLayoutStale(el), el.id + ': DPR change on leave');
+            el.style.width = '';
+            // First hover on a clean but stale base must also rebuild geometry.
+            before = setups;
+            move(el, 300);
+            check(setups === before + 1 && !c._hoverLayoutStale(el), el.id + ': clean stale base');
+            leave(el);
         });
+        // Exercise the shared prepare guard directly, without pointer hit-testing.
+        soc.style.width = '480px';
+        var before = setups;
+        check(c._prepareHoverBase(soc, function () { c.renderSocOverTime(soc, rows); })
+            && setups === before + 1 && !c._hoverLayoutStale(soc), 'direct prepare on clean stale base');
+        c._finishHover(soc, function () { c.renderSocOverTime(soc, rows); });
+        soc.style.width = '';
+        c.renderSocOverTime(soc, rows);
         // Switching charts evicts the old base. Returning to its active hover
         // must repaint rather than capturing an already annotated image.
         move(soc, 200); move(power, 210);
         check(c._hoverBase.canvas === power, 'single cache ownership');
-        var before = setups;
+        before = setups;
         move(soc, 300);
         check(setups === before + 1 && c._hoverBase.canvas === soc, 'evicted chart fallback');
         leave(power); leave(soc);
         // Touch cancel and cache invalidation when clearing a chart.
         check(touch(temp, 'touchstart', 200).defaultPrevented, 'touch start');
+        temp.style.width = '480px'; before = setups;
         touch(temp, 'touchmove', 300);
+        check(setups === before + 1 && !c._hoverLayoutStale(temp), 'touch move after resize');
+        temp.style.width = ''; before = setups;
         touch(temp, 'touchcancel', 300);
-        check(c._hoverBase === null && temp._chgHoverIdx === null, 'touch cancel');
+        check(setups === before + 1 && !c._hoverLayoutStale(temp)
+            && c._hoverBase === null && temp._chgHoverIdx === null, 'touch cancel after resize');
         move(temp, 200); c._clearCanvas(temp.id); before = setups;
         move(temp, 300);
         check(setups === before && c._hoverBase === null && temp._chgHoverSpec === null, 'cleared chart cannot revive');
@@ -117,7 +193,7 @@ window.BYD = { clock: { time: function (date) { return date.toISOString().slice(
         move(soc, 100); move(soc, 500);
         check(c._hoverBase === null && setups === before + 1, 'oversized fallback');
         leave(soc);
-        result.textContent = 'PASS: 6 chart types, pixel comparisons, 720 repeated/moving hover events, redraw and cache lifecycle, touch, failed/oversized cache; DPR=' + window.devicePixelRatio;
+        result.textContent = 'PASS: 6 chart types, pixel comparisons, 720 repeated/moving hover events, redraw and cache lifecycle, resize/DPR hit-testing and leave, touch, failed/oversized cache; DPR=' + window.devicePixelRatio;
     } catch (error) { result.textContent = 'FAIL: ' + (error.stack || error); }
 })();
 </script>

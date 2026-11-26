@@ -2846,7 +2846,17 @@ var CHARGING = {
         }
     },
 
+    _hoverLayoutStale: function (canvas) {
+        var dpr = window.devicePixelRatio || 1;
+        var w = canvas.clientWidth || (canvas.parentNode && canvas.parentNode.clientWidth) || 320;
+        return Math.round(w * dpr) !== canvas.width;
+    },
+
     _prepareHoverBase: function (canvas, repaint) {
+        if (this._hoverLayoutStale(canvas)) {
+            this._forgetHoverBase(canvas);
+            canvas._chargingHoverClean = false;
+        }
         if (!canvas._chargingHoverClean && !this._restoreHoverBase(canvas)) {
             repaint(); // Legacy/oversized canvas or cache failure: rebuild as before.
             if (!canvas._chargingHoverClean) return false;
@@ -2870,6 +2880,10 @@ var CHARGING = {
     },
 
     _finishHover: function (canvas, repaint) {
+        if (this._hoverLayoutStale(canvas)) {
+            this._forgetHoverBase(canvas);
+            canvas._chargingHoverClean = false;
+        }
         if (!canvas._chargingHoverClean && !this._restoreHoverBase(canvas)) repaint();
         this._forgetHoverBase(canvas);
         canvas._chargingHoverPainted = false;
@@ -3016,6 +3030,15 @@ var CHARGING = {
         var onMove = function (clientX) {
             var g = self._socGeom;
             if (!g) return;
+            // Refresh geometry before hit-testing, even if the old index would match.
+            if (self._hoverLayoutStale(canvas)) {
+                self._socHoverIdx = null;
+                self._finishHover(canvas, function () {
+                    if (self.socHistoryCache) self.renderSocOverTime(canvas, self.socHistoryCache);
+                });
+                g = self._socGeom;
+                if (!g || self._hoverLayoutStale(canvas)) return;
+            }
             var rect = g.canvas.getBoundingClientRect();
             var px = clientX - rect.left;
             // Find nearest sample by x.
@@ -3371,6 +3394,13 @@ var CHARGING = {
         var onMove = function (clientX) {
             var g = canvas._chgHoverSpec;
             if (!g) return;
+            // Refresh geometry before hit-testing, even if the old index would match.
+            if (self._hoverLayoutStale(canvas)) {
+                canvas._chgHoverIdx = null;
+                self._finishHover(canvas, function () { if (g.render) g.render(); });
+                g = canvas._chgHoverSpec;
+                if (!g || self._hoverLayoutStale(canvas)) return;
+            }
             var rect = canvas.getBoundingClientRect();
             var px = clientX - rect.left;
             var best = -1, bestDx = 1e9;
@@ -3482,6 +3512,13 @@ var CHARGING = {
         var onMove = function (clientX) {
             var g = canvas._barSpec;
             if (!g) return;
+            // Refresh geometry before hit-testing, even if the old index would match.
+            if (self._hoverLayoutStale(canvas)) {
+                canvas._barIdx = null;
+                self._finishHover(canvas, function () { if (g.render) g.render(); });
+                g = canvas._barSpec;
+                if (!g || self._hoverLayoutStale(canvas)) return;
+            }
             var rect = canvas.getBoundingClientRect();
             var px = clientX - rect.left;
             var best = -1, bestDx = 1e9;
