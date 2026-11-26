@@ -2491,13 +2491,11 @@
         return String(seg.id).replace(/[^a-f0-9]/gi, '') + '.mp4';
     }
 
-    function downloadCurrentSegment() {
-        var seg = V.item;
-        var url = seg && seg.videoUrl;
+    function downloadSegment(url, name) {
         if (!url) return;
         var a = doc.createElement('a');
         a.href = url;
-        a.download = segFilename(seg);
+        a.download = name;
         doc.body.appendChild(a);
         a.click();
         doc.body.removeChild(a);
@@ -2513,6 +2511,7 @@
             if (BYD.utils && BYD.utils.toast) BYD.utils.toast(tr('shareRecording'), 'warning');
             return;
         }
+        // Keep every asynchronous fallback tied to the clip selected at the tap.
         var url = seg.videoUrl;
         var name = segFilename(seg);
         var nav = root.navigator;
@@ -2533,10 +2532,10 @@
                 return shareFiles(file);
             });
         }).then(function (shared) {
-            if (shared) return;
+            if (shared) return true;
             if (root.navigator && root.navigator.share) {
                 var link = ((root.location && root.location.origin) || '') + url;
-                return root.navigator.share({ title: name, url: link }).catch(function () { return false; });
+                return root.navigator.share({ title: name, url: link }).then(function () { return true; }).catch(function () { return false; });
             }
             return false;
         }).then(function (shared) {
@@ -2545,12 +2544,12 @@
             if (root.navigator && root.navigator.clipboard && root.navigator.clipboard.writeText) {
                 return root.navigator.clipboard.writeText(link).then(function () {
                     if (BYD.utils && BYD.utils.toast) BYD.utils.toast(tr('shareCopied'), 'success');
-                }).catch(function () { downloadCurrentSegment(); });
+                }).catch(function () { downloadSegment(url, name); });
             }
-            downloadCurrentSegment();
+            downloadSegment(url, name);
         }).catch(function () {
             if (BYD.utils && BYD.utils.toast) BYD.utils.toast(tr('shareFailed'), 'error');
-            downloadCurrentSegment();
+            downloadSegment(url, name);
         });
     }
 
