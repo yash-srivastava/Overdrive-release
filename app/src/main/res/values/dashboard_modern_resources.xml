@@ -5,8 +5,6 @@
     <dimen name="dashboard_modern_radius">8dp</dimen>
     <dimen name="dashboard_modern_touch_target">48dp</dimen>
     <dimen name="dashboard_modern_action_min_height">@dimen/od_touch_primary</dimen>
-    <dimen name="dashboard_modern_metric_gap">12dp</dimen>
-    <dimen name="dashboard_modern_qr_size">184dp</dimen>
 
     <!-- Hero ribbon opacity; values-night overrides. -->
     <item name="dashboard_hero_ribbon_alpha" format="float" type="dimen">0.45</item>

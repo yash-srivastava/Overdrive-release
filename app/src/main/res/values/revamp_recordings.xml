@@ -40,7 +40,6 @@
 
     <!-- Player chrome -->
     <dimen name="rec_player_padding">6dp</dimen>
-    <dimen name="rec_player_play_size">56dp</dimen>
     <dimen name="rec_player_quad_width">44dp</dimen>
     <dimen name="rec_player_track_inset">12dp</dimen>
     <dimen name="rec_player_event_band">16dp</dimen>
