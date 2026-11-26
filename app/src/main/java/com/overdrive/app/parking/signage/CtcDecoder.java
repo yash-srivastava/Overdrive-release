@@ -31,49 +31,64 @@ public final class CtcDecoder {
      */
     public static Decoded decode(float[][] probs, String[] charset, int blankIndex, boolean isProbability) {
         if (probs == null || probs.length == 0 || charset == null) return new Decoded("", 0f);
-        StringBuilder sb = new StringBuilder();
-        int prev = -1;
-        double confSum = 0.0;
-        int emitted = 0;
-        for (float[] step : probs) {
-            if (step == null || step.length == 0) { prev = -1; continue; }
-            int best = 0;
-            float bestV = step[0];
-            for (int c = 1; c < step.length; c++) {
-                if (step[c] > bestV) { bestV = step[c]; best = c; }
-            }
-            float p = isProbability ? bestV : softmaxAt(step, best);
-            if (best != blankIndex && best != prev) {
-                if (best >= 0 && best < charset.length && charset[best] != null) {
-                    sb.append(charset[best]);
-                    confSum += p;
-                    emitted++;
-                }
-            }
-            prev = best;
-        }
-        float conf = emitted == 0 ? 0f : (float) (confSum / emitted);
-        return new Decoded(sb.toString(), conf);
+        return decodeRows(probs, null, probs.length, 0, charset, blankIndex, isProbability);
     }
 
     /** Convenience for a flat row-major {@code [T*C]} buffer. */
     public static Decoded decodeFlat(float[] flat, int steps, int classes, String[] charset,
                                      int blankIndex, boolean isProbability) {
-        if (flat == null || steps <= 0 || classes <= 0 || flat.length < steps * classes) {
+        // Division avoids overflow when validating an invalid tensor shape.
+        if (flat == null || steps <= 0 || classes <= 0 || charset == null
+                || steps > flat.length / classes) {
             return new Decoded("", 0f);
         }
-        float[][] probs = new float[steps][classes];
+        return decodeRows(null, flat, steps, classes, charset, blankIndex, isProbability);
+    }
+
+    /** Read row slices in place; the recogniser already owns the flat output buffer. */
+    private static Decoded decodeRows(float[][] rows, float[] flat, int steps, int classes,
+                                      String[] charset, int blankIndex, boolean isProbability) {
+        StringBuilder sb = new StringBuilder();
+        int prev = -1;
+        double confSum = 0.0;
+        int emitted = 0;
         for (int t = 0; t < steps; t++) {
-            System.arraycopy(flat, t * classes, probs[t], 0, classes);
+            float[] step = rows == null ? flat : rows[t];
+            if (step == null || step.length == 0) { prev = -1; continue; }
+            int start = rows == null ? t * classes : 0;
+            int end = rows == null ? start + classes : step.length;
+            int best = start;
+            float bestV = step[start];
+            for (int c = start + 1; c < end; c++) {
+                if (step[c] > bestV) { bestV = step[c]; best = c; }
+            }
+            int symbol = best - start;
+            if (symbol != blankIndex && symbol != prev
+                    && symbol < charset.length && charset[symbol] != null) {
+                // Confidence is only used for emitted symbols. Blank, repeated and
+                // unmapped winners do not need an expensive softmax pass.
+                float p = isProbability ? bestV : softmaxAt(step, start, end, best);
+                sb.append(charset[symbol]);
+                confSum += p;
+                emitted++;
+            }
+            prev = symbol;
         }
-        return decode(probs, charset, blankIndex, isProbability);
+        float conf = emitted == 0 ? 0f : (float) (confSum / emitted);
+        return new Decoded(sb.toString(), conf);
     }
 
     static float softmaxAt(float[] logits, int idx) {
+        return softmaxAt(logits, 0, logits.length, idx);
+    }
+
+    private static float softmaxAt(float[] logits, int start, int end, int idx) {
+        // Preserve the original max search, float subtraction and accumulation order
+        // (including non-finite input behaviour), but restrict them to this row.
         float max = Float.NEGATIVE_INFINITY;
-        for (float v : logits) if (v > max) max = v;
+        for (int i = start; i < end; i++) if (logits[i] > max) max = logits[i];
         double sum = 0.0;
-        for (float v : logits) sum += Math.exp(v - max);
+        for (int i = start; i < end; i++) sum += Math.exp(logits[i] - max);
         return sum <= 0 ? 0f : (float) (Math.exp(logits[idx] - max) / sum);
     }
 
