@@ -102,6 +102,7 @@ public class AutomationSchemaCompatibilityTest {
         EnumType choice = new EnumType(FIELD, new Label("b", "B"), new Label("a", "A"));
         assertEquals("enum", choice.toJson().getString("type"));
         assertEquals("b", choice.toJson().getJSONArray("options").getJSONObject(0).getString("id"));
+        assertSame(StringValue.COMPARATORS, choice.getComparators());
         assertTrue(choice.isValid("a"));
         assertFalse(choice.isValid("A"));
         StringType string = new StringType(FIELD, 5, "automation.variable_name");
@@ -109,11 +110,13 @@ public class AutomationSchemaCompatibilityTest {
         assertEquals(5, string.toJson().getInt("maxLength"));
         assertEquals(Messages.get("automation.variable_name"), string.toJson().getString("warning"));
         assertFalse(new StringType(FIELD, 5).toJson().has("warning"));
+        assertSame(StringValue.COMPARATORS, string.getComparators());
         assertTrue(string.isValid(""));
         assertFalse(string.isValid("abcdef"));
         SignalAddressType address = new SignalAddressType(FIELD);
         assertEquals("signalAddress", address.toJson().getString("type"));
         assertTrue(address.toJson().getBoolean("signalAddress"));
+        assertSame(StringValue.COMPARATORS, address.getComparators());
         assertTrue(address.isValid("unknownLegacySignal"));
         assertFalse(address.isValid("  "));
         assertTrue(new DynamicStringType(FIELD, 64).toJson().getBoolean("dynamic"));
@@ -178,6 +181,22 @@ public class AutomationSchemaCompatibilityTest {
             assertNull(condition.eventData(input));
             vars.put(key, "a".repeat(keyLimits[i]));
             assertNotNull(condition.eventData(input));
+        }
+    }
+
+    @Test
+    public void textKeyConditionsDoNotAdvertiseMqttTwinForTelemetryId() throws Exception {
+        Label label = new Label("speed", "Speed");
+        EventCondition ordinary = new EventCondition(label, "Speed", new StringType(FIELD, 5));
+        assertEquals("speed", ordinary.toJson().getString("mqtt"));
+
+        // A mapped id makes the omission depend on the text-key schema override.
+        EventCondition[] conditions = {new VariableCondition(label, "Speed"),
+                new MqttTriggerCondition(label, "Speed")};
+        for (EventCondition condition : conditions) {
+            JSONObject schema = condition.toJson();
+            assertEquals("speed", schema.getString("id"));
+            assertFalse(schema.has("mqtt"));
         }
     }
 }
