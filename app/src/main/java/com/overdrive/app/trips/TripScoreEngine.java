@@ -482,14 +482,8 @@ public class TripScoreEngine {
                 launchCaptureRemaining--;
                 if (launchCaptureRemaining == 0) {
                     // Finalize this launch profile
-                    MicroMoments.LaunchProfile lp = new MicroMoments.LaunchProfile();
-                    lp.startTime = launchStartTime;
-                    lp.peakAccelPercent = launchPeakAccel;
-                    lp.accelCurve = new int[launchCurveBuffer.size()];
-                    for (int k = 0; k < launchCurveBuffer.size(); k++) {
-                        lp.accelCurve[k] = launchCurveBuffer.get(k);
-                    }
-                    microMoments.launches.add(lp);
+                    microMoments.launches.add(buildLaunchProfile(
+                            launchStartTime, launchPeakAccel, launchCurveBuffer));
                 }
             } else {
                 // Detect launch: was stationary, now moving. Arm at a near-
@@ -637,14 +631,7 @@ public class TripScoreEngine {
 
         // Finalize any in-progress launch capture (trip ended mid-launch)
         if (launchCaptureRemaining > 0 && launchCurveBuffer != null && !launchCurveBuffer.isEmpty()) {
-            MicroMoments.LaunchProfile lp = new MicroMoments.LaunchProfile();
-            lp.startTime = launchStartTime;
-            lp.peakAccelPercent = launchPeakAccel;
-            lp.accelCurve = new int[launchCurveBuffer.size()];
-            for (int k = 0; k < launchCurveBuffer.size(); k++) {
-                lp.accelCurve[k] = launchCurveBuffer.get(k);
-            }
-            microMoments.launches.add(lp);
+            microMoments.launches.add(buildLaunchProfile(launchStartTime, launchPeakAccel, launchCurveBuffer));
         }
 
         // ── Classify kinematic state ──
@@ -907,6 +894,18 @@ public class TripScoreEngine {
     }
 
     // ==================== Utilities ====================
+
+    private static MicroMoments.LaunchProfile buildLaunchProfile(long startTime, int peakAccel,
+                                                                List<Integer> curve) {
+        MicroMoments.LaunchProfile profile = new MicroMoments.LaunchProfile();
+        profile.startTime = startTime;
+        profile.peakAccelPercent = peakAccel;
+        profile.accelCurve = new int[curve.size()];
+        for (int k = 0; k < curve.size(); k++) {
+            profile.accelCurve[k] = curve.get(k);
+        }
+        return profile;
+    }
 
     static int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
