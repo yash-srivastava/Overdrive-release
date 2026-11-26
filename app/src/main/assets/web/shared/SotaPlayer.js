@@ -21,6 +21,8 @@
             this.frameCount = 0;
             this.onConnected = null;
             this.onDisconnected = null;
+            // Optional notification for consumers that upload the canvas as a texture.
+            this.onCanvasChanged = null;
             // Tracks the user's intent to view (vs. transient running state), so
             // we can suspend the stream when the tab is hidden and auto-resume
             // when it returns — without the user re-tapping the camera.
@@ -465,8 +467,11 @@
             const frame = this.pendingFrame;
             this.pendingFrame = null;
             if (!frame) return;
+            let canvasChanged = false;
             try {
                 if (!this.running || this._failed) return;
+                // Resizing clears the canvas even if the subsequent draw fails.
+                canvasChanged = true;
                 if (this.canvas.width !== frame.displayWidth || this.canvas.height !== frame.displayHeight) {
                     this.canvas.width = frame.displayWidth;
                     this.canvas.height = frame.displayHeight;
@@ -474,11 +479,18 @@
                 this.ctx.drawImage(frame, 0, 0, this.canvas.width, this.canvas.height);
             } finally {
                 frame.close();
+                if (canvasChanged) this._notifyCanvasChanged();
             }
             if (this._frameWatchdog) this._clearFrameWatchdog();
             this.decodeErrors = 0;
             this.frameCount++;
             if (this.onFrame) this.onFrame(this.frameCount);
+        }
+
+        _notifyCanvasChanged() {
+            if (!this.onCanvasChanged) return;
+            try { this.onCanvasChanged(); }
+            catch (e) { console.warn('[SotaPlayer] Canvas notification failed:', e); }
         }
 
         _discardPendingFrame() {
@@ -538,6 +550,7 @@
             this._discardPendingFrame();
             if (this.decoder) { try { this.decoder.close(); } catch(e) {} this.decoder = null; }
             this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            this._notifyCanvasChanged();
             this.sps = null;
             this.pps = null;
             this.hasReceivedKeyframe = false;
