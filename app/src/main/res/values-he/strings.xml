@@ -115,8 +115,8 @@
     <string name="camera_concurrent_probe_subtitle">בדיקה חד-פעמית הפותחת את שתי המצלמות בו-זמנית כדי לוודא שרכב זה מסוגל להפעיל מצלמה פנורמית ומצלמת דרך במקביל. מתבצעת פעם אחת בהפעלה הבאה בזמן חניה. השאר כבוי אלא אם ההקלטות נראות משובשות — הבדיקה אינה חובה ועלולה לקטוע זמנית הקלטה אם היא פעילה בעת הבדיקה.</string>
     <string name="camera_fast_ai_copy_title">העתקת פריימים ל-AI</string>
     <string name="camera_fast_ai_copy_label">העתקת פריימים מהירה לזיהוי AI</string>
-    <string name="camera_fast_ai_copy_hint">מעביר פריימים ממצלמה לזיהוי ה-AI בערך פי שניים מהר יותר, כך ששומר צורך פחות CPU בזמן שהוא שומר על הרכב. ההקלטות לא מושפעות.</string>
-    <string name="camera_fast_ai_copy_subtitle">הפריימים הראשונים נבדקים מול ההעתקה הרגילה, והמערכת חוזרת לבד אם הם שונים. כבה רק אם הזיהוי מתנהג לא תקין. פעיל כברירת מחדל. שינוי מפעיל מחדש את שירות המצלמה.</string>
+    <string name="camera_fast_ai_copy_hint">מעביר פריימים מהמצלמות לזיהוי ה-AI בערך פי שניים מהר יותר, כך ששומר צורך פחות CPU בזמן שהוא שומר על הרכב. ההקלטות לא מושפעות.</string>
+    <string name="camera_fast_ai_copy_subtitle">הפריימים הראשונים נבדקים מול ההעתקה הרגילה, והמערכת חוזרת לבד אם הם שונים. כבה רק אם הזיהוי לא עובד כראוי. פעיל כברירת מחדל. שינוי ההגדרה מפעיל מחדש את שירות המצלמה.</string>
     <string name="camera_oem_option_0">מצלמה 0 — Seal / Han (ברירת מחדל)</string>
     <string name="camera_oem_option_1">מצלמה 1 — Atto / Tang</string>
     <string name="camera_pair_title">איזו מצלמה היא איזו?</string>

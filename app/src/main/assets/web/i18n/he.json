@@ -2636,11 +2636,11 @@
     "kept_old_values": "{applied} — אך נשמרו הערכים הקודמים עבור: {fields}",
     "codec_capability_scope": "הגדרות הקלטת GPU שמורות לנסיעה ולחניה (לא בדיקת הקלטה):",
     "codec_capability_stale": "יכולות הקלטת GPU האחרונות הידועות (רענון ממתין; לא בדיקת הקלטה):",
-    "codec_capability_advertised": "תמיכת חומרה מפורסמת",
-    "codec_capability_missing": "המקודד המועדף לא מפרסם תמיכת חומרה",
+    "codec_capability_advertised": "יש תמיכת חומרה מוצהרת",
+    "codec_capability_missing": "המקודד המועדף לא מצהיר על תמיכת חומרה",
     "codec_capability_unknown": "תמיכה לא ידועה",
     "codec_runtime_output": "פלט המקודד הנוכחי:",
-    "codec_runtime_fallback": "פלט המקודד הנוכחי: H.264 (נפילה לסשן מ-H.265)."
+    "codec_runtime_fallback": "פלט המקודד הנוכחי: H.264 (חזרה מ-H.265 בסשן הזה)."
   },
   "events": {
     "player_volume": "עוצמת קול",
@@ -2766,7 +2766,7 @@
     "pack_ready": "חבילת הראיות מוכנה",
     "watched_clip": "נצפה",
     "unwatched_clip": "לא נצפה",
-    "playlist_resume": "המשך צפייה שלא נצפו",
+    "playlist_resume": "המשך מהקליפים שלא נצפו",
     "playlist_settings": "הגדרות פלייליסט",
     "playlist_after_clip": "אחרי כל קליפ",
     "playlist_newer": "הקודם (חדש יותר)",
@@ -4682,8 +4682,8 @@
     "bluetooth_title": "ה-Bluetooth של הרכב: {state}. {detail}",
     "prefer_personalized_range": "העדף טווח מותאם אישית",
     "range_preference_failed": "לא ניתן לשמור את העדפת תצוגת הטווח.",
-    "autostart_allowed": "הפעלה אוטומטית — לאחרונה אושרה (המתג כבוי)",
-    "autostart_blocked": "הפעלה אוטומטית — לאחרונה נחסמה (המתג דלוק)",
+    "autostart_allowed": "הפעלה אוטומטית: בבדיקה האחרונה הייתה מותרת (המתג כבוי)",
+    "autostart_blocked": "הפעלה אוטומטית: בבדיקה האחרונה הייתה חסומה (המתג דלוק)",
     "autostart_unknown": "הפעלה אוטומטית: לא אומת",
     "autostart_offline": "הפעלה אוטומטית: הסטטוס לא זמין"
   },
@@ -7041,7 +7041,7 @@
     },
     "parked_bluetooth_audio_warning": "כשההגדרה פעילה, שיחות Bluetooth ומדיה יכולים להישאר מחוברים, והקרנת טלפון אלחוטית יכולה להישאר פעילה בזמן חניה. קרבת טלפון דורשת חיבור Bluetooth פעיל; השמע וההקרנה לא מושהים בנפרד.",
     "parked_phone_audio_off": "השאר שיחות ומוזיקה בטלפון בזמן חניה",
-    "parked_phone_audio_off_desc": "ניסיוני. כשהרכב כבוי, הקישור Bluetooth שנשמר לקרבה מסרב לשמע שיחות ומנתק שמע מדיה, כך ששיחות ומוזיקה נשארות בטלפון. שניהם חוזרים כשהרכב נדלק. בחלק מהטלפונים הרינג עדיין יישמע ברכב."
+    "parked_phone_audio_off_desc": "ניסיוני. כשהרכב כבוי, חיבור ה-Bluetooth שנשמר לקרבה מסרב לשמע שיחות ומנתק שמע מדיה, כך ששיחות ומוזיקה נשארות בטלפון. שניהם חוזרים כשהרכב נדלק. בחלק מהטלפונים הצלצול עדיין יישמע ברכב."
   },
   "widgetBuilder": {
     "title": "בונה הווידג'טים",
