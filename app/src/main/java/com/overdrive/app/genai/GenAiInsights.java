@@ -14,9 +14,6 @@ import com.overdrive.app.server.LocaleManager;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.nio.charset.StandardCharsets;
 import java.time.DayOfWeek;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -598,9 +595,7 @@ public final class GenAiInsights {
     }
 
     private static String bound(String value) {
-        String clean = value == null ? "" : value.trim();
-        return clean.length() <= MAX_TEXT_CHARS
-                ? clean : clean.substring(0, MAX_TEXT_CHARS);
+        return boundShort(value, MAX_TEXT_CHARS);
     }
 
     private static String boundShort(String value, int max) {
@@ -613,11 +608,7 @@ public final class GenAiInsights {
         if (loaded) return;
         loaded = true;
         items.clear();
-        makeOwnerOnly(home(), true);
-        makeOwnerOnly(storeFile(), false);
-        makeOwnerOnly(backupFile(), false);
-        JSONObject root = GenAiStoreReader.read(storeFile(), MAX_STORE_BYTES);
-        if (root == null) root = GenAiStoreReader.read(backupFile(), MAX_STORE_BYTES);
+        JSONObject root = store().load(MAX_STORE_BYTES);
         JSONArray stored = root == null
                 ? null : root.optJSONArray("items");
         if (stored == null) return;
@@ -632,67 +623,17 @@ public final class GenAiInsights {
     }
 
     private static boolean saveLocked() {
-        File home = home();
-        if (!home.exists() && !home.mkdirs()) return false;
-        makeOwnerOnly(home, true);
-        File file = storeFile();
-        File tmp = tempFile();
-        File backup = backupFile();
-        try {
+        // Insights historically limit reads, but not serialized writes.
+        return store().save(() -> {
             JSONArray stored = new JSONArray();
             for (JSONObject item : items) stored.put(item);
-            byte[] bytes = new JSONObject()
+            return new JSONObject()
                     .put("version", 1)
-                    .put("items", stored)
-                    .toString()
-                    .getBytes(StandardCharsets.UTF_8);
-            if (tmp.exists() && !tmp.delete()) return false;
-            if (!tmp.createNewFile()) return false;
-            makeOwnerOnly(tmp, false);
-            try (FileOutputStream out =
-                         new FileOutputStream(tmp, false)) {
-                out.write(bytes);
-                out.flush();
-                out.getFD().sync();
-            }
-            if (backup.exists() && !backup.delete()) return false;
-            if (file.exists() && !file.renameTo(backup)) return false;
-            if (!tmp.renameTo(file)) {
-                if (backup.exists()) backup.renameTo(file);
-                return false;
-            }
-            return true;
-        } catch (Exception e) {
-            return false;
-        } finally {
-            if (tmp.exists()) tmp.delete();
-        }
+                    .put("items", stored);
+        }, Integer.MAX_VALUE, false);
     }
 
-    private static void makeOwnerOnly(File file, boolean directory) {
-        if (file == null || !file.exists()) return;
-        file.setReadable(false, false);
-        file.setWritable(false, false);
-        file.setExecutable(false, false);
-        file.setReadable(true, true);
-        file.setWritable(true, true);
-        if (directory) file.setExecutable(true, true);
-    }
-
-    private static File home() {
-        return new File(System.getProperty(
-                HOME_PROPERTY, com.overdrive.app.util.ScratchRoot.path(".genai")));
-    }
-
-    private static File storeFile() {
-        return new File(home(), "insights.json");
-    }
-
-    private static File backupFile() {
-        return new File(home(), "insights.json.bak");
-    }
-
-    private static File tempFile() {
-        return new File(home(), "insights.json.tmp");
+    private static GenAiStoreFiles store() {
+        return GenAiStoreFiles.forName("insights.json");
     }
 }
