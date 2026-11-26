@@ -438,36 +438,11 @@ public class DataUsageMonitor {
     private long[] readCountersQtaguid() {
         java.io.File f = new java.io.File(QTAGUID_PATH);
         if (!f.exists()) return null;
-        long wifi = 0, mobile = 0, other = 0, app = 0, system = 0;
         try (BufferedReader r = new BufferedReader(new FileReader(f))) {
-            String line;
-            while ((line = r.readLine()) != null) {
-                String[] p = line.trim().split("\\s+");
-                if (p.length < 8) continue;
-                String iface = p[1];
-                if ("iface".equals(iface)) continue;   // header row
-                if ("lo".equals(iface)) continue;       // loopback — proxy hops
-                if (!NetstatsCounters.isUntagged(p[2])) continue;         // tagged rows are a subset
-                int uid;
-                try { uid = Integer.parseInt(p[3]); } catch (NumberFormatException e) { continue; }
-                boolean isApp = appUid > 0 && uid == appUid;
-                if (uid != SHELL_UID && !isApp) continue;
-                long rx, tx;
-                try {
-                    rx = Long.parseLong(p[5]);
-                    tx = Long.parseLong(p[7]);
-                } catch (NumberFormatException e) { continue; }
-                long bytes = rx + tx;
-                if (iface.startsWith("wlan")) wifi += bytes;
-                else if (iface.startsWith("rmnet") || iface.startsWith("ccmni")
-                        || iface.startsWith("rndis") || iface.startsWith("ppp")) mobile += bytes;
-                else other += bytes;
-                if (isApp) app += bytes; else system += bytes;
-            }
+            return NetstatsCounters.readQtaguid(r, appUid, SHELL_UID);
         } catch (Throwable t) {
             return null;
         }
-        return new long[]{wifi, mobile, other, app, system};
     }
 
     /**
