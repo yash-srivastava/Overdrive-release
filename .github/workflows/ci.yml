@@ -52,6 +52,8 @@ jobs:
           node-version: '22'
       - name: Vehicle canvas lifecycle
         run: node tools/test-vehicle-canvas-lifecycle.js
+      - name: Vehicle immersive lifecycle
+        run: node tools/test-vehicle-immersive-lifecycle.js
       - name: GenAI localized contracts
         run: node tools/tests/genai-localized-contracts/run.cjs
       - name: Link manager cancellation UI
