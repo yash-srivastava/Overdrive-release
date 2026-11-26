@@ -1162,7 +1162,9 @@ BYD.events = {
     selectDate(dateKey) {
         this.selectedDate = this.selectedDate === dateKey ? null : dateKey;
         document.querySelectorAll('.calendar-day').forEach(el => {
-            el.classList.toggle('selected', el.dataset.date === this.selectedDate);
+            const selected = el.dataset.date === this.selectedDate;
+            el.classList.toggle('selected', selected);
+            el.setAttribute('aria-pressed', selected ? 'true' : 'false');
         });
         this.updateRecordingsTitle();
         this.updateCalendarButton();

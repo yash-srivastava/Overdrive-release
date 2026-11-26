@@ -12,13 +12,15 @@ function element() {
         children: [],
         dataset: {},
         handlers: {},
+        attributes: {},
+        setAttribute(name, value) { this.attributes[name] = value; },
         classList: {
             add: name => classes.add(name),
             contains: name => classes.has(name),
             toggle: (name, force) => force ? classes.add(name) : classes.delete(name)
         },
         set innerHTML(value) { this.children.length = 0; },
-        appendChild(child) { this.children.push(child); },
+        appendChild(child) { child.parentNode = this; this.children.push(child); },
         addEventListener(type, handler) { this.handlers[type] = handler; }
     };
 }
@@ -107,6 +109,9 @@ assert.ok(cell('2024-03-02').classList.contains('disabled'));
 assert.ok(!cell('2024-03-02').classList.contains('has-recordings'));
 assert.ok(!cell('2024-03-02').classList.contains('has-sentry'));
 assert.ok(!cell('2024-03-02').handlers.click);
+assert.ok(!cell('2024-03-02').handlers.keydown);
+assert.strictEqual(cell('2024-03-02').attributes['aria-disabled'], 'true');
+assert.strictEqual(cell('2024-03-01').tabIndex, 0);
 assert.ok(cell('2024-03-01').handlers.click);
 
 // A click still toggles the single-date filter, resets pagination and refreshes the list.
@@ -115,8 +120,9 @@ for (const method of ['updateRecordingsTitle', 'updateCalendarButton', 'loadReco
     events[method] = () => calls.push(method);
 }
 events.currentPage = 3;
-cell('2024-02-29').handlers.click();
+cell('2024-02-29').handlers.keydown({ key: 'Enter', preventDefault() {} });
 assert.strictEqual(events.selectedDate, '2024-02-29');
+assert.strictEqual(cell('2024-02-29').attributes['aria-pressed'], 'true');
 assert.strictEqual(events.currentPage, 1);
 assert.ok(cell('2024-02-29').classList.contains('selected'));
 assert.deepStrictEqual(calls, ['updateRecordingsTitle', 'updateCalendarButton', 'loadRecordings', 'closeCalendar']);
@@ -125,6 +131,7 @@ assert.ok(cell('2024-02-29').classList.contains('selected'));
 assert.ok(!grid.children.some(el => el.classList.contains('in-range')));
 cell('2024-02-29').handlers.click();
 assert.strictEqual(events.selectedDate, null);
+assert.strictEqual(cell('2024-02-29').attributes['aria-pressed'], 'false');
 assert.ok(!cell('2024-02-29').classList.contains('selected'));
 cell('2024-01-28').handlers.click();
 assert.strictEqual(events.selectedDate, '2024-01-28');

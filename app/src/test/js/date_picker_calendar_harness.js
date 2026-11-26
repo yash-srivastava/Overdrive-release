@@ -12,12 +12,14 @@ function fakeElement() {
         children: [],
         dataset: {},
         handlers: {},
+        attributes: {},
+        setAttribute(name, value) { this.attributes[name] = value; },
         classList: {
             add: name => classes.add(name),
             contains: name => classes.has(name)
         },
         set innerHTML(value) { this.children.length = 0; },
-        appendChild(child) { this.children.push(child); },
+        appendChild(child) { child.parentNode = this; this.children.push(child); },
         addEventListener(type, handler) { this.handlers[type] = handler; }
     };
 }
@@ -31,7 +33,11 @@ function loadCalendar(file, symbol, gridId, titleId) {
         window: { BYD },
         document: {
             getElementById: id => id === gridId ? grid : id === titleId ? title : null,
-            createElement: fakeElement,
+            createElement: () => {
+                const el = fakeElement();
+                el.focus = () => { sandbox.document.activeElement = el; };
+                return el;
+            },
             addEventListener() {}
         },
         console
@@ -43,7 +49,7 @@ function loadCalendar(file, symbol, gridId, titleId) {
         '../../main/assets/web/shared/range-calendar.js'), 'utf8'), sandbox,
         { filename: 'range-calendar.js' });
     vm.runInContext(source + '\n;this.calendar = ' + symbol + ';', sandbox, { filename: file });
-    return { calendar: sandbox.calendar, grid };
+    return { calendar: sandbox.calendar, grid, document: sandbox.document };
 }
 
 const trips = loadCalendar('trips.js', 'TRIPS', 'calendarGrid', 'calendarTitle');
@@ -57,7 +63,7 @@ for (const [name, environment, render] of [
     ['Charging', charging, '_renderCalendar'],
     ['Notifications', notifications, '_renderCalendar']
 ]) {
-    const { calendar, grid } = environment;
+    const { calendar, grid, document } = environment;
     for (const [year, month, first, last, currentDays] of [
         [2015, 1, '2015-02-01', '2015-03-14', 28], // Sunday-start non-leap February
         [2024, 1, '2024-01-28', '2024-03-09', 29], // Leap February
@@ -96,6 +102,27 @@ for (const [name, environment, render] of [
     assert.ok(cell('2024-02-12').classList.contains('selected'), name);
     cell('2024-02-11').handlers.click();
     assert.strictEqual(picked, '2024-02-11', name);
+    assert.strictEqual(cell('2024-02-10').attributes['aria-pressed'], 'true', name);
+    assert.strictEqual(cell('2024-02-11').attributes['aria-pressed'], 'false', name);
+    assert.strictEqual(cell('2024-02-11').attributes.role, 'button', name);
+    assert.strictEqual(cell('2024-02-11').attributes['aria-label'], 'February 11, 2024', name);
+    assert.strictEqual(cell('2024-02-11').tabIndex, 0, name);
+    for (const key of ['Enter', ' ']) {
+        picked = null;
+        let prevented = false;
+        cell('2024-02-11').handlers.keydown({ key, preventDefault() { prevented = true; } });
+        assert.strictEqual(picked, '2024-02-11', name);
+        assert.ok(prevented, name);
+    }
+    picked = null;
+    cell('2024-02-11').handlers.keydown({ key: ' ', repeat: true, preventDefault() {} });
+    cell('2024-02-11').handlers.keydown({ key: 'ArrowRight', preventDefault() { assert.fail('Unexpected prevention'); } });
+    assert.strictEqual(picked, null, name);
+    const oldCell = cell('2024-02-11');
+    oldCell.focus();
+    calendar[render]();
+    assert.notStrictEqual(cell('2024-02-11'), oldCell, name);
+    assert.strictEqual(document.activeElement, cell('2024-02-11'), name);
     // Existing range callers still highlight adjacent-month endpoints and interior dates.
     calendar[draft ? '_draftFrom' : '_calFromKey'] = '2024-01-28';
     calendar[draft ? '_draftTo' : '_calToKey'] = '2024-02-02';
@@ -109,6 +136,7 @@ for (const [name, environment, render] of [
     assert.strictEqual(calendar._keyToMs('invalid', false), null);
     calendar._calMonth = new Date(new Date().getFullYear() + 2, 0, 1);
     calendar[render]();
-    assert.ok(grid.children.slice(7).every(el => el.classList.contains('disabled') && !el.handlers.click), name);
+    assert.ok(grid.children.slice(7).every(el => el.classList.contains('disabled') && !el.handlers.click &&
+        !el.handlers.keydown && el.tabIndex !== 0 && el.attributes['aria-disabled'] === 'true'), name);
 }
 console.log('date_picker_calendar_harness: ALL CHECKS PASSED');
