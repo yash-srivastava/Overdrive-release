@@ -316,13 +316,7 @@ public class PerformanceApiHandler {
             PerformanceMonitor monitor = PerformanceMonitor.getInstance();
             
             // Parse client ID from body (optional)
-            String clientId = null;
-            if (body != null && !body.isEmpty()) {
-                try {
-                    JSONObject json = new JSONObject(body);
-                    clientId = json.optString("clientId", null);
-                } catch (Exception ignored) {}
-            }
+            String clientId = parseClientId(body);
             
             // Generate client ID if not provided
             if (clientId == null || clientId.isEmpty()) {
@@ -331,13 +325,7 @@ public class PerformanceApiHandler {
             
             monitor.clientConnected(clientId);
             
-            JSONObject response = new JSONObject();
-            response.put("status", "ok");
-            response.put("clientId", clientId);
-            response.put("monitoring", monitor.isRunning());
-            response.put("activeClients", monitor.getActiveClientCount());
-            response.put("heartbeatIntervalMs", 5000);  // Client should heartbeat every 5s
-            HttpResponse.sendJson(out, response.toString());
+            HttpResponse.sendJson(out, clientStatus(monitor, clientId).toString());
             return true;
         } catch (Exception e) {
             logger.error("Failed to handle client connect", e);
@@ -354,23 +342,13 @@ public class PerformanceApiHandler {
         try {
             PerformanceMonitor monitor = PerformanceMonitor.getInstance();
             
-            String clientId = null;
-            if (body != null && !body.isEmpty()) {
-                try {
-                    JSONObject json = new JSONObject(body);
-                    clientId = json.optString("clientId", null);
-                } catch (Exception ignored) {}
-            }
+            String clientId = parseClientId(body);
             
             if (clientId != null) {
                 monitor.clientDisconnected(clientId);
             }
             
-            JSONObject response = new JSONObject();
-            response.put("status", "ok");
-            response.put("monitoring", monitor.isRunning());
-            response.put("activeClients", monitor.getActiveClientCount());
-            HttpResponse.sendJson(out, response.toString());
+            HttpResponse.sendJson(out, clientStatus(monitor, null).toString());
             return true;
         } catch (Exception e) {
             logger.error("Failed to handle client disconnect", e);
@@ -387,23 +365,13 @@ public class PerformanceApiHandler {
         try {
             PerformanceMonitor monitor = PerformanceMonitor.getInstance();
             
-            String clientId = null;
-            if (body != null && !body.isEmpty()) {
-                try {
-                    JSONObject json = new JSONObject(body);
-                    clientId = json.optString("clientId", null);
-                } catch (Exception ignored) {}
-            }
+            String clientId = parseClientId(body);
             
             if (clientId != null) {
                 monitor.clientHeartbeat(clientId);
             }
             
-            JSONObject response = new JSONObject();
-            response.put("status", "ok");
-            response.put("monitoring", monitor.isRunning());
-            response.put("activeClients", monitor.getActiveClientCount());
-            HttpResponse.sendJson(out, response.toString());
+            HttpResponse.sendJson(out, clientStatus(monitor, null).toString());
             return true;
         } catch (Exception e) {
             logger.error("Failed to handle heartbeat", e);
@@ -412,6 +380,26 @@ public class PerformanceApiHandler {
         }
     }
     
+    static String parseClientId(String body) {
+        if (body != null && !body.isEmpty()) {
+            try {
+                return new JSONObject(body).optString("clientId", null);
+            } catch (Exception ignored) {}
+        }
+        return null;
+    }
+
+    /** Only a connect response includes the assigned client ID and heartbeat interval. */
+    private static JSONObject clientStatus(PerformanceMonitor monitor, String connectedId) throws Exception {
+        JSONObject response = new JSONObject();
+        response.put("status", "ok");
+        if (connectedId != null) response.put("clientId", connectedId);
+        response.put("monitoring", monitor.isRunning());
+        response.put("activeClients", monitor.getActiveClientCount());
+        if (connectedId != null) response.put("heartbeatIntervalMs", 5000);
+        return response;
+    }
+
     // ==================== LEGACY MANUAL CONTROL ====================
     
     private static boolean handleStart(OutputStream out) throws Exception {
