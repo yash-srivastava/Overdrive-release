@@ -49,40 +49,11 @@ public final class GenAiVehicleHistory {
     private static final String SOURCE_NONE = "none";
     private static final String SORT_NEWEST = "newest";
 
-    private static final String[] TRIP_KEYS = {
-            "id", "startTime", "endTime", "distanceKm",
-            "odometerStartKm", "odometerEndKm", "durationSeconds",
-            "avgSpeedKmh", "maxSpeedKmh", "socStart", "socEnd",
-            "kwhStart", "kwhEnd", "elecConStart", "elecConEnd",
-            "energyUsedKwh", "signedEnergyKwh", "energyMetered",
-            "efficiencySocPerKm", "energyPerKm", "electricityRate",
-            "currency", "rateSource", "rateLabel", "tripCost",
-            "kinematicState", "gradientProfile", "elevationGainM",
-            "elevationLossM", "avgGradientPercent", "extTempC",
-            "anticipationScore", "smoothnessScore",
-            "speedDisciplineScore", "efficiencyScore",
-            "consistencyScore", "overallScore", "isPhev",
-            "fuelPctStart", "fuelPctEnd", "fuelConStart", "fuelConEnd",
-            "litresUsed", "fuelPricePerL", "fuelCost", "electricCost",
-            "iceSeconds"
-    };
-
     private static final String[] EVENT_KEYS = {
             "type", "timestamp", "dateFormatted", "timeFormatted",
             "peakSeverity", "peakProximity", "personCount",
             "vehicleCount", "bikeCount", "animalCount",
             "storage", "available"
-    };
-
-    private static final String[] CHARGING_KEYS = {
-            "startTime", "endTime", "inProgress", "chargingNow",
-            "startSoc", "endSoc", "energyAdded", "peakPower",
-            "avgPower", "rangeGained", "gunState", "isDc",
-            "electricityRate", "cost", "currency", "timeToFullMin",
-            "tempHigh", "tempLow", "tempAvg", "durationMinutes",
-            "placeLabel", "startOdometerKm", "tariffLabel",
-            "energySource", "energySocKwh", "energyCounterKwh",
-            "energyIncomplete", "energyEstimated"
     };
 
     private static final Set<String> EVENT_TYPES = setOf(
@@ -441,7 +412,7 @@ public final class GenAiVehicleHistory {
 
     static JSONObject safeTripCard(JSONObject row) throws Exception {
         long id = positiveId(row, "id");
-        JSONObject card = GenAiContext.copyAllowed(row, TRIP_KEYS);
+        JSONObject card = GenAiContext.copyTripFields(row);
         card.put("kind", "trip");
         card.put("id", id);
         return card;
@@ -465,8 +436,7 @@ public final class GenAiVehicleHistory {
 
     static JSONObject safeChargingCard(JSONObject row) throws Exception {
         long id = positiveId(row, "id");
-        JSONObject card = GenAiContext.copyAllowed(
-                row, CHARGING_KEYS);
+        JSONObject card = GenAiContext.copyChargingSessionFields(row);
         card.put("kind", "charging");
         card.put("id", id);
         return card;
