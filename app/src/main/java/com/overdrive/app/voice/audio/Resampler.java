@@ -11,6 +11,8 @@ public final class Resampler {
     private final boolean passthrough;
     private int write;
     private int rel;
+    // Saturates at taps: at that point every sample in the FIR history is zero.
+    private int zeroRun;
 
     public Resampler(int srcRate, int dstRate) {
         if (srcRate <= 0 || dstRate <= 0) throw new IllegalArgumentException("Invalid sample rate");
@@ -51,6 +53,7 @@ public final class Resampler {
             }
         }
         ring = new float[2 * k];
+        zeroRun = k;
     }
 
     /** Upper bound on samples {@link #process} emits for {@code inputLength} inputs. */
@@ -66,26 +69,34 @@ public final class Resampler {
             return len;
         }
         final int k = taps;
-        // A fully silent input block with a fully drained filter history
-        // produces only zero samples. Keep phase and ring position advancing
-        // exactly as in the regular loop, without evaluating the FIR taps.
-        // Checking the first sample rejects most active audio immediately.
-        if (len > 0 && in[off] == 0 && isSilent(in, off, len) && isHistorySilent()) {
-            // Each input subtracts up; each emitted sample adds down.
-            // Emit the minimum number needed to leave rel nonnegative.
-            long phase = (long) len * up - rel;
-            long count = phase > 0 ? (phase + down - 1) / down : 0;
-            if (count <= Integer.MAX_VALUE && outOff >= 0 && count <= out.length - outOff) {
-                int n = (int) count;
-                java.util.Arrays.fill(out, outOff, outOff + n, (short) 0);
-                write = (int) (((long) write + len) % k);
-                rel = (int) (count * down - phase);
-                return n;
-            }
-        }
         int o = outOff;
+        boolean canSkip = in != out;
         for (int i = 0; i < len; i++) {
             float s = in[off + i];
+            if (s == 0f && zeroRun == k && canSkip) {
+                // The complete history is zero. Skip the maximal zero span,
+                // even inside a mixed block, without dropping a live FIR tail.
+                // Keep aliased input/output on the ordinary sequential path.
+                int end = i + 1;
+                while (end < len && in[off + end] == 0) end++;
+                int span = end - i;
+                long phase = (long) span * up - rel;
+                long count = phase > 0 ? (phase + down - 1) / down : 0;
+                if (o >= 0 && count <= out.length - o) {
+                    int n = (int) count;
+                    java.util.Arrays.fill(out, o, o + n, (short) 0);
+                    o += n;
+                    write = (int) (((long) write + span) % k);
+                    rel = (int) (count * down - phase);
+                    i = end - 1;
+                    continue;
+                }
+                // Preserve the ordinary path's output bounds behavior,
+                // without rescanning this span if the destination is too small.
+                canSkip = false;
+            }
+            if (s != 0f) zeroRun = 0;
+            else if (zeroRun < k) zeroRun++;
             ring[write] = s;
             ring[write + k] = s;
             if (++write == k) write = 0;
@@ -105,25 +116,11 @@ public final class Resampler {
         return o - outOff;
     }
 
-    private static boolean isSilent(short[] in, int off, int len) {
-        for (int i = 1; i < len; i++) {
-            if (in[off + i] != 0) return false;
-        }
-        return true;
-    }
-
-    private boolean isHistorySilent() {
-        // Both halves of the mirrored ring contain the same samples.
-        for (int i = 0; i < taps; i++) {
-            if (ring[i] != 0f) return false;
-        }
-        return true;
-    }
-
     public void reset() {
         java.util.Arrays.fill(ring, 0f);
         write = 0;
         rel = 0;
+        zeroRun = taps;
     }
 
     /** Little-endian PCM16 bytes to shorts; returns the sample count. */

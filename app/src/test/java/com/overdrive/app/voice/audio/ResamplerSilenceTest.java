@@ -16,8 +16,8 @@ public class ResamplerSilenceTest {
 
     @Test
     public void chunkedSilenceAndFilterTailsMatchOrdinaryProcessing() {
-        // A nonzero first sample forces the one-shot reference through the
-        // ordinary FIR path. The chunked stream can skip drained silent blocks.
+        // Compare a single mixed block with arbitrary chunk boundaries,
+        // including boundaries inside live filter tails and drained silence.
         for (int[] rate : RATES) {
             Resampler reference = new Resampler(rate[0], rate[1]);
             Resampler chunked = new Resampler(rate[0], rate[1]);
