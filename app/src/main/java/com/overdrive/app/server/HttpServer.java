@@ -55,6 +55,7 @@ public class HttpServer {
 
     private static final String WEB_ROOT = com.overdrive.app.util.ScratchRoot.path("web");
     private final int port;
+    private final AssetCatalogCache assetCatalogs = new AssetCatalogCache();
     // stop() runs on a different thread from start()/accept(); volatile is
     // required so it always closes the currently published listener socket.
     private volatile ServerSocket serverSocket;
@@ -2749,17 +2750,7 @@ public class HttpServer {
      * same-length translation edit as unchanged across app versions.
      */
     static String assetContentEtag(byte[] data) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(data);
-            StringBuilder hex = new StringBuilder(digest.length * 2 + 2);
-            hex.append('"');
-            for (byte value : digest) {
-                hex.append(String.format(java.util.Locale.ROOT, "%02x", value & 0xff));
-            }
-            return hex.append('"').toString();
-        } catch (Exception impossible) {
-            return "\"" + Integer.toHexString(java.util.Arrays.hashCode(data)) + "\"";
-        }
+        return AssetCatalogCache.contentEtag(data);
     }
 
     /**
@@ -2779,18 +2770,13 @@ public class HttpServer {
 
         android.content.Context context =
                 com.overdrive.app.daemon.DaemonBootstrap.getContext();
-        if (context == null || context.getAssets() == null) return false;
-        try (InputStream in = context.getAssets().open(
-                "web/i18n/" + requested + ".json")) {
-            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-            byte[] buffer = new byte[8192];
-            int count;
-            while ((count = in.read(buffer)) != -1) {
-                bytes.write(buffer, 0, count);
-            }
-            byte[] data = bytes.toByteArray();
+        AssetManager assets = context == null ? null : context.getAssets();
+        if (assets == null) return false;
+        try {
+            AssetCatalogCache.Entry catalog = assetCatalogs.get(assets, requested,
+                    () -> assets.open("web/i18n/" + requested + ".json"));
             String cacheControl = "public, max-age=3600, must-revalidate";
-            String etag = assetContentEtag(data);
+            String etag = catalog.etag;
             if (ifNoneMatch != null && etag.equals(ifNoneMatch.trim())) {
                 out.write(("HTTP/1.1 304 Not Modified\r\n"
                         + "ETag: " + etag + "\r\n"
@@ -2801,12 +2787,12 @@ public class HttpServer {
             }
             String headers = "HTTP/1.1 200 OK\r\n"
                     + "Content-Type: application/json; charset=utf-8\r\n"
-                    + "Content-Length: " + data.length + "\r\n"
+                    + "Content-Length: " + catalog.length() + "\r\n"
                     + "ETag: " + etag + "\r\n"
                     + "Cache-Control: " + cacheControl + "\r\n"
                     + "Connection: close\r\n\r\n";
             out.write(headers.getBytes("UTF-8"));
-            out.write(data);
+            catalog.writeTo(out);
             out.flush();
             return true;
         } catch (Exception e) {
