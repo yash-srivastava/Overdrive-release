@@ -120,7 +120,12 @@
       if (seq !== C.seq) return;
       C.loading = false;
       if (!r.ok || !Array.isArray(r.data.items)) { C.error = cmError(r, 'cm_load_failed'); renderStatus(); return; }
-      const items = r.data.items.map(normalize).filter(Boolean).filter(it => !C.items.some(x => x.id === it.id));
+      const seen = new Set(C.items.map(it => it.id));
+      const items = r.data.items.map(normalize).filter(it => {
+        if (!it || seen.has(it.id)) return false;
+        seen.add(it.id);
+        return true;
+      });
       C.items = C.items.concat(items);
       // The daemon can filter every row from a page yet return a valid next cursor.
       // Keep pagination available even if normalization/deduplication added no cards.
