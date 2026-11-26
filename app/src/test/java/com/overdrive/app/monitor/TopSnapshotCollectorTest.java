@@ -134,6 +134,47 @@ public class TopSnapshotCollectorTest {
         assertFalse(TopSnapshotCollector.isCacheFresh(10_000L, 9_500L));
     }
 
+    @Test
+    public void preservesLineBoundariesAndLateSummariesAfterRowLimit() throws Exception {
+        String output = "\r\n  tAsKs: 1 total, 0 running, 1 sleeping, 0 stopped, 0 zombie\r\n"
+                + " PID USER PR NI VIRT RES SHR S[%CPU] %MEM TIME+ ARGS\r\n"
+                + "broken process row\r\n"
+                + " 42 shell 20 0 1G 2M 3K S 1.5 0.2 0:01.00 command with spaces  \r\n"
+                + " 43 shell 20 0 1G 2M 3K S 1.5 0.2 0:01.00 ignored\n"
+                + "  Mem: 2G total, 1G free\n"
+                + "  Swap: 1G total, 2M used\r\n"
+                + "400%cpu 300%idle\n"
+                + "Tasks: 2 total, 1 running, 1 sleeping, 0 stopped, 0 zombie";
+        JSONObject snapshot = TopSnapshotCollector.parseSnapshot(output, 1, 42, 0, 0, "fixture");
+        assertEquals(1, snapshot.getInt("processCount"));
+        JSONObject process = snapshot.getJSONArray("processes").getJSONObject(0);
+        assertEquals(42, process.getInt("pid"));
+        assertEquals("command with spaces", process.getString("command"));
+        assertTrue(process.getBoolean("isOverdrive"));
+        assertEquals(mebibytes(2), process.getLong("residentBytes"));
+        assertEquals(2, snapshot.getJSONObject("tasks").getInt("total"));
+        assertEquals(gibibytes(2), snapshot.getJSONObject("memory").getLong("totalBytes"));
+        assertEquals(mebibytes(2), snapshot.getJSONObject("swap").getLong("usedBytes"));
+        assertEquals(25.0, snapshot.getJSONObject("cpu").getDouble("deviceBusyPercent"), 0.0);
+    }
+
+    @Test
+    public void preservesCpuTokenPrecedenceAndUnterminatedProcessRows() throws Exception {
+        String header = "PID USER PR NI VIRT RES SHR S[%CPU] %MEM TIME+ ARGS\n";
+        String row = " 7 shell 20 0 1G 2M 3K S 1.0 0.1 0:00.01 ";
+        String output = header + row + "command 100%cpu 25%idle\n"
+                + row + "ordinary %CPU command";
+        JSONObject snapshot = TopSnapshotCollector.parseSnapshot(output, 24, -1, 0, 0, "fixture");
+        assertEquals(1, snapshot.getInt("processCount"));
+        assertEquals("ordinary %CPU command", snapshot.getJSONArray("processes")
+                .getJSONObject(0).getString("command"));
+        assertEquals(75.0, snapshot.getJSONObject("cpu").getDouble("deviceBusyPercent"), 0.0);
+        for (String empty : new String[] {null, "", "\n\r\n \t\r\n"}) {
+            assertFalse(TopSnapshotCollector.parseSnapshot(empty, 24, -1, 0, 0, "fixture")
+                    .getBoolean("available"));
+        }
+    }
+
     private static long mebibytes(double value) {
         return Math.round(value * 1024.0 * 1024.0);
     }

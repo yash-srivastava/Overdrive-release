@@ -149,13 +149,26 @@ public final class TopSnapshotCollector {
         boolean processRows = false;
 
         try {
-            String[] lines = output == null ? new String[0] : output.split("\\r?\\n");
-            for (String originalLine : lines) {
-                String line = originalLine == null ? "" : originalLine.trim();
-                if (line.isEmpty()) continue;
+            // Walk line ranges without splitting/copying the entire snapshot. The
+            // portable top fallback can include hundreds of rows beyond rowLimit.
+            if (output == null) output = "";
+            Matcher tasksMatcher = TASKS_PATTERN.matcher(output);
+            Matcher processMatcher = PROCESS_PATTERN.matcher(output);
+            for (int next = 0; next < output.length(); ) {
+                int rawStart = next;
+                int newline = output.indexOf('\n', rawStart);
+                int rawEnd = newline < 0 ? output.length() : newline;
+                next = newline < 0 ? rawEnd : newline + 1;
+                // Match the old split("\\r?\\n") and String.trim() semantics.
+                if (newline >= 0 && rawEnd > rawStart && output.charAt(rawEnd - 1) == '\r') rawEnd--;
+                int start = rawStart;
+                int end = rawEnd;
+                while (start < end && output.charAt(start) <= ' ') start++;
+                while (end > start && output.charAt(end - 1) <= ' ') end--;
+                if (start == end) continue;
 
-                Matcher tasksMatcher = TASKS_PATTERN.matcher(line);
-                if (tasksMatcher.find()) {
+                if (end - start >= 6 && output.regionMatches(true, start, "Tasks:", 0, 6)
+                        && tasksMatcher.region(start, end).find()) {
                     tasks.put("total", parseInt(tasksMatcher.group(1)));
                     tasks.put("running", parseInt(tasksMatcher.group(2)));
                     tasks.put("sleeping", parseInt(tasksMatcher.group(3)));
@@ -163,26 +176,26 @@ public final class TopSnapshotCollector {
                     tasks.put("zombie", parseInt(tasksMatcher.group(5)));
                     continue;
                 }
-                if (line.startsWith("Mem:")) {
-                    parseMemoryLine(line, memory);
+                if (startsWith(output, start, end, "Mem:")) {
+                    parseMemoryLine(output.substring(start, end), memory);
                     continue;
                 }
-                if (line.startsWith("Swap:")) {
-                    parseMemoryLine(line, swap);
+                if (startsWith(output, start, end, "Swap:")) {
+                    parseMemoryLine(output.substring(start, end), swap);
                     continue;
                 }
-                if (line.contains("%cpu")) {
-                    parseCpuLine(line, cpu);
+                if (containsCpuToken(output, start, end, "%cpu")) {
+                    parseCpuLine(output.substring(start, end), cpu);
                     continue;
                 }
-                if (line.startsWith("PID ") && line.contains("%CPU")) {
+                if (startsWith(output, start, end, "PID ")
+                        && containsCpuToken(output, start, end, "%CPU")) {
                     processRows = true;
                     continue;
                 }
                 if (!processRows || processes.length() >= rowLimit) continue;
 
-                Matcher processMatcher = PROCESS_PATTERN.matcher(originalLine);
-                if (!processMatcher.matches()) continue;
+                if (!processMatcher.region(rawStart, rawEnd).matches()) continue;
                 JSONObject process = new JSONObject();
                 int pid = parseInt(processMatcher.group(1));
                 String command = processMatcher.group(12).trim();
@@ -190,12 +203,15 @@ public final class TopSnapshotCollector {
                 process.put("user", processMatcher.group(2));
                 process.put("priority", processMatcher.group(3));
                 process.put("nice", processMatcher.group(4));
-                process.put("virtual", processMatcher.group(5));
-                process.put("resident", processMatcher.group(6));
-                process.put("shared", processMatcher.group(7));
-                process.put("virtualBytes", parseHumanBytes(processMatcher.group(5)));
-                process.put("residentBytes", parseHumanBytes(processMatcher.group(6)));
-                process.put("sharedBytes", parseHumanBytes(processMatcher.group(7)));
+                String virtual = processMatcher.group(5);
+                String resident = processMatcher.group(6);
+                String shared = processMatcher.group(7);
+                process.put("virtual", virtual);
+                process.put("resident", resident);
+                process.put("shared", shared);
+                process.put("virtualBytes", parseHumanBytes(virtual));
+                process.put("residentBytes", parseHumanBytes(resident));
+                process.put("sharedBytes", parseHumanBytes(shared));
                 process.put("state", processMatcher.group(8));
                 process.put("cpuPercent", parseDouble(processMatcher.group(9)));
                 process.put("memoryPercent", parseDouble(processMatcher.group(10)));
@@ -234,6 +250,18 @@ public final class TopSnapshotCollector {
             } catch (Exception ignoredAgain) {}
         }
         return root;
+    }
+
+    private static boolean startsWith(String text, int start, int end, String prefix) {
+        return end - start >= prefix.length() && text.startsWith(prefix, start);
+    }
+
+    /** Bounded search: never scan the remaining snapshot for a token on this line. */
+    private static boolean containsCpuToken(String text, int start, int end, String token) {
+        for (int i = start; i <= end - token.length(); i++) {
+            if (text.charAt(i) == '%' && text.startsWith(token, i)) return true;
+        }
+        return false;
     }
 
     private static CommandResult runTop(boolean withLimit) throws Exception {
