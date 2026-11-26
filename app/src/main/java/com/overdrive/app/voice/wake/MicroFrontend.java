@@ -250,7 +250,16 @@ public final class MicroFrontend {
         inputUsed += copy;
         if (inputUsed < windowSize) return copy;
 
-        applyWindow();
+        if (applyWindow()) {
+            // An exactly zero window has zero energy in every FFT bin. Keep
+            // the adaptive noise estimate decaying just as on the full path.
+            // Zero signal stays zero through noise reduction, PCAN and log.
+            java.util.Arrays.fill(signal, 0);
+            reduceNoise();
+            java.util.Arrays.fill(features, 0);
+            frameReady = true;
+            return copy;
+        }
         int inputShift = 15 - msb32(maxAbsOutput);
         for (int i = 0; i < windowSize; i++) {
             fftInput[i] = (short) ((windowOutput[i] & 0xFFFF) << inputShift);
@@ -304,17 +313,22 @@ public final class MicroFrontend {
         return (int) Math.round(25.6 * 256.0 * inputScale);
     }
 
-    private void applyWindow() {
+    /** Returns true only when every windowed sample is exactly zero. */
+    private boolean applyWindow() {
         int maxAbs = 0;
+        int sampleBits = 0;
         for (int i = 0; i < windowSize; i++) {
             short v = (short) ((windowInput[i] * windowCoefficients[i]) >> WINDOW_BITS);
             windowOutput[i] = v;
+            // Do not use maxAbs: negating Short.MIN_VALUE as a short wraps.
+            sampleBits |= v;
             short a = v < 0 ? (short) -v : v;
             if (a > maxAbs) maxAbs = a;
         }
         System.arraycopy(windowInput, windowStep, windowInput, 0, windowSize - windowStep);
         inputUsed -= windowStep;
         maxAbsOutput = maxAbs;
+        return sampleBits == 0;
     }
 
     private void kissFftr() {
