@@ -55,6 +55,12 @@ final class RangeModel {
             1.363, 1.356, 1.350, 1.345, 1.341, 1.337, 1.333, 1.330, 1.328, 1.325,
             1.323, 1.321, 1.319, 1.318, 1.316, 1.315, 1.314, 1.313, 1.311, 1.310};
 
+    // Initialized only when a nonempty history needs curves. These tables are read-only.
+    private static final class CurveKernels {
+        static final double[] TEMP = kernel(T_MAX - T_MIN + 1, TEMP_SIGMA_C);
+        static final double[] SPEED = kernel(V_MAX + 1, SPEED_SIGMA_KMH);
+    }
+
     private RangeModel() {}
 
     enum Mode { EV, FUEL, MIXED }
@@ -173,8 +179,8 @@ final class RangeModel {
         Curves current = new Curves(ones(tSpan), ones(vSpan));
         if (samples == null || samples.isEmpty()) return current;
         int n = samples.size();
-        double[] tKernel = kernel(tSpan, TEMP_SIGMA_C);
-        double[] vKernel = kernel(vSpan, SPEED_SIGMA_KMH);
+        double[] tKernel = CurveKernels.TEMP;
+        double[] vKernel = CurveKernels.SPEED;
         int[] tBin = new int[n];
         int[] vBin = new int[n];
         for (int i = 0; i < n; i++) {
@@ -221,28 +227,32 @@ final class RangeModel {
         }
         if (!(kmSum > 0) || !(usedSum > 0)) return ones(span);
         double mean = usedSum / kmSum;
+        // The bin mean is constant during this pass. Keep the division order unchanged.
+        double[] normalizedBin = new double[span];
+        for (int b = 0; b < span; b++) normalizedBin[b] = used[b] / km[b] / mean;
         double within = 0;
         for (int i = 0; i < samples.size(); i++) {
             int b = bin[i];
             if (b < 0) continue;
             double d = samples.get(i).km;
-            double dev = adjusted[i] / d / mean - used[b] / km[b] / mean;
+            double dev = adjusted[i] / d / mean - normalizedBin[b];
             within += d * dev * dev;
         }
         double noisePerKm = within / kmSum * (sumSqKm / kmSum);
         double between = 0;
+        int[] occupied = new int[span];
         int bins = 0;
         for (int b = 0; b < span; b++) {
             if (km[b] == 0) continue;
-            double dev = used[b] / km[b] / mean - 1;
+            double dev = normalizedBin[b] - 1;
             between += km[b] * dev * dev;
-            bins++;
+            occupied[bins++] = b;
         }
         double signal = between / kmSum - noisePerKm * bins / kmSum;
         double priorKm = signal > 1e-6
                 ? Math.max(MIN_CURVE_PRIOR_KM, Math.min(MAX_CURVE_PRIOR_KM, noisePerKm / signal))
                 : MAX_CURVE_PRIOR_KM;
-        return smooth(used, km, kernel, mean, priorKm);
+        return smooth(used, km, kernel, mean, priorKm, occupied, bins, normalizedBin);
     }
 
     /** Null below {@link #MIN_TRIPS} trips or {@link #MIN_KM} km, or when nothing usable remains. */
@@ -512,13 +522,14 @@ final class RangeModel {
 
     /** Kernel-smoothed rate per bin relative to {@code mean}, shrunk to 1 by {@code priorKm}. */
     private static double[] smooth(double[] used, double[] km, double[] kernel, double mean,
-                                   double priorKm) {
+                                   double priorKm, int[] occupied, int bins, double[] curve) {
+        // Reuse the no-longer-needed normalized bin scratch as the output.
         int n = used.length;
-        double[] curve = ones(n);
         for (int t = 0; t < n; t++) {
             double num = 0, den = 0;
-            for (int b = 0; b < n; b++) {
-                if (km[b] == 0) continue;
+            // Ascending occupied bins preserve the original summation order.
+            for (int i = 0; i < bins; i++) {
+                int b = occupied[i];
                 double k = kernel[Math.abs(b - t)];
                 num += k * used[b];
                 den += k * km[b];
