@@ -2751,7 +2751,20 @@
     "pack_invalid_id": "The daemon returned an invalid pack id",
     "pack_ready": "Evidence pack ready",
     "watched_clip": "Watched",
-    "unwatched_clip": "Unwatched"
+    "unwatched_clip": "Unwatched",
+    "playlist_resume": "Resume unwatched",
+    "playlist_settings": "Playlist settings",
+    "playlist_after_clip": "After each clip",
+    "playlist_newer": "Previous (newer)",
+    "playlist_older": "Next (older)",
+    "playlist_stop": "Stop",
+    "playlist_skip_dvr": "Skip dvr_p*",
+    "playlist_skip_event": "Skip event_*",
+    "playlist_skip_cam": "Skip cam_*",
+    "playlist_unwatched_only": "Skip watched clips",
+    "playlist_no_unwatched": "No matching unwatched clips",
+    "playlist_end": "End of playlist",
+    "playlist_failed": "Could not continue playlist. Try again."
   },
   "surveillance": {
     "deterrent_zone": "Deterrent zone",

@@ -104,6 +104,113 @@ BYD.events = {
     _recordingNavSerial: 0,
     _recordingNavBoundary: { '-1': false, '1': false },
     _timelineSeq: 0,
+    _playlist: { direction: -1, skipDvr: false, skipEvent: false, skipCam: false, unwatchedOnly: false },
+    _playlistRequest: null,
+    _PLAYLIST_LS_KEY: 'byd.events.playlist',
+
+    initPlaylist(player) {
+        const settings = document.getElementById('eventsPlaylistSettings');
+        if (!settings) return; // The shared Parking player has no playlist.
+        try {
+            const saved = JSON.parse(localStorage.getItem(this._PLAYLIST_LS_KEY));
+            if (saved) {
+                if ([-1, 0, 1].includes(saved.direction)) this._playlist.direction = saved.direction;
+                for (const key of ['skipDvr', 'skipEvent', 'skipCam', 'unwatchedOnly']) {
+                    if (typeof saved[key] === 'boolean') this._playlist[key] = saved[key];
+                }
+            }
+        } catch (error) { /* private mode or invalid stored settings */ }
+        const modalSettings = settings.cloneNode(true);
+        modalSettings.id = 'videoPlaylistSettings';
+        modalSettings.open = false;
+        const shortcuts = document.getElementById('videoShortcuts');
+        shortcuts.parentNode.insertBefore(modalSettings, shortcuts);
+        const controls = document.querySelectorAll('[data-playlist-option]');
+        const sync = () => controls.forEach(control => {
+            const value = this._playlist[control.dataset.playlistOption];
+            if (control.type === 'checkbox') control.checked = value;
+            else control.value = String(value);
+        });
+        controls.forEach(control => control.addEventListener('change', () => {
+            const key = control.dataset.playlistOption;
+            this._playlist[key] = control.type === 'checkbox' ? control.checked : Number(control.value);
+            this._cancelPlaylistRequest();
+            sync();
+            try { localStorage.setItem(this._PLAYLIST_LS_KEY, JSON.stringify(this._playlist)); }
+            catch (error) { /* private mode */ }
+        }));
+        sync();
+        document.getElementById('eventsPlaylistResume').addEventListener('click', () => this.seekPlaylist(true));
+        player.addEventListener('ended', () => {
+            if (player.ended) this.seekPlaylist(false);
+        });
+    },
+
+    _cancelPlaylistRequest() {
+        if (!this._playlistRequest) return;
+        this._playlistRequest = null;
+        this._refreshPlaylistControls();
+        this._refreshRecordingNav();
+    },
+
+    _refreshPlaylistControls() {
+        const resume = document.getElementById('eventsPlaylistResume');
+        if (resume) resume.disabled = !!this._playlistRequest;
+    },
+
+    // Resume always uses daemon watched fingerprints. Auto-advance uses the
+    // same stable-ID ordering as manual navigation but adds playlist-only filters.
+    async seekPlaylist(resume) {
+        if (!document.getElementById('eventsPlaylistSettings') || this._listHidden()
+                || this._externalRecordingKey || this._playlistRequest || this._recordingNavBusy) return;
+        const modal = document.getElementById('videoModal');
+        const player = document.getElementById('videoPlayer');
+        const isOpen = () => modal.classList.contains('active');
+        if (resume ? isOpen() : (!isOpen() || !player.ended || !this._canSeekRecording()
+                || !this._playlist.direction)) return;
+        const step = this._playlist.direction || -1;
+        const filters = this._recordingFilterParams().join('&');
+        const params = [filters, 'step=' + step, 'pageSize=' + this.pageSize];
+        if (resume) params.push('resume=1');
+        else params.push('fromId=' + encodeURIComponent(this._activeRecording.id));
+        if (this._playlist.skipDvr) params.push('skip_dvr_p=1');
+        if (this._playlist.skipEvent) params.push('skip_event_=1');
+        if (this._playlist.skipCam) params.push('skip_cam_=1');
+        if (this._playlist.unwatchedOnly) params.push('unwatchedOnly=1');
+        const request = this._playlistRequest = { filters };
+        const serial = this._recordingNavSerial;
+        const current = () => this._playlistRequest === request && this._recordingNavSerial === serial
+            && !this._listHidden() && this._recordingFilterParams().join('&') === filters
+            && (resume ? !isOpen() : isOpen() && player.ended);
+        this._refreshPlaylistControls();
+        this._refreshRecordingNav();
+        try {
+            const response = await fetch('/api/recordings/adjacent?' + params.filter(Boolean).join('&'), { cache: 'no-store' });
+            const data = await response.json();
+            if (!current()) return;
+            if (!response.ok || !data.success) throw new Error(data.status || response.status);
+            if (data.status === 'end') {
+                BYD.core.toast(BYD.i18n.t(resume ? 'events.playlist_no_unwatched' : 'events.playlist_end'));
+                return;
+            }
+            if (data.status !== 'found' || !data.recording || !Number.isInteger(data.page) || data.page < 1) {
+                throw new Error('Invalid playlist response');
+            }
+            if (resume) this.openRecording(data.recording);
+            else this._openAdjacentRecording(this.recordingKey(data.recording), data.recording);
+            if (this.currentPage !== data.page || this._activeRecordingIndex() < 0) {
+                this.currentPage = data.page;
+                this.loadRecordings();
+            }
+        } catch (error) {
+            if (current()) {
+                console.warn('[events] Playlist seek failed:', error);
+                BYD.core.toast(BYD.i18n.t('events.playlist_failed'), 'error');
+            }
+        } finally {
+            if (this._playlistRequest === request) this._cancelPlaylistRequest();
+        }
+    },
 
     recordingKey(rec) {
         // SECURITY (run-2 fix): the filename fallback must never carry markup or
@@ -155,7 +262,7 @@ BYD.events = {
         if (header && header.classList) header.classList.toggle('has-nav', shown);
         const prev = document.getElementById('videoPrevBtn');
         const next = document.getElementById('videoNextBtn');
-        const busy = this._recordingNavBusy;
+        const busy = this._recordingNavBusy || !!this._playlistRequest;
         if (anchored) {
             // Page one already contains the newest row: Previous has no work.
             // For a clip outside the loaded page, defer to an indexed seek.
@@ -180,7 +287,7 @@ BYD.events = {
     },
 
     async navigateRecording(step) {
-        if ((step !== -1 && step !== 1) || this._recordingNavBusy) return;
+        if ((step !== -1 && step !== 1) || this._recordingNavBusy || this._playlistRequest) return;
         // No HTTP request for either direction inside the already loaded page.
         if (this._navigateLoadedRecording(step)) return;
         if (this._canSeekRecording()) {
@@ -316,6 +423,7 @@ BYD.events = {
         if (!modal || !player) return;
 
         this.wireQuadrantBar();
+        this.initPlaylist(player);
         document.addEventListener('keydown', (e) => {
             if (!modal.classList.contains('active')) return;
             if (e.key === 'Escape') {
@@ -743,7 +851,8 @@ BYD.events = {
         new MutationObserver(() => {
             if (listHidden === this._listHidden()) return;
             listHidden = !listHidden;
-            if (!listHidden) this._resumeHeldPolls();
+            if (listHidden) this._cancelPlaylistRequest();
+            else this._resumeHeldPolls();
         }).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
         const urlParams = new URLSearchParams(window.location.search);
         const filterParam = urlParams.get('filter');
@@ -1879,6 +1988,9 @@ BYD.events = {
     },
 
     async loadRecordings(quiet = false) {
+        if (this._playlistRequest && this._playlistRequest.filters !== this._recordingFilterParams().join('&')) {
+            this._cancelPlaylistRequest();
+        }
         const list = document.getElementById('recordingsList');
         if (!quiet) {
             this._replaceRecordingList(list, '<div class="loading"><div class="spinner"></div></div>');
@@ -2447,6 +2559,7 @@ BYD.events = {
     },
 
     openRecording(rec) {
+        this._cancelPlaylistRequest();
         document.getElementById('videoTitle').textContent = rec.filename;
         document.getElementById('videoDate').innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> ' + (rec.dateFormatted || '');
         document.getElementById('videoTime').innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> ' + (rec.timeFormatted || '');
@@ -2527,6 +2640,9 @@ BYD.events = {
     },
     
     closeVideo() {
+        this._cancelPlaylistRequest();
+        const playlistSettings = document.getElementById('videoPlaylistSettings');
+        if (playlistSettings) playlistSettings.open = false;
         this._cancelWatchedTimer();
         this._watchActiveKey = null;
         const player = document.getElementById('videoPlayer');
