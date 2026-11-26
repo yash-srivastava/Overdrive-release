@@ -121,6 +121,7 @@ public class OverlayBitmapRenderer {
     private final RectF glyphRect = new RectF();
     private final Path glyphPath = new Path();
     private final Date reusableDate = new Date();
+    private final OverlayValueText valueText = new OverlayValueText();
 
     // Reused per-segment measured widths, indexed by Field.ordinal(). Populated
     // in the measure pass and consumed in the draw pass so measureText runs once
@@ -499,12 +500,12 @@ public class OverlayBitmapRenderer {
                 return ICON_SIZE + 2f;
             case BATTERY_PERCENT: {
                 float w = 34f + 4f;  // battery glyph + terminal
-                if (canText) w += 6f + valuePaint.measureText(formatSoc(soc));
+                if (canText) w += 6f + valuePaint.measureText(valueText.soc(soc));
                 return w;
             }
             case VOLTAGE_12V: {
                 float w = 40f;  // "12V" box glyph
-                if (canText) w += 6f + valuePaint.measureText(formatVolts(volt12));
+                if (canText) w += 6f + valuePaint.measureText(valueText.volts(volt12));
                 return w;
             }
             case LOCATION: {
@@ -514,8 +515,8 @@ public class OverlayBitmapRenderer {
                 // size from a prior segment/frame's draw.
                 timePaint.setTextSize(16);
                 return 22f + 4f + Math.max(
-                        timePaint.measureText(formatCoord(lat, hasLoc, true)),
-                        timePaint.measureText(formatCoord(lon, hasLoc, false)));
+                        timePaint.measureText(valueText.latitude(lat, hasLoc)),
+                        timePaint.measureText(valueText.longitude(lon, hasLoc)));
             }
             case VIN: {
                 // Text-only segment (no glyph), so with no font there is nothing
@@ -660,21 +661,6 @@ public class OverlayBitmapRenderer {
 
     // ==================== Value formatters ====================
 
-    private static String formatSoc(double soc) {
-        if (Double.isNaN(soc) || soc < 0) return "--%";
-        return String.format(Locale.US, "%.0f%%", soc);
-    }
-
-    private static String formatVolts(double v) {
-        if (Double.isNaN(v) || v <= 0) return "--.-V";
-        return String.format(Locale.US, "%.2fV", v);
-    }
-
-    private static String formatCoord(double v, boolean hasLoc, boolean isLat) {
-        if (!hasLoc || Double.isNaN(v)) return isLat ? "lat --" : "lon --";
-        return String.format(Locale.US, "%.5f", v);
-    }
-
     /**
      * VIN for display. Falls back to a placeholder when the bodywork getter
      * hasn't produced one yet (cold boot before the first poll, or a trim that
@@ -748,7 +734,7 @@ public class OverlayBitmapRenderer {
         }
         if (canText) {
             valuePaint.setColor(0xFFFFFFFF);
-            c.drawText(formatSoc(soc), bodyR + 10f, iy + 28f, valuePaint);
+            c.drawText(valueText.soc(soc), bodyR + 10f, iy + 28f, valuePaint);
         }
     }
 
@@ -785,7 +771,7 @@ public class OverlayBitmapRenderer {
             labelPaint.setTextSize(saved);
             // Voltage value in white to the right.
             valuePaint.setColor(0xFFFFFFFF);
-            c.drawText(formatVolts(v), boxR + 8f, iy + 28f, valuePaint);
+            c.drawText(valueText.volts(v), boxR + 8f, iy + 28f, valuePaint);
         }
     }
 
@@ -835,8 +821,8 @@ public class OverlayBitmapRenderer {
         if (canText) {
             timePaint.setColor(0xFFFFFFFF);
             timePaint.setTextSize(16);
-            c.drawText(formatCoord(lat, hasLoc, true), x + 22f, 34, timePaint);
-            c.drawText(formatCoord(lon, hasLoc, false), x + 22f, 58, timePaint);
+            c.drawText(valueText.latitude(lat, hasLoc), x + 22f, 34, timePaint);
+            c.drawText(valueText.longitude(lon, hasLoc), x + 22f, 58, timePaint);
             timePaint.setTextSize(20);
         }
     }
