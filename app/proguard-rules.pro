@@ -221,6 +221,9 @@
 -keep class com.overdrive.app.surveillance.RgbaReadback {
     native <methods>;
 }
+-keep class com.overdrive.app.ai.NormalizedRgbInput {
+    native <methods>;
+}
 -keep class com.overdrive.app.audio.VoiceFrontend {
     native <methods>;
 }

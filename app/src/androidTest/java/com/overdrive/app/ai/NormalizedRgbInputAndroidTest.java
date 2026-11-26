@@ -1,6 +1,10 @@
 package com.overdrive.app.ai;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assume.assumeTrue;
 
 import org.junit.Test;
 import org.tensorflow.lite.DataType;
@@ -39,6 +43,57 @@ public class NormalizedRgbInputAndroidTest {
             int expectedBits = Float.floatToIntBits(e.get());
             int actualBits = Float.floatToIntBits(a.get());
             if (expectedBits != actualBits) assertEquals("Element " + i, expectedBits, actualBits);
+        }
+    }
+
+    @Test
+    public void arm64NativeMatchesJavaForArrayAndSlicedBuffers() {
+        assumeTrue("aarch64".equals(System.getProperty("os.arch")));
+        Random random = new Random(129);
+        for (int count : new int[]{1, 15, 16, 17, 271, 4097, ELEMENTS}) {
+            NormalizedRgbInput reference = new NormalizedRgbInput(count, false);
+            NormalizedRgbInput fast = new NormalizedRgbInput(count, true);
+            byte[] rgb = new byte[count];
+            random.nextBytes(rgb);
+            ByteBuffer expected = reference.prepare(rgb);
+            ByteBuffer output = fast.prepare(rgb);
+            assertTrue("ARM64 native normalization must be active", fast.isNativeEnabled());
+            assertFalse(reference.isNativeEnabled());
+            assertEqualBits(expected, output, count);
+
+            ByteBuffer heap = ByteBuffer.allocate(count + 9);
+            ByteBuffer direct = ByteBuffer.allocateDirect(count + 9);
+            for (ByteBuffer backing : new ByteBuffer[]{heap, direct}) {
+                backing.position(5);
+                backing.put(rgb);
+                backing.position(5);
+                backing.limit(5 + count);
+                ByteBuffer slice = backing.slice();
+                slice.position(count / 2);
+                output.position(output.limit());
+                assertSame(output, fast.prepare(slice));
+                assertEquals(count / 2, slice.position());
+                assertEquals(0, output.position());
+                assertEqualBits(expected, output, count);
+                assertTrue(fast.isNativeEnabled());
+                // Read-only heap buffers intentionally use the Java fallback;
+                // read-only direct buffers can still use the native input address.
+                assertSame(output, fast.prepare(slice.asReadOnlyBuffer()));
+                assertEqualBits(expected, output, count);
+            }
+            random.nextBytes(rgb);
+            assertSame(output, fast.prepare(rgb));
+            assertEqualBits(reference.prepare(rgb), output, count);
+            assertTrue(fast.isNativeEnabled());
+        }
+    }
+
+    private static void assertEqualBits(ByteBuffer expected, ByteBuffer actual, int count) {
+        assertEquals(count * Float.BYTES, actual.remaining());
+        assertEquals(expected.order(), actual.order());
+        for (int i = 0; i < count; i++) {
+            assertEquals(Float.floatToIntBits(expected.getFloat(i * Float.BYTES)),
+                    Float.floatToIntBits(actual.getFloat(i * Float.BYTES)));
         }
     }
 
