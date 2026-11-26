@@ -2,9 +2,12 @@ package com.overdrive.app.voice.wake;
 
 import org.junit.Test;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.security.MessageDigest;
 import java.util.Random;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -139,6 +142,69 @@ public class MicroFrontendPerformanceTest {
             }
             assertEquals("step " + steps[s], expected[s], hex.toString());
         }
+    }
+
+    @Test
+    public void compactFilterbankMatchesIndependentSpectrumReference() throws Exception {
+        MicroFrontend frontend = new MicroFrontend();
+        // Test the filterbank before adaptive noise reduction can mask a mismatch.
+        // Keep the FFT and filterbank internals private in production.
+        short[] re = (short[]) readField(frontend, "outRe");
+        short[] im = (short[]) readField(frontend, "outIm");
+        int[] signal = (int[]) readField(frontend, "signal");
+        Method accumulate = MicroFrontend.class.getDeclaredMethod("accumulateFilterbank", int.class);
+        accumulate.setAccessible(true);
+        Random random = new Random(92731);
+        for (int frame = 0; frame < 128; frame++) {
+            for (int bin = 0; bin < re.length; bin++) {
+                // Include zero, maximum negative, single-bin impulses and
+                // arbitrary signed spectra, not just typical speech magnitudes.
+                re[bin] = frame == 0 ? 0 : frame == 1 ? Short.MIN_VALUE
+                        : frame < 18 ? (bin == (frame - 2) * 16 ? Short.MAX_VALUE : 0)
+                        : (short) random.nextInt();
+                im[bin] = frame == 0 || (frame >= 2 && frame < 18) ? 0
+                        : frame == 1 ? Short.MIN_VALUE : (short) random.nextInt();
+            }
+            int shift = frame % 16;
+            accumulate.invoke(frontend, shift);
+            assertArrayEquals("spectrum " + frame, referenceFilterbank(re, im, shift), signal);
+        }
+    }
+
+    private static Object readField(MicroFrontend frontend, String name) throws Exception {
+        Field field = MicroFrontend.class.getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(frontend);
+    }
+
+    // Independent bin-to-output accumulation: scatter to neighboring channels
+    // instead of carrying the preceding interval into the next interval.
+    private static int[] referenceFilterbank(short[] re, short[] im, int shift) {
+        int channels = MicroFrontend.NUM_CHANNELS;
+        long[] sums = new long[channels];
+        float hz = 0.5f * MicroFrontend.SAMPLE_RATE / (re.length - 1);
+        float low = referenceMel(125f);
+        float spacing = (referenceMel(7500f) - low) / (channels + 1);
+        int first = (int) (1.5f + 125f / hz);
+        for (int bin = first; bin < re.length; bin++) {
+            float mel = referenceMel(bin * hz);
+            int interval = 0;
+            while (interval <= channels && mel > low + spacing * (interval + 1)) interval++;
+            if (interval > channels) break;
+            float upper = low + spacing * (interval + 1);
+            float lower = interval == 0 ? low : low + spacing * interval;
+            float w = (upper - mel) / (upper - lower);
+            long energy = re[bin] * re[bin] + im[bin] * im[bin];
+            if (interval > 0) sums[interval - 1] += (short) Math.floor(w * 4096 + 0.5f) * energy;
+            if (interval < channels) sums[interval] += (short) Math.floor((1f - w) * 4096 + 0.5f) * energy;
+        }
+        int[] out = new int[channels];
+        for (int ch = 0; ch < channels; ch++) out[ch] = MicroFrontend.sqrt64(sums[ch]) >>> shift;
+        return out;
+    }
+
+    private static float referenceMel(float hz) {
+        return 1127f * (float) StrictMath.log1p(hz / 700f);
     }
 
     private static short[] input(int kind) {
