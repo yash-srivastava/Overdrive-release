@@ -326,11 +326,21 @@ public class TariffManager {
     }
 
     private static PublishedImage imageFromSection(JSONObject section) {
-        List<TariffProfile> parsed = new ArrayList<>();
         List<String> pending = pendingRepricesFromSection(section);
-        String requestedDefault = "";
+        String requestedDefault = section != null ? section.optString(KEY_DEFAULT_ID, "") : "";
+        List<TariffProfile> parsed = parseProfiles(section);
+        String publishedDefault = resolvePublishedDefault(parsed, requestedDefault);
+        return new PublishedImage(
+                Collections.unmodifiableList(parsed),
+                publishedDefault,
+                Collections.unmodifiableList(pending),
+                Collections.unmodifiableMap(
+                        pendingRepriceTokensFromSection(section)));
+    }
+
+    private static List<TariffProfile> parseProfiles(JSONObject section) {
+        List<TariffProfile> parsed = new ArrayList<>();
         if (section != null) {
-            requestedDefault = section.optString(KEY_DEFAULT_ID, "");
             JSONArray tariffs = tariffsArrayFromSection(section);
             for (int i = 0; i < tariffs.length()
                     && parsed.size() < MAX_PROFILES; i++) {
@@ -338,19 +348,17 @@ public class TariffManager {
                 if (profile != null) parsed.add(new TariffProfile(profile));
             }
         }
-        String publishedDefault = "";
+        return parsed;
+    }
+
+    private static String resolvePublishedDefault(List<TariffProfile> parsed,
+            String requestedDefault) {
         for (TariffProfile profile : parsed) {
             if (requestedDefault.equals(profile.getId())) {
-                publishedDefault = requestedDefault;
-                break;
+                return requestedDefault;
             }
         }
-        return new PublishedImage(
-                Collections.unmodifiableList(parsed),
-                publishedDefault,
-                Collections.unmodifiableList(pending),
-                Collections.unmodifiableMap(
-                        pendingRepriceTokensFromSection(section)));
+        return "";
     }
 
     private void publishImage(PublishedImage image) {
@@ -964,24 +972,9 @@ public class TariffManager {
     /** Build an immutable manager image detached from the root passed to saveConfig(). */
     private static UsageReconcileResult usageSnapshot(
             JSONObject section, boolean persisted) {
-        List<TariffProfile> parsed = new ArrayList<>();
-        String requestedDefault = "";
-        if (section != null) {
-            requestedDefault = section.optString(KEY_DEFAULT_ID, "");
-            JSONArray tariffs = tariffsArrayFromSection(section);
-            for (int i = 0; i < tariffs.length()
-                    && parsed.size() < MAX_PROFILES; i++) {
-                JSONObject profile = tariffs.optJSONObject(i);
-                if (profile != null) parsed.add(new TariffProfile(profile));
-            }
-        }
-        String publishedDefault = "";
-        for (TariffProfile profile : parsed) {
-            if (requestedDefault.equals(profile.getId())) {
-                publishedDefault = requestedDefault;
-                break;
-            }
-        }
+        String requestedDefault = section != null ? section.optString(KEY_DEFAULT_ID, "") : "";
+        List<TariffProfile> parsed = parseProfiles(section);
+        String publishedDefault = resolvePublishedDefault(parsed, requestedDefault);
         return UsageReconcileResult.success(
                 Collections.unmodifiableList(parsed), publishedDefault, persisted);
     }

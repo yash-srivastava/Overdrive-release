@@ -302,6 +302,38 @@ public class TariffManagerUsageReplayContractTest {
     }
 
     @Test
+    public void statusProfileLimitCountsObjectsAndRejectsExcludedDefault()
+            throws Exception {
+        JSONArray tariffs = new JSONArray().put("invalid").put(JSONObject.NULL);
+        for (int i = 0; i <= TariffManager.MAX_PROFILES; i++) {
+            tariffs.put(new JSONObject().put("id", "tariff-" + i)
+                    .put("label", "Tariff " + i).put("createdAt", i));
+        }
+        JSONObject section = new JSONObject().put("tariffs", tariffs)
+                .put("defaultTariffId", "tariff-" + TariffManager.MAX_PROFILES);
+        JSONObject root = new JSONObject().put("chargingAnalytics", section);
+        TariffManager manager = TariffManager.getInstance();
+
+        JSONObject status = manager.toStatusJson(root, 0, 0);
+        assertEquals(TariffManager.MAX_PROFILES, status.getJSONArray("tariffs").length());
+        assertEquals("", status.getString("defaultTariffId"));
+        assertEquals(TariffManager.MAX_PROFILES + 3, tariffs.length());
+
+        // The last admitted profile is still a valid default despite the skipped entries.
+        String admitted = "tariff-" + (TariffManager.MAX_PROFILES - 1);
+        section.put("defaultTariffId", admitted);
+        assertEquals(admitted, manager.toStatusJson(root, 0, 0)
+                .getString("defaultTariffId"));
+    }
+
+    @Test
+    public void missingTariffSectionHasNoProfilesOrDefault() throws Exception {
+        JSONObject status = TariffManager.getInstance().toStatusJson(new JSONObject(), 0, 0);
+        assertEquals(0, status.getJSONArray("tariffs").length());
+        assertEquals("", status.getString("defaultTariffId"));
+    }
+
+    @Test
     public void statusMatchesDcOnlyTariffAtCurrentLocation()
             throws Exception {
         JSONObject tariff = new JSONObject()
