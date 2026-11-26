@@ -57,14 +57,17 @@ public final class HighResPreviewSampler {
     // uTexMatrix already includes Android's producer Y-flip — combined,
     // we'd double-flip and the dialog preview would be upside-down.
     // Counter-flip via uApplyInverseFlip for SurfaceTexture layouts 1 and 3.
-    private static final String VERTEX_SHADER =
+    // Package-visible for the offscreen GLES orientation regression test.
+    static final String VERTEX_SHADER =
             "attribute vec4 aPosition;\n" +
             "attribute vec2 aTexCoord;\n" +
             "uniform mat4 uTexMatrix;\n" +
             "uniform float uApplyInverseYFlip;\n" +
             "varying vec2 vTexCoord;\n" +
             "void main() {\n" +
-            "    gl_Position = aPosition;\n" +
+            // Reflect the destination, not the camera UV transform: glReadPixels
+            // now returns the rows in bitmap order, without a CPU row swap.
+            "    gl_Position = vec4(aPosition.x, -aPosition.y, aPosition.z, aPosition.w);\n" +
             "    vec2 src = aTexCoord;\n" +
             "    if (uApplyInverseYFlip > 0.5) src.y = 1.0 - src.y;\n" +
             "    vTexCoord = (uTexMatrix * vec4(src, 0.0, 1.0)).xy;\n" +
@@ -228,7 +231,6 @@ public final class HighResPreviewSampler {
     private FloatBuffer vertexBuffer;
     private FloatBuffer texCoordBuffer;
     private ByteBuffer readBuffer;
-    private PreviewBitmapPixels previewPixels;
     // Sampler-thread-owned; reused until the FBO dimensions change.
     private Bitmap jpegBitmap;
     private final boolean isTexture2D;
@@ -327,6 +329,9 @@ public final class HighResPreviewSampler {
                 logger.warn("eglMakeCurrent failed");
                 return;
             }
+            // The reflected destination reverses triangle winding. This dedicated
+            // context draws a two-sided fullscreen strip.
+            GLES20.glDisable(GLES20.GL_CULL_FACE);
             vertexBuffer = GlUtil.createFloatBuffer(VERTEX_COORDS);
             texCoordBuffer = GlUtil.createFloatBuffer(TEX_COORDS);
             glReady = true;
@@ -368,7 +373,6 @@ public final class HighResPreviewSampler {
             readBuffer = ByteBuffer.allocateDirect(rgbaBytes);
             readBuffer.order(ByteOrder.nativeOrder());
             jpegBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-            previewPixels = new PreviewBitmapPixels(width);
             fboWidth = width;
             fboHeight = height;
         } catch (Throwable t) {
@@ -667,7 +671,8 @@ public final class HighResPreviewSampler {
             // On dilink4 the SurfaceTexture matrix already Y-flips; combined
             // with the legacy pre-flipped TEX_COORDS we'd double-flip.
             // Counter-flip in the vertex shader so the dialog preview comes
-            // out the right way up.
+            // out the right way up. The independent destination reflection
+            // in VERTEX_SHADER only changes framebuffer row order.
             int inverseFlipLoc = (program == mosaicProgram)
                 ? mosaicUApplyInverseYFlip
                 : (program == quadProgram ? quadUApplyInverseYFlip : -1);
@@ -717,13 +722,13 @@ public final class HighResPreviewSampler {
         }
     }
 
-    /** Flips the readback rows, copies into the reusable bitmap and encodes it. */
+    /** Copies the already top-first readback into the reusable bitmap and encodes it. */
     private byte[] encodeReadback(int width, int height) {
         try {
             // The shaders write opaque alpha. On little-endian Android RGBA
-            // matches native ARGB_8888 storage; swap rows in bulk instead of
-            // staging and converting every pixel in a full-frame Java array.
-            previewPixels.copyOpaqueRgba(readBuffer, jpegBitmap);
+            // matches native ARGB_8888 storage. The vertex shader already
+            // puts the image in bitmap row order, so only the raw copy remains.
+            PreviewBitmapPixels.copyOpaqueRgba(readBuffer, jpegBitmap);
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             if (!jpegBitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)) {
                 return null;
@@ -748,7 +753,6 @@ public final class HighResPreviewSampler {
         // Release the direct readback storage when dimensions change or
         // the sampler shuts down.
         readBuffer = null;
-        previewPixels = null;
         if (jpegBitmap != null) {
             jpegBitmap.recycle();
             jpegBitmap = null;

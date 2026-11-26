@@ -10,31 +10,27 @@ import static org.junit.Assert.assertEquals;
 
 public class PreviewBitmapPixelsTest {
     @Test
-    public void bulkFlipMatchesReferenceAndCanReuseScratch() {
+    public void fallbackReadsTopFirstRowsAndReusesScratch() {
         Random random = new Random(125);
         for (int width : new int[] {1, 2, 3, 16, 63, 320, 1280, 2560}) {
-            PreviewBitmapPixels converter = new PreviewBitmapPixels(width);
+            int[] row = new int[width];
             for (int height : new int[] {1, 2, 3, 9, 48}) {
-                int stride = width * 4;
-                byte[] original = new byte[stride * height];
+                byte[] original = new byte[width * height * 4];
                 random.nextBytes(original);
-                byte[] expected = new byte[original.length];
-                for (int y = 0; y < height; y++) {
-                    System.arraycopy(original, y * stride, expected,
-                            (height - 1 - y) * stride, stride);
-                }
                 ByteBuffer rgba = ByteBuffer.allocateDirect(original.length);
-                rgba.put(original);
-                converter.flipRows(rgba, height);
-                assertEquals(0, rgba.position());
-                assertEquals(original.length, rgba.remaining());
-                byte[] actual = new byte[original.length];
-                rgba.get(actual);
-                assertArrayEquals(expected, actual);
-                // Flipping twice restores every byte, including the middle row.
-                converter.flipRows(rgba, height);
-                rgba.get(actual);
-                assertArrayEquals(original, actual);
+                rgba.put(original).flip();
+                int[] expected = new int[width];
+                for (int y = 0; y < height; y++) {
+                    for (int x = 0; x < width; x++) {
+                        int i = (y * width + x) * 4;
+                        expected[x] = 0xff000000 | ((original[i] & 255) << 16)
+                                | ((original[i + 1] & 255) << 8) | (original[i + 2] & 255);
+                    }
+                    PreviewBitmapPixels.readOpaqueArgbRow(rgba, row);
+                    assertArrayEquals(expected, row);
+                    assertEquals((y + 1) * width * 4, rgba.position());
+                }
+                assertEquals(0, rgba.remaining());
             }
         }
     }
