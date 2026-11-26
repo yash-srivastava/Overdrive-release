@@ -117,10 +117,10 @@ public final class AiLaneGl {
     // observe the new pendingSeq and pick up the latest.
     private final AtomicBoolean postQueued = new AtomicBoolean(false);
 
-    // Frame-modulo gate for the readback. Mirrors the prior
-    // AI_READBACK_FRAME_MODULO=3 behaviour: AI cadence scales with HAL rate
-    // independent of wall-clock throttling. Visible to the encoder thread
-    // via setReadbackModulo() if surveillance config changes it.
+    // Frame-modulo gate for the readback, defaulting to every third frame.
+    // AI cadence scales with HAL rate when wall-clock pacing is disabled.
+    // Visible to the encoder thread via setReadbackModulo() if surveillance
+    // config changes it.
     private static final int DEFAULT_READBACK_MODULO = 3;
     private volatile int readbackModulo = DEFAULT_READBACK_MODULO;
 
