@@ -746,6 +746,7 @@ public class RecordingsApiHandler {
     /** Media needs readable, nonempty content; legacy JSON lookup checks existence only. */
     static File findInDirectories(List<File> directories, String filename,
                                   boolean requireReadableContent) {
+        // Callers must pass an already-validated base name; this helper does not validate it.
         for (File dir : directories) {
             File file = new File(dir, filename);
             if (!RemovableStorageFs.exists(file)) continue;
