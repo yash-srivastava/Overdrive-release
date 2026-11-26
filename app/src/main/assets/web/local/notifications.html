@@ -1096,6 +1096,12 @@
                                 <div style="font-size:13px;margin-top:6px;" data-i18n="notiflog.empty_hint">Alerts you receive appear here so you can review them any time.</div>
                             </div>
 
+                            <!-- Load failure is distinct from a confirmed empty log. -->
+                            <div class="nl-empty" id="nlLoadError" style="display:none;">
+                                <div role="alert" data-i18n="notiflog.load_failed">Could not load notifications</div>
+                                <button type="button" class="btn btn-primary" style="margin-top:14px;" onclick="NOTIFLOG.load()" data-i18n="common.retry">Retry</button>
+                            </div>
+
                             <!-- Pagination -->
                             <div class="nl-pagination" id="nlPagination">
                                 <button class="pagination-btn prev" id="nlPrevBtn" onclick="NOTIFLOG.prevPage()" disabled>
@@ -1556,7 +1562,7 @@
          keep firing without a per-page bridge. -->
     <script src="../shared/surveillance.js?v=codecavailability3"></script>
     <script src="../shared/range-calendar.js?v=3"></script>
-    <script src="../shared/notif-log.js?v=4"></script>
+    <script src="../shared/notif-log.js?v=5"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
