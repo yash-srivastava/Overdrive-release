@@ -23,8 +23,9 @@ internal class GlassKeyShaders {
 
     fun invalidate() { shaderNight = null }
 
-    fun ensure(t: GlassTheme) {
-        if (shaderNight == t.night) return
+    /** Returns true when the shaders are rebuilt, so callers can refresh any extra gradients. */
+    fun ensure(t: GlassTheme): Boolean {
+        if (shaderNight == t.night) return false
         shaderNight = t.night
         val night = t.night
         val white = 0xFFFFFFFF.toInt()
@@ -37,6 +38,7 @@ internal class GlassKeyShaders {
         shadowSh = RadialGradient(0f, 0f, 1f, GlassColor.alpha(t.shadow, t.shadowA), GlassColor.clear(t.shadow), Shader.TileMode.CLAMP)
         fun glow(c: Int) = RadialGradient(0f, 0f, 1f, intArrayOf(GlassColor.alpha(c, 0.8f), GlassColor.alpha(c, 0.3f), GlassColor.clear(c)), floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP)
         glowAccent = glow(t.glowAccent); glowWarn = glow(t.glowWarn)
+        return true
     }
 
     fun mapToBounds(sh: Shader, box: RectF) {
