@@ -12,11 +12,20 @@ function deferred() {
 }
 function flush() { return new Promise(resolve => setImmediate(resolve)); }
 
-function setup(inApp = false) {
-    const values = new Map([['overdrive_theme', 'dark']]);
+function setup(inApp = false, stored = 'dark', systemLight = true, legacy = false) {
+    const values = new Map([['overdrive_theme', stored]]);
     const attrs = {};
     const listeners = [];
     const requests = [];
+    const mediaListeners = [];
+    const media = { get matches() { return systemLight; } };
+    if (legacy) media.addListener = cb => mediaListeners.push(cb);
+    else media.addEventListener = (type, cb) => {
+        assert.strictEqual(type, 'change');
+        mediaListeners.push(cb);
+    };
+    const favicon = {};
+    const touchIcon = {};
     const context = {
         console, navigator: { language: 'en' },
         localStorage: {
@@ -31,10 +40,12 @@ function setup(inApp = false) {
                 style: { setProperty() {} }
             },
             addEventListener: (type, cb) => { if (type === 'DOMContentLoaded') listeners.push(cb); },
-            querySelector: () => null, querySelectorAll: () => []
+            querySelector: selector => selector === 'link[rel~="icon"]' ? favicon
+                : selector === 'link[rel~="apple-touch-icon"]' ? touchIcon : null,
+            querySelectorAll: () => []
         },
         addEventListener() {},
-        matchMedia: () => ({ matches: true, addEventListener() {} }),
+        matchMedia: () => media,
         MutationObserver: class { observe() {} },
         fetch: (url, options) => {
             assert.strictEqual(url, '/api/settings/appearance');
@@ -48,6 +59,14 @@ function setup(inApp = false) {
     vm.runInNewContext(source, context);
     return {
         theme: context.BYD.theme, requests, attrs,
+        setSystemLight: light => {
+            systemLight = light;
+            mediaListeners.forEach(cb => cb({ matches: light }));
+        },
+        checkIcons: effective => {
+            assert.strictEqual(favicon.href, '/shared/app-icon-' + effective + '.webp');
+            assert.strictEqual(touchIcon.href, favicon.href);
+        },
         start: () => listeners.forEach(cb => cb()),
         check: (preference, effective) => {
             assert.strictEqual(values.get('overdrive_theme'), preference);
@@ -125,6 +144,37 @@ async function main() {
     s.start();
     assert.strictEqual(s.requests.length, 0);
     s.check('dark', 'light');
-    console.log('8 theme bootstrap synchronization scenarios passed');
+    // A stale web Auto preference must not let a media event override Android.
+    s = setup(true, 'auto');
+    s.start();
+    s.setSystemLight(false);
+    s.check('auto', 'light');
+    assert.strictEqual(s.requests.length, 0);
+
+    // A fixed web preference must not determine the initial native icons.
+    s = setup(true, 'dark');
+    s.check('dark', 'light');
+    s.checkIcons('light'); // Before DOMContentLoaded or any mutation callback.
+    s.start();
+    s.checkIcons('light');
+
+    // External browsers in Auto still track the OS, including legacy Safari.
+    for (const legacy of [false, true]) {
+        s = setup(false, 'auto', false, legacy);
+        s.check('auto', 'dark');
+        s.checkIcons('dark');
+        s.start();
+        s.setSystemLight(true);
+        s.check('auto', 'light');
+        s.setSystemLight(false);
+        s.check('auto', 'dark');
+    }
+
+    // Explicit browser choices remain independent of the media query.
+    s = setup(false, 'light');
+    s.start();
+    s.setSystemLight(false);
+    s.check('light', 'light');
+    console.log('13 theme bootstrap synchronization scenarios passed');
 }
 main().catch(err => { console.error(err); process.exitCode = 1; });
