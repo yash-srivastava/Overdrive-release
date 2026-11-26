@@ -1,8 +1,6 @@
 package com.overdrive.app.roadsense.sync
 
-import com.overdrive.app.config.UnifiedConfigManager
-import org.json.JSONObject
-import java.util.UUID
+import com.overdrive.app.util.RotatingAnonymousId
 
 /**
  * Rotating anonymous device identity for crowdsource uploads (R-CRD-7, D-009).
@@ -29,28 +27,11 @@ object DeviceId {
     private const val ROTATE_DAYS = 30L
     private const val ROTATE_MS = ROTATE_DAYS * 24L * 60L * 60L * 1000L
 
+    private val identity = RotatingAnonymousId(SECTION, KEY_ID, KEY_MINTED, ROTATE_MS)
+
     /**
      * Current anonymous id, minting or rotating as needed. [nowMs] injected for
      * testability. Returns a stable id within a rotation window.
      */
-    fun current(nowMs: Long): String {
-        val section = try {
-            UnifiedConfigManager.forceReload().optJSONObject(SECTION)
-        } catch (_: Throwable) { null }
-        val existing = section?.optString(KEY_ID, "")?.ifEmpty { null }
-        val minted = section?.optLong(KEY_MINTED, 0L) ?: 0L
-
-        if (existing != null && (nowMs - minted) < ROTATE_MS) {
-            return existing
-        }
-        // Mint (first use) or rotate (window elapsed).
-        val fresh = UUID.randomUUID().toString()
-        try {
-            UnifiedConfigManager.updateSection(
-                SECTION,
-                JSONObject().put(KEY_ID, fresh).put(KEY_MINTED, nowMs),
-            )
-        } catch (_: Throwable) { /* if persist fails we'll just mint again next time */ }
-        return fresh
-    }
+    fun current(nowMs: Long): String = identity.current(nowMs)
 }
