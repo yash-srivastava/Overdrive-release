@@ -860,30 +860,7 @@ class WebViewFragment : Fragment() {
                                 val response = WebResourceResponse(mime, encoding, stream)
                                 response.setStatusCodeAndReasonPhrase(connection.responseCode, connection.responseMessage ?: "OK")
 
-                                val headers = mutableMapOf<String, String>()
-                                connection.headerFields?.forEach { (k, v) ->
-                                    if (k == null || v.isEmpty()) return@forEach
-                                    val lower = k.lowercase()
-                                    // Same filter as the localhost branch:
-                                    // Content-Encoding/Length and hop-by-hop
-                                    // headers describe the upstream
-                                    // connection, not the WebView one. CDNs
-                                    // commonly gzip; without this filter
-                                    // WebView re-decodes an already-decoded
-                                    // stream and the resource fails to
-                                    // render.
-                                    if (lower == "content-encoding" ||
-                                        lower == "content-length" ||
-                                        lower == "transfer-encoding" ||
-                                        lower == "connection" ||
-                                        lower == "keep-alive" ||
-                                        lower == "proxy-authenticate" ||
-                                        lower == "trailer" ||
-                                        lower == "te" ||
-                                        lower == "upgrade") return@forEach
-                                    headers[k] = v.last()
-                                }
-                                headers["Access-Control-Allow-Origin"] = "*"
+                                val headers = webViewResponseHeaders(connection.headerFields)
                                 response.responseHeaders = headers
 
                                 // Promote this strategy. Subsequent CDN
@@ -1029,39 +1006,8 @@ class WebViewFragment : Fragment() {
                         )
 
                         // 5. Force Response Headers
-                        val headers = mutableMapOf<String, String>()
-                        // Copy server headers, but drop:
-                        //   - Content-Encoding: HttpURLConnection transparently
-                        //     gunzips, so the stream we hand to WebView is
-                        //     already decoded — leaving the header would tell
-                        //     WebView to decode again and fail.
-                        //   - Content-Length: keyed off the server's
-                        //     (possibly compressed) length; we recompute
-                        //     below from connection.contentLength which
-                        //     reflects the post-decompression stream when
-                        //     the server didn't gzip, and the manual
-                        //     override is safer than a stale value.
-                        //   - Hop-by-hop headers: Transfer-Encoding /
-                        //     Connection / Keep-Alive / Proxy-Authenticate /
-                        //     Trailer / TE / Upgrade. These describe the
-                        //     server↔intercept connection, not the
-                        //     intercept↔WebView one.
-                        connection.headerFields?.forEach { (k, v) ->
-                            if (k == null || v.isEmpty()) return@forEach
-                            val lower = k.lowercase()
-                            if (lower == "content-encoding" ||
-                                lower == "content-length" ||
-                                lower == "transfer-encoding" ||
-                                lower == "connection" ||
-                                lower == "keep-alive" ||
-                                lower == "proxy-authenticate" ||
-                                lower == "trailer" ||
-                                lower == "te" ||
-                                lower == "upgrade") return@forEach
-                            headers[k] = v.last()
-                        }
-                        // MANUAL OVERRIDES: Ensure these exist even if server forgot them
-                        headers["Access-Control-Allow-Origin"] = "*"
+                        val headers = webViewResponseHeaders(connection.headerFields)
+                        // Local media and HTML responses need their own length and range overrides.
                         headers["Accept-Ranges"] = "bytes"  // Tells player "You can seek"
                         if (length > 0 && !splicedHtml) {
                             headers["Content-Length"] = length.toString()
