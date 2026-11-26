@@ -2,6 +2,7 @@ package com.overdrive.app.streaming;
 
 import org.java_websocket.server.WebSocketServer;
 import org.java_websocket.WebSocket;
+import org.java_websocket.WebSocketImpl;
 import org.java_websocket.drafts.Draft;
 import org.java_websocket.exceptions.InvalidDataException;
 import org.java_websocket.framing.CloseFrame;
@@ -53,6 +54,11 @@ public class WebSocketStreamServer extends WebSocketServer
                 return thread;
             });
     private final Set<WebSocket> pendingKeyframeRetries =
+            Collections.newSetFromMap(new ConcurrentHashMap<>());
+    // Serialize application-level sends (drainer, onOpen, keyframe retry).
+    // The library's socket writer remains independent.
+    private final Object directSendLock = new Object();
+    private final Set<WebSocket> waitingForIdr =
             Collections.newSetFromMap(new ConcurrentHashMap<>());
     private Timer idleTimer;
     private volatile long lastClientDisconnectElapsedMs = 0;
@@ -184,10 +190,12 @@ public class WebSocketStreamServer extends WebSocketServer
             idleShutdownTriggered = false;
         }
         logger.info("WS Client connected: " + conn.getRemoteSocketAddress() + " (total: " + clients.size() + ")");
-        if (cachedSpsPps != null) {
+        byte[] headers = cachedSpsPps;
+        if (headers != null) {
             try {
-                conn.send(cachedSpsPps);
-                logger.info("Sent cached SPS/PPS (" + cachedSpsPps.length + " bytes)");
+                if (sendBounded(conn, ByteBuffer.wrap(headers), false)) {
+                    logger.info("Sent cached SPS/PPS (" + headers.length + " bytes)");
+                }
             } catch (Exception e) {
                 logger.error("Failed to send SPS/PPS", e);
             }
@@ -198,6 +206,7 @@ public class WebSocketStreamServer extends WebSocketServer
     public void onClose(WebSocket conn, int code, String reason, boolean remote) {
         clients.remove(conn);
         pendingKeyframeRetries.remove(conn);
+        waitingForIdr.remove(conn);
         logger.info("WS Client disconnected (remaining: " + clients.size() + ")");
         if (clients.isEmpty() && !shutdownRequested) {
             lastClientDisconnectElapsedMs =
@@ -213,7 +222,7 @@ public class WebSocketStreamServer extends WebSocketServer
 
     @Override
     public void onMessage(WebSocket conn, String message) {
-        if (shutdownRequested) return;
+        if (shutdownRequested || waitingForIdr.contains(conn)) return;
         if ("keyframe".equals(message)) {
             // A live-view stream client (port 8887, fed by streamEncoder) requests a
             // clean decode restart — typically because its decoder just (re)gained a
@@ -230,7 +239,9 @@ public class WebSocketStreamServer extends WebSocketServer
             logger.info("Client requested keyframe — re-sending SPS/PPS + sync frame");
             byte[] sps = cachedSpsPps;
             if (sps != null && sps.length > 0) {
-                try { conn.send(sps); } catch (Exception e) {
+                try {
+                    if (!sendBounded(conn, ByteBuffer.wrap(sps), false)) return;
+                } catch (Exception e) {
                     logger.warn("keyframe: SPS/PPS resend failed: " + e.getMessage());
                 }
             } else {
@@ -261,7 +272,7 @@ public class WebSocketStreamServer extends WebSocketServer
                             if (shutdownRequested) return;
                             byte[] late = cachedSpsPps;
                             if (late != null && late.length > 0 && deferredConn.isOpen()) {
-                                try { deferredConn.send(late); } catch (Exception e) {
+                                try { sendBounded(deferredConn, ByteBuffer.wrap(late), false); } catch (Exception e) {
                                     logger.warn("keyframe: deferred SPS/PPS resend failed: " + e.getMessage());
                                 }
                             } else if (late == null) {
@@ -291,6 +302,7 @@ public class WebSocketStreamServer extends WebSocketServer
         if (conn != null) {
             clients.remove(conn);
             pendingKeyframeRetries.remove(conn);
+            waitingForIdr.remove(conn);
             logger.error("WS Error: " + ex.getMessage());
             if (clients.isEmpty() && !shutdownRequested) {
                 lastClientDisconnectElapsedMs =
@@ -482,7 +494,8 @@ public class WebSocketStreamServer extends WebSocketServer
         }
 
         // Send to all clients (they copy internally)
-        sendToAll(buf, frameSize);
+        boolean isKey = (info.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0;
+        sendToAll(buf, frameSize, isKey);
         
         frameCount++;
         long now = System.currentTimeMillis();
@@ -493,10 +506,10 @@ public class WebSocketStreamServer extends WebSocketServer
     }
 
     private void sendToAll(byte[] data) {
-        sendToAll(data, data.length);
+        sendToAll(data, data.length, false);
     }
     
-    private void sendToAll(byte[] data, int length) {
+    private void sendToAll(byte[] data, int length, boolean isKey) {
         // Single ByteBuffer.wrap reused across clients. java-WebSocket reads
         // via position()/remaining() and copies internally before queueing,
         // so resetting position before each conn.send is safe and gets us
@@ -507,12 +520,63 @@ public class WebSocketStreamServer extends WebSocketServer
             try {
                 if (conn.isOpen()) {
                     wrapped.position(0);
-                    conn.send(wrapped);
+                    sendBounded(conn, wrapped, isKey);
                 }
-                else clients.remove(conn);
+                else {
+                    clients.remove(conn);
+                    waitingForIdr.remove(conn);
+                }
             } catch (Exception e) {
                 clients.remove(conn);
+                waitingForIdr.remove(conn);
             }
+        }
+    }
+
+    /**
+     * A congested viewer drains its already queued packets, then resumes on
+     * the next fitting keyframe. Never enqueue dependent frames across a gap.
+     * All application sends, including the two recovery messages, share the
+     * same lock; never clear the library queue or interrupt its socket writer.
+     */
+    private boolean sendBounded(WebSocket conn, ByteBuffer payload, boolean isKey) {
+        synchronized (directSendLock) {
+            if (shutdownRequested || !clients.contains(conn) || !conn.isOpen()) return false;
+            if (conn instanceof WebSocketImpl) {
+                WebSocketImpl socket = (WebSocketImpl) conn;
+                boolean waiting = waitingForIdr.contains(conn);
+                byte[] headers = waiting && isKey ? cachedSpsPps : null;
+                DirectStreamBacklogPolicy.Decision decision = DirectStreamBacklogPolicy.decide(
+                        socket.outQueue, payload.remaining(), isKey,
+                        headers == null ? 0 : headers.length, waiting);
+                if (decision == DirectStreamBacklogPolicy.Decision.WAIT_FOR_IDR) {
+                    if (waitingForIdr.add(conn)) {
+                        // Close/error/shutdown callbacks may race admission.
+                        if (shutdownRequested || !clients.contains(conn) || !conn.isOpen()) {
+                            waitingForIdr.remove(conn);
+                        } else {
+                            logger.warn("WS: legacy viewer waiting for IDR: "
+                                    + conn.getRemoteSocketAddress() + " (queued="
+                                    + socket.outQueue.size() + ")");
+                        }
+                    }
+                    return false;
+                }
+                if (decision == DirectStreamBacklogPolicy.Decision.RESUME) {
+                    // Both messages were checked together. Clear the gate only
+                    // after both sends succeed; no other application send can
+                    // interleave. Control frames may still be queued by the library.
+                    conn.send(ByteBuffer.wrap(headers));
+                    conn.send(payload);
+                    waitingForIdr.remove(conn);
+                    logger.warn("WS: legacy viewer resumed at IDR: "
+                            + conn.getRemoteSocketAddress() + " (queued="
+                            + socket.outQueue.size() + ")");
+                    return true;
+                }
+            }
+            conn.send(payload);
+            return true;
         }
     }
 
@@ -532,6 +596,7 @@ public class WebSocketStreamServer extends WebSocketServer
             }
             clients.clear();
             pendingKeyframeRetries.clear();
+            waitingForIdr.clear();
             cachedSpsPps = null;
             reusableFrameBuffer = null;
             frameCount = 0;
