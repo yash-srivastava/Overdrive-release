@@ -48,6 +48,8 @@
                                   // pinning every detection at MEDIUM(approach).
 #define V2_BYTES_PER_PIXEL   3    // RGB
 #define V2_QUADRANT_SIZE     (V2_QUADRANT_WIDTH * V2_QUADRANT_HEIGHT * V2_BYTES_PER_PIXEL)
+#define V2_SAMPLED_WIDTH     (V2_QUADRANT_WIDTH / 4)
+#define V2_SAMPLED_SIZE      (V2_SAMPLED_WIDTH * (V2_QUADRANT_HEIGHT / 4))
 #define V2_OSCILLATION_WINDOW 10  // Track last 10 frames for oscillation detection
 #define V2_FLOW_NET_WINDOW    10  // Stage 4b: net-displacement window (~1s at 10 FPS)
 #define V2_FLOW_SEARCH_RADIUS 6   // Stage 4b: block-match search half-window (px)
@@ -225,9 +227,11 @@ struct QuadrantState {
     // Stage 3: Per-block temporal confidence
     float blockConfidence[V2_TOTAL_BLOCKS];
     
-    // Ring buffer: last N frames for this quadrant (grayscale, stride-4 sampled)
-    // We store full RGB for edge computation
+    // Full RGB history remains available for chroma and arbitrary-offset flow.
     uint8_t frameHistory[V2_FRAME_HISTORY][V2_QUADRANT_SIZE];
+    // Lazily derived stride-4 luma, tied to the same immutable history slot.
+    uint8_t sampledLuma[V2_FRAME_HISTORY][V2_SAMPLED_SIZE];
+    bool    sampledLumaReady[V2_FRAME_HISTORY];
     int     historyIndex;
     int     historyCount;
     
