@@ -96,6 +96,7 @@ public final class TfliteTextOcrBackend implements TextOcrBackend {
     private ByteBuffer detInput;
     private ByteBuffer detOutput;
     private int[] tilePixels;
+    private float[] detProb;
     private ByteBuffer recInput;
     private ByteBuffer recOutput;
     private float[] recFlat;
@@ -282,6 +283,7 @@ public final class TfliteTextOcrBackend implements TextOcrBackend {
         detInput = null;
         detOutput = null;
         tilePixels = null;
+        detProb = null;
         recInput = null;
         recOutput = null;
         recFlat = null;
@@ -293,24 +295,16 @@ public final class TfliteTextOcrBackend implements TextOcrBackend {
     private List<int[]> detect(Bitmap src) {
         Bitmap scaled = Bitmap.createScaledBitmap(src, detW, detH, true);
         try {
-            if (detInput == null) {
-                detInput = ByteBuffer.allocateDirect(4 * 3 * detH * detW).order(ByteOrder.nativeOrder());
-            }
-            fillNormalised(scaled, detInput, detNchw);
             int[] oshape = det.getOutputTensor(0).shape();
             int oh, ow;
             if (oshape.length == 4 && oshape[1] == 1) { oh = oshape[2]; ow = oshape[3]; }        // NCHW
             else if (oshape.length == 4) { oh = oshape[1]; ow = oshape[2]; }                      // NHWC
             else if (oshape.length == 3) { oh = oshape[1]; ow = oshape[2]; }
             else { oh = detH; ow = detW; }
-            ByteBuffer outBuf = ByteBuffer.allocateDirect(4 * oh * ow).order(ByteOrder.nativeOrder());
-            detInput.rewind();
-            det.run(detInput, outBuf);
-            outBuf.rewind();
-            float[] prob = new float[oh * ow];
-            outBuf.asFloatBuffer().get(prob);
+            ensureDetectorScratch(ow, oh);
+            runDetectorTile(scaled, 0, 0, detW, detH);
             List<ConnectedComponents.Component> comps =
-                    ConnectedComponents.label(prob, ow, oh, DET_BIN_THRESH, DET_MIN_AREA);
+                    ConnectedComponents.label(detProb, ow, oh, DET_BIN_THRESH, DET_MIN_AREA);
             float sx = (float) src.getWidth() / ow, sy = (float) src.getHeight() / oh;
             List<int[]> boxes = new ArrayList<>();
             for (ConnectedComponents.Component c : comps) {
@@ -365,34 +359,14 @@ public final class TfliteTextOcrBackend implements TextOcrBackend {
             else if (oshape.length == 4) { oh = oshape[1]; ow = oshape[2]; }
             else if (oshape.length == 3) { oh = oshape[1]; ow = oshape[2]; }
             else { oh = detH; ow = detW; }
-            if (detInput == null) {
-                detInput = ByteBuffer.allocateDirect(4 * 3 * detH * detW).order(ByteOrder.nativeOrder());
-            }
-            if (detOutput == null || detOutput.capacity() != 4 * oh * ow) {
-                detOutput = ByteBuffer.allocateDirect(4 * oh * ow).order(ByteOrder.nativeOrder());
-            }
-            if (tilePixels == null || tilePixels.length != detW * detH) tilePixels = new int[detW * detH];
+            ensureDetectorScratch(ow, oh);
             float[] map = new float[fw * fh];
-            float[] tileProb = new float[oh * ow];
+            OcrTileMerger merger = new OcrTileMerger(detW, detH, ow, oh);
             for (int ty : tileStarts(fh, detH)) {
                 for (int tx : tileStarts(fw, detW)) {
                     int tw = Math.min(detW, fw - tx), th = Math.min(detH, fh - ty);
-                    img.getPixels(tilePixels, 0, detW, tx, ty, tw, th);
-                    OcrPixelNormalizer.detector(tilePixels, detW, tw, th,
-                            detInput, detNchw, detW, detH);
-                    detInput.rewind();
-                    detOutput.rewind();
-                    det.run(detInput, detOutput);
-                    detOutput.rewind();
-                    detOutput.asFloatBuffer().get(tileProb);
-                    for (int y = 0; y < th; y++) {
-                        int orow = Math.min(oh - 1, y * oh / detH) * ow;
-                        int row = (ty + y) * fw + tx;
-                        for (int x = 0; x < tw; x++) {
-                            float v = tileProb[orow + Math.min(ow - 1, x * ow / detW)];
-                            if (v > map[row + x]) map[row + x] = v;
-                        }
-                    }
+                    runDetectorTile(img, tx, ty, tw, th);
+                    merger.merge(detProb, map, fw, tx, ty, tw, th);
                 }
             }
             List<ConnectedComponents.Component> comps =
@@ -542,12 +516,28 @@ public final class TfliteTextOcrBackend implements TextOcrBackend {
 
     // ==================== PIXEL PLUMBING ====================
 
-    /** ImageNet-normalized RGB in NHWC or NCHW layout. */
-    private static void fillNormalised(Bitmap bmp, ByteBuffer buf, boolean nchw) {
-        int w = bmp.getWidth(), h = bmp.getHeight();
-        int[] px = new int[w * h];
-        bmp.getPixels(px, 0, w, 0, 0, w, h);
-        OcrPixelNormalizer.detector(px, w, w, h, buf, nchw, w, h);
+    /** Both detector passes run serially under read(); scratch never escapes the backend. */
+    private void ensureDetectorScratch(int ow, int oh) {
+        if (detInput == null) {
+            detInput = ByteBuffer.allocateDirect(4 * 3 * detH * detW).order(ByteOrder.nativeOrder());
+        }
+        int outputPixels = ow * oh;
+        if (detOutput == null || detOutput.capacity() != 4 * outputPixels) {
+            detOutput = ByteBuffer.allocateDirect(4 * outputPixels).order(ByteOrder.nativeOrder());
+        }
+        if (detProb == null || detProb.length != outputPixels) detProb = new float[outputPixels];
+        if (tilePixels == null || tilePixels.length != detW * detH) tilePixels = new int[detW * detH];
+    }
+
+    /** Normalize, infer and copy one tile (including a whole resized coarse frame). */
+    private void runDetectorTile(Bitmap bmp, int x, int y, int w, int h) {
+        bmp.getPixels(tilePixels, 0, detW, x, y, w, h);
+        OcrPixelNormalizer.detector(tilePixels, detW, w, h, detInput, detNchw, detW, detH);
+        detInput.rewind();
+        detOutput.rewind();
+        det.run(detInput, detOutput);
+        detOutput.rewind();
+        detOutput.asFloatBuffer().get(detProb);
     }
 
     /** (x/255 - 0.5) / 0.5 with right padding to {@code targetW}. */
