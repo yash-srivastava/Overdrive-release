@@ -2121,16 +2121,30 @@ const TRIPS = {
             this.currentDays, this.currentOffset, this.currentCursor);
     },
 
-    /** The trips in the order renderTripList shows them (grouped by day). */
-    _displayedTrips() {
+    _groupTripsByDay(trips) {
         const groups = {};
-        (this.trips || []).forEach(t => {
-            const day = new Date(t.startTime || t.start_time).toLocaleDateString(BYD.i18n.getLang(), {
-                weekday: 'long', month: 'short', day: 'numeric'
-            });
+        const options = { weekday: 'long', month: 'short', day: 'numeric' };
+        let formatter = null;
+        // Reuse the locale formatter within this synchronous pass only.
+        // The next pass picks up locale and time-zone changes.
+        if (trips.length > 1 && typeof Intl !== 'undefined' && typeof Intl.DateTimeFormat === 'function') {
+            try { formatter = new Intl.DateTimeFormat(BYD.i18n.getLang(), options); }
+            catch (e) { /* Retain the original Date path on older engines. */ }
+        }
+        trips.forEach(t => {
+            const date = new Date(t.startTime || t.start_time);
+            // Unlike Date.toLocaleDateString, Intl.format throws on invalid dates.
+            const day = formatter && Number.isFinite(date.getTime())
+                ? formatter.format(date) : date.toLocaleDateString(BYD.i18n.getLang(), options);
             if (!groups[day]) groups[day] = [];
             groups[day].push(t);
         });
+        return groups;
+    },
+
+    /** The trips in the order renderTripList shows them (grouped by day). */
+    _displayedTrips() {
+        const groups = this._groupTripsByDay(this.trips || []);
         const ordered = [];
         Object.keys(groups).forEach(day => { groups[day].forEach(t => ordered.push(t)); });
         return ordered;
@@ -2198,14 +2212,7 @@ const TRIPS = {
         container.innerHTML = '';
         if (skel) container.appendChild(skel);
 
-        const groups = {};
-        trips.forEach(t => {
-            const day = new Date(t.startTime || t.start_time).toLocaleDateString(BYD.i18n.getLang(), {
-                weekday: 'long', month: 'short', day: 'numeric'
-            });
-            if (!groups[day]) groups[day] = [];
-            groups[day].push(t);
-        });
+        const groups = this._groupTripsByDay(trips);
 
         Object.keys(groups).forEach(day => {
             const header = document.createElement('h3');
