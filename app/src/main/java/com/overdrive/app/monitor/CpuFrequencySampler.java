@@ -2,6 +2,7 @@ package com.overdrive.app.monitor;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileReader;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -120,6 +121,31 @@ final class CpuFrequencySampler {
     }
 
     private static long readPositiveKhz(File file) {
+        // Linux cpufreq attributes normally contain a short ASCII decimal line.
+        // Avoid allocating a character reader and its large buffers for that case.
+        // Keep the original reader for incomplete or nonstandard lines.
+        byte[] bytes = new byte[32];
+        try (FileInputStream input = new FileInputStream(file)) {
+            int length = input.read(bytes);
+            long khz = 0;
+            for (int i = 0; i < length; i++) {
+                int b = bytes[i] & 0xff;
+                if (i > 0 && (b == '\n' || b == '\r')) {
+                    return khz > 0 ? khz : -1;
+                }
+                int digit = b - '0';
+                if (digit < 0 || digit > 9 || khz > (Long.MAX_VALUE - digit) / 10) {
+                    break;
+                }
+                khz = khz * 10 + digit;
+            }
+        } catch (Exception ignored) {
+            return -1;
+        }
+        return readPositiveKhzText(file);
+    }
+
+    private static long readPositiveKhzText(File file) {
         try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
             String value = reader.readLine();
             if (value == null) return -1;
