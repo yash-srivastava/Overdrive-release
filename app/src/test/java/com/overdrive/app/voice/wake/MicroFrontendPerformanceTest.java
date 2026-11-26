@@ -171,6 +171,68 @@ public class MicroFrontendPerformanceTest {
         }
     }
 
+    @Test
+    public void radix4LocalsMatchArrayBasedButterfly() throws Exception {
+        MicroFrontend frontend = new MicroFrontend();
+        short[] re = (short[]) readField(frontend, "tmpRe");
+        short[] im = (short[]) readField(frontend, "tmpIm");
+        short[] twRe = (short[]) readField(frontend, "twiddleRe");
+        short[] twIm = (short[]) readField(frontend, "twiddleIm");
+        Method butterfly = MicroFrontend.class.getDeclaredMethod("bfly4", int.class, int.class, int.class);
+        butterfly.setAccessible(true);
+        Random random = new Random(18873);
+        for (int m : new int[]{4, 16, 64}) {
+            int stride = re.length / (4 * m);
+            for (int trial = 0; trial < 256; trial++) {
+                for (int i = 0; i < re.length; i++) {
+                    re[i] = trial == 0 ? Short.MIN_VALUE : trial == 1 ? Short.MAX_VALUE
+                            : (short) random.nextInt();
+                    im[i] = trial == 0 ? Short.MAX_VALUE : trial == 1 ? Short.MIN_VALUE
+                            : (short) random.nextInt();
+                }
+                int start = (trial % stride) * 4 * m;
+                short[] expectedRe = re.clone(), expectedIm = im.clone();
+                referenceRadix4(expectedRe, expectedIm, twRe, twIm, start, stride, m);
+                butterfly.invoke(frontend, start, stride, m);
+                assertArrayEquals(expectedRe, re);
+                assertArrayEquals(expectedIm, im);
+            }
+        }
+    }
+
+    // Array-based reference: scale the four inputs in place, then rotate
+    // the three nonzero legs, including the unity twiddle at k == 0.
+    private static void referenceRadix4(short[] re, short[] im, short[] wr, short[] wi,
+                                        int start, int stride, int m) {
+        for (int k = 0; k < m; k++) {
+            int a = start + k, b = a + m, c = b + m, d = c + m;
+            for (int i = a; i <= d; i += m) {
+                re[i] = rounded(re[i] * 8191);
+                im[i] = rounded(im[i] * 8191);
+            }
+            int t = k * stride;
+            short br = rounded(re[b] * wr[t] - im[b] * wi[t]);
+            short bi = rounded(re[b] * wi[t] + im[b] * wr[t]);
+            short cr = rounded(re[c] * wr[2 * t] - im[c] * wi[2 * t]);
+            short ci = rounded(re[c] * wi[2 * t] + im[c] * wr[2 * t]);
+            short dr = rounded(re[d] * wr[3 * t] - im[d] * wi[3 * t]);
+            short di = rounded(re[d] * wi[3 * t] + im[d] * wr[3 * t]);
+            short ar = re[a], ai = im[a];
+            re[a] = (short) (ar + cr + br + dr);
+            im[a] = (short) (ai + ci + bi + di);
+            re[b] = (short) (ar - cr + bi - di);
+            im[b] = (short) (ai - ci - br + dr);
+            re[c] = (short) (ar + cr - br - dr);
+            im[c] = (short) (ai + ci - bi - di);
+            re[d] = (short) (ar - cr - bi + di);
+            im[d] = (short) (ai - ci + br - dr);
+        }
+    }
+
+    private static short rounded(int x) {
+        return (short) ((x + 16384) >> 15);
+    }
+
     private static Object readField(MicroFrontend frontend, String name) throws Exception {
         Field field = MicroFrontend.class.getDeclaredField(name);
         field.setAccessible(true);

@@ -401,31 +401,46 @@ public final class MicroFrontend {
             int i1 = i0 + m;
             int i2 = i1 + m;
             int i3 = i2 + m;
-            fixdiv(i0, SAMP_MAX / 4);
-            fixdiv(i1, SAMP_MAX / 4);
-            fixdiv(i2, SAMP_MAX / 4);
-            fixdiv(i3, SAMP_MAX / 4);
-            short s0R = sround(tmpRe[i1] * twiddleRe[tw1] - tmpIm[i1] * twiddleIm[tw1]);
-            short s0I = sround(tmpRe[i1] * twiddleIm[tw1] + tmpIm[i1] * twiddleRe[tw1]);
-            short s1R = sround(tmpRe[i2] * twiddleRe[tw2] - tmpIm[i2] * twiddleIm[tw2]);
-            short s1I = sround(tmpRe[i2] * twiddleIm[tw2] + tmpIm[i2] * twiddleRe[tw2]);
-            short s2R = sround(tmpRe[i3] * twiddleRe[tw3] - tmpIm[i3] * twiddleIm[tw3]);
-            short s2I = sround(tmpRe[i3] * twiddleIm[tw3] + tmpIm[i3] * twiddleRe[tw3]);
-            short s5R = (short) (tmpRe[i0] - s1R);
-            short s5I = (short) (tmpIm[i0] - s1I);
-            tmpRe[i0] = (short) (tmpRe[i0] + s1R);
-            tmpIm[i0] = (short) (tmpIm[i0] + s1I);
+            // Scale in locals rather than round-tripping through the scratch arrays.
+            // Retain the short narrowing at each fixed-point butterfly boundary.
+            short aR = sround(tmpRe[i0] * (SAMP_MAX / 4));
+            short aI = sround(tmpIm[i0] * (SAMP_MAX / 4));
+            short bR = sround(tmpRe[i1] * (SAMP_MAX / 4));
+            short bI = sround(tmpIm[i1] * (SAMP_MAX / 4));
+            short cR = sround(tmpRe[i2] * (SAMP_MAX / 4));
+            short cI = sround(tmpIm[i2] * (SAMP_MAX / 4));
+            short dR = sround(tmpRe[i3] * (SAMP_MAX / 4));
+            short dI = sround(tmpIm[i3] * (SAMP_MAX / 4));
+            short s0R, s0I, s1R, s1I, s2R, s2I;
+            if (k == 0) {
+                // Unity twiddles (32767, 0) are exact after radix-4 scaling.
+                // The scaled values are in [-8191, 8191], so sround(v*32767) == v.
+                s0R = bR; s0I = bI;
+                s1R = cR; s1I = cI;
+                s2R = dR; s2I = dI;
+            } else {
+                s0R = sround(bR * twiddleRe[tw1] - bI * twiddleIm[tw1]);
+                s0I = sround(bR * twiddleIm[tw1] + bI * twiddleRe[tw1]);
+                s1R = sround(cR * twiddleRe[tw2] - cI * twiddleIm[tw2]);
+                s1I = sround(cR * twiddleIm[tw2] + cI * twiddleRe[tw2]);
+                s2R = sround(dR * twiddleRe[tw3] - dI * twiddleIm[tw3]);
+                s2I = sround(dR * twiddleIm[tw3] + dI * twiddleRe[tw3]);
+            }
+            short s5R = (short) (aR - s1R);
+            short s5I = (short) (aI - s1I);
+            short acR = (short) (aR + s1R);
+            short acI = (short) (aI + s1I);
             short s3R = (short) (s0R + s2R);
             short s3I = (short) (s0I + s2I);
             short s4R = (short) (s0R - s2R);
             short s4I = (short) (s0I - s2I);
-            tmpRe[i2] = (short) (tmpRe[i0] - s3R);
-            tmpIm[i2] = (short) (tmpIm[i0] - s3I);
+            tmpRe[i2] = (short) (acR - s3R);
+            tmpIm[i2] = (short) (acI - s3I);
             tw1 += fstride;
             tw2 += fstride * 2;
             tw3 += fstride * 3;
-            tmpRe[i0] = (short) (tmpRe[i0] + s3R);
-            tmpIm[i0] = (short) (tmpIm[i0] + s3I);
+            tmpRe[i0] = (short) (acR + s3R);
+            tmpIm[i0] = (short) (acI + s3I);
             tmpRe[i1] = (short) (s5R + s4I);
             tmpIm[i1] = (short) (s5I - s4R);
             tmpRe[i3] = (short) (s5R - s4I);
