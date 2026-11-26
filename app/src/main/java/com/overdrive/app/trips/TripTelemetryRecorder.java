@@ -18,14 +18,11 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.zip.GZIPOutputStream;
 
 /**
  * Captures 5Hz telemetry by reading from existing singleton monitors.
@@ -1310,52 +1307,8 @@ public class TripTelemetryRecorder {
         }
     }
 
-    /** Accumulates a second without allocating a list for every 5Hz sample. */
-    private static final class SecondBucket {
-        TelemetrySample closest;
-        long closestDistance = Long.MAX_VALUE;
-        float landedMeters;
-    }
-
-    /**
-     * 1Hz downsampling: for each whole-second boundary present in the data,
-     * select the sample with timestamp closest to that boundary.
-     */
     static List<TelemetrySample> downsampleTo1Hz(List<TelemetrySample> samples) {
-        if (samples == null || samples.isEmpty()) return new ArrayList<>();
-
-        // Keep the original encounter order for ties and float accumulation.
-        Map<Long, SecondBucket> bySecond = new HashMap<>();
-        for (TelemetrySample s : samples) {
-            long boundary = (s.timestampMs / 1000) * 1000;
-            SecondBucket bucket = bySecond.get(boundary);
-            if (bucket == null) {
-                bucket = new SecondBucket();
-                bySecond.put(boundary, bucket);
-            }
-            long distance = Math.abs(s.timestampMs - boundary);
-            if (distance < bucket.closestDistance) {
-                bucket.closestDistance = distance;
-                bucket.closest = s;
-            }
-            bucket.landedMeters += s.distanceLandedM;
-        }
-
-        List<Long> sortedSeconds = new ArrayList<>(bySecond.keySet());
-        java.util.Collections.sort(sortedSeconds);
-
-        List<TelemetrySample> result = new ArrayList<>(sortedSeconds.size());
-        for (long boundary : sortedSeconds) {
-            SecondBucket bucket = bySecond.get(boundary);
-            TelemetrySample closest = bucket.closest;
-            if (closest != null) {
-                // Landed distance is an event: retain the sum on the selected row.
-                float landedM = bucket.landedMeters;
-                result.add(landedM != closest.distanceLandedM
-                        ? closest.withDistanceLandedM(landedM) : closest);
-            }
-        }
-        return result;
+        return TripTelemetryChunk.downsampleTo1Hz(samples);
     }
 
     /**
@@ -1371,17 +1324,7 @@ public class TripTelemetryRecorder {
     private void writeGzippedChunk(List<TelemetrySample> samples) throws IOException {
         if (outputFile == null) return;
 
-        // Build JSON-lines content
-        StringBuilder sb = new StringBuilder();
-        for (TelemetrySample sample : samples) {
-            sb.append(sample.toJson().toString()).append('\n');
-        }
-
-        // Gzip the content
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        try (GZIPOutputStream gzos = new GZIPOutputStream(baos)) {
-            gzos.write(sb.toString().getBytes("UTF-8"));
-        }
+        ByteArrayOutputStream baos = TripTelemetryChunk.gzip(samples);
 
         // Re-resolve target file if its directory has gone away mid-trip.
         // We migrate any partial bytes from the stale path to the live one so
