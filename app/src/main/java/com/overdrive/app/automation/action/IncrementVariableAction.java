@@ -4,10 +4,8 @@ import com.overdrive.app.automation.AutomationAction;
 import com.overdrive.app.automation.Automations;
 import com.overdrive.app.automation.type.IntType;
 import com.overdrive.app.automation.type.StringType;
-import com.overdrive.app.automation.type.Type;
 import com.overdrive.app.automation.value.Label;
 import com.overdrive.app.automation.value.Value;
-import com.overdrive.app.server.Messages;
 
 import java.util.List;
 import java.util.Map;
@@ -26,29 +24,16 @@ import java.util.Map;
  * The written value is normalised (no trailing ".0" for whole numbers) so a downstream
  * string {@code eq} comparison against "5" still matches.
  */
-public class IncrementVariableAction extends BaseAction {
+public class IncrementVariableAction extends DeclaredAction {
     private static final String TYPE = "incrementVariable";
 
-    private final Label label;
-    private final String description;
-    private final List<Type> variables = List.of(
-            new StringType(new Label("name", "automation.variable_name"), SetVariableAction.MAX_NAME),
-            // Signed step. IntType range is generous but bounded so a hand-edited config
-            // can't request an absurd value; the stored result is still bounded below.
-            new IntType(new Label("amount", "automation.variable_amount"), -1000000, 1000000));
-
     public IncrementVariableAction(Label label, String description) {
-        this.label = label;
-        this.description = description;
+        super(TYPE, label, description, List.of(
+                new StringType(new Label("name", "automation.variable_name"), SetVariableAction.MAX_NAME),
+                // Signed step. IntType range is generous but bounded so a hand-edited config
+                // can't request an absurd value; the stored result is still bounded below.
+                new IntType(new Label("amount", "automation.variable_amount"), -1000000, 1000000)));
     }
-
-    public String getType() { return TYPE; }
-
-    public Label getLabel() { return label; }
-
-    public String getDescription() { return Messages.get(description); }
-
-    public List<Type> getVariables() { return variables; }
 
     public void trigger(AutomationAction automationAction) {
         Map<String, Object> vars = automationAction.getVariables();

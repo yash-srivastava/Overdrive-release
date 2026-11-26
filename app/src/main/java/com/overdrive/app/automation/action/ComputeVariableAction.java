@@ -4,9 +4,7 @@ import com.overdrive.app.automation.AutomationAction;
 import com.overdrive.app.automation.Automations;
 import com.overdrive.app.automation.ExpressionEvaluator;
 import com.overdrive.app.automation.type.StringType;
-import com.overdrive.app.automation.type.Type;
 import com.overdrive.app.automation.value.Label;
-import com.overdrive.app.server.Messages;
 
 import java.util.List;
 import java.util.Map;
@@ -27,33 +25,20 @@ import java.util.Map;
  * leaves the variable UNCHANGED rather than writing a wrong or zero value — a stale
  * reading is recoverable, a silently-wrong one drives a bad ADB tap.
  */
-public class ComputeVariableAction extends BaseAction {
+public class ComputeVariableAction extends DeclaredAction {
     private static final String TYPE = "computeVariable";
 
-    private final Label label;
-    private final String description;
-    private final List<Type> variables = List.of(
-            new StringType(new Label("name", "automation.variable_name"), SetVariableAction.MAX_NAME),
-            // Plain StringType, not DynamicStringType: the whole point is a free-text
-            // expression that may EMBED several ${…} tokens, so the single-token picker
-            // would be the wrong control here. The syntax is documented in this action's
-            // description rather than the StringType warning slot, which renders an amber
-            // caution box meant for genuine hazards (the shell field).
-            new StringType(new Label("expression", "automation.variable_expression"),
-                    ExpressionEvaluator.MAX_LENGTH));
-
     public ComputeVariableAction(Label label, String description) {
-        this.label = label;
-        this.description = description;
+        super(TYPE, label, description, List.of(
+                new StringType(new Label("name", "automation.variable_name"), SetVariableAction.MAX_NAME),
+                // Plain StringType, not DynamicStringType: the whole point is a free-text
+                // expression that may EMBED several ${…} tokens, so the single-token picker
+                // would be the wrong control here. The syntax is documented in this action's
+                // description rather than the StringType warning slot, which renders an amber
+                // caution box meant for genuine hazards (the shell field).
+                new StringType(new Label("expression", "automation.variable_expression"),
+                        ExpressionEvaluator.MAX_LENGTH)));
     }
-
-    public String getType() { return TYPE; }
-
-    public Label getLabel() { return label; }
-
-    public String getDescription() { return Messages.get(description); }
-
-    public List<Type> getVariables() { return variables; }
 
     public void trigger(AutomationAction automationAction) {
         Map<String, Object> vars = automationAction.getVariables();

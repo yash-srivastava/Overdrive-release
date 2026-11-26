@@ -8,10 +8,8 @@ import com.overdrive.app.automation.type.DynamicIntType;
 import com.overdrive.app.automation.type.EnumType;
 import com.overdrive.app.automation.type.IntType;
 import com.overdrive.app.automation.type.SignalAddressType;
-import com.overdrive.app.automation.type.Type;
 import com.overdrive.app.automation.value.IntValue;
 import com.overdrive.app.automation.value.Label;
-import com.overdrive.app.server.Messages;
 
 import java.util.List;
 import java.util.Map;
@@ -37,7 +35,7 @@ import java.util.Map;
  * as a trigger+condition; keeping this to numeric signals avoids the multi-variable
  * sub-key plumbing and keeps the form a flat, self-explanatory row.
  */
-public class WaitUntilAction extends BaseAction {
+public class WaitUntilAction extends DeclaredAction {
     private static final String TYPE = "waitUntil";
 
     // Poll cadence + absolute ceiling. The worker sleeps POLL_MS between state reads;
@@ -47,18 +45,12 @@ public class WaitUntilAction extends BaseAction {
     private static final int MAX_TIMEOUT_S = 600; // 10 min hard ceiling
     private static final int DEFAULT_TIMEOUT_S = 30;
 
-    private final Label label;
-    private final String description;
-    private final List<Type> variables;
-
     public WaitUntilAction(Label label, String description) {
-        this.label = label;
-        this.description = description;
         // event: which scalar signal to watch. The ids MUST match the EventData keys
         // published by BydEvent so resolveEvent() can map them back. comparator/value
         // reuse the IntValue comparators + a 0..1000 int (wide enough for range/temp/
         // speed/percent; signed steering handled by allowing negatives via min).
-        this.variables = List.of(
+        super(TYPE, label, description, List.of(
                 // LHS = an ADDRESS into the shared condition catalog (all ~58 conditions,
                 // attributed ones included) instead of a hardcoded signal list. Legacy stored
                 // ids still resolve — see AutomationCondition.resolveSignalAddress.
@@ -70,21 +62,13 @@ public class WaitUntilAction extends BaseAction {
                 // min 0, not 1: 0 means "wait the full ceiling" (see clampTimeout). A 1s
                 // timeout is almost always a mistake — the chain continues either way, so a
                 // too-short wait silently behaves as if the wait weren't there.
-                new IntType(new Label("timeout", "automation.wait_timeout"), 0, MAX_TIMEOUT_S));
+                new IntType(new Label("timeout", "automation.wait_timeout"), 0, MAX_TIMEOUT_S)));
     }
 
     /** A comparator picker backed by the same enum IntValue exposes to conditions. */
     private static EnumType cloneComparators() {
         return IntValue.COMPARATORS;
     }
-
-    public String getType() { return TYPE; }
-
-    public Label getLabel() { return label; }
-
-    public String getDescription() { return Messages.get(description); }
-
-    public List<Type> getVariables() { return variables; }
 
     /**
      * Map the picker's event id to the published {@link EventData}. Returns null for
