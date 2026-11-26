@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Checked state -->
-    <item android:color="@color/brand_primary" android:state_checked="true" />
-    <!-- Default/unchecked state -->
-    <item android:color="@color/bg_elevated" />
-</selector>
