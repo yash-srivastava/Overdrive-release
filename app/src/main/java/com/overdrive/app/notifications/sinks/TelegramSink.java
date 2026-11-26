@@ -53,7 +53,7 @@ public final class TelegramSink implements NotificationBus.Sink {
                 if (com.overdrive.app.remoteaccess.RemoteAccessNotifications
                         .canDeliver(event, "telegram")) {
                     String action = event.data != null ? event.data.optString("action", "") : "";
-                    String lead = "lock".equals(action) ? "🔒🔴 " : "🔑🟢 ";
+                    String lead = remoteAccessTelegramLead(action);
                     TelegramNotifier.sendRemoteAccess(lead + "*" + md(event.title) + "*\n"
                             + md(event.body), event.data);
                 }
@@ -156,6 +156,12 @@ public final class TelegramSink implements NotificationBus.Sink {
      * 400 ("can't parse entities") and silently drop the whole message. Matches
      * the daemon-side mdEscape character set.
      */
+    static String remoteAccessTelegramLead(String action) {
+        if ("lock".equals(action)) return "🔒🔴 ";
+        if ("unlock".equals(action)) return "🔑🟢 ";
+        return "🔑 ";
+    }
+
     private static String md(String s) {
         if (s == null || s.isEmpty()) return s == null ? "" : s;
         StringBuilder b = new StringBuilder(s.length() + 8);
