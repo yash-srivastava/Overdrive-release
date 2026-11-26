@@ -18,7 +18,6 @@ import com.overdrive.app.mqtt.TelemetryDiffer;
 
 import org.json.JSONObject;
 
-import java.lang.reflect.Method;
 import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -69,22 +68,6 @@ public class AbrpTelemetryService {
     private final VehicleDataMonitor vehicleDataMonitor;
     private final GpsMonitor gpsMonitor;
     private final GearMonitor gearMonitor;
-
-    // Reflection-accessed devices
-    private Object engineDevice;        // BYDAutoEngineDevice
-    private Method getEnginePowerMethod;
-    private Object chargingDevice;      // BYDAutoChargingDevice
-    private Method getChargingGunStateMethod;
-    private Object instrumentDevice;    // BYDAutoInstrumentDevice
-    private Method getOutCarTemperatureMethod;
-    private Object statisticDevice;     // BYDAutoStatisticDevice
-    private Method getTotalMileageValueMethod;
-    private Object speedDevice;         // BYDAutoSpeedDevice
-    private Method getCurrentSpeedMethod;
-    private Object acDevice;            // BYDAutoAcDevice
-    private Method getTempratureMethod;
-    private Object gearboxDevice;       // BYDAutoGearboxDevice
-    private Method getGearboxAutoModeTypeMethod;
 
     // HTTP client; routing is per request via ProxyHelper.chainProxySelector().
     private OkHttpClient httpClient;
@@ -726,54 +709,5 @@ public class AbrpTelemetryService {
      */
     public boolean isRunning() {
         return running;
-    }
-
-    // ==================== HELPERS ====================
-
-    /**
-     * Create a PermissionBypassContext for BYD device access.
-     * Follows the same pattern as AccSentryDaemon and CameraDaemon.
-     */
-    private Context createPermissiveContext(Context context) {
-        try {
-            return new PermissionBypassContext(context);
-        } catch (Exception e) {
-            logger.error("Failed to create PermissionBypassContext: " + e.getMessage());
-            return null;
-        }
-    }
-
-    /**
-     * Context wrapper that bypasses BYD permission checks.
-     * Required for accessing BYD hardware services without signature permissions.
-     */
-    private static class PermissionBypassContext extends android.content.ContextWrapper {
-        public PermissionBypassContext(Context base) {
-            super(base);
-        }
-
-        @Override
-        public void enforceCallingOrSelfPermission(String permission, String message) {}
-
-        @Override
-        public void enforcePermission(String permission, int pid, int uid, String message) {}
-
-        @Override
-        public void enforceCallingPermission(String permission, String message) {}
-
-        @Override
-        public int checkCallingOrSelfPermission(String permission) {
-            return android.content.pm.PackageManager.PERMISSION_GRANTED;
-        }
-
-        @Override
-        public int checkPermission(String permission, int pid, int uid) {
-            return android.content.pm.PackageManager.PERMISSION_GRANTED;
-        }
-
-        @Override
-        public int checkSelfPermission(String permission) {
-            return android.content.pm.PackageManager.PERMISSION_GRANTED;
-        }
     }
 }

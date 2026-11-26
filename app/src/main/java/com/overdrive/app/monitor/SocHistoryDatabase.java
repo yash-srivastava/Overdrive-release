@@ -8760,14 +8760,6 @@ public class SocHistoryDatabase {
         }
     }
 
-    private boolean reconcileClearedTables(Exception failure, String... tableNames) {
-        Boolean durable = areTablesDurablyEmpty(tableNames);
-        if (durable != null) return durable;
-        if (isSqlFailure(failure)) noteWriteFailed();
-        try { reconnect(); } catch (Exception ignored) {}
-        return Boolean.TRUE.equals(areTablesDurablyEmpty(tableNames));
-    }
-
     private Boolean isChargingSessionDurablyAbsent(long id) {
         Connection c = connection;
         if (c == null) return null;
@@ -10033,11 +10025,6 @@ public class SocHistoryDatabase {
         "hv_temp_high, hv_temp_low, hv_temp_avg, start_lat, start_lng, place_label, start_odometer_km, " +
         "tariff_id, tariff_label, energy_source, energy_soc_kwh, energy_incomplete, " +
         "counter_energy_kwh";
-
-    /** Non-finite -> JSON null; JSON numeric values must be finite. */
-    private static Object jsonNum(double v) {
-        return Double.isFinite(v) ? Double.valueOf(v) : JSONObject.NULL;
-    }
 
     private static Object jsonSoc(double v) {
         return Double.isFinite(v) && v >= 0.0 && v <= 100.0

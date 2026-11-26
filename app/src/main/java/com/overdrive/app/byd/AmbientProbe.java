@@ -65,7 +65,6 @@ public final class AmbientProbe {
 
     // Switch/mode feature ids, cross-checked against BYD's own Lights/Setting constants.
     private static final int MAIN_SWITCH_STATUS = 0x3F300046;
-    private static final int MAIN_SWITCH_SET = 0x4C109044;
     private static final int MUSIC_MODE_STATE = 0x42E00040;
     private static final int MUSIC_MODE_SET = 0x4C109019;
     private static final int DYNAMIC_COLOURS_STATE = 0x2880014A;

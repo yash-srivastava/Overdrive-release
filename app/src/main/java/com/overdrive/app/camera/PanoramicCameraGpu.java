@@ -1388,10 +1388,6 @@ public class PanoramicCameraGpu {
     }
     private CameraYieldListener yieldListener;
     
-    // CPU usage monitoring
-    private long lastCpuCheckTime = 0;
-    private static final long CPU_CHECK_INTERVAL_MS = 10000;  // Every 10 seconds
-    
     // Stats logging (time-based, not frame-based)
     private long lastStatsTime = 0;
     private int lastStatsFrameCount = 0;
@@ -8341,71 +8337,6 @@ public class PanoramicCameraGpu {
     }
     
     /**
-     * Verifies that the camera is producing a real panoramic strip (4 distinct views)
-     * rather than a single camera stretched or AVM bird's-eye view.
-     *
-     * A real panoramic strip has 4 cameras stitched side by side. Each quadrant shows
-     * a different scene. We verify by reading pixel samples from each quadrant and
-     * checking that they have significantly different luma values.
-     *
-     * Uses the downscaler's 8x8 readback. Columns 0-1=Q0, 2-3=Q1, 4-5=Q2, 6-7=Q3.
-     */
-    private boolean verifyPanoramicStrip(byte[] probe8x8) {
-        if (probe8x8 == null || probe8x8.length < 192) return false;
-        int[] qLuma = new int[4];
-        int[] qCnt = new int[4];
-        int[] qMin = {255, 255, 255, 255};
-        int[] qMax = {0, 0, 0, 0};
-        int totalNonBlack = 0;
-        for (int y = 0; y < 8; y++) {
-            for (int x = 0; x < 8; x++) {
-                int idx = (y * 8 + x) * 3;
-                int r = probe8x8[idx] & 0xFF, g = probe8x8[idx+1] & 0xFF, b = probe8x8[idx+2] & 0xFF;
-                int luma = (r + g*2 + b) / 4;
-                int q = x / 2;
-                qLuma[q] += luma; qCnt[q]++;
-                if (luma < qMin[q]) qMin[q] = luma;
-                if (luma > qMax[q]) qMax[q] = luma;
-                if (luma > 10) totalNonBlack++;
-            }
-        }
-        for (int q = 0; q < 4; q++) { if (qCnt[q] > 0) qLuma[q] /= qCnt[q]; }
-        
-        // Primary check: luma difference between quadrant pairs.
-        // A real panoramic strip has 4 cameras showing different scenes.
-        int diffPairs = 0;
-        for (int i = 0; i < 4; i++) for (int j = i+1; j < 4; j++) if (Math.abs(qLuma[i]-qLuma[j]) > 15) diffPairs++;
-        boolean isStrip = diffPairs >= 2;
-        
-        // Secondary check: if all quadrants have real (non-black) data with internal
-        // variance, this is a real camera feed even if the scenes look similar.
-        // This handles the common case of a parked car in a garage/at night where
-        // all 4 cameras see similar dark scenes (low inter-quadrant difference)
-        // but each quadrant still has texture/detail (intra-quadrant variance).
-        if (!isStrip && totalNonBlack >= 48) {  // At least 75% of pixels are non-black
-            int quadrantsWithVariance = 0;
-            for (int q = 0; q < 4; q++) {
-                // Each quadrant has internal texture (not a flat solid color)
-                if (qMax[q] - qMin[q] >= 3) quadrantsWithVariance++;
-            }
-            // Accept if all quadrants have real data (non-black) and at least 3 have
-            // internal variance. This distinguishes a real 4-camera feed from a
-            // synthetic AVM bird's-eye view (which would have large inter-quadrant
-            // differences) or a single stretched camera (which would have identical
-            // min/max patterns across all quadrants).
-            if (quadrantsWithVariance >= 3) {
-                isStrip = true;
-                logger.info("Strip accepted via secondary check: " + quadrantsWithVariance + 
-                    " quadrants with variance, " + totalNonBlack + "/64 non-black pixels");
-            }
-        }
-        
-        logger.info("Strip check: Q0=" + qLuma[0] + " Q1=" + qLuma[1] + " Q2=" + qLuma[2] + " Q3=" + qLuma[3] +
-                " diffPairs=" + diffPairs + " → " + (isStrip ? "STRIP" : "NOT_STRIP"));
-        return isStrip;
-    }
-
-    /**
      * SOTA: Advance to the next camera ID during probe.
      * Surface mode 0 is confirmed working on all tested models — only probe camera IDs 0-5.
      * 
@@ -12212,53 +12143,6 @@ public class PanoramicCameraGpu {
             if (mosaic != null) {
                 try { mosaic.recycle(); } catch (Exception ignored) {}
             }
-        }
-    }
-    
-    /**
-     * Checks CPU usage and logs warning if exceeds threshold.
-     * 
-     * Provides breakdown by component to identify bottlenecks.
-     */
-    private void checkCpuUsage() {
-        long now = System.currentTimeMillis();
-        if (now - lastCpuCheckTime < CPU_CHECK_INTERVAL_MS) {
-            return;
-        }
-        
-        lastCpuCheckTime = now;
-        
-        try {
-            // Read /proc/stat for total CPU time
-            java.io.BufferedReader reader = new java.io.BufferedReader(
-                    new java.io.FileReader("/proc/stat"));
-            String line = reader.readLine();
-            reader.close();
-            
-            // Parse CPU times
-            String[] tokens = line.split("\\s+");
-            long totalCpu = 0;
-            for (int i = 1; i < tokens.length; i++) {
-                totalCpu += Long.parseLong(tokens[i]);
-            }
-            
-            // Read /proc/self/stat for process CPU time
-            reader = new java.io.BufferedReader(
-                    new java.io.FileReader("/proc/self/stat"));
-            line = reader.readLine();
-            reader.close();
-            
-            tokens = line.split("\\s+");
-            long processCpu = Long.parseLong(tokens[13]) + Long.parseLong(tokens[14]);
-            
-            // Calculate CPU percentage (simplified)
-            // Note: This is a rough estimate. For accurate measurement, use
-            // Android Profiler or systrace.
-            // Logging disabled to reduce log spam - uncomment for debugging
-            // logger.debug( String.format("CPU check: process=%d, total=%d", processCpu, totalCpu));
-            
-        } catch (Exception e) {
-            // Silent fail - CPU monitoring is optional
         }
     }
 }

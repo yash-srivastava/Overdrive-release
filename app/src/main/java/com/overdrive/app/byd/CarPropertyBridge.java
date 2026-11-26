@@ -289,7 +289,6 @@ public final class CarPropertyBridge {
     private boolean diLink5BreakerOpenLogged;
 
     /** Outcome of one DI5 resolution attempt, used to feed the breaker. */
-    private ICarPropertyService lastServiceManagerCandidate;
     private boolean lastServiceManagerHadWrongDescriptorOnly;
 
     /**

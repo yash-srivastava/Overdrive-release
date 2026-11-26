@@ -114,7 +114,6 @@ public final class ClusterProjectionController {
     private static final long SUSTAINED_OPEN_STEP_MS = 3000;
     private static final long CLOSE_STEP_DELAY_MS = 1000;  // between 18→0
     private static final long READY_POLL_MS = 120;
-    private static final long READY_TIMEOUT_MS = 8000;
     // The cluster VirtualDisplay materializes ~280ms after OP_DI4_MODE. We poll
     // DisplayManager as a fast early-exit, but the daemon's app_process Context has
     // a DisplayManagerGlobal cache that does NOT receive add-callbacks for the

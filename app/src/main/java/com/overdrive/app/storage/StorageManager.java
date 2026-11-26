@@ -216,7 +216,6 @@ public class StorageManager {
     // but they still count toward the user's configured limit and must be
     // reaped — otherwise a 500 MB limit can show 800 MB used in the UI.
     private static final String LEGACY_APP_FILES_DIR = RecordingDirectoryRegistry.LEGACY_BASE;
-    private static final String LEGACY_SURVEILLANCE_DIR = RecordingDirectoryRegistry.LEGACY_SENTRY;
 
     // Subdirectories
     public static final String RECORDINGS_SUBDIR = "recordings";

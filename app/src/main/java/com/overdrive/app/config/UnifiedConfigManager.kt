@@ -4824,23 +4824,6 @@ object UnifiedConfigManager {
     }
 
     /**
-     * Persist a config mutated by loadConfig()'s self-heal/migration paths,
-     * cross-process-safely. Gated to the daemon (UID 2000): only it can
-     * reliably atomic-rename, and routing all real persists through the daemon
-     * keeps a single locked writer. A non-daemon (app UID) caller skips the
-     * write and keeps the migrated object in memory — the daemon re-persists it
-     * on its next locked write, so nothing is lost on disk. Re-entrant: if the
-     * caller already holds the file lock (the updateSection path) this nests
-     * harmlessly.
-     */
-    private fun persistSelfHeal(config: JSONObject) {
-        if (android.os.Process.myUid() != SHELL_DAEMON_UID) return
-        withConfigFileLockOrNull("Config self-heal persistence") {
-            saveConfigInternal(config)
-        }
-    }
-
-    /**
      * Persist the geocoding-schema migration WITHOUT clobbering a peer's
      * concurrently-written section. Daemon-only. Acquires the cross-process
      * lock, RE-READS the current on-disk bytes (which may now carry a peer's
