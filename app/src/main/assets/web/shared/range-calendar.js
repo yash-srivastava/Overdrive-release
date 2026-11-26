@@ -1,4 +1,4 @@
-/** Shared local-date range calendar for Trips, Charging and Notification Log. */
+/** Shared local-date range calendar for Trips, Charging, Notification Log and Events. */
 var ODRangeCalendar = (function () {
     function dateKey(d) {
         var m = d.getMonth() + 1, day = d.getDate();
@@ -13,7 +13,7 @@ var ODRangeCalendar = (function () {
         return (endOfDay ? new Date(y, mo, da, 23, 59, 59, 999) : new Date(y, mo, da, 0, 0, 0, 0)).getTime();
     }
 
-    function render(grid, title, selectedMonth, lang, fromKey, toKey, onPick) {
+    function render(grid, title, selectedMonth, lang, fromKey, toKey, onPick, options) {
         var year = selectedMonth.getFullYear(), month = selectedMonth.getMonth();
         var monthDate = new Date(year, month, 1);
         try { title.textContent = new Intl.DateTimeFormat(lang, { month: 'long' }).format(monthDate) + ' ' + year; }
@@ -51,9 +51,12 @@ var ODRangeCalendar = (function () {
             el.textContent = day;
             el.dataset.date = key;
             if (otherMonth) el.classList.add('other-month');
-            if (key === todayKey) el.classList.add('today');
-            if (key === fromKey || key === toKey) el.classList.add('selected');
-            else if (fromKey && toKey && key > fromKey && key < toKey) el.classList.add('in-range');
+            // Events highlights only the displayed month; range pickers also highlight padding days.
+            if (!otherMonth || !options || !options.currentMonthHighlightsOnly) {
+                if (key === todayKey) el.classList.add('today');
+                if (key === fromKey || key === toKey) el.classList.add('selected');
+                else if (fromKey && toKey && key > fromKey && key < toKey) el.classList.add('in-range');
+            }
             var today = new Date(); today.setHours(0, 0, 0, 0);
             if (new Date(key + 'T00:00:00') > today) el.classList.add('disabled');
             else el.addEventListener('click', function () { onPick(key); });

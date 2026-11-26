@@ -1130,91 +1130,24 @@ BYD.events = {
     renderCalendar() {
         const grid = document.getElementById('calendarGrid');
         const title = document.getElementById('calendarTitle');
-        const year = this.currentDate.getFullYear();
-        const month = this.currentDate.getMonth();
-        
-        // i18n: Use Intl.DateTimeFormat for localized month/weekday names instead of hardcoded English arrays.
-        var monthDate = new Date(year, month, 1);
-        var monthName;
-        try {
-            monthName = new Intl.DateTimeFormat(BYD.i18n.getLang(), { month: 'long' }).format(monthDate);
-        } catch (e) {
-            monthName = monthDate.toLocaleDateString(BYD.i18n.getLang(), { month: 'long' });
-        }
-        title.textContent = monthName + ' ' + year;
-        grid.innerHTML = '';
+        ODRangeCalendar.render(grid, title, this.currentDate, BYD.i18n.getLang(),
+            this.selectedDate, null, key => this.selectDate(key), { currentMonthHighlightsOnly: true });
 
-        var weekdayFmt;
-        try {
-            weekdayFmt = new Intl.DateTimeFormat(BYD.i18n.getLang(), { weekday: 'short' });
-        } catch (e) { weekdayFmt = null; }
-        // Use Sunday 2024-01-07 .. Saturday 2024-01-13 as a known week for label rendering
-        for (var w = 0; w < 7; w++) {
-            const dateForDay = new Date(2024, 0, 7 + w); // Sun..Sat
-            const label = weekdayFmt ? weekdayFmt.format(dateForDay) : dateForDay.toLocaleDateString(BYD.i18n.getLang(), { weekday: 'short' });
-            const el = document.createElement('div');
-            el.className = 'calendar-weekday';
-            el.textContent = label;
-            grid.appendChild(el);
-        }
-        
-        const firstDay = new Date(year, month, 1).getDay();
-        const daysInMonth = new Date(year, month + 1, 0).getDate();
-        const daysInPrevMonth = new Date(year, month, 0).getDate();
-        const todayStr = this.formatDateKey(new Date());
-        
-        for (let i = firstDay - 1; i >= 0; i--) {
-            const day = daysInPrevMonth - i;
-            this.addDayCell(grid, day, this.formatDateKey(new Date(year, month - 1, day)), true);
-        }
-        
-        for (let day = 1; day <= daysInMonth; day++) {
-            const dateKey = this.formatDateKey(new Date(year, month, day));
-            this.addDayCell(grid, day, dateKey, false, dateKey === todayStr, this.selectedDate === dateKey);
-        }
-        
-        const totalCells = grid.children.length;
-        for (let day = 1; totalCells + day - 7 <= 42; day++) {
-            this.addDayCell(grid, day, this.formatDateKey(new Date(year, month + 1, day)), true);
-        }
-    },
-    
-    addDayCell(grid, day, dateKey, isOtherMonth, isToday, isSelected) {
-        const el = document.createElement('div');
-        el.className = 'calendar-day';
-        el.textContent = day;
-        el.dataset.date = dateKey;
-        
-        if (isOtherMonth) el.classList.add('other-month');
-        if (isToday) el.classList.add('today');
-        if (isSelected) el.classList.add('selected');
-        
-        // Disable future dates
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const cellDate = new Date(dateKey + 'T00:00:00');
-        const isFuture = cellDate > today;
-        
-        if (isFuture) {
-            el.classList.add('disabled');
-        } else {
-            const dateInfo = this.datesWithRecordings.get(dateKey);
+        // Keep recording and Sentry dots page-specific, including adjacent-month days.
+        for (const el of grid.children) {
+            if (!el.dataset.date || el.classList.contains('disabled')) continue;
+            const dateInfo = this.datesWithRecordings.get(el.dataset.date);
             if (dateInfo) {
                 el.classList.add('has-recordings');
                 if (dateInfo.hasSentry) el.classList.add('has-sentry');
             }
-            el.addEventListener('click', () => this.selectDate(dateKey));
         }
-        
-        grid.appendChild(el);
     },
-    
+
     formatDateKey(date) {
-        return date.getFullYear() + '-' + 
-               String(date.getMonth() + 1).padStart(2, '0') + '-' + 
-               String(date.getDate()).padStart(2, '0');
+        return ODRangeCalendar.dateKey(date);
     },
-    
+
     prevMonth() {
         this.currentDate.setMonth(this.currentDate.getMonth() - 1, 1);
         this.renderCalendar();
