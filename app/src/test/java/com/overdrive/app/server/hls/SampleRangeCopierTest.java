@@ -35,13 +35,23 @@ public class SampleRangeCopierTest {
         }
     }
 
-    private static void compare(Source src, long[] offsets, int[] sizes, int from, int to)
+    private static final class CountingOutput extends ByteArrayOutputStream {
+        int calls;
+
+        @Override public synchronized void write(byte[] b, int off, int len) {
+            calls++;
+            super.write(b, off, len);
+        }
+    }
+
+    private static int compare(Source src, long[] offsets, int[] sizes, int from, int to)
             throws IOException {
         ByteArrayOutputStream expected = new ByteArrayOutputStream();
         for (int i = from; i < to; i++) expected.write(src.data, (int) offsets[i], sizes[i]);
-        ByteArrayOutputStream actual = new ByteArrayOutputStream();
+        CountingOutput actual = new CountingOutput();
         new SampleRangeCopier(src, actual).copySamples(offsets, sizes, from, to);
         assertArrayEquals(expected.toByteArray(), actual.toByteArray());
+        return actual.calls;
     }
 
     @Test public void batchesNearbyInterleavedSamplesWithoutWritingGaps() throws IOException {
@@ -52,10 +62,58 @@ public class SampleRangeCopierTest {
             offsets[i] = i * 2250L;
             sizes[i] = 2000;
         }
-        compare(src, offsets, sizes, 0, sizes.length);
+        assertEquals(4, compare(src, offsets, sizes, 0, sizes.length));
+        // First batch packs 17 runs; the remaining three use direct writes.
         // 4 KiB total gap cap allows 17 samples in the first batch, 3 in the next.
         assertEquals(2, src.calls);
         assertEquals(44_500, src.bytes);
+    }
+
+    @Test public void compactsDenseInterleavingInPlaceWithoutExtraReads() throws IOException {
+        Source src = new Source(40_000, 97);
+        long[] offsets = new long[1000];
+        int[] sizes = new int[1000];
+        for (int i = 0; i < offsets.length; i++) {
+            offsets[i] = i * 36L;
+            sizes[i] = 32;
+        }
+        // All 1000 runs fit in one bounded window, including 3996 gap bytes.
+        assertEquals(1, compare(src, offsets, sizes, 0, offsets.length));
+        assertEquals(35_996, src.bytes);
+        assertEquals((35_996 + 96) / 97, src.calls);
+    }
+
+    @Test public void packsAdjacentRunsAndZeroLengthEntriesWithoutLeakingGaps() throws IOException {
+        Source src = new Source(20_000, Integer.MAX_VALUE);
+        long[] offsets = {0, 100, 200, 210, 310, 320, 420, 430, 530, 540};
+        int[] sizes = {100, 100, 0, 100, 0, 100, 0, 100, 0, 100};
+        assertEquals(1, compare(src, offsets, sizes, 0, sizes.length));
+        assertEquals(640, src.bytes);
+        assertEquals(1, src.calls);
+        // The same copier must not reuse packed bytes from a prior window.
+        CountingOutput out = new CountingOutput();
+        SampleRangeCopier copier = new SampleRangeCopier(src, out);
+        copier.copySamples(offsets, sizes, 0, sizes.length);
+        copier.copySamples(offsets, sizes, 0, sizes.length);
+        ByteArrayOutputStream expected = new ByteArrayOutputStream();
+        for (int pass = 0; pass < 2; pass++) {
+            for (int i = 0; i < sizes.length; i++) expected.write(src.data, (int) offsets[i], sizes[i]);
+        }
+        assertArrayEquals(expected.toByteArray(), out.toByteArray());
+        assertEquals(2, out.calls);
+    }
+
+    @Test public void packedBatchNeverEmitsPartialBytesOnTruncation() throws IOException {
+        Source src = new Source(500, 13);
+        CountingOutput out = new CountingOutput();
+        try {
+            new SampleRangeCopier(src, out).copySamples(
+                    new long[] {0, 110, 220, 330, 440}, new int[] {100,100,100,100,100}, 0, 5);
+            fail("truncation must fail");
+        } catch (EOFException expected) {
+            assertEquals(0, out.calls);
+            assertEquals(0, out.size());
+        }
     }
 
     @Test public void doesNotReadLargeGapsOrDisproportionateGaps() throws IOException {
