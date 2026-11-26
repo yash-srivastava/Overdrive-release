@@ -54,7 +54,7 @@
     // core.js cached in localStorage on the last load, for the language
     // core.js resolved then (this file has no resolveLang()). A cold cache
     // paints as before: there is no synchronous fetch. core.js picks up
-    // window.__odI18nEarly, does the full hydrate and refreshes the cache.
+    // window.__odI18nEarly, does the full hydrate and refreshes browser caches.
     // English users skip all of this.
     (function earlyI18n() {
         var code = '';
@@ -69,11 +69,18 @@
         if (/^iw(-|$)/i.test(code)) code = 'he';
         if (/^he-/i.test(code)) code = 'he';
         if (!code || /^en(-|$)/i.test(code)) return;
+        var fromBundle = false;
         function load(lang) {
             try {
                 if (window.AndroidBridge && typeof window.AndroidBridge.getI18nCatalog === 'function') {
                     var b = window.AndroidBridge.getI18nCatalog(lang);
-                    if (b) return JSON.parse(b);
+                    if (b) {
+                        var parsed = JSON.parse(b);
+                        if (parsed) {
+                            fromBundle = true;
+                            return parsed;
+                        }
+                    }
                 }
             } catch (e) {}
             try {
@@ -122,7 +129,8 @@
         var existing = document.querySelectorAll('[data-i18n]');
         for (var e = 0; e < existing.length; e++) apply(existing[e]);
         obs.observe(document.documentElement, { childList: true, subtree: true });
-        window.__odI18nEarly = { lang: code, catalog: cat, stop: function () { obs.disconnect(); } };
+        window.__odI18nEarly = { lang: code, catalog: cat, fromBundle: fromBundle,
+            stop: function () { obs.disconnect(); } };
     })();
 
     // ─── Step 0: viewport-height stabilizer ─────────────────────────────────
