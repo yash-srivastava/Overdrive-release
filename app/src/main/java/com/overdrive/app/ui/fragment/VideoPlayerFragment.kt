@@ -21,6 +21,7 @@ import androidx.navigation.fragment.findNavController
 import com.overdrive.app.R
 import com.overdrive.app.ui.view.EventTimelineView
 import com.overdrive.app.ui.view.ZoomableVideoView
+import com.overdrive.app.util.RecordingSizeFormatter
 import com.google.android.material.button.MaterialButton
 import org.json.JSONObject
 import java.io.File
@@ -333,7 +334,7 @@ class VideoPlayerFragment : Fragment() {
         // File size meta
         val file = File(path)
         if (file.exists()) {
-            tvMeta.text = formatSize(file.length())
+            tvMeta.text = RecordingSizeFormatter.format(file.length())
         } else {
             tvMeta.text = ""
         }
@@ -1005,13 +1006,6 @@ class VideoPlayerFragment : Fragment() {
         val min = totalSec / 60
         val sec = totalSec % 60
         return "$min:${sec.toString().padStart(2, '0')}"
-    }
-
-    private fun formatSize(bytes: Long): String = when {
-        bytes >= 1_000_000_000 -> String.format("%.1f GB", bytes / 1_000_000_000.0)
-        bytes >= 1_000_000 -> String.format("%.1f MB", bytes / 1_000_000.0)
-        bytes >= 1_000 -> String.format("%.1f KB", bytes / 1_000.0)
-        else -> "$bytes B"
     }
 
     override fun onPause() {
