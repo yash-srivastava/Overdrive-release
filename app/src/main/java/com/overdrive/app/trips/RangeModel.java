@@ -221,28 +221,32 @@ final class RangeModel {
         }
         if (!(kmSum > 0) || !(usedSum > 0)) return ones(span);
         double mean = usedSum / kmSum;
+        // Normalize each bin once and collect occupied bins in their original order.
+        double[] binRate = new double[span];
+        int[] occupied = new int[span];
+        int bins = 0;
+        double between = 0;
+        for (int b = 0; b < span; b++) {
+            binRate[b] = used[b] / km[b] / mean;
+            if (km[b] == 0) continue;
+            occupied[bins++] = b;
+            double dev = binRate[b] - 1;
+            between += km[b] * dev * dev;
+        }
         double within = 0;
         for (int i = 0; i < samples.size(); i++) {
             int b = bin[i];
             if (b < 0) continue;
             double d = samples.get(i).km;
-            double dev = adjusted[i] / d / mean - used[b] / km[b] / mean;
+            double dev = adjusted[i] / d / mean - binRate[b];
             within += d * dev * dev;
         }
         double noisePerKm = within / kmSum * (sumSqKm / kmSum);
-        double between = 0;
-        int bins = 0;
-        for (int b = 0; b < span; b++) {
-            if (km[b] == 0) continue;
-            double dev = used[b] / km[b] / mean - 1;
-            between += km[b] * dev * dev;
-            bins++;
-        }
         double signal = between / kmSum - noisePerKm * bins / kmSum;
         double priorKm = signal > 1e-6
                 ? Math.max(MIN_CURVE_PRIOR_KM, Math.min(MAX_CURVE_PRIOR_KM, noisePerKm / signal))
                 : MAX_CURVE_PRIOR_KM;
-        return smooth(used, km, kernel, mean, priorKm);
+        return smooth(used, km, kernel, mean, priorKm, occupied, bins);
     }
 
     /** Null below {@link #MIN_TRIPS} trips or {@link #MIN_KM} km, or when nothing usable remains. */
@@ -512,13 +516,13 @@ final class RangeModel {
 
     /** Kernel-smoothed rate per bin relative to {@code mean}, shrunk to 1 by {@code priorKm}. */
     private static double[] smooth(double[] used, double[] km, double[] kernel, double mean,
-                                   double priorKm) {
+                                   double priorKm, int[] occupied, int bins) {
         int n = used.length;
         double[] curve = ones(n);
         for (int t = 0; t < n; t++) {
             double num = 0, den = 0;
-            for (int b = 0; b < n; b++) {
-                if (km[b] == 0) continue;
+            for (int i = 0; i < bins; i++) {
+                int b = occupied[i];
                 double k = kernel[Math.abs(b - t)];
                 num += k * used[b];
                 den += k * km[b];
