@@ -39,6 +39,9 @@ class GravityFrame(
     private var gy = 0f
     private var gz = 0f
     private var seeded = false
+    // Lazy pitch axis, valid until the next accelerometer update or reset.
+    private var pitchAxisDirty = true
+    private var pitchX = 0f; private var pitchY = 0f; private var pitchZ = 0f
 
     // Effective per-sample EMA weights; equal to the 100 Hz constants unless [setSamplePeriodMs] rescaled them.
     private var gravityAlpha = alpha
@@ -116,8 +119,8 @@ class GravityFrame(
 
     /** Latest gravity magnitude (≈ 9.8 once seeded). Used internally by the
      *  gravity-projection helpers ([alongGravity], [pitchRate]). */
-    val gravityMagnitude: Float
-        get() = sqrt(gx * gx + gy * gy + gz * gz)
+    var gravityMagnitude: Float = 0f
+        private set
 
     /**
      * Fold one accelerometer sample in and return the vertical residual.
@@ -126,10 +129,12 @@ class GravityFrame(
      *         dropped (pothole / dip). Near 0 on flat road.
      */
     fun update(ax: Float, ay: Float, az: Float): Float {
+        pitchAxisDirty = true
         if (!seeded) {
             // Seed directly with the first sample so we don't spend the first
             // second ramping up from zero (which would emit a huge bogus a_vert).
             gx = ax; gy = ay; gz = az
+            gravityMagnitude = sqrt(gx * gx + gy * gy + gz * gz)
             seeded = true
             return 0f
         }
@@ -138,6 +143,7 @@ class GravityFrame(
         gz += gravityAlpha * (az - gz)
 
         val mag = sqrt(gx * gx + gy * gy + gz * gz)
+        gravityMagnitude = mag
         if (mag < 1e-3f) {
             horizontalResidual = 0f; longitudinalResidual = 0f; lateralResidual = 0f
             return 0f
@@ -246,16 +252,19 @@ class GravityFrame(
     fun pitchRate(x: Float, y: Float, z: Float): Float {
         val gMag = gravityMagnitude
         if (gMag < 1e-3f || !longAxisAvail) return 0f
-        val ux = gx / gMag; val uy = gy / gMag; val uz = gz / gMag         // vertical unit
-        // effective longitudinal unit (already normalized in update())
-        // lateral axis = ĝ × l̂ (ĝ and l̂ are ~orthogonal — l̂ is gravity-free horizontal)
-        var sx = uy * effLz - uz * effLy
-        var sy = uz * effLx - ux * effLz
-        var sz = ux * effLy - uy * effLx
-        val sMag = sqrt(sx * sx + sy * sy + sz * sz)
-        if (sMag < 1e-3f) return 0f
-        sx /= sMag; sy /= sMag; sz /= sMag
-        return x * sx + y * sy + z * sz
+        // Gyro callbacks can outnumber accel updates. Recompute the same lateral
+        // unit vector only when the gravity or longitudinal estimate has changed.
+        if (pitchAxisDirty) {
+            val ux = gx / gMag; val uy = gy / gMag; val uz = gz / gMag
+            val sx = uy * effLz - uz * effLy
+            val sy = uz * effLx - ux * effLz
+            val sz = ux * effLy - uy * effLx
+            val sMag = sqrt(sx * sx + sy * sy + sz * sz)
+            if (sMag < 1e-3f) return 0f
+            pitchX = sx / sMag; pitchY = sy / sMag; pitchZ = sz / sMag
+            pitchAxisDirty = false
+        }
+        return x * pitchX + y * pitchY + z * pitchZ
     }
 
     /**
@@ -271,6 +280,8 @@ class GravityFrame(
 
     fun reset() {
         gx = 0f; gy = 0f; gz = 0f; seeded = false; horizontalResidual = 0f
+        gravityMagnitude = 0f
+        pitchAxisDirty = true
         hax = 0f; hay = 0f; haz = 0f
         longitudinalResidual = 0f; lateralResidual = 0f
         latLx = 0f; latLy = 0f; latLz = 0f; longAxisLatched = false
