@@ -2,6 +2,7 @@ package com.overdrive.app.geo;
 
 import static org.junit.Assert.assertEquals;
 
+import org.json.JSONException;
 import org.json.JSONObject;
 import org.junit.Test;
 
@@ -21,12 +22,21 @@ public class GeoBackfillSweepTest {
         return new GeoBackfillSweep.RecentSidecar(new File(name), mtime, "recording");
     }
 
+    // Android's org.json declares a checked JSONException on put(); the helpers run inside lambdas.
     private static JSONObject geo() {
-        return new JSONObject().put("lat", 47.0).put("lng", 8.0);
+        try {
+            return new JSONObject().put("lat", 47.0).put("lng", 8.0);
+        } catch (JSONException e) {
+            throw new AssertionError(e);
+        }
     }
 
     private static JSONObject root(JSONObject geo) {
-        return new JSONObject().put("geo", geo);
+        try {
+            return new JSONObject().put("geo", geo);
+        } catch (JSONException e) {
+            throw new AssertionError(e);
+        }
     }
 
     @Test
@@ -49,7 +59,7 @@ public class GeoBackfillSweepTest {
     }
 
     @Test
-    public void skipsIneligibleFilesWithoutSpendingBudgetAndKeepsStableTieOrder() {
+    public void skipsIneligibleFilesWithoutSpendingBudgetAndKeepsStableTieOrder() throws JSONException {
         List<GeoBackfillSweep.RecentSidecar> entries = new ArrayList<>();
         Map<File, JSONObject> roots = new HashMap<>();
         String[] names = {"first", "second", "tagged", "no-fix", "cooldown", "expired", "invalid", "nested", "missing"};
