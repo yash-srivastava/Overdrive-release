@@ -33,8 +33,6 @@ public final class MicroFrontend {
     private static final int PCAN_OUTPUT_BITS = 6;
     private static final int WIDE_DYNAMIC_FUNCTION_BITS = 32;
     private static final int WIDE_DYNAMIC_FUNCTION_LUT_SIZE = 4 * WIDE_DYNAMIC_FUNCTION_BITS - 3;
-    private static final int FILTERBANK_INDEX_ALIGNMENT = 2;
-    private static final int FILTERBANK_CHANNEL_BLOCK_SIZE = 4;
     private static final int LOG_SCALE_LOG2 = 16;
     private static final int LOG_SCALE = 1 << LOG_SCALE_LOG2;
     private static final int LOG_SEGMENTS_LOG2 = 7;
@@ -76,14 +74,11 @@ public final class MicroFrontend {
     private final int[] factors;
 
     private final int startIndex;
-    private final int endIndex;
-    private final short[] channelFrequencyStarts;
-    private final short[] channelWeightStarts;
-    private final short[] channelWidths;
+    // Consecutive, unpadded FFT-bin ranges. Each bin belongs to exactly one
+    // interval between mel centers; its two weights feed neighboring channels.
+    private final int[] channelEnds;
     private final short[] weights;
     private final short[] unweights;
-    private final int[] energy;
-    private final long[] work;
     private final int[] signal;
 
     private final int evenSmoothing;
@@ -142,72 +137,35 @@ public final class MicroFrontend {
 
         int spectrumSize = fftSize / 2 + 1;
         int channelsPlus1 = NUM_CHANNELS + 1;
-        channelFrequencyStarts = new short[channelsPlus1];
-        channelWeightStarts = new short[channelsPlus1];
-        channelWidths = new short[channelsPlus1];
-        work = new long[channelsPlus1];
+        channelEnds = new int[channelsPlus1];
         float[] centerMel = new float[channelsPlus1];
-        int[] actualStarts = new int[channelsPlus1];
-        int[] actualWidths = new int[channelsPlus1];
         float melLow = freqToMel(LOWER_BAND_LIMIT);
         float melSpacing = (freqToMel(UPPER_BAND_LIMIT) - melLow) / ((float) channelsPlus1);
         for (int i = 0; i < channelsPlus1; i++) centerMel[i] = melLow + (melSpacing * (i + 1));
 
         float hzPerSbin = 0.5f * SAMPLE_RATE / ((float) spectrumSize - 1);
         startIndex = (int) (1.5f + LOWER_BAND_LIMIT / hzPerSbin);
-        int chanFreqIndexStart = startIndex;
-        int weightIndexStart = 0;
-        boolean needsZeros = false;
+        int frequency = startIndex;
         for (int chan = 0; chan < channelsPlus1; chan++) {
-            int freqIndex = chanFreqIndexStart;
-            while (freqToMel(freqIndex * hzPerSbin) <= centerMel[chan]) freqIndex++;
-            int width = freqIndex - chanFreqIndexStart;
-            actualStarts[chan] = chanFreqIndexStart;
-            actualWidths[chan] = width;
-            if (width == 0) {
-                channelFrequencyStarts[chan] = 0;
-                channelWeightStarts[chan] = 0;
-                channelWidths[chan] = FILTERBANK_CHANNEL_BLOCK_SIZE;
-                if (!needsZeros) {
-                    needsZeros = true;
-                    for (int j = 0; j < chan; j++) channelWeightStarts[j] += FILTERBANK_CHANNEL_BLOCK_SIZE;
-                    weightIndexStart += FILTERBANK_CHANNEL_BLOCK_SIZE;
-                }
-            } else {
-                int alignedStart = (chanFreqIndexStart / FILTERBANK_INDEX_ALIGNMENT) * FILTERBANK_INDEX_ALIGNMENT;
-                int alignedWidth = chanFreqIndexStart - alignedStart + width;
-                int paddedWidth = (((alignedWidth - 1) / FILTERBANK_CHANNEL_BLOCK_SIZE) + 1)
-                        * FILTERBANK_CHANNEL_BLOCK_SIZE;
-                channelFrequencyStarts[chan] = (short) alignedStart;
-                channelWeightStarts[chan] = (short) weightIndexStart;
-                channelWidths[chan] = (short) paddedWidth;
-                weightIndexStart += paddedWidth;
-            }
-            chanFreqIndexStart = freqIndex;
+            while (freqToMel(frequency * hzPerSbin) <= centerMel[chan]) frequency++;
+            channelEnds[chan] = frequency;
         }
-        weights = new short[weightIndexStart];
-        unweights = new short[weightIndexStart];
-        int end = 0;
+        if (frequency >= spectrumSize) throw new IllegalStateException("filterbank end above spectrum");
+        // The C reference pads weight blocks for vector loads. Java consumes
+        // only real bins, in order, so no aligned offsets or zero slots are needed.
+        weights = new short[frequency - startIndex];
+        unweights = new short[weights.length];
+        frequency = startIndex;
+        int idx = 0;
         for (int chan = 0; chan < channelsPlus1; chan++) {
-            int frequency = actualStarts[chan];
-            int offset = frequency - channelFrequencyStarts[chan];
-            int weightStart = channelWeightStarts[chan];
             float denom = chan == 0 ? melLow : centerMel[chan - 1];
-            for (int j = 0; j < actualWidths[chan]; j++, frequency++) {
+            for (; frequency < channelEnds[chan]; frequency++, idx++) {
                 float w = (centerMel[chan] - freqToMel(frequency * hzPerSbin)) / (centerMel[chan] - denom);
-                int idx = weightStart + offset + j;
+                // Round both independently, exactly as in the reference.
                 weights[idx] = (short) Math.floor(w * (1 << FILTERBANK_BITS) + 0.5f);
                 unweights[idx] = (short) Math.floor((1.0f - w) * (1 << FILTERBANK_BITS) + 0.5f);
             }
-            if (frequency > end) end = frequency;
         }
-        endIndex = end;
-        if (endIndex >= spectrumSize) throw new IllegalStateException("filterbank end above spectrum");
-        int maxEnergyIndex = spectrumSize;
-        for (int chan = 0; chan < channelsPlus1; chan++) {
-            maxEnergyIndex = Math.max(maxEnergyIndex, channelFrequencyStarts[chan] + channelWidths[chan]);
-        }
-        energy = new int[maxEnergyIndex];
         signal = new int[NUM_CHANNELS];
 
         oddSmoothing = (int) (ODD_SMOOTHING * (1 << NOISE_REDUCTION_BITS));
@@ -297,7 +255,6 @@ public final class MicroFrontend {
         java.util.Arrays.fill(fftInput, (short) 0);
         java.util.Arrays.fill(outRe, (short) 0);
         java.util.Arrays.fill(outIm, (short) 0);
-        java.util.Arrays.fill(work, 0L);
         java.util.Arrays.fill(estimate, 0);
         frameReady = false;
     }
@@ -482,28 +439,26 @@ public final class MicroFrontend {
     }
 
     private void accumulateFilterbank(int inputShift) {
-        for (int i = startIndex; i < endIndex; i++) {
-            int re = outRe[i];
-            int im = outIm[i];
-            energy[i] = re * re + im * im;
-        }
-        long weightAcc = 0;
-        long unweightAcc = 0;
+        int bin = startIndex;
+        int idx = 0;
+        long carry = 0;
         for (int ch = 0; ch <= NUM_CHANNELS; ch++) {
-            int mag = channelFrequencyStarts[ch];
-            int w = channelWeightStarts[ch];
-            int width = channelWidths[ch];
-            for (int j = 0; j < width; j++) {
-                long e = energy[mag + j];
-                weightAcc += weights[w + j] * e;
-                unweightAcc += unweights[w + j] * e;
+            long weightAcc = carry;
+            long unweightAcc = 0;
+            int end = channelEnds[ch];
+            for (; bin < end; bin++, idx++) {
+                int re = outRe[bin];
+                int im = outIm[bin];
+                // Preserve the reference's int arithmetic (including wrap),
+                // then widen before the weighted long accumulation.
+                long e = re * re + im * im;
+                weightAcc += weights[idx] * e;
+                unweightAcc += unweights[idx] * e;
             }
-            work[ch] = weightAcc;
-            weightAcc = unweightAcc;
-            unweightAcc = 0;
-        }
-        for (int i = 0; i < NUM_CHANNELS; i++) {
-            signal[i] = sqrt64(work[i + 1]) >>> inputShift;
+            // The first interval supplies only the carry for channel zero.
+            // Every later interval completes one output, even if it is empty.
+            if (ch > 0) signal[ch - 1] = sqrt64(weightAcc) >>> inputShift;
+            carry = unweightAcc;
         }
     }
 
