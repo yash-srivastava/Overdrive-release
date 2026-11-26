@@ -555,6 +555,12 @@ BYD.map = {
                     L.DomEvent.preventDefault(e);
                     self.toggleFollow();
                 });
+                // An anchor activates on Enter, but needs explicit Space support as a button.
+                L.DomEvent.on(a, 'keydown', (e) => {
+                    if (e.key !== ' ' && e.keyCode !== 32) return;
+                    L.DomEvent.preventDefault(e);
+                    if (!e.repeat) a.click();
+                });
                 self._followBtn = a;
                 return bar;
             }

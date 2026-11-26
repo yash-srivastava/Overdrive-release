@@ -71,3 +71,67 @@ const cases = [
 ];
 cases.forEach(args => exercise(...args));
 console.log('map_position_harness: ' + cases.length + ' scenarios passed');
+
+// Exercise the actual Leaflet control handlers and follow-state transitions.
+{
+    const pans = [];
+    const handlers = {};
+    const attrs = {};
+    const button = {
+        style: {},
+        setAttribute(name, value) { attrs[name] = value; },
+        click() { return dispatch('click'); }
+    };
+    function dispatch(type, fields = {}) {
+        const event = Object.assign({ defaultPrevented: false }, fields);
+        if (handlers[type]) handlers[type](event);
+        return event;
+    }
+    const BYD = { i18n: { t: () => 'Follow vehicle' } };
+    const L = {
+        Control: { extend(options) { return class {
+            addTo() { options.onAdd(); return this; }
+        }; } },
+        DomUtil: { create(tag) { return tag === 'a' ? button : {}; } },
+        DomEvent: {
+            disableClickPropagation() {},
+            on(el, type, handler) { handlers[type] = handler; },
+            preventDefault(event) { event.defaultPrevented = true; }
+        }
+    };
+    vm.runInNewContext(src, { BYD, window: { BYD }, L, clearTimeout() {} });
+    const map = BYD.map;
+    map.carPosition = { lat: 1, lng: 2 };
+    map.map = { panTo(point) { pans.push(Array.from(point)); } };
+    map._addFollowControl();
+    assert.strictEqual(attrs.role, 'button');
+    assert.strictEqual(attrs['aria-pressed'], 'true');
+
+    // Space activates once and prevents the page from scrolling.
+    assert.strictEqual(dispatch('keydown', { key: ' ' }).defaultPrevented, true);
+    assert.strictEqual(map.followCar, false);
+    assert.strictEqual(attrs['aria-pressed'], 'false');
+    assert.strictEqual(pans.length, 0);
+    assert.strictEqual(dispatch('keydown', { key: ' ', repeat: true }).defaultPrevented, true);
+    assert.strictEqual(map.followCar, false);
+
+    // A second press resumes following and immediately pans to the car.
+    assert.strictEqual(dispatch('keydown', { keyCode: 32 }).defaultPrevented, true);
+    assert.strictEqual(map.followCar, true);
+    assert.strictEqual(attrs['aria-pressed'], 'true');
+    assert.deepStrictEqual(pans, [[1, 2]]);
+
+    // Leave native anchor Enter activation and other keys alone.
+    for (const key of ['Enter', 'ArrowLeft', 'Tab']) {
+        assert.strictEqual(dispatch('keydown', { key }).defaultPrevented, false);
+        assert.strictEqual(map.followCar, true);
+    }
+    // The existing click path remains responsible for toggling.
+    assert.strictEqual(button.click().defaultPrevented, true);
+    assert.strictEqual(map.followCar, false);
+    assert.strictEqual(attrs['aria-pressed'], 'false');
+    assert.strictEqual(button.click().defaultPrevented, true);
+    assert.strictEqual(map.followCar, true);
+    assert.deepStrictEqual(pans, [[1, 2], [1, 2]]);
+    console.log('map_position_harness: follow control keyboard and click checks passed');
+}
