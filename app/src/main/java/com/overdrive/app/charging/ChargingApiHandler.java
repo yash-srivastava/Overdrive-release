@@ -1,5 +1,9 @@
 package com.overdrive.app.charging;
 
+import static com.overdrive.app.util.AnalyticsQueryParams.parseQueryParams;
+import static com.overdrive.app.util.AnalyticsQueryParams.getIntParam;
+import static com.overdrive.app.util.AnalyticsQueryParams.getLongParam;
+
 import com.overdrive.app.byd.BydDataCollector;
 import com.overdrive.app.byd.BydVehicleData;
 import com.overdrive.app.abrp.SohEstimator;
@@ -1609,39 +1613,6 @@ public class ChargingApiHandler {
 
     private SocHistoryDatabase db() {
         return manager.getSocDb();
-    }
-
-    private void parseQueryParams(String queryString, Map<String, String> params) {
-        if (queryString == null || queryString.isEmpty()) return;
-        String[] pairs = queryString.split("&");
-        for (String pair : pairs) {
-            int eq = pair.indexOf('=');
-            if (eq > 0) {
-                String key = pair.substring(0, eq);
-                String value = eq < pair.length() - 1 ? pair.substring(eq + 1) : "";
-                params.put(key, value);
-            }
-        }
-    }
-
-    private int getIntParam(Map<String, String> params, String key, int defaultValue) {
-        String value = params.get(key);
-        if (value == null || value.isEmpty()) return defaultValue;
-        try {
-            return Integer.parseInt(value);
-        } catch (NumberFormatException e) {
-            return defaultValue;
-        }
-    }
-
-    private long getLongParam(Map<String, String> params, String key, long defaultValue) {
-        String value = params.get(key);
-        if (value == null || value.isEmpty()) return defaultValue;
-        try {
-            return Long.parseLong(value);
-        } catch (NumberFormatException e) {
-            return defaultValue;
-        }
     }
 
     private JSONObject errorResponse(String message, int status) {

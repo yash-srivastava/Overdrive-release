@@ -1,5 +1,9 @@
 package com.overdrive.app.trips;
 
+import static com.overdrive.app.util.AnalyticsQueryParams.parseQueryParams;
+import static com.overdrive.app.util.AnalyticsQueryParams.getIntParam;
+import static com.overdrive.app.util.AnalyticsQueryParams.getLongParam;
+
 import com.overdrive.app.storage.removable.RemovableStorageFs;
 
 import com.overdrive.app.logging.DaemonLogger;
@@ -1430,22 +1434,6 @@ public class TripApiHandler {
     // ==================== UTILITY METHODS ====================
 
     /**
-     * Parse query parameters from a query string (e.g., "days=7&limit=50").
-     */
-    private void parseQueryParams(String queryString, Map<String, String> params) {
-        if (queryString == null || queryString.isEmpty()) return;
-        String[] pairs = queryString.split("&");
-        for (String pair : pairs) {
-            int eq = pair.indexOf('=');
-            if (eq > 0) {
-                String key = pair.substring(0, eq);
-                String value = eq < pair.length() - 1 ? pair.substring(eq + 1) : "";
-                params.put(key, value);
-            }
-        }
-    }
-
-    /**
      * Enrich a trip record with estimated energy if BMS kWh data wasn't available.
      * Uses the SohEstimator's calibrated nominal capacity (same as VehicleDataMonitor).
      * This ensures old trips without kWh readings still show cost in the UI.
@@ -1551,33 +1539,6 @@ public class TripApiHandler {
             if (recomputed > 0 || trip.tripCost <= 0) {
                 trip.tripCost = recomputed;
             }
-        }
-    }
-
-    /**
-     * Get an integer query parameter with a default value.
-     */
-    private int getIntParam(Map<String, String> params, String key, int defaultValue) {
-        String value = params.get(key);
-        if (value == null || value.isEmpty()) return defaultValue;
-        try {
-            return Integer.parseInt(value);
-        } catch (NumberFormatException e) {
-            return defaultValue;
-        }
-    }
-
-    /**
-     * Get a long query parameter with a default value. Used for epoch-ms
-     * range bounds, which overflow the int range {@link #getIntParam} parses.
-     */
-    private long getLongParam(Map<String, String> params, String key, long defaultValue) {
-        String value = params.get(key);
-        if (value == null || value.isEmpty()) return defaultValue;
-        try {
-            return Long.parseLong(value);
-        } catch (NumberFormatException e) {
-            return defaultValue;
         }
     }
 
