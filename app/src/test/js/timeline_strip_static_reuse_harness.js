@@ -11,6 +11,8 @@ const { buildModel } = window.BYD.tlstrip._internals;
 const staticFields = ['runs', 'runDrive', 'unav', 'seams', 'mT', 'mK', 'mA', 'mRec', 'mLab', 'moments', 'momT'];
 function fields(model) {
     const { staticData, ...rest } = model;
+    // filter()/slice() on the harness's arrays can return either realm's Array once optimised.
+    for (const key of Object.keys(rest)) if (Array.isArray(rest[key])) rest[key] = Array.from(rest[key]);
     return rest;
 }
 function check(payload, previous, expectReuse) {
