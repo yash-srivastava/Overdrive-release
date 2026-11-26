@@ -36,7 +36,6 @@ public class VehicleDataMonitor {
     
     private final CopyOnWriteArrayList<VehicleDataListener> listeners = new CopyOnWriteArrayList<>();
     private boolean isRunning = false;
-    private Context context;
 
     // Throttle for the charging-power resolution diagnostic (see getChargingState).
     private volatile long lastChargePowerLogMs = 0L;
@@ -73,7 +72,6 @@ public class VehicleDataMonitor {
     // ==================== LIFECYCLE ====================
     
     public void init(Context context) {
-        this.context = context;
         logger.info("Initializing VehicleDataMonitor (BydDataCollector mode)");
         
         // Only init battery power monitor (for AccSentryDaemon voltage listener)
@@ -87,7 +85,6 @@ public class VehicleDataMonitor {
     }
     
     public void initBatteryPowerOnly(Context context) {
-        this.context = context;
         try {
             batteryPowerMonitor.init(context);
         } catch (Exception e) {
@@ -1460,13 +1457,9 @@ public class VehicleDataMonitor {
         return availability;
     }
     
-    // ==================== MONITOR ACCESS (kept for backward compat) ====================
-    
+    // ==================== MONITOR ACCESS ====================
+
     public BatteryPowerMonitor getBatteryPowerMonitor() { return batteryPowerMonitor; }
-    
-    // These return null now — consumers should use the data access methods above
-    public BatteryVoltageMonitor getBatteryVoltageMonitor() { return null; }
-    public DrivingRangeMonitor getDrivingRangeMonitor() { return null; }
     
     // ==================== LISTENER MANAGEMENT ====================
     
