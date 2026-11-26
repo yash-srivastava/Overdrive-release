@@ -1350,6 +1350,7 @@ public class TripDatabase {
         }
     }
 
+    // Keep this UPDATE column order in sync with the parameter bindings in updateWeeklyRollup() and updateMonthlyRollup().
     private PreparedStatement prepareRollupUpdate(String table, String periodColumn) throws Exception {
         String sql = "UPDATE " + table + " SET trip_count=?, " +
                 "total_distance_km=?, total_duration_seconds=?, avg_efficiency=?, " +
