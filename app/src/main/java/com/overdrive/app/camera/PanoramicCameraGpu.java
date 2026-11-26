@@ -8932,13 +8932,13 @@ public class PanoramicCameraGpu {
                                 } else {
                                     // No native app — this is a HAL issue, restart camera
                                     consecutiveContentionStalls = 0;
-                                    if (!holdStallRestartForReverseView(now)) {
+                                    if (!holdStallRestartForReverseView()) {
                                         postLegacyStallRestart(stallOpenSeq);
                                     }
                                 }
                             } else {
                                 // No coordinator — just restart
-                                if (!holdStallRestartForReverseView(now)) {
+                                if (!holdStallRestartForReverseView()) {
                                     postLegacyStallRestart(stallOpenSeq);
                                 }
                             }
@@ -10113,7 +10113,9 @@ public class PanoramicCameraGpu {
     private final ReverseViewCameraGate.Hold reverseStallHold =
         new ReverseViewCameraGate.Hold(ReverseViewCameraGate.appliesHere());
 
-    private boolean holdStallRestartForReverseView(long now) {
+    private boolean holdStallRestartForReverseView() {
+        // Monotonic, like the gate's cap; the watchdog's own clock is wall time.
+        long now = android.os.SystemClock.elapsedRealtime();
         if (!reverseStallHold.holdNow(ReverseViewCameraGate.freshGear(), now)) return false;
         logger.info("Frame stall in R: restart held " + reverseStallHold.heldMs(now)
             + "ms (max " + ReverseViewCameraGate.MAX_HOLD_MS

@@ -14,6 +14,12 @@ public final class ReverseViewCameraGate {
     public static final long MAX_HOLD_MS = 12_000L;
     /** How often a waiting cold open re-reads the gear. */
     public static final long POLL_MS = 250L;
+    /**
+     * A gap this long between two calls in R starts a new hold. The stall watchdog only calls
+     * while frames are missing (about every 5 s), never on the way out of R, so without this a
+     * second reverse later in the drive would inherit the first one's spent hold.
+     */
+    public static final long EPISODE_GAP_MS = 8_000L;
 
     private ReverseViewCameraGate() {
     }
@@ -49,18 +55,26 @@ public final class ReverseViewCameraGate {
     public static final class Hold {
         private final boolean applies;
         private long startMs;
+        private long lastSeenMs;
 
         public Hold(boolean applies) {
             this.applies = applies;
         }
 
-        /** True to skip this open/restart now. Starts the hold on the first R, clears it off R. */
+        /**
+         * True to skip this open/restart now. Starts the hold on the first R, clears it off R,
+         * and starts a fresh hold after {@link #EPISODE_GAP_MS} without a call.
+         *
+         * @param nowMs monotonic time (elapsedRealtime)
+         */
         public boolean holdNow(int freshGear, long nowMs) {
             if (!applies || freshGear != com.overdrive.app.monitor.GearMonitor.GEAR_R) {
                 startMs = 0L;
                 return false;
             }
+            if (startMs > 0L && nowMs - lastSeenMs >= EPISODE_GAP_MS) startMs = 0L;
             if (startMs <= 0L) startMs = Math.max(1L, nowMs);
+            lastSeenMs = nowMs;
             return shouldHold(true, freshGear, startMs, nowMs);
         }
 
