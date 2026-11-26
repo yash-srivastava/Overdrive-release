@@ -483,38 +483,39 @@ Developers can still send pull requests on the language files: `app/src/main/ass
 The latest release in full, then earlier highlights. APKs and per-release notes are on
 [GitHub Releases](https://github.com/yash-srivastava/Overdrive-release/releases).
 
-### v65.4: Calls Stay on Your Phone, Richer Custom Layouts & 80+ Fixes
+### v65.5: Continuous Playback, Smoother DiLink 5 Layouts & 120+ Improvements
 
 #### ✨ New
 
-- **Keep calls and music on your phone while parked** — A new, optional Proximity rule. With the car off, phone proximity keeps working, but calls and media stay on your phone instead of the parked car.
-- **More on every Custom Layout** — The car's regeneration level, a status rail (clock, drive mode, outside and cabin temperature, compass, odometer, Trip A and Trip B) and a detailed trip wherever there's room, with no fact shown twice. The Motorcourt ring now glows, lamps follow the curved lens, and Navigator can host any map app.
-- **Full cluster on more DiLink 3 cars** — The full-cluster takeover now works on more DiLink 3 firmwares.
-- **Auto theme follows the sun** — Custom Layouts' Auto theme now changes with the time of day instead of turning dark whenever the headlamps come on in rain or shade.
-- **Trip B** — The cluster's "since reset" trip meter is now available.
-- **Codec support at a glance** — Recording and Surveillance settings show whether your car supports H.264 and H.265 in hardware, and which codec is recording.
+- **Back-to-back playback** — Events → List can play recordings one after another, newer or older first, and remembers your direction and skip choices.
+- **Live trip cost on glass widgets** — Trip cost now updates while you drive, as it already did on Custom Layouts.
+- **Map notice** — Maps say when tiles can't load instead of staying blank.
+- **Keyboard and screen reader support** — Date pickers, the map's Follow button, collapsible cards and dialogs now work with a keyboard and are read out properly.
+- **Hebrew** — The Hebrew translation is complete again.
 
 #### ⚡ Optimizations
 
-- **Faster AI frames** — Camera frames reach the AI detector about twice as fast (measured on DiLink 3), including zoomed AI crops. You can switch this in Camera probe → AI frame copy.
-- **Quicker thumbnails** — Busy Events and Timeline pages no longer queue up old thumbnail work.
-- **Lighter live view in the browser** — Fewer full-frame copies, so phones and laptops work less.
-- **Smaller improvements everywhere** — Recording, playback, the timeline, trips, voice, OCR and the web server all do less work.
+- **Smoother Custom Layouts on DiLink 5** — Speed, gear and turn signals reach the cluster in about 25–50 ms instead of freezing for about 0.4 s every 2 s (measured on a Sealion 7).
+- **Lighter guarding and recording** — The parked motion detector, the CPU dashcam compositor and preview de-warping do less work per frame.
+- **Faster Timeline and Trips** — The timeline strip, playlist planning and video buffers are reused instead of rebuilt, and trip maps draw fewer layers.
+- **Leaner streaming** — Voice and AI chat send far fewer tiny network packets, and the browser's live view keeps its decode backlog bounded.
+- **Cleaner code** — Around 100 changes merge duplicated code and remove dead code, with no change in behaviour.
 
 #### 🛠️ Fixes
 
-- **DiLink 100** — Screen brightness comes back as you set it, not at 50%. BYD's own apps, Service Mode and the config backup now use the driver's account. The reverse camera stays live while OverDrive records, and setup skips the auto-start step when the car doesn't need it.
-- **Pre-heat** — If the car ignores the remote power-on, climate control falls back to the cloud.
-- **Walk-away lock** — Phone proximity keeps working after switch-off, even if the head unit closes the app.
-- **Trip timeline** — Shows the real battery level along the trip instead of a straight line.
-- **DiLink 5 recordings** — The video overlay shows the real gear instead of P.
-- **Tyre limits** — Limits are shown and edited in your chosen unit (PSI or bar).
-- **Watched clips** — Stay in sync between local and remote access.
-- **Live View** — All + DVR explains why it's unavailable, and older viewers recover at the next keyframe instead of disconnecting.
-- **And more** — Charging chart hover after rotating, 3D car page memory use, leftover export files, the AVM camera probe, and a warning about Bluetooth audio while parked.
+- **DiLink 100 (Atto 2 DM-i)** — OverDrive no longer fights the car's own 360°/reverse view after the car restarts.
+- **SD card errors** — When the card starts failing writes, OverDrive can remount it again. This was blocked on every car.
+- **Custom Layouts** — No more bars on 8.8" DiLink 3 clusters, and a running layout moves to the full panel as soon as it's ready.
+- **Telegram proximity messages** — 🔒 and 🔓 appear only when the car confirmed the lock or unlock, and ⚠️ otherwise. Unlock confirmations now say "unlock" instead of "lock state".
+- **Auto-start** — Delayed resets of the BYD auto-start restriction are fixed, and settings show its last verified state.
+- **Timeline sharing** — A successful share no longer also copies a link or downloads the clip, and fallbacks use the clip you tapped.
+- **No more stuck pages** — The Notification Log shows load errors with a retry instead of an empty list. Parking history, Community Automations, the SoC history chart, hotspot status, search and SafeKeep badges no longer get stuck on old or failed answers. Backups no longer report success when the download failed.
+- **Security** — The MQTT settings pages can no longer be used to run other daemon commands.
+- **And more** — The language picker, themes in embedded pages, duplicate Community Widgets, and the layout of the parked-audio setting.
 
 ### Earlier releases
 
+- **v65.4** — Calls Stay on Your Phone, Richer Custom Layouts & 80+ Fixes
 - **v65.2** — Lighter Surveillance, Smoother Live View & 60+ Fixes
 - **v65.0** — Take Control of Your Full Driver Cluster + Face ID Lock
 - **v64.3** — Living Layouts & Drive-Start Fixes
