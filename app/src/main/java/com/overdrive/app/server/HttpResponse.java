@@ -1,8 +1,11 @@
 package com.overdrive.app.server;
 
 import com.overdrive.app.storage.removable.RemovableStorageFs;
+import com.overdrive.app.storage.removable.SeekableFileReader;
 
 import org.json.JSONObject;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
@@ -265,37 +268,13 @@ public class HttpResponse {
     private static final String VIDEO_CACHE_CONTROL = "private, max-age=86400, immutable";
 
     /**
-     * Backwards-compat overload — callers that don't compute an ETag get the
-     * old "no-cache" behaviour so any future /video/* caller (e.g. live
-     * streams) opting out of caching just calls the no-ETag version.
-     */
-    /**
      * Stream an arbitrary media file with an explicit Content-Type. Same chunked
      * body as {@link #sendVideo} but caller-chosen MIME, so audio (mp3/wav/…) and
      * video both serve correctly to a streaming MediaPlayer. No Range (callers use
      * this for small library files that buffer fine over the local loopback).
      */
-    public static void sendMediaFile(OutputStream out, java.io.File file, String contentType) throws Exception {
-        if (!RemovableStorageFs.exists(file)) {
-            sendError(out, 404, "File not found");
-            return;
-        }
-        StringBuilder headers = new StringBuilder();
-        headers.append("HTTP/1.1 200 OK\r\n")
-               .append("Content-Type: ").append(contentType).append("\r\n")
-               .append("Content-Length: ").append(RemovableStorageFs.length(file)).append("\r\n")
-               .append("Accept-Ranges: bytes\r\n")
-               .append("Cache-Control: no-cache\r\n")
-               .append("Connection: close\r\n\r\n");
-        out.write(headers.toString().getBytes());
-        try (java.io.FileInputStream fis = RemovableStorageFs.openInput(file)) {
-            byte[] buffer = new byte[FILE_STREAM_BUFFER];
-            int count;
-            while ((count = fis.read(buffer)) != -1) {
-                out.write(buffer, 0, count);
-            }
-        }
-        out.flush();
+    public static void sendMediaFile(OutputStream out, File file, String contentType) throws Exception {
+        sendFullMedia(out, file, contentType, null);
     }
 
     /**
@@ -310,7 +289,7 @@ public class HttpResponse {
      * and {@code prepare()} stalls, so "Play Video" produced nothing while a linearly-
      * streamable MP3 still played. Serving 206 fixes video playback from the library.
      */
-    public static void sendMediaFileRanged(OutputStream out, java.io.File file,
+    public static void sendMediaFileRanged(OutputStream out, File file,
                                            String contentType, String rangeHeader) throws Exception {
         if (!RemovableStorageFs.exists(file)) {
             sendError(out, 404, "File not found");
@@ -330,34 +309,8 @@ public class HttpResponse {
         long start = range == null ? 0 : range[0];
         long end = range == null ? fileLength - 1 : range[1];
         boolean partial = range != null;
-        long contentLength = end - start + 1;
-
-        StringBuilder headers = new StringBuilder();
-        headers.append(partial ? "HTTP/1.1 206 Partial Content\r\n" : "HTTP/1.1 200 OK\r\n")
-               .append("Content-Type: ").append(contentType).append("\r\n")
-               .append("Content-Length: ").append(contentLength).append("\r\n");
-        if (partial) {
-            headers.append("Content-Range: bytes ").append(start).append("-").append(end)
-                   .append("/").append(fileLength).append("\r\n");
-        }
-        headers.append("Accept-Ranges: bytes\r\n")
-               .append("Cache-Control: no-cache\r\n")
-               .append("Connection: close\r\n\r\n");
-        out.write(headers.toString().getBytes());
-
-        try (com.overdrive.app.storage.removable.SeekableFileReader raf = new com.overdrive.app.storage.removable.SeekableFileReader(file)) {
-            raf.seek(start);
-            byte[] buffer = new byte[FILE_STREAM_BUFFER];
-            long remaining = contentLength;
-            while (remaining > 0) {
-                int toRead = (int) Math.min(buffer.length, remaining);
-                int read = raf.read(buffer, 0, toRead);
-                if (read <= 0) break;
-                out.write(buffer, 0, read);
-                remaining -= read;
-            }
-        }
-        out.flush();
+        sendMediaHeaders(out, contentType, fileLength, start, end, partial, null);
+        streamFileRange(out, file, start, end - start + 1);
     }
 
     /**
@@ -409,54 +362,31 @@ public class HttpResponse {
         out.flush();
     }
 
-    public static void sendVideo(OutputStream out, java.io.File file) throws Exception {
-        sendVideoInternal(out, file, null);
+    /** Send video without an ETag, retaining the no-cache policy. */
+    public static void sendVideo(OutputStream out, File file) throws Exception {
+        sendVideo(out, file, null);
     }
 
-    public static void sendVideo(OutputStream out, java.io.File file, String etag) throws Exception {
-        sendVideoInternal(out, file, etag);
+    public static void sendVideo(OutputStream out, File file, String etag) throws Exception {
+        sendFullMedia(out, file, "video/mp4", etag);
     }
 
-    private static void sendVideoInternal(OutputStream out, java.io.File file, String etag) throws Exception {
+    private static void sendFullMedia(OutputStream out, File file, String contentType,
+                                      String etag) throws Exception {
         if (!RemovableStorageFs.exists(file)) {
             sendError(out, 404, "File not found");
             return;
         }
-
-        StringBuilder headers = new StringBuilder();
-        headers.append("HTTP/1.1 200 OK\r\n")
-               .append("Content-Type: video/mp4\r\n")
-               .append("Content-Length: ").append(RemovableStorageFs.length(file)).append("\r\n")
-               .append("Accept-Ranges: bytes\r\n");
-        if (etag != null) {
-            headers.append("Cache-Control: ").append(VIDEO_CACHE_CONTROL).append("\r\n")
-                   .append("ETag: ").append(etag).append("\r\n");
-        } else {
-            headers.append("Cache-Control: no-cache\r\n");
-        }
-        headers.append("Connection: close\r\n\r\n");
-        out.write(headers.toString().getBytes());
-
-        // Stream file in chunks
-        try (java.io.FileInputStream fis = RemovableStorageFs.openInput(file)) {
-            byte[] buffer = new byte[FILE_STREAM_BUFFER];
-            int count;
-            while ((count = fis.read(buffer)) != -1) {
-                out.write(buffer, 0, count);
-            }
-        }
-        out.flush();
+        long fileLength = RemovableStorageFs.length(file);
+        sendMediaHeaders(out, contentType, fileLength, 0, fileLength - 1, false, etag);
+        streamFullFile(out, file, FILE_STREAM_BUFFER);
     }
 
-    public static void sendVideoRange(OutputStream out, java.io.File file, long start, long end) throws Exception {
-        sendVideoRangeInternal(out, file, start, end, null);
+    public static void sendVideoRange(OutputStream out, File file, long start, long end) throws Exception {
+        sendVideoRange(out, file, start, end, null);
     }
 
-    public static void sendVideoRange(OutputStream out, java.io.File file, long start, long end, String etag) throws Exception {
-        sendVideoRangeInternal(out, file, start, end, etag);
-    }
-
-    private static void sendVideoRangeInternal(OutputStream out, java.io.File file, long start, long end, String etag) throws Exception {
+    public static void sendVideoRange(OutputStream out, File file, long start, long end, String etag) throws Exception {
         if (!RemovableStorageFs.exists(file)) {
             sendError(out, 404, "File not found");
             return;
@@ -474,14 +404,21 @@ public class HttpResponse {
             sendRangeNotSatisfiable(out, fileLength, "Range Not Satisfiable");
             return;
         }
-        long contentLength = end - start + 1;
+        sendMediaHeaders(out, "video/mp4", fileLength, start, end, true, etag);
+        streamFileRange(out, file, start, end - start + 1);
+    }
 
+    private static void sendMediaHeaders(OutputStream out, String contentType, long fileLength,
+                                         long start, long end, boolean partial, String etag) throws Exception {
         StringBuilder headers = new StringBuilder();
-        headers.append("HTTP/1.1 206 Partial Content\r\n")
-               .append("Content-Type: video/mp4\r\n")
-               .append("Content-Length: ").append(contentLength).append("\r\n")
-               .append("Content-Range: bytes ").append(start).append("-").append(end).append("/").append(fileLength).append("\r\n")
-               .append("Accept-Ranges: bytes\r\n");
+        headers.append(partial ? "HTTP/1.1 206 Partial Content\r\n" : "HTTP/1.1 200 OK\r\n")
+               .append("Content-Type: ").append(contentType).append("\r\n")
+               .append("Content-Length: ").append(end - start + 1).append("\r\n");
+        if (partial) {
+            headers.append("Content-Range: bytes ").append(start).append("-").append(end)
+                   .append("/").append(fileLength).append("\r\n");
+        }
+        headers.append("Accept-Ranges: bytes\r\n");
         if (etag != null) {
             headers.append("Cache-Control: ").append(VIDEO_CACHE_CONTROL).append("\r\n")
                    .append("ETag: ").append(etag).append("\r\n");
@@ -490,8 +427,22 @@ public class HttpResponse {
         }
         headers.append("Connection: close\r\n\r\n");
         out.write(headers.toString().getBytes());
+    }
 
-        try (com.overdrive.app.storage.removable.SeekableFileReader raf = new com.overdrive.app.storage.removable.SeekableFileReader(file)) {
+    private static void streamFullFile(OutputStream out, File file, int bufferSize) throws Exception {
+        try (FileInputStream fis = RemovableStorageFs.openInput(file)) {
+            byte[] buffer = new byte[bufferSize];
+            int count;
+            while ((count = fis.read(buffer)) != -1) {
+                out.write(buffer, 0, count);
+            }
+        }
+        out.flush();
+    }
+
+    private static void streamFileRange(OutputStream out, File file, long start,
+                                        long contentLength) throws Exception {
+        try (SeekableFileReader raf = new SeekableFileReader(file)) {
             raf.seek(start);
             byte[] buffer = new byte[FILE_STREAM_BUFFER];
             long remaining = contentLength;
@@ -541,7 +492,7 @@ public class HttpResponse {
     /**
      * Send an image file with default 24h private cache headers.
      */
-    public static void sendImage(OutputStream out, java.io.File file, String contentType) throws Exception {
+    public static void sendImage(OutputStream out, File file, String contentType) throws Exception {
         sendImage(out, file, contentType, IMAGE_CACHE_CONTROL);
     }
 
@@ -551,7 +502,7 @@ public class HttpResponse {
      * deterrent image) — otherwise WebViews and external clients will
      * keep the previous version up to 24h even after a re-upload.
      */
-    public static void sendImage(OutputStream out, java.io.File file, String contentType,
+    public static void sendImage(OutputStream out, File file, String contentType,
                                   String cacheControl) throws Exception {
         if (!RemovableStorageFs.exists(file)) {
             sendError(out, 404, "Image not found");
@@ -565,14 +516,7 @@ public class HttpResponse {
                         "Connection: close\r\n\r\n";
         out.write(headers.getBytes());
 
-        try (java.io.FileInputStream fis = RemovableStorageFs.openInput(file)) {
-            byte[] buffer = new byte[8192];
-            int count;
-            while ((count = fis.read(buffer)) != -1) {
-                out.write(buffer, 0, count);
-            }
-        }
-        out.flush();
+        streamFullFile(out, file, 8192);
     }
     
     /**
