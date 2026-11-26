@@ -123,8 +123,11 @@ var NOTIFLOG = {
         if (empty) empty.style.display = 'none';
 
         list.innerHTML = '';
+        // Formatters are lazy and scoped to this render, so locale/timezone
+        // changes between renders do not leave stale formatting state.
+        var timeFormats = {};
         for (var i = 0; i < this.notifications.length; i++) {
-            list.appendChild(this._buildCard(this.notifications[i]));
+            list.appendChild(this._buildCard(this.notifications[i], timeFormats));
         }
         this._updatePagination();
         this._updateBulkBar();
@@ -160,7 +163,7 @@ var NOTIFLOG = {
         this._updateCount();
     },
 
-    _buildCard: function (n) {
+    _buildCard: function (n, timeFormats) {
         var self = this;
         var sev = (n.severity || 'info').toLowerCase();
         var card = document.createElement('div');
@@ -213,6 +216,7 @@ var NOTIFLOG = {
                 '" onerror="this.parentNode.style.display=\'none\'"></div>';
         }
 
+        var timeLabel = this._fmtTime(n.ts, timeFormats);
         card.innerHTML =
             checkCol +
             '<div class="nl-icon sev-' + sev + '">' + icon + '</div>' +
@@ -225,7 +229,7 @@ var NOTIFLOG = {
                 (n.body ? '<div class="nl-text">' + this._esc(n.body) + '</div>' : '') +
                 '<div class="nl-meta">' +
                     sevPill + groupPill + place + chips +
-                    '<span class="nl-time">' + this._esc(this._fmtTime(n.ts)) + '</span>' +
+                    '<span class="nl-time">' + this._esc(timeLabel) + '</span>' +
                 '</div>' +
             '</div>' +
             (this.selectMode ? '' :
@@ -253,7 +257,7 @@ var NOTIFLOG = {
             if (card.className.indexOf('nl-clickable') >= 0) {
                 card.setAttribute('role', 'button');
                 card.setAttribute('tabindex', '0');
-                card.setAttribute('aria-label', (n.title || '') + ' — ' + self._fmtTime(n.ts));
+                card.setAttribute('aria-label', (n.title || '') + ' — ' + timeLabel);
                 card.addEventListener('click', function () { self._open(n); });
                 card.addEventListener('keydown', function (e) {
                     // Leave keyboard activation of the nested Delete button to the browser.
@@ -907,12 +911,34 @@ var NOTIFLOG = {
         return this._t('notiflog.prox_far', 'Far');
     },
 
-    _fmtTime: function (ts) {
+    _fmtTime: function (ts, formats) {
         if (!ts) return '';
         var lang = (window.BYD && BYD.i18n && BYD.i18n.getLang) ? BYD.i18n.getLang() : undefined;
         var d = new Date(ts);
         var now = new Date();
         var sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+        // Intl.format throws for an invalid Date, whereas Date's locale
+        // methods return the legacy invalid-date label. Keep that path intact.
+        if (formats && !formats.unavailable && !isNaN(d.getTime())) {
+            try {
+                if (formats.lang !== lang) {
+                    formats.lang = lang;
+                    formats.time = formats.day = null;
+                }
+                if (!formats.time) {
+                    formats.time = new Intl.DateTimeFormat(lang, { hour: '2-digit', minute: '2-digit' });
+                }
+                if (sameDay) return formats.time.format(d);
+                if (!formats.day) {
+                    formats.day = new Intl.DateTimeFormat(lang, { month: 'short', day: 'numeric' });
+                }
+                return formats.day.format(d) + ' · ' + formats.time.format(d);
+            } catch (e) {
+                // Older WebViews may not support Intl.DateTimeFormat. Avoid
+                // repeated failed construction for the rest of this render.
+                formats.unavailable = true;
+            }
+        }
         try {
             if (sameDay) {
                 return d.toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit' });
