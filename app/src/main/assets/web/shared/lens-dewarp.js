@@ -46,6 +46,10 @@
         '}'
     ].join('\n');
 
+    // Media events wake an otherwise idle renderer, including paused seeks and
+    // source/size changes. Playing older WebViews still need decoded-frame polling.
+    const WAKE_EVENTS = ['loadedmetadata', 'loadeddata', 'canplay', 'play', 'playing',
+        'pause', 'seeking', 'seeked', 'ended', 'resize', 'emptied'];
     const STRENGTH_TTL_MS = 10000;
     let strengthCache = null;   // { at, promise }
 
@@ -131,14 +135,16 @@
         this.lastTime = -1;
         this.checkUpload = true;
         this._boundTick = this._tick.bind(this);
-        this._boundFrame = this._onVideoFrame.bind(this);
+        this._attachment = 0;
+        this._boundFrame = null;
+        this._boundMediaWake = this._onMediaWake.bind(this);
         const self = this;
         canvas.addEventListener('webglcontextlost', function() { self._fail('contextlost'); }, false);
     }
 
     LensDewarp.prototype.attach = function(videoEl, spec) {
         if (this.failed) return false;
-        this._cancelFrameCallback();
+        this._stopWatching();
         this.video = videoEl;
         this.spec = spec;
         this.dirty = true;
@@ -146,11 +152,19 @@
         this.lastFrames = -1;
         this.lastTime = -1;
         this._syncSize();
+        this.running = true;
+        const attachment = this._attachment;
+        const self = this;
+        // A callback from a replaced attachment must not restart its old loop,
+        // even on implementations without cancelVideoFrameCallback.
+        this._boundFrame = function() {
+            if (self._attachment === attachment) self._onVideoFrame();
+        };
+        WAKE_EVENTS.forEach(function(event) {
+            videoEl.addEventListener(event, self._boundMediaWake);
+        });
         this._requestFrameCallback();
-        if (!this.running) {
-            this.running = true;
-            this.raf = requestAnimationFrame(this._boundTick);
-        }
+        this._scheduleTick();
         return true;
     };
 
@@ -160,15 +174,24 @@
         this.spec.k1 = 0.30 * t;
         this.spec.k2 = 0.10 * t;
         this.dirty = true;
+        this._scheduleTick();
+    };
+
+    LensDewarp.prototype._stopWatching = function() {
+        this.running = false;
+        ++this._attachment;
+        this._cancelFrameCallback();
+        const v = this.video, wake = this._boundMediaWake;
+        if (v) WAKE_EVENTS.forEach(function(event) { v.removeEventListener(event, wake); });
+        if (this.raf) cancelAnimationFrame(this.raf);
+        this.raf = 0;
+        this._boundFrame = null;
     };
 
     LensDewarp.prototype.detach = function() {
-        this._cancelFrameCallback();
+        this._stopWatching();
         this.video = null;
         this.spec = null;
-        this.running = false;
-        if (this.raf) cancelAnimationFrame(this.raf);
-        this.raf = 0;
         // Give back the frame-sized texture and drawing buffer while no clip is open.
         const gl = this.gl;
         if (!this.failed && gl && !(gl.isContextLost && gl.isContextLost())) {
@@ -212,7 +235,20 @@
         this.vfc = 0;
         if (!this.running) return;
         this.dirty = true;
+        this._scheduleTick();
         this._requestFrameCallback();
+    };
+
+    LensDewarp.prototype._scheduleTick = function() {
+        if (this.running && !this.raf) this.raf = requestAnimationFrame(this._boundTick);
+    };
+
+    LensDewarp.prototype._onMediaWake = function(event) {
+        if (!this.running) return;
+        // Play/playing only restart polling; all other events may change the
+        // image even without a decoded-frame notification (notably paused seeks).
+        if (event.type !== 'play' && event.type !== 'playing') this.dirty = true;
+        this._scheduleTick();
     };
 
     LensDewarp.prototype._syncSize = function() {
@@ -237,13 +273,18 @@
     };
 
     LensDewarp.prototype._tick = function() {
+        this.raf = 0;
         if (!this.running) return;
         const v = this.video, spec = this.spec, gl = this.gl;
-        this.raf = requestAnimationFrame(this._boundTick);
-        if (!v || !spec || v.readyState < 2 || v.videoWidth === 0) return;
+        if (!v || !spec) return;
+        const hasFrameCallback = typeof v.requestVideoFrameCallback === 'function';
+        // Modern engines wake on actual video frames. Older ones poll only
+        // during playback/seeking, never indefinitely on a settled pause.
+        if (!hasFrameCallback && ((!v.paused && !v.ended) || v.seeking)) this._scheduleTick();
+        if (v.readyState < 2 || v.videoWidth === 0) return; // media events wake us when ready
 
         this._syncSize();
-        if (typeof v.requestVideoFrameCallback === 'function') {
+        if (hasFrameCallback) {
             if (!this.dirty) return;
         } else if (!this._newFrameWithoutCallback(v) && !this.dirty) {
             return;
@@ -261,6 +302,7 @@
                 this._fail('tainted');
             } else {
                 this.dirty = true;   // decode not ready; retry next frame
+                this._scheduleTick();
             }
             return;
         }
