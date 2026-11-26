@@ -56,6 +56,7 @@
         'parking.events': 'Sentry events', 'parking.no_events': 'No sentry events during this session.', 'parking.open_events': 'Recordings',
         'parking.delete': 'Delete session', 'parking.delete_confirm': 'Delete this session, its stills and frames?', 'parking.deleted': 'Session deleted',
         'parking.delete_failed': 'Could not delete (open session?)', 'parking.enabled_toast': 'Parking Intelligence turned on',
+        'errors.load_failed': 'Failed to load',
         'parking.enable_failed': 'Could not save setting', 'parking.requeued': 'Signage read queued', 'parking.requeue_failed': 'Not running — enable Parking Intelligence first',
         'parking.trigger_door_open': 'door opened', 'parking.trigger_unlock': 'unlocked', 'parking.trigger_acc_on': 'car switched on',
         'parking.trigger_drive_away': 'drove away',
@@ -377,11 +378,16 @@
         if (from > 0) url += '&from=' + from;
         var copied = false;
         return fetch(url, { cache: 'no-store' })
-            .then(function (r) { copied = fromCopy(r); return r.json(); })
+            .then(function (r) {
+                if (!r.ok) throw new Error('http ' + r.status);
+                copied = fromCopy(r);
+                return r.json();
+            })
             .then(function (d) {
                 if (req !== state.listRequest) return;      // a newer filter owns the list
+                if (!d || d.success === false || !Array.isArray(d.sessions)) throw new Error('parking list unavailable');
                 state.loading = false;
-                var list = (d && d.sessions) || [];
+                var list = d.sessions;
                 state.total = d.total || 0;
                 state.sessions = state.sessions.concat(list);
                 renderList(list, append);
@@ -397,12 +403,17 @@
                 more.style.display = (list.length === PAGE) ? 'block' : 'none';
                 if (state.detailId != null) paintPager();
                 // Rows from the phone's saved copy reload like a failed list (no-store reads never get one today).
-                if (!append) state.listOk = !!(d && Array.isArray(d.sessions)) && !copied;
+                if (!append) state.listOk = !copied;
                 else if (copied) state.listOk = false;
             })
             .catch(function () {
                 if (req !== state.listRequest) return;
                 state.loading = false;
+                if (append) {
+                    // Keep the loaded pages and offset; Load more can retry the same page.
+                    toast(t('errors.load_failed'), 'error');
+                    return;
+                }
                 state.listOk = false;
                 box.innerHTML = '';
                 showEmpty('none');

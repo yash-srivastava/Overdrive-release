@@ -43,7 +43,7 @@ function setup(mode) {
         document: { getElementById: id => nodes[id] || (nodes[id] = element()),
             querySelectorAll: () => [], createElement: element },
         fetch() { return new Promise(resolve => requests.push(rows => resolve({
-            json: () => Promise.resolve({ sessions: rows, total: rows.length })
+            ok: true, json: () => Promise.resolve({ success: true, sessions: rows, total: rows.length })
         }))); }
     };
     vm.runInNewContext(src, sandbox, { filename: 'parking.js' });
