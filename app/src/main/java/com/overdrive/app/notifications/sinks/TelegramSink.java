@@ -149,6 +149,13 @@ public final class TelegramSink implements NotificationBus.Sink {
                 body, photo, buttons);
     }
 
+    /** Telegram message lead for proximity lock/unlock (lock, unlock, otherwise plain key). */
+    static String remoteAccessTelegramLead(String action) {
+        if ("lock".equals(action)) return "🔒🔴 ";
+        if ("unlock".equals(action)) return "🔑🟢 ";
+        return "🔑 ";
+    }
+
     /**
      * Escape legacy-Markdown metacharacters. The daemon's sendMessage hardcodes
      * parse_mode=Markdown, and these titles/bodies carry user-set content
@@ -156,12 +163,6 @@ public final class TelegramSink implements NotificationBus.Sink {
      * 400 ("can't parse entities") and silently drop the whole message. Matches
      * the daemon-side mdEscape character set.
      */
-    static String remoteAccessTelegramLead(String action) {
-        if ("lock".equals(action)) return "🔒🔴 ";
-        if ("unlock".equals(action)) return "🔑🟢 ";
-        return "🔑 ";
-    }
-
     private static String md(String s) {
         if (s == null || s.isEmpty()) return s == null ? "" : s;
         StringBuilder b = new StringBuilder(s.length() + 8);
