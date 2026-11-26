@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.os.IBinder
 import android.os.Parcel
 import android.os.RemoteException
+import android.os.SystemClock
 import android.os.ResultReceiver
 import android.view.Display
 import android.view.Surface
@@ -56,6 +57,7 @@ object DiLink5HostedProjectionBridge {
     const val EXTRA_BUFFER_HEIGHT = "hosted_projection_buffer_height"
     const val EXTRA_DENSITY = "hosted_projection_density"
     internal const val EXTRA_AAOS_MAP_AREA = "hosted_projection_aaos_map_area"
+    internal const val EXTRA_SEALION7_DEADLINE_MS = "hosted_projection_sealion7_deadline_ms"
     internal const val EXTRA_SEALION7_HDMI = "hosted_projection_sealion7_hdmi"
     internal const val RESULT_DISPLAY_ID = "display_id"
     internal const val RESULT_DISPLAY_WIDTH = "display_width"
@@ -65,7 +67,7 @@ object DiLink5HostedProjectionBridge {
 
     private const val TX_CREATE = IBinder.FIRST_CALL_TRANSACTION
     internal const val TX_RELEASE_FROM_APP = IBinder.FIRST_CALL_TRANSACTION + 1
-    private const val WAIT_MS = 3_000L
+    internal const val WAIT_MS = 3_000L
     private const val APP_OPS_WAIT_MS = 3_000L
     internal const val SHELL_UID = 2000
     private const val SHELL_PACKAGE = "com.android.shell"
@@ -101,7 +103,9 @@ object DiLink5HostedProjectionBridge {
     private class Pending(
         val physicalDisplayId: Int,
         val sealion7Geometry: HostedProjectionGeometry?,
+        val deadlineMs: Long?,
     ) {
+        fun expired(): Boolean = deadlineMs != null && SystemClock.elapsedRealtime() >= deadlineMs
         val complete = CountDownLatch(1)
         @Volatile var session: HostedSession? = null
         @Volatile var cancelled = false
@@ -357,13 +361,15 @@ object DiLink5HostedProjectionBridge {
                 )) != geometry)) return null
         attachDaemonContext(daemonContext)
         if (!aaosMapArea && !sealion7Hdmi && !ensureProjectionAppOps()) return null
-        val ticket = Pending(physicalDisplayId, geometry.takeIf { sealion7Hdmi })
+        val deadline = if (sealion7Hdmi) SystemClock.elapsedRealtime() + WAIT_MS else null
+        val ticket = Pending(physicalDisplayId, geometry.takeIf { sealion7Hdmi }, deadline)
         synchronized(lock) {
             if (sessions.containsKey(generation) || retainedDisplays.containsKey(generation) ||
-                pending.put(generation, ticket) != null
+                pending.containsKey(generation)
             ) {
                 return null
             }
+            pending[generation] = ticket
         }
         val extras = Bundle().apply { putBinder(EXTRA_BRIDGE, binder) }
         val intent = Intent(context, DiLink5HostedProjectionService::class.java)
@@ -383,8 +389,10 @@ object DiLink5HostedProjectionBridge {
             .putExtra(EXTRA_DENSITY, geometry.densityDpi)
         var accepted = false
         return try {
+            if (deadline != null) intent.putExtra(EXTRA_SEALION7_DEADLINE_MS, deadline)
             if (!dispatchService(intent, sealion7Hdmi, diagnostic)) return null
-            val result = if (!HostedProjectionBoundary.awaitSurface(ticket.complete, WAIT_MS)) {
+            val waitMs = deadline?.let { it - SystemClock.elapsedRealtime() } ?: WAIT_MS
+            val result = if (!HostedProjectionBoundary.awaitSurface(ticket.complete, waitMs)) {
                 diagnostic?.let { logger.warn("$it timed out waiting for the hosted surface") }
                 null
             } else {
@@ -556,16 +564,21 @@ object DiLink5HostedProjectionBridge {
     ): HostedSession? {
         val ticket = synchronized(lock) {
             pending[generation]?.takeIf {
-                !it.cancelled && creatingGenerations.add(generation)
+                !it.cancelled && !it.expired() && creatingGenerations.add(generation)
             }
         } ?: return null
         try {
         val diagnostic = ticket.sealion7Geometry?.let { "Sealion 7 hosted allocation generation=$generation" }
         ticket.sealion7Geometry?.let {
+            val rejection = Sealion7HdmiProjection.createConfigRejection(checkNotNull(ticket.deadlineMs))
+            if (rejection != null) {
+                logger.warn("$diagnostic declined: $rejection")
+                return null
+            }
             if (physicalId != ticket.physicalDisplayId || width != it.bufferWidth ||
                 height != it.bufferHeight || density != it.densityDpi ||
-                Sealion7HdmiProjection.findDisplay(daemonContext)?.displayId != physicalId) {
-                logger.warn("$diagnostic declined: HDMI display or geometry changed")
+                Sealion7HdmiProjection.findPhysicalDisplay(daemonContext)?.displayId != physicalId || ticket.expired()) {
+                logger.warn("$diagnostic declined: HDMI display or geometry changed, or request expired")
                 return null
             }
         }
@@ -614,7 +627,7 @@ object DiLink5HostedProjectionBridge {
             if (!HostedProjectionBoundary.canPublish(
                     pending[generation] === ticket,
                     sessions.containsKey(generation),
-                ) || ticket.cancelled
+                ) || ticket.cancelled || ticket.expired()
             ) {
                 false
             } else {

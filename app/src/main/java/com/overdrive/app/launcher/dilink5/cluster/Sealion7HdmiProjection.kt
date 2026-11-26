@@ -42,16 +42,40 @@ object Sealion7HdmiProjection {
     }
 
     internal fun matchesVehicleConfig(config: JSONObject, requireOptIn: Boolean): Boolean {
-        val vehicle = config.optJSONObject("vehicle")
-        return isUserSelected(vehicle?.opt("modelId"), vehicle?.opt("modelSource")) &&
-            (!requireOptIn || isOptedIn(config.optJSONObject("projection")))
+        return configRejection(config, requireOptIn) == null
     }
 
-    private fun findDisplay(context: Context, requireOptIn: Boolean): Display? = try {
-        if (isVehicleConfigured(requireOptIn)) {
-            context.getSystemService(DisplayManager::class.java)?.displays
-                ?.singleOrNull { AaosMapAreaCheck.isTarget(context, it) }
-        } else null
+    private fun configRejection(config: JSONObject, requireOptIn: Boolean): String? {
+        val vehicle = config.optJSONObject("vehicle")
+        if (!isUserSelected(vehicle?.opt("modelId"), vehicle?.opt("modelSource"))) {
+            return "vehicle model is not explicitly set to Sealion 7"
+        }
+        if (requireOptIn && !isOptedIn(config.optJSONObject("projection"))) return "Full HDMI opt-in is disabled"
+        return null
+    }
+
+    /** Called on the hosted service's worker before it posts the window operation to the main thread. */
+    internal fun createConfigRejection(
+        deadlineMs: Long,
+        testedFirmware: Boolean = isTestedFirmware(),
+        read: (Long) -> JSONObject? = UnifiedConfigManager::readDurableConfigBefore,
+    ): String? {
+        if (!testedFirmware) return "unsupported firmware"
+        return try {
+            val config = read(deadlineMs) ?: return "durable config lock busy"
+            configRejection(config, requireOptIn = true)
+        } catch (error: Exception) {
+            "durable config unavailable (${error.javaClass.simpleName})"
+        }
+    }
+
+    private fun findDisplay(context: Context, requireOptIn: Boolean): Display? =
+        if (isVehicleConfigured(requireOptIn)) findPhysicalDisplay(context) else null
+
+    /** Hardware-only check; CREATE rechecks the physical HDMI target after the worker admits the config. */
+    internal fun findPhysicalDisplay(context: Context): Display? = try {
+        context.getSystemService(DisplayManager::class.java)?.displays
+            ?.singleOrNull { AaosMapAreaCheck.isTarget(context, it) }
     } catch (_: Exception) {
         null
     }

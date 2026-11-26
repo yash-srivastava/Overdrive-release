@@ -61,6 +61,28 @@ class Sealion7HdmiProjectionTest {
     }
 
     @Test
+    fun createReportsTheActualAdmissionFailureAndUsesTheRequestDeadline() {
+        val selection = JSONObject().put("modelId", "sealion7").put("modelSource", "user")
+        val projection = JSONObject().put(Sealion7HdmiProjection.CONFIG_KEY, true)
+        val config = JSONObject().put("vehicle", selection).put("projection", projection)
+        val deadline = 3123L
+        fun rejection() = Sealion7HdmiProjection.createConfigRejection(deadline, true) {
+            assertEquals(deadline, it)
+            config
+        }
+        assertNull(rejection())
+        projection.put(Sealion7HdmiProjection.CONFIG_KEY, false)
+        assertEquals("Full HDMI opt-in is disabled", rejection())
+        selection.put("modelSource", "auto")
+        assertEquals("vehicle model is not explicitly set to Sealion 7", rejection())
+        assertEquals("durable config lock busy", Sealion7HdmiProjection.createConfigRejection(deadline, true) { null })
+        assertEquals("durable config unavailable (IllegalStateException)",
+            Sealion7HdmiProjection.createConfigRejection(deadline, true) { error("unreadable") })
+        assertEquals("unsupported firmware",
+            Sealion7HdmiProjection.createConfigRejection(deadline, false) { error("unexpected config read") })
+    }
+
+    @Test
     fun fullWindowAndContentBufferMatchThePanelWithoutAnApprovedMapRectangle() {
         val display = AppDisplayInfo(2, 1920, 720, 160)
         val expected = HostedProjectionGeometry(
