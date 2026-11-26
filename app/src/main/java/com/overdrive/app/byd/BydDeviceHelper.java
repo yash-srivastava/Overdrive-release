@@ -1124,6 +1124,53 @@ public final class BydDeviceHelper {
         return null;
     }
 
+    private static Class<?> resolveGenericListenerInterface(Object device) throws ClassNotFoundException {
+        String listenerInterfaceName = "android.hardware.IBYDAutoListener";
+        Class<?> iListener = getListenerInterface(device.getClass(), listenerInterfaceName);
+        if (iListener == null) {
+            iListener = Class.forName(listenerInterfaceName);
+        }
+        return iListener;
+    }
+
+    private static Object newGenericListenerProxy(Class<?> iListener, ListenerCallback callback) {
+        return java.lang.reflect.Proxy.newProxyInstance(
+            iListener.getClassLoader(),
+            new Class<?>[]{iListener},
+            (p, method, args) -> {
+                String name = method.getName();
+                if ("hashCode".equals(name)) return System.identityHashCode(p);
+                if ("equals".equals(name)) return p == args[0];
+                if ("toString".equals(name)) return "BydListener";
+                try {
+                    callback.onCallback(name, args);
+                } catch (Exception e) {
+                    logger.debug("Listener callback error: " + name + " — " + e.getMessage());
+                }
+                return null;
+            }
+        );
+    }
+
+    private static void logRegisterListenerOverloads(Object device, String deviceName) {
+        Method[] allMethods = device.getClass().getMethods();
+        StringBuilder overloads = new StringBuilder();
+        for (Method m : allMethods) {
+            if ("registerListener".equals(m.getName())) {
+                Class<?>[] params = m.getParameterTypes();
+                overloads.append("  registerListener(");
+                for (int i = 0; i < params.length; i++) {
+                    if (i > 0) overloads.append(", ");
+                    overloads.append(params[i].getSimpleName());
+                }
+                overloads.append(")\n");
+            }
+        }
+        if (overloads.length() > 0) {
+            logger.info(deviceName + " registerListener overloads:\n" + overloads);
+        }
+    }
+
     /**
      * Register a listener on a device using IBYDAutoListener interface.
      * Creates a dynamic proxy that forwards all calls to the callback.
@@ -1132,27 +1179,8 @@ public final class BydDeviceHelper {
         if (device == null) return false;
         ensureRuntimeSdk();
         try {
-            String listenerInterfaceName = "android.hardware.IBYDAutoListener";
-            Class<?> iListener = getListenerInterface(device.getClass(), listenerInterfaceName);
-            if (iListener == null) {
-                iListener = Class.forName(listenerInterfaceName);
-            }
-            Object proxy = java.lang.reflect.Proxy.newProxyInstance(
-                iListener.getClassLoader(),
-                new Class<?>[]{iListener},
-                (p, method, args) -> {
-                    String name = method.getName();
-                    if ("hashCode".equals(name)) return System.identityHashCode(p);
-                    if ("equals".equals(name)) return p == args[0];
-                    if ("toString".equals(name)) return "BydListener";
-                    try {
-                        callback.onCallback(name, args);
-                    } catch (Exception e) {
-                        logger.debug("Listener callback error: " + name + " — " + e.getMessage());
-                    }
-                    return null;
-                }
-            );
+            Class<?> iListener = resolveGenericListenerInterface(device);
+            Object proxy = newGenericListenerProxy(iListener, callback);
 
             // Try registerListener(IBYDAutoListener)
             Method register = findRegisterMethod(device.getClass(), iListener);
@@ -1173,27 +1201,8 @@ public final class BydDeviceHelper {
         if (device == null) return false;
         ensureRuntimeSdk();
         try {
-            String listenerInterfaceName = "android.hardware.IBYDAutoListener";
-            Class<?> iListener = getListenerInterface(device.getClass(), listenerInterfaceName);
-            if (iListener == null) {
-                iListener = Class.forName(listenerInterfaceName);
-            }
-            Object proxy = java.lang.reflect.Proxy.newProxyInstance(
-                iListener.getClassLoader(),
-                new Class<?>[]{iListener},
-                (p, method, args) -> {
-                    String name = method.getName();
-                    if ("hashCode".equals(name)) return System.identityHashCode(p);
-                    if ("equals".equals(name)) return p == args[0];
-                    if ("toString".equals(name)) return "BydListener";
-                    try {
-                        callback.onCallback(name, args);
-                    } catch (Exception e) {
-                        logger.debug("Listener callback error: " + name + " — " + e.getMessage());
-                    }
-                    return null;
-                }
-            );
+            Class<?> iListener = resolveGenericListenerInterface(device);
+            Object proxy = newGenericListenerProxy(iListener, callback);
 
             // Try registerListener(IBYDAutoListener, int[])
             Method register = findRegisterMethodWithIds(device.getClass(), iListener);
@@ -1559,23 +1568,7 @@ public final class BydDeviceHelper {
                     }
                 };
 
-            // Log available registerListener overloads for diagnostics
-            Method[] allMethods = device.getClass().getMethods();
-            StringBuilder overloads = new StringBuilder();
-            for (Method m : allMethods) {
-                if ("registerListener".equals(m.getName())) {
-                    Class<?>[] params = m.getParameterTypes();
-                    overloads.append("  registerListener(");
-                    for (int i = 0; i < params.length; i++) {
-                        if (i > 0) overloads.append(", ");
-                        overloads.append(params[i].getSimpleName());
-                    }
-                    overloads.append(")\n");
-                }
-            }
-            if (overloads.length() > 0) {
-                logger.info("TyreDevice registerListener overloads:\n" + overloads);
-            }
+            logRegisterListenerOverloads(device, "TyreDevice");
 
             if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
                 return registerLegacyAdditive(
@@ -1660,24 +1653,7 @@ public final class BydDeviceHelper {
                     }
                 };
 
-            // Diagnostic: dump all registerListener overloads so we know what
-            // shapes the HAL exposes on this firmware.
-            Method[] allMethods = device.getClass().getMethods();
-            StringBuilder overloads = new StringBuilder();
-            for (Method m : allMethods) {
-                if ("registerListener".equals(m.getName())) {
-                    Class<?>[] params = m.getParameterTypes();
-                    overloads.append("  registerListener(");
-                    for (int i = 0; i < params.length; i++) {
-                        if (i > 0) overloads.append(", ");
-                        overloads.append(params[i].getSimpleName());
-                    }
-                    overloads.append(")\n");
-                }
-            }
-            if (overloads.length() > 0) {
-                logger.info("EngineDevice registerListener overloads:\n" + overloads);
-            }
+            logRegisterListenerOverloads(device, "EngineDevice");
 
             if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
                 return registerLegacyAdditive(
