@@ -40,13 +40,11 @@ import com.google.android.material.card.MaterialCardView
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import com.google.android.material.color.MaterialColors
-import com.google.android.material.datepicker.CalendarConstraints
-import com.google.android.material.datepicker.DateValidatorPointBackward
-import com.google.android.material.datepicker.MaterialDatePicker
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.sidesheet.SideSheetDialog
 import com.overdrive.app.R
 import com.overdrive.app.ui.model.RecordingFile
+import com.overdrive.app.ui.util.RecordingDateSelection
 import com.overdrive.app.ui.util.RecordingScanner
 import com.overdrive.app.ui.util.RecordingUiText
 import com.overdrive.app.ui.util.RecordingsApiClient
@@ -1648,64 +1646,17 @@ class RecordingsFragment : Fragment() {
     // -----------------------------------------------------------------
 
     private fun showDatePicker() {
-        val constraints = CalendarConstraints.Builder()
-            .setEnd(MaterialDatePicker.todayInUtcMilliseconds())
-            .setValidator(DateValidatorPointBackward.now())
-            .build()
-
-        val selectedUtcMs = utcMidnightMillis(
-            calendar.get(Calendar.YEAR),
-            calendar.get(Calendar.MONTH),
-            selectedDay
-        )
-
-        val picker = MaterialDatePicker.Builder.datePicker()
-            .setTitleText(R.string.recording_lib_pick_date)
-            .setCalendarConstraints(constraints)
-            .setSelection(selectedUtcMs)
-            .build()
-
-        picker.addOnPositiveButtonClickListener { utcMs ->
-            val cal = Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
-                timeInMillis = utcMs
-            }
-            calendar.set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), 1)
-            selectedDay = cal.get(Calendar.DAY_OF_MONTH)
-            dateNarrowed = true
-            view?.let { updateDateHeader(it) }
-            view?.let { renderActiveFilterAffordances(it) }
-            libraryFragment?.let { applyAllFiltersTo(it) }
-        }
-
-        picker.show(parentFragmentManager, "recording_lib_date_picker")
-    }
-
-    private fun utcMidnightMillis(year: Int, month: Int, day: Int): Long {
-        val cal = Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
-            clear()
-            set(year, month, day, 0, 0, 0)
-            set(Calendar.MILLISECOND, 0)
-        }
-        return cal.timeInMillis
+        RecordingDateSelection.showPicker(parentFragmentManager, calendar, selectedDay, ::selectDate)
     }
 
     private fun shiftSelectedDay(delta: Int) {
-        val cal = Calendar.getInstance().apply {
-            set(calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH), selectedDay)
-            add(Calendar.DAY_OF_MONTH, delta)
-        }
-        val today = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-        }
-        val candidate = (cal.clone() as Calendar).apply {
-            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-        }
-        if (candidate.after(today)) return
+        val day = RecordingDateSelection.shiftDay(calendar, selectedDay, delta) ?: return
+        selectDate(day)
+    }
 
-        calendar.set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), 1)
-        selectedDay = cal.get(Calendar.DAY_OF_MONTH)
+    private fun selectDate(day: Calendar) {
+        calendar.set(day.get(Calendar.YEAR), day.get(Calendar.MONTH), 1)
+        selectedDay = day.get(Calendar.DAY_OF_MONTH)
         dateNarrowed = true
         view?.let { updateDateHeader(it) }
         view?.let { renderActiveFilterAffordances(it) }
