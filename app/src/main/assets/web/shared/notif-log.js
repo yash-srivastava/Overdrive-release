@@ -29,6 +29,7 @@ var NOTIFLOG = {
     _menuKind: null,      // which filter chip's sheet is open ('date'|'cat'|'sev')
     categories: [],          // registry entries: {id,label,group,severity,...}
     loaded: false,
+    _loadState: 'idle',
 
     // Filters
     currentDays: 0,          // 0 = all time (default — a log wants everything)
@@ -66,15 +67,22 @@ var NOTIFLOG = {
     load: function () {
         var self = this;
         var seq = ++this._loadSeq;   // tag this request; ignore stale responses
+        this._loadState = 'loading';
         this._showSkeleton();
         var url = '/api/notifications/log?' + this._query();
-        BYDAuth.fetch(url).then(function (r) { return r.json(); })
+        BYDAuth.fetch(url).then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        })
             .then(function (d) {
                 if (seq !== self._loadSeq) return;   // a newer load superseded us
+                if (!d || d.success !== true || !Array.isArray(d.notifications)) {
+                    throw new Error('Invalid notification log response');
+                }
+                self._loadState = 'ready';
                 self._hideSkeleton();
-                if (!d || d.success !== true) { self._renderEmpty(); return; }
                 if (d.categories) self.categories = d.categories;
-                self.notifications = d.notifications || [];
+                self.notifications = d.notifications;
                 self.total = d.total || 0;
                 self.totalPages = d.totalPages || 1;
                 self.currentPage = d.page || 1;
@@ -90,6 +98,7 @@ var NOTIFLOG = {
             })
             .catch(function () {
                 if (seq !== self._loadSeq) return;
+                self._loadState = 'failed';
                 self._hideSkeleton();
                 self._renderEmpty();
                 self._toast(self._t('notiflog.load_failed', 'Could not load notifications'), 'error');
@@ -120,6 +129,8 @@ var NOTIFLOG = {
 
         var empty = document.getElementById('nlEmpty');
         if (empty) empty.style.display = 'none';
+        var error = document.getElementById('nlLoadError');
+        if (error) error.style.display = 'none';
 
         list.innerHTML = '';
         // Formatters are lazy and scoped to this render, so locale/timezone
@@ -136,6 +147,10 @@ var NOTIFLOG = {
     _updateCount: function () {
         var el = document.getElementById('nlCount');
         if (!el) return;
+        if (this._loadState === 'failed' || (this._loadState === 'loading' && !this.notifications.length)) {
+            el.style.display = 'none';
+            return;
+        }
         el.style.display = '';
         if (!this.total) {
             // Header count doubles as a compact empty label so the header never
@@ -156,7 +171,9 @@ var NOTIFLOG = {
         this.total = 0;
         this.totalPages = 1;
         var empty = document.getElementById('nlEmpty');
-        if (empty) empty.style.display = '';
+        if (empty) empty.style.display = this._loadState === 'ready' ? '' : 'none';
+        var error = document.getElementById('nlLoadError');
+        if (error) error.style.display = this._loadState === 'failed' ? '' : 'none';
         this._updatePagination();
         this._updateBulkBar();
         this._updateCount();
@@ -908,6 +925,11 @@ var NOTIFLOG = {
     _showSkeleton: function () {
         var sk = document.getElementById('nlSkeleton');
         if (sk) sk.style.display = '';
+        var empty = document.getElementById('nlEmpty');
+        if (empty) empty.style.display = 'none';
+        var error = document.getElementById('nlLoadError');
+        if (error) error.style.display = 'none';
+        if (!this.notifications.length) this._updateCount();
         var list = document.getElementById('nlList');
         if (list && !this.notifications.length) list.innerHTML = '';
     },
