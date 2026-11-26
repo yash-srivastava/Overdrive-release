@@ -341,15 +341,20 @@ final class ParkedPhoneAudioGuard {
         boolean marked = record != null && record.mediaDisconnected;
         if (!marked && (record == null || !put(key, record.withMediaDisconnected(true)))) return;
         phone.mediaDisconnects++;
+        boolean dropped = false;
         try {
-            if (!platform.disconnectMedia(key)) phone.detail = "media_disconnect_rejected";
+            dropped = platform.disconnectMedia(key);
+            if (!dropped) phone.detail = "media_disconnect_rejected";
             else logger.log("Parked phone audio: media disconnected for a trusted phone");
         } catch (Exception refused) {
             phone.detail = stage("media_disconnect_failed", refused);
-            if (permanent(refused)) {
-                phone.mediaUnsupported = true;
-                if (!marked) put(key, records().get(key).withMediaDisconnected(false));
-            }
+            if (permanent(refused)) phone.mediaUnsupported = true;
+        }
+        // The mark was written ahead for crash safety. If this first drop did not happen,
+        // take it back so power-on does not connect media that was never dropped.
+        if (!dropped && !marked) {
+            Record current = records().get(key);
+            if (current != null) put(key, current.withMediaDisconnected(false));
         }
     }
 

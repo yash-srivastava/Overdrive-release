@@ -165,6 +165,18 @@ public class ParkedPhoneAudioGuardTest {
         assertEquals(0, platform.mediaConnects);
     }
 
+    @Test public void transientMediaFailureDoesNotReconnectMediaTheUserDroppedThemselves() {
+        platform.mediaConnected = true;
+        platform.mediaFailure = new IllegalStateException("busy");
+        for (int i = 0; i < ParkedPhoneAudioPolicy.MAX_MEDIA_DISCONNECTS; i++) {
+            tick(true, 0, true);
+        }
+        assertFalse(store.records.get(PHONE).mediaDisconnected);
+        platform.mediaConnected = false; // dropped outside OverDrive
+        tick(true, 1, true);
+        assertEquals(0, platform.mediaConnects);
+    }
+
     @Test public void failedRestoreStaysPendingAndRetries() {
         tick(true, 0, true);
         platform.setFailure = new IllegalStateException("radio");
