@@ -213,6 +213,25 @@ bool prepareOverlay(const uint8_t* rgba, size_t rgbaCap, int bw, int bh, int row
     float* rowU[2] = {scratch + 2 * (size_t) w, scratch + 3 * (size_t) w};
     float* rowV[2] = {scratch + 4 * (size_t) w, scratch + 5 * (size_t) w};
 
+    // The horizontal bilinear mapping is identical for every output row.
+    // Preserve the original double expression and clamping (no accumulated step).
+    struct Column {
+        int x0, x1;
+        double wx;
+    };
+    Column* columns = new (std::nothrow) Column[w];
+    if (!columns) {
+        delete[] scratch;
+        return false;
+    }
+    for (int x = 0; x < w; x++) {
+        double fx = ((double) x + 0.5) * bw / w - 0.5;
+        if (fx < 0) fx = 0;
+        if (fx > bw - 1) fx = bw - 1;
+        const int x0 = (int) fx;
+        columns[x] = {x0, x0 + 1 < bw ? x0 + 1 : x0, fx - x0};
+    }
+
     for (int yc = 0; yc < h / 2; yc++) {
         for (int k = 0; k < 2; k++) {
             const int y = yc * 2 + k;
@@ -227,12 +246,10 @@ bool prepareOverlay(const uint8_t* rgba, size_t rgbaCap, int bw, int bh, int row
             int first = -1, last = -1;
             uint16_t* ty = tabY + (size_t) y * w * 2;
             for (int x = 0; x < w; x++) {
-                double fx = ((double) x + 0.5) * bw / w - 0.5;
-                if (fx < 0) fx = 0;
-                if (fx > bw - 1) fx = bw - 1;
-                const int x0 = (int) fx;
-                const int x1 = x0 + 1 < bw ? x0 + 1 : x0;
-                const double wx = fx - x0;
+                const Column& column = columns[x];
+                const int x0 = column.x0;
+                const int x1 = column.x1;
+                const double wx = column.wx;
                 const uint8_t* p00 = r0 + (size_t) x0 * 4;
                 const uint8_t* p01 = r0 + (size_t) x1 * 4;
                 const uint8_t* p10 = r1 + (size_t) x0 * 4;
@@ -273,20 +290,26 @@ bool prepareOverlay(const uint8_t* rgba, size_t rgbaCap, int bw, int bh, int row
         for (int xc = 0; xc < wc; xc++) {
             const int x = xc * 2;
             const double a = ((double) rowA[0][x] + rowA[0][x + 1] + rowA[1][x] + rowA[1][x + 1]) * 0.25;
+            // Zero (or rounded-to-zero) alpha is an identity blend. Do not
+            // load/average the two chroma channels when their weights are unused.
+            const long a256 = a == 0.0 ? 0 : lround(a * 256.0);
+            if (a256 <= 0) {
+                tc[xc * 3] = tc[xc * 3 + 1] = 0;
+                tc[xc * 3 + 2] = 256;
+                continue;
+            }
             const double pu = ((double) rowU[0][x] + rowU[0][x + 1] + rowU[1][x] + rowU[1][x + 1]) * 0.25;
             const double pv = ((double) rowV[0][x] + rowV[0][x + 1] + rowV[1][x] + rowV[1][x + 1]) * 0.25;
-            const long a256 = lround(a * 256.0);
-            tc[xc * 3] = a256 > 0 ? clampU16(pu * 256.0) : 0;
-            tc[xc * 3 + 1] = a256 > 0 ? clampU16(pv * 256.0) : 0;
-            tc[xc * 3 + 2] = (uint16_t) (256 - (a256 < 0 ? 0 : a256 > 256 ? 256 : a256));
-            if (a256 > 0) {
-                if (first < 0) first = xc;
-                last = xc;
-            }
+            tc[xc * 3] = clampU16(pu * 256.0);
+            tc[xc * 3 + 1] = clampU16(pv * 256.0);
+            tc[xc * 3 + 2] = (uint16_t) (256 - (a256 > 256 ? 256 : a256));
+            if (first < 0) first = xc;
+            last = xc;
         }
         spansC[yc * 2] = first < 0 ? 0 : first;
         spansC[yc * 2 + 1] = first < 0 ? 0 : last + 1;
     }
+    delete[] columns;
     delete[] scratch;
     hdr[3] = 1;
     return true;
