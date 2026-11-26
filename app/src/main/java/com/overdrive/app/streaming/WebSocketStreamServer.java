@@ -2,6 +2,7 @@ package com.overdrive.app.streaming;
 
 import org.java_websocket.server.WebSocketServer;
 import org.java_websocket.WebSocket;
+import org.java_websocket.WebSocketImpl;
 import org.java_websocket.drafts.Draft;
 import org.java_websocket.exceptions.InvalidDataException;
 import org.java_websocket.framing.CloseFrame;
@@ -53,6 +54,11 @@ public class WebSocketStreamServer extends WebSocketServer
                 return thread;
             });
     private final Set<WebSocket> pendingKeyframeRetries =
+            Collections.newSetFromMap(new ConcurrentHashMap<>());
+    // Serialize application-level sends (drainer, onOpen, keyframe retry).
+    // The library's socket writer remains independent.
+    private final Object directSendLock = new Object();
+    private final Set<WebSocket> pendingCongestionCloses =
             Collections.newSetFromMap(new ConcurrentHashMap<>());
     private Timer idleTimer;
     private volatile long lastClientDisconnectElapsedMs = 0;
@@ -184,10 +190,12 @@ public class WebSocketStreamServer extends WebSocketServer
             idleShutdownTriggered = false;
         }
         logger.info("WS Client connected: " + conn.getRemoteSocketAddress() + " (total: " + clients.size() + ")");
-        if (cachedSpsPps != null) {
+        byte[] headers = cachedSpsPps;
+        if (headers != null) {
             try {
-                conn.send(cachedSpsPps);
-                logger.info("Sent cached SPS/PPS (" + cachedSpsPps.length + " bytes)");
+                if (sendBounded(conn, ByteBuffer.wrap(headers))) {
+                    logger.info("Sent cached SPS/PPS (" + headers.length + " bytes)");
+                }
             } catch (Exception e) {
                 logger.error("Failed to send SPS/PPS", e);
             }
@@ -198,6 +206,7 @@ public class WebSocketStreamServer extends WebSocketServer
     public void onClose(WebSocket conn, int code, String reason, boolean remote) {
         clients.remove(conn);
         pendingKeyframeRetries.remove(conn);
+        pendingCongestionCloses.remove(conn);
         logger.info("WS Client disconnected (remaining: " + clients.size() + ")");
         if (clients.isEmpty() && !shutdownRequested) {
             lastClientDisconnectElapsedMs =
@@ -213,7 +222,7 @@ public class WebSocketStreamServer extends WebSocketServer
 
     @Override
     public void onMessage(WebSocket conn, String message) {
-        if (shutdownRequested) return;
+        if (shutdownRequested || pendingCongestionCloses.contains(conn)) return;
         if ("keyframe".equals(message)) {
             // A live-view stream client (port 8887, fed by streamEncoder) requests a
             // clean decode restart — typically because its decoder just (re)gained a
@@ -230,7 +239,9 @@ public class WebSocketStreamServer extends WebSocketServer
             logger.info("Client requested keyframe — re-sending SPS/PPS + sync frame");
             byte[] sps = cachedSpsPps;
             if (sps != null && sps.length > 0) {
-                try { conn.send(sps); } catch (Exception e) {
+                try {
+                    if (!sendBounded(conn, ByteBuffer.wrap(sps))) return;
+                } catch (Exception e) {
                     logger.warn("keyframe: SPS/PPS resend failed: " + e.getMessage());
                 }
             } else {
@@ -261,7 +272,7 @@ public class WebSocketStreamServer extends WebSocketServer
                             if (shutdownRequested) return;
                             byte[] late = cachedSpsPps;
                             if (late != null && late.length > 0 && deferredConn.isOpen()) {
-                                try { deferredConn.send(late); } catch (Exception e) {
+                                try { sendBounded(deferredConn, ByteBuffer.wrap(late)); } catch (Exception e) {
                                     logger.warn("keyframe: deferred SPS/PPS resend failed: " + e.getMessage());
                                 }
                             } else if (late == null) {
@@ -507,12 +518,44 @@ public class WebSocketStreamServer extends WebSocketServer
             try {
                 if (conn.isOpen()) {
                     wrapped.position(0);
-                    conn.send(wrapped);
+                    sendBounded(conn, wrapped);
                 }
                 else clients.remove(conn);
             } catch (Exception e) {
                 clients.remove(conn);
             }
+        }
+    }
+
+    /**
+     * Do not feed an unbounded java-WebSocket outbound queue. A slow legacy
+     * viewer must reconnect rather than silently lose a reference picture.
+     * Disconnect on the shared scheduler, not on the encoder drain thread.
+     */
+    private boolean sendBounded(WebSocket conn, ByteBuffer payload) {
+        synchronized (directSendLock) {
+            if (shutdownRequested || !clients.contains(conn) || !conn.isOpen()
+                    || pendingCongestionCloses.contains(conn)) return false;
+            if (conn instanceof WebSocketImpl
+                    && DirectStreamBacklogPolicy.wouldExceed(
+                            ((WebSocketImpl) conn).outQueue, payload.remaining())) {
+                pendingCongestionCloses.add(conn);
+                KEYFRAME_RETRY_EXECUTOR.execute(() -> {
+                    try {
+                        logger.warn("WS: disconnecting slow legacy stream viewer");
+                        // Immediate close: a graceful close would sit behind
+                        // the same queued video that caused the congestion.
+                        conn.closeConnection(CloseFrame.ABNORMAL_CLOSE, "Stream backlog");
+                    } catch (Exception e) {
+                        onError(conn, e);
+                    } finally {
+                        pendingCongestionCloses.remove(conn);
+                    }
+                });
+                return false;
+            }
+            conn.send(payload);
+            return true;
         }
     }
 
@@ -532,6 +575,7 @@ public class WebSocketStreamServer extends WebSocketServer
             }
             clients.clear();
             pendingKeyframeRetries.clear();
+            pendingCongestionCloses.clear();
             cachedSpsPps = null;
             reusableFrameBuffer = null;
             frameCount = 0;

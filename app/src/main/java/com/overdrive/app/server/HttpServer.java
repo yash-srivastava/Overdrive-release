@@ -2888,10 +2888,10 @@ public class HttpServer {
      * This gives instant stream start with no encoder restart, no frame corruption,
      * and no broken pipe from the client timing out during restart.
      *
-     * Congestion: frames go through {@link StreamFrameDropPolicy}, which never
-     * drops an IDR on its own and, once the viewer falls behind, discards
-     * whole GOPs until the next keyframe instead of leaving reference-broken
-     * P-frames in the stream. Encoder restarts (quality change from another
+     * Congestion: frames go through {@link StreamFrameDropPolicy}, which caps
+     * queued video backing arrays at 4 MiB per viewer and discards whole GOPs
+     * until a keyframe fits instead of leaving reference-broken P-frames in
+     * the stream. Encoder restarts (quality change from another
      * viewer) are survived on the same socket: the retiring encoder posts a
      * sentinel through {@code StreamCallback.onStreamRetired()} and the loop
      * re-attaches to the replacement encoder (see {@link #reattachAfterRetire}).
