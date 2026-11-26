@@ -22,6 +22,7 @@ var ODRangeCalendar = (function () {
         var focusedKey = active && active.parentNode === grid && active.dataset
             ? active.dataset.date : null;
         grid.innerHTML = '';
+        var focusEl = null;
 
         var dayFmt;
         try { dayFmt = new Intl.DateTimeFormat(lang, { year: 'numeric', month: 'long', day: 'numeric' }); }
@@ -51,6 +52,8 @@ var ODRangeCalendar = (function () {
         for (var d2 = 1; d2 <= trailingDays; d2++) {
             appendDay(d2, dateKey(new Date(year, month + 1, d2)), true);
         }
+        // Refocus once the grid is complete; focusing mid-rebuild clamps a scrolled sheet.
+        if (focusEl) focusEl.focus();
 
         function appendDay(day, key, otherMonth) {
             var el = document.createElement('div');
@@ -82,7 +85,7 @@ var ODRangeCalendar = (function () {
             }
             grid.appendChild(el);
             // Notification range selection rebuilds the grid after each pick.
-            if (key === focusedKey && key <= todayKey) el.focus();
+            if (key === focusedKey && key <= todayKey) focusEl = el;
         }
     }
 
