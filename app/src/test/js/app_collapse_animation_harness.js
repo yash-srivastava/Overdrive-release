@@ -30,7 +30,12 @@ function fixture() {
             addEventListener: (type, handler) => { handlers[type] = handler; },
             querySelector: () => null,
             appendChild: () => {},
-            click() { handlers.click({ target: this }); }
+            click() { handlers.click({ target: this }); },
+            keydown(options) {
+                let prevented = false;
+                handlers.keydown(Object.assign({ target: this, preventDefault() { prevented = true; } }, options));
+                return prevented;
+            }
         };
     }
     function makeCard(id, closed) {
@@ -140,4 +145,40 @@ function fixture() {
     assert.strictEqual(a.body.style.maxHeight, 'none');
     assert.strictEqual(saved.get('ot-card-collapsed:settings.html:a'), '0');
 }
-console.log('app_collapse_animation_harness: 4 scenarios passed');
+// A held activation key must not repeatedly toggle or restart the animation.
+for (const key of [{ key: 'Enter' }, { key: ' ' }, { keyCode: 13 }, { keyCode: 32 }]) {
+    const { a, advance, timers, saved } = fixture();
+    assert.strictEqual(a.header.keydown(key), true);
+    assert.strictEqual(a.header.getAttribute('aria-expanded'), 'true');
+    advance(100);
+    for (let i = 0; i < 3; i++) {
+        assert.strictEqual(a.header.keydown({ ...key, repeat: true }), true,
+            'repeated activation must still prevent default scrolling');
+        assert.strictEqual(a.header.getAttribute('aria-expanded'), 'true',
+            'holding an activation key must not toggle again');
+        assert.strictEqual(saved.get('ot-card-collapsed:settings.html:a'), '0');
+        assert.strictEqual(timers.size, 1);
+    }
+    advance(220);
+    assert.strictEqual(a.body.style.maxHeight, 'none', 'original expansion deadline is preserved');
+    assert.strictEqual(a.header.keydown(key), true, 'a separate press still toggles');
+    assert.strictEqual(a.header.getAttribute('aria-expanded'), 'false');
+    assert.strictEqual(saved.get('ot-card-collapsed:settings.html:a'), '1');
+    assert.strictEqual(a.header.keydown({ ...key, repeat: true }), true);
+    assert.strictEqual(a.header.getAttribute('aria-expanded'), 'false');
+    assert.strictEqual(timers.size, 0);
+}
+
+// Child controls and unrelated keys must keep their native behavior.
+{
+    const { a, timers, saved } = fixture();
+    assert.strictEqual(a.header.keydown({ key: ' ', target: {}, repeat: true }), false);
+    assert.strictEqual(a.header.keydown({ key: 'Enter', target: {} }), false);
+    assert.strictEqual(a.header.keydown({ key: 'Tab', repeat: true }), false);
+    assert.strictEqual(a.header.getAttribute('aria-expanded'), 'false');
+    assert.strictEqual(saved.size, 0);
+    assert.strictEqual(timers.size, 0);
+    a.toggle();
+    assert.strictEqual(a.header.getAttribute('aria-expanded'), 'true');
+}
+console.log('app_collapse_animation_harness: 9 scenarios passed');
