@@ -18,6 +18,8 @@ void main() {
     val timelineDewarpShader = dewarpFragment(withAlpha = true)
 
     // Timeline blends frames with premultiplied opacity; standalone playback does not.
+    // The dewarp is point-symmetric about each tile centre, so working in
+    // texture space (y up) matches the recorder's image-space result.
     private fun dewarpFragment(withAlpha: Boolean): String {
         val alphaUniform = if (withAlpha) "uniform float uAlpha;\n" else ""
         val opacity = if (withAlpha) " * uAlpha" else ""
