@@ -1,7 +1,5 @@
 package com.overdrive.app.battery;
 
-import com.overdrive.app.byd.BydVehicleData;
-
 import org.json.JSONObject;
 
 /**

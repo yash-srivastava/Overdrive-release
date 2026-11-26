@@ -5,7 +5,6 @@ import com.overdrive.app.storage.removable.RemovableStorageFs;
 import org.json.JSONObject;
 
 import java.io.File;
-import java.io.FileWriter;
 
 /**
  * Handles /backup — the TELEGRAM surface of the settings backup feature.

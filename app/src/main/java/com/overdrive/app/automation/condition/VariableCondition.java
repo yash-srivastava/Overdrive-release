@@ -4,11 +4,9 @@ import com.overdrive.app.automation.AutomationCondition;
 import com.overdrive.app.automation.action.SetVariableAction;
 import com.overdrive.app.automation.type.StringType;
 import com.overdrive.app.automation.value.Label;
-import com.overdrive.app.server.Messages;
 
 import org.json.JSONObject;
 
-import java.util.Map;
 
 /**
  * A trigger/condition on a named user VARIABLE (see {@link SetVariableAction}).

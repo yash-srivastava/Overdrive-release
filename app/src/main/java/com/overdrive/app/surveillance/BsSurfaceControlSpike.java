@@ -1,6 +1,5 @@
 package com.overdrive.app.surveillance;
 
-import android.graphics.Point;
 import android.opengl.EGLSurface;
 import android.opengl.GLES20;
 import android.os.Handler;

@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.PixelFormat
 import android.graphics.RectF
-import android.graphics.Region
 import android.os.Build
 import android.util.DisplayMetrics
 import android.util.Log

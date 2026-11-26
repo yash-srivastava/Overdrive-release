@@ -6,7 +6,6 @@ import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.util.MessageFormatSafe;
 
 import java.io.File;
-import java.io.FileWriter;
 import java.lang.reflect.Method;
 import java.text.MessageFormat;
 import java.util.ArrayList;

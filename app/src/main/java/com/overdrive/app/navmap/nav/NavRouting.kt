@@ -1,12 +1,10 @@
 package com.overdrive.app.navmap.nav
 
 import com.overdrive.app.navmap.NavMapConfig
-import com.overdrive.app.navmap.google.GoogleApi
 import com.overdrive.app.navmap.google.GoogleHttp
 import com.overdrive.app.navmap.google.GoogleMapsBudget
 import com.overdrive.app.navmap.google.GoogleMapsConfig
 import com.overdrive.app.navmap.google.GoogleRoutesClient
-import com.overdrive.app.navmap.google.GoogleSku
 
 /**
  * Routing entry point: Google Routes while [googleActive], otherwise exactly [ValhallaRouteClient].

@@ -6,7 +6,6 @@ import com.overdrive.app.trips.TripRecord;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.text.SimpleDateFormat;

@@ -3,7 +3,6 @@ package com.overdrive.app.daemon.sentry;
 import android.content.Context;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
-import android.os.PowerManager;
 import android.provider.Settings;
 
 import com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend;

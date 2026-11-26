@@ -13,7 +13,6 @@ import com.overdrive.app.monitor.VehicleDataMonitor;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
