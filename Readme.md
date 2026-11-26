@@ -38,7 +38,7 @@ Download the latest APK from [GitHub Releases](https://github.com/yash-srivastav
 
 ### 2. Initial Configuration
 1. **Authorize ADB:** On first launch, accept the ADB authentication prompt on your device screen.
-2. **Background Persistence:** In Settings, ensure the **"Disable Autostart"** toggle is **unchecked**. This is critical for reliable background operation.
+2. **Background Persistence:** In Settings, ensure the **"Disable Autostart"** toggle is **unchecked**. This is critical for reliable background operation. On firmware with the BYD auto-start dialog, the setup guide's opt-in automatic recheck verifies the switch after an update and at delayed checkpoints (about one hour and one day after the first confirmation, when parked with the screen on). The WebUI dashboard shows the last observed switch state and time, not a live firmware reading. An unverified state may require an in-car check.
 
 > ⚠️ **CRITICAL: Hard Reboot Required**
 > After the first installation and initial run, you must hard reboot the device:

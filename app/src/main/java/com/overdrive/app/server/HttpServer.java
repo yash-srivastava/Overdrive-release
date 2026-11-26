@@ -2134,6 +2134,13 @@ public class HttpServer {
         }
         status.put("genAiDashboardEnabled",
                 GenAiConfig.isDashboardPresentationEnabled());
+        // DiLink 5 has a separate background-access mechanism; BYD100F normally
+        // has no restriction. Do not expose an unrelated or public-mode observation.
+        if (!CameraDaemon.isPublicMode()) {
+            JSONObject autoStart = com.overdrive.app.services.AutoStartObservation.read(
+                    CameraDaemon.getAppContext());
+            if (autoStart != null) status.put("autoStartObservation", autoStart);
+        }
 
         // Vehicle-data readiness, surfaced explicitly so the web UI can render
         // a "waiting for vehicle…" state instead of silently leaving every

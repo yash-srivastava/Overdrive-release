@@ -327,14 +327,14 @@
     <string name="setup_language_body">Defaults to your head unit\'s language. Tap to choose a different one for the OverDrive app and the web tunnel.</string>
     <string name="setup_language_button">Choose Language</string>
     <string name="setup_autostart_title">Disable Auto-Start Restriction</string>
-    <string name="setup_autostart_body">Tap below to open BYD Auto-Start. Find OverDrive in the list and uncheck the box. BYD wipes this on every install — you\'ll redo it after updates.</string>
+    <string name="setup_autostart_body">Tap below to open BYD Auto-Start. Find OverDrive in the list and uncheck the box. BYD may reset this after an update, so verify it again.</string>
     <string name="setup_autostart_button">Open BYD Auto-Start</string>
     <string name="setup_autostart_enabling">Enabling autostart…</string>
     <string name="setup_autostart_enabled">Autostart enabled ✓</string>
     <string name="setup_autostart_not_needed">Not needed on this car. Its system doesn\'t restrict OverDrive from starting on its own.</string>
     <string name="setup_autostart_failed">Couldn\'t enable autostart automatically — opening BYD Auto-Start so you can do it by hand.</string>
     <string name="setup_autostart_reapply">Redo this automatically after updates</string>
-    <string name="setup_autostart_reapply_hint">After each update, BYD Auto-Start opens for a moment and OverDrive unchecks itself. Only while parked with the screen on.</string>
+    <string name="setup_autostart_reapply_hint">After each update, OverDrive checks and unchecks the BYD restriction if needed, then checks again after about one hour and one day. Only while parked with the screen on.</string>
     <string name="setup_overlay_title">Allow Display Over Other Apps</string>
     <string name="setup_overlay_body">Enable this to show a floating status indicator for recording and trip tracking on top of other apps.</string>
     <string name="setup_overlay_button">Open Overlay Settings</string>
@@ -1022,7 +1022,7 @@
     <string name="play_with_chooser">Play with</string>
 
     <!-- Setup guide -->
-    <string name="setup_version_banner">Updated to %1$s — re-confirm autostart, BYD wipes it on every install</string>
+    <string name="setup_version_banner">Updated to %1$s — re-confirm auto-start, since BYD may reset it</string>
     <string name="setup_overlay_already_granted">Already Granted</string>
 
     <!-- Setup guide — post-setup tips section -->

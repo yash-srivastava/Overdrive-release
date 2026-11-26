@@ -2719,6 +2719,7 @@
                             <a class="dash-chip alert is-live" id="dashRecChip" href="events.html" hidden><span class="dash-chip-text" data-i18n="dashboard.chip_recording">Recording</span></a>
                             <span class="dash-chip" id="dashGpsChip" data-ico="nav"><span class="dash-chip-text" data-i18n="dashboard.chip_gps_pending">GPS --</span></span>
                             <a class="dash-chip" id="dashConnChip" href="network.html" data-ico="wifi"><span class="dash-chip-text" data-i18n="dashboard.chip_network_pending">Network --</span></a>
+                            <span class="dash-chip warn" id="dashAutoStartChip" data-ico="clock" hidden><span class="dash-chip-text" data-i18n="dashboard.autostart_unknown">Auto-start: not verified</span></span>
                         </div>
                         <div class="dash-glance-rows">
                             <div class="dash-glance-row">
@@ -4726,6 +4727,25 @@
                     return BYD.dashboard.onOffText(on);
                 }
 
+                var autoStart = status.autoStartObservation;
+                var autoStartChip = document.getElementById('dashAutoStartChip');
+                if (autoStartChip) autoStartChip.hidden = !autoStart;
+                if (autoStart) {
+                    var observedAt = Number(autoStart.checkedAt);
+                    var hasTime = Number.isFinite(observedAt) && observedAt > 0;
+                    var allowed = hasTime && autoStart.state === 'allowed';
+                    var blocked = hasTime && autoStart.state === 'blocked';
+                    var autoStartText = allowed
+                        ? tr('dashboard.autostart_allowed', 'Auto-start last seen allowed (switch OFF)')
+                        : blocked
+                            ? tr('dashboard.autostart_blocked', 'Auto-start last seen blocked (switch ON)')
+                            : tr('dashboard.autostart_unknown', 'Auto-start: not verified');
+                    if (hasTime) {
+                        autoStartText += ' · ' + new Date(observedAt).toLocaleString();
+                    }
+                    setChip('dashAutoStartChip', autoStartText, allowed ? '' : 'warn', 'clock');
+                }
+
                 var driveState = this.updateDriveState(status);
                 // Hero chips: surveillance → recording (only while it runs) →
                 // GPS fix → how the car is connected. Each links to its page.
@@ -4930,6 +4950,17 @@
                 if (state !== 'live') {
                     this.updateBluetoothStatus(
                         this.lastStatus && this.lastStatus.bluetooth, true);
+                    var autoStartChip = document.getElementById('dashAutoStartChip');
+                    if (autoStartChip && !autoStartChip.hidden) {
+                        var autoStartKey = 'dashboard.autostart_offline';
+                        var autoStartLabel = BYD.i18n.t(autoStartKey);
+                        if (!autoStartLabel || autoStartLabel === autoStartKey) {
+                            autoStartLabel = 'Auto-start: status unavailable';
+                        }
+                        autoStartChip.querySelector('.dash-chip-text').textContent = autoStartLabel;
+                        autoStartChip.title = autoStartLabel;
+                        autoStartChip.classList.add('warn');
+                    }
                 }
                 var chip = document.getElementById('dashConnChip');
                 if (!chip || state === 'live') return;
