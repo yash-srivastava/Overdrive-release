@@ -103,6 +103,30 @@ public class ConnectedComponentsTest {
         compare(new float[64], 8, 8, 0.3f, 1);
     }
 
+    @Test public void foregroundMaskPreservesThresholdAndNonFiniteSemantics() {
+        float[] scores = {Float.NaN, Float.NEGATIVE_INFINITY, -0.0f, 0.0f,
+                Math.nextDown(0.3f), 0.3f, Math.nextUp(0.3f), Float.POSITIVE_INFINITY};
+        for (float threshold : new float[] {Float.NEGATIVE_INFINITY, -0.0f, 0.3f,
+                Float.POSITIVE_INFINITY, Float.NaN}) {
+            compare(scores, 4, 2, threshold, 1);
+            compare(scores, 2, 4, threshold, 3);
+        }
+    }
+
+    @Test public void foregroundSeedsCrossBitWordsWithoutWrappingRows() {
+        // Sparse components straddling bitset words, with separate row edges.
+        int w = 65, h = 129;
+        float[] scores = new float[w * h + 64];
+        scores[63] = scores[64] = scores[65] = 0.75f;
+        scores[127] = scores[128] = scores[193] = 0.3f;
+        scores[64 * w + 32] = scores[65 * w + 33] = 0.8f;
+        scores[w * h - 1] = 0.9f;
+        Arrays.fill(scores, w * h, scores.length, 1f); // unused backing-array tail
+        compare(scores, w, h, 0.3f, 1);
+        compare(scores, w, h, 0.3f, 2);
+        compare(scores, w, h, 0.3f, 8);
+    }
+
     @Test public void invalidDimensionsReturnEmpty() {
         assertTrue(ConnectedComponents.label(null, 1, 1, 0.3f, 1).isEmpty());
         assertTrue(ConnectedComponents.label(new float[1], 0, 1, 0.3f, 1).isEmpty());
