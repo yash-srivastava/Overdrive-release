@@ -4,6 +4,7 @@ import com.overdrive.app.storage.removable.RemovableStorageFs;
 
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.storage.StorageManager;
+import com.overdrive.app.util.RecordingSizeFormatter;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -2853,7 +2854,7 @@ public final class RecordingsIndex {
         rec.put("size", size);
         rec.put("mp4Mtime", rs.getLong("mp4_mtime"));
         rec.put("watched", rs.getBoolean("watched"));
-        rec.put("sizeFormatted", formatSize(size));
+        rec.put("sizeFormatted", RecordingSizeFormatter.format(size, Locale.US));
 
         Date d = new Date(ts);
         rec.put("date", FMT_DATE_ISO.get().format(d));
@@ -2980,13 +2981,6 @@ public final class RecordingsIndex {
         c.set(Calendar.SECOND, 0);
         c.set(Calendar.MILLISECOND, 0);
         return c.getTimeInMillis();
-    }
-
-    private static String formatSize(long bytes) {
-        if (bytes >= 1_000_000_000L) return String.format(Locale.US, "%.1f GB", bytes / 1_000_000_000.0);
-        if (bytes >= 1_000_000L) return String.format(Locale.US, "%.1f MB", bytes / 1_000_000.0);
-        if (bytes >= 1_000L) return String.format(Locale.US, "%.1f KB", bytes / 1_000.0);
-        return bytes + " B";
     }
 
     private static final ThreadLocal<SimpleDateFormat> FMT_DATE_ISO =

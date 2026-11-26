@@ -7,6 +7,7 @@ import android.media.MediaMetadataRetriever;
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.storage.RecordingDirectoryRegistry;
 import com.overdrive.app.storage.StorageManager;
+import com.overdrive.app.util.RecordingSizeFormatter;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -1514,23 +1515,23 @@ public class RecordingsApiHandler {
         // Legacy flat fields — preserved verbatim for client compat.
         response.put("normalCount", s.normalCount);
         response.put("normalSize", s.normalBytes);
-        response.put("normalSizeFormatted", formatSize(s.normalBytes));
+        response.put("normalSizeFormatted", RecordingSizeFormatter.format(s.normalBytes, Locale.US));
         response.put("sentryCount", s.sentryCount);
         response.put("sentrySize", s.sentryBytes);
-        response.put("sentrySizeFormatted", formatSize(s.sentryBytes));
+        response.put("sentrySizeFormatted", RecordingSizeFormatter.format(s.sentryBytes, Locale.US));
         response.put("proximityCount", s.proximityCount);
         response.put("proximitySize", s.proximityBytes);
-        response.put("proximitySizeFormatted", formatSize(s.proximityBytes));
+        response.put("proximitySizeFormatted", RecordingSizeFormatter.format(s.proximityBytes, Locale.US));
         response.put("replayCount", s.replayCount);
         response.put("replaySize", s.replayBytes);
-        response.put("replaySizeFormatted", formatSize(s.replayBytes));
+        response.put("replaySizeFormatted", RecordingSizeFormatter.format(s.replayBytes, Locale.US));
         response.put("totalCount", s.totalCount());
         response.put("totalSize", s.totalBytes());
-        response.put("totalSizeFormatted", formatSize(s.totalBytes()));
+        response.put("totalSizeFormatted", RecordingSizeFormatter.format(s.totalBytes(), Locale.US));
         response.put("availableSpace", availableSpace);
-        response.put("availableSpaceFormatted", formatSize(availableSpace));
+        response.put("availableSpaceFormatted", RecordingSizeFormatter.format(availableSpace, Locale.US));
         response.put("totalSpace", totalSpace);
-        response.put("totalSpaceFormatted", formatSize(totalSpace));
+        response.put("totalSpaceFormatted", RecordingSizeFormatter.format(totalSpace, Locale.US));
         response.put("normalTodayCount", s.normalToday);
         response.put("sentryTodayCount", s.sentryToday);
         response.put("proximityTodayCount", s.proximityToday);
@@ -1589,7 +1590,7 @@ public class RecordingsApiHandler {
         JSONObject o = new JSONObject();
         o.put("count", count);
         o.put("bytes", bytes);
-        o.put("bytesFormatted", formatSize(bytes));
+        o.put("bytesFormatted", RecordingSizeFormatter.format(bytes, Locale.US));
         o.put("todayCount", today);
         return o;
     }
@@ -2127,16 +2128,5 @@ public class RecordingsApiHandler {
         }
 
         return null;
-    }
-    
-    private static String formatSize(long bytes) {
-        if (bytes >= 1_000_000_000) {
-            return String.format(Locale.US, "%.1f GB", bytes / 1_000_000_000.0);
-        } else if (bytes >= 1_000_000) {
-            return String.format(Locale.US, "%.1f MB", bytes / 1_000_000.0);
-        } else if (bytes >= 1_000) {
-            return String.format(Locale.US, "%.1f KB", bytes / 1_000.0);
-        }
-        return bytes + " B";
     }
 }

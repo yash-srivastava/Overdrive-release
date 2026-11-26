@@ -10,6 +10,7 @@ import androidx.lifecycle.MutableLiveData
 import com.overdrive.app.client.CameraDaemonClient
 import com.overdrive.app.logging.LogManager
 import com.overdrive.app.ui.util.PreferencesManager
+import com.overdrive.app.util.RecordingSizeFormatter
 import org.json.JSONObject
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -215,18 +216,9 @@ class RecordingViewModel(app: Application) : AndroidViewModel(app) {
         val availableBytes: Long,
         val totalBytes: Long
     ) {
-        val usedFormatted: String get() = formatBytes(usedBytes)
-        val availableFormatted: String get() = formatBytes(availableBytes)
-        val totalFormatted: String get() = formatBytes(totalBytes)
+        val usedFormatted: String get() = RecordingSizeFormatter.format(usedBytes)
+        val availableFormatted: String get() = RecordingSizeFormatter.format(availableBytes)
+        val totalFormatted: String get() = RecordingSizeFormatter.format(totalBytes)
         val usagePercent: Int get() = if (totalBytes > 0) ((usedBytes * 100) / totalBytes).toInt() else 0
-        
-        private fun formatBytes(bytes: Long): String {
-            return when {
-                bytes >= 1_000_000_000 -> String.format("%.1f GB", bytes / 1_000_000_000.0)
-                bytes >= 1_000_000 -> String.format("%.1f MB", bytes / 1_000_000.0)
-                bytes >= 1_000 -> String.format("%.1f KB", bytes / 1_000.0)
-                else -> "$bytes B"
-            }
-        }
     }
 }

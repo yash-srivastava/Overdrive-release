@@ -1,6 +1,7 @@
 package com.overdrive.app.ui.model
 
 import android.net.Uri
+import com.overdrive.app.util.RecordingSizeFormatter
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -102,12 +103,7 @@ data class RecordingFile(
         }
     
     val formattedSize: String
-        get() = when {
-            sizeBytes >= 1_000_000_000 -> String.format("%.1f GB", sizeBytes / 1_000_000_000.0)
-            sizeBytes >= 1_000_000 -> String.format("%.1f MB", sizeBytes / 1_000_000.0)
-            sizeBytes >= 1_000 -> String.format("%.1f KB", sizeBytes / 1_000.0)
-            else -> "$sizeBytes B"
-        }
+        get() = RecordingSizeFormatter.format(sizeBytes)
     
     enum class RecordingType {
         NORMAL,         // Regular recordings (cam_*.mp4)
