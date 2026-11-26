@@ -59,8 +59,9 @@ public final class Mp4IndexCache {
 
     public static Mp4Index get(File f) throws Mp4Exception {
         if (f == null) throw new Mp4Exception("no file");
-        long len = RemovableStorageFs.length(f);
-        long mtime = RemovableStorageFs.lastModified(f);
+        RemovableStorageFs.FileStamp stamp = RemovableStorageFs.fileStamp(f);
+        long len = stamp.length;
+        long mtime = stamp.mtime;
         String key = f.getAbsolutePath() + '|' + len + '|' + mtime;
         FutureTask<Mp4Index> task;
         boolean owner = false;
