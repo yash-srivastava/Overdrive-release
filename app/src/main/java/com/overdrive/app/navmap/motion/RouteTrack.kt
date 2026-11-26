@@ -22,6 +22,7 @@ class RouteTrack private constructor(val route: NavRoute) {
     /** Along-route positions of the maneuvers worth framing (turns, exits, roundabouts, arrival). */
     private val keyS: DoubleArray
     private var seg = 0
+    private var keyBoundary = 0
 
     val length: Double
 
@@ -69,15 +70,33 @@ class RouteTrack private constructor(val route: NavRoute) {
 
     /** Distance from [s] to the next framed maneuver ahead, or +∞. */
     fun distanceToNextKey(s: Double): Double {
-        for (k in keyS) if (k > s + 0.5) return k - s
-        return Double.POSITIVE_INFINITY
+        val limit = s + 0.5
+        val i = keyBoundaryFor(limit)
+        // NaN keys sort last but never satisfy the original strict comparison.
+        return if (i < keyS.size && keyS[i] > limit) keyS[i] - s else Double.POSITIVE_INFINITY
     }
 
     /** Distance travelled since the last framed maneuver at or behind [s], or +∞. */
     fun distanceSinceLastKey(s: Double): Double {
-        var best = Double.POSITIVE_INFINITY
-        for (k in keyS) if (k <= s + 0.5) best = s - k else break
-        return max(0.0, best)
+        val i = keyBoundaryFor(s + 0.5)
+        return if (i > 0) max(0.0, s - keyS[i - 1]) else Double.POSITIVE_INFINITY
+    }
+
+    /** First key not <= limit. The camera usually stays between the same two keys for many frames. */
+    private fun keyBoundaryFor(limit: Double): Int {
+        val i = keyBoundary
+        if ((i == 0 || keyS[i - 1] <= limit) &&
+            (i == keyS.size || !(keyS[i] <= limit))) return i
+
+        // The sorted array puts NaNs last; <= is false for those and for a NaN limit.
+        var lo = 0
+        var hi = keyS.size
+        while (lo < hi) {
+            val mid = lo + (hi - lo) / 2
+            if (keyS[mid] <= limit) lo = mid + 1 else hi = mid
+        }
+        keyBoundary = lo
+        return lo
     }
 
     /**
