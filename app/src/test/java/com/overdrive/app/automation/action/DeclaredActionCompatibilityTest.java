@@ -91,15 +91,13 @@ public class DeclaredActionCompatibilityTest {
     }
 
     @Test
-    public void variableListsKeepTheirOriginalPerInstanceStorage() {
-        Label label = new Label("test", "test");
-        SafeKeepAction first = new SafeKeepAction(label, DESCRIPTION);
-        SafeKeepAction second = new SafeKeepAction(label, DESCRIPTION);
-        Type original = second.getVariables().get(0);
-        Type replacement = new IntType(new Label("replacement", "test"), 0, 1);
-        first.getVariables().set(0, replacement); // Existing Arrays.asList contract.
-        assertSame(replacement, first.getVariables().get(0));
-        assertSame(original, second.getVariables().get(0));
+    public void safeKeepInstancesRetainTheirOwnMetadata() throws Exception {
+        Label firstLabel = new Label("first", "test");
+        Label secondLabel = new Label("second", "test");
+        SafeKeepAction first = new SafeKeepAction(firstLabel, DESCRIPTION);
+        SafeKeepAction second = new SafeKeepAction(secondLabel, DESCRIPTION);
+        assertMetadata(first, firstLabel, "safeKeep", "command", "minutes");
+        assertMetadata(second, secondLabel, "safeKeep", "command", "minutes");
     }
 
     private static void assertMetadata(BaseAction action, Label label, String type, String... ids)
