@@ -2100,15 +2100,54 @@
         if (els.vrows) els.vrows.innerHTML = '';
         V.vRowEls = {};
     }
+    // Moments are newest first, and the vertical strip projects newer times above older ones.
+    // Validate ordering once per data revision; never sort or copy the moments on a frame.
+    function PortraitMomentRows() {
+        this.source = null;
+        this.ordered = false;
+    }
+    PortraitMomentRows.prototype.collect = function (list, filter, strip, height) {
+        if (this.source !== list) {
+            this.source = list;
+            this.ordered = true;
+            var previous = Infinity;
+            for (var j = 0; j < list.length; j++) {
+                var t = num(list[j].t);
+                if (t == null || t > previous) { this.ordered = false; break; }
+                previous = t;
+            }
+        }
+        var min = -ROW_H * 8, max = height + ROW_H;
+        var items = [], lo = 0, hi = list.length, ordered = this.ordered;
+        if (ordered) {
+            // Search in pixel space to preserve the exact inclusive boundary tests,
+            // including rounding at large wall-clock timestamps and duplicate times.
+            while (lo < hi) {
+                var mid = lo + Math.floor((hi - lo) / 2);
+                var p = call(strip, 'timeToPos', list[mid].t);
+                if (num(p) == null) { ordered = false; lo = 0; break; }
+                if (p < min) lo = mid + 1;
+                else hi = mid;
+            }
+        }
+        for (var i = lo; i < list.length; i++) {
+            var m = list[i];
+            if (!ordered && !momentPasses(m, filter)) continue;
+            var pos = call(strip, 'timeToPos', m.t);
+            if (num(pos) == null || pos < min) continue;
+            if (pos > max) {
+                if (ordered) break;
+                continue;
+            }
+            if (ordered && !momentPasses(m, filter)) continue;
+            items.push({ key: m.id, pos: pos });
+        }
+        return items;
+    };
+    var portraitMomentRows = new PortraitMomentRows();
     function positionRows() {
         if (V.layout !== 'port' || !V.active || !V.strip || typeof V.strip.timeToPos !== 'function') return;
-        var h = els.vfeed.clientHeight, items = [], list = V.moments, i;
-        for (i = 0; i < list.length; i++) {
-            if (!momentPasses(list[i], V.filter)) continue;
-            var pos = call(V.strip, 'timeToPos', list[i].t);
-            if (num(pos) == null || pos < -ROW_H * 8 || pos > h + ROW_H) continue;
-            items.push({ key: list[i].id, pos: pos });
-        }
+        var h = els.vfeed.clientHeight, items = portraitMomentRows.collect(V.moments, V.filter, V.strip, h), i;
         var placed = pushRows(items, ROW_H, ROW_GAP, null), keep = {}, pool = V.vRowEls || (V.vRowEls = {});
         for (i = 0; i < placed.length; i++) {
             var p = placed[i];
@@ -2673,7 +2712,8 @@
             addDaysKey: addDaysKey, parseFilename: parseFilename, matchFileSegment: matchFileSegment,
             buildMoments: buildMoments, momentKind: momentKind, momentPasses: momentPasses, momentMeta: momentMeta,
             segClasses: segClasses, pushRows: pushRows, fmtSpan: fmtSpan, fmtClipDur: fmtClipDur, FILTERS: FILTERS,
-            Store: Store, normalizeWindow: normalizeWindow, MomentNavigation: MomentNavigation
+            Store: Store, normalizeWindow: normalizeWindow, MomentNavigation: MomentNavigation,
+            PortraitMomentRows: PortraitMomentRows
         }
     };
 
