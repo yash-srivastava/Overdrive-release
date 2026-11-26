@@ -252,6 +252,7 @@ object DiLink5ClusterCast {
 
         fun customLayoutsPanel() = diLink5CustomLayoutsPanel(
             targetDisplayName, displayWidth, displayHeight, hostedGeometry, miniMapBounds ?: requestedCustomMiniMapBounds,
+            sealion7Hdmi = sealion7Hdmi,
         )
     }
 
@@ -5835,15 +5836,17 @@ internal fun factoryMiniMapDefaultBounds(width: Int, height: Int): DiLink5Projec
     return DiLink5ProjectionBounds(width - windowWidth, 0, width, height)
 }
 
-/** Activity-local pixels. Only a window spanning the factory's dedicated band gets its rail treatment. */
+/** Logical panel passed to the Custom Layouts renderer inside the projection window. */
 internal fun diLink5CustomLayoutsPanel(
     displayName: String,
     width: Int,
     height: Int,
     hosted: HostedProjectionGeometry?,
     miniMap: DiLink5ProjectionBounds?,
+    sealion7Hdmi: Boolean,
 ): Panel {
     if (miniMap != null) return Panel("full", miniMap.width(), miniMap.height())
+    if (sealion7Hdmi) return Panel("band", Sealion7HdmiProjection.WIDTH, 480)
     val spansPanel = hosted == null || (hosted.overlay.width() == hosted.panelWidth &&
         hosted.overlay.height() == hosted.panelHeight)
     val mode = if (spansPanel && displayName.endsWith("_1", ignoreCase = true)) "band" else "full"

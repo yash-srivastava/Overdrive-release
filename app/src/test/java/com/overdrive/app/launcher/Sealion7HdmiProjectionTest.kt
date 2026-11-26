@@ -1,5 +1,6 @@
 package com.overdrive.app.launcher
 
+import com.overdrive.app.customlayouts.model.Panel
 import com.overdrive.app.launcher.dilink5.cluster.DiLink5HostedProjectionBridge.AppDisplayInfo
 import com.overdrive.app.launcher.dilink5.cluster.DiLink5ProjectionConfig
 import com.overdrive.app.launcher.dilink5.cluster.HostedProjectionGeometry
@@ -12,6 +13,30 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class Sealion7HdmiProjectionTest {
+    private fun assertPanel(mode: String, width: Int, height: Int, panel: Panel) {
+        assertEquals(mode, panel.mode)
+        assertEquals(width, panel.w)
+        assertEquals(height, panel.h)
+    }
+
+    @Test
+    fun onlyTheOptedInHdmiSessionUsesThe480PixelCustomLayout() {
+        val hdmi = requireNotNull(Sealion7HdmiProjection.geometry(AppDisplayInfo(1, 1920, 720, 213)))
+        assertPanel("band", 1920, 480,
+            diLink5CustomLayoutsPanel("HDMI Screen", 1920, 720, hdmi, null, sealion7Hdmi = true))
+        assertPanel("full", 1920, 720,
+            diLink5CustomLayoutsPanel("HDMI Screen", 1920, 720, hdmi, null, sealion7Hdmi = false))
+    }
+
+    @Test
+    fun existingDedicatedBandAndMiniMapKeepTheirOwnDimensions() {
+        assertPanel("band", 1600, 400,
+            diLink5CustomLayoutsPanel("cluster_1", 1600, 400, null, null, sealion7Hdmi = false))
+        val miniMap = DiLink5ProjectionBounds(1088, 0, 1600, 400)
+        assertPanel("full", 512, 400,
+            diLink5CustomLayoutsPanel("cluster_1", 1600, 400, null, miniMap, sealion7Hdmi = false))
+    }
+
     @Test
     fun onlyTheCapturedFirmwareAndAnExplicitSealion7SelectionQualify() {
         val product = "DX_BYD_AUTO"
