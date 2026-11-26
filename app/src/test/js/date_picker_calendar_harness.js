@@ -11,13 +11,14 @@ function fakeElement() {
     return {
         children: [],
         dataset: {},
+        handlers: {},
         classList: {
             add: name => classes.add(name),
             contains: name => classes.has(name)
         },
         set innerHTML(value) { this.children.length = 0; },
         appendChild(child) { this.children.push(child); },
-        addEventListener() {}
+        addEventListener(type, handler) { this.handlers[type] = handler; }
     };
 }
 
@@ -38,6 +39,9 @@ function loadCalendar(file, symbol, gridId, titleId) {
     const source = fs.readFileSync(path.resolve(__dirname,
         '../../main/assets/web/shared', file), 'utf8');
     vm.createContext(sandbox);
+    vm.runInContext(fs.readFileSync(path.resolve(__dirname,
+        '../../main/assets/web/shared/range-calendar.js'), 'utf8'), sandbox,
+        { filename: 'range-calendar.js' });
     vm.runInContext(source + '\n;this.calendar = ' + symbol + ';', sandbox, { filename: file });
     return { calendar: sandbox.calendar, grid };
 }
@@ -46,10 +50,12 @@ const trips = loadCalendar('trips.js', 'TRIPS', 'calendarGrid', 'calendarTitle')
 // Trip dots require a separate API request and are unrelated to grid layout.
 trips.calendar.loadCalendarDots = () => {};
 const charging = loadCalendar('charging.js', 'CHARGING', 'chargeCalendarGrid', 'chargeCalendarTitle');
+const notifications = loadCalendar('notif-log.js', 'NOTIFLOG', 'nlCalendarGrid', 'nlCalendarTitle');
 
 for (const [name, environment, render] of [
     ['Trips', trips, 'renderCalendar'],
-    ['Charging', charging, '_renderCalendar']
+    ['Charging', charging, '_renderCalendar'],
+    ['Notifications', notifications, '_renderCalendar']
 ]) {
     const { calendar, grid } = environment;
     for (const [year, month, first, last, currentDays] of [
@@ -75,5 +81,26 @@ for (const [name, environment, render] of [
             assert.strictEqual(cell.dataset.date, calendar._dateKey(date), label + ': consecutive dates');
         });
     }
+
+    // All three adapters render their own range state and deliver the picked key.
+    calendar._calMonth = new Date(2024, 1, 1);
+    const draft = name === 'Notifications';
+    calendar[draft ? '_draftFrom' : '_calFromKey'] = '2024-02-10';
+    calendar[draft ? '_draftTo' : '_calToKey'] = '2024-02-12';
+    let picked = null;
+    calendar._calPick = key => { picked = key; };
+    calendar[render]();
+    const cell = key => grid.children.find(el => el.dataset.date === key);
+    assert.ok(cell('2024-02-10').classList.contains('selected'), name);
+    assert.ok(cell('2024-02-11').classList.contains('in-range'), name);
+    assert.ok(cell('2024-02-12').classList.contains('selected'), name);
+    cell('2024-02-11').handlers.click();
+    assert.strictEqual(picked, '2024-02-11', name);
+    assert.strictEqual(calendar._keyToMs('2024-02-29', false), new Date(2024, 1, 29).getTime());
+    assert.strictEqual(calendar._keyToMs('2024-02-29', true), new Date(2024, 1, 29, 23, 59, 59, 999).getTime());
+    assert.strictEqual(calendar._keyToMs('invalid', false), null);
+    calendar._calMonth = new Date(new Date().getFullYear() + 2, 0, 1);
+    calendar[render]();
+    assert.ok(grid.children.slice(7).every(el => el.classList.contains('disabled') && !el.handlers.click), name);
 }
 console.log('date_picker_calendar_harness: ALL CHECKS PASSED');

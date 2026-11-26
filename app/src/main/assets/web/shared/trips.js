@@ -1772,49 +1772,12 @@ const TRIPS = {
         const title = document.getElementById('calendarTitle');
         if (!grid || !this._calMonth) return;
         const lang = BYD.i18n.getLang();
-        const year = this._calMonth.getFullYear(), month = this._calMonth.getMonth();
-        const monthDate = new Date(year, month, 1);
-        try { title.textContent = new Intl.DateTimeFormat(lang, { month: 'long' }).format(monthDate) + ' ' + year; }
-        catch (e) { title.textContent = monthDate.toLocaleDateString(lang, { month: 'long' }) + ' ' + year; }
-
-        grid.innerHTML = '';
-        let wkFmt; try { wkFmt = new Intl.DateTimeFormat(lang, { weekday: 'short' }); } catch (e) { wkFmt = null; }
-        for (let w = 0; w < 7; w++) {
-            const dd = new Date(2024, 0, 7 + w);   // 2024-01-07 is a Sunday
-            const el = document.createElement('div');
-            el.className = 'calendar-weekday';
-            el.textContent = wkFmt ? wkFmt.format(dd) : dd.toLocaleDateString(lang, { weekday: 'short' });
-            grid.appendChild(el);
-        }
-
-        const firstDay = new Date(year, month, 1).getDay();
-        const daysInMonth = new Date(year, month + 1, 0).getDate();
-        const daysInPrev = new Date(year, month, 0).getDate();
-        const todayKey = this._dateKey(new Date());
-        for (let i = firstDay - 1; i >= 0; i--) this._calDayCell(grid, daysInPrev - i, this._dateKey(new Date(year, month - 1, daysInPrev - i)), true, todayKey);
-        for (let day = 1; day <= daysInMonth; day++) this._calDayCell(grid, day, this._dateKey(new Date(year, month, day)), false, todayKey);
-        const trailingDays = 42 - firstDay - daysInMonth;
-        for (let d2 = 1; d2 <= trailingDays; d2++) this._calDayCell(grid, d2, this._dateKey(new Date(year, month + 1, d2)), true, todayKey);
+        const self = this;
+        ODRangeCalendar.render(grid, title, this._calMonth, lang,
+            this._calFromKey, this._calToKey, function (key) { self._calPick(key); });
 
         // Overlay dots on days that have trips (trips-specific enhancement).
         this.loadCalendarDots();
-    },
-
-    _calDayCell(grid, day, dateKey, otherMonth, todayKey) {
-        const self = this;
-        const el = document.createElement('div');
-        el.className = 'calendar-day';
-        el.textContent = day;
-        el.dataset.date = dateKey;
-        if (otherMonth) el.classList.add('other-month');
-        if (dateKey === todayKey) el.classList.add('today');
-        if (dateKey === this._calFromKey || dateKey === this._calToKey) el.classList.add('selected');
-        else if (this._calFromKey && this._calToKey && dateKey > this._calFromKey && dateKey < this._calToKey) el.classList.add('in-range');
-        // Disable future dates.
-        const today = new Date(); today.setHours(0, 0, 0, 0);
-        if (new Date(dateKey + 'T00:00:00') > today) el.classList.add('disabled');
-        else el.addEventListener('click', function () { self._calPick(dateKey); });
-        grid.appendChild(el);
     },
 
     _calPick(dateKey) {
@@ -1869,16 +1832,11 @@ const TRIPS = {
 
     // "YYYY-MM-DD" local date key.
     _dateKey(d) {
-        const m = d.getMonth() + 1, day = d.getDate();
-        return d.getFullYear() + '-' + (m < 10 ? '0' + m : m) + '-' + (day < 10 ? '0' + day : day);
+        return ODRangeCalendar.dateKey(d);
     },
     // date key → epoch-ms at local 00:00 (or 23:59:59.999 when endOfDay).
     _keyToMs(key, endOfDay) {
-        const p = key.split('-');
-        if (p.length !== 3) return null;
-        const y = parseInt(p[0], 10), mo = parseInt(p[1], 10) - 1, da = parseInt(p[2], 10);
-        if (isNaN(y) || isNaN(mo) || isNaN(da)) return null;
-        return (endOfDay ? new Date(y, mo, da, 23, 59, 59, 999) : new Date(y, mo, da, 0, 0, 0, 0)).getTime();
+        return ODRangeCalendar.keyToMs(key, endOfDay);
     },
 
     renderStorageUsage(usedMb, limitMb, count, unit) {
