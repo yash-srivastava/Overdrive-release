@@ -4150,6 +4150,7 @@
     "trunk_close_confirm_body": "Check that the trunk area is clear before closing."
   },
   "map": {
+    "tiles_unavailable": "Map unavailable: check the internet connection",
     "follow_vehicle": "Follow vehicle",
     "your_vehicle": "Your Vehicle",
     "your_vehicle_sub": "OverDrive Surveillance",

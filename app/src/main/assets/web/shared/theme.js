@@ -701,6 +701,42 @@
         container.style.filter = filter;
         container.style.webkitFilter = filter;
     }
+    // Tiles come from the internet. Without a connection the map stayed blank with no
+    // explanation, so say why until the first tile arrives.
+    var TILE_TIMEOUT_MS = 20000;
+    function mapOfflineText() {
+        var i18n = window.BYD && window.BYD.i18n;
+        var v = i18n && i18n.t ? i18n.t('map.tiles_unavailable') : null;
+        return v && v !== 'map.tiles_unavailable' ? v : 'Map unavailable: check the internet connection';
+    }
+    function watchTileFailures(map, layer) {
+        var notice = null;
+        var loaded = false;
+        function show() {
+            if (loaded || notice) return;
+            var box = map.getContainer && map.getContainer();
+            if (!box) return;
+            notice = document.createElement('div');
+            notice.className = 'byd-map-offline';
+            notice.setAttribute('role', 'status');
+            notice.textContent = mapOfflineText();
+            notice.style.cssText = 'position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);' +
+                'z-index:450;max-width:80%;padding:8px 12px;border-radius:8px;text-align:center;' +
+                'pointer-events:none;font:13px/1.35 var(--family-sans,sans-serif);' +
+                'background:var(--bg-elevated,rgba(0,0,0,.72));color:var(--text-primary,#fff);';
+            box.appendChild(notice);
+        }
+        // A request that hangs (no route, stalled proxy) never fires tileerror.
+        var timer = setTimeout(show, TILE_TIMEOUT_MS);
+        layer.on('tileerror', show);
+        layer.on('tileload', function () {
+            loaded = true;
+            clearTimeout(timer);
+            if (notice) { notice.remove(); notice = null; }
+        });
+        map.on('remove', function () { clearTimeout(timer); });
+    }
+
     /**
      * Attach the shared OSM.de layer and keep its filter in sync with the
      * current theme. The caller still owns the map and layer lifecycle.
@@ -719,6 +755,7 @@
         });
         layer.addTo(map);
         applyTileTheme(layer);
+        watchTileFailures(map, layer);
         var obs = new MutationObserver(function () {
             try { applyTileTheme(layer); }
             catch (e) { /* map may be mid-teardown — ignore */ }
