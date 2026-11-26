@@ -1765,11 +1765,6 @@ BYD.recording = {
         }
     },
 
-    updateRetention(value) {
-        // Deprecated - retention days no longer used
-        console.log('Retention days setting deprecated');
-    },
-
     /**
      * Look up the active bottom-tab id (status / capture / quality / oem).
      * Mirrors the helper on SurvSettings — kept inline here to avoid a hard

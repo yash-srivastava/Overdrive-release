@@ -269,14 +269,6 @@ BYD.stream = {
     },
 
     /**
-     * Set quality before streaming starts
-     */
-    setQualityUpfront(quality) {
-        this.selectedQuality = quality;
-        console.log('[Stream] Quality preset:', quality);
-    },
-    
-    /**
      * Select camera and start streaming
      */
     async selectCamera(mode) {
@@ -287,45 +279,6 @@ BYD.stream = {
         
         // Start streaming
         await this.startStream();
-    },
-    
-    /**
-     * Highlight car section on hover
-     */
-    hoverCam(section) {
-        const sectionMap = {
-            'front': 'hlFront',
-            'rear': 'hlRear', 
-            'left': 'hlLeft',
-            'right': 'hlRight'
-        };
-        
-        // Reset all highlights
-        Object.values(sectionMap).forEach(id => {
-            const el = document.getElementById(id);
-            if (el) {
-                el.style.fill = 'transparent';
-                el.style.stroke = 'transparent';
-            }
-        });
-        
-        // Apply highlight to hovered section
-        if (section && sectionMap[section]) {
-            const el = document.getElementById(sectionMap[section]);
-            if (el) {
-                el.style.fill = 'rgba(0, 212, 170, 0.15)';
-                el.style.stroke = 'rgba(0, 212, 170, 0.5)';
-            }
-        }
-        
-        // Also highlight the label
-        document.querySelectorAll('.cam-label').forEach(label => {
-            if (section && label.classList.contains(section)) {
-                label.classList.add('hover');
-            } else {
-                label.classList.remove('hover');
-            }
-        });
     },
     
     /**
@@ -941,24 +894,6 @@ BYD.stream = {
         }
         
         this.connectWebSocket();
-    },
-    
-    /**
-     * Stop streaming and show camera selector
-     */
-    stopAndShowSelector() {
-        this.stopStream();
-        
-        // Show placeholder, hide overlay
-        const placeholder = document.getElementById('placeholder');
-        const overlay = document.getElementById('streamOverlay');
-        if (placeholder) placeholder.style.display = 'flex';
-        if (overlay) overlay.style.display = 'none';
-        
-        // Reset selection
-        this.currentViewMode = -1;
-        document.querySelectorAll('.cam-indicator').forEach(el => el.classList.remove('active'));
-        document.querySelectorAll('.cam-label').forEach(el => el.classList.remove('active'));
     },
     
     /**
