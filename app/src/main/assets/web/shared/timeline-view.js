@@ -577,7 +577,7 @@
         spans: { land: 6 * HOUR, port: 2 * HOUR }, range: null, minMs: Date.now() - DAYS_BACK * DAY,
         scrubbing: false, wasPlaying: false, touched: false, deep: null, pendingFile: null, pendingDefault: false, pendingDay: null,
         playerWin: null, item: null, itemId: null, spec: null, families: [], activeFamily: null,
-        data: null, dataRev: 0, moments: [], momentsById: {}, activeId: null, rowEls: {}, listSig: '', titleSig: '',
+        data: null, dataRev: 0, stripMoments: null, moments: [], momentsById: {}, activeId: null, rowEls: {}, listSig: '', titleSig: '',
         camLayout: null, objSig: '', menu: null, menuAnchor: null, hideTimer: null, uiTimer: null, uiAt: 0, rowsRaf: 0,
         userScrollAt: 0, refreshTimer: null, liveKey: null, daysInfo: null, daysAt: 0, hintTo: null, bannerTimer: null,
         rowDrag: null, suppressClickUntil: 0, fullscreen: false
@@ -1191,6 +1191,7 @@
         // A re-read that returned the same day changes nothing on screen (no list rebuild, no scroll jump).
         if (!same || !V.data) {
             V.dataRev++;
+            V.stripMoments = null;
             V.data = store.merged();
             V.moments = buildMoments(V.data.segments, V.data.marks);
             V.momentsById = {};
@@ -1225,10 +1226,14 @@
         }
         if (!V.strip || !V.data) return;
         var d = V.data, now = nowMs();
+        // Merged data is replaced by onStoreChange; labels are replaced by onLangChange.
+        // Keep this projection stable between clock-only refreshes.
+        if (!V.stripMoments) V.stripMoments = V.moments.map(function (m) { return { t: m.t, rec: m.id, label: m.label }; });
         call(V.strip, 'setData', {
+            reuseStatic: true,
             segments: d.segments, marks: d.marks, sessions: d.sessions, trips: d.trips, states: d.states, reaped: d.reaped,
             road: d.road, live: d.live, now: now, minMs: Math.min(V.minMs, now - HOUR), maxMs: now,
-            moments: V.moments.map(function (m) { return { t: m.t, rec: m.id, label: m.label }; })
+            moments: V.stripMoments
         });
     }
     function resolveFile() {
@@ -2697,6 +2702,7 @@
         timeFmtCache = {};
         renderTexts();
         V.moments.forEach(function (m) { m.label = momentKind(m); });
+        V.stripMoments = null;
         pushStripData();
         clearVRows();
         scheduleRows();

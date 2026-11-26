@@ -342,13 +342,8 @@
 
     function arr(v) { return Array.isArray(v) ? v : []; }
 
-    // Normalises one /api/timeline payload into sorted, packed arrays for drawing and hit tests.
-    function buildModel(d) {
-        d = d || {};
-        const dataNow = num(d.now, Date.now());
-        const lo = num(d.minMs, -Infinity);
-        const maxMs = num(d.maxMs, Infinity);
-        const hiData = Math.max(lo, Math.min(maxMs, dataNow));
+    // Normalise footage, seams and marker geometry independently of the clock.
+    function buildStaticModel(d) {
         const segs = arr(d.segments).filter(function (sg) { return sg && num(sg.start, NaN) === sg.start; });
         const av = [], un = [];
         for (let i = 0; i < segs.length; i++) {
@@ -358,31 +353,6 @@
         }
         const { runs, runDrive } = mergeFootageRuns(av);
         const unav = subtractIntervals(mergeIntervals(un, CONTIG_MS), runs);
-        const liveSince = arr(d.live).map(function (l) { return l ? num(l.since, NaN) : NaN; })
-            .filter(function (v) { return v === v && v <= dataNow; }).sort(function (a, b) { return a - b; });
-        const live = mergeIntervals(liveSince.map(function (s) { return [s, dataNow]; }), 0);
-        const reaped = mergeIntervals(arr(d.reaped).filter(Boolean).map(function (r) {
-            return [num(r.start, NaN), num(r.end, NaN)];
-        }), 0);
-        let armedOpen = false;
-        const armedRaw = [];
-        arr(d.sessions).forEach(function (s) {
-            if (!s || s.sentry !== 'armed' || !(num(s.start, NaN) <= dataNow)) return;
-            const e = num(s.end, NaN);
-            if (!(e === e)) armedOpen = true;
-            armedRaw.push([s.start, e === e ? e : dataNow]);
-        });
-        const armed = subtractIntervals(mergeIntervals(armedRaw, 0), reaped);
-        if (armedOpen && !(armed.length && armed[armed.length - 1][1] >= dataNow)) armedOpen = false;
-        const cover = mergeIntervals(runs.concat(unav, live, armed).map(function (p) { return [p[0], p[1]]; }), CONTIG_MS);
-        let gaps = [];
-        const gLo = isFinite(lo) ? lo : (cover.length ? cover[0][0] : hiData);
-        if (hiData > gLo) {
-            gaps = subtractIntervals([[gLo, hiData]], cover).filter(function (g) { return g[1] - g[0] >= CONTIG_MS; });
-        }
-        const gapOpen = gaps.length > 0 && gaps[gaps.length - 1][1] >= dataNow && hiData === dataNow;
-        const gapKey = gapReasons(gaps, d, dataNow);
-
         const seamList = [];
         ['normal', 'oemDashcam', 'sentry'].forEach(function (type) {
             const list = segs.filter(function (sg) { return sg.type === type && sg.available !== false; })
@@ -434,16 +404,66 @@
         for (let i = 0; i < moments.length; i++) momT[i] = moments[i].t;
 
         return {
+            source: d.reuseStatic === true ? [d.segments, d.marks, d.road, d.moments] : null,
+            geometry: {
+                runs: packPairs(runs), nRuns: runs.length, runDrive: runDrive,
+                unav: packPairs(unav), nUnav: unav.length,
+                seams: seams, nSeams: nSeams,
+                mT: mT, mK: mK, mA: mA, mRec: mRec, mLab: mLab, nM: nM,
+                moments: moments, momT: momT, nMom: moments.length
+            }
+        };
+    }
+
+    // Opt-in callers promise to replace the four source arrays when their contents change.
+    // Other callers (including the gap card) retain the original rebuild-on-every-call behaviour.
+    function buildModel(d, previousStatic) {
+        d = d || {};
+        const dataNow = num(d.now, Date.now());
+        const source = previousStatic && previousStatic.source;
+        const fixed = d.reuseStatic === true && source && source[0] === d.segments &&
+            source[1] === d.marks && source[2] === d.road && source[3] === d.moments
+            ? previousStatic : buildStaticModel(d);
+        const lo = num(d.minMs, -Infinity);
+        const maxMs = num(d.maxMs, Infinity);
+        const hiData = Math.max(lo, Math.min(maxMs, dataNow));
+        const liveSince = arr(d.live).map(function (l) { return l ? num(l.since, NaN) : NaN; })
+            .filter(function (v) { return v === v && v <= dataNow; }).sort(function (a, b) { return a - b; });
+        const live = mergeIntervals(liveSince.map(function (s) { return [s, dataNow]; }), 0);
+        const reaped = mergeIntervals(arr(d.reaped).filter(Boolean).map(function (r) {
+            return [num(r.start, NaN), num(r.end, NaN)];
+        }), 0);
+        let armedOpen = false;
+        const armedRaw = [];
+        arr(d.sessions).forEach(function (s) {
+            if (!s || s.sentry !== 'armed' || !(num(s.start, NaN) <= dataNow)) return;
+            const e = num(s.end, NaN);
+            if (!(e === e)) armedOpen = true;
+            armedRaw.push([s.start, e === e ? e : dataNow]);
+        });
+        const armed = subtractIntervals(mergeIntervals(armedRaw, 0), reaped);
+        if (armedOpen && !(armed.length && armed[armed.length - 1][1] >= dataNow)) armedOpen = false;
+        // Rebuild only clock-dependent coverage, using the existing packed static intervals.
+        const coverInput = [];
+        for (const pairs of [fixed.geometry.runs, fixed.geometry.unav]) {
+            for (let i = 0; i < pairs.length; i += 2) coverInput.push([pairs[i], pairs[i + 1]]);
+        }
+        const cover = mergeIntervals(coverInput.concat(live, armed), CONTIG_MS);
+        let gaps = [];
+        const gLo = isFinite(lo) ? lo : (cover.length ? cover[0][0] : hiData);
+        if (hiData > gLo) {
+            gaps = subtractIntervals([[gLo, hiData]], cover).filter(function (g) { return g[1] - g[0] >= CONTIG_MS; });
+        }
+        const gapOpen = gaps.length > 0 && gaps[gaps.length - 1][1] >= dataNow && hiData === dataNow;
+        const gapKey = gapReasons(gaps, d, dataNow);
+
+        return Object.assign({
+            staticData: fixed,
             lo: lo, maxMs: maxMs, dataNow: dataNow, hiData: hiData, liveDay: maxMs >= dataNow - 1000,
-            runs: packPairs(runs), nRuns: runs.length, runDrive: runDrive,
-            unav: packPairs(unav), nUnav: unav.length,
             armed: packPairs(armed), nArmed: armed.length, armedOpen: armedOpen,
             gaps: packPairs(gaps), nGaps: gaps.length, gapKey: gapKey, gapOpen: gapOpen,
-            live: packPairs(live), nLive: live.length,
-            seams: seams, nSeams: nSeams,
-            mT: mT, mK: mK, mA: mA, mRec: mRec, mLab: mLab, nM: nM,
-            moments: moments, momT: momT, nMom: moments.length
-        };
+            live: packPairs(live), nLive: live.length
+        }, fixed.geometry);
     }
 
     function create(hostEl, opts) {
@@ -1203,7 +1223,8 @@
 
         function setData(d) {
             if (destroyed) return;
-            model = buildModel(d);
+            const previousStatic = model.staticData;
+            model = buildModel(d, previousStatic);
             dataPerf = performance.now();
             strCache.clear();
             for (let i = 0; i < twCache.length; i++) twCache[i].clear();
@@ -1213,7 +1234,7 @@
                 gapShort[i] = reason;
                 gapFull[i] = tr('tlview.gapFmt', { duration: fmtDur(model.gaps[2 * i + 1] - model.gaps[2 * i]), reason: reason });
             }
-            applyFilter();
+            if (model.staticData !== previousStatic) applyFilter();
             lastCurKey = -2;
             // A fling whose landing left the new bounds re-plans from its current velocity (edge bounce).
             if (cAnim === 2 || cAnim === 3) {
