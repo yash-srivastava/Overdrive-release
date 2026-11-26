@@ -249,78 +249,17 @@ public class TripRecord {
      * Serialize all fields to JSON (full detail, including micro-moments).
      */
     public JSONObject toJson() {
-        JSONObject json = new JSONObject();
-        try {
-            json.put("id", id);
-            json.put("startTime", startTime);
-            json.put("endTime", endTime);
-            json.put("distanceKm", distanceKm);
-            json.put("odometerStartKm", odometerStartKm);
-            json.put("odometerEndKm", odometerEndKm);
-            json.put("durationSeconds", durationSeconds);
-            json.put("avgSpeedKmh", avgSpeedKmh);
-            json.put("maxSpeedKmh", maxSpeedKmh);
-            json.put("socStart", socStart);
-            json.put("socEnd", socEnd);
-            json.put("kwhStart", kwhStart);
-            json.put("kwhEnd", kwhEnd);
-            if (elecConStart >= 0) json.put("elecConStart", elecConStart);
-            if (elecConEnd >= 0) json.put("elecConEnd", elecConEnd);
-            json.put("energyUsedKwh", getEnergyUsedKwh());
-            // Signed twin of the above: negative on a regen-dominant trip where
-            // the pack ended fuller than it started. energyUsedKwh clamps that to
-            // 0 because it feeds cost and rollup totals, which must never go
-            // negative — but the UI needs the sign so the Energy tile agrees with
-            // the SoC Used tile instead of reading 0 next to a negative delta.
-            json.put("signedEnergyKwh", getSignedEnergyKwh());
-            // Lets the UI say "energy was measured, and it was ~0" (a genuinely
-            // tiny trip) instead of "no data" — the two look identical otherwise.
-            json.put("energyMetered", hasMeteredEnergy());
-            json.put("efficiencySocPerKm", efficiencySocPerKm);
-            json.put("energyPerKm", energyPerKm);
-            json.put("electricityRate", electricityRate);
-            json.put("currency", currency != null ? currency : "");
-            json.put("rateSource", rateSource != null ? rateSource : "");
-            json.put("rateLabel", rateLabel != null ? rateLabel : "");
-            json.put("tripCost", tripCost);
-            json.put("kinematicState", kinematicState != null ? kinematicState : "");
-            json.put("gradientProfile", gradientProfile != null ? gradientProfile : "");
-            json.put("elevationGainM", elevationGainM);
-            json.put("elevationLossM", elevationLossM);
-            json.put("avgGradientPercent", avgGradientPercent);
-            json.put("startLat", startLat);
-            json.put("startLon", startLon);
-            json.put("endLat", endLat);
-            json.put("endLon", endLon);
-            json.put("extTempC", extTempC);
-            json.put("anticipationScore", anticipationScore);
-            json.put("smoothnessScore", smoothnessScore);
-            json.put("speedDisciplineScore", speedDisciplineScore);
-            json.put("efficiencyScore", efficiencyScore);
-            json.put("consistencyScore", consistencyScore);
-            json.put("overallScore", getOverallScore());
-            json.put("isPhev", isPhev);
-            if (fuelPctStart >= 0) json.put("fuelPctStart", fuelPctStart);
-            if (fuelPctEnd >= 0) json.put("fuelPctEnd", fuelPctEnd);
-            if (fuelConStart >= 0) json.put("fuelConStart", fuelConStart);
-            if (fuelConEnd >= 0) json.put("fuelConEnd", fuelConEnd);
-            json.put("litresUsed", litresUsed);
-            json.put("fuelPricePerL", fuelPricePerL);
-            json.put("fuelCost", fuelCost);
-            json.put("electricCost", electricCost);
-            json.put("iceSeconds", iceSeconds());
-            json.put("microMomentsJson", microMomentsJson != null ? microMomentsJson : "");
-            json.put("telemetryFilePath", telemetryFilePath != null ? telemetryFilePath : "");
-        } catch (Exception e) {
-            // JSONObject.put only throws on null key
-        }
-        return json;
+        return serialize(true);
     }
 
     /**
-     * Serialize to summary JSON (excludes microMomentsJson for list views).
+     * Serialize to summary JSON (excludes microMomentsJson and telemetryFilePath).
      */
     public JSONObject toSummaryJson() {
+        return serialize(false);
+    }
+
+    private JSONObject serialize(boolean includeDetails) {
         JSONObject json = new JSONObject();
         try {
             json.put("id", id);
@@ -381,6 +320,10 @@ public class TripRecord {
             json.put("fuelCost", fuelCost);
             json.put("electricCost", electricCost);
             json.put("iceSeconds", iceSeconds());
+            if (includeDetails) {
+                json.put("microMomentsJson", microMomentsJson != null ? microMomentsJson : "");
+                json.put("telemetryFilePath", telemetryFilePath != null ? telemetryFilePath : "");
+            }
         } catch (Exception e) {
             // JSONObject.put only throws on null key
         }
