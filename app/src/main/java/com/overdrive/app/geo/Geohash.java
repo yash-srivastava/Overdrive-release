@@ -20,6 +20,16 @@ public final class Geohash {
             's', 't', 'u', 'v', 'w', 'x', 'y', 'z'
     };
 
+    private static final int[] DECODE_BASE32 = new int[128];
+    // Seven characters encode 17 latitude bits and 18 longitude bits. Both
+    // axes therefore have the same exactly representable angular cell width.
+    private static final double CELL_DEGREES = 180.0 / (1 << 17);
+
+    static {
+        java.util.Arrays.fill(DECODE_BASE32, -1);
+        for (int i = 0; i < BASE32.length; i++) DECODE_BASE32[BASE32[i]] = i;
+    }
+
     private Geohash() {}
 
     public static String encode(double lat, double lng) {
@@ -69,40 +79,34 @@ public final class Geohash {
             return false;
         }
 
-        double south = -90.0, north = 90.0;
-        double west = -180.0, east = 180.0;
-        boolean longitudeBit = true;
+        int latCell = 0, lngCell = 0;
         for (int i = 0; i < hash.length(); i++) {
-            int value = -1;
-            for (int j = 0; j < BASE32.length; j++) {
-                if (BASE32[j] == hash.charAt(i)) {
-                    value = j;
-                    break;
-                }
-            }
+            char c = hash.charAt(i);
+            int value = c < DECODE_BASE32.length ? DECODE_BASE32[c] : -1;
             if (value < 0) return false; // Ignore malformed persisted cache keys.
-            for (int bit = 4; bit >= 0; bit--) {
-                boolean upperHalf = (value & (1 << bit)) != 0;
-                if (longitudeBit) {
-                    double mid = (west + east) / 2.0;
-                    if (upperHalf) west = mid;
-                    else east = mid;
-                } else {
-                    double mid = (south + north) / 2.0;
-                    if (upperHalf) south = mid;
-                    else north = mid;
-                }
-                longitudeBit = !longitudeBit;
+            // Alternating characters contribute three bits to one axis and
+            // two to the other. Deinterleave without repeated FP bisection.
+            int three = ((value & 16) >> 2) | ((value & 4) >> 1) | (value & 1);
+            int two = ((value & 8) >> 2) | ((value & 2) >> 1);
+            if ((i & 1) == 0) {
+                lngCell = (lngCell << 3) | three;
+                latCell = (latCell << 2) | two;
+            } else {
+                latCell = (latCell << 3) | three;
+                lngCell = (lngCell << 2) | two;
             }
         }
-
-        double centerLat = (south + north) / 2.0;
-        double centerLng = (west + east) / 2.0;
+        double south = -90.0 + latCell * CELL_DEGREES;
+        double north = south + CELL_DEGREES;
+        double west = -180.0 + lngCell * CELL_DEGREES;
+        double centerLat = south + CELL_DEGREES / 2.0;
+        double centerLng = west + CELL_DEGREES / 2.0;
+        // The east/west longitude deltas from the exact dyadic midpoint
+        // differ only in sign, which disappears in the squared sine term.
+        // One corner at each latitude is sufficient, including polar cells.
         double cellRadiusM = Math.max(
-                Math.max(distanceMeters(centerLat, centerLng, south, west),
-                         distanceMeters(centerLat, centerLng, south, east)),
-                Math.max(distanceMeters(centerLat, centerLng, north, west),
-                         distanceMeters(centerLat, centerLng, north, east)));
+                distanceMeters(centerLat, centerLng, south, west),
+                distanceMeters(centerLat, centerLng, north, west));
         return distanceMeters(lat, lng, centerLat, centerLng) <= radiusM + cellRadiusM;
     }
 
