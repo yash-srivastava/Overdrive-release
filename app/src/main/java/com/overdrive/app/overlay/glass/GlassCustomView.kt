@@ -290,7 +290,30 @@ class GlassCustomView(context: Context, env: GlassEnv, ticker: GlassTicker, val 
         protected abstract fun render(c: Canvas, now: Long, k: Float)
     }
 
-    private inner class RingLayer(spec: CustomDoc.Spec) : Layer(spec, false) {
+    // Ring and bar share value animation and colors, but keep their own geometry.
+    private abstract inner class MeterLayer(spec: CustomDoc.Spec) : Layer(spec, false) {
+        private var v: Float? = null
+        private var s: Spring? = null
+        protected var color: Int? = null
+            private set
+        protected var lit = 0
+            private set
+        protected var track: Int? = null
+            private set
+
+        final override fun update(instant: Boolean, now: Long) {
+            v = num("value")
+            s = spring(s, v, instant)
+            color = color("color", t.glowAccent)?.also { lit = GlassColor.lighten(it, 0.6f) }
+            track = color("track", t.etch)
+        }
+
+        final override fun step(dt: Float): Boolean { val sp = s; return sp != null && sp.step(dt) }
+
+        protected fun fraction(): Float = level(v, s)
+    }
+
+    private inner class RingLayer(spec: CustomDoc.Spec) : MeterLayer(spec) {
         private val cx = geo("cx", 80f)
         private val cy = geo("cy", 92f)
         private val r = geo("r", 54f)
@@ -300,23 +323,9 @@ class GlassCustomView(context: Context, env: GlassEnv, ticker: GlassTicker, val 
         private val glow = geo("glow", 1f).coerceIn(0f, 4f)
         private val oval = RectF(cx - r, cy - r, cx + r, cy + r)
         private val inner = (r - w * 0.18f).let { RectF(cx - it, cy - it, cx + it, cy + it) }
-        private var v: Float? = null
-        private var s: Spring? = null
-        private var color: Int? = null
-        private var lit = 0
-        private var track: Int? = null
-
-        override fun update(instant: Boolean, now: Long) {
-            v = num("value")
-            s = spring(s, v, instant)
-            color = color("color", t.glowAccent)?.also { lit = GlassColor.lighten(it, 0.6f) }
-            track = color("track", t.etch)
-        }
-
-        override fun step(dt: Float): Boolean { val sp = s; return sp != null && sp.step(dt) }
 
         override fun render(c: Canvas, now: Long, k: Float) {
-            val f = level(v, s)
+            val f = fraction()
             paint.style = Paint.Style.STROKE
             paint.strokeCap = Paint.Cap.ROUND
             track?.let { paint.strokeWidth = w; paint.color = fade(it, k); c.drawArc(oval, start, sweep, false, paint) }
@@ -334,30 +343,16 @@ class GlassCustomView(context: Context, env: GlassEnv, ticker: GlassTicker, val 
         }
     }
 
-    private inner class BarLayer(spec: CustomDoc.Spec) : Layer(spec, false) {
+    private inner class BarLayer(spec: CustomDoc.Spec) : MeterLayer(spec) {
         private val x = geo("x", 26f)
         private val y = geo("y", 140f)
         private val w = geo("w", 220f)
         private val h = geo("h", 9f).coerceAtLeast(0f)
         private val glow = geo("glow", 1f).coerceIn(0f, 4f)
         private val rr = h / 2f
-        private var v: Float? = null
-        private var s: Spring? = null
-        private var color: Int? = null
-        private var lit = 0
-        private var track: Int? = null
-
-        override fun update(instant: Boolean, now: Long) {
-            v = num("value")
-            s = spring(s, v, instant)
-            color = color("color", t.glowAccent)?.also { lit = GlassColor.lighten(it, 0.6f) }
-            track = color("track", t.etch)
-        }
-
-        override fun step(dt: Float): Boolean { val sp = s; return sp != null && sp.step(dt) }
 
         override fun render(c: Canvas, now: Long, k: Float) {
-            val f = level(v, s)
+            val f = fraction()
             paint.style = Paint.Style.FILL
             track?.let { paint.color = fade(it, k); rect.set(x, y, x + w, y + h); c.drawRoundRect(rect, rr, rr, paint) }
             if (f <= 0.002f) return
