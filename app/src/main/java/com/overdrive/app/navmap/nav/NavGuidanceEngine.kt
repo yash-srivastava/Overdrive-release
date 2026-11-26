@@ -102,6 +102,9 @@ class NavGuidanceEngine {
 
     private var route: NavRoute? = null
 
+    /** Projection constants for the active immutable polyline, rebuilt on reroute. */
+    private var segmentGeometry: SegmentGeometry? = null
+
     /** Prefix-sum of haversine arc length (m) along [route].points: cumArcM[i] is the
      *  distance from the route start to vertex i. Built once in [start]. Drives the
      *  along-route progress fraction for the traveled-route trim (line-gradient) — that
@@ -170,6 +173,7 @@ class NavGuidanceEngine {
         for (i in 1 until pts.size) {
             cum[i] = cum[i - 1] + haversineMeters(pts[i - 1].lat, pts[i - 1].lng, pts[i].lat, pts[i].lng)
         }
+        segmentGeometry = SegmentGeometry(pts)
         cumArcM = cum
         routeArcLenM = if (cum.isNotEmpty()) cum[cum.size - 1] else 0.0
         Log.i(TAG, "guidance started: ${route.points.size} pts, ${route.maneuvers.size} maneuvers")
@@ -178,6 +182,7 @@ class NavGuidanceEngine {
     /** Stop guidance and clear all state. Subsequent [update] calls no-op. */
     fun stop() {
         this.route = null
+        segmentGeometry = null
         this.consecutiveOffRoute = 0
         this.matchedSegIndex = -1
         this.offRouteSinceMs = 0L
@@ -228,16 +233,18 @@ class NavGuidanceEngine {
      */
     fun approachAfter(lat: Double, lng: Double, fromAlongM: Double): RoutePoint? {
         val pts = route?.points ?: return null
+        val geometry = segmentGeometry?.takeIf { it.points === pts }
+        val s = SnapResult()
         var best = Double.MAX_VALUE
         for (i in 0 until pts.size - 1) {
             if (cumArcM[i + 1] < fromAlongM) continue
-            val s = pointToSegment(lat, lng, pts[i].lat, pts[i].lng, pts[i + 1].lat, pts[i + 1].lng)
+            projectSegment(lat, lng, pts, i, geometry, s)
             if (alongOf(i, s.t) >= fromAlongM && s.distMeters < best) best = s.distMeters
         }
         if (best == Double.MAX_VALUE) return null
         for (i in 0 until pts.size - 1) {
             if (cumArcM[i + 1] < fromAlongM) continue
-            val s = pointToSegment(lat, lng, pts[i].lat, pts[i].lng, pts[i + 1].lat, pts[i + 1].lng)
+            projectSegment(lat, lng, pts, i, geometry, s)
             val a = alongOf(i, s.t)
             if (a >= fromAlongM && s.distMeters <= best + APPROACH_SLACK_M) return RoutePoint(a, s.lat, s.lng)
         }
@@ -301,6 +308,8 @@ class NavGuidanceEngine {
         // (a move too big for GPS jitter counts even with no speed reading)
         if (speedMps >= MOVING_MPS || moved >= JITTER_MAX_M) traveledM += moved
         val maxAlong = if (lastAlongM < 0.0) Double.MAX_VALUE else lastAlongM + 2.0 * moved + ADVANCE_SLACK_M
+        val geometry = segmentGeometry?.takeIf { it.points === pts }
+        val snap = SnapResult()
         var bestDist = Double.MAX_VALUE
         var bestSegStart = 0
         var bestT = 0.0
@@ -316,8 +325,7 @@ class NavGuidanceEngine {
             // the second pass only if nothing in reach was found (a long gap between fixes, a teleport)
             if (pass == 1 && bestDist < Double.MAX_VALUE) break
             for (i in lo..hi) {
-                val a = pts[i]; val b = pts[i + 1]
-                val snap = pointToSegment(lat, lng, a.lat, a.lng, b.lat, b.lng)
+                projectSegment(lat, lng, pts, i, geometry, snap)
                 if (pass == 0 && alongOf(i, snap.t) > maxAlong) continue
                 if (snap.distMeters < bestDist) {
                     bestDist = snap.distMeters; bestSegStart = i; bestT = snap.t
@@ -329,8 +337,7 @@ class NavGuidanceEngine {
         // and matching there would put the car at the end.
         if (matchedSegIndex < 0) {
             for (i in 0 until bestSegStart) {
-                val a = pts[i]; val b = pts[i + 1]
-                val snap = pointToSegment(lat, lng, a.lat, a.lng, b.lat, b.lng)
+                projectSegment(lat, lng, pts, i, geometry, snap)
                 if (snap.distMeters <= bestDist + FIRST_MATCH_SLACK_M) {
                     bestDist = snap.distMeters; bestSegStart = i; bestT = snap.t
                     bestLat = snap.lat; bestLng = snap.lng
@@ -342,8 +349,7 @@ class NavGuidanceEngine {
         // do ONE global rescan so a real reroute/teleport re-acquires correctly — within reach along the route.
         if (matchedSegIndex >= 0 && bestDist > OFF_ROUTE_LATERAL_M) {
             for (i in 0 until pts.size - 1) {
-                val a = pts[i]; val b = pts[i + 1]
-                val snap = pointToSegment(lat, lng, a.lat, a.lng, b.lat, b.lng)
+                projectSegment(lat, lng, pts, i, geometry, snap)
                 if (alongOf(i, snap.t) > maxAlong) continue
                 if (snap.distMeters < bestDist) {
                     bestDist = snap.distMeters; bestSegStart = i; bestT = snap.t
@@ -497,13 +503,14 @@ class NavGuidanceEngine {
             lo = (matchedSegIndex - MATCH_BACK_WINDOW).coerceAtLeast(0)
             hi = (matchedSegIndex + MATCH_FWD_WINDOW).coerceAtMost(pts.size - 2)
         } else { lo = 0; hi = pts.size - 2 }
+        val geometry = segmentGeometry?.takeIf { it.points === pts }
+        val snap = SnapResult()
         var bestDist = Double.MAX_VALUE
         var bestSeg = lo
         var bestLat = pts[lo].lat
         var bestLng = pts[lo].lng
         for (i in lo..hi) {
-            val a = pts[i]; val b = pts[i + 1]
-            val snap = pointToSegment(lat, lng, a.lat, a.lng, b.lat, b.lng)
+            projectSegment(lat, lng, pts, i, geometry, snap)
             if (snap.distMeters < bestDist) {
                 bestDist = snap.distMeters; bestSeg = i
                 bestLat = snap.lat; bestLng = snap.lng
@@ -635,15 +642,49 @@ class NavGuidanceEngine {
 
     // ---- Geometry helpers (pure, unit-testable) ----
 
-    /** Result of snapping a point onto a segment. */
-    private data class SnapResult(
-        val lat: Double,
-        val lng: Double,
-        /** Parametric position along the segment in [0,1] (0=A, 1=B). */
-        val t: Double,
-        /** Perpendicular/clamped distance from the input point, in meters. */
-        val distMeters: Double
-    )
+    // Per-invocation scratch, not shared between update and render. Only the
+    // winning scalar values escape the search; no allocation per candidate.
+    private class SnapResult {
+        var lat = 0.0
+        var lng = 0.0
+        var t = 0.0
+        var distMeters = 0.0
+    }
+
+    /** Four doubles per segment, in the same local projection as the uncached helper. */
+    private class SegmentGeometry(val points: List<GeoPoint>) {
+        val values = DoubleArray((points.size - 1).coerceAtLeast(0) * 4)
+
+        init {
+            for (i in 0 until points.size - 1) {
+                val a = points[i]
+                val b = points[i + 1]
+                val scale = 111_320.0 * cos(Math.toRadians(a.lat))
+                val dx = (b.lng - a.lng) * scale - 0.0
+                val dy = (b.lat - a.lat) * 111_320.0 - 0.0
+                val j = i * 4
+                values[j] = scale
+                values[j + 1] = dx
+                values[j + 2] = dy
+                values[j + 3] = dx * dx + dy * dy
+            }
+        }
+    }
+
+    private fun projectSegment(
+        pLat: Double, pLng: Double, pts: List<GeoPoint>, i: Int,
+        geometry: SegmentGeometry?, out: SnapResult
+    ) {
+        val a = pts[i]
+        if (geometry == null) {
+            val b = pts[i + 1]
+            pointToSegment(pLat, pLng, a.lat, a.lng, b.lat, b.lng, out)
+            return
+        }
+        val j = i * 4
+        val v = geometry.values
+        projectPoint(pLat, pLng, a.lat, a.lng, v[j], v[j + 1], v[j + 2], v[j + 3], out)
+    }
 
     /**
      * Great-circle distance between two WGS-84 points, in meters (haversine).
@@ -685,7 +726,11 @@ class NavGuidanceEngine {
         pLat: Double, pLng: Double,
         aLat: Double, aLng: Double,
         bLat: Double, bLng: Double
-    ): Double = pointToSegment(pLat, pLng, aLat, aLng, bLat, bLng).distMeters
+    ): Double {
+        val out = SnapResult()
+        pointToSegment(pLat, pLng, aLat, aLng, bLat, bLng, out)
+        return out.distMeters
+    }
 
     /**
      * Full snap: nearest point on segment A-B to P, the parametric `t` in
@@ -695,23 +740,24 @@ class NavGuidanceEngine {
     private fun pointToSegment(
         pLat: Double, pLng: Double,
         aLat: Double, aLng: Double,
-        bLat: Double, bLng: Double
-    ): SnapResult {
-        // Project to local meters: x = east, y = north, scaled by cos(lat).
-        val latRad = Math.toRadians(aLat)
-        val mPerDegLat = 111_320.0
-        val mPerDegLng = 111_320.0 * cos(latRad)
+        bLat: Double, bLng: Double,
+        out: SnapResult
+    ) {
+        val mPerDegLng = 111_320.0 * cos(Math.toRadians(aLat))
+        val dx = (bLng - aLng) * mPerDegLng - 0.0
+        val dy = (bLat - aLat) * 111_320.0 - 0.0
+        projectPoint(pLat, pLng, aLat, aLng, mPerDegLng, dx, dy, dx * dx + dy * dy, out)
+    }
 
+    private fun projectPoint(
+        pLat: Double, pLng: Double, aLat: Double, aLng: Double,
+        mPerDegLng: Double, dx: Double, dy: Double, segLenSq: Double, out: SnapResult
+    ) {
+        val mPerDegLat = 111_320.0
         val ax = 0.0
         val ay = 0.0
-        val bx = (bLng - aLng) * mPerDegLng
-        val by = (bLat - aLat) * mPerDegLat
         val px = (pLng - aLng) * mPerDegLng
         val py = (pLat - aLat) * mPerDegLat
-
-        val dx = bx - ax
-        val dy = by - ay
-        val segLenSq = dx * dx + dy * dy
 
         val t = if (segLenSq <= 1e-9) {
             0.0
@@ -721,18 +767,10 @@ class NavGuidanceEngine {
 
         val projX = ax + t * dx
         val projY = ay + t * dy
-        val distMeters = sqrt((px - projX) * (px - projX) + (py - projY) * (py - projY))
-
-        // Convert the projected local-meter point back to lat/lng.
-        val snapLat = aLat + (projY / mPerDegLat)
-        val snapLng = if (abs(mPerDegLng) < 1e-9) aLng else aLng + (projX / mPerDegLng)
-
-        return SnapResult(
-            lat = snapLat,
-            lng = snapLng,
-            t = t,
-            distMeters = distMeters
-        )
+        out.distMeters = sqrt((px - projX) * (px - projX) + (py - projY) * (py - projY))
+        out.lat = aLat + (projY / mPerDegLat)
+        out.lng = if (abs(mPerDegLng) < 1e-9) aLng else aLng + (projX / mPerDegLng)
+        out.t = t
     }
 
     /**
