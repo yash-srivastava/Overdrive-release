@@ -101,28 +101,21 @@ internal class CommunityWidgetSync(
             .callTimeout(timeoutS, TimeUnit.SECONDS)
             .build()
         client.newCall(req).execute().use { resp ->
-            val parsed = readJson(resp.body)
-            if (resp.isSuccessful) return Result(true, parsed, null, resp.code)
-            val msg = parsed?.optString("error", "")?.ifEmpty { null } ?: "HTTP ${resp.code}"
-            return Result(false, parsed, msg, resp.code)
+            return communityResponse(readBody(resp.body), resp.isSuccessful, resp.code)
         }
     }
 
     /** Bounded read: a body over [MAX_RESPONSE_BYTES] fails the call instead of filling the heap. */
-    private fun readJson(body: ResponseBody?): JSONObject? {
+    private fun readBody(body: ResponseBody?): String? {
         if (body == null) return null
         val source = body.source()
         if (body.contentLength() > MAX_RESPONSE_BYTES || source.request(MAX_RESPONSE_BYTES + 1)) {
             throw IOException("community response too large")
         }
-        val raw = source.readUtf8()
-        return try { JSONObject(raw) } catch (_: Throwable) { null }
+        return source.readUtf8()
     }
 
-    private fun baseUrl(): String? {
-        val u = workerUrlSupplier()?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        return u.trimEnd('/')
-    }
+    private fun baseUrl(): String? = communityBaseUrl(workerUrlSupplier())
 
     private fun noUrl(): Result = fail("no community worker URL configured")
 
