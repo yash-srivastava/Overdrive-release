@@ -150,12 +150,12 @@ class DiLink5InstrumentFullSessionTest {
         assertNull(io.marker)
         assertEquals(4, io.mode)
         assertEquals(RESULT_INSTRUMENT_MODE_CHANGED,
-            DiLink5InstrumentFullSession.savedModeDisposition(4, closing = true))
+            DiLink5InstrumentFullSession.savedModeDisposition(4, owner.copy(closing = true)))
         assertEquals(RESULT_INSTRUMENT_MODE_CHANGED,
-            DiLink5InstrumentFullSession.savedModeDisposition(2, closing = true))
+            DiLink5InstrumentFullSession.savedModeDisposition(2, owner.copy(closing = true)))
         assertEquals(RESULT_INSTRUMENT_GUARD_FAILED,
-            DiLink5InstrumentFullSession.savedModeDisposition(-1, closing = true))
-        assertNull(DiLink5InstrumentFullSession.savedModeDisposition(1, closing = true))
+            DiLink5InstrumentFullSession.savedModeDisposition(-1, owner.copy(closing = true)))
+        assertNull(DiLink5InstrumentFullSession.savedModeDisposition(1, owner.copy(closing = true)))
     }
 
     @Test
@@ -171,11 +171,68 @@ class DiLink5InstrumentFullSessionTest {
     }
 
     @Test
-    fun anotherBootDiscardsOwnershipWithoutAnOemCommand() {
-        val io = FakeIo().apply { marker = owner; acc = false }
-        assertTrue(Lifecycle(io).release(null, "next-boot"))
-        assertNull(io.marker)
+    fun previousBootOpeningInFullRestoresOffAndRetriesIncompleteBatches() {
+        for (legacy in listOf(false, true)) {
+            val opening = owner.copy(legacyMapFocus = legacy)
+            val closing = opening.copy(bootId = "next-boot", closing = true, rebootRestore = true)
+            val io = FakeIo().apply { marker = opening; mode = 4; acc = false }
+            val lifecycle = Lifecycle(io)
+
+            assertFalse(lifecycle.release(null, "next-boot"))
+            io.acc = true
+            io.canWrite = false
+            assertFalse(lifecycle.release(null, "next-boot"))
+            assertEquals(opening, io.marker)
+            assertTrue(io.commands.isEmpty())
+
+            io.canWrite = true
+            val expectedCount = if (legacy) 5 else 4
+            io.nextReply = answered(RESULT_SENT, expectedCount - 1)
+            assertFalse(lifecycle.release(null, "next-boot"))
+            assertEquals(closing, io.marker)
+            io.marker = Owner.decode(closing.encode())
+            io.nextReply = answered(RESULT_SENT, expectedCount)
+            assertTrue(Lifecycle(io).release(null, "next-boot"))
+            assertEquals(listOf(closing, closing), io.commands)
+            assertEquals(listOf(closing, null), io.writes)
+            assertNull(io.marker)
+        }
+    }
+
+    @Test
+    fun previousBootClearsOtherSelectionsAndClosingOwnersWithoutCommands() {
+        for (mode in listOf(1, 2, 3, 4)) {
+            for (closing in listOf(false, true)) {
+                if (mode == 4 && !closing) continue
+                val io = FakeIo().apply { marker = owner.copy(closing = closing); this.mode = mode; acc = false }
+                assertTrue(Lifecycle(io).release(null, "next-boot"))
+                assertNull(io.marker)
+                assertTrue(io.commands.isEmpty())
+            }
+        }
+    }
+
+    @Test
+    fun previousBootDefersAnUnreadableModeAndHonorsTheSelectionAtDispatch() {
+        val io = FakeIo().apply { marker = owner; mode = -1 }
+        val lifecycle = Lifecycle(io)
+        assertFalse(lifecycle.release(null, "next-boot"))
+        assertEquals(owner, io.marker)
         assertTrue(io.commands.isEmpty())
+
+        io.mode = 4
+        io.observedModeAtDispatch = -1
+        assertFalse(lifecycle.release(null, "next-boot"))
+        val closing = owner.copy(bootId = "next-boot", closing = true, rebootRestore = true)
+        assertEquals(closing, io.marker)
+        for (mode in listOf(1, 2, 3)) {
+            assertEquals(RESULT_INSTRUMENT_MODE_CHANGED,
+                DiLink5InstrumentFullSession.savedModeDisposition(mode, closing))
+        }
+        io.observedModeAtDispatch = 3
+        assertTrue(lifecycle.release(null, "next-boot"))
+        assertNull(io.marker)
+        assertEquals(3, io.mode)
     }
 
     @Test
@@ -202,6 +259,8 @@ class DiLink5InstrumentFullSessionTest {
         assertEquals(owner, Owner.decode(owner.encode()))
         assertEquals(close, Owner.decode(close.encode()))
         assertFalse(Owner.decode(owner.encode()) == close)
+        assertNull(Owner.decode(owner.copy(rebootRestore = true).encode()))
+        assertEquals(close, Owner.decode("""{"generation":42,"bootId":"boot-id","closing":true,"legacyMapFocus":false}"""))
         assertNull(Owner.decode("""{"generation":42,"bootId":"boot-id"}"""))
     }
 
@@ -251,7 +310,8 @@ class DiLink5InstrumentFullSessionTest {
             assertEquals(marker, owner)
             commands += owner
             observedModeAtDispatch?.let { mode = it }
-            return nextReply
+            val declined = DiLink5InstrumentFullSession.savedModeDisposition(mode, owner)
+            return if (declined != null) answered(declined) else nextReply
         }
     }
 

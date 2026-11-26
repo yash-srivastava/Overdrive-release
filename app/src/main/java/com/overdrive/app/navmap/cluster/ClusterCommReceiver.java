@@ -242,16 +242,16 @@ public final class ClusterCommReceiver extends BroadcastReceiver {
             int sent = 0;
             boolean restore = instrumentOwner != null && instrumentOwner.getClosing();
             for (Bundle command : commands) {
-                if (instrumentOwner != null && SystemClock.elapsedRealtime() > deadline) {
-                    send(reply, ClusterCommContract.RESULT_EXPIRED, token, sent);
-                    return;
-                }
                 if (restore && command.getInt("DataType") == 31 && command.getInt("subtype") == 3) {
-                    Integer declined = DiLink5InstrumentFullSession.beforeOff(context);
+                    Integer declined = DiLink5InstrumentFullSession.beforeWire(context, instrumentOwner);
                     if (declined != null) {
                         send(reply, declined, token, sent);
                         return;
                     }
+                }
+                if (instrumentOwner != null && SystemClock.elapsedRealtime() > deadline) {
+                    send(reply, ClusterCommContract.RESULT_EXPIRED, token, sent);
+                    return;
                 }
                 Parcel data = Parcel.obtain();
                 try {

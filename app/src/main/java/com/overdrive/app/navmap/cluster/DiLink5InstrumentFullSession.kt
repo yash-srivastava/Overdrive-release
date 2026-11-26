@@ -37,6 +37,7 @@ internal object DiLink5InstrumentFullSession {
         val bootId: String,
         val closing: Boolean = false,
         val legacyMapFocus: Boolean = false,
+        val rebootRestore: Boolean = false,
     ) {
         val expectedCommandCount: Int get() = commandBuilders(this).size
 
@@ -45,6 +46,7 @@ internal object DiLink5InstrumentFullSession {
             .put("bootId", bootId)
             .put("closing", closing)
             .put("legacyMapFocus", legacyMapFocus)
+            .put("rebootRestore", rebootRestore)
             .toString()
 
         companion object {
@@ -55,7 +57,10 @@ internal object DiLink5InstrumentFullSession {
                 val closing = json.getBoolean("closing")
                 // Owners persisted before this field could have acquired OEM map focus.
                 val legacyMapFocus = !json.has("legacyMapFocus") || json.getBoolean("legacyMapFocus")
-                if (generation > 0 && bootId.isNotBlank()) Owner(generation, bootId, closing, legacyMapFocus) else null
+                val rebootRestore = json.has("rebootRestore") && json.getBoolean("rebootRestore")
+                if (generation > 0 && bootId.isNotBlank() && (!rebootRestore || closing)) {
+                    Owner(generation, bootId, closing, legacyMapFocus, rebootRestore)
+                } else null
             } catch (_: Exception) {
                 null
             }
@@ -96,11 +101,18 @@ internal object DiLink5InstrumentFullSession {
             val owner = io.readOwner() ?: return true
             if (generation != null && generation != owner.generation) return true
             if (bootId.isBlank()) return false
-            if (owner.bootId != bootId) return io.writeOwner(null)
+            val previousBoot = owner.bootId != bootId
+            if (previousBoot) {
+                if (owner.closing) return io.writeOwner(null)
+                // An interrupted temporary Full can survive reboot on this firmware.
+                val mode = io.readMode()
+                if (mode <= 0) return false
+                if (mode != FULL) return io.writeOwner(null)
+            }
             if (!io.accOn()) return false
             // Cancel any late opening broadcast before dispatching the close. The app checks
             // this phase again on its serialized worker, immediately before touching Binder.
-            val closing = owner.copy(closing = true)
+            val closing = owner.copy(bootId = bootId, closing = true, rebootRestore = previousBoot || owner.rebootRestore)
             if (!owner.closing && !io.writeOwner(closing)) return false
             val reply = io.dispatch(closing)
             return (reply.ok() && reply.sent == closing.expectedCommandCount ||
@@ -234,19 +246,17 @@ internal object DiLink5InstrumentFullSession {
         ) {
             RESULT_INSTRUMENT_GUARD_FAILED
         } else {
-            savedModeDisposition(readAppSavedMode(context), owner.closing)
+            savedModeDisposition(readAppSavedMode(context), owner)
         }
     } catch (_: Exception) {
         RESULT_INSTRUMENT_GUARD_FAILED
     }
 
-    @JvmStatic
-    fun beforeOff(context: Context): Int? = savedModeDisposition(readAppSavedMode(context), closing = true)
-
-    internal fun savedModeDisposition(mode: Int, closing: Boolean): Int? = when {
-        mode == OFF -> null
+    internal fun savedModeDisposition(mode: Int, owner: Owner): Int? = when {
         mode <= 0 -> RESULT_INSTRUMENT_GUARD_FAILED
-        !closing && mode == FULL -> RESULT_INSTRUMENT_ALREADY_FULL
+        owner.rebootRestore -> if (mode == FULL) null else RESULT_INSTRUMENT_MODE_CHANGED
+        mode == OFF -> null
+        !owner.closing && mode == FULL -> RESULT_INSTRUMENT_ALREADY_FULL
         else -> RESULT_INSTRUMENT_MODE_CHANGED
     }
 
