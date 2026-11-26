@@ -32,6 +32,41 @@ class NavGuidanceRecoveryScanAndroidTest {
         assertTrue("point reads: ${points.reads}", points.reads < 200)
     }
 
+    @Test fun firstFixSkipsDistantBlocksWithoutChangingEarliestMatch() {
+        val points = CountingPoints(List(100_001) { GeoPoint(0.0, it * 0.0001) })
+        val guidance = NavGuidanceEngine()
+        guidance.start(route(points))
+        points.reads = 0
+        val state = guidance.update(0.0, 0.0, 90.0, 10.0, 1000)
+        assertEquals(0.0, state.snappedLng, 1e-10)
+        assertEquals(0.0, guidance.offRouteM, 1e-6)
+        assertTrue("point reads: ${points.reads}", points.reads < 100)
+    }
+
+    @Test fun lateRecoverySkipsDistantButReachablePrefix() {
+        val points = CountingPoints(List(100_001) { GeoPoint(0.0, it * 0.0001) })
+        val guidance = NavGuidanceEngine()
+        guidance.start(route(points))
+        guidance.update(0.0, 8.0, 90.0, 10.0, 1000)
+        points.reads = 0
+        val state = guidance.update(0.001, 8.0, 90.0, 10.0, 2000)
+        assertEquals(0.0, state.snappedLat, 1e-10)
+        assertEquals(8.0, state.snappedLng, 1e-10)
+        assertEquals(111.32, guidance.offRouteM, 1e-6)
+        assertTrue("point reads: ${points.reads}", points.reads < 300)
+    }
+
+    @Test fun firstMatchSlackStillPrefersEarlierParallelLeg() {
+        val early = List(65) { GeoPoint(0.0002, it * 0.001) }
+        val late = List(65) { GeoPoint(0.0, (64 - it) * 0.001) }
+        val guidance = NavGuidanceEngine()
+        guidance.start(route(early + late))
+        val state = guidance.update(0.0, 0.0155, 90.0, 10.0, 1000)
+        assertEquals(0.0002, state.snappedLat, 1e-10)
+        assertEquals(0.0155, state.snappedLng, 1e-10)
+        assertEquals(22.264, guidance.offRouteM, 1e-6)
+    }
+
     @Test fun recoveryStillFindsReachableSegmentBeyondLocalWindow() {
         // ~1.1 m per segment. A 90 m move lies beyond the 16-segment window.
         val points = List(2000) { GeoPoint(0.0, it * 0.00001) }
