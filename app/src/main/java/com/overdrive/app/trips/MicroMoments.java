@@ -1,10 +1,12 @@
 package com.overdrive.app.trips;
 
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 
 /**
  * Container for micro-moment analysis extracted from trip telemetry.
@@ -170,23 +172,9 @@ public class MicroMoments {
     public JSONObject toJson() {
         JSONObject json = new JSONObject();
         try {
-            JSONArray launchArr = new JSONArray();
-            for (LaunchProfile lp : launches) {
-                launchArr.put(lp.toJson());
-            }
-            json.put("launches", launchArr);
-
-            JSONArray coastArr = new JSONArray();
-            for (CoastBrakeEvent ev : coastBrakeEvents) {
-                coastArr.put(ev.toJson());
-            }
-            json.put("coastBrakeEvents", coastArr);
-
-            JSONArray smoothArr = new JSONArray();
-            for (PedalSmoothnessWindow w : smoothnessWindows) {
-                smoothArr.put(w.toJson());
-            }
-            json.put("smoothnessWindows", smoothArr);
+            json.put("launches", toJsonArray(launches, LaunchProfile::toJson));
+            json.put("coastBrakeEvents", toJsonArray(coastBrakeEvents, CoastBrakeEvent::toJson));
+            json.put("smoothnessWindows", toJsonArray(smoothnessWindows, PedalSmoothnessWindow::toJson));
         } catch (Exception e) {
             // ignore
         }
@@ -202,29 +190,30 @@ public class MicroMoments {
         try {
             JSONObject json = new JSONObject(jsonStr);
 
-            JSONArray launchArr = json.optJSONArray("launches");
-            if (launchArr != null) {
-                for (int i = 0; i < launchArr.length(); i++) {
-                    mm.launches.add(LaunchProfile.fromJson(launchArr.getJSONObject(i)));
-                }
-            }
-
-            JSONArray coastArr = json.optJSONArray("coastBrakeEvents");
-            if (coastArr != null) {
-                for (int i = 0; i < coastArr.length(); i++) {
-                    mm.coastBrakeEvents.add(CoastBrakeEvent.fromJson(coastArr.getJSONObject(i)));
-                }
-            }
-
-            JSONArray smoothArr = json.optJSONArray("smoothnessWindows");
-            if (smoothArr != null) {
-                for (int i = 0; i < smoothArr.length(); i++) {
-                    mm.smoothnessWindows.add(PedalSmoothnessWindow.fromJson(smoothArr.getJSONObject(i)));
-                }
-            }
+            appendFromJsonArray(json.optJSONArray("launches"), mm.launches, LaunchProfile::fromJson);
+            appendFromJsonArray(json.optJSONArray("coastBrakeEvents"),
+                    mm.coastBrakeEvents, CoastBrakeEvent::fromJson);
+            appendFromJsonArray(json.optJSONArray("smoothnessWindows"),
+                    mm.smoothnessWindows, PedalSmoothnessWindow::fromJson);
         } catch (Exception e) {
-            // Return empty MicroMoments on parse failure
+            // Retain entries decoded before the failure.
         }
         return mm;
+    }
+
+    private static <T> JSONArray toJsonArray(List<T> items, Function<T, JSONObject> encode) {
+        JSONArray array = new JSONArray();
+        for (T item : items) {
+            array.put(encode.apply(item));
+        }
+        return array;
+    }
+
+    private static <T> void appendFromJsonArray(JSONArray array, List<T> target,
+                                               Function<JSONObject, T> decode) throws JSONException {
+        if (array == null) return;
+        for (int i = 0; i < array.length(); i++) {
+            target.add(decode.apply(array.getJSONObject(i)));
+        }
     }
 }
