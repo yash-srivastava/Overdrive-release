@@ -106,8 +106,8 @@ static void extractInnerCoreTemplate(
 
 #ifdef USE_OPENCV_IMGPROC
 static float matchInMicroRoi(
-    const uint8_t* gray, int width, int height,
-    const uint8_t* tmpl,
+    const uint8_t* frame, int width, int height, int rgbStride,
+    uint8_t* gray, bool sharedGray, const uint8_t* tmpl,
     int lastX, int lastY, int lastW, int lastH,
     int* outX, int* outY)
 {
@@ -126,9 +126,6 @@ static float matchInMicroRoi(
         return 0.0f;
     }
 
-    cv::Mat frameMat(height, width, CV_8UC1, const_cast<uint8_t*>(gray));
-    cv::Mat roi = frameMat(cv::Rect(roiX1, roiY1, roiW, roiH));
-
     // Scale the ROI so the object appears at TRACKER_TEMPLATE_SIZE.
     // This normalizes for the object's current size in the frame.
     float scaleX = (float)TRACKER_TEMPLATE_SIZE / lastW;
@@ -145,6 +142,19 @@ static float matchInMicroRoi(
         *outX = lastX;
         *outY = lastY;
         return 0.0f;
+    }
+
+    // With one track, convert only the pixels consumed by resize. Retain the
+    // original full-frame gray view when several tracks share this quadrant,
+    // so overlapping search windows never repeat RGB conversion work.
+    cv::Mat roi;
+    if (sharedGray) {
+        cv::Mat frameMat(height, width, CV_8UC1, gray);
+        roi = frameMat(cv::Rect(roiX1, roiY1, roiW, roiH));
+    } else {
+        trackerRgbToGray(frame + roiY1 * rgbStride + roiX1 * 3,
+                         gray, roiW, roiH, rgbStride);
+        roi = cv::Mat(roiH, roiW, CV_8UC1, gray);
     }
 
     cv::Mat scaledRoi;
@@ -262,6 +272,14 @@ void tracker_update(
     if (width <= 0 || height <= 0 || height > 320 * 240 / width) return;
     if (rgbStride == 0) rgbStride = width * 3;
     if (rgbStride < width * 3) return;
+    int eligibleTracks = 0;
+    for (const TrackedObject& t : state->tracks) {
+        if (t.active && t.quadrant == quadrant &&
+            (nowMs - t.startTimeMs) <= TRACKER_MAX_DURATION_MS) {
+            ++eligibleTracks;
+        }
+    }
+    const bool sharedGray = eligibleTracks > 1;
     bool grayReady = false;
 
     for (int i = 0; i < TRACKER_MAX_TRACKS; i++) {
@@ -279,9 +297,10 @@ void tracker_update(
             t.needsYoloVerification = true;
         }
 
-        // Convert only if a matching, non-expired track needs this frame.
-        // The grayscale result is shared by all tracks in the quadrant.
-        if (!grayReady) {
+        // Multiple tracks share a single full-quadrant conversion. A lone
+        // track converts its micro-ROI inside matchInMicroRoi, after geometry
+        // validation (including the scaled-size rejection).
+        if (sharedGray && !grayReady) {
             trackerRgbToGray(frame, grayBuf, width, height, rgbStride);
             grayReady = true;
         }
@@ -289,8 +308,8 @@ void tracker_update(
         // Run micro-ROI NCC template matching
         int newX, newY;
         float confidence = matchInMicroRoi(
-            grayBuf, width, height,
-            t.templateData,
+            frame, width, height, rgbStride,
+            grayBuf, sharedGray, t.templateData,
             t.x, t.y, t.w, t.h,
             &newX, &newY);
 
