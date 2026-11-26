@@ -87,6 +87,9 @@ function createEnvironment() {
         Set: Set
     };
     vm.createContext(context);
+    vm.runInContext(fs.readFileSync(path.resolve(__dirname,
+        '../../main/assets/web/shared/range-calendar.js'), 'utf8'), context,
+        { filename: 'range-calendar.js' });
     vm.runInContext(
         chargingSource + '\nthis.CHARGING = CHARGING;',
         context,
