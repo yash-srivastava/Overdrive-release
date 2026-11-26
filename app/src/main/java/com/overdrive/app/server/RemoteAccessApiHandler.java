@@ -1549,9 +1549,10 @@ public final class RemoteAccessApiHandler {
             if (confirmation == DiLink5GateActuationPolicy.Confirmation.CONFIRMED) {
                 lastCommandConfirmed = true;
                 decision.satisfied();
-                recordAction(action, "confirmed", "Driver-door lock state confirmed");
+                String confirmed = driverDoorStateConfirmed(action);
+                recordAction(action, "confirmed", confirmed);
                 if ("lock".equals(action)) seedKeyFobArmingAfterProximityLock(decision);
-                notifyOutcome(decision, settings, "confirmed", "Driver-door lock state confirmed");
+                notifyOutcome(decision, settings, "confirmed", confirmed);
                 return;
             }
             if (cloudFallback) {
@@ -1619,8 +1620,9 @@ public final class RemoteAccessApiHandler {
         if (confirmation == DiLink5GateActuationPolicy.Confirmation.CONFIRMED) {
             lastCommandConfirmed = true;
             decision.satisfied();
-            recordAction(action, "confirmed", "Driver-door lock state confirmed");
-            notifyOutcome(decision, settings, "confirmed", "Driver-door lock state confirmed");
+            String confirmed = driverDoorStateConfirmed(action);
+            recordAction(action, "confirmed", confirmed);
+            notifyOutcome(decision, settings, "confirmed", confirmed);
             return;
         }
         recordAction(action, "unconfirmed", "Command accepted; driver-door change could not be confirmed");
@@ -1848,6 +1850,12 @@ public final class RemoteAccessApiHandler {
                 target, windowMs, SystemClock::elapsedRealtime, Thread::sleep);
     }
 
+    private static String driverDoorStateConfirmed(String action) {
+        return "unlock".equals(action)
+                ? "Driver-door unlock state confirmed"
+                : "Driver-door lock state confirmed";
+    }
+
     /**
      * Terminal outcome of a decision that ran the cloud-fallback leg. "confirmed" is used ONLY when a
      * LOCAL readback confirmed the target; a cloud acknowledgement alone is {@code cloud_acknowledged}
@@ -1865,11 +1873,12 @@ public final class RemoteAccessApiHandler {
             // confirmed state came from elsewhere (owner, fob) and the text says so.
             String localLeg = sdkAccepted ? "via local command"
                     : "without a command (local command failed: " + sdkFailureText + ")";
+            String prefix = driverDoorStateConfirmed(action);
             String text = leg.result == null
-                    ? "Driver-door lock state confirmed " + localLeg + "; cloud command not sent" + cloudDetail
+                    ? prefix + " " + localLeg + "; cloud command not sent" + cloudDetail
                     : leg.acknowledged()
-                            ? "Driver-door lock state confirmed via cloud command" + cloudDetail
-                            : "Driver-door lock state confirmed " + localLeg + "; cloud command failed: "
+                            ? prefix + " via cloud command" + cloudDetail
+                            : prefix + " " + localLeg + "; cloud command failed: "
                                     + cloudLegSummary(leg) + cloudDetail;
             lastCommandConfirmed = true;
             decision.satisfied();

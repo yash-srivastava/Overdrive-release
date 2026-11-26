@@ -52,7 +52,9 @@ public final class TelegramSink implements NotificationBus.Sink {
             if (com.overdrive.app.remoteaccess.RemoteAccessNotifications.isRemoteAccess(event)) {
                 if (com.overdrive.app.remoteaccess.RemoteAccessNotifications
                         .canDeliver(event, "telegram")) {
-                    TelegramNotifier.sendRemoteAccess("🔑 *" + md(event.title) + "*\n"
+                    String action = event.data != null ? event.data.optString("action", "") : "";
+                    String lead = "lock".equals(action) ? "🔒🔴 " : "🔑🟢 ";
+                    TelegramNotifier.sendRemoteAccess(lead + "*" + md(event.title) + "*\n"
                             + md(event.body), event.data);
                 }
                 return;

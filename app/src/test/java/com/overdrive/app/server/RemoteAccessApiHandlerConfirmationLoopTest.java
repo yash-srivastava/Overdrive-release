@@ -207,7 +207,7 @@ public class RemoteAccessApiHandlerConfirmationLoopTest {
         assertTrue(body.contains("if (confirmation == DiLink5GateActuationPolicy.Confirmation.CONFIRMED) {\n"
                 + "                lastCommandConfirmed = true;\n"
                 + "                decision.satisfied();\n"
-                + "                recordAction(action, \"confirmed\", \"Driver-door lock state confirmed\");"));
+                + "                recordAction(action, \"confirmed\", confirmed);"));
         assertTrue(body.contains(
                 "recordAction(action, \"unconfirmed\", \"Command accepted; driver-door change could not be confirmed\");"));
         // Case (C) burst only for the carsvc actuation rail; the app outcome is taken on the dispatch thread.

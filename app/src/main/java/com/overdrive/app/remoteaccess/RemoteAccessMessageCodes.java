@@ -131,6 +131,7 @@ public final class RemoteAccessMessageCodes {
         rule("Local command accepted; awaiting driver-door readback" + DETAIL, "local_accepted_awaiting", "detail");
         exact("Command sent; vehicle confirmation off", "sent_confirmation_off");
         exact("Driver-door lock state confirmed", "lock_state_confirmed");
+        exact("Driver-door unlock state confirmed", "unlock_state_confirmed");
         exact("Command accepted; driver-door change could not be confirmed", "accepted_unconfirmed");
         exact("Driver door still locked; local command re-sent", "still_locked_resent");
         rule("Cloud command accepted; awaiting driver-door readback" + DETAIL, "cloud_accepted_awaiting", "detail");
@@ -143,6 +144,15 @@ public final class RemoteAccessMessageCodes {
                 "confirmed_local_cloud_failed", "cloud", "detail");
         rule("Driver-door lock state confirmed without a command \\(local command failed: (.*)\\); cloud command failed: " + PHRASE + DETAIL,
                 "confirmed_without_command_cloud_failed", "failure", "cloud", "detail");
+        rule("Driver-door unlock state confirmed via local command; cloud command not sent" + DETAIL,
+                "unlock_confirmed_local_cloud_not_sent", "detail");
+        rule("Driver-door unlock state confirmed without a command \\(local command failed: (.*)\\); cloud command not sent" + DETAIL,
+                "unlock_confirmed_without_command_cloud_not_sent", "failure", "detail");
+        rule("Driver-door unlock state confirmed via cloud command" + DETAIL, "unlock_confirmed_via_cloud", "detail");
+        rule("Driver-door unlock state confirmed via local command; cloud command failed: " + PHRASE + DETAIL,
+                "unlock_confirmed_local_cloud_failed", "cloud", "detail");
+        rule("Driver-door unlock state confirmed without a command \\(local command failed: (.*)\\); cloud command failed: " + PHRASE + DETAIL,
+                "unlock_confirmed_without_command_cloud_failed", "failure", "cloud", "detail");
         rule("Cloud command acknowledged; driver-door change could not be confirmed locally" + DETAIL,
                 "cloud_acknowledged_unconfirmed", "detail");
         rule("Command accepted; driver-door change could not be confirmed; cloud command not sent: " + PHRASE + DETAIL,

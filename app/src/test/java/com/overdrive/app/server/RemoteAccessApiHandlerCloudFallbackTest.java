@@ -362,7 +362,7 @@ public class RemoteAccessApiHandlerCloudFallbackTest {
         assertEquals(0, count(handler, "notifyOutcome(decision, settings, \"cloud_acknowledged\""));
         // The texts of the outcome table.
         for (String text : new String[] {
-                "\"Driver-door lock state confirmed via cloud command\" + cloudDetail",
+                "prefix + \" via cloud command\" + cloudDetail",
                 "\"; cloud command not sent\" + cloudDetail",
                 "\"; cloud command failed: \"",
                 "\"Command accepted; driver-door change could not be confirmed; cloud command not sent: \"",
@@ -465,7 +465,7 @@ public class RemoteAccessApiHandlerCloudFallbackTest {
                 + "                return;\n"
                 + "            }"));
         assertTrue(off.contains(
-                "                notifyOutcome(decision, settings, \"confirmed\", \"Driver-door lock state confirmed\");\n"
+                "                notifyOutcome(decision, settings, \"confirmed\", confirmed);\n"
                 + "                return;\n"
                 + "            }\n"
                 + "            recordAction(action, \"unconfirmed\", \"Command accepted; driver-door change could not be confirmed\");\n"

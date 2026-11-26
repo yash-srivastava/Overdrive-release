@@ -116,7 +116,7 @@ public class RemoteAccessApiHandlerConfirmJobTest {
         assertEquals(1, count(confirm, "DiLink5GateActuationPolicy.confirmByDistinctReadbacks("));
         assertEquals(1, count(confirm, "if (actuationRail == DiLink5LockRail.CARSVC) collector.requestDiLink5CarSvcLockBurst(12_000L);"));
         assertEquals(4, count(confirm, "dispatchCloudFallback("));
-        assertEquals(1, count(confirm, "recordAction(action, \"confirmed\", \"Driver-door lock state confirmed\");"));
+        assertEquals(1, count(confirm, "recordAction(action, \"confirmed\", confirmed);"));
         assertEquals(1, count(confirm, "recordAction(action, \"unconfirmed\", \"Command accepted; driver-door change could not be confirmed\");"));
         assertEquals(1, count(confirm, "lastCommandConfirmed = true;"));
         assertTrue(confirm.contains("        CloudLeg cloudLeg = null;"));
