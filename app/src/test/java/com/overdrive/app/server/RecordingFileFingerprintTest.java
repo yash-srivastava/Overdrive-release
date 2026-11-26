@@ -32,6 +32,26 @@ public class RecordingFileFingerprintTest {
     }
 
     @Test
+    public void precomputedIdentityProducesSameFingerprint() throws Exception {
+        Path dir = Files.createTempDirectory("recording-fingerprint-reuse");
+        File mp4 = write(dir.resolve("cam.mp4"), "video");
+        File sidecar = write(dir.resolve("cam.json"), "{}");
+        try {
+            RecordingIdentity identity = RecordingIdentity.fromFile(mp4);
+            RecordingFileFingerprint expected = RecordingFileFingerprint.from(mp4);
+            RecordingFileFingerprint actual = RecordingFileFingerprint.from(mp4, identity);
+            assertEquals(identity.recordingId, actual.recordingId);
+            assertEquals(expected.recordingId, actual.recordingId);
+            assertTrue(actual.matches(expected.absolutePath, expected.sizeBytes,
+                    expected.mp4Mtime, expected.sidecarMtime));
+        } finally {
+            Files.deleteIfExists(sidecar.toPath());
+            Files.deleteIfExists(mp4.toPath());
+            Files.deleteIfExists(dir);
+        }
+    }
+
+    @Test
     public void pathSizeAndMtimeChangesRequireRefresh() throws Exception {
         Path dir = Files.createTempDirectory("recording-fingerprint");
         File mp4 = write(dir.resolve("cam_20260810_120000.mp4"), "video");

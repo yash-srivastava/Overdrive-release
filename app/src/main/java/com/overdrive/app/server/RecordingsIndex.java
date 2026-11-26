@@ -1779,7 +1779,7 @@ public final class RecordingsIndex {
                 RecordingIdentity identity = RecordingIdentity.fromFile(file);
                 scan.observedIds.add(identity.recordingId);
                 if (!RemovableStorageFs.isFile(file)) continue;
-                RecordingFileFingerprint fingerprint = RecordingFileFingerprint.from(file);
+                RecordingFileFingerprint fingerprint = RecordingFileFingerprint.from(file, identity);
                 if (fingerprint.sizeBytes > 0) {
                     scan.files.put(fingerprint.recordingId, fingerprint);
                 }
