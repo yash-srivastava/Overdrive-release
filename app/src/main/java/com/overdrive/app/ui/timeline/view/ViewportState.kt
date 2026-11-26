@@ -159,8 +159,21 @@ class ViewportState {
         clampCenter()
     }
 
-    /** Presented crop region. */
-    fun region(): Region = Region(rx.value, ry.value, max(MIN_EXTENT, rw.value), max(MIN_EXTENT, rh.value))
+    private var presentedRegion = CameraRegions.FULL
+
+    /** Presented crop region. Reuse the immutable snapshot until its coordinates change. */
+    fun region(): Region {
+        val x = rx.value
+        val y = ry.value
+        val w = max(MIN_EXTENT, rw.value)
+        val h = max(MIN_EXTENT, rh.value)
+        val previous = presentedRegion
+        // Exact bits also preserve signed zero and non-finite coordinates.
+        if (previous.x.toRawBits() == x.toRawBits() && previous.y.toRawBits() == y.toRawBits() &&
+            previous.w.toRawBits() == w.toRawBits() && previous.h.toRawBits() == h.toRawBits()
+        ) return previous
+        return Region(x, y, w, h).also { presentedRegion = it }
+    }
 
     fun presentedZoom(): Float = if (live) bandZoom(rawZoom) else zoom.value
 

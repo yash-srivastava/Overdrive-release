@@ -49,21 +49,31 @@ object CameraRegions {
     private val FOUR = listOf(Quadrant.FRONT, Quadrant.RIGHT, Quadrant.REAR, Quadrant.LEFT)
     private val ONE = listOf(Quadrant.FRONT)
 
+    // Layout rectangles are immutable and identical for every clip.
+    private val STANDARD_FRONT = Region(0f, 0f, 0.5f, 0.5f)
+    private val STANDARD_RIGHT = Region(0.5f, 0f, 0.5f, 0.5f)
+    private val STANDARD_REAR = Region(0f, 0.5f, 0.5f, 0.5f)
+    private val STANDARD_LEFT = Region(0.5f, 0.5f, 0.5f, 0.5f)
+    private val DASHCAM_FRONT = Region(0f, 0f, 1f, DASHCAM_SPLIT)
+    private val DASHCAM_LEFT = Region(0f, DASHCAM_SPLIT, DASHCAM_THIRD, DASHCAM_BOTTOM)
+    private val DASHCAM_REAR = Region(DASHCAM_THIRD, DASHCAM_SPLIT, DASHCAM_THIRD, DASHCAM_BOTTOM)
+    private val DASHCAM_RIGHT = Region(2f * DASHCAM_THIRD, DASHCAM_SPLIT, DASHCAM_THIRD, DASHCAM_BOTTOM)
+
     fun regionFor(layout: TileLayout, q: Quadrant): Region = when (layout) {
         TileLayout.SINGLE -> FULL
         TileLayout.STANDARD -> when (q) {
             Quadrant.ALL -> FULL
-            Quadrant.FRONT -> Region(0f, 0f, 0.5f, 0.5f)
-            Quadrant.RIGHT -> Region(0.5f, 0f, 0.5f, 0.5f)
-            Quadrant.REAR -> Region(0f, 0.5f, 0.5f, 0.5f)
-            Quadrant.LEFT -> Region(0.5f, 0.5f, 0.5f, 0.5f)
+            Quadrant.FRONT -> STANDARD_FRONT
+            Quadrant.RIGHT -> STANDARD_RIGHT
+            Quadrant.REAR -> STANDARD_REAR
+            Quadrant.LEFT -> STANDARD_LEFT
         }
         TileLayout.DASHCAM -> when (q) {
             Quadrant.ALL -> FULL
-            Quadrant.FRONT -> Region(0f, 0f, 1f, DASHCAM_SPLIT)
-            Quadrant.LEFT -> Region(0f, DASHCAM_SPLIT, DASHCAM_THIRD, DASHCAM_BOTTOM)
-            Quadrant.REAR -> Region(DASHCAM_THIRD, DASHCAM_SPLIT, DASHCAM_THIRD, DASHCAM_BOTTOM)
-            Quadrant.RIGHT -> Region(2f * DASHCAM_THIRD, DASHCAM_SPLIT, DASHCAM_THIRD, DASHCAM_BOTTOM)
+            Quadrant.FRONT -> DASHCAM_FRONT
+            Quadrant.LEFT -> DASHCAM_LEFT
+            Quadrant.REAR -> DASHCAM_REAR
+            Quadrant.RIGHT -> DASHCAM_RIGHT
         }
     }
 
