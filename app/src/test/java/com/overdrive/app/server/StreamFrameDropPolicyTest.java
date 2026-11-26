@@ -49,63 +49,6 @@ public class StreamFrameDropPolicyTest {
     }
 
     @Test
-    public void byteBudgetCountsBackingCapacityAndRecoversWithConfigAndIdr() throws Exception {
-        StreamFrameDropPolicy q = new StreamFrameDropPolicy(60, 1000, 8192, () -> nowMs);
-        q.offerConfig(SPS_PPS);
-        byte[] packet = new byte[1000]; // occupies a 4096-byte pool bucket
-        assertTrue(offerVideo(q, packet, true, 1));
-        assertTrue(offerVideo(q, packet, false, 2));
-        assertEquals(8192L, q.queuedVideoBytes());
-        assertFalse(offerVideo(q, packet, false, 3)); // count cap is far away
-        assertEquals(0L, q.queuedVideoBytes());
-        assertEquals(0, q.size());
-        assertTrue(q.consumeSyncFrameRequest());
-        assertTrue(q.isSkipping());
-        assertFalse(offerVideo(q, packet, false, 4));
-        assertTrue(offerVideo(q, packet, true, 5));
-        assertTrue(q.poll(0, TimeUnit.MILLISECONDS).isConfig);
-        StreamFrameDropPolicy.Frame frame = q.poll(0, TimeUnit.MILLISECONDS);
-        assertTrue(frame.isKey);
-        assertEquals(5, frame.ptsUs);
-        assertEquals(0L, q.queuedVideoBytes());
-        q.release(frame);
-        assertTrue(q.drainSummary().contains("byte budget x1"));
-    }
-
-    @Test
-    public void oversizedIdrDoesNotAllocateAndNextFittingIdrResumes() throws Exception {
-        StreamFrameDropPolicy q = new StreamFrameDropPolicy(60, 1000, 8192, () -> nowMs);
-        assertTrue(offerVideo(q, idr(1), true, 1));
-        assertFalse(offerVideo(q, new byte[8193], true, 2));
-        assertTrue(q.isSkipping());
-        assertTrue(q.consumeSyncFrameRequest());
-        assertEquals(0L, q.queuedVideoBytes());
-        assertFalse(offerVideo(q, p(3), false, 3));
-        assertTrue(offerVideo(q, idr(4), true, 4));
-        assertEquals(4, q.poll(0, TimeUnit.MILLISECONDS).ptsUs);
-        assertTrue(q.drainSummary().contains("oversized packets x1"));
-    }
-
-    @Test
-    public void pollRetirementAndResetReleaseByteReservations() throws Exception {
-        StreamFrameDropPolicy q = new StreamFrameDropPolicy(2, 1000, 8192, () -> nowMs);
-        assertTrue(offerVideo(q, idr(1), true, 1));
-        StreamFrameDropPolicy.Frame inFlight = q.poll(0, TimeUnit.MILLISECONDS);
-        assertEquals(0L, q.queuedVideoBytes());
-        assertTrue(offerVideo(q, p(2), false, 2));
-        assertTrue(offerVideo(q, p(3), false, 3));
-        assertEquals(8192L, q.queuedVideoBytes());
-        q.offerRetired();
-        assertEquals(0L, q.queuedVideoBytes());
-        assertSame(StreamFrameDropPolicy.Frame.RETIRED, q.poll(0, TimeUnit.MILLISECONDS));
-        assertTrue(offerVideo(q, idr(4), true, 4));
-        q.resetForReattach();
-        assertEquals(0L, q.queuedVideoBytes());
-        q.release(inFlight);
-        assertEquals(0L, q.queuedVideoBytes());
-    }
-
-    @Test
     public void pooledFramesKeepExactLengthAndDoNotAliasInFlightOrSource() throws Exception {
         StreamFrameDropPolicy q = policy(4);
         ByteBuffer source = ByteBuffer.allocateDirect(7000);

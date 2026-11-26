@@ -4,7 +4,6 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 
 /**
@@ -21,7 +20,7 @@ import java.util.function.LongSupplier;
  *
  * <p>This policy never emits a reference-broken P-frame:
  * <ul>
- *   <li>When the queue is full by count or video bytes, or the oldest queued frame is older than
+ *   <li>When the queue is full, or the oldest queued frame is older than
  *       {@link #MAX_QUEUE_AGE_MS} (the sender is stuck in a blocking write),
  *       the whole backlog is discarded and the policy enters <em>skipping</em>.
  *       The caller should ask the encoder for a sync frame (rate-limited).</li>
@@ -43,11 +42,6 @@ final class StreamFrameDropPolicy {
 
     /** Same depth as the previous {@code ArrayBlockingQueue<byte[]>(60)}. */
     static final int DEFAULT_CAPACITY = 60;
-
-    // Bound the *backing arrays*, not just the encoded lengths or frame count.
-    // One congested viewer must not retain tens of MiB of large encoder packets.
-    // Match the direct WebSocket server's 4 MiB individual packet ceiling.
-    static final int MAX_QUEUED_VIDEO_BYTES = 4 * 1024 * 1024;
 
     /** Oldest queued frame older than this means the sender is stuck. */
     static final long MAX_QUEUE_AGE_MS = 1_000L;
@@ -112,12 +106,6 @@ final class StreamFrameDropPolicy {
     private final ArrayBlockingQueue<Frame> queue;
     private final LongSupplier monotonicMs;
     private final long maxQueueAgeMs;
-    private final int maxQueuedVideoBytes;
-
-    // Producers are serialized by this monitor; the sender can dequeue without
-    // it. Reserve before publishing and subtract only after claiming a frame.
-    // A racing poll can briefly overcount, never undercount.
-    private final AtomicLong queuedVideoBytes = new AtomicLong();
 
     // State below is guarded by `this`. Offers come from the encoder drain
     // thread, the retirement sentinel from the thread disabling streaming,
@@ -132,8 +120,6 @@ final class StreamFrameDropPolicy {
     private long gopSkips;
     private long fullTriggers;
     private long staleTriggers;
-    private long byteTriggers;
-    private long oversizedPackets;
     private long configDeferrals;
     private long lastSummaryMs = Long.MIN_VALUE;
     private long summarizedDropped;
@@ -146,17 +132,8 @@ final class StreamFrameDropPolicy {
     }
 
     StreamFrameDropPolicy(int capacity, long maxQueueAgeMs, LongSupplier monotonicMs) {
-        this(capacity, maxQueueAgeMs, MAX_QUEUED_VIDEO_BYTES, monotonicMs);
-    }
-
-    StreamFrameDropPolicy(int capacity, long maxQueueAgeMs, int maxQueuedVideoBytes,
-                          LongSupplier monotonicMs) {
-        if (maxQueuedVideoBytes < MIN_POOLED_BYTES) {
-            throw new IllegalArgumentException("Video byte budget is too small");
-        }
         this.queue = new ArrayBlockingQueue<>(capacity);
         this.maxQueueAgeMs = maxQueueAgeMs;
-        this.maxQueuedVideoBytes = maxQueuedVideoBytes;
         this.monotonicMs = monotonicMs;
     }
 
@@ -197,30 +174,14 @@ final class StreamFrameDropPolicy {
             droppedFrames++;
             return false;
         }
-        int backingBytes = backingCapacity(length);
-        if (backingBytes > maxQueuedVideoBytes) {
-            // Do not allocate a runaway packet, even if it is an IDR. Clear
-            // references and wait for a keyframe that fits, as on congestion.
-            oversizedPackets++;
-            if (!skipping) enterSkip(false, true);
-            droppedFrames++;
-            return false;
-        }
         boolean needsConfig = isKey && configDirty && latestConfig != null;
         int slotsNeeded = needsConfig ? 2 : 1;
         if (!skipping) {
             boolean full = queue.remainingCapacity() < slotsNeeded;
-            boolean byteFull = queuedVideoBytes.get() + backingBytes > maxQueuedVideoBytes;
-            if (full || byteFull || oldestOlderThan(now)) {
-                enterSkip(full, byteFull);
+            if (full || oldestOlderThan(now)) {
+                enterSkip(full);
                 needsConfig = isKey && configDirty && latestConfig != null;
             }
-        }
-        // A sender may have claimed a frame but not yet subtracted its bytes.
-        // Stay conservative: do not admit an IDR until accounting has caught up.
-        if (queuedVideoBytes.get() + backingBytes > maxQueuedVideoBytes) {
-            droppedFrames++;
-            return false;
         }
         if (skipping) {
             if (!isKey) {
@@ -241,11 +202,9 @@ final class StreamFrameDropPolicy {
         view.get(bytes, 0, length);
         Frame frame = new Frame(bytes, length, bytes.length <= MAX_POOLED_BYTES,
                 isKey, false, ptsUs, now);
-        queuedVideoBytes.addAndGet(bytes.length);
         if (queue.offer(frame)) {
             return true;
         }
-        queuedVideoBytes.addAndGet(-bytes.length);
         release(frame);
         // Unreachable after the capacity check above; keep the invariant that a
         // dropped IDR always leaves us waiting for the next one.
@@ -264,7 +223,7 @@ final class StreamFrameDropPolicy {
         if (queue.offer(Frame.RETIRED)) return;
         int discarded = 0;
         Frame f;
-        while ((f = pollNow()) != null) {
+        while ((f = queue.poll()) != null) {
             if (!f.isConfig && !f.isRetired()) discarded++;
             release(f);
         }
@@ -286,18 +245,7 @@ final class StreamFrameDropPolicy {
 
     /** Sender-side poll; mirrors {@link ArrayBlockingQueue#poll(long, TimeUnit)}. */
     Frame poll(long timeout, TimeUnit unit) throws InterruptedException {
-        return accountDequeued(queue.poll(timeout, unit));
-    }
-
-    private Frame pollNow() {
-        return accountDequeued(queue.poll());
-    }
-
-    private Frame accountDequeued(Frame frame) {
-        if (frame != null && !frame.isConfig && !frame.isRetired()) {
-            queuedVideoBytes.addAndGet(-frame.bytes.length);
-        }
-        return frame;
+        return queue.poll(timeout, unit);
     }
 
     /** Return a video payload only after the sender has finished writing it. */
@@ -319,11 +267,7 @@ final class StreamFrameDropPolicy {
      * encoder sends its own on attach).
      */
     synchronized void resetForReattach() {
-        // Claim each remaining frame rather than zeroing the counter: a
-        // concurrent sender may already have removed a frame but not accounted it.
-        while (pollNow() != null) {
-            // Old encoder payloads and config are intentionally discarded.
-        }
+        queue.clear();
         Arrays.fill(spareBuffers, null);
         skipping = false;
         syncFrameWanted = false;
@@ -352,8 +296,6 @@ final class StreamFrameDropPolicy {
         summarizedDeferrals = configDeferrals;
         return "WS: dropped " + gopSkips + " GOPs (" + droppedFrames
                 + " frames; queue full x" + fullTriggers
-                + ", byte budget x" + byteTriggers
-                + ", oversized packets x" + oversizedPackets
                 + ", stale >" + maxQueueAgeMs + "ms x" + staleTriggers
                 + ", SPS/PPS deferred x" + configDeferrals + ")";
     }
@@ -366,10 +308,6 @@ final class StreamFrameDropPolicy {
 
     int size() {
         return queue.size();
-    }
-
-    long queuedVideoBytes() {
-        return queuedVideoBytes.get();
     }
 
     synchronized long droppedFrames() {
@@ -402,10 +340,6 @@ final class StreamFrameDropPolicy {
         return new byte[MIN_POOLED_BYTES << bucket];
     }
 
-    private static int backingCapacity(int length) {
-        return length > MAX_POOLED_BYTES ? length : MIN_POOLED_BYTES << poolClass(length);
-    }
-
     private static int poolClass(int length) {
         int bucket = 0;
         while (length > (MIN_POOLED_BYTES << bucket)) bucket++;
@@ -422,14 +356,14 @@ final class StreamFrameDropPolicy {
      * sentinel survives (the viewer must still learn about it) and a queued
      * config is marked for re-send so it is not lost.
      */
-    private void enterSkip(boolean becauseFull, boolean becauseBytes) {
+    private void enterSkip(boolean becauseFull) {
         int discardedVideo = 0;
         boolean hadRetired = false;
         boolean hadConfig = false;
         // Poll claims each discarded frame exclusively. A weakly consistent
         // iterator followed by clear could recycle a frame the sender owns.
         Frame f;
-        while ((f = pollNow()) != null) {
+        while ((f = queue.poll()) != null) {
             if (f.isRetired()) hadRetired = true;
             else if (f.isConfig) hadConfig = true;
             else discardedVideo++;
@@ -440,8 +374,7 @@ final class StreamFrameDropPolicy {
         droppedFrames += discardedVideo;
         gopSkips++;
         if (becauseFull) fullTriggers++;
-        if (becauseBytes) byteTriggers++;
-        if (!becauseFull && !becauseBytes) staleTriggers++;
+        else staleTriggers++;
         skipping = true;
         syncFrameWanted = true;
     }
