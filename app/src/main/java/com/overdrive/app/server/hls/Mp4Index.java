@@ -289,12 +289,40 @@ public final class Mp4Index {
             for (int g = 1; g < gops; g++) {
                 int s = gopFirst[g];
                 long vUs = video.toUs(video.time[s] + video.ctsAt(s));
-                while (i < audio.count && audio.toUs(audio.time[i] - audio.editMediaTime) < vUs) i++;
+                i = firstAudioSampleAtOrAfter(audio.time, audio.editMediaTime, audio.timescale, i, vUs);
                 audioFirst[g] = i;
             }
             audioFirst[gops] = audio.count;
         }
         return new Mp4Index(f, len, mtime, video, audio, gopFirst, gopUs, audioFirst);
+    }
+
+    /** Forward lower bound over decode timestamps, excluding the terminal end boundary.
+     * Gallop from the previous GOP's cursor so nearby boundaries stay cheap. Keep the
+     * original microsecond rounding (including negative priming times and equal timestamps).
+     * STTS durations are unsigned and track edits shift every decode timestamp equally. */
+    static int firstAudioSampleAtOrAfter(long[] time, long editMediaTime, long timescale,
+                                         int from, long targetUs) {
+        int count = time.length - 1;
+        if (from >= count || ticksToUs(time[from] - editMediaTime, timescale) >= targetUs) {
+            return from;
+        }
+        int lo = from; // Known to precede the target.
+        int step = 1;
+        int hi = from + step;
+        while (hi < count && ticksToUs(time[hi] - editMediaTime, timescale) < targetUs) {
+            lo = hi;
+            // The parser caps tracks at MAX_SAMPLES, so doubling cannot overflow.
+            step *= 2;
+            hi = from + Math.min(step, count - from);
+        }
+        // hi either satisfies the bound or is the exclusive sample-count sentinel.
+        while (hi - lo > 1) {
+            int mid = lo + (hi - lo) / 2;
+            if (ticksToUs(time[mid] - editMediaTime, timescale) < targetUs) lo = mid;
+            else hi = mid;
+        }
+        return hi;
     }
 
     private static long mvhdTimescale(byte[] m, int p, int end) throws Mp4Exception {
