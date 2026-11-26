@@ -50,6 +50,31 @@ public class GenAiContextTest {
     }
 
     @Test
+    public void tripAndChargingProjectionsKeepTheirExistingFieldBoundaries()
+            throws Exception {
+        JSONObject row = new JSONObject()
+                .put("id", 7)
+                .put("distanceKm", 12.5)
+                .put("energyAdded", 42.0)
+                .put("placeLabel", "Office")
+                .put("startLat", 12.34)
+                .put("tariffId", "private-tariff");
+
+        JSONObject trip = GenAiContext.copyTripFields(row);
+        assertEquals(2, trip.length());
+        assertEquals(7, trip.getInt("id"));
+        assertEquals(12.5, trip.getDouble("distanceKm"), 0.0);
+
+        JSONObject charge = GenAiContext.copyChargingSessionFields(row);
+        assertEquals(2, charge.length());
+        assertEquals(42.0, charge.getDouble("energyAdded"), 0.0);
+        assertEquals("Office", charge.getString("placeLabel"));
+        assertFalse(charge.has("id"));
+        assertEquals(0, GenAiContext.copyTripFields(null).length());
+        assertEquals(0, GenAiContext.copyChargingSessionFields(null).length());
+    }
+
+    @Test
     public void realtimeStartsWithoutDataAndRequiresANarrowToolMode()
             throws Exception {
         GenAiContext.Snapshot session = GenAiContext.buildRealtime();

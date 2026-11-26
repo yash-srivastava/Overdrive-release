@@ -577,7 +577,7 @@ public final class GenAiContext {
             JSONObject detail = detailResponse.optJSONObject("trip");
             if (detail == null) detail = summary;
 
-            JSONObject out = copyAllowed(detail, TRIP_KEYS);
+            JSONObject out = copyTripFields(detail);
             String rawMoments = detail.optString("microMomentsJson", "");
             if (!rawMoments.isEmpty() && rawMoments.length() <= 64_000) {
                 MicroMoments moments = MicroMoments.fromJson(rawMoments);
@@ -648,7 +648,7 @@ public final class GenAiContext {
                      i < candidates.length() && safeTrips.length() < 12; i++) {
                     JSONObject row = candidates.optJSONObject(i);
                     if (row != null) {
-                        safeTrips.put(copyAllowed(row, TRIP_KEYS));
+                        safeTrips.put(copyTripFields(row));
                     }
                 }
             }
@@ -687,7 +687,7 @@ public final class GenAiContext {
 
             int count = candidates == null ? 0 : candidates.length();
             out.put("available", true);
-            out.put("latestTrip", copyAllowed(latest, TRIP_KEYS));
+            out.put("latestTrip", copyTripFields(latest));
             out.put("baseline", new JSONObject()
                     .put("basis", basis == null ? "" : basis)
                     .put("sampleCount", count)
@@ -1082,8 +1082,7 @@ public final class GenAiContext {
                 for (int i = 0; i < rows.length(); i++) {
                     JSONObject row = rows.optJSONObject(i);
                     if (row != null) {
-                        sessions.put(copyAllowed(
-                                row, CHARGING_SESSION_KEYS));
+                        sessions.put(copyChargingSessionFields(row));
                     }
                 }
             }
@@ -1463,6 +1462,15 @@ public final class GenAiContext {
             default:
                 return "";
         }
+    }
+
+    // Keep the field policy shared without exposing the mutable key arrays.
+    static JSONObject copyTripFields(JSONObject source) {
+        return copyAllowed(source, TRIP_KEYS);
+    }
+
+    static JSONObject copyChargingSessionFields(JSONObject source) {
+        return copyAllowed(source, CHARGING_SESSION_KEYS);
     }
 
     static JSONObject copyAllowed(JSONObject source, String... keys) {
