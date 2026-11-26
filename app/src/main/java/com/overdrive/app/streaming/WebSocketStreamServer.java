@@ -216,14 +216,19 @@ public class WebSocketStreamServer extends WebSocketServer
     }
 
     /** Optional hook to ask the owning encoder for a fresh IDR when a client
-     *  requests a keyframe. Set by the pipeline to encoder::requestSyncFrame. */
-    private Runnable keyframeRequestHook;
+     *  requests a keyframe. Set by the pipeline to the rate-limited stream encoder request. */
+    private volatile Runnable keyframeRequestHook;
     public void setKeyframeRequestHook(Runnable hook) { this.keyframeRequestHook = hook; }
 
     @Override
     public void onMessage(WebSocket conn, String message) {
-        if (shutdownRequested || waitingForIdr.contains(conn)) return;
+        if (shutdownRequested || !clients.contains(conn) || !conn.isOpen()) return;
         if ("keyframe".equals(message)) {
+            if (waitingForIdr.contains(conn)) {
+                // Ask for an IDR without replaying config or opening the recovery gate.
+                requestKeyframeIfConnected(conn);
+                return;
+            }
             // A live-view stream client (port 8887, fed by streamEncoder) requests a
             // clean decode restart — typically because its decoder just (re)gained a
             // Surface AFTER the connection's one-shot onOpen SPS/PPS replay was already
@@ -240,7 +245,11 @@ public class WebSocketStreamServer extends WebSocketServer
             byte[] sps = cachedSpsPps;
             if (sps != null && sps.length > 0) {
                 try {
-                    if (!sendBounded(conn, ByteBuffer.wrap(sps), false)) return;
+                    if (!sendBounded(conn, ByteBuffer.wrap(sps), false)) {
+                        // The replay itself may have crossed the admission limit.
+                        requestKeyframeIfConnected(conn);
+                        return;
+                    }
                 } catch (Exception e) {
                     logger.warn("keyframe: SPS/PPS resend failed: " + e.getMessage());
                 }
@@ -285,11 +294,16 @@ public class WebSocketStreamServer extends WebSocketServer
                     }, KEYFRAME_RESEND_DEFER_MS, TimeUnit.MILLISECONDS);
                 }
             }
-            Runnable hook = keyframeRequestHook;
-            if (hook != null) {
-                try { hook.run(); } catch (Throwable t) {
-                    logger.warn("keyframe: sync-frame hook failed: " + t.getMessage());
-                }
+            requestKeyframeIfConnected(conn);
+        }
+    }
+
+    private void requestKeyframeIfConnected(WebSocket conn) {
+        if (shutdownRequested || !clients.contains(conn) || !conn.isOpen()) return;
+        Runnable hook = keyframeRequestHook;
+        if (hook != null) {
+            try { hook.run(); } catch (Throwable t) {
+                logger.warn("keyframe: sync-frame hook failed: " + t.getMessage());
             }
         }
     }

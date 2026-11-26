@@ -5537,6 +5537,7 @@ public class GpuSurveillancePipeline {
         // WebSocket has zero buffering delay vs HTTP Chunked (64KB+ buffer)
         logger.info("Starting WebSocket stream server...");
         wsStreamServer = new com.overdrive.app.streaming.WebSocketStreamServer();
+        wsStreamServer.setKeyframeRequestHook(encoderLocal::requestSyncFrameRateLimited);
 
         // Gate PASS 1B on live client presence: with no viewer on either the
         // port-8887 or the /ws relay path, skip the stream raster + encode

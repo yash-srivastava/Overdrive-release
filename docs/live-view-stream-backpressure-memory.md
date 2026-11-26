@@ -13,7 +13,12 @@ frame. While waiting for an IDR, it receives neither dependent pictures nor
 standalone SPS/PPS replays. When a packet marked `BUFFER_FLAG_KEY_FRAME` arrives
 and there is room for both cached SPS/PPS and the keyframe, the server enqueues
 them in that order under the application send lock, then resumes normal sends.
-There is no congestion-triggered disconnect or additional forced encoder IDR.
+There is no congestion-triggered disconnect or automatic forced encoder IDR.
+An explicit client `keyframe` request, including while waiting or when a config
+replay fails admission, asks the owning stream encoder for a sync frame via its
+existing shared one-second rate limiter. It does not bypass the recovery gate or
+send standalone config to a waiting viewer. A requested IDR that does not fit
+leaves the viewer waiting; periodic keyframes remain the fallback.
 
 The two recovery messages must fit together (including both header allowances).
 An oversized recovery pair, missing parameter sets, or insufficient queue space
@@ -27,7 +32,7 @@ may skip multiple GOPs; the chosen thresholds are not device-tuned.
 ## Verification plan (not yet performed)
 
 - Run `./gradlew assembleDebug` and `./gradlew test`, including
-  `DirectStreamBacklogPolicyTest`.
+  `DirectStreamBacklogPolicyTest` and `SyncFrameRateLimiterTest`.
 - On a parked head unit with an authenticated legacy 8887 viewer, select MAX
   (1280x960, 30 fps, 5 Mbps nominal). Keep another unthrottled viewer connected.
 - Capture timestamped `WSStreamServer` logs, then throttle only the legacy
@@ -40,6 +45,12 @@ may skip multiple GOPs; the chosen thresholds are not device-tuned.
   pictures are admitted during the gap, decoding recovers at a keyframe, and the
   healthy viewer continues normally. Capture the client-side connection/decoder
   events as well: server enqueue logs alone do not establish successful decode.
+- While the throttled viewer is waiting, send `keyframe` requests before and
+  after removing the throttle, including a burst within one second. Confirm
+  requests share the encoder limiter, do not enqueue standalone config while
+  gated, and resume only when the SPS/PPS and IDR pair fits. Compare against
+  passive recovery with no explicit request; a coalesced or non-fitting IDR may
+  still require waiting for the next periodic keyframe.
 - Repeat with a fast viewer only and with the primary `/ws` path. Record device
   model, build revision, preset, throttling configuration, recovery duration and
   any observed disconnects; redact tokens and private addresses before sharing.
