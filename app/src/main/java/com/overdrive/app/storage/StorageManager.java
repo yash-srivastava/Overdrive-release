@@ -6143,7 +6143,7 @@ public class StorageManager {
         long now = android.os.SystemClock.elapsedRealtime();
         synchronized (writeFaultLock) {
             if (writeFaultRemountSkipLogAtMs[i] != 0
-                    && now - writeFaultRemountSkipLogAtMs[i] < WRITE_FAULT_REMOUNT_GAP_MS) {
+                    && now - writeFaultRemountSkipLogAtMs[i] < WRITE_FAULT_RETEST_MIN_MS) {
                 return;
             }
             writeFaultRemountSkipLogAtMs[i] = now;
@@ -6210,6 +6210,7 @@ public class StorageManager {
         String needle = "/" + uuid;
         File[] procs = new File("/proc").listFiles();
         if (procs == null) return "/proc is not readable";
+        java.util.List<String> hidden = new java.util.ArrayList<>();
         for (File proc : procs) {
             String pid = proc.getName();
             if (pid.isEmpty() || !Character.isDigit(pid.charAt(0))) continue;
@@ -6218,11 +6219,14 @@ public class StorageManager {
             } catch (Exception e) {
                 continue;  // exited
             }
-            String who = readSysfsLine(proc, "comm") + " (pid " + pid + ")";
+            String comm = readSysfsLine(proc, "comm");
+            String who = comm + " (pid " + pid + ")";
             File[] fds = new File(proc, "fd").listFiles();
             if (fds == null) {
                 if (!proc.exists()) continue;
-                return who + " cannot be inspected";
+                // adbd always runs as this uid with an unreadable fd table; it opens card files only for adb push/pull.
+                if (!"adbd".equals(comm)) hidden.add(who);
+                continue;
             }
             for (File fd : fds) {
                 String target = readlinkQuietly(fd.getPath());
@@ -6238,7 +6242,7 @@ public class StorageManager {
                 // exited, or no maps
             }
         }
-        return null;
+        return hidden.isEmpty() ? null : String.join(", ", hidden) + " cannot be inspected";
     }
 
     private static boolean isOnVolume(String path, String needle) {
