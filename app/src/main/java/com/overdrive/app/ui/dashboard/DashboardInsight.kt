@@ -18,6 +18,7 @@ import androidx.annotation.WorkerThread
 import com.overdrive.app.R
 import com.overdrive.app.genai.GenAiConfig
 import com.overdrive.app.server.LocaleManager
+import com.overdrive.app.util.AppLocaleContext
 import com.overdrive.app.ui.util.RecordingsApiClient
 import com.overdrive.app.util.DaemonHttpClient
 import org.json.JSONObject
@@ -59,6 +60,10 @@ data class DashboardAiInsight(
 class DashboardInsightProvider(appContext: Context) {
 
     private val ctx: Context = appContext.applicationContext
+
+    // Below Android 13 the application context resolves the system language, not the
+    // one picked in the app, so the card's text must come from a localized context.
+    private val strings: Context get() = AppLocaleContext.of(ctx)
     private val prefs: SharedPreferences =
         ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
@@ -127,9 +132,9 @@ class DashboardInsightProvider(appContext: Context) {
         return DashboardAiInsight(
             title = item.optString(
                 "title",
-                ctx.getString(R.string.dashboard_ai_insight_default_title)
+                strings.getString(R.string.dashboard_ai_insight_default_title)
             ).trim().ifEmpty {
-                ctx.getString(R.string.dashboard_ai_insight_default_title)
+                strings.getString(R.string.dashboard_ai_insight_default_title)
             },
             text = text,
             createdAt = createdAt,
@@ -141,7 +146,7 @@ class DashboardInsightProvider(appContext: Context) {
     private fun welcomeInsight(visitCountBefore: Int): DashboardInsight? {
         if (visitCountBefore != 0) return null
         return DashboardInsight(
-            text = ctx.getString(R.string.dashboard_insight_welcome),
+            text = strings.getString(R.string.dashboard_insight_welcome),
             priority = 100,
             icon = R.drawable.ic_star
         )
@@ -190,9 +195,9 @@ class DashboardInsightProvider(appContext: Context) {
 
         val socStr = formatPercent(drainSoc)
         val template = if (!drainKwh.isNaN()) {
-            ctx.getString(R.string.dashboard_insight_parked_drained_kwh, socStr, formatKwh(drainKwh))
+            strings.getString(R.string.dashboard_insight_parked_drained_kwh, socStr, formatKwh(drainKwh))
         } else {
-            ctx.getString(R.string.dashboard_insight_parked_drained, socStr)
+            strings.getString(R.string.dashboard_insight_parked_drained, socStr)
         }
         return DashboardInsight(
             text = emphasizeNumbers(template, emphasisColor),
@@ -217,7 +222,7 @@ class DashboardInsightProvider(appContext: Context) {
             DateUtils.MINUTE_IN_MILLIS,
             DateUtils.FORMAT_ABBREV_RELATIVE
         ).toString()
-        val template = ctx.getString(R.string.dashboard_insight_last_alert, rel)
+        val template = strings.getString(R.string.dashboard_insight_last_alert, rel)
         return DashboardInsight(
             text = emphasizeSubstring(template, rel, emphasisColor),
             priority = 70,
@@ -240,7 +245,7 @@ class DashboardInsightProvider(appContext: Context) {
                 true
             }
         val formattedKwh = (if (energyApproximate) "~" else "") + formatKwh(kwh)
-        val template = ctx.getString(
+        val template = strings.getString(
             R.string.dashboard_insight_last_charge,
             formattedKwh,
             formatDurationMinutes(mins)
@@ -260,7 +265,7 @@ class DashboardInsightProvider(appContext: Context) {
         if (todayCount == null || todayCount > Int.MAX_VALUE) return null
         val n = todayCount.toInt()
         if (n <= 0) return null
-        val template = ctx.resources.getQuantityString(
+        val template = strings.resources.getQuantityString(
             R.plurals.dashboard_insight_today_clips, n, n
         )
         return DashboardInsight(
@@ -279,8 +284,8 @@ class DashboardInsightProvider(appContext: Context) {
         if (totalClips == null || totalBytes == null) return null
         if (totalClips <= 50) return null
         if (totalBytes <= 0L) return null
-        val sizeStr = Formatter.formatShortFileSize(ctx, totalBytes)
-        val template = ctx.getString(
+        val sizeStr = Formatter.formatShortFileSize(strings, totalBytes)
+        val template = strings.getString(
             R.string.dashboard_insight_storage_milestone, totalClips, sizeStr
         )
         return DashboardInsight(
@@ -298,14 +303,14 @@ class DashboardInsightProvider(appContext: Context) {
         val days = totalMin / (24 * 60)
         val remHours = (totalMin % (24 * 60)) / 60
         val template = if (days > 0) {
-            ctx.resources.getQuantityString(
+            strings.resources.getQuantityString(
                 R.plurals.dashboard_insight_uptime_days_hours,
                 days.toInt(),
                 days.toInt(),
                 remHours.toInt()
             )
         } else {
-            ctx.resources.getQuantityString(
+            strings.resources.getQuantityString(
                 R.plurals.dashboard_insight_uptime_hours,
                 remHours.toInt(),
                 remHours.toInt()
@@ -389,28 +394,28 @@ class DashboardInsightProvider(appContext: Context) {
     /** "1.2 kWh" — single-decimal kWh formatter; clamps to one decimal. */
     private fun formatKwh(kwh: Double): String {
         val v = if (kwh.isNaN()) 0.0 else kwh
-        return ctx.getString(R.string.dashboard_insight_kwh_format, v)
+        return strings.getString(R.string.dashboard_insight_kwh_format, v)
     }
 
     private fun formatPercent(pct: Double): String {
         val v = if (pct.isNaN()) 0.0 else pct
-        return ctx.getString(R.string.dashboard_insight_percent_format, v)
+        return strings.getString(R.string.dashboard_insight_percent_format, v)
     }
 
     private fun formatDurationMinutes(mins: Long): String {
         if (mins < 60) {
-            return ctx.resources.getQuantityString(
+            return strings.resources.getQuantityString(
                 R.plurals.dashboard_insight_minutes, mins.toInt(), mins.toInt()
             )
         }
         val h = mins / 60
         val m = mins % 60
         return if (m == 0L) {
-            ctx.resources.getQuantityString(
+            strings.resources.getQuantityString(
                 R.plurals.dashboard_insight_hours, h.toInt(), h.toInt()
             )
         } else {
-            ctx.getString(
+            strings.getString(
                 R.string.dashboard_insight_hours_minutes, h.toInt(), m.toInt()
             )
         }
