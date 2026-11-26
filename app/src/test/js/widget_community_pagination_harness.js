@@ -121,6 +121,29 @@ async function main() {
     assert.strictEqual(f.grid.children.length, 1);
     assert.strictEqual(f.grid.children[0].attrs['data-id'], 'new');
     assert.strictEqual(f.more.hidden, true);
-    console.log('6 widget community pagination scenarios passed');
+    // Deduplicate within the first response, preserving first occurrence and order.
+    const g = setup();
+    await respond(g.requests[0], [widget('a'), widget('b'), { ...widget('a'), name: 'duplicate' }], 'p2');
+    assert.deepStrictEqual(g.grid.children.map(card => card.attrs['data-id']), ['a', 'b']);
+    assert.strictEqual(g.find('wb-cm-name', g.grid.children[0]).textContent, 'a');
+    assert.strictEqual(g.more.hidden, false);
+
+    // A continuation can repeat IDs from earlier pages and from its own page.
+    g.more.click();
+    await respond(g.requests[1], [widget('b'), widget('c'), widget('c'), widget('d'), null], 'p3');
+    assert.deepStrictEqual(g.grid.children.map(card => card.attrs['data-id']), ['a', 'b', 'c', 'd']);
+    assert.strictEqual(g.more.hidden, false);
+    g.more.click();
+    assert.strictEqual(cursor(g.requests[2]), 'p3');
+    await respond(g.requests[2], [widget('d')], null);
+    assert.strictEqual(g.grid.children.length, 4);
+    assert.strictEqual(g.more.hidden, true);
+
+    // A reset must not retain IDs from the old result set.
+    g.community.refresh();
+    await respond(g.requests[3], [widget('a'), widget('a')], null);
+    assert.deepStrictEqual(g.grid.children.map(card => card.attrs['data-id']), ['a']);
+
+    console.log('9 widget community pagination scenarios passed');
 }
 main().catch(e => { console.error(e); process.exitCode = 1; });
