@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Disabled state - grayed out -->
-    <item android:color="@color/bg_hover" android:state_enabled="false" />
-    <!-- Enabled state - brand primary -->
-    <item android:color="@color/brand_primary" />
-</selector>

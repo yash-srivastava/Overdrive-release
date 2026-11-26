@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Disabled state - muted text -->
-    <item android:color="@color/text_muted" android:state_enabled="false" />
-    <!-- Enabled state - dark text on primary -->
-    <item android:color="@color/bg_base" />
-</selector>
