@@ -21,10 +21,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * Opt-in: re-applies BYD's "Disable Auto-Start" switch by itself after an install or update.
  *
- * <p>BYD may reset the switch on install, and only its own dialog can change it
- * ({@code ACCESS_APPOPSDATA} is signature-only), so this drives {@link AutoStartEnabler} after install and at two
- * delayed checkpoints: screen on, parked, bounded attempts per phase, then the setup guide
- * takes over again.
+ * <p>On DiLink 3, BYD wipes the auto-start whitelist on every install/update,
+ * and only its own dialog can change it ({@code ACCESS_APPOPSDATA} is signature-only).
+ * This drives {@link AutoStartEnabler} after install and at two delayed checkpoints:
+ * screen on, parked, bounded attempts per phase, then the setup guide takes over again.
  */
 public final class AutoStartReapply {
 
@@ -81,7 +81,8 @@ public final class AutoStartReapply {
         prefs(context).edit().putBoolean(KEY_ENABLED, enabled).apply();
         Log.i(TAG, "re-apply after updates " + (enabled ? "enabled" : "disabled"));
         MAIN.removeCallbacks(CHECK);
-        if (enabled) schedule(FIRST_CHECK_DELAY_MS);
+        // The guide owns the initial step when enabling on an unconfirmed install.
+        if (enabled && isDoneForCurrentInstall(context)) schedule(FIRST_CHECK_DELAY_MS);
     }
 
     /** Opted in and able to act on this install: the service is enabled and it hasn't given up. */

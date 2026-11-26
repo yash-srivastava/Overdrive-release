@@ -3,7 +3,9 @@ package com.overdrive.app.services;
 import android.content.Context;
 import android.util.Log;
 
+import com.overdrive.app.camera.dilink5.DiLink5Platform;
 import com.overdrive.app.config.UnifiedConfigManager;
+import com.overdrive.app.overlay.SetupGuideDialog;
 
 import org.json.JSONObject;
 
@@ -53,16 +55,18 @@ public final class AutoStartObservation {
         }
     }
 
-    /** Reads the shared config, not the app process's private SharedPreferences. */
+    /** Reads the shared config; returns null where the BYD dialog cannot be resolved. */
     public static JSONObject read(Context context) {
+        if (context == null || DiLink5Platform.isSelected()) return null;
+        try {
+            if (context.getPackageManager().resolveActivity(
+                    SetupGuideDialog.buildAppStartManagementIntent(), 0) == null) return null;
+        } catch (Throwable ignored) {
+            return null;
+        }
         JSONObject unknown = new JSONObject();
         try {
             unknown.put("state", "unknown");
-            if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) return null;
-            if (com.overdrive.app.camera.DiLink100Platform.isByd100f()
-                    && context != null && context.getPackageManager().resolveActivity(
-                            com.overdrive.app.overlay.SetupGuideDialog.buildAppStartManagementIntent(),
-                            0) == null) return null;
             long install = currentInstall(context);
             if (install <= 0L) return unknown;
             JSONObject saved = UnifiedConfigManager.loadConfig().optJSONObject(SECTION);

@@ -2134,8 +2134,8 @@ public class HttpServer {
         }
         status.put("genAiDashboardEnabled",
                 GenAiConfig.isDashboardPresentationEnabled());
-        // DiLink 5 has a separate background-access mechanism; BYD100F normally
-        // has no restriction. Do not expose an unrelated or public-mode observation.
+        // Only expose observations where the BYD auto-start dialog applies,
+        // and never in public mode.
         if (!CameraDaemon.isPublicMode()) {
             JSONObject autoStart = com.overdrive.app.services.AutoStartObservation.read(
                     CameraDaemon.getAppContext());

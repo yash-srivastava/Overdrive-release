@@ -24,8 +24,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <p>BYD's DiLink firmware blocks any /data app from autostarting at boot unless
  * its per-app value in {@code com.byd.appstartmanagement} ("Deaktiver Autostart")
- * is toggled OFF. The value may reset on install/update, so it must be observed
- * rather than inferred from a running daemon or a successful update.
+ * is toggled OFF. On DiLink 3, BYD resets that value (app re-blocked) on every
+ * install/update. It must be observed rather than inferred from a running daemon
+ * or a successful update.
  *
  * <p>This runs when the user taps the autostart button in the setup wizard
  * ({@link com.overdrive.app.overlay.SetupGuideDialog}), or, when the user opted in,

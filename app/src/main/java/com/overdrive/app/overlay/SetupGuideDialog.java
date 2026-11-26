@@ -32,8 +32,8 @@ import com.overdrive.app.util.BydDataCacheWhitelist;
  *
  * Re-show policy: the dialog re-appears every time PackageInfo.lastUpdateTime
  * advances past the stored marker. That covers first install, in-app update,
- * adb sideload, and any other replace path. BYD may reset its autostart whitelist
- * on install, so the user should be reminded to verify it.
+ * adb sideload, and any other replace path. On DiLink 3, BYD wipes its autostart
+ * whitelist on every install, so the user must be reminded to re-enable it.
  */
 public class SetupGuideDialog {
     // A BYD settings round trip from this guide keeps an unlocked PIN session.
@@ -224,7 +224,7 @@ public class SetupGuideDialog {
 
         // "Don't show again" — record current install time so the dialog stays
         // suppressed until PackageInfo.lastUpdateTime advances (next install
-        // or update). BYD may reset the autostart whitelist on install, so
+        // or update). BYD wipes the autostart whitelist on every install on DiLink 3, so
         // the marker naturally invalidates and the dialog reappears post-update.
         view.findViewById(R.id.btnDone).setOnClickListener(v -> {
             markCurrentInstallSeen(context);
