@@ -282,7 +282,8 @@
     }
 
     // ─── Step 3: system-mode listener ──────────────────────────────────────
-    if (window.matchMedia) {
+    // Android owns the embedded theme, including subsequent appearance changes.
+    if (!IN_APP_WEBVIEW && window.matchMedia) {
         var sysMq = window.matchMedia('(prefers-color-scheme: light)');
         var sysListener = function () {
             if (readStoredTheme() === 'auto') {
@@ -739,7 +740,7 @@
     // Initial apply (favicon only — brand-logo imgs may not exist yet) and
     // observe future data-theme changes.
     try {
-        applyThemeIcons(resolveEffective(readStoredTheme()));
+        window.BYD.theme.applyIcons();
         // Re-apply on DOMContentLoaded so any markup injected synchronously
         // during parse (or by scripts running before us) picks up the right
         // icon. app-shell.js also calls BYD.theme.applyIcons() after mount.
