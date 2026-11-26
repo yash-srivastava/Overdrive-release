@@ -2870,15 +2870,6 @@ open class MainActivity : AppCompatActivity() {
         super.onBackPressed()
     }
     
-    // ==================== Camera Reconfiguration ====================
-    
-    /**
-     * No-op since the rail shell doesn't have a drawer-side menu item to
-     * retitle — Camera probe status is shown inside the dialog itself.
-     */
-    private fun updateCameraProbeMenuItem() { /* intentionally empty */ }
-
-
     // ==================== Camera Mapping data model ====================
 
     private data class CameraRoleOption(val key: String, val label: String)

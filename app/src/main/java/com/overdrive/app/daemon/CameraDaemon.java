@@ -4243,18 +4243,6 @@ public class CameraDaemon {
         }
     }
 
-    /**
-     * Check if a port is already in use (fallback check).
-     */
-    private static boolean isPortInUse(int port) {
-        try (java.net.ServerSocket socket = new java.net.ServerSocket(port)) {
-            socket.setReuseAddress(true);
-            return false;
-        } catch (java.io.IOException e) {
-            return true;
-        }
-    }
-
     public static Handler getMainHandler() {
         return mainHandler;
     }
@@ -7402,15 +7390,6 @@ public class CameraDaemon {
         }
     }
 
-    private static boolean isAccOnRequestedOrCached() {
-        synchronized (parkTerminateLock) {
-            if (latestAccIsOff != null) {
-                return !latestAccIsOff.booleanValue();
-            }
-        }
-        return com.overdrive.app.monitor.AccMonitor.isAccOn();
-    }
-
     private static long captureAccObservationGeneration() {
         synchronized (parkTerminateLock) {
             return accTransitionGeneration;
@@ -10148,14 +10127,6 @@ public class CameraDaemon {
         }
 
         return status;
-    }
-
-    /**
-     * Count event recordings from today.
-     * Looks for files matching pattern: event_YYYYMMDD_*.mp4 in sentry_events directory
-     */
-    private static int countTodaysEvents() {
-        return getTodaysEvents().size();
     }
 
     /** Map battery capacity to ABRP car model name */

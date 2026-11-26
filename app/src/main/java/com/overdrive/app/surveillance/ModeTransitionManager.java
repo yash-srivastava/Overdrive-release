@@ -36,7 +36,6 @@ public class ModeTransitionManager {
     private static final int NORMAL_BITRATE = 6_000_000;
     private static final int SENTRY_FPS = 10;
     private static final int SENTRY_BITRATE_IDLE = 2_000_000;
-    private static final int SENTRY_BITRATE_EVENT = 5_000_000;
     
     /**
      * Creates a mode transition manager.

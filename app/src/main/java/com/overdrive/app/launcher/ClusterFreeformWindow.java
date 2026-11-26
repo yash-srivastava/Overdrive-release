@@ -2442,33 +2442,6 @@ final class ClusterFreeformWindow {
         return false;
     }
 
-    /** {@code resizeStack(stackId, null, …)} — clear the stack's remembered bounds on restore.
-     *  Validates the FULL 6-arg signature (not just the first two params): a build exposing a
-     *  differently-shaped {@code resizeStack(int, Rect, …)} would otherwise be handed
-     *  {@code (true, true, false, -1)} against mismatched types, throw IllegalArgumentException,
-     *  and leave a freeform stack behind — the exact residue this method exists to clear. */
-    private static void invokeResizeStackNull(Object svc, int stackId) {
-        for (Method cand : svc.getClass().getMethods()) {
-            if (!cand.getName().equals("resizeStack")) continue;
-            Class<?>[] pt = cand.getParameterTypes();
-            try {
-                if (pt.length == 6 && pt[0] == int.class && pt[1] == Rect.class
-                        && pt[2] == boolean.class && pt[3] == boolean.class
-                        && pt[4] == boolean.class && pt[5] == int.class) {
-                    cand.invoke(svc, stackId, null, true, true, false, -1);
-                    return;
-                }
-                if (pt.length == 2 && pt[0] == int.class && pt[1] == Rect.class) {
-                    cand.invoke(svc, stackId, (Rect) null);
-                    return;
-                }
-            } catch (Throwable t) {
-                logger.debug("resizeStack(null) failed: " + unwrap(t));
-                return;
-            }
-        }
-    }
-
     /** {@code setFocusedRootTask(taskId)} / {@code setFocusedTask(taskId)} — make the resized
      *  window the focused one on the cluster so it receives the relayed touches. */
     private static void invokeSetFocusedRootTask(Object svc, int taskId) {

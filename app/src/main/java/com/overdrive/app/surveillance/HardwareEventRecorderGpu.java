@@ -8075,9 +8075,6 @@ public class HardwareEventRecorderGpu {
         }
     }
     
-    // Track the current output file path for cleanup protection
-    private static volatile String currentlyWritingPath = null;
-    
     /**
      * Gets the path of the file currently being written to.
      * Used by cleanup to avoid deleting active files.

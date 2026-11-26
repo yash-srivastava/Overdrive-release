@@ -117,12 +117,6 @@ public class OemDashcamPipeline {
     // failing eglCore.makeCurrent or AVMCamera HAL.
     private static final int MAX_CONSECUTIVE_RENDER_ERRORS = 30;
 
-    // Pre-record window — small (1 s) by default. The pano pipeline's 5 s
-    // pre-record is justified by surveillance event triggers; OEM dashcam is
-    // purely continuous-record + manual-trigger, so a short pre-roll is
-    // sufficient to capture the moment the user taps "save now".
-    private static final int PRE_RECORD_SECONDS_DEFAULT = 1;
-
     private final String outputDir;
 
     private int width = DEFAULT_WIDTH;

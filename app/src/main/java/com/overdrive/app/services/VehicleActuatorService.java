@@ -77,7 +77,6 @@ public class VehicleActuatorService extends Service {
     private static final String SETTING_DEVICE = "android.hardware.bydauto.setting.BYDAutoSettingDevice";
     private static final String BODYWORK_DEVICE = "android.hardware.bydauto.bodywork.BYDAutoBodyworkDevice";
     private static final int BODYWORK_DEVICE_TYPE = 1001;
-    private static final String INSTRUMENT_DEVICE = "android.hardware.bydauto.instrument.BYDAutoInstrumentDevice";
     private static final String ENERGY_DEVICE = "android.hardware.bydauto.energy.BYDAutoEnergyDevice";
     private static final long ENERGY_VERIFY_TIMEOUT_MS = 1500L;
     private static final long ENERGY_VERIFY_POLL_MS = 100L;

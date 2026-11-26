@@ -3295,18 +3295,6 @@ public class SohEstimator {
             : PersistenceOutcome.FAILED;
     }
 
-    private void persistClearedStateTombstoneOrThrow(String operation) {
-        PersistenceOutcome outcome =
-            persistClearedStateTombstoneWithDurabilityRetries(operation);
-        if (outcome != PersistenceOutcome.DURABLE) {
-            throw new IllegalStateException(
-                "Could not durably " + operation
-                    + (outcome.wasCommitted()
-                        ? " after committing the tombstone"
-                        : ""));
-        }
-    }
-
     /**
      * Write a fresh schema-reset snapshot, preserving only a validated nominal
      * capacity when migration retained one.

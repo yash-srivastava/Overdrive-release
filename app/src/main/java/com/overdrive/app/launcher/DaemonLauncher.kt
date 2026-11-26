@@ -99,9 +99,6 @@ class DaemonLauncher(
         // setPkg2AccWhiteList, stealing AVMCamera feed from the dashcam app.
         private const val USE_PRIVILEGED_SHELL_FOR_SENTRY = false
         
-        // ACC Sentry daemon MUST run via ADB shell (UID 2000) for screen control
-        private const val USE_ADB_SHELL_FOR_ACC_SENTRY = true
-        
         // Guards to prevent concurrent launch attempts (shared across all instances).
         //
         // These are TIMESTAMPED, not plain booleans: a launch sets the guard to

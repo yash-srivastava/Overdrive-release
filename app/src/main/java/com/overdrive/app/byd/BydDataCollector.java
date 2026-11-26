@@ -15161,11 +15161,6 @@ public class BydDataCollector {
     private volatile long lastChargingPowerLogTime = 0;
     private volatile long lastChargingModeLogMs = 0;
     private volatile long lastChargingStateRawLogMs = 0;
-    // One-shot: log the raw vs scaled getExternalChargingPower value the first
-    // time we successfully publish a value, so the next field log capture can
-    // confirm the hectowatt vs kW scaling against the cluster's own readout.
-    private volatile boolean loggedExtChargePowerScale = false;
-
     // One-shot each: whether the per-session charged-energy counter answers on this trim, and
     // through which accessor. "Absent" has to be visible in a capture rather than inferred from
     // a missing line, because it decides whether session energy is metered or reconstructed.

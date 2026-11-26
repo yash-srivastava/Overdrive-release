@@ -715,38 +715,6 @@ class DaemonStartupManager(
         }
     }
 
-    /**
-     * Setup privileged shell (UID 1000) on app launch.
-     * This enables system-level operations like granting permissions and running daemons as system user.
-     */
-    /*private fun setupPrivilegedShell(onComplete: () -> Unit) {
-        PrivilegedShellSetup.init(context)
-        
-        // Check if already available
-        if (PrivilegedShellSetup.isShellAvailable()) {
-            log.info(TAG, "Privileged shell already available (UID 1000)")
-            onComplete()
-            return
-        }
-        
-        log.info(TAG, "Setting up privileged shell...")
-        PrivilegedShellSetup.setup(object : PrivilegedShellSetup.SetupCallback {
-            override fun onSuccess() {
-                log.info(TAG, "Privileged shell ready (UID 1000)")
-                onComplete()
-            }
-            
-            override fun onFailure(reason: String) {
-                log.warn(TAG, "Privileged shell setup failed: $reason - continuing with normal startup")
-                onComplete()
-            }
-            
-            override fun onProgress(message: String) {
-                log.debug(TAG, "Shell setup: $message")
-            }
-        })
-    }*/
-
     private fun initializeOnBoot(
         inheritedStart: Long? = null, alreadyFired: Set<Long> = emptySet()
     ) {
@@ -1581,10 +1549,6 @@ class DaemonStartupManager(
         }
     }
     
-    private fun startTunnelIfEnabled(vm: DaemonsViewModel) {
-        restartTunnelIfEnabled(vm, forceRestart = false)
-    }
-
     fun onDaemonToggled(type: DaemonType, enabled: Boolean) {
         if (type in OPTIONAL_DAEMONS) {
             val state = if (enabled) "ON" else "OFF"

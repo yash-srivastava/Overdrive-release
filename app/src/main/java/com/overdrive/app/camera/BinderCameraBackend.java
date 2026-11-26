@@ -58,8 +58,6 @@ public class BinderCameraBackend {
     private static final int TX_SET_DISPLAY_ORIENTATION = 7;
     private static final int TX_SET_PREVIEW_SIZE = 8;
     private static final int TX_REGISTER_CALLBACK = 9;
-    private static final int TX_UNREGISTER_CALLBACK = 10;
-    private static final int TX_SET_PREVIEW_TEXTURE = 11;
     private static final int TX_CONNECT = 12;
     private static final int TX_DISCONNECT = 13;
     private static final int TX_ENABLE_RENDERING = 14;
