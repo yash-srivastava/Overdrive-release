@@ -1387,36 +1387,32 @@ BYD.performance = {
     },
     
     renderAllCharts() {
-        // Only render charts that aren't currently being hovered
-        // This prevents tooltip from being cleared during data updates
-        if (this.tooltip.chartId !== 'cpu') {
-            this.renderChart(this.charts.cpu, [
-                { data: this.history.cpuSystem, color: this.colors.system, label: BYD.i18n.t('performance.legend_system') },
-                { data: this.history.cpuApp, color: this.colors.app, label: BYD.i18n.t('performance.legend_app') }
-            ]);
-        } else {
-            // Re-render with tooltip
-            this.renderChartByType('cpu');
-        }
-
-        if (this.tooltip.chartId !== 'mem') {
-            this.renderChart(this.charts.mem, [
-                { data: this.history.memSystem, color: this.colors.system, label: BYD.i18n.t('performance.legend_system') },
-                { data: this.history.memApp, color: this.colors.app, label: BYD.i18n.t('performance.legend_app') }
-            ]);
-        } else {
-            this.renderChartByType('mem');
-        }
-
-        if (this.tooltip.chartId !== 'gpu') {
-            this.renderChart(this.charts.gpu, [
-                { data: this.history.gpu, color: this.colors.gpu, label: BYD.i18n.t('performance.card_gpu') }
-            ]);
-        } else {
-            this.renderChartByType('gpu');
-        }
+        // The renderer also restores the crosshair and tooltip for the hovered chart.
+        this.renderChartByType('cpu');
+        this.renderChartByType('mem');
+        this.renderChartByType('gpu');
     },
 
+    /** Draw the common 0–100% grid using the caller's chart geometry. */
+    drawPercentageGrid(ctx, padding, width, chartHeight) {
+        ctx.strokeStyle = this.colors.grid;
+        ctx.lineWidth = 1;
+
+        // Horizontal grid lines (0%, 25%, 50%, 75%, 100%)
+        for (let i = 0; i <= 4; i++) {
+            const y = padding.top + (chartHeight * i / 4);
+            ctx.beginPath();
+            ctx.moveTo(padding.left, y);
+            ctx.lineTo(width - padding.right, y);
+            ctx.stroke();
+
+            // Y-axis labels
+            ctx.fillStyle = this.colors.text;
+            ctx.font = '10px Inter, sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText((100 - i * 25) + '%', padding.left - 8, y + 3);
+        }
+    },
 
     renderChart(chart, series) {
         if (!chart || !chart.ctx) return;
@@ -1425,28 +1421,11 @@ BYD.performance = {
         const padding = { top: 10, right: 10, bottom: 25, left: 40 };
         const chartWidth = width - padding.left - padding.right;
         const chartHeight = height - padding.top - padding.bottom;
-        
+
         // Clear canvas
         ctx.clearRect(0, 0, width, height);
-        
-        // Draw grid
-        ctx.strokeStyle = this.colors.grid;
-        ctx.lineWidth = 1;
-        
-        // Horizontal grid lines (0%, 25%, 50%, 75%, 100%)
-        for (let i = 0; i <= 4; i++) {
-            const y = padding.top + (chartHeight * i / 4);
-            ctx.beginPath();
-            ctx.moveTo(padding.left, y);
-            ctx.lineTo(width - padding.right, y);
-            ctx.stroke();
-            
-            // Y-axis labels
-            ctx.fillStyle = this.colors.text;
-            ctx.font = '10px Inter, sans-serif';
-            ctx.textAlign = 'right';
-            ctx.fillText((100 - i * 25) + '%', padding.left - 8, y + 3);
-        }
+
+        this.drawPercentageGrid(ctx, padding, width, chartHeight);
         
         // X-axis labels (time)
         ctx.textAlign = 'center';
@@ -2120,24 +2099,7 @@ BYD.performance = {
         const rawRange = timeEnd - timeStart;
         const timeRange = rawRange > 0 ? rawRange : 1;
         
-        // Draw grid
-        ctx.strokeStyle = this.colors.grid;
-        ctx.lineWidth = 1;
-        
-        // Horizontal grid lines (0%, 25%, 50%, 75%, 100%)
-        for (let i = 0; i <= 4; i++) {
-            const y = padding.top + (chartHeight * i / 4);
-            ctx.beginPath();
-            ctx.moveTo(padding.left, y);
-            ctx.lineTo(width - padding.right, y);
-            ctx.stroke();
-            
-            // Y-axis labels
-            ctx.fillStyle = this.colors.text;
-            ctx.font = '10px Inter, sans-serif';
-            ctx.textAlign = 'right';
-            ctx.fillText((100 - i * 25) + '%', padding.left - 8, y + 3);
-        }
+        this.drawPercentageGrid(ctx, padding, width, chartHeight);
         
         // X-axis time labels
         ctx.textAlign = 'center';
