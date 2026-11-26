@@ -582,8 +582,7 @@ class GlassWidgetsOverlayService : Service() {
         snapshot?.let { bindAll(it, animate = false) }
     }
 
-    private fun createOverlay() {
-        val h = GlassWidgetsHost(this, env, ticker) { enterArrange() }
+    private fun stackWindowParams(title: String): WindowManager.LayoutParams {
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -596,7 +595,13 @@ class GlassWidgetsOverlayService : Service() {
                 WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT,
         )
-        params.title = "GlassWidgets"
+        params.title = title
+        return params
+    }
+
+    private fun createOverlay() {
+        val h = GlassWidgetsHost(this, env, ticker) { enterArrange() }
+        val params = stackWindowParams("GlassWidgets")
         lp = params
         host = h
         settings?.let { placeWindow(it, update = false) }
@@ -626,34 +631,44 @@ class GlassWidgetsOverlayService : Service() {
         val d = resources.displayMetrics.density
         val k = d * env.scale
         val ox = s.offsetX * d; val oy = s.offsetY * d
+        anchorStackWindow(params, s.position, ox, oy, k)
+        if (update) updateWindow()
+        if (customHost != null) placeCustom(s)
+    }
+
+    /** Apply the shared shadow-margin correction to either stack window. */
+    private fun anchorStackWindow(params: WindowManager.LayoutParams, position: String, ox: Float, oy: Float, k: Float) {
         val left = ox - GlassWidgetView.PAD_L * k; val right = ox - GlassWidgetView.PAD_R * k
         val top = oy - GlassWidgetView.PAD_T * k; val bottom = oy - GlassWidgetView.PAD_B * k
         val centreX = (GlassWidgetView.PAD_R - GlassWidgetView.PAD_L) / 2f * k
         val centreY = (GlassWidgetView.PAD_B - GlassWidgetView.PAD_T) / 2f * k
-        val (g, x, y) = when (s.position) {
-            "bottom-center" -> Triple(Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, centreX, bottom)
-            "bottom-right" -> Triple(Gravity.BOTTOM or Gravity.END, right, bottom)
-            "top-left" -> Triple(Gravity.TOP or Gravity.START, left, top)
-            "top-right" -> Triple(Gravity.TOP or Gravity.END, right, top)
-            "left" -> Triple(Gravity.CENTER_VERTICAL or Gravity.START, left, centreY)
-            "right" -> Triple(Gravity.CENTER_VERTICAL or Gravity.END, right, centreY)
-            else -> Triple(Gravity.BOTTOM or Gravity.START, left, bottom)
+        val (x, y) = when (position) {
+            "bottom-center" -> centreX to bottom
+            "bottom-right" -> right to bottom
+            "top-left" -> left to top
+            "top-right" -> right to top
+            "left" -> left to centreY
+            "right" -> right to centreY
+            else -> left to bottom
         }
-        params.gravity = g
+        params.gravity = stackGravity(position)
         params.x = x.toInt()
         params.y = y.toInt()
-        if (update) updateWindow()
-        if (customHost != null) placeCustom(s)
     }
 
     /** The stack takes touches whenever it shows (a long press arranges); hidden, it never blocks the screen. */
     private fun setTouchable(touchable: Boolean) {
         val params = lp ?: return
+        if (!setStackTouchable(params, touchable)) return
+        updateWindow()
+    }
+
+    private fun setStackTouchable(params: WindowManager.LayoutParams, touchable: Boolean): Boolean {
         val flag = WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         val next = if (touchable) params.flags and flag.inv() else params.flags or flag
-        if (next == params.flags) return
+        if (next == params.flags) return false
         params.flags = next
-        updateWindow()
+        return true
     }
 
     private fun updateWindow() {
@@ -683,18 +698,7 @@ class GlassWidgetsOverlayService : Service() {
         customScale = s.scale
         val e = GlassEnv().also { it.copyFrom(env); it.scale = customScale }
         val h = GlassWidgetsHost(this, e, ticker) { enterArrange() }
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
-            PixelFormat.TRANSLUCENT,
-        )
-        params.title = "GlassWidgetsCustom"
+        val params = stackWindowParams("GlassWidgetsCustom")
         customHost = h; customLp = params; customEnv = e
         placeCustom(s, update = false)
         try {
@@ -724,11 +728,7 @@ class GlassWidgetsOverlayService : Service() {
     /** The custom row's scale: the user's, shrunk (never grown) to fit the screen, as the built-ins' row does. */
     private fun fitCustom(s: Settings, ids: List<String>) {
         val h = customHost ?: return
-        val dm = resources.displayMetrics
-        val extent = h.extent(ids, s.vertical)
-        val room = if (s.vertical) dm.heightPixels / dm.density - 2f * s.offsetY else dm.widthPixels / dm.density - 2f * s.offsetX
-        val fit = if (extent > 0f) (room / extent).coerceAtLeast(0.4f) else s.scale
-        val next = minOf(s.scale, fit)
+        val next = fittedStackScale(s, h, ids)
         if (next == customScale) return
         customScale = next
         syncCustomEnv()
@@ -749,33 +749,14 @@ class GlassWidgetsOverlayService : Service() {
             else (if (s.vertical) beside.maxOf { GlassWidgets.size(it).first } else beside.maxOf { GlassWidgets.size(it).second }) * kb + GlassWidgetView.GAP * kb
         val ox = s.offsetX * d + (if (s.vertical) reach else 0f)
         val oy = s.offsetY * d + (if (s.vertical) 0f else reach)
-        // as placeWindow anchors the built-ins' stack
-        val left = ox - GlassWidgetView.PAD_L * k; val right = ox - GlassWidgetView.PAD_R * k
-        val top = oy - GlassWidgetView.PAD_T * k; val bottom = oy - GlassWidgetView.PAD_B * k
-        val centreX = (GlassWidgetView.PAD_R - GlassWidgetView.PAD_L) / 2f * k
-        val centreY = (GlassWidgetView.PAD_B - GlassWidgetView.PAD_T) / 2f * k
-        val (g, x, y) = when (s.position) {
-            "bottom-center" -> Triple(Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, centreX, bottom)
-            "bottom-right" -> Triple(Gravity.BOTTOM or Gravity.END, right, bottom)
-            "top-left" -> Triple(Gravity.TOP or Gravity.START, left, top)
-            "top-right" -> Triple(Gravity.TOP or Gravity.END, right, top)
-            "left" -> Triple(Gravity.CENTER_VERTICAL or Gravity.START, left, centreY)
-            "right" -> Triple(Gravity.CENTER_VERTICAL or Gravity.END, right, centreY)
-            else -> Triple(Gravity.BOTTOM or Gravity.START, left, bottom)
-        }
-        params.gravity = g
-        params.x = x.toInt()
-        params.y = y.toInt()
+        anchorStackWindow(params, s.position, ox, oy, k)
         if (update) customHost?.let { try { windowManager.updateViewLayout(it, params) } catch (e: Exception) { Log.w(TAG, "custom row layout: ${e.message}") } }
     }
 
     private fun setCustomTouchable(touchable: Boolean) {
         val v = customHost ?: return
         val params = customLp ?: return
-        val flag = WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-        val next = if (touchable) params.flags and flag.inv() else params.flags or flag
-        if (next == params.flags) return
-        params.flags = next
+        if (!setStackTouchable(params, touchable)) return
         try { windowManager.updateViewLayout(v, params) } catch (e: Exception) { Log.w(TAG, "custom row layout: ${e.message}") }
     }
 
@@ -1144,14 +1125,18 @@ class GlassWidgetsOverlayService : Service() {
         else -> Gravity.BOTTOM or Gravity.START
     }
 
-    /** Shrink (never grow) the user's scale just enough for the stack to fit the screen with the same margin both sides. */
-    private fun fitScale(s: Settings, ids: List<String>) {
-        val h = host ?: return
+    private fun fittedStackScale(s: Settings, h: GlassWidgetsHost, ids: List<String>): Float {
         val dm = resources.displayMetrics
         val extent = h.extent(ids, s.vertical)
         val room = if (s.vertical) dm.heightPixels / dm.density - 2f * s.offsetY else dm.widthPixels / dm.density - 2f * s.offsetX
         val fit = if (extent > 0f) (room / extent).coerceAtLeast(0.4f) else s.scale
-        val next = minOf(s.scale, fit)
+        return minOf(s.scale, fit)
+    }
+
+    /** Shrink (never grow) the user's scale just enough for the stack to fit the screen with the same margin both sides. */
+    private fun fitScale(s: Settings, ids: List<String>) {
+        val h = host ?: return
+        val next = fittedStackScale(s, h, ids)
         if (next == env.scale) return
         env.scale = next
         h.rescale()
