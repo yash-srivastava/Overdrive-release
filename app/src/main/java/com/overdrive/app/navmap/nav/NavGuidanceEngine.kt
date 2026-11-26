@@ -341,7 +341,14 @@ class NavGuidanceEngine {
         // If the windowed match is poor (we likely diverged or the window was wrong),
         // do ONE global rescan so a real reroute/teleport re-acquires correctly — within reach along the route.
         if (matchedSegIndex >= 0 && bestDist > OFF_ROUTE_LATERAL_M) {
+            val finiteArc = routeArcLenM.isFinite()
             for (i in 0 until pts.size - 1) {
+                // With a finite, nondecreasing arc table, even t=0 on this segment
+                // is beyond reach. Later segments cannot pass the existing gate either.
+                // Keep the full scan for malformed geometry (NaN comparisons fail open).
+                if (finiteArc && cumArcM[i] > maxAlong) break
+                // Both window passes have already considered every reachable candidate here.
+                if (i in lo..hi) continue
                 val a = pts[i]; val b = pts[i + 1]
                 val snap = pointToSegment(lat, lng, a.lat, a.lng, b.lat, b.lng)
                 if (alongOf(i, snap.t) > maxAlong) continue
