@@ -532,16 +532,7 @@ class SettingsAboutFragment : Fragment() {
                 if (file.length() > MAX_IMPORT_CHARS.toLong()) { tooLarge = true; null }
                 else file.readText(Charsets.UTF_8)
             } catch (e: Exception) { null }
-            mainHandler.post {
-                if (!isAdded) return@post
-                if (tooLarge) { toast(getString(R.string.settings_backup_invalid_file)); return@post }
-                if (text.isNullOrBlank()) { toast(getString(R.string.settings_backup_read_failed)); return@post }
-                val parsed = try { JSONObject(text) } catch (e: Exception) { null }
-                if (parsed == null || parsed.optJSONObject("manifest") == null) {
-                    toast(getString(R.string.settings_backup_invalid_file)); return@post
-                }
-                confirmAndRestore(text)
-            }
+            validateAndConfirmBackup(text, tooLarge)
         }
     }
 
@@ -742,17 +733,21 @@ class SettingsAboutFragment : Fragment() {
                     sb.toString()
                 }
             } catch (e: Exception) { null }
-            mainHandler.post {
-                if (!isAdded) return@post
-                if (tooLarge) { toast(getString(R.string.settings_backup_invalid_file)); return@post }
-                if (text.isNullOrBlank()) { toast(getString(R.string.settings_backup_read_failed)); return@post }
-                // Validate it parses + looks like our bundle before prompting.
-                val parsed = try { JSONObject(text) } catch (e: Exception) { null }
-                if (parsed == null || parsed.optJSONObject("manifest") == null) {
-                    toast(getString(R.string.settings_backup_invalid_file)); return@post
-                }
-                confirmAndRestore(text)
+            validateAndConfirmBackup(text, tooLarge)
+        }
+    }
+
+    /** Validate either import source on the main thread before asking for confirmation. */
+    private fun validateAndConfirmBackup(text: String?, tooLarge: Boolean) {
+        mainHandler.post {
+            if (!isAdded) return@post
+            if (tooLarge) { toast(getString(R.string.settings_backup_invalid_file)); return@post }
+            if (text.isNullOrBlank()) { toast(getString(R.string.settings_backup_read_failed)); return@post }
+            val parsed = try { JSONObject(text) } catch (e: Exception) { null }
+            if (parsed == null || parsed.optJSONObject("manifest") == null) {
+                toast(getString(R.string.settings_backup_invalid_file)); return@post
             }
+            confirmAndRestore(text)
         }
     }
 
