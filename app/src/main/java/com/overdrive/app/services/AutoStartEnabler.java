@@ -24,13 +24,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <p>BYD's DiLink firmware blocks any /data app from autostarting at boot unless
  * its per-app value in {@code com.byd.appstartmanagement} ("Deaktiver Autostart")
- * is toggled OFF. That value is RESET (app re-blocked) on every install/update but
- * PERSISTS across ordinary reboots.
+ * is toggled OFF. On DiLink 3, BYD resets that value (app re-blocked) on every
+ * install/update. It must be observed rather than inferred from a running daemon
+ * or a successful update.
  *
  * <p>This runs when the user taps the autostart button in the setup wizard
  * ({@link com.overdrive.app.overlay.SetupGuideDialog}), or, when the user opted in,
- * from {@link AutoStartReapply}: once per install, screen on and parked, capped at a
- * few attempts. The earlier unconditional onServiceConnected trigger was removed
+ * from {@link AutoStartReapply}: once per install, screen on and parked,
+ * with at most three attempts. The earlier unconditional onServiceConnected trigger was removed
  * because it re-fired on every a11y reconnect / app churn and repeatedly popped the
  * BYD dialog.
  *
@@ -156,7 +157,8 @@ public class AutoStartEnabler {
         NOT_THIS_FIRMWARE,// appstartmanagement activity missing -> abort, no retry
         NO_DIALOG,        // dialog window never surfaced
         NO_ROW,           // OverDrive row / switch not found
-        FLIP_UNCONFIRMED  // clicked but state didn't confirm OFF
+        STILL_ON,         // a fresh read positively confirmed the restriction is ON
+        FLIP_UNCONFIRMED  // clicked but state couldn't be read back
     }
 
     public Result attemptOnce() {
@@ -199,6 +201,13 @@ public class AutoStartEnabler {
         }
 
         // (f) Read + flip.
+        if (!overdriveSwitch.refresh()) {
+            AccessibilityNodeInfo freshRoot = findDialogRoot();
+            overdriveSwitch = freshRoot != null ? findOverDriveSwitch(freshRoot) : null;
+        }
+        if (overdriveSwitch == null || !overdriveSwitch.isCheckable()) {
+            return Result.FLIP_UNCONFIRMED;
+        }
         boolean checkedBefore = overdriveSwitch.isChecked();
         log("OverDrive switch found: isChecked(before)=" + checkedBefore
                 + " (ON=blocked, OFF=autostart-allowed)");
@@ -216,21 +225,21 @@ public class AutoStartEnabler {
         // produced false FLIP_UNCONFIRMED results even though the switch had visibly flipped
         // (observed 2026-07-07: switch flipped correctly but the button reported failure).
         sleep(CLICK_CONFIRM_DELAY_MS);
-        if (overdriveSwitch.refresh() && !overdriveSwitch.isChecked()) {
+        if (overdriveSwitch.refresh() && overdriveSwitch.isCheckable() && !overdriveSwitch.isChecked()) {
             log("confirmed via refresh(): switch now OFF");
             return Result.SUCCESS;
         }
         // Fallback: best-effort re-scan of the dialog.
         AccessibilityNodeInfo freshRoot = findDialogRoot();
         AccessibilityNodeInfo freshSwitch = (freshRoot != null) ? findOverDriveSwitch(freshRoot) : null;
-        if (freshSwitch != null) {
+        if (freshSwitch != null && freshSwitch.isCheckable()) {
             boolean checkedAfter = freshSwitch.isChecked();
             log("OverDrive switch isChecked(after re-scan)=" + checkedAfter);
             if (!checkedAfter) {
                 return Result.SUCCESS;
             }
             // Positively still ON after a good re-read -> the click genuinely didn't take.
-            return Result.FLIP_UNCONFIRMED;
+            return Result.STILL_ON;
         }
         // A dispatched click is not evidence of a flip. Claiming success here would show a
         // permanent green check while autostart may still be blocked, so require confirmation.

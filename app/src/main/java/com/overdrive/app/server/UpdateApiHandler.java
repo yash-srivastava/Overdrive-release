@@ -411,10 +411,9 @@ public class UpdateApiHandler {
      *   - which tunnel is active and whether its URL will change
      *   - the local LAN IP(s) (faster recovery path)
      *   - estimated downtime
-     *   - whether to recommend the in-car app over the webapp (always true:
-     *     BYD wipes the autostart whitelist on every install, and only the
-     *     in-car SetupGuideDialog can deep-link to com.byd.appstartmanagement
-     *     to re-enable it)
+     *   - whether to recommend the in-car app over the webapp (on DiLink 3,
+     *     BYD wipes the autostart whitelist on every install; the in-car setup
+     *     guide can verify it)
      */
     private static void handlePreview(OutputStream out) throws Exception {
         JSONObject r = new JSONObject();
@@ -498,8 +497,8 @@ public class UpdateApiHandler {
         r.put("recommendInApp", autoStartRestricted);
         if (autoStartRestricted) {
             r.put("recommendInAppReason",
-                    "BYD clears the auto-start whitelist on every install. " +
-                    "The in-car app prompts you to re-enable it; the webapp can't.");
+                    "BYD wipes the auto-start whitelist on every install. " +
+                    "Verify that Disable Auto-Start is OFF in the in-car app; the webapp cannot change it.");
         }
 
         HttpResponse.sendJson(out, r.toString());

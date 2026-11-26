@@ -334,7 +334,7 @@
     <string name="setup_autostart_not_needed">Not needed on this car. Its system doesn\'t restrict OverDrive from starting on its own.</string>
     <string name="setup_autostart_failed">Couldn\'t enable autostart automatically — opening BYD Auto-Start so you can do it by hand.</string>
     <string name="setup_autostart_reapply">Redo this automatically after updates</string>
-    <string name="setup_autostart_reapply_hint">After each update, BYD Auto-Start opens for a moment and OverDrive unchecks itself. Only while parked with the screen on.</string>
+    <string name="setup_autostart_reapply_hint">After each update, OverDrive checks and unchecks the BYD restriction if needed, with at most three attempts. Only while parked with the screen on.</string>
     <string name="setup_overlay_title">Allow Display Over Other Apps</string>
     <string name="setup_overlay_body">Enable this to show a floating status indicator for recording and trip tracking on top of other apps.</string>
     <string name="setup_overlay_button">Open Overlay Settings</string>

@@ -421,7 +421,7 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
      * on it.
      *
      * <p>Triggered from the setup wizard's button, or by the opt-in {@link AutoStartReapply}
-     * at most a few times per install. An earlier version ran it from every
+     * at most three automatic attempts per install. An earlier version ran it from every
      * onServiceConnected, which re-fired on every reconnect and app-churn and repeatedly
      * popped BYD's dialog in the user's face. Single-flight is enforced inside the enabler,
      * so a double-tap cannot double-run.
@@ -432,7 +432,11 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
             Thread worker = new Thread(() -> {
                 AutoStartEnabler.Result result = null;
                 try {
+                    long install = AutoStartObservation.currentInstall(this);
                     result = enabler.run();
+                    if (result != null) {
+                        AutoStartObservation.record(this, install, result);
+                    }
                 } catch (Throwable t) {
                     Log.w(TAG, "runAutoStartEnabler worker threw: " + t);
                 }

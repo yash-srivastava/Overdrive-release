@@ -21,10 +21,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * Opt-in: re-applies BYD's "Disable Auto-Start" switch by itself after an install or update.
  *
- * <p>BYD resets the switch on every install, and only its own dialog can change it
- * ({@code ACCESS_APPOPSDATA} is signature-only), so this drives {@link AutoStartEnabler} once
- * per install: screen on, parked, at most {@link #MAX_ATTEMPTS} dialog launches, then the setup
- * guide takes over again.
+ * <p>On DiLink 3, BYD wipes the auto-start whitelist on every install/update,
+ * and only its own dialog can change it ({@code ACCESS_APPOPSDATA} is signature-only).
+ * This drives {@link AutoStartEnabler} once per install: screen on, parked,
+ * at most {@link #MAX_ATTEMPTS} attempts, then the setup guide takes over again.
  */
 public final class AutoStartReapply {
 
@@ -37,8 +37,7 @@ public final class AutoStartReapply {
 
     private static final long FIRST_CHECK_DELAY_MS = 20_000L;
     private static final long RECHECK_MS = 60_000L;
-    // A long drive right after an update must not run the budget out before the car parks.
-    private static final int MAX_CHECKS_PER_CONNECTION = 240;
+    private static final long GATE_RECHECK_MS = 5 * 60_000L;
     private static final int MAX_ATTEMPTS = 3;
     private static final long MIN_ATTEMPT_SPACING_MS = 120_000L;
     private static final long PIN_RETURN_GRACE_MS = 60_000L;
@@ -48,7 +47,6 @@ public final class AutoStartReapply {
     private static final Runnable CHECK = AutoStartReapply::check;
 
     // Main thread only.
-    private static int checksLeft;
     private static long lastAttemptElapsed = -MIN_ATTEMPT_SPACING_MS;
     private static volatile Boolean available;
 
@@ -65,7 +63,7 @@ public final class AutoStartReapply {
             found = context.getPackageManager().resolveActivity(
                     SetupGuideDialog.buildAppStartManagementIntent(), 0) != null;
         } catch (Throwable t) {
-            found = false;
+            return false;
         }
         available = found;
         return found;
@@ -78,6 +76,9 @@ public final class AutoStartReapply {
     public static void setEnabled(Context context, boolean enabled) {
         prefs(context).edit().putBoolean(KEY_ENABLED, enabled).apply();
         Log.i(TAG, "re-apply after updates " + (enabled ? "enabled" : "disabled"));
+        // The guide owns the initial step when enabling on an unconfirmed install.
+        // Disabling also cancels any queued automatic check.
+        MAIN.removeCallbacks(CHECK);
     }
 
     /** Opted in and able to act on this install: the service is enabled and it hasn't given up. */
@@ -96,16 +97,14 @@ public final class AutoStartReapply {
 
     public static void markDoneForCurrentInstall(Context context) {
         long install = currentInstall(context);
-        if (install > 0L) prefs(context).edit().putLong(KEY_DONE_INSTALL, install).apply();
+        if (install <= 0L) return;
+        prefs(context).edit().putLong(KEY_DONE_INSTALL, install).apply();
+        MAIN.removeCallbacks(CHECK);
     }
 
     /** Called on the main thread once the accessibility service is wired. */
     static void onServiceConnected(KeepAliveAccessibilityService service) {
-        if (!isPending(service)) return;
-        checksLeft = MAX_CHECKS_PER_CONNECTION;
-        MAIN.removeCallbacks(CHECK);
-        MAIN.postDelayed(CHECK, FIRST_CHECK_DELAY_MS);
-        Log.i(TAG, "pending for this install; first check in " + FIRST_CHECK_DELAY_MS + "ms");
+        schedule(FIRST_CHECK_DELAY_MS);
     }
 
     static void onServiceDisconnected() {
@@ -115,26 +114,28 @@ public final class AutoStartReapply {
     private static boolean isPending(Context context) {
         if (!isEnabled(context) || !isAvailable(context)) return false;
         long install = currentInstall(context);
-        if (install <= 0L || isDoneForCurrentInstall(context)) return false;
+        if (install <= 0L || prefs(context).getLong(KEY_DONE_INSTALL, 0L) == install) return false;
         return attemptsFor(context, install) < MAX_ATTEMPTS;
     }
 
     private static void check() {
         final KeepAliveAccessibilityService service = KeepAliveAccessibilityService.getInstance();
-        if (service == null || !isPending(service) || checksLeft <= 0) return;
-        checksLeft--;
+        if (service == null || !isPending(service)) return;
+        final long install = currentInstall(service);
         if (SystemClock.elapsedRealtime() - lastAttemptElapsed < MIN_ATTEMPT_SPACING_MS
                 || !IN_FLIGHT.compareAndSet(false, true)) {
-            reschedule();
+            schedule(RECHECK_MS);
             return;
         }
         new Thread(() -> {
             String blocked = gateReason(service);
             MAIN.post(() -> {
-                if (blocked != null || KeepAliveAccessibilityService.getInstance() != service) {
+                if (KeepAliveAccessibilityService.getInstance() != service || !isPending(service)
+                        || currentInstall(service) != install
+                        || blocked != null || !isScreenOn(service)) {
                     IN_FLIGHT.set(false);
                     if (blocked != null) Log.i(TAG, "deferred: " + blocked);
-                    reschedule();
+                    schedule(GATE_RECHECK_MS);
                     return;
                 }
                 launch(service);
@@ -144,13 +145,18 @@ public final class AutoStartReapply {
 
     /** Null when BYD's dialog may open now; reads the daemon, so off the main thread. */
     private static String gateReason(Context context) {
+        if (!isScreenOn(context)) return "screen off or unknown";
+        return DrivingSafetyGuard.isMovementBlockedViaDaemon()
+                ? "not parked (or vehicle state unavailable)" : null;
+    }
+
+    private static boolean isScreenOn(Context context) {
         try {
             PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
-            if (pm != null && !pm.isInteractive()) return "screen off";
+            return pm != null && pm.isInteractive();
         } catch (Throwable ignored) {
+            return false;
         }
-        return DrivingSafetyGuard.isActionBlockedViaDaemon(DrivingSafetyGuard.GUARD_SCREEN_MEDIA)
-                ? "not parked (or vehicle state unavailable)" : null;
     }
 
     private static void launch(KeepAliveAccessibilityService service) {
@@ -166,13 +172,13 @@ public final class AutoStartReapply {
         PinSession.INSTANCE.expectReturn(PIN_RETURN_GRACE_MS);
         service.runAutoStartEnabler((success, result) -> {
             IN_FLIGHT.set(false);
+            if (currentInstall(context) != install) return;
             if (success) {
                 markDoneForCurrentInstall(context);
                 Log.i(TAG, "done (result=" + result + ")");
                 return;
             }
             boolean terminal = result == AutoStartEnabler.Result.NOT_THIS_FIRMWARE
-                    || result == AutoStartEnabler.Result.NO_ROW
                     || attempt >= MAX_ATTEMPTS;
             if (terminal) {
                 // The guide was skipped for this update; bring its manual button back.
@@ -182,14 +188,14 @@ public final class AutoStartReapply {
                 return;
             }
             Log.w(TAG, "attempt " + attempt + " failed (result=" + result + "); will retry");
-            reschedule();
+            schedule(RECHECK_MS);
         });
     }
 
-    private static void reschedule() {
-        if (checksLeft <= 0) return;
+    private static void schedule(long delay) {
         MAIN.removeCallbacks(CHECK);
-        MAIN.postDelayed(CHECK, RECHECK_MS);
+        KeepAliveAccessibilityService service = KeepAliveAccessibilityService.getInstance();
+        if (service != null && isPending(service)) MAIN.postDelayed(CHECK, delay);
     }
 
     private static boolean isServiceEnabled(Context context) {

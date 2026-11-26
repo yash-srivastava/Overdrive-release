@@ -2134,6 +2134,13 @@ public class HttpServer {
         }
         status.put("genAiDashboardEnabled",
                 GenAiConfig.isDashboardPresentationEnabled());
+        // Only expose observations where the BYD auto-start dialog applies,
+        // and never in public mode.
+        if (!CameraDaemon.isPublicMode()) {
+            JSONObject autoStart = com.overdrive.app.services.AutoStartObservation.read(
+                    CameraDaemon.getAppContext());
+            if (autoStart != null) status.put("autoStartObservation", autoStart);
+        }
 
         // Vehicle-data readiness, surfaced explicitly so the web UI can render
         // a "waiting for vehicle…" state instead of silently leaving every
