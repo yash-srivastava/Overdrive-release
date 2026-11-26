@@ -24,6 +24,7 @@ BYD.events = {
     _watchActiveKey: null,
     _watchTimer: null,
     _watchListenersReady: false,
+    _watchRevision: 0,
 
     // Multi-select state
     selectMode: false,
@@ -838,6 +839,9 @@ BYD.events = {
         const stopOnExit = () => this.stopInflightPolling();
         window.addEventListener('pagehide', stopOnExit);
         window.addEventListener('beforeunload', stopOnExit);
+        window.addEventListener('pageshow', (event) => {
+            if (event.persisted) this._refreshWatchHistory();
+        });
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'hidden') { stopOnExit(); return; }
             // Coming back to the foreground: the index-down retry is a ONE-SHOT
@@ -849,12 +853,22 @@ BYD.events = {
             if (this._indexDown && !this._indexDownRetryTimer) {
                 this.scheduleIndexDownRetry(0);
             }
+            this._refreshWatchHistory();
         });
     },
 
-    /** A list on screen stays (reloading it flashes a spinner and loses the scroll); a failed one, or one still
-     *  on its way from the outage, loads again. While hidden: on the next return to the page, once; while init
-     *  reads: when it's done. */
+    // LAN and tunnel URLs have separate page instances. Re-read daemon state
+    // when returning to an already-open list, without blanking its cards.
+    _refreshWatchHistory() {
+        if (!this._initDone || document.hidden || this._listHidden()
+                || this._listPending || this._indexDown) return;
+        // Quiet unless a spinner or status card is showing: never blank a healthy list.
+        return this.loadRecordings(!this._listShowsStatus);
+    },
+
+    /** Refresh even a successful list: another client may have watched clips
+     *  during the outage. While hidden, defer until visible; during init,
+     *  defer until the initial reads finish. */
     _refreshAfterReconnect() {
         if (document.hidden) {
             if (this._reconnectDeferred) return;
@@ -871,7 +885,8 @@ BYD.events = {
         if (!this._initDone) { this._reconnectDuringInit = true; return; }
         this.loadStorageStats();
         this.loadDatesWithRecordings();
-        if (this._listFailed || this._listPending) this.loadRecordings();
+        if (this._listFailed || this._listPending) return this.loadRecordings(!this._listShowsStatus);
+        return this._refreshWatchHistory();
     },
 
     // Timeline mode hides the list: a poll falling due there is held (no request) until the list shows again.
@@ -891,6 +906,7 @@ BYD.events = {
         if (held.inflight && this.inflightFilename && !this.inflightPollHandle) this.startInflightPolling();
         if (indexDown && this._indexDown && !this._indexDownRetryTimer) this.scheduleIndexDownRetry(0);
         if (held.warming && !this._warmingPollTimer && this.loadStorageStats) this.loadStorageStats();
+        this._refreshWatchHistory();
     },
 
     /**
@@ -1862,12 +1878,16 @@ BYD.events = {
         return params;
     },
 
-    async loadRecordings() {
+    async loadRecordings(quiet = false) {
         const list = document.getElementById('recordingsList');
-        this._replaceRecordingList(list, '<div class="loading"><div class="spinner"></div></div>');
+        if (!quiet) {
+            this._replaceRecordingList(list, '<div class="loading"><div class="spinner"></div></div>');
+            this._listShowsStatus = true;
+        }
         // Overlapping reads: a reply for other filters never paints; a success paints unless a newer
         // success did, a failure only if nothing newer painted. Failed/pending feed the reconnect handler.
         const seq = this._listSeq = (this._listSeq || 0) + 1;
+        const watchRevision = this._watchRevision;
         this._listPending = true;
         let reqUrl = null;
 
@@ -1879,10 +1899,16 @@ BYD.events = {
             url += '?' + params.join('&');
             reqUrl = this._listUrl = url;
 
-            const res = await fetch(url);
+            const res = await fetch(url, { cache: 'no-store' });
             const data = await res.json();
             const ok = !!data && (data.success === true || !!data.indexUnavailable);
             if (url !== this._listUrl || (ok ? seq < (this._listOk || 0) : seq < (this._listLast || 0))) return;
+            // A list snapshot started before a successful watched POST can
+            // arrive afterwards. Never repaint it over the acknowledged badge.
+            if (data.success && !data.indexUnavailable && watchRevision !== this._watchRevision) {
+                if (seq === this._listSeq) return this.loadRecordings(quiet);
+                return;
+            }
             if (ok) this._listOk = seq;
             if (seq > (this._listLast || 0)) this._listLast = seq;
             if (seq === this._listSeq) this._listPending = false;
@@ -1895,6 +1921,7 @@ BYD.events = {
             if (data.indexUnavailable) {
                 this._indexDown = true;
                 this._replaceRecordingList(list, this._indexDownCardHtml());
+                this._listShowsStatus = true;
                 // Clear the stale pagination bar + count. Without this the
                 // user is left with "Page 3 of 5" and an enabled Next button
                 // sitting above the error card, and clicking Next just walks
@@ -1933,13 +1960,17 @@ BYD.events = {
                     if (this.loadStorageStats) this.loadStorageStats();
                     if (this.loadDatesWithRecordings) this.loadDatesWithRecordings();
                 }
-                this.recordings = data.recordings || [];
+                const recordings = data.recordings || [];
+                const unchanged = quiet && JSON.stringify(this.recordings) === JSON.stringify(recordings);
+                this.recordings = recordings;
                 // Newly indexed clips can extend an end that was previously
                 // empty while the player remains open.
                 this._recordingNavBoundary = { '-1': false, '1': false };
                 this.totalPages = data.totalPages || 1;
                 this.totalCount = data.totalCount || this.recordings.length;
-                this.renderRecordings();
+                if (!unchanged) this.renderRecordings();
+                // A spinner or status card is only kept on screen until real cards replace it.
+                this._listShowsStatus = false;
                 this.updatePagination();
                 if (this._activeRecordingKey) this._refreshRecordingNav();
                 document.getElementById('recordingsCount').textContent =
@@ -1968,7 +1999,10 @@ BYD.events = {
                 // doesn't wait on this auxiliary fetch.
                 this.loadPlaceChips();
             } else {
-                this._replaceRecordingList(list, this._failedCardHtml());
+                if (!quiet) {
+                    this._replaceRecordingList(list, this._failedCardHtml());
+                    this._listShowsStatus = true;
+                }
             }
         } catch (e) {
             if ((reqUrl !== null && reqUrl !== this._listUrl) || seq < (this._listLast || 0)) return;
@@ -1976,7 +2010,10 @@ BYD.events = {
             if (seq === this._listSeq) this._listPending = false;
             this._listFailed = true;
             console.error('Failed to load recordings:', e);
-            this._replaceRecordingList(list, this._failedCardHtml());
+            if (!quiet) {
+                this._replaceRecordingList(list, this._failedCardHtml());
+                this._listShowsStatus = true;
+            }
         }
     },
 
@@ -2348,6 +2385,7 @@ BYD.events = {
             const result = await response.json();
             if (!result.success) throw new Error('Watched status not saved');
             rec.watched = true;
+            this._watchRevision++;
             // The list may have been reloaded while the POST was in flight.
             const current = this.findRecording(key);
             if (this._activeRecording && this._activeRecording.id === rec.id
