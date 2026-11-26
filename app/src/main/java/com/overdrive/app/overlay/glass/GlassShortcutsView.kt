@@ -5,14 +5,10 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.DashPathEffect
-import android.graphics.LinearGradient
-import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PathMeasure
-import android.graphics.RadialGradient
 import android.graphics.RectF
-import android.graphics.Shader
 import android.os.SystemClock
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
@@ -64,16 +60,10 @@ class GlassShortcutsView(context: Context, env: GlassEnv, ticker: GlassTicker) :
     private val fm = Paint.FontMetrics()
     private val p = Paint(Paint.ANTI_ALIAS_FLAG)
     private val s = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
-    private val m = Matrix()
     private val r = RectF()
     private val dash = DashPathEffect(floatArrayOf(5f, 4f), 0f)
 
-    private var shaderNight: Boolean? = null
-    private lateinit var keyBody: LinearGradient
-    private lateinit var rimSh: LinearGradient
-    private lateinit var shadowSh: RadialGradient
-    private lateinit var glowAccent: RadialGradient
-    private lateinit var glowWarn: RadialGradient
+    private val keyShaders = GlassKeyShaders()
 
     private val parked get() = !env.driving
     private val longPress = Runnable {
@@ -242,35 +232,19 @@ class GlassShortcutsView(context: Context, env: GlassEnv, ticker: GlassTicker) :
         return busy
     }
 
-    override fun onThemeChanged() { shaderNight = null; for (i in 0 until SLOTS) wrap(i) }
+    override fun onThemeChanged() { keyShaders.invalidate(); for (i in 0 until SLOTS) wrap(i) }
 
     // ── drawing ──────────────────────────────────────────────────────────────
 
-    private fun ensureShaders(t: GlassTheme) {
-        if (shaderNight == t.night) return
-        shaderNight = t.night
-        val night = t.night
-        val white = 0xFFFFFFFF.toInt()
-        keyBody = LinearGradient(0f, 0f, 0.6f, 1f,
-            if (night) intArrayOf(GlassColor.alpha(white, 0.13f), GlassColor.alpha(white, 0.04f), 0x40000000) else intArrayOf(white, 0xFFF1F5F2.toInt(), 0xFFD9E1DC.toInt()),
-            floatArrayOf(0f, if (night) 0.45f else 0.5f, 1f), Shader.TileMode.CLAMP)
-        rimSh = LinearGradient(0f, 0f, 1f, 1f,
-            if (night) intArrayOf(GlassColor.alpha(white, 0.55f), GlassColor.alpha(white, 0.1f), 0x80000000.toInt()) else intArrayOf(white, 0x1A0B281E, 0x4D0B281E),
-            floatArrayOf(0f, if (night) 0.4f else 0.5f, 1f), Shader.TileMode.CLAMP)
-        shadowSh = RadialGradient(0f, 0f, 1f, GlassColor.alpha(t.shadow, t.shadowA), GlassColor.clear(t.shadow), Shader.TileMode.CLAMP)
-        fun glow(c: Int) = RadialGradient(0f, 0f, 1f, intArrayOf(GlassColor.alpha(c, 0.8f), GlassColor.alpha(c, 0.3f), GlassColor.clear(c)), floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP)
-        glowAccent = glow(t.glowAccent); glowWarn = glow(t.glowWarn)
-    }
-
     override fun drawBack(c: Canvas) {
         val t = env.theme
-        ensureShaders(t)
+        keyShaders.ensure(t)
         for (i in 0 until SLOTS) if (pressed != i) drawKey(c, t, i, false)
     }
 
     override fun drawLive(c: Canvas, nowMs: Long) {
         val t = env.theme
-        ensureShaders(t)
+        keyShaders.ensure(t)
         if (pressed >= 0) drawKey(c, t, pressed, true)
         for (i in 0 until SLOTS) {
             if (runningId[i] != null) drawRing(c, t, i, nowMs)
@@ -291,12 +265,12 @@ class GlassShortcutsView(context: Context, env: GlassEnv, ticker: GlassTicker) :
         // the key's shadow, then its glass, drawn pressed-in when held
         c.save(); c.translate(cx + 4f, KY + 8f + KH / 2f); c.scale(KW / 2f, KH / 2f)
         r.set(-1f, -1f, 1f, 1f)
-        if (!empty) c.drawRoundRect(r, 22f / (KW / 2f), 22f / (KH / 2f), p.shade(shadowSh))
+        if (!empty) c.drawRoundRect(r, 22f / (KW / 2f), 22f / (KH / 2f), p.shade(keyShaders.shadowSh))
         c.restore()
         if (pressing) { c.save(); c.scale(0.95f, 0.95f, cx, cy) }
         r.set(x, KY, x + KW, KY + KH)
-        bbox(keyBody, r)
-        p.shade(keyBody)
+        keyShaders.mapToBounds(keyShaders.keyBody, r)
+        p.shade(keyShaders.keyBody)
         if (empty) p.alpha = 110
         c.drawRoundRect(r, 22f, 22f, p)
         p.alpha = 255
@@ -306,8 +280,8 @@ class GlassShortcutsView(context: Context, env: GlassEnv, ticker: GlassTicker) :
             c.drawRoundRect(r, 21.5f, 21.5f, s)
             s.pathEffect = null
         } else {
-            bbox(rimSh, r)
-            s.shade(rimSh); s.strokeWidth = 1.2f; s.strokeCap = Paint.Cap.BUTT
+            keyShaders.mapToBounds(keyShaders.rimSh, r)
+            s.shade(keyShaders.rimSh); s.strokeWidth = 1.2f; s.strokeCap = Paint.Cap.BUTT
             c.drawRoundRect(r, 21.5f, 21.5f, s)
             s.shader = null; s.strokeCap = Paint.Cap.ROUND
             s.color = GlassColor.alpha(0xFFFFFFFF.toInt(), if (t.night) 0.5f else 1f); s.strokeWidth = 1.2f
@@ -376,7 +350,7 @@ class GlassShortcutsView(context: Context, env: GlassEnv, ticker: GlassTicker) :
         val a = (1f - k) * (1f - k)
         val cx = keyX(i) + KW / 2f; val cy = KY + KH / 2f
         val ok = resultOk[i]
-        c.unitOval(p, if (ok) glowAccent else glowWarn, cx, cy, KW * 0.66f, KH * 0.7f, (a * 200f).roundToInt())
+        c.unitOval(p, if (ok) keyShaders.glowAccent else keyShaders.glowWarn, cx, cy, KW * 0.66f, KH * 0.7f, (a * 200f).roundToInt())
         if (ok) drawLit(c, t, i, (a * 255f).roundToInt())
         val bx = keyX(i) + KW - 6f; val by = KY + 6f
         p.shader = null; p.color = GlassColor.alpha(if (ok) t.glowAccent else t.glowWarn, a)
@@ -401,11 +375,6 @@ class GlassShortcutsView(context: Context, env: GlassEnv, ticker: GlassTicker) :
         c.drawRoundRect(r, 12f, 12f, s)
         badge.color = GlassColor.alpha(t.warn, fade)
         c.drawText(hintText, cx, r.centerY() - (fm.ascent + fm.descent) / 2f, badge)
-    }
-
-    private fun bbox(sh: Shader, box: RectF) {
-        m.setScale(box.width(), box.height()); m.postTranslate(box.left, box.top)
-        sh.setLocalMatrix(m)
     }
 
     /** The middle of slot [i]'s key, as a fraction of the widget's width. */
