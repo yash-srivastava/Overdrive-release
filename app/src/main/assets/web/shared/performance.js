@@ -46,6 +46,7 @@ BYD.performance = {
     
     // SOC State
     socTimeRange: 72, // Default 3 days (72 hours)
+    _socRequestGeneration: 0,
     socData: {
         history: [],
         stats: {},
@@ -1900,12 +1901,16 @@ BYD.performance = {
      * Fetch SOC history from API
      */
     async fetchSocHistory() {
+        // Only the latest range selection or refresh may update the chart and stale state.
+        const generation = ++this._socRequestGeneration;
         try {
             const url = `/api/performance/soc/full?hours=${this.socTimeRange}&points=300`;
             const res = await fetch(url);
+            if (generation !== this._socRequestGeneration) return;
             
             if (res.ok) {
                 const data = await res.json();
+                if (generation !== this._socRequestGeneration) return;
                 this.socData = {
                     history: data.history || [],
                     stats: data.stats || {},
@@ -1921,6 +1926,7 @@ BYD.performance = {
                 this.noteSocFetchFailure();
             }
         } catch (e) {
+            if (generation !== this._socRequestGeneration) return;
             console.error('[Performance] SOC fetch error:', e);
             this.noteSocFetchFailure();
         }
