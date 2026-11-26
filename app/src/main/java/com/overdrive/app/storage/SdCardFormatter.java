@@ -162,7 +162,10 @@ public final class SdCardFormatter {
     private Result format(String expectedUuid, String expectedIdentityToken, boolean stopFactoryDvr) {
         dvrRestartUnverified = false;
         // One user for every DVR step and the journal: a restart mid-format must not resolve another.
-        final int dvrUser = com.overdrive.app.util.ShellUser.targetUserId();
+        // Only BYD100F (driver = another Android user) resolves the foreground user; elsewhere it
+        // stays user 0, as before.
+        final int dvrUser = DiLink100Platform.isByd100f()
+                ? com.overdrive.app.util.ShellUser.targetUserId() : 0;
         if (dvrUser < 0 && DiLink100Platform.isByd100f())
             return new Result(false, "Cannot resolve the driver's Android user; formatting blocked.");
         StorageManager storage = StorageManager.getInstance();
@@ -211,7 +214,13 @@ public final class SdCardFormatter {
                     "Could not stop SD cleanup safely; formatting blocked.");
             // Write a durable recovery intent BEFORE disabling the DVR or invoking vold.
             // A daemon restart must not strand a disabled package or an unmounted card.
-            restoreDvr = !cdr.success && stopFactoryDvr;
+            // BYD100F keeps a user-disabled persistent recorder running: leave that setting alone.
+            boolean alreadyDisabled = false;
+            if (!cdr.success && stopFactoryDvr && DiLink100Platform.isByd100f()) {
+                Result before = command(COMMAND_TIMEOUT_MS, "sh", "-c", disabledPackagesCommand(dvrUser));
+                alreadyDisabled = before.success && packageListed(before.message, "com.byd.cdr");
+            }
+            restoreDvr = !cdr.success && stopFactoryDvr && !alreadyDisabled;
             if (!saveMarker(target.volumeId, target.uuid, restoreDvr, dvrUser))
                 return new Result(false, "Cannot save format recovery intent; format blocked.");
             markerSaved = true;
@@ -227,7 +236,7 @@ public final class SdCardFormatter {
             cdr = checkCdrStopped();
             if (!cdr.success) {
                 // Only a DVR seen running and known persistent; an inconclusive ps still refuses.
-                persistentDvrKept = restoreDvr
+                persistentDvrKept = (restoreDvr || alreadyDisabled)
                         && cdr.message.startsWith("Factory BYD CDR is running.")
                         && persistentDvrSurvivesDisable();
                 if (!persistentDvrKept) return cdr;
@@ -293,7 +302,7 @@ public final class SdCardFormatter {
                 // Remount even on refusal/error (e.g. after a partially completed vold call).
                 if (!mountVerified && volumeId != null) command(COMMAND_TIMEOUT_MS, "sm", "mount", volumeId);
                 boolean restored = !restoreDvr || restoreFactoryDvr(dvrUser);
-                if (restored && persistentDvrKept && !awaitFactoryDvrRunning()) {
+                if (restored && restoreDvr && persistentDvrKept && !awaitFactoryDvrRunning()) {
                     dvrRestartUnverified = true;
                     log("factory DVR did not restart after re-enable");
                 }
@@ -654,7 +663,8 @@ public final class SdCardFormatter {
             usb.getClass().getMethod("getDeviceList", android.os.Bundle.class).invoke(usb, list);
             for (String key : list.keySet()) {
                 Object value = list.getParcelable(key);
-                if (!(value instanceof android.hardware.usb.UsbDevice)) continue;
+                // A partial list could hide a second storage device on the SD bus.
+                if (!(value instanceof android.hardware.usb.UsbDevice)) return new java.util.ArrayList<>();
                 android.hardware.usb.UsbDevice device = (android.hardware.usb.UsbDevice) value;
                 boolean storage = false;
                 for (int i = 0; i < device.getInterfaceCount(); i++)
@@ -664,6 +674,7 @@ public final class SdCardFormatter {
             }
         } catch (Throwable e) {
             log("USB device list unavailable: " + e);
+            return new java.util.ArrayList<>();
         }
         return out;
     }
@@ -796,13 +807,13 @@ public final class SdCardFormatter {
                 // Re-enable the recorder BEFORE the potentially ten-minute mount
                 // retry; even a missing card must not strand the disabled DVR.
                 if ("1".equals(restore) && dvrUser < 0) {
-                    // Journals without the user (older builds) fall back to the current one,
-                    // except on BYD100F, where a wrong guess would strand the driver's DVR.
+                    // Journals without the user (older builds) used user 0, except on BYD100F,
+                    // where a guess could strand the driver's DVR. Never re-resolve it live.
                     if (DiLink100Platform.isByd100f()) {
                         log("recovery journal has no DVR user; manual inspection required");
                         return;
                     }
-                    dvrUser = com.overdrive.app.util.ShellUser.targetUserId();
+                    dvrUser = 0;
                 }
                 boolean dvrRestored = !"1".equals(restore) || restoreFactoryDvr(dvrUser);
                 StorageManager storage = StorageManager.getInstance();
