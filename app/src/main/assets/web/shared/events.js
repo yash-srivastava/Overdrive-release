@@ -104,7 +104,8 @@ BYD.events = {
     _recordingNavSerial: 0,
     _recordingNavBoundary: { '-1': false, '1': false },
     _timelineSeq: 0,
-    _playlist: { direction: -1, skipDvr: false, skipEvent: false, skipCam: false, unwatchedOnly: false },
+    // Off by default: continuing to the next clip is an opt-in (it streams over tunnels too).
+    _playlist: { direction: 0, skipDvr: false, skipEvent: false, skipCam: false, unwatchedOnly: false },
     _playlistRequest: null,
     _PLAYLIST_LS_KEY: 'byd.events.playlist',
 
@@ -166,8 +167,8 @@ BYD.events = {
         const modal = document.getElementById('videoModal');
         const player = document.getElementById('videoPlayer');
         const isOpen = () => modal.classList.contains('active');
-        if (resume ? isOpen() : (!isOpen() || !player.ended || !this._canSeekRecording()
-                || !this._playlist.direction)) return;
+        if (resume ? isOpen() : (!isOpen() || !player.ended || document.hidden
+                || !this._canSeekRecording() || !this._playlist.direction)) return;
         const step = this._playlist.direction || -1;
         const filters = this._recordingFilterParams().join('&');
         const params = [filters, 'step=' + step, 'pageSize=' + this.pageSize];
