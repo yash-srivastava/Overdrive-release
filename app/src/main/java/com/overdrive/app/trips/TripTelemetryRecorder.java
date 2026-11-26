@@ -25,7 +25,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.zip.GZIPOutputStream;
 
 /**
  * Captures 5Hz telemetry by reading from existing singleton monitors.
@@ -1324,6 +1323,46 @@ public class TripTelemetryRecorder {
     static List<TelemetrySample> downsampleTo1Hz(List<TelemetrySample> samples) {
         if (samples == null || samples.isEmpty()) return new ArrayList<>();
 
+        // Sampling normally produces consecutive, nondecreasing second buckets.
+        // Avoid boxing timestamps, hashing, per-second buckets and sorting in that case.
+        List<TelemetrySample> result = new ArrayList<>();
+        long boundary = Long.MIN_VALUE;
+        TelemetrySample closest = null;
+        long closestDistance = Long.MAX_VALUE;
+        float landedMeters = 0f;
+        for (TelemetrySample sample : samples) {
+            long second = (sample.timestampMs / 1000) * 1000;
+            if (second < boundary) {
+                // Wall-clock corrections or an out-of-order input can revisit an
+                // earlier bucket. Reprocess the original rows with the general path.
+                return downsampleUnordered(samples);
+            }
+            if (second != boundary) {
+                if (closest != null) appendBucket(result, closest, landedMeters);
+                boundary = second;
+                closest = null;
+                closestDistance = Long.MAX_VALUE;
+                landedMeters = 0f;
+            }
+            long distance = Math.abs(sample.timestampMs - boundary);
+            if (distance < closestDistance) {
+                closestDistance = distance;
+                closest = sample;
+            }
+            landedMeters += sample.distanceLandedM;
+        }
+        if (closest != null) appendBucket(result, closest, landedMeters);
+        return result;
+    }
+
+    private static void appendBucket(List<TelemetrySample> result, TelemetrySample closest,
+                                     float landedMeters) {
+        // Landed distance is an event: retain the sum on the selected row.
+        result.add(landedMeters != closest.distanceLandedM
+                ? closest.withDistanceLandedM(landedMeters) : closest);
+    }
+
+    private static List<TelemetrySample> downsampleUnordered(List<TelemetrySample> samples) {
         // Keep the original encounter order for ties and float accumulation.
         Map<Long, SecondBucket> bySecond = new HashMap<>();
         for (TelemetrySample s : samples) {
@@ -1348,12 +1387,7 @@ public class TripTelemetryRecorder {
         for (long boundary : sortedSeconds) {
             SecondBucket bucket = bySecond.get(boundary);
             TelemetrySample closest = bucket.closest;
-            if (closest != null) {
-                // Landed distance is an event: retain the sum on the selected row.
-                float landedM = bucket.landedMeters;
-                result.add(landedM != closest.distanceLandedM
-                        ? closest.withDistanceLandedM(landedM) : closest);
-            }
+            if (closest != null) appendBucket(result, closest, bucket.landedMeters);
         }
         return result;
     }
@@ -1371,17 +1405,9 @@ public class TripTelemetryRecorder {
     private void writeGzippedChunk(List<TelemetrySample> samples) throws IOException {
         if (outputFile == null) return;
 
-        // Build JSON-lines content
-        StringBuilder sb = new StringBuilder();
-        for (TelemetrySample sample : samples) {
-            sb.append(sample.toJson().toString()).append('\n');
-        }
-
-        // Gzip the content
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        try (GZIPOutputStream gzos = new GZIPOutputStream(baos)) {
-            gzos.write(sb.toString().getBytes("UTF-8"));
-        }
+        // Compress incrementally; keep only the completed compressed member staged
+        // before opening the journal, as before.
+        ByteArrayOutputStream baos = GzipJsonLines.encodeMember(samples);
 
         // Re-resolve target file if its directory has gone away mid-trip.
         // We migrate any partial bytes from the stale path to the live one so

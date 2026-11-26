@@ -1,15 +1,33 @@
 package com.overdrive.app.trips;
 
+import java.io.BufferedWriter;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.function.Consumer;
 import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
 
-/** Incrementally decodes LF-delimited UTF-8 records from a compressed telemetry snapshot. */
+/** Incrementally encodes and decodes LF-delimited UTF-8 telemetry records. */
 final class GzipJsonLines {
     private GzipJsonLines() {}
+
+    /** Encode one complete appendable gzip member without staging the expanded chunk. */
+    static ByteArrayOutputStream encodeMember(List<TelemetrySample> samples) throws IOException {
+        ByteArrayOutputStream compressed = new ByteArrayOutputStream();
+        try (GZIPOutputStream gzip = new GZIPOutputStream(compressed);
+             BufferedWriter writer = new BufferedWriter(
+                     new OutputStreamWriter(gzip, StandardCharsets.UTF_8), 1024)) {
+            for (TelemetrySample sample : samples) {
+                writer.write(sample.toJson().toString());
+                writer.write('\n');
+            }
+        }
+        return compressed;
+    }
 
     /** Read at most the captured file length; the caller owns the input stream. */
     static void read(InputStream input, long length, Consumer<String> onLine) throws IOException {
