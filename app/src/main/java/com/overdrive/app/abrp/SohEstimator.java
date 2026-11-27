@@ -2425,21 +2425,6 @@ public class SohEstimator {
         }
     }
 
-    /**
-     * SOH derived from the peak frame anchor. {@code -1} until the anchor has
-     * stabilized at {@link #PEAK_REMAIN_KWH_REQUIRED_SAMPLES} samples; this
-     * gate prevents a single noisy peak from displaying a misleading SOH
-     * before enough confirming observations exist.
-     */
-    public double getFrameAnchorSoh() {
-        if (peakRemainKwhAtFull <= 0 || nominalCapacityKwh <= 0) return -1;
-        if (peakRemainKwhSamples < PEAK_REMAIN_KWH_REQUIRED_SAMPLES) return -1;
-        double soh = (peakRemainKwhAtFull / nominalCapacityKwh) * 100.0;
-        if (soh < MIN_SOH) return MIN_SOH;
-        if (soh > MAX_SOH) return MAX_SOH;
-        return soh;
-    }
-
     // ==================== GETTERS ====================
 
     /** Capacity-derived diagnostic estimate; presentation consumers use {@link #getDisplaySoh()}. */
@@ -2730,9 +2715,8 @@ public class SohEstimator {
     }
 
     /**
-     * Lock-held variant of {@link #getFrameAnchorSoh()} for callers that have
-     * already acquired {@code autoDetectLock} and need a consistent snapshot
-     * with sibling fields. Identical formula — see that method for behavior.
+     * SOH derived from the peak frame anchor, or -1 until enough samples exist.
+     * Callers hold {@code autoDetectLock} for a consistent snapshot of the inputs.
      */
     private double getFrameAnchorSohLocked() {
         if (peakRemainKwhAtFull <= 0 || nominalCapacityKwh <= 0) return -1;
@@ -2751,10 +2735,7 @@ public class SohEstimator {
     public double getCalibrationSoh() { return calibrationSoh; }
     public long getCalibrationTimestampMs() { return calibrationTimestampMs; }
     public double getCapacityAhSoh() { return capacityAhSoh; }
-    public long getCapacityAhTimestampMs() { return capacityAhTimestampMs; }
     public double getPeakRemainKwhAtFull() { return peakRemainKwhAtFull; }
-    public long getPeakRemainKwhTimestampMs() { return peakRemainKwhTimestampMs; }
-    public int getPeakRemainKwhSamples() { return peakRemainKwhSamples; }
     public boolean hasEstimate() { return currentSoh > 0; }
 
     public double getEstimatedCapacityKwh() {

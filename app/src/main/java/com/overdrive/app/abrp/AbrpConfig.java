@@ -200,10 +200,6 @@ public class AbrpConfig {
         return carModel;
     }
 
-    public int getUploadIntervalSeconds() {
-        return uploadIntervalSeconds;
-    }
-
     public String getApiKey() {
         return apiKey;
     }
@@ -252,14 +248,6 @@ public class AbrpConfig {
 
     public void setCarModel(String carModel) {
         this.carModel = carModel;
-    }
-
-    public void setUploadIntervalSeconds(int seconds) {
-        this.uploadIntervalSeconds = seconds;
-    }
-
-    public void setApiKey(String apiKey) {
-        this.apiKey = apiKey;
     }
 
     /**
