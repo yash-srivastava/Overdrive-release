@@ -34,8 +34,8 @@ import java.net.Socket;
  * 4. MCU wake-up to keep hardware powered during sentry mode
  * 5. Backlight control and blocker activity management
  *
- * NOTE: Whitelisting and ACC Lock acquisition is handled by SentryDaemon (UID 1000).
- * This daemon focuses on ACC state detection and sentry mode management.
+ * This daemon owns ACC state detection and sentry mode management;
+ * SentryDaemon handles Wi-Fi and location sidecar maintenance.
  */
 public class AccSentryDaemon {
 
@@ -176,22 +176,6 @@ public class AccSentryDaemon {
     private static final int SURVEILLANCE_IPC_PORT = 19877;
     private static volatile boolean surveillanceEnabled = false;
 
-    // MCU wake timestamp (for voltage-triggered wake cooldown)
-    private static volatile long lastMcuWakeTime = 0;
-
-    // ==================== ACTIVE VOLTAGE RECOVERY (REPLACED) ====================
-    //
-    // Replaced by com.overdrive.app.power.BatteryVoltageMonitorV2 +
-    // com.overdrive.app.power.McuPowerHal. The 45 s "wake the MCU on every
-    // pulse" model was net-negative on a parked car — no alternator load,
-    // and each pulse drew the 12 V it was meant to preserve. The new model
-    // gates MCU wake/sleep on a 12.0 V / 12.5 V hysteresis with a 60 s
-    // re-arm and a 15 min sleep-defer window.
-    //
-    // Kept as commented references only; no live code paths use these.
-    // private static Thread mcuChargingThread = null;
-    // private static final long MCU_CHARGE_PULSE_INTERVAL_MS = 45000;
-
     // Context for BYD device access
     private static Context appContext;
     private static final String BOOT_IDENTITY = readBootIdentity();
@@ -301,8 +285,8 @@ public class AccSentryDaemon {
      * capability on DiLink 5.</b> It would be wrong to call the extra candidate
      * "strictly additive because the old path already returned null":
      * {@link #setSpecialConfig} is also reached from the FLEET-WIDE writes in
-     * {@link #applyPeripheralPowerBatch} (782237711 / 782237728) and
-     * {@link #applySentryIspPowerVote} (the 409 pair), which run on every variant. On
+     * {@link #applyPeripheralPowerBatch} (782237711 / 782237728 and
+     * the 409 pair), which run on every variant. On
      * a legacy trim that ships only the bare class, all of those are currently inert
      * no-ops; making them start landing would newly drive BCM peripheral-power and
      * camera/ISP flags on hardware they have never been exercised against. Gating
@@ -1321,63 +1305,8 @@ public class AccSentryDaemon {
     // Gated to dilink4 — legacy secondary-reference path stays bit-exact unchanged.
     private static final int OEM_MCU_POWER_HOLD_ID = -1442840502;
 
-    private static boolean applyOemMcuPowerHold(boolean enable) {
-        if (!isDilink4CameraMode()) return true;
-        if (enable) {
-            log("[oem-parity] McuStatus = ON (PowerDevice -1442840502 = 1)");
-            return setPowerConfig(OEM_MCU_POWER_HOLD_ID, 1);
-        }
-        // Disable path is already covered in applyPeripheralPowerBatch's
-        // DISABLE branch via setPowerConfig(-1442840502, 0); no separate
-        // call needed here. Kept symmetric for future callers.
-        return true;
-    }
-
-    // ==================== V1-PARITY UNCONDITIONAL POWER HOLD (DILINK 4) ====================
-
-    /**
-     * V1-parity MCU power hold: write {@code -1442840502 = 1} IMMEDIATELY and
-     * UNCONDITIONALLY on the ACC-OFF path, with no MCU-status precondition.
-     *
-     * <p><b>Why this exists.</b> We ported the reference app's
-     * BatteryVoltageMonitor<b>V2</b> (its {@code kh/d}) and wired it up as if it
-     * were the shipping behaviour. It is not. The reference app selects its
-     * monitor at runtime from the {@code key.flameout.wakeup.mode} preference
-     * ({@code kh/a.c()}), and that preference <b>defaults to 0 → V1</b>
-     * ({@code vj/a.m()} returns {@code d("key.flameout.wakeup.mode", 0)}).
-     *
-     * <p>V1 ({@code kh/b}) is drastically simpler than what we implemented — its
-     * whole ACC-off behaviour is a single unconditional write:
-     * <pre>
-     *   BYDAutoEventValue v; v.intValue = 1;
-     *   powerDevice.set(new int[]{-1442840502}, v);   // "wakeUp"
-     * </pre>
-     * and it <b>never sleeps the MCU at all</b> — no voltage hysteresis, no
-     * 15-minute deferred sleep, no {@code getMcuStatus} gate.
-     *
-     * <p>Our equivalent write ({@link #applyOemMcuPowerHold}) only fires from
-     * inside {@link #applyPeripheralPowerBatch}'s branches, all of which are
-     * predicated on {@code getMcuStatus()} reading 1 or 10 (or on a wake-retry
-     * succeeding). When the MCU reports any other status the hold was never
-     * written, so on DiLink 4 the AVM/ISP rail could collapse right after ACC OFF
-     * and every subsequent AVMCamera frame came back all-zero.
-     *
-     * <p>Idempotent (it is the same value the status-gated path writes when it
-     * does run), cheap (one binder write), and gated to
-     * {@code cameraMode=dilink4} so the legacy fleet's sequence is byte-identical.
-     */
-    private static boolean applyV1ParityMcuPowerHold() {
-        if (!isDilink4CameraMode()) return true;
-        log("[v1-parity] unconditional MCU power hold (PowerDevice -1442840502 = 1) "
-            + "— no MCU-status precondition, mirrors reference-app default mode 0 (V1)");
-        return setPowerConfig(OEM_MCU_POWER_HOLD_ID, 1);
-    }
-
-    // NOTE: the matching "never sleep the MCU on dilink4" gate lives in
-    // BatteryVoltageMonitorV2.isDilink4CameraMode() — that class deliberately
-    // reads the config itself rather than calling across into this daemon
-    // (it must work in whichever process boots it), exactly as it already does
-    // for isKeepUsbPowerOnAccOff().
+    // The generation-aware peripheral batch writes the hold before checking MCU
+    // status on DiLink 4. BatteryVoltageMonitorV2 owns the matching sleep gate.
 
     // ==================== OEM-PARITY SENTRY KEYS (DILINK 4) ====================
 
@@ -1394,21 +1323,6 @@ public class AccSentryDaemon {
     // Gated to cameraMode=dilink4. Legacy cars don't read or write these.
     private static final int OEM_SENTRY_KEY_1 = 1901;
     private static final int OEM_SENTRY_KEY_2 = 1902;
-
-    private static boolean applyOemSentrySpecialConfig(boolean enable) {
-        if (!isDilink4CameraMode()) return true;
-        boolean success = true;
-        if (enable) {
-            log("[oem-parity] sentry wakeUp: SpecialDevice [1901]=1, [1902]=1");
-            success &= setSpecialConfig(OEM_SENTRY_KEY_1, 1);
-            success &= setSpecialConfig(OEM_SENTRY_KEY_2, 1);
-        } else {
-            log("[oem-parity] sentry sleep: SpecialDevice [1901]=0, [1902]=2");
-            success &= setSpecialConfig(OEM_SENTRY_KEY_1, 0);
-            success &= setSpecialConfig(OEM_SENTRY_KEY_2, 2);
-        }
-        return success;
-    }
 
     // ==================== SENTRY ISP / CAMERA POWER VOTE (409) ====================
 
@@ -1442,15 +1356,6 @@ public class AccSentryDaemon {
     private static final int SENTRY_ISP_NEED_409_SET   = 0x4090103E;
     private static final int SENTRY_ISP_WORK_STATE_SET = 0x4090103C;
 
-    private static boolean applySentryIspPowerVote(boolean enable) {
-        int v = enable ? 1 : 0;
-        log("[sentry-isp] 409 camera/ISP power vote " + (enable ? "ON" : "OFF")
-            + ": SpecialDevice[0x4090103E]=" + v + " [0x4090103C]=" + v);
-        boolean success = setSpecialConfig(SENTRY_ISP_NEED_409_SET, v);
-        success &= setSpecialConfig(SENTRY_ISP_WORK_STATE_SET, v);
-        return success;
-    }
-    
     /**
      * Get current MCU status.
      * @return MCU status code, or -1 if unavailable
@@ -1576,20 +1481,6 @@ public class AccSentryDaemon {
                             + "typed OEM telemetry/power calls may be unavailable");
                 }
 
-                // Debug: Dump sleep reason constants to identify correct values for this firmware
-                //logAllSleepReasonFields();
-
-                // Dump all power-related methods for discovery
-                //dumpPowerManagerMethods();
-                //dumpBydPowerDeviceMethods();
-                //dumpBydSettingDeviceMethods();
-
-                // Dump all BYD device methods for discovery
-                //dumpAllBydDeviceMethods();
-                
-                // Test instrument device (charging power)
-                //testInstrumentDevice();
-
                 // Acquire WakeLock for guaranteed CPU cycles.
                 // GATE (G4a): in "Vehicle ON only" mode, do NOT hold the process-wide
                 // AccSentry:Core wakelock while the car is already OFF at daemon start.
@@ -1606,7 +1497,6 @@ public class AccSentryDaemon {
                 } else {
                     acquireWakeLock();
                 }
-                //forceSmartSleepReflection();
                 
                 // SIGKILL recovery: if the previous instance darkened the panel
                 // while parked and was then killed, the backlight is still off
@@ -3180,7 +3070,7 @@ public class AccSentryDaemon {
             // GATE (onOnly): this HAL-delivered low-battery callback is event-driven and
             // independent of the SentrySetup worker that G1 gates — AccListener is
             // registered unconditionally at daemon init and inSentryMode stays true for
-            // the whole park, so without this guard forceMcuWakeUp() would fire in onOnly
+            // the whole park, so without this guard an emergency wake could fire in onOnly
             // and (with the default Keep-USB toggle ON) force the AP awake via
             // performSystemWakeUp(), defeating "let the head unit sleep". In onOnly the
             // daemon deliberately runs no post-OFF voltage management (G1 skipped
@@ -3375,7 +3265,6 @@ public class AccSentryDaemon {
                             generation, episodeId)) {
                         return true;
                     }
-                    lastMcuWakeTime = System.currentTimeMillis();
                     boolean success = true;
                     if (isKeepUsbPowerOnAccOff()
                             && !isLowBatterySystemWakeCommitted(
@@ -3620,15 +3509,6 @@ public class AccSentryDaemon {
             return false;
         }
     }
-
-    // ==================== VOLTAGE HYSTERESIS STATE (REPLACED) ====================
-    //
-    // Replaced by BatteryVoltageMonitorV2 (12.0/12.5 V thresholds, 15 min
-    // sleep-defer). The local copy is kept commented as a reference only.
-    //
-    // private static volatile boolean isVoltageChargingCycle = false;
-    // private static final double LOW_VOLTAGE_THRESHOLD = 12.1;      // Wake Trigger (Volts)
-    // private static final double HEALTHY_VOLTAGE_THRESHOLD = 12.8;  // Sleep Trigger (Volts)
 
     // VehicleDataMonitor listener for voltage-based MCU control
     private static VehicleDataListener vehicleDataListener = null;
@@ -4519,339 +4399,6 @@ public class AccSentryDaemon {
                 && reconciler.awaitApplied(
                         generation, state, remaining);
     }
-
-    // ==================== DEBUG TOOLS ====================
-
-    /**
-     * DEBUG TOOL: Dumps the values of all known Sleep Reason constants.
-     * Use this to verify which magic number (9, 13, etc.) your specific car firmware uses.
-     */
-    private static void logAllSleepReasonFields() {
-        log("=== DUMPING SLEEP REASON CONSTANTS ===");
-
-        String[] possibleFieldNames = {
-            "GO_TO_SLEEP_REASON_ACCOFF",       // Primary BYD constant
-            "GO_TO_SLEEP_REASON_ACC_OFF",      // Alternative naming
-            "GO_TO_SLEEP_REASON_POWER_OFF",    // Generic power off
-            "GO_TO_SLEEP_REASON_DEVICE_ADMIN", // Android 10+ constant (value 13)
-            "GO_TO_SLEEP_REASON_TIMEOUT",      // Standard Android (usually 2)
-            "GO_TO_SLEEP_REASON_POWER_BUTTON"  // Standard Android (usually 4)
-        };
-
-        for (String fieldName : possibleFieldNames) {
-            try {
-                java.lang.reflect.Field field = PowerManager.class.getDeclaredField(fieldName);
-                field.setAccessible(true);
-                int value = field.getInt(null); // Static field, so object is null
-                log("  [FOUND] " + fieldName + " = " + value);
-            } catch (NoSuchFieldException e) {
-                log("  [MISSING] " + fieldName + " (Not present on this firmware)");
-            } catch (Exception e) {
-                log("  [ERROR] " + fieldName + ": " + e.getMessage());
-            }
-        }
-
-        // Also dump the standard SDK version for context
-        log("  [INFO] Android SDK Version: " + android.os.Build.VERSION.SDK_INT);
-        log("=== END DUMP ===");
-    }
-
-    // ==================== SENTRY HELPERS ====================
-
-    /*// ==================== POWER METHOD DISCOVERY ====================
-
-    *//**
-     * Dump ALL PowerManager methods (no filtering).
-     *//*
-    private static void dumpPowerManagerMethods() {
-        log("=== DUMPING ALL POWERMANAGER METHODS ===");
-        try {
-            Context permissiveContext = new PermissionBypassContext(appContext);
-            PowerManager pm = (PowerManager) permissiveContext.getSystemService(Context.POWER_SERVICE);
-
-            for (Method m : pm.getClass().getMethods()) {
-                StringBuilder params = new StringBuilder();
-                for (Class<?> p : m.getParameterTypes()) {
-                    if (params.length() > 0) params.append(", ");
-                    params.append(p.getSimpleName());
-                }
-                log("  PM: " + m.getName() + "(" + params + ") -> " + m.getReturnType().getSimpleName());
-            }
-
-            // Also try to get current screen power status if method exists
-            try {
-                Method getStatus = PowerManager.class.getMethod("getPowerScreenStatus");
-                int status = (int) getStatus.invoke(pm);
-                log("  >> Current getPowerScreenStatus(): " + status);
-            } catch (NoSuchMethodException e) {
-                log("  >> getPowerScreenStatus() not found");
-            }
-
-        } catch (Exception e) {
-            log("PowerManager dump error: " + e.getMessage());
-        }
-        log("=== END POWERMANAGER METHODS ===");
-    }
-
-    *//**
-     * Dump ALL BYDAutoPowerDevice methods (no filtering).
-     *//*
-    private static void dumpBydPowerDeviceMethods() {
-        log("=== DUMPING ALL BYDAUTOPOWERDEVICE METHODS ===");
-        try {
-            Context permissiveContext = new PermissionBypassContext(appContext);
-            BYDAutoPowerDevice powerDevice = BYDAutoPowerDevice.getInstance(permissiveContext);
-
-            if (powerDevice == null) {
-                log("  BYDAutoPowerDevice.getInstance() returned null");
-                return;
-            }
-
-            for (Method m : powerDevice.getClass().getMethods()) {
-                StringBuilder params = new StringBuilder();
-                for (Class<?> p : m.getParameterTypes()) {
-                    if (params.length() > 0) params.append(", ");
-                    params.append(p.getSimpleName());
-                }
-                log("  BYD: " + m.getName() + "(" + params + ") -> " + m.getReturnType().getSimpleName());
-            }
-
-        } catch (Exception e) {
-            log("BYDAutoPowerDevice dump error: " + e.getMessage());
-        }
-        log("=== END BYDAUTOPOWERDEVICE METHODS ===");
-    }
-
-    *//**
-     * Dump ALL BYDAutoSettingDevice methods (no filtering).
-     *//*
-    private static void dumpBydSettingDeviceMethods() {
-        log("=== DUMPING ALL BYDAUTOSETTINGDEVICE METHODS ===");
-        try {
-            Context permissiveContext = new PermissionBypassContext(appContext);
-            Class<?> clazz = Class.forName("android.hardware.bydauto.setting.BYDAutoSettingDevice");
-            Method getInstance = clazz.getMethod("getInstance", Context.class);
-            Object settingDevice = getInstance.invoke(null, permissiveContext);
-
-            if (settingDevice == null) {
-                log("  BYDAutoSettingDevice.getInstance() returned null");
-                return;
-            }
-
-            for (Method m : clazz.getMethods()) {
-                StringBuilder params = new StringBuilder();
-                for (Class<?> p : m.getParameterTypes()) {
-                    if (params.length() > 0) params.append(", ");
-                    params.append(p.getSimpleName());
-                }
-                log("  SETTING: " + m.getName() + "(" + params + ") -> " + m.getReturnType().getSimpleName());
-            }
-
-        } catch (Exception e) {
-            log("BYDAutoSettingDevice dump error: " + e.getMessage());
-        }
-        log("=== END BYDAUTOSETTINGDEVICE METHODS ===");
-    }
-
-    *//**
-     * Dump ALL BYDAutoLocationDevice methods.
-     *//*
-    private static void dumpBydLocationDeviceMethods() {
-        log("=== DUMPING ALL BYDAUTOLOCATIONDEVICE METHODS ===");
-        try {
-            Context permissiveContext = new PermissionBypassContext(appContext);
-            Class<?> clazz = Class.forName("android.hardware.bydauto.location.BYDAutoLocationDevice");
-            Method getInstance = clazz.getMethod("getInstance", Context.class);
-            Object device = getInstance.invoke(null, permissiveContext);
-
-            if (device == null) {
-                log("  BYDAutoLocationDevice.getInstance() returned null");
-                return;
-            }
-
-            for (Method m : clazz.getMethods()) {
-                StringBuilder params = new StringBuilder();
-                for (Class<?> p : m.getParameterTypes()) {
-                    if (params.length() > 0) params.append(", ");
-                    params.append(p.getSimpleName());
-                }
-                log("  LOCATION: " + m.getName() + "(" + params + ") -> " + m.getReturnType().getSimpleName());
-            }
-
-        } catch (Exception e) {
-            log("BYDAutoLocationDevice dump error: " + e.getMessage());
-        }
-        log("=== END BYDAUTOLOCATIONDEVICE METHODS ===");
-    }
-
-    *//**
-     * Dump ALL BYDAutoADASDevice methods.
-     *//*
-    private static void dumpBydAdasDeviceMethods() {
-        log("=== DUMPING ALL BYDAUTOADASDEVICE METHODS ===");
-        try {
-            Context permissiveContext = new PermissionBypassContext(appContext);
-            Class<?> clazz = Class.forName("android.hardware.bydauto.adas.BYDAutoADASDevice");
-            Method getInstance = clazz.getMethod("getInstance", Context.class);
-            Object device = getInstance.invoke(null, permissiveContext);
-
-            if (device == null) {
-                log("  BYDAutoADASDevice.getInstance() returned null");
-                return;
-            }
-
-            for (Method m : clazz.getMethods()) {
-                StringBuilder params = new StringBuilder();
-                for (Class<?> p : m.getParameterTypes()) {
-                    if (params.length() > 0) params.append(", ");
-                    params.append(p.getSimpleName());
-                }
-                log("  ADAS: " + m.getName() + "(" + params + ") -> " + m.getReturnType().getSimpleName());
-            }
-
-        } catch (Exception e) {
-            log("BYDAutoADASDevice dump error: " + e.getMessage());
-        }
-        log("=== END BYDAUTOADASDEVICE METHODS ===");
-    }
-
-    *//**
-     * Dump ALL BYDAutoBodyworkDevice methods.
-     *//*
-    private static void dumpBydBodyworkDeviceMethods() {
-        log("=== DUMPING ALL BYDAUTOBODYWORKDEVICE METHODS ===");
-        try {
-            Context permissiveContext = new PermissionBypassContext(appContext);
-            Class<?> clazz = Class.forName("android.hardware.bydauto.bodywork.BYDAutoBodyworkDevice");
-            Method getInstance = clazz.getMethod("getInstance", Context.class);
-            Object device = getInstance.invoke(null, permissiveContext);
-
-            if (device == null) {
-                log("  BYDAutoBodyworkDevice.getInstance() returned null");
-                return;
-            }
-
-            for (Method m : clazz.getMethods()) {
-                StringBuilder params = new StringBuilder();
-                for (Class<?> p : m.getParameterTypes()) {
-                    if (params.length() > 0) params.append(", ");
-                    params.append(p.getSimpleName());
-                }
-                log("  BODYWORK: " + m.getName() + "(" + params + ") -> " + m.getReturnType().getSimpleName());
-            }
-
-        } catch (Exception e) {
-            log("BYDAutoBodyworkDevice dump error: " + e.getMessage());
-        }
-        log("=== END BYDAUTOBODYWORKDEVICE METHODS ===");
-    }
-
-    *//**
-     * Dump ALL BYDAutoChargingDevice methods.
-     *//*
-    private static void dumpBydChargingDeviceMethods() {
-        log("=== DUMPING ALL BYDAUTOCHARGINGDEVICE METHODS ===");
-        try {
-            Context permissiveContext = new PermissionBypassContext(appContext);
-            Class<?> clazz = Class.forName("android.hardware.bydauto.charging.BYDAutoChargingDevice");
-            Method getInstance = clazz.getMethod("getInstance", Context.class);
-            Object device = getInstance.invoke(null, permissiveContext);
-
-            if (device == null) {
-                log("  BYDAutoChargingDevice.getInstance() returned null");
-                return;
-            }
-
-            for (Method m : clazz.getMethods()) {
-                StringBuilder params = new StringBuilder();
-                for (Class<?> p : m.getParameterTypes()) {
-                    if (params.length() > 0) params.append(", ");
-                    params.append(p.getSimpleName());
-                }
-                log("  CHARGING: " + m.getName() + "(" + params + ") -> " + m.getReturnType().getSimpleName());
-            }
-
-        } catch (Exception e) {
-            log("BYDAutoChargingDevice dump error: " + e.getMessage());
-        }
-        log("=== END BYDAUTOCHARGINGDEVICE METHODS ===");
-    }
-
-    *//**
-     * Dump ALL BYDAutoStatisticDevice methods.
-     *//*
-    private static void dumpBydStatisticDeviceMethods() {
-        log("=== DUMPING ALL BYDAUTOSTATISTICDEVICE METHODS ===");
-        try {
-            Context permissiveContext = new PermissionBypassContext(appContext);
-            Class<?> clazz = Class.forName("android.hardware.bydauto.statistic.BYDAutoStatisticDevice");
-            Method getInstance = clazz.getMethod("getInstance", Context.class);
-            Object device = getInstance.invoke(null, permissiveContext);
-
-            if (device == null) {
-                log("  BYDAutoStatisticDevice.getInstance() returned null");
-                return;
-            }
-
-            for (Method m : clazz.getMethods()) {
-                StringBuilder params = new StringBuilder();
-                for (Class<?> p : m.getParameterTypes()) {
-                    if (params.length() > 0) params.append(", ");
-                    params.append(p.getSimpleName());
-                }
-                log("  STATISTIC: " + m.getName() + "(" + params + ") -> " + m.getReturnType().getSimpleName());
-            }
-
-        } catch (Exception e) {
-            log("BYDAutoStatisticDevice dump error: " + e.getMessage());
-        }
-        log("=== END BYDAUTOSTATISTICDEVICE METHODS ===");
-    }
-
-    *//**
-     * Dump ALL BYDAutoTyreDevice methods.
-     *//*
-    private static void dumpBydTyreDeviceMethods() {
-        log("=== DUMPING ALL BYDAUTOTYREDEVICE METHODS ===");
-        try {
-            Context permissiveContext = new PermissionBypassContext(appContext);
-            Class<?> clazz = Class.forName("android.hardware.bydauto.tyre.BYDAutoTyreDevice");
-            Method getInstance = clazz.getMethod("getInstance", Context.class);
-            Object device = getInstance.invoke(null, permissiveContext);
-
-            if (device == null) {
-                log("  BYDAutoTyreDevice.getInstance() returned null");
-                return;
-            }
-
-            for (Method m : clazz.getMethods()) {
-                StringBuilder params = new StringBuilder();
-                for (Class<?> p : m.getParameterTypes()) {
-                    if (params.length() > 0) params.append(", ");
-                    params.append(p.getSimpleName());
-                }
-                log("  TYRE: " + m.getName() + "(" + params + ") -> " + m.getReturnType().getSimpleName());
-            }
-
-        } catch (Exception e) {
-            log("BYDAutoTyreDevice dump error: " + e.getMessage());
-        }
-        log("=== END BYDAUTOTYREDEVICE METHODS ===");
-    }
-
-    *//**
-     * Dump all BYD device methods at startup for discovery.
-     *//*
-    private static void dumpAllBydDeviceMethods() {
-        log("=== STARTING BYD DEVICE METHOD DUMP ===");
-        dumpBydLocationDeviceMethods();
-        dumpBydAdasDeviceMethods();
-        dumpBydBodyworkDeviceMethods();
-        dumpBydChargingDeviceMethods();
-        dumpBydStatisticDeviceMethods();
-        dumpBydTyreDeviceMethods();
-        log("=== COMPLETED BYD DEVICE METHOD DUMP ===");
-    }*/
 
     // ==================== POWER CONTROL (Reflection) ====================
 
@@ -7545,51 +7092,6 @@ public class AccSentryDaemon {
         }
     }
 
-    private static void immediateWakeUpMcu() {
-        log("IMMEDIATE MCU WAKE-UP...");
-
-        if (wakeUpMcu()) {
-            log("  MCU wake: OK");
-        } else {
-            log("  MCU wake: FAILED");
-        }
-    }
-
-    /**
-     * Force MCU wake-up for voltage-triggered charging cycles.
-     * Called by VehicleDataListener when battery drops below threshold.
-     * Also triggers system wake to ensure full power rail activation.
-     */
-    private static void forceMcuWakeUp() {
-        log("VOLTAGE-TRIGGERED MCU WAKE-UP...");
-
-        // Update wake timestamp
-        lastMcuWakeTime = System.currentTimeMillis();
-
-        // Wake the system first (ensures power rails are active) — GATED ON THE
-        // "Keep USB powered" TOGGLE, matching enterSentryMode(). The forced AP wake
-        // is what keeps USB powered while parked; when the user turned it OFF we must
-        // NOT force the AP awake, or the emergency wake silently contradicts their
-        // power-save preference. The MCU wake below (DC-DC converter) stays
-        // unconditional — it is the actual low-battery emergency action.
-        if (isKeepUsbPowerOnAccOff()) {
-            performSystemWakeUp();
-        } else {
-            log("  Keep-USB-power OFF: skipping forced system wake (AP may stay asleep)");
-        }
-
-        // Then wake MCU to trigger DC-DC converter
-        if (wakeUpMcu()) {
-            log("  MCU wake: OK");
-        }
-
-        // Double-tap for reliability
-        try {
-            Thread.sleep(500);
-            wakeUpMcu();
-        } catch (InterruptedException ignored) {}
-    }
-
     // ==================== ACTIVE VOLTAGE RECOVERY ====================
 
     /**
@@ -7872,32 +7374,6 @@ public class AccSentryDaemon {
         }
     }
 
-    /**
-     * REPLACED — superseded by {@link com.overdrive.app.power.BatteryVoltageMonitorV2}.
-     * The old 45 s MCU-pulse loop drained the 12 V faster than it preserved
-     * it on a parked car (no alternator load). Calls are now no-ops; the
-     * V2 monitor is what does MCU sleep/wake hysteresis.
-     */
-    private static void startChargingMaintenance() {
-        log("startChargingMaintenance: NO-OP (replaced by BatteryVoltageMonitorV2)");
-        // Original body retained for reference:
-        //   if (isVoltageChargingCycle && mcuChargingThread != null && mcuChargingThread.isAlive()) return;
-        //   log("Starting Active Voltage Recovery (Target: " + HEALTHY_VOLTAGE_THRESHOLD + "V)...");
-        //   isVoltageChargingCycle = true;
-        //   mcuChargingThread = new Thread(() -> { while (isVoltageChargingCycle && running && inSentryMode) { try { forceMcuWakeUp(); Thread.sleep(MCU_CHARGE_PULSE_INTERVAL_MS); } catch (...) {} } }, "McuChargeLoop");
-        //   mcuChargingThread.start();
-    }
-
-    /** REPLACED — see {@link #startChargingMaintenance}. */
-    private static void stopChargingMaintenance() {
-        log("stopChargingMaintenance: NO-OP (replaced by BatteryVoltageMonitorV2)");
-        // Original body retained for reference:
-        //   if (!isVoltageChargingCycle) return;
-        //   log("Target voltage reached. Stopping Active Recovery.");
-        //   isVoltageChargingCycle = false;
-        //   if (mcuChargingThread != null) { mcuChargingThread.interrupt(); mcuChargingThread = null; }
-    }
-
     // ==================== VEHICLE DATA MONITOR INTEGRATION ====================
 
     /**
@@ -7928,23 +7404,8 @@ public class AccSentryDaemon {
 
                 @Override
                 public void onBatteryPowerChanged(BatteryPowerData data) {
-                    // REPLACED — voltage hysteresis is now owned by
-                    // BatteryVoltageMonitorV2 (12.0V wake / 12.5V sleep,
-                    // 15-min defer). The 12V isCritical < 10.5V kill switch
-                    // is also dropped — the new SoC-driven cutoff
-                    // (SocCutoffMonitor, HV battery, default 10%) is the
-                    // primary safety net. The replaced body remains for
-                    // reference only:
-                    //
-                    //   if (!inSentryMode || data == null) return;
-                    //   double voltage = data.voltageVolts;
-                    //   if (!data.isValidRange()) { forceMcuWakeUp(); }
-                    //   if (isVoltageChargingCycle) {
-                    //       if (voltage >= HEALTHY_VOLTAGE_THRESHOLD) stopChargingMaintenance();
-                    //   } else {
-                    //       if (voltage <= LOW_VOLTAGE_THRESHOLD) startChargingMaintenance();
-                    //   }
-                    //   if (data.isCritical && surveillanceEnabled) disableSurveillance();
+                    // BatteryVoltageMonitorV2 owns voltage hysteresis; SocCutoffMonitor
+                    // owns the HV battery cutoff. This listener only logs telemetry.
                     if (data != null) {
                         log("onBatteryPowerChanged " + String.format("%.2f", data.voltageVolts)
                                 + "V (handled by BatteryVoltageMonitorV2)");
@@ -9452,125 +8913,6 @@ public class AccSentryDaemon {
         }
         @Override public Context createPackageContext(String packageName, int flags) {
             try { return super.createPackageContext(packageName, flags); } catch (Exception e) { return this; }
-        }
-    }
-
-    // ==================== INSTRUMENT DEVICE TEST ====================
-
-    /**
-     * Tests BYDAutoInstrumentDevice and BYDAutoStatisticDevice for charging data.
-     */
-    private static void testInstrumentDevice() {
-        log("=== TESTING CHARGING DATA SOURCES ===");
-
-        if (appContext == null) {
-            log("ERROR: No context available");
-            return;
-        }
-
-        try {
-            Context permissiveContext = new PermissionBypassContext(appContext);
-
-            // Test InstrumentDevice
-            log("--- BYDAutoInstrumentDevice ---");
-            Class<?> instrClazz = Class.forName("android.hardware.bydauto.instrument.BYDAutoInstrumentDevice");
-            Method getInstrInstance = instrClazz.getMethod("getInstance", Context.class);
-            Object instrDevice = getInstrInstance.invoke(null, permissiveContext);
-
-            if (instrDevice != null) {
-                String[] instrGetters = {
-                    "getExternalChargingPower",
-                    "getChargePower",
-                    "getChargePercent",
-                    "getChargeRestTime",
-                    "getOutCarTemperature"
-                };
-
-                for (String methodName : instrGetters) {
-                    testGetter(instrClazz, instrDevice, methodName);
-                }
-            }
-
-            // Test StatisticDevice ( uses this for SOC)
-            log("--- BYDAutoStatisticDevice ---");
-            Class<?> statClazz = Class.forName("android.hardware.bydauto.statistic.BYDAutoStatisticDevice");
-            Method getStatInstance = statClazz.getMethod("getInstance", Context.class);
-            Object statDevice = getStatInstance.invoke(null, permissiveContext);
-
-            if (statDevice != null) {
-                String[] statGetters = {
-                    "getElecPercentageValue",      // SOC % ( uses this!)
-                    "getFuelPercentageValue",      // Fuel %
-                    "getTotalElecConValue",        // Total kWh consumed
-                    "getTotalFuelConValue",        // Total fuel consumed
-                    "getEVMileageValue",           // EV range
-                    "getWaterTemperature"          // Coolant temp
-                };
-
-                for (String methodName : statGetters) {
-                    testGetter(statClazz, statDevice, methodName);
-                }
-
-                // Test getMileageNumber(int type)
-                try {
-                    Method m = statClazz.getMethod("getMileageNumber", int.class);
-                    for (int type = 0; type <= 3; type++) {
-                        Object result = m.invoke(statDevice, type);
-                        log("  getMileageNumber(" + type + ") = " + result);
-                    }
-                } catch (Exception e) {
-                    log("  getMileageNumber(int) = [ERROR]");
-                }
-            }
-
-            // Test EnergyDevice
-            log("--- BYDAutoEnergyDevice ---");
-            Class<?> energyClazz = Class.forName("android.hardware.bydauto.energy.BYDAutoEnergyDevice");
-            Method getEnergyInstance = energyClazz.getMethod("getInstance", Context.class);
-            Object energyDevice = getEnergyInstance.invoke(null, permissiveContext);
-
-            if (energyDevice != null) {
-                String[] energyGetters = {
-                    "getElecPercentageValue",
-                    "getEnergyMode",
-                    "getOperationMode",
-                    "getEVMileageValue"
-                };
-
-                for (String methodName : energyGetters) {
-                    testGetter(energyClazz, energyDevice, methodName);
-                }
-            }
-
-            log("=== END CHARGING DATA TEST ===");
-
-        } catch (Exception e) {
-            log("ERROR testing devices: " + e.getMessage());
-        }
-    }
-
-    private static void testGetter(Class<?> clazz, Object device, String methodName) {
-        try {
-            Method method = clazz.getMethod(methodName);
-            Object result = method.invoke(device);
-
-            String resultStr;
-            if (result == null) {
-                resultStr = "null";
-            } else if (result instanceof int[]) {
-                resultStr = java.util.Arrays.toString((int[]) result);
-            } else if (result instanceof double[]) {
-                resultStr = java.util.Arrays.toString((double[]) result);
-            } else {
-                resultStr = result.toString();
-            }
-
-            log("  " + methodName + "() = " + resultStr);
-        } catch (NoSuchMethodException e) {
-            log("  " + methodName + "() = [NOT FOUND]");
-        } catch (Exception e) {
-            String msg = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
-            log("  " + methodName + "() = [ERROR: " + msg + "]");
         }
     }
 
