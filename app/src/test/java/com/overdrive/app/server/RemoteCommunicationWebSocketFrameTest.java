@@ -10,9 +10,11 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.EOFException;
 import java.io.OutputStream;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
+import java.util.Random;
 
 import org.junit.Test;
 
@@ -60,6 +62,73 @@ public class RemoteCommunicationWebSocketFrameTest {
         WebSocketFrames.Frame decoded = readFrame(new ByteArrayInputStream(frame));
         assertEquals(0x2, decoded.opcode);
         assertArrayEquals(payload, decoded.payload);
+    }
+
+    @Test
+    public void decodesMaskedPayloadsAcrossWordAndLengthBoundaries() throws Exception {
+        Random random = new Random(22022L);
+        ByteArrayOutputStream wire = new ByteArrayOutputStream();
+        // Test all short sizes (including the fast-path threshold and every tail),
+        // then real audio-sized frames and both extended-length boundaries.
+        int[] large = {639, 640, 641, 1364, 4095, 4096, 4097, 32767, 32768,
+                65534, 65535, 65536, 65537, 131071, 131072};
+        byte[][] payloads = new byte[320 + large.length][];
+        for (int i = 0; i < payloads.length; i++) {
+            int size = i < 320 ? i : large[i - 320];
+            byte[] payload = new byte[size];
+            byte[] mask = new byte[4];
+            random.nextBytes(payload);
+            random.nextBytes(mask);
+            payloads[i] = payload;
+            wire.write(maskedFrame(payload, mask));
+        }
+        // Read multiple consecutive frames through deliberately short reads.
+        InputStream input = new ByteArrayInputStream(wire.toByteArray()) {
+            @Override public synchronized int read(byte[] b, int off, int len) {
+                return super.read(b, off, Math.min(len, 13));
+            }
+        };
+        for (byte[] payload : payloads) {
+            WebSocketFrames.Frame frame = WebSocketFrames.readFrame(input,
+                    GenAiRequestSecurity.MAX_CLIENT_FRAME_BYTES);
+            assertEquals(2, frame.opcode);
+            assertArrayEquals(payload, frame.payload);
+        }
+        assertEquals(null, WebSocketFrames.readFrame(input,
+                GenAiRequestSecurity.MAX_CLIENT_FRAME_BYTES));
+    }
+
+    @Test
+    public void truncatedMaskedPayloadIsNotPublished() throws Exception {
+        byte[] wire = maskedFrame(new byte[513], new byte[]{-1, 2, -3, 4});
+        try {
+            WebSocketFrames.readFrame(new ByteArrayInputStream(wire, 0, wire.length - 1),
+                    GenAiRequestSecurity.MAX_CLIENT_FRAME_BYTES);
+            fail("Expected EOF in masked payload");
+        } catch (EOFException expected) {
+            // Incomplete frames must still fail before unmasking/publication.
+        }
+    }
+
+    private static byte[] maskedFrame(byte[] payload, byte[] mask) {
+        ByteArrayOutputStream wire = new ByteArrayOutputStream();
+        int size = payload.length;
+        wire.write(0x82);
+        if (size <= 125) {
+            wire.write(0x80 | size);
+        } else if (size <= 65535) {
+            wire.write(0xFE);
+            wire.write(size >>> 8);
+            wire.write(size);
+        } else {
+            wire.write(0xFF);
+            for (int i = 7; i >= 0; i--) {
+                wire.write((int) ((long) size >>> (8 * i)));
+            }
+        }
+        wire.write(mask, 0, mask.length);
+        for (int i = 0; i < size; i++) wire.write(payload[i] ^ mask[i & 3]);
+        return wire.toByteArray();
     }
 
     @Test

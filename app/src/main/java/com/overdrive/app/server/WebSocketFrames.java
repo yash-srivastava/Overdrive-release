@@ -10,6 +10,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 
@@ -98,10 +99,28 @@ final class WebSocketFrames {
         readFully(input, mask);
         byte[] payload = new byte[(int) length];
         readFully(input, payload);
-        for (int i = 0; i < payload.length; i++) {
-            payload[i] = (byte) (payload[i] ^ mask[i & 3]);
-        }
+        unmask(payload, mask);
         return new Frame(opcode, payload);
+    }
+
+    // XOR two complete mask periods at once, using a heap view of the same payload.
+    private static void unmask(byte[] payload, byte[] mask) {
+        int i = 0;
+        // Avoid the view setup cost for short control frames.
+        if (payload.length >= 256) {
+            long key = ((mask[0] & 0xffL) << 24) | ((mask[1] & 0xffL) << 16)
+                    | ((mask[2] & 0xffL) << 8) | (mask[3] & 0xffL);
+            key |= key << 32;
+            // ByteBuffer defaults to big-endian, matching the key construction above.
+            ByteBuffer words = ByteBuffer.wrap(payload);
+            int end = payload.length & ~7;
+            for (; i < end; i += 8) {
+                words.putLong(i, words.getLong(i) ^ key);
+            }
+        }
+        for (; i < payload.length; i++) {
+            payload[i] ^= mask[i & 3];
+        }
     }
 
     private static int readRequired(InputStream input)
