@@ -532,7 +532,7 @@ BYD.stream = {
             const wasmUrl = baseUrl + 'avc.wasm';
             
             // 2. Fetch Decoder.js source code
-            const decoderUrl = baseUrl + "Decoder.js";
+            const decoderUrl = baseUrl + "Decoder.js?v=pool1";
             const response = await fetch(decoderUrl);
             let decoderCode = await response.text();
             
@@ -568,7 +568,9 @@ BYD.stream = {
                 reusePlaneTextures: this.forceBroadway && this.reusePlaneTextures,
                 // GPU readback timings are collected only in forced diagnostic mode.
                 benchmarkPlaneTextures: this.forceBroadway === true,
-                reuseMemory: this.isDiLink5 === true,
+                // The canvas consumes each frame synchronously; return its
+                // transferred buffer to the bounded worker pool on every device.
+                reuseMemory: true,
                 size: { width: 1280, height: 960 }
             });
             

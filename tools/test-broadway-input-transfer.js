@@ -54,6 +54,7 @@ async function main() {
         if (module === context.BYD.stream) module.connectWebSocket();
         assert.equal(module.ws.binaryType, 'arraybuffer');
         const worker = workers.at(-1);
+        assert.equal(module.broadwayPlayer._config.reuseMemory, true);
         for (let i = 0; i < 120; i++) {
             const data = Uint8Array.from({ length: 1 + (i * 7919) % 65536 }, (_, j) => (i + j) & 255);
             const expected = data.slice();
