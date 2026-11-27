@@ -298,24 +298,8 @@ public final class ThumbnailBuffer {
      * @param h       Height of the rgb buffer
      * @param camera  Quadrant index
      *
-     * @deprecated NO CURRENT CALLERS — the engine uses the mask-aware overload
-     *     {@link #observe(List, byte[], int, int, int, float[], float, float, float, float)}.
-     *     Retained only as the documented fail-open entry point for a caller that
-     *     genuinely cannot supply the motion mask. Prefer the mask-aware form:
-     *     without the mask, motion-grounded staticness is disabled and every actor
-     *     is ranked LIVE, so stationary scenery can win the hero again — the exact
-     *     bug that motivated Tier 1. Kept (rather than deleted) so that failure
-     *     mode is spelled out at the call site instead of being rediscovered.
-     */
-    @Deprecated
-    public synchronized void observe(List<Actor> actors, byte[] rgb, int w, int h, int camera) {
-        observe(actors, rgb, w, h, camera, null, 1f, 0f, 1f, 0f);
-    }
-
-    /**
-     * As {@link #observe(List, byte[], int, int, int)} but with the motion
-     * pipeline's per-block confidence mask for THIS frame, enabling
-     * motion-grounded staticness for hero ranking.
+     * The motion mask enables motion-grounded staticness for hero ranking.
+     * When unavailable, pass null explicitly: every actor is treated as live.
      *
      * @param blockConf per-block confidence over the 320×240 grid, or
      *                  {@code null} when unavailable — null FAILS OPEN (all
@@ -928,8 +912,8 @@ public final class ThumbnailBuffer {
         // Preserve the staticness VERDICTS across the drain.
         //
         // The notification/caption headline pick (isActorStaticNonThreat) runs
-        // AFTER this drain — stopRecording calls flushSegmentMetadata (which drains
-        // here) and only then publishMotionFinal / sendFinalTelegramNotification.
+        // AFTER this drain in stopRecording, which captures slots before
+        // publishing the final notifications.
         // Without this carry-over, every lookup after the drain would hit an empty
         // `slots` map and return false for every actor, silently collapsing the
         // live-beats-static tier back to plain class rank on exactly the two
@@ -989,8 +973,8 @@ public final class ThumbnailBuffer {
     public synchronized boolean isActorStaticNonThreat(long actorId) {
         Slot s = slots.get(actorId);
         if (s != null) return s.staticNonThreat;
-        // Post-drain fallback: stopRecording drains the slots (inside
-        // flushSegmentMetadata) BEFORE it publishes the final push / Telegram
+        // Post-drain fallback: stopRecording drains the slots BEFORE
+        // it publishes the final push / Telegram
         // caption, so by the time those threat picks ask, `slots` is empty. The
         // drain stashes the static actorIds precisely so this lookup still answers
         // for the event being published.

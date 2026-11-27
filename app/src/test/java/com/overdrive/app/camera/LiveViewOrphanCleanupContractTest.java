@@ -203,7 +203,7 @@ public class LiveViewOrphanCleanupContractTest {
         assertMonotonicWait(between(
                 engine,
                 "private boolean drainSegmentMetadata(long timeoutMs)",
-                "private void flushSegmentMetadata("));
+                "public void enable()"));
 
         String samplerRelease = sampler.substring(
                 sampler.indexOf("public void release()"));

@@ -5051,7 +5051,7 @@ public class HardwareEventRecorderGpu {
 
                     // Geo sidecar for non-sentry flows (cam_*, proximity_*).
                     // Sentry events (event_*.mp4) use the richer path
-                    // through SurveillanceEngineGpu.scheduleSegmentMetadataFlush
+                    // through SurveillanceEngineGpu.scheduleSegmentMetadataFlushWithSnapshot
                     // which produces the v3 sidecar with actors/hero +
                     // geo. Dashcam + proximity recordings have no actor
                     // tracking, so they get a lighter sidecar covering
