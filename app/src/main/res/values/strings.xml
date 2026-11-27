@@ -1643,6 +1643,14 @@
     <string name="settings_theme_active_dark_caption">Dark theme is always on.</string>
     <string name="settings_language_count_format">%1$d of %2$d languages available</string>
     <string name="settings_language_card_title">Display language</string>
+    <string name="settings_drive_mode_window_title">Drive mode window</string>
+    <string name="settings_drive_mode_window_desc">Opens OverDrive in a large floating window so the car doesn\'t cover it when you leave P. This turns on floating windows for every app on the head unit; turning it off puts the previous system settings back.</string>
+    <string name="settings_drive_mode_window_status_off">Off</string>
+    <string name="settings_drive_mode_window_status_floating">On: OverDrive is in a floating window</string>
+    <string name="settings_drive_mode_window_status_waiting">On: OverDrive moves to a floating window the next time it\'s in front</string>
+    <string name="settings_drive_mode_window_status_restart">On, but the head unit didn\'t accept the floating window. Restart the head unit once and try again.</string>
+    <string name="settings_drive_mode_window_status_failed">Couldn\'t finish turning this on or off. Switch it again to retry.</string>
+    <string name="settings_drive_mode_window_status_error">Couldn\'t reach the OverDrive service. Try again in a moment.</string>
 
     <!-- ============================================================ -->
     <!-- Vehicle data pane — manifest permissions + integrations       -->

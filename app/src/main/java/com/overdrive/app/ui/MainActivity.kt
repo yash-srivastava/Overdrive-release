@@ -884,6 +884,13 @@ open class MainActivity : AppCompatActivity() {
         // never affected by this gate.
         maybeShowPinLock()
 
+        // BYD100F drive mode window (#1002): let the daemon float this screen before the car
+        // leaves P. Off the main thread; a no-op unless the user opted in.
+        if (!remoteDevSession && com.overdrive.app.camera.DiLink100Platform.isByd100f()) {
+            Thread({ com.overdrive.app.ui.util.DriveModeWindowClient.notifyResumed() },
+                "DriveModeWindowResume").start()
+        }
+
         // Try to start overlay if permission was just granted (user returned from settings)
         if (!remoteDevSession) {
             com.overdrive.app.overlay.StatusOverlayService.startIfPermitted(this)
