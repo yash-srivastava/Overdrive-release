@@ -5108,9 +5108,8 @@ public class BydDataCollector {
     }
 
     /**
-     * The cluster's resettable trip meter ("since zeroing", BYD's second trip next to the current journey) in km,
-     * or NaN when the car does not answer. The register's live meaning is unverified on every platform, so callers
-     * must treat a value outside 0..odometer as absent.
+     * The energy page's "since zeroing" distance in km (not the cluster's TRIP A/B: see {@link #readTripAKmNow}),
+     * or NaN when the car does not answer. Callers must treat a value outside 0..odometer as absent.
      */
     public double readMileageAfterZeroingKmNow() {
         if (statisticDevice == null || isDiLink5Vehicle() || isDiLink5BridgeConsumer()) return Double.NaN;
@@ -5124,6 +5123,42 @@ public class BydDataCollector {
             logger.debug("readMileageAfterZeroingKmNow error: " + t.getMessage());
             return Double.NaN;
         }
+    }
+
+    /** The cluster's stored, driver-resettable TRIP A in km, or NaN when the car does not answer. */
+    public double readTripAKmNow() { return readStoredTripKm(BydFeatureIds.STAT_DD_MILEAGE1); }
+
+    /** The cluster's stored, driver-resettable TRIP B in km, or NaN when the car does not answer. */
+    public double readTripBKmNow() { return readStoredTripKm(BydFeatureIds.STAT_DD_MILEAGE2); }
+
+    private double readStoredTripKm(int featureId) {
+        if (statisticDevice == null || isDiLink5Vehicle() || isDiLink5BridgeConsumer()) return Double.NaN;
+        try {
+            int raw = BydDeviceHelper.getIntValue(BydDeviceHelper.callGet(statisticDevice, featureId, Integer.class));
+            // Di 3.0 can refuse per-device statistic reads; the manager tier answers instead.
+            if (!isUsableTripRaw(raw)) raw = BydManagerChannel.getInt(context, statisticDevice, featureId);
+            if (!isUsableTripRaw(raw)) return Double.NaN;
+            return raw * 0.1 * storedTripKmFactor();
+        } catch (Throwable t) {
+            logger.debug("readStoredTripKm error: " + t.getMessage());
+            return Double.NaN;
+        }
+    }
+
+    /** 0.1-unit trip meter: rejects the HAL's not-available rails and anything past 99,999.9. */
+    static boolean isUsableTripRaw(int raw) {
+        return raw >= 0 && raw <= 999_999 && raw != 65535 && raw != 65534;
+    }
+
+    /** The trip meters' own unit flag: 1 km, 2 miles (BYD's encoding); anything else defers to the detected unit. */
+    private double storedTripKmFactor() {
+        int unit = BydVehicleData.UNAVAILABLE;
+        if (instrumentDevice != null) {
+            unit = BydDeviceHelper.getIntValue(BydDeviceHelper.callGet(
+                    instrumentDevice, BydFeatureIds.INSTRUMENT_DD_MILEAGE_UNIT_03, Integer.class));
+            if (unit != 1 && unit != 2) unit = BydManagerChannel.getInt(context, instrumentDevice, BydFeatureIds.INSTRUMENT_DD_MILEAGE_UNIT_03);
+        }
+        return unit == 1 ? 1.0 : unit == 2 ? MILES_TO_KM : distanceToKmFactor;
     }
 
     private int readLegacyInt(Object device, String getter, int min, int max) {
