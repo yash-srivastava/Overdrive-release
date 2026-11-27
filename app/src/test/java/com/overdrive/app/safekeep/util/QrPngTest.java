@@ -12,11 +12,9 @@ import com.google.zxing.qrcode.QRCodeReader;
 
 import org.junit.Test;
 
-import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 import java.util.Arrays;
-
-import javax.imageio.ImageIO;
 
 public class QrPngTest {
 
@@ -27,7 +25,7 @@ public class QrPngTest {
         byte[] signature = {(byte) 0x89, 'P', 'N', 'G', 13, 10, 26, 10};
         assertArrayEquals(signature, Arrays.copyOf(png, signature.length));
 
-        BufferedImage image = readImage(png);
+        Pixels image = readImage(png);
         assertEquals(text, decode(image));
     }
 
@@ -40,29 +38,45 @@ public class QrPngTest {
     @Test
     public void moduleScaleIsClampedAndDimensionsGrowProportionally() throws Exception {
         String text = "Scale test";
-        int minWidth = readImage(QrPng.render(text, 2)).getWidth();
-        int maxWidth = readImage(QrPng.render(text, 16)).getWidth();
+        int minWidth = readImage(QrPng.render(text, 2)).width;
+        int maxWidth = readImage(QrPng.render(text, 16)).width;
 
-        assertEquals(minWidth, readImage(QrPng.render(text, 0)).getWidth());
-        assertEquals(minWidth, readImage(QrPng.render(text, -1)).getWidth());
-        assertEquals(minWidth * 4, readImage(QrPng.render(text, 8)).getWidth());
+        assertEquals(minWidth, readImage(QrPng.render(text, 0)).width);
+        assertEquals(minWidth, readImage(QrPng.render(text, -1)).width);
+        assertEquals(minWidth * 4, readImage(QrPng.render(text, 8)).width);
         assertEquals(minWidth * 8, maxWidth);
-        assertEquals(maxWidth, readImage(QrPng.render(text, 100)).getWidth());
+        assertEquals(maxWidth, readImage(QrPng.render(text, 100)).width);
     }
 
-    private static BufferedImage readImage(byte[] png) throws Exception {
-        BufferedImage image = ImageIO.read(new ByteArrayInputStream(png));
+    private static final class Pixels {
+        final int width;
+        final int height;
+        final int[] argb;
+
+        Pixels(int width, int height, int[] argb) {
+            this.width = width;
+            this.height = height;
+            this.argb = argb;
+        }
+    }
+
+    // Reflection: unit tests compile against Android's java.base, which has no ImageIO.
+    private static Pixels readImage(byte[] png) throws Exception {
+        Object image = Class.forName("javax.imageio.ImageIO").getMethod("read", InputStream.class)
+                .invoke(null, new ByteArrayInputStream(png));
         assertNotNull("PNG must be readable by the JVM image decoder", image);
-        assertTrue(image.getWidth() > 0);
-        assertEquals(image.getWidth(), image.getHeight());
-        return image;
+        Class<?> buffered = Class.forName("java.awt.image.BufferedImage");
+        int width = (Integer) buffered.getMethod("getWidth").invoke(image);
+        int height = (Integer) buffered.getMethod("getHeight").invoke(image);
+        assertTrue(width > 0);
+        assertEquals(width, height);
+        int[] argb = (int[]) buffered.getMethod("getRGB", int.class, int.class, int.class, int.class,
+                int[].class, int.class, int.class).invoke(image, 0, 0, width, height, null, 0, width);
+        return new Pixels(width, height, argb);
     }
 
-    private static String decode(BufferedImage image) throws Exception {
-        int width = image.getWidth();
-        int height = image.getHeight();
-        int[] pixels = image.getRGB(0, 0, width, height, null, 0, width);
-        RGBLuminanceSource source = new RGBLuminanceSource(width, height, pixels);
+    private static String decode(Pixels image) throws Exception {
+        RGBLuminanceSource source = new RGBLuminanceSource(image.width, image.height, image.argb);
         return new QRCodeReader().decode(new BinaryBitmap(new HybridBinarizer(source))).getText();
     }
 }
