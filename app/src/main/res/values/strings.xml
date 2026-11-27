@@ -2398,6 +2398,28 @@
     <string name="projection_hosted_content_scale">Hosted content scale</string>
     <string name="projection_direct_scale">Direct app scale</string>
     <string name="projection_scale_value">%1$s: %2$d%%</string>
+    <!-- Projection app picker: tiles replace the dropdown; long-press opens per-app actions. -->
+    <string name="projection_picker_title">Tap an app to cast it to the cluster</string>
+    <string name="projection_picker_hint">Long-press an app for its window position, size and tools.</string>
+    <string name="projection_cluster_label">Driver cluster</string>
+    <string name="projection_favorites">Favorites</string>
+    <string name="projection_all_apps">All apps</string>
+    <string name="projection_apps_empty">No app can be projected yet.</string>
+    <string name="projection_now_on_cluster">On cluster</string>
+    <string name="projection_app_live_description">%1$s, on cluster</string>
+    <string name="projection_app_actions">Window and tools</string>
+    <string name="projection_actions_window_saved">Window saved for this app</string>
+    <string name="projection_actions_resize_hint">On the mirror</string>
+    <string name="projection_actions_tools">App tools</string>
+    <string name="projection_actions_tools_hint">App DPI, keyboard</string>
+    <string name="projection_favorite_add">Add to favorites</string>
+    <string name="projection_favorite_remove">Remove from favorites</string>
+    <string name="projection_stop_casting">Stop casting</string>
+    <string name="projection_settings_title">Projection settings</string>
+    <string name="projection_window_settings_desc">Each app keeps its own window. Long-press an app to change its position or size.</string>
+    <string name="projection_advanced_title">Advanced</string>
+    <string name="projection_advanced_desc">Cluster transport and DiLink 5 options. Change these only if casting fails.</string>
+    <string name="projection_layouts_desc">Show several apps on the cluster at once.</string>
     <!-- Translations kept from the public repository -->
     <string name="settings_overlay_chip_opacity_subtitle">Higher = more prominent. Range 10 to 100 (percent shown at right).</string>
 </resources>
