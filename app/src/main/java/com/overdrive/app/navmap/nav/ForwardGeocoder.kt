@@ -551,7 +551,7 @@ object ForwardGeocoder {
                 if (coords.length() < 2) continue
                 val lng = coords.optDouble(0, Double.NaN)
                 val lat = coords.optDouble(1, Double.NaN)
-                if (lat.isNaN() || lng.isNaN()) continue
+                if (lat !in -90.0..90.0 || lng !in -180.0..180.0) continue
 
                 val props = feature.optJSONObject("properties") ?: JSONObject()
                 val label = buildPhotonLabel(props)
@@ -607,6 +607,7 @@ object ForwardGeocoder {
                 // Nominatim returns lat/lon as strings.
                 val lat = item.optString("lat", "").toDoubleOrNull() ?: continue
                 val lng = item.optString("lon", "").toDoubleOrNull() ?: continue
+                if (lat !in -90.0..90.0 || lng !in -180.0..180.0) continue
                 val label = item.optString("display_name", "").trim()
                 if (label.isEmpty()) continue
                 out.add(SearchResult(label, lat, lng))
