@@ -2412,8 +2412,4 @@
     <string name="projection_scale_value">%1$s: %2$d%%</string>
     <!-- Translations kept from the public repository -->
     <string name="settings_overlay_chip_opacity_subtitle">Higher = more prominent. Range 10 to 100 (percent shown at right).</string>
-    <!-- Timeline source chip: windshield clip on top, side and rear cameras below (as the dashcam layout records). -->
-    <string name="timeline_source_dashcam_view">Dashcam view</string>
-    <string name="timeline_dashcam_view">Dashcam view</string>
-    <string name="timeline_dashcam_view_desc">Windshield camera on top, side and rear cameras below, like the dashcam layout. Built from your recordings when you play them, so the car does no extra work while driving. Turn off to watch one camera feed at a time.</string>
 </resources>

@@ -50,7 +50,12 @@ class DashcamFollower(
     interface Listener {
         /** Main thread: a second decoder can't run here; the mode should no longer be offered. */
         fun onUnavailable()
+        /** Main thread: whether the Dashcam view is drawn now, about to be, or can't be here. */
+        fun onCompose(state: Compose) {}
     }
+
+    /** COMPOSING: drawn. PENDING: on its way (or nothing to do). BLOCKED: can't be composed here until a seek. */
+    enum class Compose { COMPOSING, PENDING, BLOCKED }
 
     enum class LeaderState { PLAYING, PAUSED, BUFFERING, SCRUBBING, ENDED, OTHER }
 
@@ -101,12 +106,24 @@ class DashcamFollower(
     private var prepareFailures = 0
     private var everPlayed = false
     private var prefetched: String? = null
+    // Sticky "can't compose here" until a seek or the windshield clip under the playhead changes.
+    private var blocked = false
+    private var blockedDvr: String? = null
+    private var pendingSince = 0L
+    private var surfaceFailures = 0
+    private var reported: Compose? = null
+    private var mpEnded = false
+    private var lastSeekMode = MediaPlayer.SEEK_CLOSEST
+    private var lastSegEnd = Long.MIN_VALUE
+    private var curFmt: VideoFmt? = null
+    private var curPair: String? = null
+    private var curPairRate = 0f
     private val skip = HashSet<String>()
     private val params = PlaybackParams()
     private var ticking = false
     private val tick = Runnable {
         ticking = false
-        evaluate()
+        guard { evaluate() }
     }
 
     fun setSegments(list: List<TlSegment>) {
@@ -116,10 +133,9 @@ class DashcamFollower(
 
     /** The clip the leader shows and whether its sidecar carries a valid grid block. */
     fun setLeader(seg: TlSegment?, gridOk: Boolean) = exec {
-        val changed = seg?.id != leaderSeg?.id
+        // No reset here: the leader's source flips with this follower's own verdict.
         leaderSeg = seg
         leaderGrid = gridOk
-        if (changed) resetSync()
     }
 
     fun setLeaderState(state: LeaderState, rate: Float, skipQuietOn: Boolean) = exec {
@@ -142,6 +158,14 @@ class DashcamFollower(
 
     /** Re-evaluates now (leader position or state moved). */
     fun poke() = exec {}
+
+    /** The leader's decoder failed: the leader wins; this pair is not tried again. */
+    fun onLeaderDecoderError() = exec {
+        if (mp == null) return@exec
+        curPair?.let { pairs[it] = false }
+        block()
+        failCurrent()
+    }
 
     /** GL dropped the follower Surface: the decoder stops rendering into it. */
     fun onSurfaceLost() = exec {
@@ -181,12 +205,23 @@ class DashcamFollower(
         if (released) return
         h.post {
             if (released) return@post
-            try {
+            guard {
                 block()
                 evaluate()
-            } catch (t: Throwable) {
-                if (BuildConfig.DEBUG) Log.w(TAG, "follower step failed", t)
+            }
+        }
+    }
+
+    /** Every follower-thread entry: a failure drops the current clip, never the thread. */
+    private inline fun guard(block: () -> Unit) {
+        if (released) return
+        try {
+            block()
+        } catch (t: Throwable) {
+            if (BuildConfig.DEBUG) Log.w(TAG, "follower step failed", t)
+            try {
                 failCurrent()
+            } catch (_: Throwable) {
             }
         }
     }
@@ -197,9 +232,37 @@ class DashcamFollower(
         hardSeeks = 0
         unsynced = false
         skip.clear()
+        blocked = false
+        blockedDvr = null
+        pendingSince = 0L
+        surfaceFailures = 0
+    }
+
+    private fun block() {
+        blocked = true
+        setShown(false)
+    }
+
+    private fun report() {
+        val st = when {
+            unavailable -> Compose.BLOCKED
+            shown -> Compose.COMPOSING
+            blocked || unsynced -> Compose.BLOCKED
+            leaderSeg != null && !PlaybackPlan.oem(leaderSeg!!) && (!leaderGrid || leaderRate > MAX_RATE || skipQuiet) ->
+                Compose.BLOCKED
+            else -> Compose.PENDING
+        }
+        if (st == reported) return
+        reported = st
+        main.post { if (!released) listener.onCompose(st) }
     }
 
     private fun evaluate() {
+        evaluateInner()
+        report()
+    }
+
+    private fun evaluateInner() {
         if (released) return
         if (!enabled || !visible || unavailable) {
             teardown()
@@ -208,8 +271,34 @@ class DashcamFollower(
         val now = SystemClock.uptimeMillis()
         val w = leader.wallNowMs()
         noteLeaderJump(w, now)
-        val dvr = if (leaderOk()) oemAt(w) else null
-        if (dvr == null || unsynced) {
+        // A new windshield clip under the playhead is a clip boundary: a verdict on the last one is spent.
+        val raw = oemAt(w, ignoreSkip = true)
+        val rawKey = raw?.let { key(it) }
+        if (rawKey != blockedDvr) {
+            if (blocked || unsynced) {
+                blocked = false
+                unsynced = false
+                hardSeeks = 0
+            }
+            blockedDvr = rawKey
+            pendingSince = 0L
+        }
+        val ok = leaderOk()
+        val dvr = if (ok) oemAt(w) else null
+        if (ok && dvr == null && !blocked && !unsynced && holdAcrossSeam(w)) {
+            // Index seam between windshield clips: hold the last frame rather than flash the 360° view.
+            pausePlayer()
+            schedule(TICK_MS)
+            return
+        }
+        if (ok && raw != null && dvr == null) blocked = true
+        if (ok && dvr != null && !shown && leaderState == LeaderState.PLAYING) {
+            if (pendingSince == 0L) pendingSince = now
+            else if (now - pendingSince > PENDING_MAX_MS) block()
+        } else if (shown) {
+            pendingSince = 0L
+        }
+        if (dvr == null || unsynced || blocked) {
             setShown(false)
             pausePlayer()
             if (idleSince == 0L) idleSince = now
@@ -221,6 +310,10 @@ class DashcamFollower(
         schedule(if (leaderState == LeaderState.PLAYING) TICK_MS else IDLE_TICK_MS)
         val s = surface
         if (s == null) {
+            if (surfaceFailures >= MAX_SURFACE_FAILURES) {
+                block()
+                return
+            }
             requestSurface(now)
             return
         }
@@ -234,6 +327,22 @@ class DashcamFollower(
         }
         val target = w - dvr.start
         prefetchNext(dvr, target)
+        // A faster rate needs more decode throughput: re-check the pair at it.
+        val f = curFmt
+        val lead = leader.codec()
+        if (f != null && lead != null && leaderRate != curPairRate) {
+            if (!canRunBoth(lead.mime, lead.width, lead.height, LEADER_FPS, f, leaderRate)) {
+                block()
+                failCurrent()
+                return
+            }
+            curPairRate = leaderRate
+        }
+        if (mpEnded) {
+            // Ran out a little before the index end: hold; a jump back into the clip plays it again.
+            if (target < durationMs(dvr) - END_SLACK_MS) seek(target, MediaPlayer.SEEK_CLOSEST)
+            return
+        }
         if (seeking) {
             if (now - seekAt > SEEK_TIMEOUT_MS) {
                 failCurrent()
@@ -257,6 +366,12 @@ class DashcamFollower(
         sync(target, now, playing, frames > 0)
     }
 
+    /** Just past the end of the clip that was playing, within the seam the plan bridges. */
+    private fun holdAcrossSeam(w: Long): Boolean {
+        val end = lastSegEnd
+        return shown && end != Long.MIN_VALUE && w >= end - PlaybackPlan.SEAM_MS && w < end + PlaybackPlan.SEAM_MS
+    }
+
     private fun leaderOk(): Boolean {
         val l = leaderSeg ?: return false
         if (PlaybackPlan.oem(l) || !leaderGrid || l.spanSrc != SPAN_WRITER) return false
@@ -265,7 +380,7 @@ class DashcamFollower(
     }
 
     /** OEM clip covering [w] with a trusted anchor, newest start first. */
-    private fun oemAt(w: Long): TlSegment? {
+    private fun oemAt(w: Long, ignoreSkip: Boolean = false): TlSegment? {
         val list = oem
         var lo = 0
         var hi = list.size - 1
@@ -283,7 +398,7 @@ class DashcamFollower(
             val c = list[i]
             if (c.start < w - MAX_CLIP_MS) break
             val end = c.end ?: c.start
-            if (w < end && c.spanSrc == SPAN_WRITER && key(c) !in skip) return c
+            if (w < end && c.spanSrc == SPAN_WRITER && (ignoreSkip || key(c) !in skip)) return c
             i--
         }
         return null
@@ -298,8 +413,7 @@ class DashcamFollower(
         if (prev == Long.MIN_VALUE) return
         val expected = if (leaderState == LeaderState.PLAYING) prev + (dt * leaderRate).toLong() else prev
         if (abs(w - expected) > JUMP_MS) {
-            hardSeeks = 0
-            unsynced = false
+            resetSync()
             lastHardSeekAt = 0L
         }
     }
@@ -316,7 +430,8 @@ class DashcamFollower(
             leaderState == LeaderState.SCRUBBING || leaderState == LeaderState.PAUSED -> {
                 pausePlayer()
                 // Only when the leader moved: frame quantisation alone must not re-seek forever.
-                if (abs(targetMs - seekTargetMs) > 1L && abs(d) > tol / 2) seek(targetMs, seekModeForState())
+                val exactAgain = leaderState == LeaderState.PAUSED && lastSeekMode == MediaPlayer.SEEK_CLOSEST_SYNC
+                if (exactAgain || (abs(targetMs - seekTargetMs) > 1L && abs(d) > tol / 2)) seek(targetMs, seekModeForState())
                 else if (framed || shown) setShown(true)
             }
             else -> {
@@ -342,6 +457,7 @@ class DashcamFollower(
             if (hardSeeks >= MAX_HARD_SEEKS) {
                 // Never converged: single source until the next user seek or clip boundary.
                 unsynced = true
+                blocked = true
                 setShown(false)
                 pausePlayer()
                 return
@@ -372,6 +488,8 @@ class DashcamFollower(
         try {
             p.seekTo(t, mode)
             seeking = true
+            mpEnded = false
+            lastSeekMode = mode
             seekAt = SystemClock.uptimeMillis()
             seekTargetMs = targetMs
             pendingSeekMs = -1L
@@ -424,6 +542,7 @@ class DashcamFollower(
             if (rate == leaderRate) {
                 // The leader's own rate can't be followed: single source.
                 unsynced = true
+                blocked = true
                 setShown(false)
                 pausePlayer()
             } else {
@@ -483,11 +602,12 @@ class DashcamFollower(
                 if (gen != surfaceGen || !surfaceRequested) return@post
                 surfaceRequested = false
                 if (s == null) {
+                    surfaceFailures++
                     surfaceRetryAt = SystemClock.uptimeMillis() + SURFACE_RETRY_MS
                 } else {
                     surface = s
                 }
-                evaluate()
+                guard { evaluate() }
             }
         }
         if (!ok) {
@@ -497,16 +617,17 @@ class DashcamFollower(
     }
 
     private fun openClip(dvr: TlSegment, s: Surface, w: Long) {
-        val prevEnd = seg?.end
+        val prevEnd = seg?.end ?: lastSegEnd.takeIf { it != Long.MIN_VALUE }
         teardownPlayer()
         seg = dvr
+        lastSegEnd = dvr.end ?: Long.MIN_VALUE
         // Straight on into the next clip: the top band holds the last frame meanwhile; else single source.
         if (prevEnd == null || !PlaybackPlan.contiguous(prevEnd, dvr.start)) setShown(false)
         val src = HttpRangeDataSource(cache, dvr.videoUrl, dvr.fp)
         try {
             // Local daemon read of the first block (moov is at the front); bounded by the cache timeout.
             src.open()
-        } catch (e: IOException) {
+        } catch (e: Exception) {
             src.close()
             skip.add(key(dvr))
             seg = null
@@ -515,11 +636,15 @@ class DashcamFollower(
         // Both decoders must fit on this unit for the formats actually being composed.
         val fmt = probeVideo(dvr)
         val lead = leader.codec()
-        if (fmt != null && lead != null && !canRunBoth(lead.mime, lead.width, lead.height, LEADER_FPS, fmt)) {
+        curFmt = fmt
+        curPairRate = leaderRate
+        curPair = if (fmt != null && lead != null) pairKey(lead.mime, lead.width, lead.height, LEADER_FPS, fmt, leaderRate) else null
+        if (fmt != null && lead != null && !canRunBoth(lead.mime, lead.width, lead.height, LEADER_FPS, fmt, leaderRate)) {
             if (BuildConfig.DEBUG) Log.d(TAG, "decoders can't run together: $lead + ${fmt.mime} ${fmt.width}x${fmt.height}")
             src.close()
             skip.add(key(dvr))
             seg = null
+            blocked = true
             return
         }
         val p = try {
@@ -532,12 +657,12 @@ class DashcamFollower(
         source = src
         mp = p
         openedAt = SystemClock.uptimeMillis()
-        p.setOnPreparedListener { if (it === mp) onPrepared(it) }
-        p.setOnSeekCompleteListener { if (it === mp) onSeekDone() }
+        p.setOnPreparedListener { if (it === mp) guard { onPrepared(it); report() } }
+        p.setOnSeekCompleteListener { if (it === mp) guard { onSeekDone(); report() } }
         p.setOnVideoSizeChangedListener { m, vw, vh -> if (m === mp) out.setVideoSize(vw, vh) }
-        p.setOnCompletionListener { if (it === mp) onEndedFirst() }
+        p.setOnCompletionListener { if (it === mp) guard { onEndedFirst(); report() } }
         p.setOnErrorListener { m, what, extra ->
-            if (m === mp) onPlayerError(what, extra)
+            if (m === mp) guard { onPlayerError(what, extra); report() }
             true
         }
         try {
@@ -588,20 +713,41 @@ class DashcamFollower(
         seek(leader.wallNowMs() - dvr.start, MediaPlayer.SEEK_CLOSEST)
     }
 
-    /** The windshield clip ran out before the index said: a gap until the next one. */
+    /** The windshield clip ran out before the index said: hold into a contiguous next clip, else a gap. */
     private fun onEndedFirst() {
-        seg?.let { skip.add(key(it)) }
         mpPlaying = false
-        setShown(false)
+        val cur = seg
+        val end = cur?.end
+        val next = if (end == null) null else oem.firstOrNull {
+            it.id != cur.id && it.start in (end - PlaybackPlan.SEAM_MS)..(end + PlaybackPlan.SEAM_MS)
+        }
+        if (cur != null && next != null && durationMs(cur) - (leader.wallNowMs() - cur.start) < END_SLACK_MS) {
+            mpEnded = true
+        } else {
+            cur?.let { skip.add(key(it)) }
+            setShown(false)
+        }
         evaluate()
     }
 
     private fun onPlayerError(what: Int, extra: Int) {
         if (BuildConfig.DEBUG) Log.d(TAG, "player error $what/$extra")
         val wasPrepared = prepared
+        // A read error (clip gone, network) is the clip's fault, not the decoder's.
+        val io = source?.error != null
         failCurrent()
-        // Never got a decoder up twice in a row: a second decoder isn't available on this unit.
-        if (!wasPrepared && !everPlayed && ++prepareFailures >= MAX_PREPARE_FAILURES) onDecoderUnavailable()
+        val capability = !io && (extra == MediaPlayer.MEDIA_ERROR_UNSUPPORTED || extra == MEDIA_ERROR_SYSTEM ||
+            what == MediaPlayer.MEDIA_ERROR_SERVER_DIED)
+        if (!wasPrepared && capability) {
+            val pk = curPair
+            if (pk != null) {
+                // This pair of formats can't run together here; other pairs may.
+                pairs[pk] = false
+                blocked = true
+            } else if (!everPlayed && ++prepareFailures >= MAX_PREPARE_FAILURES) {
+                onDecoderUnavailable()
+            }
+        }
     }
 
     private fun failCurrent() {
@@ -612,7 +758,6 @@ class DashcamFollower(
 
     private fun onDecoderUnavailable() {
         unavailable = true
-        sessionUnavailable = true
         teardown()
         main.post { if (!released) listener.onUnavailable() }
     }
@@ -640,8 +785,11 @@ class DashcamFollower(
     private fun teardownPlayer() {
         val p = mp
         mp = null
+        // Unblock a stalled read first so release can't wait on it.
+        source?.abort()
         prepared = false
         seeking = false
+        mpEnded = false
         seekTargetMs = -1L
         pendingSeekMs = -1L
         awaitFrames = 0
@@ -718,7 +866,12 @@ class DashcamFollower(
 
         private const val LEADER_FPS = 30
 
-        @Volatile private var sessionUnavailable = false
+        private const val PENDING_MAX_MS = 4_000L
+        private const val MAX_SURFACE_FAILURES = 3
+        private const val END_SLACK_MS = 1_500L
+        // MediaPlayer.MEDIA_ERROR_SYSTEM (hidden constant): codec could not be allocated.
+        private const val MEDIA_ERROR_SYSTEM = Int.MIN_VALUE
+
         @Volatile private var probed: Boolean? = null
         private val pairs = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
 
@@ -727,7 +880,6 @@ class DashcamFollower(
          * The formats actually composed are checked per clip pair ([canRunBoth]). Blocking; off the UI thread.
          */
         fun supported(): Boolean {
-            if (sessionUnavailable) return false
             probed?.let { return it }
             val ok = try {
                 val list = MediaCodecList(MediaCodecList.REGULAR_CODECS)
@@ -746,9 +898,14 @@ class DashcamFollower(
          * Leader (grid) and follower (windshield) decoders at once: each format supported at its size and rate,
          * and enough instances (two of one decoder when both use it). Cached per format pair.
          */
-        private fun canRunBoth(lMime: String, lw: Int, lh: Int, lFps: Int, f: VideoFmt): Boolean {
-            val k = "$lMime $lw x $lh @$lFps|${f.mime} ${f.width} x ${f.height} @${f.fps}"
+        private fun pairKey(lMime: String, lw: Int, lh: Int, lFps: Int, f: VideoFmt, rate: Float): String =
+            "$lMime $lw x $lh @$lFps|${f.mime} ${f.width} x ${f.height} @${f.fps} x$rate"
+
+        private fun canRunBoth(lMime: String, lw: Int, lh: Int, lFpsBase: Int, f: VideoFmt, rate: Float): Boolean {
+            val k = pairKey(lMime, lw, lh, lFpsBase, f, rate)
             pairs[k]?.let { return it }
+            val lFps = (lFpsBase * rate).toInt()
+            val fFps = (f.fps * rate).toInt()
             val ok = try {
                 val list = MediaCodecList(MediaCodecList.REGULAR_CODECS)
                 val a = nameFor(list, lMime, lw, lh)
@@ -758,7 +915,7 @@ class DashcamFollower(
                 if (ca == null || cb == null) {
                     false
                 } else {
-                    val rates = sizeRateOk(ca, lw, lh, lFps) && sizeRateOk(cb, f.width, f.height, f.fps)
+                    val rates = sizeRateOk(ca, lw, lh, lFps) && sizeRateOk(cb, f.width, f.height, fFps)
                     val instances = if (a == b) ca.maxSupportedInstances >= 2
                     else ca.maxSupportedInstances >= 1 && cb.maxSupportedInstances >= 1
                     rates && instances
@@ -773,8 +930,7 @@ class DashcamFollower(
 
         private fun sizeRateOk(c: android.media.MediaCodecInfo.CodecCapabilities, w: Int, h: Int, fps: Int): Boolean {
             val v = c.videoCapabilities ?: return false
-            return v.areSizeAndRateSupported(w, h, fps.coerceIn(1, 120).toDouble()) ||
-                (fps > 30 && v.areSizeAndRateSupported(w, h, 30.0))
+            return v.areSizeAndRateSupported(w, h, fps.coerceIn(1, 240).toDouble())
         }
 
         private fun nameFor(list: MediaCodecList, mime: String, w: Int, h: Int): String? =
@@ -787,6 +943,6 @@ class DashcamFollower(
             nameFor(list, mime, w, h)?.let { capsFor(list, mime, it) }
 
         /** Cached result of [supported]; null until probed. */
-        fun supportedNow(): Boolean? = if (sessionUnavailable) false else probed
+        fun supportedNow(): Boolean? = probed
     }
 }

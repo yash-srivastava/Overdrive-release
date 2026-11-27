@@ -173,6 +173,10 @@ class TimelineVideoView @JvmOverloads constructor(
         renderer?.holdForComposite(maxWaitMs)
     }
 
+    fun cancelCompositeHold() {
+        renderer?.cancelCompositeHold()
+    }
+
     fun closeFollowerInput() {
         renderer?.closeFollowerInput()
     }

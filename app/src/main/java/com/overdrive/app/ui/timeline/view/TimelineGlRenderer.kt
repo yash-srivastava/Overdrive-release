@@ -207,6 +207,7 @@ internal class TimelineGlRenderer(private val host: Host) {
     fun closeFollowerInput() = post {
         // Fade out while the windshield texture still holds its picture.
         dashWanted = false
+        endAwait()
         refreshComposite()
         releaseFollowerInput()
     }
@@ -214,8 +215,12 @@ internal class TimelineGlRenderer(private val host: Host) {
     /** The follower is in sync: draw the Dashcam view once both inputs have a frame. */
     fun setFollowerShown(on: Boolean) = post {
         dashWanted = on
+        if (!on) endAwait()
         refreshComposite()
     }
+
+    /** The composite won't come: end a hold now instead of at its cap. */
+    fun cancelCompositeHold() = post { endAwait() }
 
     /**
      * The leader is about to switch source only to feed the Dashcam view: keep the current picture until the

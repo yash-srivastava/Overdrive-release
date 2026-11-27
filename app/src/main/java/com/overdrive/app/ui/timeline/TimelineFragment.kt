@@ -95,6 +95,7 @@ class TimelineFragment : Fragment() {
     private var dashcamRestored = false
     private var appliedPrefer: String? = PREFER_UNSET
     private var dashcamCheckedAt = 0L
+    private var compose = com.overdrive.app.ui.timeline.player.DashcamFollower.Compose.PENDING
     private var filterKey = MomentText.FILTER_ALL
     private var spanMs = DEFAULT_SPAN_MS
     private var camera = ZoomableVideoView.Quadrant.ALL
@@ -632,6 +633,15 @@ class TimelineFragment : Fragment() {
                     dashcamSupported = false
                     setDashcamView(false)
                 }
+
+                override fun onCompose(state: com.overdrive.app.ui.timeline.player.DashcamFollower.Compose) = onUi(gen) {
+                    compose = state
+                    if (state == com.overdrive.app.ui.timeline.player.DashcamFollower.Compose.BLOCKED) {
+                        videoView?.cancelCompositeHold()
+                    }
+                    applyLeaderPrefer()
+                    refreshSourceChip()
+                }
             })
         repo?.currentSnapshot?.let { f.setSegments(it.segments) }
         return f
@@ -647,7 +657,9 @@ class TimelineFragment : Fragment() {
 
     /** Off, or nothing to compose here: exactly the saved source choice, as before the Dashcam view. */
     private fun applyLeaderPrefer() {
-        val want = if (dashcamView && dashcamViewAt(currentWallMs)) null else preferSource
+        // The follower can't compose here (failed, bailed out, unsupported pair): the saved choice, as before.
+        val blocked = compose == com.overdrive.app.ui.timeline.player.DashcamFollower.Compose.BLOCKED
+        val want = if (dashcamView && !blocked && dashcamViewAt(currentWallMs)) null else preferSource
         if (want == appliedPrefer) return
         // Front -> 360° only to feed the composite: no visible 360° step, one crossfade into the Dashcam view.
         if (want == null && appliedPrefer == TYPE_OEM && dashcamView && isOemFamily(activeFamily)) {
@@ -667,8 +679,10 @@ class TimelineFragment : Fragment() {
         refreshSourceChip()
     }
 
+    /** The Dashcam view is drawn now (the follower says so), not merely possible. */
     private fun dashcamViewShown(): Boolean =
-        dashcamView && !isOemFamily(activeFamily) && dashcamViewAt(currentWallMs)
+        dashcamView && !isOemFamily(activeFamily) &&
+            compose == com.overdrive.app.ui.timeline.player.DashcamFollower.Compose.COMPOSING
 
     private fun followerState(state: TimelinePlayer.State) = when (state) {
         TimelinePlayer.State.PLAYING -> com.overdrive.app.ui.timeline.player.DashcamFollower.LeaderState.PLAYING
@@ -689,9 +703,11 @@ class TimelineFragment : Fragment() {
         val segs = repo?.currentSnapshot?.segments ?: return false
         var mosaic = false
         var oem = false
+        val seam = com.overdrive.app.ui.timeline.player.PlaybackPlan.SEAM_MS
         for (sg in segs) {
             val end = sg.end ?: continue
-            if (!sg.available || wall < sg.start || wall >= end || sg.spanSrc != "writer") continue
+            // The seam the plan bridges counts as covered: no flip at a clip boundary.
+            if (!sg.available || wall < sg.start - seam || wall >= end + seam || sg.spanSrc != "writer") continue
             if (com.overdrive.app.ui.timeline.player.PlaybackPlan.oem(sg)) oem = true
             else if (specs?.cached(sg)?.grid != null) mosaic = true
             if (mosaic && oem) return true
@@ -727,6 +743,8 @@ class TimelineFragment : Fragment() {
             override fun onVideoSize(w: Int, h: Int) = onUi(gen) { videoView?.setVideoSize(w, h) }
             // The wait expired: a clip landing later should show its frame, not wait on a follow that's gone.
             override fun onFollowDropped() = onUi(gen) { liveFollow = false }
+            // The leader never loses to the follower: drop it and its format pair.
+            override fun onDecoderError() = onUi(gen) { follower?.onLeaderDecoderError() }
         })
     }
 
@@ -2146,7 +2164,7 @@ class TimelineFragment : Fragment() {
         private const val KEY_DASHCAM_VIEW = "tl_dashcam_view"
         private const val PREFER_UNSET = "\u0000unset"
         private const val DASHCAM_CHECK_MS = 1_000L
-        private const val COMPOSITE_HOLD_MS = 3_000L
+        private const val COMPOSITE_HOLD_MS = 4_000L
         private const val PLAYER_PREFS = "video_player_prefs"
         private const val PLAYER_PREF_MUTED = "muted"
         private const val TYPE_OEM = "oemDashcam"

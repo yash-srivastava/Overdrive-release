@@ -40,6 +40,8 @@ class TimelinePlayer(context: Context, private val listener: Listener) {
         fun onVideoSize(w: Int, h: Int)
         /** A pending follow expired without starting: nothing will start by itself. */
         fun onFollowDropped() {}
+        /** The video decoder failed (it is being recreated or the clip skipped). */
+        fun onDecoderError() {}
     }
 
     enum class State { IDLE, BUFFERING, PLAYING, PAUSED, SCRUBBING, ENDED, ERROR }
@@ -1045,6 +1047,7 @@ class TimelinePlayer(context: Context, private val listener: Listener) {
     /** Recreate the decoder once per item; a second failure skips the item. */
     private fun onCodecError(item: PlanItem?, error: Throwable) {
         if (BuildConfig.DEBUG) Log.d(TAG, "decoder error: ${error.javaClass.simpleName}")
+        toMain { listener.onDecoderError() }
         val key = item?.let { itemKey(it) } ?: "-"
         if (scrubbing) {
             releasePipeline(hold = true)
