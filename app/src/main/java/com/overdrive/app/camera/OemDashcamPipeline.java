@@ -282,6 +282,10 @@ public class OemDashcamPipeline {
         new java.util.concurrent.locks.ReentrantLock();
     private final Object frameSync = new Object();
     private volatile boolean imagePending = false;
+    // Custom Layouts back-off: frames the SurfaceTexture replaced before the render loop
+    // latched them (written on irHandler only), and the GL-thread start of the current frame.
+    private volatile long coalescedFrames = 0L;
+    private long frameWorkStartNs = 0L;
     // Heartbeat updated at the top of every renderLoop iteration; read by the
     // watchdog Thread to detect a wedged GL thread.
     private volatile long lastRenderHeartbeat = 0L;
@@ -1797,6 +1801,7 @@ public class OemDashcamPipeline {
             cameraFrameSeen = true;
             lastCameraFrameElapsedMs = SystemClock.elapsedRealtime();
             synchronized (frameSync) {
+                if (imagePending) coalescedFrames++;
                 imagePending = true;
                 frameSync.notify();
             }
@@ -1853,6 +1858,14 @@ public class OemDashcamPipeline {
         while (running.get()) {
             try {
                 lastRenderHeartbeat = SystemClock.elapsedRealtime();
+                if (frameWorkStartNs != 0L) {
+                    // Previous frame's GL work (latch, draw, swap): Custom Layouts models yield to the DVR.
+                    if (com.overdrive.app.customlayouts.daemon.road.RoadFrameTap.active) {
+                        com.overdrive.app.customlayouts.daemon.road.RoadFrameTap.noteDvrFrame(
+                            System.nanoTime() - frameWorkStartNs, coalescedFrames);
+                    }
+                    frameWorkStartNs = 0L;
+                }
                 synchronized (frameSync) {
                     long start = SystemClock.elapsedRealtime();
                     while (!imagePending && running.get()) {
@@ -1886,6 +1899,7 @@ public class OemDashcamPipeline {
                     imagePending = false;
                 }
                 if (!running.get()) return;
+                frameWorkStartNs = System.nanoTime();
 
                 eglCore.makeCurrent(encoderEglSurface);
                 // Capture cameraSurfaceTexture into a local so a concurrent
@@ -2033,6 +2047,7 @@ public class OemDashcamPipeline {
                 consecutiveErrors = 0;
             } catch (Throwable t) {
                 consecutiveErrors++;
+                frameWorkStartNs = 0L;  // the back-off below is not DVR frame work
                 logger.warn("renderLoop iter error (" + consecutiveErrors
                     + "/" + MAX_CONSECUTIVE_RENDER_ERRORS + "): " + t.getMessage());
                 if (consecutiveErrors >= MAX_CONSECUTIVE_RENDER_ERRORS) {

@@ -2426,6 +2426,7 @@ public class PanoramicCameraGpu {
                 logger.debug("Downscaler initialized (probe path on its own thread)");
             }
         }
+        publishRoadFrameSource();
 
         if (USE_PASSIVE_APA_MODE) {
             // Port 0 is an opaque full-frame layout on these variants. Do not
@@ -2580,6 +2581,7 @@ public class PanoramicCameraGpu {
         } else {
             createCameraImageReader();
         }
+        publishRoadFrameSource();
         logger.info("Camera consumer recreated for camera switch");
     }
 
@@ -7030,6 +7032,19 @@ public class PanoramicCameraGpu {
             currentBoundCpuSource = new com.overdrive.app.surveillance.CpuFrameSource(currentBoundImage);
         }
         return currentBoundCpuSource;
+    }
+
+    /**
+     * Custom Layouts road model: tells it once per camera consumer whether a front frame can reach it, so it
+     * never loads a model on a camera that cannot feed one (same rules as offerRoadFrame and postRoadFrame).
+     */
+    private void publishRoadFrameSource() {
+        boolean strip = CAMERA_LAYOUT_MODE == 0 && !USE_DILINK5_QCARCAM_PATH;
+        GpuDownscaler ds = downscaler;
+        // A SurfaceTexture consumer always carries a non-identity matrix, which the road view refuses.
+        boolean gpuView = strip && !USE_SURFACE_TEXTURE_CONSUMER && ds != null && ds.isInitialized();
+        com.overdrive.app.customlayouts.daemon.road.RoadFrameTap.noteSource(
+            strip, cpuFrameReaderActive, gpuView, width / 4, height);
     }
 
     /**
