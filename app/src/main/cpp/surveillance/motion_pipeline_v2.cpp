@@ -777,6 +777,16 @@ static int stage5_behaviorClassification(
 // Process single quadrant through all stages
 // ============================================================================
 
+static const uint8_t* writeHistorySlot(
+    QuadrantState* qs, int slot,
+    const uint8_t* mosaic, int mosaicW, int mosaicH, int quadrantIdx)
+{
+    uint8_t* quadrantRgb = qs->frameHistory[slot];
+    extractQuadrant(mosaic, mosaicW, mosaicH, quadrantIdx, quadrantRgb);
+    qs->sampledLumaReady[slot] = false;
+    return quadrantRgb;
+}
+
 static const uint8_t* sampledLumaForSlot(QuadrantState* qs, int slot) {
     if (!qs->sampledLumaReady[slot]) {
         motion_luma::sampleFrame<V2_QUADRANT_WIDTH, V2_QUADRANT_HEIGHT>(
@@ -809,9 +819,8 @@ static void processQuadrant(
     static_assert(V2_COMPARE_OFFSET > 0 && V2_COMPARE_OFFSET < V2_FRAME_HISTORY,
                   "Current and reference history slots must be distinct");
     int histIdx = qs->historyIndex;
-    uint8_t* quadrantRgb = qs->frameHistory[histIdx];
-    extractQuadrant(mosaic, mosaicW, mosaicH, quadrantIdx, quadrantRgb);
-    qs->sampledLumaReady[histIdx] = false;
+    const uint8_t* quadrantRgb = writeHistorySlot(
+            qs, histIdx, mosaic, mosaicW, mosaicH, quadrantIdx);
 
     // --- Stage 1: Brightness check ---
     float meanLuma = 0;

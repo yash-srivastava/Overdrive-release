@@ -67,7 +67,7 @@ inline void bestDisplacement(const uint8_t* current, const uint8_t* reference,
                     fillLumaRow(reference + row * rgbStride, luma[row], Width);
                     ready[row] = true;
                 }
-                sad += sadRow(current + (y / 4) * 8, luma[row] + dx + Radius);
+                sad += sadRow(current + (y / 4) * 8, luma[row] + (dx + Radius));
                 if (bestSad >= 0 && sad >= bestSad) break;
             }
             if (bestSad < 0 || sad < bestSad) {
