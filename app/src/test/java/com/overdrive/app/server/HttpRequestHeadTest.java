@@ -9,6 +9,10 @@ import java.io.BufferedInputStream;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.Random;
 import java.nio.charset.StandardCharsets;
 import org.junit.Test;
 
@@ -142,6 +146,64 @@ public class HttpRequestHeadTest {
                 new ByteArrayInputStream(new byte[0]), 0));
         failsWith(400, () -> HttpRequestHead.readUtf8Body(
                 new ByteArrayInputStream("small".getBytes(StandardCharsets.UTF_8)), 9));
+    }
+
+    @Test public void smallBodiesMatchStreamingDecoderAndLeaveFollowingBytes() throws Exception {
+        Random random = new Random(79211L);
+        for (int length : new int[]{1, 2, 3, 7, 64, 255, 1024, 4095, 4096, 4097, 8192}) {
+            for (int iteration = 0; iteration < 40; iteration++) {
+                byte[] payload = new byte[length];
+                if (iteration % 2 == 0) {
+                    random.nextBytes(payload); // malformed and valid sequences, including tails
+                } else {
+                    for (int i = 0; i < length; i++) payload[i] = (byte) random.nextInt(128);
+                }
+                assertBodyMatchesReader(payload, 1 + random.nextInt(73));
+            }
+        }
+        byte[] text = "{\"name\":\"Zürich 🚗 東京\"}".getBytes(StandardCharsets.UTF_8);
+        for (int readSize = 1; readSize <= text.length; readSize++) {
+            assertBodyMatchesReader(text, readSize);
+        }
+    }
+
+    private static void assertBodyMatchesReader(byte[] payload, int readSize) throws Exception {
+        StringBuilder expected = new StringBuilder();
+        try (InputStreamReader decoder = new InputStreamReader(
+                new ByteArrayInputStream(payload), StandardCharsets.UTF_8)) {
+            char[] chars = new char[37];
+            int count;
+            while ((count = decoder.read(chars)) >= 0) expected.append(chars, 0, count);
+        }
+        byte[] wire = Arrays.copyOf(payload, payload.length + 1);
+        wire[payload.length] = '!';
+        InputStream input = new ByteArrayInputStream(wire) {
+            @Override public synchronized int read(byte[] bytes, int off, int len) {
+                return super.read(bytes, off, Math.min(len, readSize));
+            }
+        };
+        assertEquals(expected.toString(), HttpRequestHead.readUtf8Body(input, payload.length));
+        assertEquals('!', input.read());
+    }
+
+    @Test public void smallAndLargeBodiesRejectTruncationAtTheBoundary() throws Exception {
+        for (int length : new int[]{1, 64, 4095, 4096, 4097, 8192}) {
+            failsWith(400, () -> HttpRequestHead.readUtf8Body(
+                    new ByteArrayInputStream(new byte[length - 1]), length));
+        }
+    }
+
+    @Test public void smallBodyDoesNotSpinOnBrokenZeroProgressStream() throws Exception {
+        InputStream input = new InputStream() {
+            @Override public int read() { return 0; }
+            @Override public int read(byte[] bytes, int off, int len) { return 0; }
+        };
+        try {
+            HttpRequestHead.readUtf8Body(input, 64);
+            fail("Expected an IOException on zero progress");
+        } catch (IOException expected) {
+            assertTrue(!(expected instanceof HttpRequestHead.HeadException));
+        }
     }
 
     @Test public void reusedHeaderBufferKeepsStringsIndependentAndValidatesShorterLines()

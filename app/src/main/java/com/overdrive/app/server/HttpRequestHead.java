@@ -5,7 +5,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.SocketTimeoutException;
+import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Locale;
@@ -28,6 +30,7 @@ final class HttpRequestHead {
     static final int MAX_HEADER_LINE_BYTES = 16384;
     static final int MAX_HEAD_BYTES = 32768;
     static final int MAX_HEADER_FIELDS = 100;
+    private static final int SMALL_BODY_BYTES = 4096;
     private static final long MAX_HEAD_NANOS = 15_000_000_000L;
 
     private final InputStream input;
@@ -107,12 +110,36 @@ final class HttpRequestHead {
     /**
      * Decode exactly the Content-Length bytes, without guessing byte counts
      * from character chunks (which can split multi-byte UTF-8 sequences).
-     * The bounded stream returns EOF at the declared length, so a decoding
-     * buffer cannot consume bytes belonging to another HTTP message.
+     * Small bodies use a length-sized array; for larger bodies the bounded
+     * stream returns EOF at the declared length. Neither path can consume
+     * bytes belonging to another HTTP message.
      */
     static String readUtf8Body(InputStream input, int contentLength) throws IOException {
         if (contentLength < 0) throw new IllegalArgumentException("contentLength");
         if (contentLength == 0) return null;
+        // Small JSON/control requests do not need the streaming decoder's
+        // fixed byte and char buffers. Keep large bodies on the bounded path.
+        if (contentLength <= SMALL_BODY_BYTES) {
+            byte[] bytes = new byte[contentLength];
+            int offset = 0;
+            while (offset < bytes.length) {
+                int count = input.read(bytes, offset, bytes.length - offset);
+                if (count < 0) throw new HeadException(400, "Incomplete request body");
+                if (count == 0) throw new IOException("No progress reading request body");
+                offset += count;
+            }
+            for (byte b : bytes) {
+                if (b < 0) {
+                    // Use the same replacement-mode UTF-8 decoder as
+                    // InputStreamReader for non-ASCII, including malformed input.
+                    return StandardCharsets.UTF_8.newDecoder()
+                            .onMalformedInput(CodingErrorAction.REPLACE)
+                            .onUnmappableCharacter(CodingErrorAction.REPLACE)
+                            .decode(ByteBuffer.wrap(bytes)).toString();
+                }
+            }
+            return new String(bytes, StandardCharsets.UTF_8);
+        }
         LimitedBodyStream limited = new LimitedBodyStream(input, contentLength);
         InputStreamReader decoder = new InputStreamReader(limited, StandardCharsets.UTF_8);
         char[] chars = new char[4096];
