@@ -1076,7 +1076,7 @@ public class DiLink5RuntimeContractTest {
         assertTrue(cropper.contains(
                 "quadrantCornerOffsetsXY, false);"));
         assertTrue(streamScaler.contains(
-                "this(outputWidth, outputHeight, quadrantStripOffsetX, false);"));
+                "this(outputWidth, outputHeight, null, false);"));
         assertTrue(previewSampler.contains(
                 "this(sharedContext, false);"));
         assertTrue(pipeline.contains(
