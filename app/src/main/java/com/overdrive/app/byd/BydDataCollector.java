@@ -406,7 +406,7 @@ public class BydDataCollector {
     private static final String APP_PROCESS = "com.overdrive.app";
     // Package-private so the carsvc rail's timing-budget test can assert the budgets against it.
     static final long DILINK5_AUTOMATION_MAX_AGE_MS = 15_000L;
-    private static final long DILINK5_DYNAMIC_MAX_AGE_MS =
+    static final long DILINK5_DYNAMIC_MAX_AGE_MS =
             CarSvcTelemetry.DUMP_TTL_MS + 1_000L;
     private static final long DILINK5_INGRESS_MAX_DELAY_MS =
             DILINK5_AUTOMATION_MAX_AGE_MS;
@@ -454,6 +454,7 @@ public class BydDataCollector {
     private static final double DILINK5_CARSVC_MIN_CHARGING_KW = 0.3;
     // Volatile so requestDiLink5CarSvcLockBurst can enqueue on it without the collector monitor.
     private volatile java.util.concurrent.ScheduledExecutorService diLink5CarSvcChargingPoller;
+    private volatile Sealion7DisplayPower diLink5DisplayPower;
     // carsvc lock rail state (daemon). Burst deadline and settings mirror are volatile, written on
     // the "DI5CarSvcCharging" thread (deadline also by requestDiLink5CarSvcLockBurst callers).
     private volatile long diLink5CarSvcLockBurstUntilElapsedMs;
@@ -990,6 +991,8 @@ public class BydDataCollector {
                     t.setDaemon(true);
                     return t;
                 });
+        diLink5DisplayPower = new Sealion7DisplayPower(diLink5CarSvcChargingPoller);
+        com.overdrive.app.config.UnifiedConfigManager.addListener(diLink5DisplayPower);
         diLink5CarSvcChargingPoller.scheduleWithFixedDelay(() -> {
             try {
                 pollDiLink5CarSvcCharging();
@@ -1011,6 +1014,10 @@ public class BydDataCollector {
     }
 
     private synchronized void stopDiLink5CarSvcChargingPoll() {
+        if (diLink5DisplayPower != null) {
+            com.overdrive.app.config.UnifiedConfigManager.removeListener(diLink5DisplayPower);
+            diLink5DisplayPower = null;
+        }
         if (diLink5CarSvcChargingPoller != null) {
             diLink5CarSvcChargingPoller.shutdownNow();
             diLink5CarSvcChargingPoller = null;
@@ -4288,6 +4295,13 @@ public class BydDataCollector {
         return out;
     }
 
+    /** Signed power for displays, with a Sealion 7 gauge fallback when the pack is unreadable. */
+    public double displayPackPowerKw(double packKw) {
+        Sealion7DisplayPower fallback = diLink5DisplayPower;
+        if (fallback == null || !accIsOn || !isDiLink5Vehicle()) return packKw;
+        return fallback.resolve(packKw);
+    }
+
     // which ENGINE_POWER read answers on this car: 0 not known yet, 1 the feature id, 2 the getter
     private volatile int drivePowerPath;
 
@@ -4299,7 +4313,7 @@ public class BydDataCollector {
     public double readDrivePowerNowKw() {
         if (isDiLink5Vehicle() || isDiLink5BridgeConsumer()) {
             BydVehicleData vd = getData();
-            return vd != null ? vd.hvBatteryPowerKw : Double.NaN;
+            return displayPackPowerKw(vd != null ? vd.hvBatteryPowerKw : Double.NaN);
         }
         Object dev = engineDevice;
         if (dev == null || !accIsOn || isPhevPublic()) return Double.NaN;
@@ -5777,6 +5791,7 @@ public class BydDataCollector {
         this.accIsOn = isOn;
 
         if (wasOn != isOn) {
+            if (diLink5DisplayPower != null) diLink5DisplayPower.invalidate();
             clearDriveModeReadings();
             updateDriveModeMonitorPower();
             clusterWarnings.reset();
