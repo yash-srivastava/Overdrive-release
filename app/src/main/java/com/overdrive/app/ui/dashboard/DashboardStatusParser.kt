@@ -135,7 +135,7 @@ object DashboardStatusParser {
         val recordingCount = root.optJSONArray("recording")?.validItemCount()
 
         val recordingStatus = root.optJSONObject("recordingStatus")
-        val gear = recordingStatus?.optString("gear")?.takeIf { it.isNotBlank() }
+        val gear = (recordingStatus?.opt("gear") as? String)?.takeIf { it.isNotBlank() }
         val isRecording = recordingStatus?.optBoolean("isRecording", false) ?: false
         val isAccOn = root.optBoolean("acc", false)
         val isGpuSurveillance = root.optBoolean("gpuSurveillance", false)
@@ -253,9 +253,9 @@ object DashboardStatusParser {
             )?.takeIf { it > 0.0 && !nominalPlaceholder }
         val eta = optPositiveInt("timeToFullMin")
         val session = finiteDouble("sessionKwh")?.takeIf { it > 0.0 }
-        val sessionSource = optString("sessionEnergySource", "")
-            .trim()
-            .takeIf { session != null && it.isNotEmpty() && !it.equals("none", true) }
+        val sessionSource = (opt("sessionEnergySource") as? String)
+            ?.trim()
+            ?.takeIf { session != null && it.isNotEmpty() && !it.equals("none", true) }
         val sessionIncomplete = session != null
             && optBoolean("sessionEnergyIncomplete", false)
         val sessionEstimated = session != null && (
@@ -264,9 +264,9 @@ object DashboardStatusParser {
                 || sessionSource == null
                 || !sessionSource.equals("metered_counter", true)
             )
-        val state = optString("stateName", "")
-            .trim()
-            .takeIf { it.isNotEmpty() && !it.equals("Unavailable", true) }
+        val state = (opt("stateName") as? String)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() && !it.equals("Unavailable", true) }
 
         return DashboardChargingSnapshot(
             charging = charging,
