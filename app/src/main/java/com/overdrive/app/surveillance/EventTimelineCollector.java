@@ -1038,7 +1038,8 @@ public class EventTimelineCollector {
 
     /** Queued behind any pending timeline write for the clip; never replaces an existing sidecar. */
     private void writeLensOnlySidecar(final File mp4File) {
-        if (mp4File == null || com.overdrive.app.surveillance.LensTag.forFile(mp4File) == null) return;
+        if (mp4File == null || (com.overdrive.app.surveillance.LensTag.forFile(mp4File) == null
+                && com.overdrive.app.surveillance.LensTag.gridForFile(mp4File) == null)) return;
         writeExecutor.execute(() -> {
             if (com.overdrive.app.surveillance.LensTag.writeSidecarIfAbsent(mp4File)) {
                 logger.info("Lens-only sidecar saved: " + mp4File.getName());
@@ -1095,12 +1096,15 @@ public class EventTimelineCollector {
             // key is unset. Read at write time; omitted for the default
             // standard layout to keep legacy sidecars byte-identical.
             org.json.JSONObject lens = null;
+            org.json.JSONObject grid = null;
             try {
                 lens = com.overdrive.app.surveillance.LensTag.forFile(mp4File);
                 if (lens != null) root.put("lens", lens);
+                grid = com.overdrive.app.surveillance.LensTag.gridForFile(mp4File);
+                if (grid != null) root.put(com.overdrive.app.surveillance.LensTag.GRID, grid);
             } catch (Throwable ignored) { /* no lens tag */ }
-            // A lens-tagged clip is a 2x2 grid whatever the layout setting says now.
-            if (lens == null) {
+            // A lens- or grid-tagged clip is a 2x2 grid whatever the layout setting says now.
+            if (lens == null && grid == null) {
                 try {
                     String survLayout = com.overdrive.app.config.UnifiedConfigManager
                             .getSurveillance().optString("recordingLayout",

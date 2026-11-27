@@ -30,6 +30,8 @@ public final class SidecarTimeline {
         public long durationMs = -1L;
         public String layout;
         public boolean lens;
+        /** Sidecar carries the 2x2 grid geometry block (LensTag.GRID). */
+        public boolean grid;
         public String peakSeverity;
         public long peakSeverityMs = -1L;
         final List<Span> spans = new ArrayList<>();
@@ -122,6 +124,7 @@ public final class SidecarTimeline {
         String layout = root.optString("layout", "");
         facts.layout = layout.isEmpty() ? null : layout;
         facts.lens = root.optJSONObject("lens") != null;
+        facts.grid = root.optJSONObject("grid") != null;
 
         JSONObject stats = root.optJSONObject("stats");
         if (stats != null) {
@@ -233,12 +236,12 @@ public final class SidecarTimeline {
         return out;
     }
 
-    /** standard | dashcam | single; a lens-tagged clip is always standard. */
+    /** standard | dashcam | single; a lens- or grid-tagged clip is always standard. */
     public static String layoutFor(String type, String fileName, Facts facts) {
         if ("oemDashcam".equals(type) || (fileName != null && fileName.startsWith("dvr_"))) {
             return "single";
         }
-        if (facts != null && facts.lens) return "standard";
+        if (facts != null && (facts.lens || facts.grid)) return "standard";
         if (facts != null && "dashcam".equals(facts.layout)) return "dashcam";
         return "standard";
     }
