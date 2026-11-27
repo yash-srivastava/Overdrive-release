@@ -1956,10 +1956,18 @@ public class HardwareEventRecorderGpu {
      * {@link #initOnce} with one retry (create + configure + surface + start) after 200 ms, only when
      * it failed while a background export held hardware codecs within the last second.
      */
+    /** A codec init stage that did not return within its timeout (message unchanged for logs). */
+    private static final class EncoderInitTimeoutException extends RuntimeException {
+        EncoderInitTimeoutException(String message) {
+            super(message);
+        }
+    }
+
     private void initOnceAfterBackgroundExport() throws Exception {
         try {
             initOnce();
-        } catch (InterruptedException | CpuInputRejectedException e) {
+        } catch (InterruptedException | CpuInputRejectedException | EncoderInitTimeoutException e) {
+            // Timeouts are a wedged codec stage, not a busy codec: never retried here.
             throw e;
         } catch (Exception first) {
             if (teardownWedged || !CameraLoadProbe.backgroundCodecsRecentlyHeld()) throw first;
@@ -2149,7 +2157,7 @@ public class HardwareEventRecorderGpu {
                 }
             }
             createThread.interrupt();
-            throw new RuntimeException("Encoder create timeout - try restarting mediaserver");
+            throw new EncoderInitTimeoutException("Encoder create timeout - try restarting mediaserver");
         }
         if (createError[0] != null) {
             throw createError[0];
@@ -2215,7 +2223,7 @@ public class HardwareEventRecorderGpu {
                 configThread.interrupt();
                 try { encoder.release(); } catch (Exception e) {}
                 encoder = null;
-                throw new RuntimeException("Encoder configure timeout");
+                throw new EncoderInitTimeoutException("Encoder configure timeout");
             }
             if (configError[0] != null) {
                 if (cpuFrames) {
@@ -2281,7 +2289,7 @@ public class HardwareEventRecorderGpu {
                 surfaceThread.interrupt();
                 try { encoder.release(); } catch (Exception e) {}
                 encoder = null;
-                throw new RuntimeException("Surface create timeout");
+                throw new EncoderInitTimeoutException("Surface create timeout");
             }
             if (surfaceError[0] != null) {
                 throw surfaceError[0];
@@ -2342,7 +2350,7 @@ public class HardwareEventRecorderGpu {
                     }
                     inputSurface = null;
                 }
-                throw new RuntimeException("Encoder start timeout - hardware encoder busy or stuck");
+                throw new EncoderInitTimeoutException("Encoder start timeout - hardware encoder busy or stuck");
             }
             if (startError[0] != null) {
                 throw startError[0];

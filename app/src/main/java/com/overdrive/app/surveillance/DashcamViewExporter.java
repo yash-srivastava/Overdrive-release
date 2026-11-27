@@ -463,10 +463,11 @@ public final class DashcamViewExporter {
 
         void close() {
             if (codec != null) {
-                if (session == null || session.unregister(codec)) {
+                if (session == null) {
                     try { codec.stop(); } catch (Throwable ignored) {}
                     try { codec.release(); } catch (Throwable ignored) {}
-                    if (session != null) session.codecFreed();
+                } else if (session.unregister(codec)) {
+                    session.stopAndRelease(java.util.Collections.singletonList(codec), "worker");
                 }
                 codec = null;
             }
@@ -506,6 +507,8 @@ public final class DashcamViewExporter {
         private final java.util.ArrayList<MediaCodec> liveCodecs = new java.util.ArrayList<>(3);
         private final java.util.ArrayList<MediaCodec> takenCodecs = new java.util.ArrayList<>(3);
         private int heldCodecs;
+        private final java.util.ArrayList<MediaCodec> freedCodecs = new java.util.ArrayList<>(3);
+        private static final long RELEASE_WAIT_MS = 3_000L;
         private volatile boolean releasing;
         int encodersInUse;
         int decodersInUse;
@@ -621,17 +624,46 @@ public final class DashcamViewExporter {
                 takenCodecs.addAll(liveCodecs);
                 liveCodecs.clear();
             }
-            for (MediaCodec c : list) {
-                synchronized (bufLock) {
-                    try { c.stop(); } catch (Throwable ignored) {}
-                }
-                synchronized (bufLock) {
-                    try { c.release(); } catch (Throwable ignored) {}
-                }
-                codecFreed();
+            // Barrier only: an in-flight buffer section finishes; later ones see `releasing` and bail.
+            synchronized (bufLock) {
             }
+            stopAndRelease(list, "releaser");
             logger.info("Export codecs released in " + (System.nanoTime() - t0) / 1_000_000 + "ms ("
                     + list.size() + ")");
+        }
+
+        /**
+         * Stops and releases {@code codecs} in parallel on helper threads, waiting at most
+         * {@link #RELEASE_WAIT_MS}. A wedged vendor stop/release is logged and counted as freed
+         * so neither the job nor the recorder's retry window waits on it forever.
+         */
+        void stopAndRelease(java.util.List<MediaCodec> codecs, String who) {
+            if (codecs.isEmpty()) return;
+            Thread[] threads = new Thread[codecs.size()];
+            for (int k = 0; k < threads.length; k++) {
+                final MediaCodec c = codecs.get(k);
+                threads[k] = new Thread(() -> {
+                    try { c.stop(); } catch (Throwable ignored) {}
+                    try { c.release(); } catch (Throwable ignored) {}
+                    codecFreed(c);
+                }, "DvExportCodecRelease");
+                threads[k].setDaemon(true);
+                threads[k].start();
+            }
+            long deadline = System.nanoTime() + RELEASE_WAIT_MS * 1_000_000L;
+            for (int k = 0; k < threads.length; k++) {
+                long left = (deadline - System.nanoTime()) / 1_000_000L;
+                try {
+                    if (left > 0) threads[k].join(left);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                if (threads[k].isAlive()) {
+                    logger.error("Export codec stop/release WEDGED (" + who + ") after " + RELEASE_WAIT_MS
+                            + "ms; counting it freed so recording retries are not held open");
+                    codecFreed(codecs.get(k));
+                }
+            }
         }
 
         /** A configured + started codec becomes releasable by the releaser; refused once releasing. */
@@ -653,9 +685,11 @@ public final class DashcamViewExporter {
             }
         }
 
-        /** Called after a codec's release() returned; the recorder's retry window starts when none are held. */
-        void codecFreed() {
+        /** After a codec's release() returned (or timed out), once per codec; the retry window starts at zero held. */
+        void codecFreed(MediaCodec c) {
             synchronized (codecLock) {
+                for (MediaCodec f : freedCodecs) if (f == c) return;
+                freedCodecs.add(c);
                 if (heldCodecs > 0 && --heldCodecs == 0) CameraLoadProbe.noteBackgroundCodecs(false);
             }
         }
@@ -1066,25 +1100,12 @@ public final class DashcamViewExporter {
                 if (encStage == null) encStage = ByteBuffer.allocateDirect(Math.max(1 << 20, outW * outH));
                 boolean write = false;
                 boolean eos = false;
+                MediaFormat newFormat = null;
                 int idx;
                 synchronized (bufLock) {
                     ensureLive();
                     idx = encoder.dequeueOutputBuffer(encInfo, 0L);
-                    if (idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                        if (muxerStarted) throw new ExportException("codec", "Encoder format changed twice");
-                        videoTrack = muxer.addTrack(encoder.getOutputFormat());
-                        if (audioFormat != null) {
-                            try {
-                                audioTrack = muxer.addTrack(audioFormat);
-                            } catch (Throwable t) {
-                                logger.warn("Audio track refused, exporting without sound: " + t.getMessage());
-                                audioTrack = -1;
-                            }
-                        }
-                        muxer.start();
-                        muxerStarted = true;
-                        continue;
-                    }
+                    if (idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) newFormat = encoder.getOutputFormat();
                     if (idx >= 0) {
                         boolean config = (encInfo.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0;
                         eos = (encInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
@@ -1106,6 +1127,22 @@ public final class DashcamViewExporter {
                         }
                         encoder.releaseOutputBuffer(idx, false);
                     }
+                }
+                if (newFormat != null) {
+                    // Muxer setup writes the header: outside the codec lock.
+                    if (muxerStarted) throw new ExportException("codec", "Encoder format changed twice");
+                    videoTrack = muxer.addTrack(newFormat);
+                    if (audioFormat != null) {
+                        try {
+                            audioTrack = muxer.addTrack(audioFormat);
+                        } catch (Throwable t) {
+                            logger.warn("Audio track refused, exporting without sound: " + t.getMessage());
+                            audioTrack = -1;
+                        }
+                    }
+                    muxer.start();
+                    muxerStarted = true;
+                    continue;
                 }
                 if (write) muxer.writeSampleData(videoTrack, encStage, muxInfo);
                 if (idx >= 0) {
@@ -1222,9 +1259,7 @@ public final class DashcamViewExporter {
             follower.close();
             if (encoder != null) {
                 if (unregister(encoder)) {
-                    try { encoder.stop(); } catch (Throwable ignored) {}
-                    try { encoder.release(); } catch (Throwable ignored) {}
-                    codecFreed();
+                    stopAndRelease(java.util.Collections.singletonList(encoder), "worker");
                 }
                 encoder = null;
             }
