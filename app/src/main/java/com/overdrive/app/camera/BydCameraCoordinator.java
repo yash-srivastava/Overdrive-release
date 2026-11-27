@@ -55,17 +55,12 @@ public class BydCameraCoordinator {
     }
 
     private CameraYieldCallback yieldCallback;
-    private volatile int activeCameraId = 1;
 
     public BydCameraCoordinator() {
     }
 
     public void setYieldCallback(CameraYieldCallback callback) {
         this.yieldCallback = callback;
-    }
-
-    public void setActiveCameraId(int cameraId) {
-        this.activeCameraId = cameraId;
     }
 
     public void setLogEventArgs(boolean logEventArgs) {
@@ -163,33 +158,7 @@ public class BydCameraCoordinator {
         return yielded;
     }
 
-    /** Event-driven camera-user registration is intentionally disabled. */
-    public boolean isRegisteredAsUser() {
-        return false;
-    }
-
     // ==================== Polling Fallback ====================
-
-    /**
-     * Queries the current camera user's package name.
-     * Returns the package name of the app currently holding the camera,
-     * or null if no other app has it (or if we are the holder).
-     *
-     * Used at camera open time to decide PRIMARY vs SECONDARY mode.
-     */
-    public String queryCurrentCameraUser() {
-        if (getCurrentCameraUserMethod != null && reflectionServiceProxy != null) {
-            try {
-                Object currentUser = getCurrentCameraUserMethod.invoke(reflectionServiceProxy);
-                if (currentUser != null) {
-                    Method getPkg = currentUser.getClass().getMethod("getPackageName");
-                    String pkg = (String) getPkg.invoke(currentUser);
-                    if (pkg != null && !"com.overdrive.app".equals(pkg)) return pkg;
-                }
-            } catch (Exception e) { /* ignore */ }
-        }
-        return null;
-    }
 
     /**
      * Checks if another app currently holds the camera via
@@ -437,26 +406,6 @@ public class BydCameraCoordinator {
     // ==================== Proper Camera Cleanup ====================
 
     /**
-     * Notify IBYDCameraService before opening camera.
-     *
-     * <p>Intentionally a no-op. Panoramic recording opens AVMCamera
-     * directly and does not join IBYDCameraUser arbitration.
-     */
-    public void notifyPreOpenCamera() {
-        // Open directly without announcing an ownership transition.
-    }
-
-    /**
-     * Notify IBYDCameraService after closing camera.
-     *
-     * <p>Intentionally a no-op for the same direct-open model as
-     * {@link #notifyPreOpenCamera()}.
-     */
-    public void notifyPosCloseCamera() {
-        // No camera-user registration exists to notify.
-    }
-
-    /**
      * Close an AVMCamera and report whether the vendor close call completed.
      *
      * <p>disablePreviewCallback/stopPreview are best-effort cleanup. Native
@@ -546,92 +495,5 @@ public class BydCameraCoordinator {
                 + wasYielded + " nativeAppActive=" + wasActive
                 + " (error-recovery path)");
         }
-    }
-
-    // ==================== AIDL Discovery ====================
-
-    /**
-     * Discovers the full IBYDCameraService and IBYDCameraUser AIDL interfaces
-     * by enumerating methods via reflection. Logs everything for debugging.
-     */
-    public void discoverCameraServiceApi() {
-        logger.info("=== IBYDCameraService API Discovery ===");
-
-        // Enumerate service methods
-        Object serviceProxy = typedServiceProxy != null ? typedServiceProxy : reflectionServiceProxy;
-        if (serviceProxy != null) {
-            logger.info("--- Service proxy methods ---");
-            try {
-                for (Method m : serviceProxy.getClass().getDeclaredMethods()) {
-                    StringBuilder sb = new StringBuilder();
-                    sb.append("  ").append(m.getReturnType().getSimpleName()).append(" ");
-                    sb.append(m.getName()).append("(");
-                    Class<?>[] params = m.getParameterTypes();
-                    for (int i = 0; i < params.length; i++) {
-                        if (i > 0) sb.append(", ");
-                        sb.append(params[i].getName());
-                    }
-                    sb.append(")");
-                    logger.info(sb.toString());
-                }
-            } catch (Exception e) {
-                logger.warn("Failed to enumerate service methods: " + e.getMessage());
-            }
-        }
-
-        // Check for IBYDCameraUser
-        String[] candidates = {
-            "android.hardware.IBYDCameraUser",
-            "android.hardware.IBYDCameraUser$Stub",
-        };
-        for (String name : candidates) {
-            try {
-                Class<?> cls = Class.forName(name);
-                logger.info("FOUND: " + name);
-                for (Method m : cls.getDeclaredMethods()) {
-                    StringBuilder sb = new StringBuilder();
-                    sb.append("  ").append(m.getReturnType().getSimpleName()).append(" ");
-                    sb.append(m.getName()).append("(");
-                    Class<?>[] params = m.getParameterTypes();
-                    for (int i = 0; i < params.length; i++) {
-                        if (i > 0) sb.append(", ");
-                        sb.append(params[i].getName());
-                    }
-                    sb.append(")");
-                    logger.info(sb.toString());
-                }
-            } catch (ClassNotFoundException e) {
-                logger.info("NOT FOUND: " + name);
-            } catch (Exception e) {
-                logger.warn("Error probing " + name + ": " + e.getMessage());
-            }
-        }
-
-        // Log transaction codes from Stub classes
-        String[] stubs = {
-            "android.hardware.IBYDCameraService$Stub",
-            "android.hardware.IBYDCameraUser$Stub",
-        };
-        for (String name : stubs) {
-            try {
-                Class<?> cls = Class.forName(name);
-                logger.info("--- " + name + " fields ---");
-                for (java.lang.reflect.Field f : cls.getDeclaredFields()) {
-                    f.setAccessible(true);
-                    try {
-                        Object val = f.get(null);
-                        logger.info("  " + f.getName() + " = " + val);
-                    } catch (Exception e) {
-                        logger.info("  " + f.getName() + " (type=" + f.getType().getSimpleName() + ")");
-                    }
-                }
-            } catch (ClassNotFoundException e) {
-                // Already logged above
-            } catch (Exception e) {
-                logger.warn("Stub field scan failed for " + name + ": " + e.getMessage());
-            }
-        }
-
-        logger.info("=== Discovery complete (camera-user registration disabled) ===");
     }
 }
