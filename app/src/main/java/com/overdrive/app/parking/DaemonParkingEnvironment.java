@@ -642,14 +642,7 @@ public final class DaemonParkingEnvironment implements ParkingEnvironment {
                 int w = b.getWidth(), h = b.getHeight();
                 int[] px = new int[w * h];
                 b.getPixels(px, 0, w, 0, 0, w, h);
-                long sum = 0;
-                int max = 0;
-                for (int p : px) {
-                    int l = (((p >> 16) & 0xFF) * 77 + ((p >> 8) & 0xFF) * 150 + (p & 0xFF) * 29) >> 8;
-                    sum += l;
-                    if (l > max) max = l;
-                }
-                return px.length > 0 && sum / px.length < BLANK_MEAN_LUMA && max < BLANK_MAX_LUMA;
+                return ParkingFrameMetrics.isBlank(px, BLANK_MEAN_LUMA, BLANK_MAX_LUMA);
             } catch (Throwable t) {
                 return false;
             } finally {
@@ -679,30 +672,7 @@ public final class DaemonParkingEnvironment implements ParkingEnvironment {
                 if (rw < 4 || rh < 4) return 0.0;
                 int[] px = new int[rw * rh];
                 b.getPixels(px, 0, rw, x0, y0, rw, rh);
-                // Luma plane
-                int[] lum = new int[rw * rh];
-                int clipped = 0;
-                for (int i = 0; i < px.length; i++) {
-                    int p = px[i];
-                    int l = (((p >> 16) & 0xFF) * 77 + ((p >> 8) & 0xFF) * 150 + (p & 0xFF) * 29) >> 8;
-                    lum[i] = l;
-                    if (l < 16 || l > 239) clipped++;
-                }
-                // Gradient energy (mean |dx| + |dy|) ⇒ sharpness proxy, cheap and monotonic.
-                double energy = 0.0;
-                long n = 0;
-                for (int y = 1; y < rh - 1; y++) {
-                    int row = y * rw;
-                    for (int x = 1; x < rw - 1; x++) {
-                        int idx = row + x;
-                        energy += Math.abs(lum[idx + 1] - lum[idx - 1]) + Math.abs(lum[idx + rw] - lum[idx - rw]);
-                        n++;
-                    }
-                }
-                if (n == 0) return 0.0;
-                double sharp = energy / n / 255.0;                    // ~0..1
-                double exposure = 1.0 - (double) clipped / px.length; // 1 = no clipping
-                return sharp * exposure * 100.0;
+                return ParkingFrameMetrics.scoreInPlace(px, rw, rh);
             } catch (Throwable t) {
                 return 0.0;
             } finally {
