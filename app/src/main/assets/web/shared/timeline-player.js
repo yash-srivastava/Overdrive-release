@@ -583,8 +583,8 @@
         '.tlv-player{position:relative;width:100%;height:100%;overflow:hidden;background:#000}',
         '.tlv-player>.tlv-video,.tlv-player>.tlv-lens,.tlv-player>.tlv-dv,.tlv-player>.tlv-hold,.tlv-player>.tlv-scrub-frame{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;display:block;margin:0;padding:0;border:0}',
         '.tlv-player>.tlv-lens,.tlv-player>.tlv-dv,.tlv-player>.tlv-hold,.tlv-player>.tlv-scrub-frame{pointer-events:none}',
-        // Decodes off-view: one pixel under the picture keeps it composited (frame callbacks) without showing it.
-        '.tlv-player>.tlv-dvf{position:absolute;left:50%;top:50%;width:1px;height:1px;margin:0;padding:0;border:0;pointer-events:none}',
+        // Follower decodes under the picture, box-sized and near-transparent so engines treat it as visible.
+        '.tlv-player>.tlv-dvf{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;opacity:.01;margin:0;padding:0;border:0;pointer-events:none}',
         '.tlv-player>.tlv-hold,.tlv-player>.tlv-dv{transition:opacity ' + HOLD_FADE_MS + 'ms cubic-bezier(.23,1,.32,1)}',
         '.tlv-player [hidden]{display:none!important}',
         '.tlv-unsupported{position:absolute;left:0;top:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;box-sizing:border-box;text-align:center;background:rgba(14,19,17,.9);color:#DEE4E0;font:500 15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}',
@@ -722,7 +722,10 @@
         this.dvLead = false;
         this.dvHoldLead = false;
         this.dvLeadAt = -1e9;
+        this.dvLeadGap = 3000;
         this.dvGeo = new Map();
+        // OEM clips the follower could not decode (after recovery): not composed for this player.
+        this.dvBad = new Set();
         this._buildDom();
         this._bindVideo();
         this._setState('idle');
@@ -2846,15 +2849,15 @@
         if (this.mode || this._effectiveSpeed() > DV_RATE_MAX) return null;
         const ci = this.curItem, segs = this.segs;
         // The playing grid item counts across its own seams (index end and playlist end may differ slightly).
-        const cur = ci && ci.seg && familyOf(ci.seg) === MOSAIC && isPlayable(ci.seg) && ci.ws - DV_SEAM_MS <= w && w < ci.we + DV_SEAM_MS ? ci.seg : null;
+        const cur = ci && ci.seg && familyOf(ci.seg) === MOSAIC && mosaicRank(ci.seg) < 3 && isPlayable(ci.seg) && ci.ws - DV_SEAM_MS <= w && w < ci.we + DV_SEAM_MS ? ci.seg : null;
         let m = cur, o = null;
         for (let i = 0; i < segs.length; i++) {
             const s = segs[i];
             if (s.start > w + DV_SEAM_MS) break;
             if (!isPlayable(s) || hasKey(this.blocked, s)) continue;
             // OEM coverage within a seam here; the follower's own playlist decides exactly.
-            if (familyOf(s) === OEM) { if (!o && s.end + DV_SEAM_MS > w) o = s; continue; }
-            if (cur || s.start > w || !(s.end > w)) continue;
+            if (familyOf(s) === OEM) { if (!o && s.end + DV_SEAM_MS > w && !this.dvBad.has(s.id + '|' + s.fp)) o = s; continue; }
+            if (cur || s.start > w || !(s.end > w) || mosaicRank(s) >= 3) continue;
             if (!m || mosaicRank(s) < mosaicRank(m)) m = s;
         }
         if (!m || !o || m.spanSrc !== 'writer' || o.spanSrc !== 'writer') return null;
@@ -2902,7 +2905,8 @@
         const self = this, v = this.video;
         const dv = {
             comp: comp, canvas: canvas, el: f, hls: null, fLoading: false, fKey: null, fGen: 0, fCtl: null,
-            tb: null, tbDirty: false, tbAt: 0, fStart: null, fFailed: false, netTries: 0, mediaTries: 0,
+            tb: null, tbDirty: false, tbAt: 0, fStart: null, fFailed: false, failN: 0, failWin: null, failTimer: 0,
+            netTries: 0, mediaTries: 0, needGesture: false, onGesture: null, noOemWin: null,
             engaged: false, shown: false, ready: false, readySeq: 0, hideSeq: 0, unsynced: false, unsyncKey: null,
             seekPending: false, settle: 0, seeks: 0, seekAt: -1e9, nudge: false, fWaiting: false, fMT: -1,
             ring: new Float64Array(8), ringN: 0, ringI: 0, scratch: new Float64Array(8), frameDur: 1 / 15,
@@ -2952,9 +2956,9 @@
             ended: function () { if (mine()) self._dvEval(); },
             error: function () {
                 if (!mine() || self.engineKind !== 'native' || !f.getAttribute('src')) return;
-                self._dvCloseF();
-                dv.fFailed = true;
-                self._dvEval();
+                const code = f.error ? f.error.code : 0;
+                if (code === 3 || code === 4) self._dvBadClip(null);
+                self._dvSoftFail(code === 3 || code === 4 ? 2000 : 0);
             }
         };
         Object.keys(dv.lh).forEach(function (k) { v.addEventListener(k, dv.lh[k]); });
@@ -2962,7 +2966,9 @@
         dv.onVis = function () {
             if (!mine()) return;
             dv.sleepPage = !!document.hidden;
-            if (dv.sleepPage) self._dvSleep(false); else self._dvEval();
+            if (dv.sleepPage) { self._dvSleep(false); return; }
+            dv.sleepView = false;
+            self._dvEval();
         };
         document.addEventListener('visibilitychange', dv.onVis);
         this._dvEval();
@@ -2979,6 +2985,8 @@
         Object.keys(dv.lh).forEach(function (k) { v.removeEventListener(k, dv.lh[k]); });
         Object.keys(dv.fh).forEach(function (k) { f.removeEventListener(k, dv.fh[k]); });
         document.removeEventListener('visibilitychange', dv.onVis);
+        this._dvGestureOff();
+        clearTimeout(dv.failTimer);
         if (f.parentNode) f.parentNode.removeChild(f);
         const wasShown = dv.shown;
         dv.shown = false;
@@ -3031,7 +3039,74 @@
     Player.prototype._dvUserSeek = function () {
         const dv = this.dv;
         dv.unsynced = false;
-        if (dv.fFailed) { dv.fFailed = false; dv.fKey = null; }
+        dv.sleepView = false;
+        if (dv.fFailed) this._dvClearFail();
+    };
+
+    Player.prototype._dvClearFail = function () {
+        const dv = this.dv;
+        clearTimeout(dv.failTimer);
+        dv.failTimer = 0;
+        dv.fFailed = false;
+        dv.failN = 0;
+        dv.failWin = null;
+    };
+
+    // A follower failure that may pass (busy, offline, refused play): single source, then retry after a
+    // bounded backoff (or the server's Retry-After), and at once in another window.
+    Player.prototype._dvSoftFail = function (delayMs) {
+        const dv = this.dv;
+        if (!dv) return;
+        const win = dv.fKey;
+        this._dvCloseF();
+        dv.fFailed = true;
+        dv.failWin = win;
+        dv.failN++;
+        const wait = delayMs > 0 ? delayMs : Math.min(60000, 2000 * Math.pow(2, Math.min(dv.failN - 1, 5)));
+        clearTimeout(dv.failTimer);
+        const self = this;
+        dv.failTimer = setTimeout(function () {
+            dv.failTimer = 0;
+            if (self.dv !== dv) return;
+            dv.fFailed = false;
+            self._dvEval();
+        }, wait);
+        this._dvEval();
+    };
+
+    // A clip that failed to decode even after recovery: never composed again by this player.
+    Player.prototype._dvBadClip = function (url) {
+        const dv = this.dv;
+        let ref = url ? idFromUrl(url) : null;
+        if (!ref && dv.tb) {
+            const it = itemAtMedia(dv.tb, dv.el.currentTime);
+            if (it && it.id) ref = { id: it.id, fp: it.fp };
+        }
+        if (ref) this.dvBad.add(ref.id + '|' + ref.fp);
+    };
+
+    // Play refused without a user gesture (WebKit policy): single source until the next tap or key.
+    Player.prototype._dvNeedGesture = function () {
+        const dv = this.dv;
+        if (dv.needGesture) return;
+        dv.needGesture = true;
+        const self = this;
+        dv.onGesture = function () {
+            if (self.dv !== dv) return;
+            self._dvGestureOff();
+            dv.needGesture = false;
+            self._dvEval();
+            if (dv.engaged && !self.video.paused) self._dvPlayF();
+        };
+        ['pointerdown', 'touchend', 'keydown', 'click'].forEach(function (n) { document.addEventListener(n, dv.onGesture, true); });
+        this._dvEval();
+    };
+
+    Player.prototype._dvGestureOff = function () {
+        const dv = this.dv, fn = dv && dv.onGesture;
+        if (!fn) return;
+        dv.onGesture = null;
+        ['pointerdown', 'touchend', 'keydown', 'click'].forEach(function (n) { document.removeEventListener(n, fn, true); });
     };
 
     // Decide composite vs single-source for the current instant. offer: from _dvOffer (undefined = compute).
@@ -3052,9 +3127,9 @@
         if (this._dvLeadStep(offer)) return;
         const v = this.video, it = this.curItem;
         let tf = -1;
-        let want = !!offer && !dv.sleepView && !dv.sleepPage && !dv.fFailed && !this.errorCode && !this.overlaySeg
+        let want = !!offer && !dv.sleepView && !dv.sleepPage && !dv.fFailed && !dv.needGesture && !this.errorCode && !this.overlaySeg
             && !!it && it.key === offer.key && !(v.playbackRate > DV_RATE_MAX);
-        if (want && v.videoWidth && v.videoHeight && Math.abs(v.videoWidth / v.videoHeight - offer.geo.W / offer.geo.H) > 0.01) want = false;
+        if (want && v.readyState >= 1 && v.videoWidth && v.videoHeight && Math.abs(v.videoWidth / v.videoHeight - offer.geo.W / offer.geo.H) > 0.01) want = false;
         if (want) {
             this._dvOpenF();
             if (!dv.tb) {
@@ -3069,7 +3144,17 @@
             if (tf < 0 && inSeam(dv.tb, wL)) return;
             want = tf >= 0 && !dv.unsynced;
         }
-        if (want) this._dvEngage(offer.geo, tf); else this._dvDisengage();
+        if (want) { this._dvEngage(offer.geo, tf); return; }
+        // Leading for an OEM preference but the composite can't engage here: back to the OEM clip,
+        // and wait longer before trying again (no reload churn).
+        if (this.dvLead && this.prefer && familyOf({ type: this.prefer }) === OEM && this._dvOemAt(this._currentWall())) {
+            this.dvLeadGap = Math.min(60000, this.dvLeadGap * 2);
+            this.dvLead = false;
+            this._openSource(this._currentWall());
+            this.dvHoldLead = false;
+            return;
+        }
+        this._dvDisengage();
     };
 
     // OEM preference: reopen with the grid clip leading while the composite is offered, and back to the OEM clip
@@ -3077,14 +3162,16 @@
     Player.prototype._dvLeadStep = function (offer) {
         const dv = this.dv, p = this.prefer;
         if (!p || familyOf({ type: p }) !== OEM || dv.sleepView || dv.sleepPage || this.scrub) return false;
-        const ok = !!offer && !dv.unsynced && !dv.fFailed && !this.errorCode && !this.overlaySeg;
+        const winKey = this.win ? this.win.from + '-' + this.win.to : null;
+        const ok = !!offer && !dv.unsynced && !dv.fFailed && !dv.needGesture && !this.errorCode && !this.overlaySeg
+            && dv.noOemWin !== winKey;
         let want = this.dvLead;
         if (ok) want = true;
         else if (this.dvLead && this._dvOemAt(this._currentWall())) want = false;
         if (want === this.dvLead) return false;
         // Entering is rate-limited against flapping; leaving is immediate (no 360° picture meanwhile).
         const now = perfNow();
-        if (want && now - this.dvLeadAt < 3000) return false;
+        if (want && now - this.dvLeadAt < this.dvLeadGap) return false;
         if (want) this.dvLeadAt = now;
         this.dvLead = want;
         const w = this._currentWall();
@@ -3180,6 +3267,8 @@
     Player.prototype._dvShow = function () {
         const dv = this.dv;
         dv.shown = true;
+        dv.failN = 0;
+        this.dvLeadGap = 3000;
         dv.hideSeq++;
         dv.canvas.style.opacity = '';
         dv.canvas.hidden = false;
@@ -3221,21 +3310,31 @@
     // Follower playlist for the leader's window: OEM clips only, gaps left open.
     Player.prototype._dvOpenF = function () {
         const dv = this.dv, win = this.win;
-        if (!win || dv.fFailed || !this.engineKind) return;
+        if (!win || !this.engineKind) return;
         const key = win.from + '-' + win.to;
-        if (dv.fKey === key) return;
+        if (dv.fFailed && dv.failWin !== key) this._dvClearFail();
+        if (dv.fFailed || dv.fKey === key) return;
         this._dvCloseF();
         dv.fKey = key;
+        if (dv.noOemWin === key) { dv.tb = buildTable([], 0); return; }
         dv.netTries = 0;
         dv.mediaTries = 0;
         const fg = ++dv.fGen, self = this, f = dv.el;
         const url = timelineUrl(win, null, 0) + '&family=oemDashcam';
         const live = function () { return self.dv === dv && dv.fGen === fg && !self.dead; };
-        const failed = function () {
+        // status 404: no OEM footage in this window (not a failure); retryAfter: seconds from a 503.
+        const failed = function (status, retryAfter) {
             if (!live()) return;
-            self._dvCloseF();
-            dv.fFailed = true;
-            self._dvEval();
+            if (status === 404) {
+                self._dvCloseF();
+                dv.noOemWin = key;
+                dv.fKey = key;
+                dv.tb = buildTable([], 0);
+                self._dvEval();
+                return;
+            }
+            const ra = Number(retryAfter);
+            self._dvSoftFail(ra > 0 ? Math.min(ra, 30) * 1000 : 0);
         };
         if (this.engineKind === 'hls' && root.Hls) {
             const H = root.Hls;
@@ -3244,7 +3343,7 @@
             cfg.maxMaxBufferLength = 30;
             cfg.backBufferLength = 10;
             let hls;
-            try { hls = new H(cfg); } catch (e) { dv.fFailed = true; return; }
+            try { hls = new H(cfg); } catch (e) { this._dvSoftFail(0); return; }
             dv.hls = hls;
             const E = H.Events;
             hls.on(E.LEVEL_LOADED, function (ev, d) {
@@ -3260,11 +3359,17 @@
             hls.loadSource(absUrl(url));
             return;
         }
-        if (this.engineKind !== 'native') { dv.fFailed = true; return; }
+        if (this.engineKind !== 'native') return;
         const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
         dv.fCtl = ctl;
         fetch(url, { signal: ctl ? ctl.signal : undefined, cache: 'no-store', credentials: 'same-origin' })
-            .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.text(); })
+            .then(function (r) {
+                if (r.ok) return r.text();
+                const err = new Error('http ' + r.status);
+                err.status = r.status;
+                err.retryAfter = r.headers && r.headers.get ? r.headers.get('Retry-After') : null;
+                throw err;
+            })
             .then(function (text) {
                 if (!live()) return;
                 dv.fCtl = null;
@@ -3272,13 +3377,22 @@
                 f.src = absUrl(url);
                 self._dvEval();
             })
-            .catch(function (err) { if (!(err && err.name === 'AbortError')) failed(); });
+            .catch(function (err) { if (!(err && err.name === 'AbortError')) failed(err && err.status, err && err.retryAfter); });
     };
 
     Player.prototype._dvHlsError = function (d, failed) {
         const H = root.Hls, dv = this.dv;
         if (!d.fatal || !H) return;
         const T = H.ErrorTypes;
+        const code = d.response && isNum(d.response.code) ? d.response.code
+            : (d.networkDetails && isNum(d.networkDetails.status) ? d.networkDetails.status : 0);
+        if (!dv.tb) {
+            // The playlist itself (busy builder, offline, nothing in the window).
+            let ra = null;
+            try { ra = d.networkDetails && d.networkDetails.getResponseHeader ? d.networkDetails.getResponseHeader('Retry-After') : null; } catch (e) { ra = null; }
+            failed(code, ra);
+            return;
+        }
         if (d.type === T.NETWORK_ERROR && dv.tb && dv.netTries < 2) {
             const n = ++dv.netTries, fg = dv.fGen, self = this;
             setTimeout(function () {
@@ -3288,11 +3402,17 @@
             }, 1000 * n);
             return;
         }
-        if (d.type === T.MEDIA_ERROR && dv.mediaTries < 1) {
-            dv.mediaTries++;
-            try { dv.hls.recoverMediaError(); return; } catch (e) { /* fall through */ }
+        if (d.type === T.MEDIA_ERROR) {
+            if (dv.mediaTries < 1) {
+                dv.mediaTries++;
+                try { dv.hls.recoverMediaError(); return; } catch (e) { /* fall through */ }
+            }
+            // Still undecodable after recovery: that clip only.
+            this._dvBadClip(d.frag && d.frag.url);
+            failed(0, 2);
+            return;
         }
-        failed();
+        failed(code, null);
     };
 
     // Stop and release the follower decoder (removeAttribute('src') + load()).
@@ -3369,12 +3489,9 @@
         p.then(function () { dv.playing = false; dv.playFails = 0; }, function (err) {
             dv.playing = false;
             if (self.dv !== dv || dv.fGen !== fg || (err && err.name === 'AbortError')) return;
-            // The browser won't play it (power saving, policy): one source instead of a frozen top band.
-            if (++dv.playFails >= 3) {
-                self._dvCloseF();
-                dv.fFailed = true;
-                self._dvEval();
-            }
+            // Refused without a gesture: retry on the next one. Anything else: back off, then retry.
+            if (err && err.name === 'NotAllowedError') self._dvNeedGesture();
+            else if (++dv.playFails >= 3) { dv.playFails = 0; self._dvSoftFail(0); }
         });
     };
 
