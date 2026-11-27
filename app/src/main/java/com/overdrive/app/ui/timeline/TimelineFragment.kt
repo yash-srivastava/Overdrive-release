@@ -624,6 +624,7 @@ class TimelineFragment : Fragment() {
         val leader = object : com.overdrive.app.ui.timeline.player.DashcamFollower.Leader {
             override fun wallNowMs(): Long = p.wallNowMs()
             override fun clockRunning(): Boolean = p.clockRunning
+            override fun codec() = p.decoderConfig()
         }
         val f = com.overdrive.app.ui.timeline.player.DashcamFollower(out, leader,
             object : com.overdrive.app.ui.timeline.player.DashcamFollower.Listener {
@@ -648,6 +649,10 @@ class TimelineFragment : Fragment() {
     private fun applyLeaderPrefer() {
         val want = if (dashcamView && dashcamViewAt(currentWallMs)) null else preferSource
         if (want == appliedPrefer) return
+        // Front -> 360° only to feed the composite: no visible 360° step, one crossfade into the Dashcam view.
+        if (want == null && appliedPrefer == TYPE_OEM && dashcamView && isOemFamily(activeFamily)) {
+            videoView?.holdForComposite(COMPOSITE_HOLD_MS)
+        }
         appliedPrefer = want
         player?.setPreferredSource(want)
     }
@@ -2141,6 +2146,7 @@ class TimelineFragment : Fragment() {
         private const val KEY_DASHCAM_VIEW = "tl_dashcam_view"
         private const val PREFER_UNSET = "\u0000unset"
         private const val DASHCAM_CHECK_MS = 1_000L
+        private const val COMPOSITE_HOLD_MS = 3_000L
         private const val PLAYER_PREFS = "video_player_prefs"
         private const val PLAYER_PREF_MUTED = "muted"
         private const val TYPE_OEM = "oemDashcam"

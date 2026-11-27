@@ -119,6 +119,9 @@ internal class TimelineGlRenderer(private val host: Host) {
     private var grid: com.overdrive.app.ui.timeline.GridSpec? = null
     private var specLayout = TileLayout.STANDARD
     private var composite = false
+    // The picture on screen is held while the leader switches under it to the clips the composite needs.
+    private var awaitComposite = false
+    private val awaitExpiry = Runnable { endAwait() }
 
     /** Frames latched from the follower input (any thread may read). */
     @Volatile var followerFrames = 0
@@ -212,6 +215,33 @@ internal class TimelineGlRenderer(private val host: Host) {
     fun setFollowerShown(on: Boolean) = post {
         dashWanted = on
         refreshComposite()
+    }
+
+    /**
+     * The leader is about to switch source only to feed the Dashcam view: keep the current picture until the
+     * composite has both frames, then crossfade straight to it (or to the live picture after [maxWaitMs]).
+     */
+    fun holdForComposite(maxWaitMs: Long) = post {
+        if (awaitComposite || composite || !hasFrame || fallback || !bindForWork()) return@post
+        if (!schedule.holdShown) {
+            val slot = 1 - fromSlot
+            if (!capture(slot, System.nanoTime())) return@post
+            fromSlot = slot
+            schedule.hold()
+        }
+        awaitComposite = true
+        handler.removeCallbacks(awaitExpiry)
+        handler.postDelayed(awaitExpiry, maxWaitMs)
+        requestRender()
+    }
+
+    private fun endAwait() {
+        if (!awaitComposite) return
+        awaitComposite = false
+        handler.removeCallbacks(awaitExpiry)
+        // Fade from the held picture (still in fromSlot) to whatever is live now.
+        if (slotTex[fromSlot] != 0 && !fallback) schedule.fadeNow(System.nanoTime(), COMPOSITE_FADE_MS)
+        requestRender()
     }
 
     fun setFollowerVideoSize(w: Int, h: Int) = post {
@@ -540,6 +570,13 @@ internal class TimelineGlRenderer(private val host: Host) {
         val on = dashWanted && dvrHasFrame && dvrInput != null && grid != null && dashProg != null &&
             specLayout != TileLayout.SINGLE && !fallback
         if (on == composite) return
+        if (awaitComposite) {
+            composite = on
+            viewport.applyLayout(if (on) TileLayout.DASHCAM else specLayout)
+            if (on) endAwait()
+            requestRender()
+            return
+        }
         if (animate && hasFrame && !schedule.fading) fadeFor(COMPOSITE_FADE_MS)
         composite = on
         viewport.applyLayout(if (on) TileLayout.DASHCAM else specLayout)
@@ -607,7 +644,7 @@ internal class TimelineGlRenderer(private val host: Host) {
     }
 
     private fun onHold() {
-        if (!hasFrame || fallback || schedule.holdShown || !bindForWork()) return
+        if (!hasFrame || fallback || schedule.holdShown || awaitComposite || !bindForWork()) return
         val slot = 1 - fromSlot
         if (capture(slot, System.nanoTime())) {
             fromSlot = slot
@@ -722,6 +759,7 @@ internal class TimelineGlRenderer(private val host: Host) {
         }
         val p = schedule.fadeProgress(nowNs)
         when {
+            awaitComposite && slotTex[fromSlot] != 0 -> drawHeld(1f)
             schedule.fading -> {
                 val e = FADE_EASE.getInterpolation(p)
                 GLES20.glEnable(GLES20.GL_BLEND)
@@ -1066,6 +1104,8 @@ internal class TimelineGlRenderer(private val host: Host) {
         if (dvrSurface != null) host.onFollowerSurfaceLost()
         releaseFollowerInput()
         dashWanted = false
+        awaitComposite = false
+        handler.removeCallbacks(awaitExpiry)
         if (composite) {
             composite = false
             viewport.applyLayout(specLayout)

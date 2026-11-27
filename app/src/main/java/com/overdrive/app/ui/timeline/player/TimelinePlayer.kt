@@ -75,6 +75,9 @@ class TimelinePlayer(context: Context, private val listener: Listener) {
         return w + (dtNs * clock.speed / 1_000_000f).toLong()
     }
 
+    /** Config of the running video decoder, null when none. */
+    fun decoderConfig(): CodecConfig? = pipe?.config
+
     /** The playback clock runs (false while paused, seeking or waiting for a frame). */
     val clockRunning: Boolean get() = clock.running
 
@@ -86,7 +89,7 @@ class TimelinePlayer(context: Context, private val listener: Listener) {
     private var plan = PlaybackPlan.EMPTY
     private var surface: Surface? = null
     private var graceSurface: Surface? = null
-    private var pipe: VideoPipeline? = null
+    @Volatile private var pipe: VideoPipeline? = null
     private var pipeIds = 0
     private var lastRelease: CountDownLatch? = null
     private var state = State.IDLE

@@ -32,6 +32,8 @@ class DashcamFollower(
     interface Leader {
         fun wallNowMs(): Long
         fun clockRunning(): Boolean
+        /** Decoder config of the leader's running decoder, null when unknown. */
+        fun codec(): CodecConfig?
     }
 
     /** Renderer side; any thread. */
@@ -510,6 +512,16 @@ class DashcamFollower(
             seg = null
             return
         }
+        // Both decoders must fit on this unit for the formats actually being composed.
+        val fmt = probeVideo(dvr)
+        val lead = leader.codec()
+        if (fmt != null && lead != null && !canRunBoth(lead.mime, lead.width, lead.height, LEADER_FPS, fmt)) {
+            if (BuildConfig.DEBUG) Log.d(TAG, "decoders can't run together: $lead + ${fmt.mime} ${fmt.width}x${fmt.height}")
+            src.close()
+            skip.add(key(dvr))
+            seg = null
+            return
+        }
         val p = try {
             MediaPlayer()
         } catch (t: Throwable) {
@@ -537,6 +549,32 @@ class DashcamFollower(
             onPlayerError(0, 0)
         }
         if (BuildConfig.DEBUG) Log.d(TAG, "open ${dvr.id} at ${w - dvr.start} ms")
+    }
+
+    private class VideoFmt(val mime: String, val width: Int, val height: Int, val fps: Int)
+
+    /** The windshield clip's video track (moov is in the cached first block); null when unreadable. */
+    private fun probeVideo(dvr: TlSegment): VideoFmt? {
+        // Own source: MediaExtractor.release() closes the one it was given.
+        val src = HttpRangeDataSource(cache, dvr.videoUrl, dvr.fp)
+        val ex = android.media.MediaExtractor()
+        return try {
+            src.open()
+            ex.setDataSource(src)
+            for (i in 0 until ex.trackCount) {
+                val f = ex.getTrackFormat(i)
+                val mime = f.getString(MediaFormat.KEY_MIME) ?: continue
+                if (!mime.startsWith("video/")) continue
+                val fps = if (f.containsKey(MediaFormat.KEY_FRAME_RATE)) runCatching { f.getInteger(MediaFormat.KEY_FRAME_RATE) }.getOrDefault(30) else 30
+                return VideoFmt(mime, f.getInteger(MediaFormat.KEY_WIDTH), f.getInteger(MediaFormat.KEY_HEIGHT), fps)
+            }
+            null
+        } catch (_: Throwable) {
+            null
+        } finally {
+            try { ex.release() } catch (_: Throwable) {}
+            src.close()
+        }
     }
 
     private fun onPrepared(p: MediaPlayer) {
@@ -678,30 +716,75 @@ class DashcamFollower(
         private const val PREPARE_TIMEOUT_MS = 8_000L
         private const val SEEK_TIMEOUT_MS = 4_000L
 
+        private const val LEADER_FPS = 30
+
         @Volatile private var sessionUnavailable = false
         @Volatile private var probed: Boolean? = null
+        private val pairs = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
 
         /**
-         * Whether this unit can run the follower next to the leader's decoder: a hardware-capable AVC decoder
-         * for 1080p reporting at least two concurrent instances. Blocking (codec list); call off the UI thread.
+         * Coarse gate for offering the mode: an H.264 or H.265 decoder for 1080p with at least two instances.
+         * The formats actually composed are checked per clip pair ([canRunBoth]). Blocking; off the UI thread.
          */
         fun supported(): Boolean {
             if (sessionUnavailable) return false
             probed?.let { return it }
             val ok = try {
-                val fmt = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, 1920, 1080)
                 val list = MediaCodecList(MediaCodecList.REGULAR_CODECS)
-                val name = list.findDecoderForFormat(fmt)
-                val info = list.codecInfos.firstOrNull { it.name == name }
-                val caps = info?.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)
-                caps != null && caps.maxSupportedInstances >= 2 &&
-                    caps.videoCapabilities?.isSizeSupported(1920, 1080) == true
+                listOf(MediaFormat.MIMETYPE_VIDEO_AVC, MediaFormat.MIMETYPE_VIDEO_HEVC).any { mime ->
+                    val caps = capsFor(list, mime, 1920, 1080)
+                    caps != null && caps.maxSupportedInstances >= 2
+                }
             } catch (_: Throwable) {
                 false
             }
             probed = ok
             return ok
         }
+
+        /**
+         * Leader (grid) and follower (windshield) decoders at once: each format supported at its size and rate,
+         * and enough instances (two of one decoder when both use it). Cached per format pair.
+         */
+        private fun canRunBoth(lMime: String, lw: Int, lh: Int, lFps: Int, f: VideoFmt): Boolean {
+            val k = "$lMime $lw x $lh @$lFps|${f.mime} ${f.width} x ${f.height} @${f.fps}"
+            pairs[k]?.let { return it }
+            val ok = try {
+                val list = MediaCodecList(MediaCodecList.REGULAR_CODECS)
+                val a = nameFor(list, lMime, lw, lh)
+                val b = nameFor(list, f.mime, f.width, f.height)
+                val ca = a?.let { capsFor(list, lMime, it) }
+                val cb = b?.let { capsFor(list, f.mime, it) }
+                if (ca == null || cb == null) {
+                    false
+                } else {
+                    val rates = sizeRateOk(ca, lw, lh, lFps) && sizeRateOk(cb, f.width, f.height, f.fps)
+                    val instances = if (a == b) ca.maxSupportedInstances >= 2
+                    else ca.maxSupportedInstances >= 1 && cb.maxSupportedInstances >= 1
+                    rates && instances
+                }
+            } catch (_: Throwable) {
+                // Unknown: try creating it; a failure falls back on its own.
+                true
+            }
+            pairs[k] = ok
+            return ok
+        }
+
+        private fun sizeRateOk(c: android.media.MediaCodecInfo.CodecCapabilities, w: Int, h: Int, fps: Int): Boolean {
+            val v = c.videoCapabilities ?: return false
+            return v.areSizeAndRateSupported(w, h, fps.coerceIn(1, 120).toDouble()) ||
+                (fps > 30 && v.areSizeAndRateSupported(w, h, 30.0))
+        }
+
+        private fun nameFor(list: MediaCodecList, mime: String, w: Int, h: Int): String? =
+            list.findDecoderForFormat(MediaFormat.createVideoFormat(mime, w, h))
+
+        private fun capsFor(list: MediaCodecList, mime: String, name: String): android.media.MediaCodecInfo.CodecCapabilities? =
+            list.codecInfos.firstOrNull { it.name == name }?.getCapabilitiesForType(mime)
+
+        private fun capsFor(list: MediaCodecList, mime: String, w: Int, h: Int): android.media.MediaCodecInfo.CodecCapabilities? =
+            nameFor(list, mime, w, h)?.let { capsFor(list, mime, it) }
 
         /** Cached result of [supported]; null until probed. */
         fun supportedNow(): Boolean? = if (sessionUnavailable) false else probed

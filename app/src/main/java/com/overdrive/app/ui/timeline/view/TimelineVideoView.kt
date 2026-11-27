@@ -168,6 +168,11 @@ class TimelineVideoView @JvmOverloads constructor(
         return true
     }
 
+    /** Keeps the picture on screen until the Dashcam view is drawn (at most [maxWaitMs]). */
+    fun holdForComposite(maxWaitMs: Long) {
+        renderer?.holdForComposite(maxWaitMs)
+    }
+
     fun closeFollowerInput() {
         renderer?.closeFollowerInput()
     }
