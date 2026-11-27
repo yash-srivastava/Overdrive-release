@@ -53,7 +53,10 @@ final class DriveModeWindowPolicy {
         }
     }
 
-    /** Per-task attempt bookkeeping, owned by the single worker thread. */
+    /**
+     * Per-task attempt bookkeeping, owned by the single worker thread. Failures in a row are
+     * bounded; a confirmed float clears the count (the spacing still applies).
+     */
     static final class Attempts {
         int taskId = -1;
         int count;
@@ -67,6 +70,11 @@ final class DriveModeWindowPolicy {
             }
             count++;
             lastMs = nowMs;
+        }
+
+        /** A confirmed float: the task keeps its full budget for the next time it is maximised. */
+        void succeeded(int taskId) {
+            if (taskId == this.taskId) count = 0;
         }
 
         int countFor(int taskId) {

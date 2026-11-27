@@ -117,6 +117,8 @@ class SettingsAppearanceFragment : Fragment() {
                     R.string.settings_drive_mode_window_status_waiting
                 com.overdrive.app.ui.util.DriveModeWindowClient.Status.NEEDS_RESTART ->
                     R.string.settings_drive_mode_window_status_restart
+                com.overdrive.app.ui.util.DriveModeWindowClient.Status.FAILED ->
+                    R.string.settings_drive_mode_window_status_failed
                 com.overdrive.app.ui.util.DriveModeWindowClient.Status.ERROR ->
                     R.string.settings_drive_mode_window_status_error
             }

@@ -104,6 +104,29 @@ public class DriveModeWindowPolicyTest {
     }
 
     @Test
+    public void aConfirmedFloatDoesNotUseUpTheBudget() {
+        DriveModeWindowPolicy.Attempts a = new DriveModeWindowPolicy.Attempts();
+        long now = 10_000L;
+        // The user maximises the floating window many times; each float is confirmed.
+        for (int i = 0; i < 10; i++) {
+            assertTrue(DriveModeWindowPolicy.shouldConvert(true, true, task(FULL, true, false), a, now));
+            a.note(42, now);
+            a.succeeded(42);
+            now += DriveModeWindowPolicy.MIN_ATTEMPT_SPACING_MS;
+        }
+        // Failures in a row are still bounded.
+        for (int i = 0; i < DriveModeWindowPolicy.MAX_ATTEMPTS_PER_TASK; i++) {
+            assertTrue(DriveModeWindowPolicy.shouldConvert(true, true, task(FULL, true, false), a, now));
+            a.note(42, now);
+            now += DriveModeWindowPolicy.MIN_ATTEMPT_SPACING_MS;
+        }
+        assertFalse(DriveModeWindowPolicy.shouldConvert(true, true, task(FULL, true, false), a, now));
+        // A success for another task doesn't clear this one's failures.
+        a.succeeded(7);
+        assertFalse(DriveModeWindowPolicy.shouldConvert(true, true, task(FULL, true, false), a, now));
+    }
+
+    @Test
     public void aFailedReadIsNotMistakenForAMissingKey() {
         assertFalse(DriveModeWindowPolicy.isReadable(""));
         assertFalse(DriveModeWindowPolicy.isReadable(null));
@@ -147,6 +170,10 @@ public class DriveModeWindowPolicyTest {
         assertTrue(main.contains("DriveModeWindowClient.notifyResumed()"));
         // The worker thread starts only where the feature applies.
         String window = read("app/src/main/java/com/overdrive/app/launcher/DriveModeWindow.java");
+        // Settings restore lets the cluster cast re-read freeform; the task's display is resolved
+        // through root tasks.
+        assertTrue(window.contains("ClusterFreeformWindow.forgetFreeformSettingCheck()"));
+        assertTrue(window.contains("ClusterFreeformWindow.taskDisplayId(svc, info, taskId) != 0"));
         int onGear = window.indexOf("public static void onGear(int gear)");
         assertTrue(window.indexOf("if (!appliesHere() || !isEnabled()) return;", onGear) > onGear);
     }

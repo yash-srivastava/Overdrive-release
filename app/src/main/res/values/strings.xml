@@ -1649,6 +1649,7 @@
     <string name="settings_drive_mode_window_status_floating">On: OverDrive is in a floating window</string>
     <string name="settings_drive_mode_window_status_waiting">On: OverDrive moves to a floating window the next time it\'s in front</string>
     <string name="settings_drive_mode_window_status_restart">On, but the head unit didn\'t accept the floating window. Restart the head unit once and try again.</string>
+    <string name="settings_drive_mode_window_status_failed">Couldn\'t finish turning this on or off. Switch it again to retry.</string>
     <string name="settings_drive_mode_window_status_error">Couldn\'t reach the OverDrive service. Try again in a moment.</string>
 
     <!-- ============================================================ -->

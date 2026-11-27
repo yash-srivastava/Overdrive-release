@@ -55,16 +55,20 @@ object DriveModeWindowClient {
             conn.inputStream.bufferedReader().use { it.readText() }
         } else null
         conn.disconnect()
-        text?.let { JSONObject(it) }?.takeIf { it.optBoolean("success", false) }
+        // A failed turn on/off still comes back with the platform flag, so it can be shown.
+        text?.let { JSONObject(it) }?.takeIf {
+            it.optBoolean("success", false) || it.optBoolean("platform", false)
+        }
     } catch (_: Exception) {
         null
     }
 
     /** Which status line to show for a daemon status. */
-    enum class Status { OFF, FLOATING, WAITING, NEEDS_RESTART, ERROR }
+    enum class Status { OFF, FLOATING, WAITING, NEEDS_RESTART, FAILED, ERROR }
 
     fun statusOf(result: JSONObject?): Status {
         if (result == null) return Status.ERROR
+        if (result.optBoolean("failed", false)) return Status.FAILED
         if (!result.optBoolean("enabled", false)) return Status.OFF
         val last = result.optString("lastResult", "")
         return when {

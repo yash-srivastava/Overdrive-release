@@ -58,6 +58,8 @@ public final class DriveModeWindow {
     private static final DriveModeWindowPolicy.Attempts attempts =
             new DriveModeWindowPolicy.Attempts();
     private static volatile String lastResult = "idle";
+    /** Outcome of the last turn on/off, so a failed one keeps showing after a refresh. */
+    private static volatile String lastToggleResult = "idle";
 
     private DriveModeWindow() {
     }
@@ -111,80 +113,72 @@ public final class DriveModeWindow {
     /** Turn the option on or off. Runs the settings work on the caller's (HTTP worker) thread. */
     public static synchronized JSONObject setEnabled(boolean on) {
         if (!appliesHere()) return status("not_this_platform");
+        String result;
         try {
-            if (on) {
-                JSONObject backup = currentBackup();
-                if (backup == null) {
-                    backup = new JSONObject();
-                    for (String[] s : DriveModeWindowPolicy.SETTINGS) {
-                        String prior = readSetting(s[0], s[1]);
-                        // A failed read comes back empty; only a printed "null" means missing.
-                        if (!DriveModeWindowPolicy.isReadable(prior)
-                                || !DriveModeWindowPolicy.isRestorableValue(prior)) {
-                            logger.warn("refusing to enable: " + s[0] + " " + s[1]
-                                    + " has an unexpected value");
-                            return status("setting_unreadable");
-                        }
-                        backup.put(s[0] + "/" + s[1], prior == null ? "null" : prior.trim());
-                    }
-                }
-                // Record the previous values before changing anything, so they can be restored.
-                if (!UnifiedConfigManager.updateSection(SECTION, new JSONObject()
-                        .put("enabled", true).put("backup", backup))) {
-                    return status("config_write_failed");
-                }
-                boolean allOn = true;
-                for (String[] s : DriveModeWindowPolicy.SETTINGS) {
-                    allOn &= DriveModeWindowPolicy.isOn(writeSetting(s[0], s[1], "1"));
-                }
-                lastResult = allOn ? "enabled" : "settings_unconfirmed";
-                logger.info("enabled (settings confirmed=" + allOn + ")");
-                Worker.EXEC.execute(attempts::reset);
-                schedule("enable", 0L);
-                return status(lastResult);
-            }
-            JSONObject backup = currentBackup();
-            Future fullscreen = runOnWorker(DriveModeWindow::restoreFullscreen);
-            fullscreen.await();
-            boolean restored = true;
-            if (backup != null) {
-                for (String[] s : DriveModeWindowPolicy.SETTINGS) {
-                    String prior = backup.optString(s[0] + "/" + s[1], "null");
-                    if (!DriveModeWindowPolicy.isRestorableValue(prior)) continue;
-                    String cmd = DriveModeWindowPolicy.restoreCommand(
-                            s[0], s[1], prior, com.overdrive.app.util.ShellUser.flag());
-                    String readback = ClusterFreeformWindow.runSettingsCmd(
-                            cmd + " && " + getCommand(s[0], s[1]));
-                    boolean ok = DriveModeWindowPolicy.restoreConfirmed(prior, readback);
-                    restored &= ok;
-                }
-            }
-            UnifiedConfigManager.updateSection(SECTION, new JSONObject()
-                    .put("enabled", false).put("backup", restored ? JSONObject.NULL : backup));
-            lastResult = restored ? "disabled" : "restore_unconfirmed";
-            logger.info("disabled (settings restored=" + restored + ")");
-            return status(lastResult);
+            result = on ? DriveModeWindowToggle.enable(ENV) : DriveModeWindowToggle.disable(ENV);
         } catch (Throwable t) {
             logger.warn("setEnabled(" + on + ") failed: " + t.getMessage());
-            return status("error");
+            result = "error";
         }
+        lastToggleResult = result;
+        lastResult = result;
+        logger.info((on ? "enable" : "disable") + ": " + result);
+        return status(result);
     }
 
-    private static JSONObject currentBackup() {
-        JSONObject section = UnifiedConfigManager.loadConfig().optJSONObject(SECTION);
-        return section == null ? null : section.optJSONObject("backup");
-    }
+    /** The daemon side of {@link DriveModeWindowToggle.Env}. */
+    private static final DriveModeWindowToggle.Env ENV = new DriveModeWindowToggle.Env() {
+        @Override public JSONObject section() {
+            return UnifiedConfigManager.loadConfig().optJSONObject(SECTION);
+        }
+
+        @Override public boolean writeSection(JSONObject patch) {
+            return UnifiedConfigManager.updateSection(SECTION, patch);
+        }
+
+        @Override public String currentUserFlag() {
+            return com.overdrive.app.util.ShellUser.flag();
+        }
+
+        @Override public String run(String command) {
+            return ClusterFreeformWindow.runSettingsCmd(command);
+        }
+
+        @Override public DriveModeWindowToggle.WindowRestore restoreWindow() {
+            final DriveModeWindowToggle.WindowRestore[] out = {DriveModeWindowToggle.WindowRestore.FAILED};
+            Future f = runOnWorker(() -> out[0] = restoreFullscreen());
+            if (!f.await()) return DriveModeWindowToggle.WindowRestore.TIMED_OUT;
+            return out[0];
+        }
+
+        @Override public void afterEnable() {
+            try {
+                Worker.EXEC.execute(attempts::reset);
+            } catch (Throwable ignored) {
+            }
+            schedule("enable", 0L);
+        }
+
+        @Override public void afterSettingsRestored() {
+            ClusterFreeformWindow.forgetFreeformSettingCheck();
+        }
+    };
 
     /** Status for the settings screen. */
     public static JSONObject status(String result) {
         JSONObject out = new JSONObject();
         try {
             boolean platform = appliesHere();
-            out.put("success", platform);
+            // A refresh (no result) reports whether the last turn on/off failed.
+            boolean failed = DriveModeWindowToggle.isFailure(
+                    result != null ? result : lastToggleResult);
+            out.put("success", platform && !failed);
+            out.put("failed", failed);
             out.put("platform", platform);
             out.put("enabled", isEnabled());
             out.put("result", result != null ? result : lastResult);
             out.put("lastResult", lastResult);
+            out.put("lastToggleResult", lastToggleResult);
             if (platform) {
                 String freeform = readSetting("global", "enable_freeform_support");
                 out.put("freeformAvailable",
@@ -227,6 +221,8 @@ public final class DriveModeWindow {
             boolean floating = after != null && after.view.taskId == found.view.taskId
                     && after.view.windowingMode == DriveModeWindowPolicy.WINDOWING_MODE_FREEFORM;
             lastResult = floating ? "floating" : applied ? "not_honoured" : "apply_failed";
+            // Only failures use up the budget; a confirmed float leaves it whole for next time.
+            if (floating) attempts.succeeded(found.view.taskId);
             logger.info("task " + found.view.taskId + " (" + why + ", covered="
                     + found.view.coveredByCar + ") → floating window " + bounds.toShortString()
                     + ": " + lastResult + " (attempt "
@@ -238,21 +234,30 @@ public final class DriveModeWindow {
         }
     }
 
-    /** Put our task back to full screen if we floated it. Worker thread. */
-    private static void restoreFullscreen() {
+    /** Put our task back to full screen if it is floating. Worker thread. */
+    private static DriveModeWindowToggle.WindowRestore restoreFullscreen() {
         try {
             Object svc = atm();
-            if (svc == null) return;
+            if (svc == null) return DriveModeWindowToggle.WindowRestore.FAILED;
             Found found = findOurTask(svc);
             if (found == null
                     || found.view.windowingMode != DriveModeWindowPolicy.WINDOWING_MODE_FREEFORM) {
-                return;
+                return DriveModeWindowToggle.WindowRestore.NOT_FLOATING;
             }
-            boolean ok = applyWindowing(svc, found.info,
+            boolean applied = applyWindowing(svc, found.info,
                     DriveModeWindowPolicy.WINDOWING_MODE_FULLSCREEN, new Rect());
-            logger.info("task " + found.view.taskId + " back to full screen: " + ok);
+            sleep(VERIFY_DELAY_MS);
+            Found after = findOurTask(svc);
+            boolean stillFloating = after != null && after.view.taskId == found.view.taskId
+                    && after.view.windowingMode == DriveModeWindowPolicy.WINDOWING_MODE_FREEFORM;
+            logger.info("task " + found.view.taskId + " back to full screen: applied=" + applied
+                    + " stillFloating=" + stillFloating);
+            return applied && !stillFloating
+                    ? DriveModeWindowToggle.WindowRestore.RESTORED
+                    : DriveModeWindowToggle.WindowRestore.FAILED;
         } catch (Throwable t) {
             logger.warn("restoreFullscreen failed: " + t.getMessage());
+            return DriveModeWindowToggle.WindowRestore.FAILED;
         } finally {
             attempts.reset();
         }
@@ -276,7 +281,10 @@ public final class DriveModeWindow {
         boolean coveredByCar = false;
         boolean seenTopVisible = false;
         for (Object info : inventory.tasks) {
-            if (intField(info, "displayId", 0) != 0) continue;
+            int taskId = intField(info, "taskId", -1);
+            // Resolve through the root tasks (the raw field has reported 0 for a task on another
+            // display); an unknown display is not ours.
+            if (taskId < 0 || ClusterFreeformWindow.taskDisplayId(svc, info, taskId) != 0) continue;
             boolean visible = boolField(info, "isVisible", true);
             String top = componentClass(info, "topActivity");
             String topPkg = componentPackage(info, "topActivity");
@@ -290,7 +298,7 @@ public final class DriveModeWindow {
                 continue;
             }
             return new Found(info, new DriveModeWindowPolicy.TaskView(
-                    intField(info, "taskId", -1), windowingMode(info), visible, coveredByCar));
+                    taskId, windowingMode(info), visible, coveredByCar));
         }
         return null;
     }
@@ -396,12 +404,6 @@ public final class DriveModeWindow {
         return ClusterFreeformWindow.runSettingsCmd(getCommand(namespace, key));
     }
 
-    private static String writeSetting(String namespace, String key, String value) {
-        return ClusterFreeformWindow.runSettingsCmd(DriveModeWindowPolicy.settingsCommand(
-                "put", namespace, key, value, com.overdrive.app.util.ShellUser.flag())
-                + " && " + getCommand(namespace, key));
-    }
-
     private static boolean hasFreeformFeature() {
         try {
             android.content.Context ctx = com.overdrive.app.daemon.CameraDaemon.getAppContext();
@@ -423,11 +425,13 @@ public final class DriveModeWindow {
     private static final class Future {
         private final java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
 
-        void await() {
+        /** True when the work finished within the bound. */
+        boolean await() {
             try {
-                done.await(3, TimeUnit.SECONDS);
+                return done.await(5, TimeUnit.SECONDS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+                return false;
             }
         }
     }

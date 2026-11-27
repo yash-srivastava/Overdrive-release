@@ -1852,7 +1852,7 @@ final class ClusterFreeformWindow {
 
     /** Display id for a RunningTaskInfo — the {@code displayId} field when present, else located
      *  via the stack list. -1 when it cannot be determined. */
-    private static int taskDisplayId(Object svc, Object task, int taskId) {
+    static int taskDisplayId(Object svc, Object task, int taskId) {
         // Root-task list FIRST: on Android 12 shared cluster displays RunningTaskInfo.displayId
         // reported 0 for a task that was resumed on display 4 (field log 2026-09-24 03:02:04,
         // "task=42 from=0 to=4" with foreground=com.waze), which made the guardian relaunch a
@@ -2239,8 +2239,10 @@ final class ClusterFreeformWindow {
 
     static boolean prepareHostedFreeformState() {
         recoverFreeformSupportOwnership();
-        // The drive mode window (#1002) needs freeform on; it restores the setting itself when
-        // it is turned off, so the cast must not switch it back here.
+        // Defensive only: this hosted path runs on DiLink 5 / hosted-projection firmware, while the
+        // drive mode window (#1002) exists only on BYD100F. If a config override ever routes a
+        // BYD100F cast here while drive mode holds freeform on, leave the setting alone; drive
+        // mode restores it when turned off.
         if (DriveModeWindow.holdsFreeformSupport()) {
             freeformSettingState = "preserved_for_drive_mode";
             return true;
@@ -2268,12 +2270,12 @@ final class ClusterFreeformWindow {
         String decision = freeformRecoveryDecision(prior, expected, current);
         if ("restored".equals(decision)) return clearFreeformOwnership();
         if (!"expected".equals(decision)) return false;
-        String command = "null".equals(prior)
+        runSettingsCmd("null".equals(prior)
                 ? "settings delete global " + SETTING_ENABLE_FREEFORM
-                    + " && settings get global " + SETTING_ENABLE_FREEFORM
-                : "settings put global " + SETTING_ENABLE_FREEFORM + " 0"
-                    + " && settings get global " + SETTING_ENABLE_FREEFORM;
-        String readback = runSettingsCmd(command);
+                : "settings put global " + SETTING_ENABLE_FREEFORM + " 0");
+        // Read back separately: "settings delete" prints "Deleted N rows", which a combined
+        // command would glue onto the value and never match "null".
+        String readback = runSettingsCmd("settings get global " + SETTING_ENABLE_FREEFORM);
         if (!prior.equals(readback)) {
             freeformSettingState = "restore_unconfirmed";
             return false;
@@ -2283,6 +2285,15 @@ final class ClusterFreeformWindow {
         freeformRecoveryChecked = true;
         freeformSettingState = "restored_for_hosted";
         return true;
+    }
+
+    /**
+     * Forget the cached freeform-setting check, so the next cast reads the setting again. The
+     * drive mode window (#1002) calls this after putting the setting back: a cast that found it
+     * "already enabled" while drive mode held it must not keep assuming it is on.
+     */
+    static void forgetFreeformSettingCheck() {
+        freeformSettingChecked = false;
     }
 
     static boolean hasFreeformSupportOwnership() {
