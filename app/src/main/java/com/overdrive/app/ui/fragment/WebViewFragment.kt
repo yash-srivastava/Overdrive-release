@@ -609,6 +609,7 @@ class WebViewFragment : Fragment() {
         // Publish the live WebView so the key-mapping capture bridge can push
         // native hardware keycodes into whatever page is showing.
         liveWebView = webView
+        WebViewTimers.attach(this)
         loadingOverlay = view.findViewById(R.id.loadingOverlay)
         errorOverlay = view.findViewById(R.id.errorOverlay)
         btnRetry = view.findViewById(R.id.btnRetry)
@@ -2462,6 +2463,14 @@ class WebViewFragment : Fragment() {
         super.onPause()
     }
 
+    internal fun liveWebViewOrNull(): WebView? = webView
+
+    /** The page shown has to keep running while OverDrive is in the background (see [WebViewTimers]). */
+    internal fun keepsTimersInBackground(): Boolean {
+        val url = webView?.url ?: currentUrl ?: return false
+        return try { WebViewTimers.keepsRunning(Uri.parse(url).path) } catch (_: Throwable) { true }
+    }
+
     override fun onDestroyView() {
         cancelAutoRetry()
         autoRetryStep = 0
@@ -2472,6 +2481,7 @@ class WebViewFragment : Fragment() {
         pendingFileCallback = null
         pendingAudioPermissionRequest?.deny()
         pendingAudioPermissionRequest = null
+        WebViewTimers.detach(this)
 
         webView?.let { wv ->
             // Stop any media playback and clear content before destroying

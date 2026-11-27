@@ -19,6 +19,7 @@ final class MarkerHeaderOutputStream extends FilterOutputStream {
     private byte[] pending = new byte[MAX_STATUS_LINE];
     private int pendingLen;
     private boolean passThrough;
+    private int status = -1;
 
     MarkerHeaderOutputStream(OutputStream out) {
         super(out);
@@ -44,6 +45,11 @@ final class MarkerHeaderOutputStream extends FilterOutputStream {
         int end = off + len;
         while (i < end && !passThrough) feed(b[i++]);
         if (i < end) out.write(b, i, end - i);
+    }
+
+    /** The status code of the response's status line once written; -1 before that or for a non-HTTP/1.x write. */
+    synchronized int status() {
+        return status;
     }
 
     /** Bytes held for an unfinished status line stay held. */
@@ -73,12 +79,25 @@ final class MarkerHeaderOutputStream extends FilterOutputStream {
         }
     }
 
+    // "HTTP/1.x 200 ..." -> 200
+    private static int parseStatus(byte[] line, int n) {
+        int i = PREFIX.length + 1;
+        if (n < i + 4 || line[i] != ' ') return -1;
+        int code = 0;
+        for (int k = i + 1; k <= i + 3; k++) {
+            if (line[k] < '0' || line[k] > '9') return -1;
+            code = code * 10 + (line[k] - '0');
+        }
+        return code;
+    }
+
     private void release(boolean marker) throws IOException {
         byte[] head = pending;
         int n = pendingLen;
         pending = null;
         pendingLen = 0;
         passThrough = true;
+        if (marker) status = parseStatus(head, n);
         if (n > 0) out.write(head, 0, n);
         if (marker) out.write(MARKER, 0, MARKER.length);
     }

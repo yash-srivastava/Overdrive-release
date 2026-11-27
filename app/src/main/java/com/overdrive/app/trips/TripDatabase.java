@@ -43,6 +43,13 @@ public class TripDatabase {
     // happens-before edge so any reader sees the freshly-swapped connection.
     private volatile Connection connection;
     private volatile boolean isInitialized = false;
+    // Bumped (under this monitor) by every trips-table write and every reopen; keys the DNA-average cache.
+    private long tripsWriteGen;
+    private long dnaCacheGen = -1;
+    private int dnaCacheDays;
+    private long dnaCacheAt;
+    private DnaScores dnaCache;
+    private static final long DNA_CACHE_MAX_AGE_MS = 10 * 60_000L;
     private final com.overdrive.app.storage.H2StoreSalvage storeSalvage =
             new com.overdrive.app.storage.H2StoreSalvage(DB_PATH, logger);
 
@@ -68,6 +75,7 @@ public class TripDatabase {
             try {
                 connection = com.overdrive.app.storage.H2CommitPoint.wrap(
                         DriverManager.getConnection(JDBC_URL, "sa", ""));
+                synchronized (this) { tripsWriteGen++; }
                 logger.info("H2 connection established");
 
                 // Tune H2 for embedded daemon use
@@ -152,6 +160,7 @@ public class TripDatabase {
             if (connection == null || connection.isClosed()) {
                 connection = com.overdrive.app.storage.H2CommitPoint.wrap(
                         DriverManager.getConnection(JDBC_URL, "sa", ""));
+                tripsWriteGen++;
                 // Idempotent (IF NOT EXISTS throughout). A reopen against a wiped
                 // or replaced .mv.db would otherwise yield a table-less store that
                 // probe() still calls healthy (SELECT 1 needs no table), turning
@@ -203,6 +212,7 @@ public class TripDatabase {
         try {
             connection = com.overdrive.app.storage.H2CommitPoint.wrap(
                     DriverManager.getConnection(JDBC_URL, "sa", ""));
+            tripsWriteGen++;
             createTables();   // idempotent; see reconnect()
             isInitialized = true;
             logger.warn("H2 trip database force-reconnected after failed liveness probe");
@@ -521,6 +531,7 @@ public class TripDatabase {
      */
     public synchronized long insertTrip(TripRecord trip) {
         if (!ensureConnection()) return -1;
+        tripsWriteGen++;
 
         String sql = "INSERT INTO trips (start_time, end_time, distance_km, duration_seconds, " +
                 "avg_speed_kmh, max_speed_kmh, soc_start, soc_end, kwh_start, kwh_end, energy_per_km, " +
@@ -565,6 +576,7 @@ public class TripDatabase {
      */
     public synchronized boolean updateTrip(TripRecord trip) {
         if (!ensureConnection()) return false;
+        tripsWriteGen++;
 
         String sql = "UPDATE trips SET start_time=?, end_time=?, distance_km=?, duration_seconds=?, " +
                 "avg_speed_kmh=?, max_speed_kmh=?, soc_start=?, soc_end=?, kwh_start=?, kwh_end=?, energy_per_km=?, " +
@@ -773,6 +785,7 @@ public class TripDatabase {
      */
     public synchronized boolean deleteTrip(long id) {
         if (!ensureConnection()) return false;
+        tripsWriteGen++;
 
         String sql = "DELETE FROM trips WHERE id=?";
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
@@ -802,6 +815,7 @@ public class TripDatabase {
      */
     public synchronized int deleteByTelemetryPath(String absPath) {
         if (absPath == null || !ensureConnection()) return 0;
+        tripsWriteGen++;
 
         String sql = "DELETE FROM trips WHERE telemetry_file_path=?";
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
@@ -927,6 +941,7 @@ public class TripDatabase {
             if (orphanIds.isEmpty()) return 0;
 
             int deleted = 0;
+            tripsWriteGen++;
             String del = "DELETE FROM trips WHERE id=?";
             try (PreparedStatement pstmt = connection.prepareStatement(del)) {
                 for (Long id : orphanIds) {
@@ -1328,6 +1343,26 @@ public class TripDatabase {
     /**
      * Compute average DNA scores over the given number of days.
      */
+    /**
+     * {@link #getAverageDna} for a hot poll: reused until a trips write or reopen, and at most
+     * {@link #DNA_CACHE_MAX_AGE_MS} as the window slides. A null (none or failed) is not cached.
+     * Callers must not modify the returned scores.
+     */
+    public synchronized DnaScores getAverageDnaCached(int days) {
+        long now = System.currentTimeMillis();
+        if (dnaCache != null && dnaCacheGen == tripsWriteGen && dnaCacheDays == days
+                && now >= dnaCacheAt && now - dnaCacheAt < DNA_CACHE_MAX_AGE_MS) {
+            return dnaCache;
+        }
+        DnaScores s = getAverageDna(days);
+        // read after the query: a reopen inside ensureConnection() bumps it
+        dnaCacheGen = tripsWriteGen;
+        dnaCacheDays = days;
+        dnaCacheAt = now;
+        dnaCache = s;
+        return s;
+    }
+
     public synchronized DnaScores getAverageDna(int days) {
         if (!ensureConnection()) return null;
 
@@ -1465,6 +1500,7 @@ public class TripDatabase {
      */
     public synchronized long resetAll() {
         if (!ensureConnection()) return -1;
+        tripsWriteGen++;
         long total = 0;
         // Order matters only weakly here (no FK constraints in the schema),
         // but child-like tables before parent feels right and matches the
@@ -3215,6 +3251,7 @@ public class TripDatabase {
      */
     public synchronized int deleteOrphanedTrips(long olderThanMs) {
         if (!ensureConnection()) return 0;
+        tripsWriteGen++;
         try (PreparedStatement pstmt = connection.prepareStatement(
                 "DELETE FROM trips WHERE (end_time = 0 OR duration_seconds = 0) AND start_time < ?")) {
             pstmt.setLong(1, olderThanMs);

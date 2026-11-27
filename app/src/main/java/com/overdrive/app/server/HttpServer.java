@@ -577,6 +577,9 @@ public class HttpServer {
 
     private void handleClient(Socket client) {
         OutputStream out = null;
+        MarkerHeaderOutputStream marked = null;
+        int routinePoll = RoutinePollLog.NONE;
+        String routineLine = null;
         try {
             client.setSoTimeout(15000);
             try { client.setTcpNoDelay(true); } catch (Exception ignored) {}
@@ -585,7 +588,7 @@ public class HttpServer {
             // Reuse this same stream for the body: no header-byte read-ahead is lost.
             BufferedInputStream input = new BufferedInputStream(client.getInputStream(), 8192);
             HttpRequestHead head = new HttpRequestHead(input);
-            out = new MarkerHeaderOutputStream(new BufferedOutputStream(client.getOutputStream()));
+            out = marked = new MarkerHeaderOutputStream(new BufferedOutputStream(client.getOutputStream()));
 
             String requestLine = head.readRequestLine();
             if (requestLine == null) {
@@ -630,9 +633,16 @@ public class HttpServer {
             // state as /api/vehicle/media?poll=… (1 Hz while armed); its pause/resume calls use
             // the plain path and still log. The proximity signal relay and the automations list
             // are 0.5-1 Hz background polls; a refused non-local relay call logs below. The Trip Briefing card
-            // reads /api/briefing/gear at 4 Hz while it is up.
+            // reads /api/briefing/gear at 4 Hz while it is up. The Custom Layouts cluster's heartbeat and
+            // config polls log the first of a run, a count a minute and every non-200 (RoutinePollLog).
             // All other requests still log.
-            if (!(requestLine.contains("/api/stream/turn")
+            routinePoll = RoutinePollLog.kind(requestLine);
+            if (routinePoll != RoutinePollLog.NONE) {
+                routineLine = redactQueryToken(requestLine);
+                if (RoutinePollLog.onRequest(routinePoll, System.nanoTime() / 1_000_000L)) {
+                    CameraDaemon.log("HTTP: " + routineLine);
+                }
+            } else if (!(requestLine.contains("/api/stream/turn")
                     || requestLine.contains("/api/stream/combined-availability")
                     || requestLine.contains("/api/bs/status")
                     || requestLine.contains("/api/bs/live")
@@ -1281,6 +1291,10 @@ public class HttpServer {
         } catch (Exception e) {
             CameraDaemon.log("HTTP error: " + e.getMessage());
         } finally {
+            if (routinePoll != RoutinePollLog.NONE) {
+                try { RoutinePollLog.onResponse(routinePoll, routineLine, marked != null ? marked.status() : -1); }
+                catch (Throwable ignored) {}
+            }
             CALLER.remove();
             // Guarded so a gate failure can never skip the socket close below.
             try { StepUpGate.clearThread(); } catch (Throwable ignored) {}
