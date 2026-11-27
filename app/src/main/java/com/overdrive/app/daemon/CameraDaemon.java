@@ -571,6 +571,8 @@ public class CameraDaemon {
     public static void main(String[] args) {
         com.overdrive.app.util.ScratchRoot.bootstrapFromEnv();
         initFileLogging();
+        String heapLine = DaemonHeap.liftSmallGrowthLimit();
+        if (heapLine != null) log(heapLine);
 
         // CRITICAL: Acquire singleton lock FIRST - exit if another instance is running
         if (!acquireSingletonLock()) {
@@ -2689,9 +2691,9 @@ public class CameraDaemon {
             long nativeSizeMB = android.os.Debug.getNativeHeapSize() / 1024 / 1024;
 
             log(String.format(
-                "MEM: heap=%d/%dMB (max=%d), native=%d/%dMB%s",
+                "MEM: heap=%d/%dMB (max=%d), native=%d/%dMB%s%s",
                 heapUsedMB, heapTotalMB, heapMaxMB,
-                nativeHeapMB, nativeSizeMB, sysLine));
+                nativeHeapMB, nativeSizeMB, sysLine, DaemonHeap.gcStats()));
         } catch (Throwable t) {
             log("logMemoryStatus error: " + t.getMessage());
         }
