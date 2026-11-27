@@ -88,7 +88,7 @@ class ProjectionFragment : Fragment() {
     private var btnCast: Button? = null
     private var btnStop: Button? = null
     private var btnAdjust: Button? = null
-    private var clusterInputKeys: MaterialButton? = null
+    private var clusterInputKeys: View? = null
     private var statusText: TextView? = null
     private var statusDot: View? = null
     private var appToast: AppToast? = null
@@ -340,7 +340,7 @@ class ProjectionFragment : Fragment() {
             requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, theaterBackCallback)
             wireAppSpinner()
             wireBounds()
-            wireClusterInputKeys()
+            wireClusterInputKeys(view)
             wireTexture()
             wireStageLayout()
             wireScaleGroup()
@@ -600,48 +600,31 @@ class ProjectionFragment : Fragment() {
         b.onTouchCancel = { ClusterViewMirrorClient.cancelTouch(mirrorSessionId) }
     }
 
-    /** A compact menu fits both portrait and landscape docks and leaves the mirror fully
-     *  available for gestures. Every key follows the same live session/display as touch. */
-    private fun wireClusterInputKeys() {
-        val row = spinnerApps?.parent as? LinearLayout ?: return
-        val button = MaterialButton(requireContext()).apply {
-            text = "⋮"
-            contentDescription = getString(R.string.projection_cluster_controls)
-            minimumWidth = 0
-            setPadding(0, 0, 0, 0)
-            val size = resources.getDimensionPixelSize(R.dimen.dashboard_modern_touch_target)
-            layoutParams = LinearLayout.LayoutParams(size, size).apply {
-                marginStart = (8 * resources.displayMetrics.density).roundToInt()
-            }
-            setOnClickListener {
-                val labels = arrayOf(
-                    getString(R.string.projection_cluster_back),
-                    getString(R.string.projection_cluster_home),
-                    getString(R.string.projection_cluster_volume_down),
-                    getString(R.string.projection_cluster_volume_up)
-                )
-                val keys = intArrayOf(KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_HOME,
-                    KeyEvent.KEYCODE_VOLUME_DOWN, KeyEvent.KEYCODE_VOLUME_UP)
-                MaterialAlertDialogBuilder(requireContext())
-                    .setTitle(R.string.projection_cluster_controls)
-                    .setItems(labels) { _, index ->
-                        if (aaosHostedMap) return@setItems
-                        val eventTime = android.os.SystemClock.uptimeMillis()
-                        val inputEpoch = ClusterViewMirrorClient.currentInputEpoch()
-                        submitClusterInput {
-                            if (aaosHostedMap) return@submitClusterInput
-                            val accepted = ClusterViewMirrorClient.key(
-                                mirrorSessionId, keys[index], eventTime, inputEpoch)
-                            if (!accepted) postMain {
-                                notifyToast(getString(R.string.projection_cluster_control_unavailable),
-                                    AppToast.Kind.WARNING)
-                            }
-                        }
-                    }.show()
+    /** Back, Home and Volume are dock buttons under the mirror (they were behind a ⋮ dialog).
+     *  Every key follows the same live session/display as touch. */
+    private fun wireClusterInputKeys(root: View) {
+        clusterInputKeys = root.findViewById(R.id.projectionClusterKeys)
+        listOf(
+            R.id.projectionKeyBack to KeyEvent.KEYCODE_BACK,
+            R.id.projectionKeyHome to KeyEvent.KEYCODE_HOME,
+            R.id.projectionKeyVolumeDown to KeyEvent.KEYCODE_VOLUME_DOWN,
+            R.id.projectionKeyVolumeUp to KeyEvent.KEYCODE_VOLUME_UP,
+        ).forEach { (id, keyCode) ->
+            root.findViewById<View>(id)?.setOnClickListener { sendClusterKey(keyCode) }
+        }
+    }
+
+    private fun sendClusterKey(keyCode: Int) {
+        if (aaosHostedMap) return
+        val eventTime = android.os.SystemClock.uptimeMillis()
+        val inputEpoch = ClusterViewMirrorClient.currentInputEpoch()
+        submitClusterInput {
+            if (aaosHostedMap) return@submitClusterInput
+            val accepted = ClusterViewMirrorClient.key(mirrorSessionId, keyCode, eventTime, inputEpoch)
+            if (!accepted) postMain {
+                notifyToast(getString(R.string.projection_cluster_control_unavailable), AppToast.Kind.WARNING)
             }
         }
-        clusterInputKeys = button
-        row.addView(button)
     }
 
     /**
