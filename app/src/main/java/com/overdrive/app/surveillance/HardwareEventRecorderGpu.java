@@ -2089,7 +2089,16 @@ public class HardwareEventRecorderGpu {
         final Exception[] createError = {null};
         Thread createThread = new Thread(() -> {
             try {
-                MediaCodec created = MediaCodec.createEncoderByType(finalCodecMimeType);
+                MediaCodec created;
+                try {
+                    created = MediaCodec.createEncoderByType(finalCodecMimeType);
+                } catch (Exception first) {
+                    // A background export may have released its codecs a moment ago: one short retry.
+                    if (!CameraLoadProbe.backgroundCodecsRecentlyHeld()) throw first;
+                    logger.warn("Encoder create failed right after a background export; retrying once");
+                    Thread.sleep(200L);
+                    created = MediaCodec.createEncoderByType(finalCodecMimeType);
+                }
                 if (!createHandoff.publish(created) && created != null) {
                     try {
                         created.release();

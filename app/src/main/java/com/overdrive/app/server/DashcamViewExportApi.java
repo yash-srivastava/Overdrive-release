@@ -88,7 +88,10 @@ public final class DashcamViewExportApi {
         }
         if (rest.equals("cancel") && "POST".equals(method)) {
             Job job = current;
-            if (job != null && job.running()) job.cancel = true;
+            if (job != null && job.running()) {
+                job.cancel = true;
+                job.abort.abort("cancelled");
+            }
             JSONObject res = new JSONObject();
             res.put("success", true);
             res.put("job", job != null ? job.json() : JSONObject.NULL);
@@ -312,37 +315,46 @@ public final class DashcamViewExportApi {
             if (part.startsWith("ids=")) ids = java.net.URLDecoder.decode(part.substring(4), "UTF-8");
         }
         JSONArray ok = new JSONArray();
+        JSONArray capped = new JSONArray();
         if (ids != null) {
             int n = 0;
             for (String id : ids.split(",")) {
                 if (!id.matches("[a-fA-F0-9]{32}") || n++ >= MAX_IDS) continue;
-                if (availableFor(id)) ok.put(id);
+                int a = availableFor(id);
+                if (a > 0) ok.put(id);
+                if (a > 1) capped.put(id);
             }
         }
         JSONObject res = new JSONObject();
         res.put("success", true);
         res.put("ids", ok);
+        // Clips longer than maxSeconds: only their first maxSeconds are saved.
+        res.put("capped", capped);
         res.put("maxSeconds", MAX_RANGE_MS / 1000L);
         HttpResponse.sendJson(out, res.toString());
     }
 
-    private static boolean availableFor(String id) {
+    /** 0 not exportable, 1 exportable, 2 exportable but longer than the cap (first part saved). */
+    private static int availableFor(String id) {
         long now = android.os.SystemClock.elapsedRealtime();
         synchronized (AVAILABLE_CACHE) {
             long[] hit = AVAILABLE_CACHE.get(id);
-            if (hit != null && now - hit[0] < AVAILABLE_TTL_MS) return hit[1] != 0;
+            if (hit != null && now - hit[0] < AVAILABLE_TTL_MS) return (int) hit[1];
         }
-        boolean ok;
+        int ok = 0;
         try {
             TimelineData.ClipRef c = TimelineData.clip(id);
-            ok = c != null && rangeFor(c) != null && plan(c.start, rangeFor(c)[1], c.type) != null;
+            long[] range = rangeFor(c);
+            if (range != null && plan(range[0], range[1], c.type) != null) {
+                ok = c.end - c.start > MAX_RANGE_MS ? 2 : 1;
+            }
         } catch (Refusal r) {
-            ok = false;
+            ok = 0;
         } catch (Throwable t) {
-            return false; // index unavailable: not cached
+            return 0; // index unavailable: not cached
         }
         synchronized (AVAILABLE_CACHE) {
-            AVAILABLE_CACHE.put(id, new long[]{now, ok ? 1 : 0});
+            AVAILABLE_CACHE.put(id, new long[]{now, ok});
         }
         return ok;
     }
@@ -370,6 +382,7 @@ public final class DashcamViewExportApi {
         volatile boolean cancel;
         volatile boolean paused;
         volatile Thread thread;
+        final DashcamViewExporter.Abort abort = new DashcamViewExporter.Abort();
 
         Job(String sourceId, long from, long to) {
             this.sourceId = sourceId;
@@ -599,10 +612,13 @@ public final class DashcamViewExportApi {
         try {
             logger.info("Dashcam view export " + job.from + ".." + job.to + " (" + plan.leaders.size()
                     + " grid, " + plan.followers.size() + " windshield clips) -> " + output.getName());
+            // The recorder's start signal releases the export's codecs at once on a releaser thread.
+            CameraLoadProbe.setBusyListener(() -> job.abort.abort(CameraLoadProbe.lastBusyReason()));
+            if (CameraLoadProbe.busyEpoch() != epoch) job.abort.abort(CameraLoadProbe.lastBusyReason());
             if (monitoring()) health.calibrate(listener);
             int[] inUse = codecsInUse();
             DashcamViewExporter.Result r = DashcamViewExporter.run(plan.leaders, plan.followers,
-                    plan.from, plan.to, strength, tmp, inUse[0], inUse[1], listener);
+                    plan.from, plan.to, strength, tmp, inUse[0], inUse[1], job.abort, listener);
             finish(job, output, tmp, plan);
             ok = true;
             logger.info("Dashcam view export saved " + output.getName() + " " + r.width + "x" + r.height
@@ -616,6 +632,7 @@ public final class DashcamViewExportApi {
             job.error = failureMessage("failed", t.getMessage());
             logger.warn("Dashcam view export failed: " + t);
         } finally {
+            CameraLoadProbe.setBusyListener(null);
             job.paused = false;
             if (!ok) {
                 RemovableStorageFs.delete(tmp);

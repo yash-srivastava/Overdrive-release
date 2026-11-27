@@ -7,6 +7,7 @@ window.DashcamExport = (function () {
     var API = '/api/recordings/dashcam-view/';
     var ID_RE = /^[a-f0-9]{32}$/i;
     var avail = {};
+    var capped = {};
     var asking = false;
     var job = null;
     var pollTimer = 0;
@@ -70,6 +71,8 @@ window.DashcamExport = (function () {
             for (var a = 0; a < ask.length; a++) avail[ask[a]] = false;
             var ids = j.ids || [];
             for (var b = 0; b < ids.length; b++) if (ID_RE.test(ids[b])) avail[String(ids[b]).toLowerCase()] = true;
+            var cap = j.capped || [];
+            for (var c = 0; c < cap.length; c++) if (ID_RE.test(cap[c])) capped[String(cap[c]).toLowerCase()] = true;
             if (ids.length) decorate();
         });
     }
@@ -102,11 +105,16 @@ window.DashcamExport = (function () {
         } else {
             btn.innerHTML = ICON;
             btn.classList.remove('dv-ready');
-            title = t('events.dv_export', 'Save as one video') + ' — ' +
-                t('events.dv_export_hint', 'Combines the windshield camera and the 360° view into a single file you can share. Runs on the car while parked and may take a few minutes.');
+            title = t('events.dv_export', 'Save as one video') + ' — ' + hintFor(id);
         }
         btn.title = title;
         btn.setAttribute('aria-label', title);
+    }
+
+    function hintFor(id) {
+        var hint = t('events.dv_export_hint', 'Combines the windshield camera and the 360° view into a single file you can share. Runs on the car while parked and may take a few minutes.');
+        if (capped[id]) hint += ' ' + t('events.dv_export_capped', 'This clip is longer than 5 minutes: only the first 5 minutes are saved.');
+        return hint;
     }
 
     function paintAll() {
@@ -136,7 +144,7 @@ window.DashcamExport = (function () {
             toast(t('events.dv_err_busy', 'An export is already running.'), 'warning');
             return;
         }
-        var hint = t('events.dv_export_hint', 'Combines the windshield camera and the 360° view into a single file you can share. Runs on the car while parked and may take a few minutes.');
+        var hint = hintFor(id);
         var ask = (window.BYD && BYD.utils && BYD.utils.confirmDialog)
             ? BYD.utils.confirmDialog({
                 title: t('events.dv_export', 'Save as one video'),

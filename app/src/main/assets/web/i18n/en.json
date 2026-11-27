@@ -2772,6 +2772,7 @@
     "pack_ready": "Evidence pack ready",
     "dv_export": "Save as one video",
     "dv_export_hint": "Combines the windshield camera and the 360° view into a single file you can share. Runs on the car while parked and may take a few minutes.",
+    "dv_export_capped": "This clip is longer than 5 minutes: only the first 5 minutes are saved.",
     "dv_export_confirm": "Save video",
     "dv_export_started": "Saving the Dashcam view. This may take a few minutes.",
     "dv_export_running": "Saving Dashcam view… tap to cancel",

@@ -34,7 +34,8 @@ public final class DashcamViewExporter {
 
     public static final int MAX_OUTPUT_WIDTH = 1920;
     private static final long CODEC_CREATE_TIMEOUT_MS = 5_000L;
-    private static final long FRAME_WAIT_MS = 1_000L;
+    // Frame-available wait; re-checks the stop flag every slice.
+    private static final long FRAME_WAIT_MS = 500L;
     // Wait slice: a stop request (recording / ACC ON) is seen within one slice.
     private static final long POLL_SLICE_MS = 20L;
     // Leader stall (no frame and no EOS) before the job fails.
@@ -46,10 +47,48 @@ public final class DashcamViewExporter {
     /** Failure with a short machine code for the API ("cancelled", "acc_on", "codec", ...). */
     public static final class ExportException extends Exception {
         public final String code;
+        /** True for a stop request (cancel, ACC ON, recording, ...), as opposed to a media failure. */
+        public final boolean stop;
 
         public ExportException(String code, String message) {
+            this(code, message, false);
+        }
+
+        ExportException(String code, String message, boolean stop) {
             super(message);
             this.code = code;
+            this.stop = stop;
+        }
+    }
+
+    /**
+     * Stops a running export from any thread without waiting for it: the codecs are stopped and
+     * released on a short-lived releaser thread at once, the worker unwinds on its next slice.
+     * Never blocks the caller (safe from the recorder's start path).
+     */
+    public static final class Abort {
+        private volatile String reason;
+        private Session session;
+
+        public String reason() {
+            return reason;
+        }
+
+        public void abort(String why) {
+            if (reason == null) reason = why != null ? why : "cancelled";
+            final Session s;
+            synchronized (this) {
+                s = session;
+            }
+            if (s == null || !s.markReleasing()) return;
+            Thread t = new Thread(s::releaseCodecs, "DvExportRelease");
+            t.setDaemon(true);
+            t.setPriority(Thread.MAX_PRIORITY);
+            t.start();
+        }
+
+        synchronized void attach(Session s) {
+            session = s;
         }
     }
 
@@ -112,12 +151,19 @@ public final class DashcamViewExporter {
      */
     public static Result run(List<Item> leaders, List<Item> followers, long fromWall, long toWall,
                              float strength, File output, int encodersInUse, int decodersInUse,
-                             Listener listener) throws ExportException {
+                             Abort abort, Listener listener) throws ExportException {
         if (leaders.isEmpty()) throw new ExportException("unavailable", "No grid clips in range");
         Session session = new Session(leaders, followers, fromWall, toWall, strength, output, listener);
         session.encodersInUse = encodersInUse;
         session.decodersInUse = decodersInUse;
-        return session.render();
+        session.abort = abort != null ? abort : new Abort();
+        session.abort.attach(session);
+        try {
+            if (session.abort.reason() != null) session.markReleasing();
+            return session.render();
+        } finally {
+            session.abort.attach(null);
+        }
     }
 
     /** Largest instance count any codec for {@code mime} reports (0 when none / unknown). */
@@ -289,7 +335,10 @@ public final class DashcamViewExporter {
         int pending = -1;
         long pendingUs;
 
-        void open(File file, Surface surface, long seekUs) throws Exception {
+        Session session;
+
+        void open(Session owner, File file, Surface surface, long seekUs) throws Exception {
+            session = owner;
             inputDone = false;
             outputDone = false;
             pending = -1;
@@ -316,7 +365,7 @@ public final class DashcamViewExporter {
                 format.setInteger(MediaFormat.KEY_PRIORITY, 1);
             } catch (Throwable ignored) {
             }
-            codec = createCodec(format.getString(MediaFormat.KEY_MIME), false);
+            codec = session.createCodec(format.getString(MediaFormat.KEY_MIME), false);
             codec.configure(format, surface, null, 0);
             codec.start();
         }
@@ -366,8 +415,10 @@ public final class DashcamViewExporter {
 
         void close() {
             if (codec != null) {
-                try { codec.stop(); } catch (Throwable ignored) {}
-                try { codec.release(); } catch (Throwable ignored) {}
+                if (session == null || session.unregister(codec)) {
+                    try { codec.stop(); } catch (Throwable ignored) {}
+                    try { codec.release(); } catch (Throwable ignored) {}
+                }
                 codec = null;
             }
             if (extractor != null) {
@@ -390,33 +441,6 @@ public final class DashcamViewExporter {
         }
     }
 
-    private static MediaCodec createCodec(String mime, boolean encoder) throws Exception {
-        final LateResourceHandoff<MediaCodec> handoff = new LateResourceHandoff<>();
-        final Exception[] error = {null};
-        Thread t = new Thread(() -> {
-            try {
-                MediaCodec c = encoder ? MediaCodec.createEncoderByType(mime) : MediaCodec.createDecoderByType(mime);
-                if (!handoff.publish(c) && c != null) c.release();
-            } catch (Exception e) {
-                error[0] = e;
-            }
-        }, "DvExportCodecCreate");
-        t.setDaemon(true);
-        t.start();
-        t.join(CODEC_CREATE_TIMEOUT_MS);
-        if (t.isAlive()) {
-            MediaCodec late = handoff.abandon();
-            if (late != null) {
-                try { late.release(); } catch (Throwable ignored) {}
-            }
-            throw new ExportException("codec", "Codec create timed out (" + mime + ")");
-        }
-        if (error[0] != null) throw error[0];
-        MediaCodec c = handoff.take();
-        if (c == null) throw new ExportException("codec", "No codec for " + mime);
-        return c;
-    }
-
     private static final class Session {
         final List<Item> leaders;
         final List<Item> followers;
@@ -426,6 +450,10 @@ public final class DashcamViewExporter {
         final File output;
         final Listener listener;
         final Result result = new Result();
+        Abort abort;
+        private final Object codecLock = new Object();
+        private final java.util.ArrayList<MediaCodec> liveCodecs = new java.util.ArrayList<>(3);
+        private boolean releasing;
         int encodersInUse;
         int decodersInUse;
 
@@ -502,6 +530,8 @@ public final class DashcamViewExporter {
             } catch (ExportException e) {
                 throw e;
             } catch (Throwable t) {
+                String reason = abort != null ? abort.reason() : null;
+                if (reason != null) throw new ExportException(reason, "Stopped: " + reason, true);
                 logger.warn("Export failed: " + t);
                 throw new ExportException("failed", t.getMessage() != null ? t.getMessage() : t.toString());
             } finally {
@@ -510,9 +540,92 @@ public final class DashcamViewExporter {
         }
 
         void checkStop() throws ExportException {
-            if (Thread.currentThread().isInterrupted()) throw new ExportException("cancelled", "Cancelled");
-            String reason = listener != null ? listener.stopReason() : null;
-            if (reason != null) throw new ExportException(reason, "Stopped: " + reason);
+            String reason = abort != null ? abort.reason() : null;
+            if (reason == null && Thread.currentThread().isInterrupted()) reason = "cancelled";
+            if (reason == null && listener != null) reason = listener.stopReason();
+            if (reason != null) {
+                if (abort != null) abort.abort(reason);
+                throw new ExportException(reason, "Stopped: " + reason, true);
+            }
+        }
+
+        /** False when already releasing. */
+        boolean markReleasing() {
+            synchronized (codecLock) {
+                if (releasing) return false;
+                releasing = true;
+                return true;
+            }
+        }
+
+        /** Releaser thread: stop + release every live codec now; the worker's later close skips them. */
+        void releaseCodecs() {
+            long t0 = System.nanoTime();
+            java.util.ArrayList<MediaCodec> list;
+            synchronized (codecLock) {
+                releasing = true;
+                list = new java.util.ArrayList<>(liveCodecs);
+                liveCodecs.clear();
+            }
+            for (MediaCodec c : list) {
+                try { c.stop(); } catch (Throwable ignored) {}
+                try { c.release(); } catch (Throwable ignored) {}
+            }
+            CameraLoadProbe.noteBackgroundCodecs(false);
+            logger.info("Export codecs released in " + (System.nanoTime() - t0) / 1_000_000 + "ms ("
+                    + list.size() + ")");
+        }
+
+        /** True when the caller still owns {@code c} (not taken by the releaser). */
+        boolean unregister(MediaCodec c) {
+            synchronized (codecLock) {
+                boolean owned = liveCodecs.remove(c);
+                if (liveCodecs.isEmpty()) CameraLoadProbe.noteBackgroundCodecs(false);
+                return owned;
+            }
+        }
+
+        /** Creates a codec on a helper thread, waited for in slices; refuses while a stop is pending. */
+        MediaCodec createCodec(String mime, boolean encoder) throws Exception {
+            checkStop();
+            final LateResourceHandoff<MediaCodec> handoff = new LateResourceHandoff<>();
+            final Exception[] error = {null};
+            Thread t = new Thread(() -> {
+                try {
+                    MediaCodec c = encoder ? MediaCodec.createEncoderByType(mime) : MediaCodec.createDecoderByType(mime);
+                    if (!handoff.publish(c) && c != null) c.release();
+                } catch (Exception e) {
+                    error[0] = e;
+                }
+            }, "DvExportCodecCreate");
+            t.setDaemon(true);
+            t.start();
+            long deadline = System.nanoTime() + CODEC_CREATE_TIMEOUT_MS * 1_000_000L;
+            while (t.isAlive() && System.nanoTime() < deadline) {
+                t.join(POLL_SLICE_MS);
+                if (t.isAlive() && abort.reason() != null) break;
+            }
+            if (t.isAlive()) {
+                MediaCodec late = handoff.abandon();
+                if (late != null) {
+                    try { late.release(); } catch (Throwable ignored) {}
+                }
+                checkStop();
+                throw new ExportException("codec", "Codec create timed out (" + mime + ")");
+            }
+            if (error[0] != null) throw error[0];
+            MediaCodec c = handoff.take();
+            if (c == null) throw new ExportException("codec", "No codec for " + mime);
+            synchronized (codecLock) {
+                if (!releasing) {
+                    liveCodecs.add(c);
+                    CameraLoadProbe.noteBackgroundCodecs(true);
+                    return c;
+                }
+            }
+            try { c.release(); } catch (Throwable ignored) {}
+            checkStop();
+            throw new ExportException("cancelled", "Cancelled", true);
         }
 
         private void setUp() throws Exception {
@@ -646,7 +759,7 @@ public final class DashcamViewExporter {
 
         private void renderLeader(Item item) throws Exception {
             checkStop();
-            leader.open(item.file, gridSurface, Math.max(0L, (item.fromWall - item.clipStartWall) * 1000L));
+            leader.open(this, item.file, gridSurface, Math.max(0L, (item.fromWall - item.clipStartWall) * 1000L));
             openAudio(item);
             long lastFrameNs = System.nanoTime();
             try {
@@ -699,6 +812,15 @@ public final class DashcamViewExporter {
         }
 
         private long nextFrameNs;
+        private int followerFailed = -1;
+
+        /** An unreadable dvr clip leaves the top band black for its span (no retry per frame). */
+        private void followerUnreadable(Item f, int index, Throwable t) {
+            logger.warn("Windshield clip " + f.file.getName() + " unreadable: " + t.getMessage());
+            follower.close();
+            followerFailed = index;
+            dvrReady = false;
+        }
 
         /** Self-imposed frame rate cap: may run slower than real time. */
         private void paceFrame() throws ExportException {
@@ -757,14 +879,16 @@ public final class DashcamViewExporter {
                 follower.close();
                 followerIndex = want;
                 dvrReady = false;
+                if (want == followerFailed) return;
                 try {
-                    follower.open(f.file, dvrSurface, Math.max(0L, wallUs - f.clipStartWall * 1000L));
+                    follower.open(this, f.file, dvrSurface, Math.max(0L, wallUs - f.clipStartWall * 1000L));
                 } catch (ExportException e) {
-                    throw e;
+                    if (e.stop || "codec".equals(e.code)) throw e;
+                    followerUnreadable(f, want, e);
+                    return;
                 } catch (Throwable t) {
-                    // An unreadable dvr clip leaves the top band black for its span.
-                    logger.warn("Windshield clip " + f.file.getName() + " unreadable: " + t.getMessage());
-                    follower.close();
+                    checkStop();
+                    followerUnreadable(f, want, t);
                     return;
                 }
                 Grid g = leaders.get(0).grid;
@@ -826,6 +950,7 @@ public final class DashcamViewExporter {
         private void drainEncoder(boolean endOfStream) throws ExportException {
             long deadline = System.nanoTime() + 5_000_000_000L;
             while (true) {
+                if (endOfStream) checkStop();
                 int idx = encoder.dequeueOutputBuffer(encInfo, endOfStream ? 10_000L : 0L);
                 if (idx == MediaCodec.INFO_TRY_AGAIN_LATER) {
                     if (!endOfStream) return;
@@ -959,8 +1084,10 @@ public final class DashcamViewExporter {
             leader.close();
             follower.close();
             if (encoder != null) {
-                try { encoder.stop(); } catch (Throwable ignored) {}
-                try { encoder.release(); } catch (Throwable ignored) {}
+                if (unregister(encoder)) {
+                    try { encoder.stop(); } catch (Throwable ignored) {}
+                    try { encoder.release(); } catch (Throwable ignored) {}
+                }
                 encoder = null;
             }
             closeAudio();

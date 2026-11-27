@@ -41,6 +41,21 @@ public final class CameraLoadProbe {
 
     public static long busyEpoch() { return BUSY_EPOCH.get(); }
 
+    private static volatile boolean backgroundCodecs;
+    private static volatile long backgroundCodecsFreedAtMs;
+
+    /** Background work holds (true) or just freed (false) hardware codecs. */
+    public static void noteBackgroundCodecs(boolean held) {
+        if (!held && backgroundCodecs) backgroundCodecsFreedAtMs = android.os.SystemClock.elapsedRealtime();
+        backgroundCodecs = held;
+    }
+
+    /** True while background work holds codecs or freed them within the last second. */
+    public static boolean backgroundCodecsRecentlyHeld() {
+        return backgroundCodecs
+                || android.os.SystemClock.elapsedRealtime() - backgroundCodecsFreedAtMs < 1_000L;
+    }
+
     public static String lastBusyReason() { return busyReason; }
 
     /** The listener must only set flags (it runs on the recorder's thread). */
