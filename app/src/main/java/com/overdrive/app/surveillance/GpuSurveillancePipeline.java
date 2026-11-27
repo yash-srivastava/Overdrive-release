@@ -3828,6 +3828,7 @@ public class GpuSurveillancePipeline {
      * @param prefix Filename prefix (e.g., "cam", "proximity", "event")
      */
     public void startRecording(java.io.File outputDir, String prefix) {
+        CameraLoadProbe.recordingStarting("recording");
         synchronized (this) {
             if (!running || stopping || confirmedStopInProgress) {
                 logger.warn("startRecording refused — pipeline is not available "
@@ -5127,6 +5128,7 @@ public class GpuSurveillancePipeline {
      */
     public void enableStreaming(int streamWidth, int streamHeight, int streamFps,
                                int streamBitrate) throws Exception {
+        CameraLoadProbe.recordingStarting("live_view");
         resumeIdleCameraSource("live view");
         streamLifecycleLock.lock();
         try {

@@ -3632,6 +3632,7 @@ public class HardwareEventRecorderGpu {
      */
     public boolean triggerEventRecording(String outputPath, long postRecordDurationMs,
             VideoUploadPolicy uploadPolicy) {
+        CameraLoadProbe.recordingStarting("recording");
         // Format barrier (LOCK-FREE): refuse to build a muxer until the encoder
         // has published its OUTPUT_FORMAT_CHANGED. Run BEFORE startStopLock
         // entry so a 2-s busy poll doesn't block concurrent stopEventRecording
@@ -5349,6 +5350,7 @@ public class HardwareEventRecorderGpu {
      * immediately from live frames.
      */
     public boolean tryReserveManualClip() {
+        CameraLoadProbe.recordingStarting("recording");
         synchronized (startStopLock) {
             if (flushInProgress || manualClipExportInProgress) return false;
             manualClipExportInProgress = true;

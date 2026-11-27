@@ -99,6 +99,7 @@ public final class AiLaneWorker {
                     // finally block. We do NOT recycle here on success.
                     sNow.processFrame(rgbFrame);
                     processedFrames++;
+                    com.overdrive.app.surveillance.CameraLoadProbe.noteAiFrame();
                 } else {
                     recycler.recycle(rgbFrame);
                 }

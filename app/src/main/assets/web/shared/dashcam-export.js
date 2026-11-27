@@ -29,9 +29,11 @@ window.DashcamExport = (function () {
         if (window.BYD && BYD.core && BYD.core.toast) BYD.core.toast(msg, type || 'info', 6000);
     }
 
-    function errorText(j) {
+    function errorText(j, stopped) {
         var code = j && j.code ? String(j.code).replace(/[^a-z_]/g, '') : '';
-        return t('events.dv_err_' + code, (j && j.error) || t('events.dv_failed', "Couldn't save the Dashcam view video"));
+        var fallback = (j && j.error) || t('events.dv_failed', "Couldn't save the Dashcam view video");
+        if (stopped) return code ? t('events.dv_stopped_' + code, fallback) : fallback;
+        return t('events.dv_err_' + code, fallback);
     }
 
     function getJson(url, opts) {
@@ -90,8 +92,9 @@ window.DashcamExport = (function () {
         var mine = job && job.sourceId === id;
         var title;
         if (mine && job.state === 'running') {
-            btn.innerHTML = '<span style="font-size:10px;font-weight:600">' + Math.floor((job.progress || 0) * 100) + '%</span>';
-            title = t('events.dv_export_running', 'Saving Dashcam view… tap to cancel');
+            btn.innerHTML = '<span style="font-size:10px;font-weight:600">' + (job.paused ? '||' : Math.floor((job.progress || 0) * 100) + '%') + '</span>';
+            title = job.paused ? t('events.dv_export_paused', 'Paused while the cameras are busy')
+                : t('events.dv_export_running', 'Saving Dashcam view… tap to cancel');
         } else if (mine && job.state === 'done' && job.videoUrl) {
             btn.innerHTML = ICON;
             btn.classList.add('dv-ready');
@@ -170,14 +173,20 @@ window.DashcamExport = (function () {
                 if (j && j.success === true && j.job) job = j.job;
                 paintAll();
                 if (!job) return;
-                if (job.state === 'running') { schedulePoll(); return; }
+                if (job.state === 'running') {
+                    if (job.paused && was && was.state === 'running' && !was.paused) {
+                        toast(t('events.dv_export_paused', 'Paused while the cameras are busy'), 'info');
+                    }
+                    schedulePoll();
+                    return;
+                }
                 if (!was || was.state !== 'running') return;
                 if (job.state === 'done') {
                     toast(t('events.dv_export_ready', 'Dashcam view saved to Replays. Tap the button again to download.'), 'success');
                 } else if (job.state === 'cancelled') {
                     toast(t('events.dv_export_cancelled', 'Export cancelled.'), 'info');
                 } else {
-                    toast(errorText(job), 'error');
+                    toast(errorText(job, true), 'error');
                 }
             });
         }, 1500);

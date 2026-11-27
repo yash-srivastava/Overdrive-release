@@ -1138,6 +1138,7 @@ public class GpuMosaicRecorder {
         // Track draw duration to detect encoder backpressure
         long elapsedNs = tAfterSwapNs - startTime;
         lastDrawDurationNs = elapsedNs;
+        CameraLoadProbe.noteDraw(elapsedNs);
 
         if (elapsedNs > maxDrawDurationNs) {
             consecutiveSlowFrames++;
@@ -2102,6 +2103,11 @@ public class GpuMosaicRecorder {
     }
 
     /** CPU recording queue drops plus frames that found a backlog, since this recorder was built (never reset). */
+    /** Frames in a row over the draw budget (encoder backpressure); 0 when healthy. */
+    public int consecutiveSlowFrames() {
+        return consecutiveSlowFrames;
+    }
+
     public long cpuPressureTotal() {
         return cpuPressureTotal.get();
     }
@@ -2324,6 +2330,7 @@ public class GpuMosaicRecorder {
 
         long elapsedNs = System.nanoTime() - start;
         lastDrawDurationNs = elapsedNs;
+        CameraLoadProbe.noteDraw(elapsedNs);
         if (elapsedNs > maxDrawDurationNs) consecutiveSlowFrames++;
         else consecutiveSlowFrames = 0;
         if (elapsedNs > cpuWorstTotalNs) {

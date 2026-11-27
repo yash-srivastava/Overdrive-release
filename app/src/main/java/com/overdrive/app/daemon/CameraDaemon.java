@@ -8357,6 +8357,7 @@ public class CameraDaemon {
     }
 
     private static void onAccStateChanged(boolean accIsOff, long requiredGeneration, long edgeElapsedMs) {
+        if (!accIsOff) com.overdrive.app.surveillance.CameraLoadProbe.recordingStarting("acc_on");
         final long transitionGeneration;
         synchronized (parkTerminateLock) {
             if (requiredGeneration != 0L
