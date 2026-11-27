@@ -246,6 +246,34 @@ public class VehicleControlApiHandler {
             return true;
         }
 
+        // BYD100F drive mode window (#1002): status, opt-in, and the app's "main screen resumed" ping.
+        if (cleanPath.equals("/api/vehicle/drive-mode-window") && method.equals("GET")) {
+            HttpResponse.sendJson(out, com.overdrive.app.launcher.DriveModeWindow
+                    .status(null).toString());
+            return true;
+        }
+        if (cleanPath.equals("/api/vehicle/drive-mode-window") && method.equals("POST")) {
+            JSONObject req;
+            try {
+                req = new JSONObject(body == null || body.isEmpty() ? "{}" : body);
+            } catch (Exception e) {
+                HttpResponse.sendJsonError(out, "Invalid JSON");
+                return true;
+            }
+            if (!req.has("enabled")) {
+                HttpResponse.sendJsonError(out, "Missing enabled");
+                return true;
+            }
+            HttpResponse.sendJson(out, com.overdrive.app.launcher.DriveModeWindow
+                    .setEnabled(req.optBoolean("enabled", false)).toString());
+            return true;
+        }
+        if (cleanPath.equals("/api/vehicle/drive-mode-window/resumed") && method.equals("POST")) {
+            com.overdrive.app.launcher.DriveModeWindow.onAppResumed();
+            HttpResponse.sendJson(out, new JSONObject().put("success", true).toString());
+            return true;
+        }
+
         // POST /api/vehicle/di5-diag — app-process DiLink 5 diagnostics (that log is not uploadable).
         if (cleanPath.equals("/api/vehicle/di5-diag") && method.equals("POST")) {
             try {

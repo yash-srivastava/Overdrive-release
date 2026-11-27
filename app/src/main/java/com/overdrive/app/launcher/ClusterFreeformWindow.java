@@ -2239,6 +2239,12 @@ final class ClusterFreeformWindow {
 
     static boolean prepareHostedFreeformState() {
         recoverFreeformSupportOwnership();
+        // The drive mode window (#1002) needs freeform on; it restores the setting itself when
+        // it is turned off, so the cast must not switch it back here.
+        if (DriveModeWindow.holdsFreeformSupport()) {
+            freeformSettingState = "preserved_for_drive_mode";
+            return true;
+        }
         JSONObject projection = UnifiedConfigManager.loadConfig().optJSONObject("projection");
         JSONObject ownership = projection == null
                 ? null : projection.optJSONObject(FREEFORM_RECOVERY_KEY);
@@ -2314,7 +2320,7 @@ final class ClusterFreeformWindow {
      * blocking {@code readLine()} on a child that never reaches EOF would otherwise hang this
      * (HTTP worker) thread past the timeout, and an un-destroyed process would leak an fd per call.
      */
-    private static String runSettingsCmd(String cmd) {
+    static String runSettingsCmd(String cmd) {
         Process p = null;
         try {
             p = new ProcessBuilder("sh", "-c", com.overdrive.app.util.ScratchRoot.remap(cmd + " 2>&1")).redirectErrorStream(true).start();

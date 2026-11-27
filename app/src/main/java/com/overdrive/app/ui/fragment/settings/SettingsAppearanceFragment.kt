@@ -54,6 +54,73 @@ class SettingsAppearanceFragment : Fragment() {
         setupThemePicker(view)
         setupLanguagePicker(view)
         setupNavigationPicker(view)
+        setupDriveModeWindow(view)
+    }
+
+    // ── BYD100F drive mode window (#1002) ──────────────────────────────────────
+
+    private companion object {
+        const val DRIVE_MODE_SETTLE_MS = 1_500L
+    }
+
+    private var driveModeEnabled = false
+    private var driveModeBinding = false
+
+    private fun setupDriveModeWindow(root: View) {
+        if (!com.overdrive.app.camera.DiLink100Platform.isByd100f()) return
+        val card = root.findViewById<View>(R.id.cardDriveModeWindow) ?: return
+        val toggle = root.findViewById<MaterialSwitch>(R.id.swDriveModeWindow) ?: return
+        val status = root.findViewById<TextView>(R.id.tvDriveModeWindowStatus) ?: return
+        card.visibility = View.VISIBLE
+        root.findViewById<View>(R.id.rowDriveModeWindow)?.setOnClickListener {
+            if (toggle.isEnabled) toggle.toggle()
+        }
+        toggle.setOnCheckedChangeListener { _, checked ->
+            if (!driveModeBinding) requestDriveMode(toggle, status, checked)
+        }
+        requestDriveMode(toggle, status, null)
+    }
+
+    /** GET (enable == null) or set the option on the daemon, then render the reply. */
+    private fun requestDriveMode(toggle: MaterialSwitch, status: TextView, enable: Boolean?) {
+        toggle.isEnabled = false
+        Thread({
+            var result = if (enable == null) {
+                com.overdrive.app.ui.util.DriveModeWindowClient.status()
+            } else {
+                com.overdrive.app.ui.util.DriveModeWindowClient.setEnabled(enable)
+            }
+            if (enable == true && result != null) {
+                // The daemon floats this screen right after enabling; show the outcome.
+                try { Thread.sleep(DRIVE_MODE_SETTLE_MS) } catch (_: InterruptedException) { }
+                result = com.overdrive.app.ui.util.DriveModeWindowClient.status() ?: result
+            }
+            activity?.runOnUiThread {
+                if (isAdded) renderDriveMode(toggle, status, result)
+            }
+        }, "DriveModeWindowSettings").start()
+    }
+
+    private fun renderDriveMode(toggle: MaterialSwitch, status: TextView, result: org.json.JSONObject?) {
+        if (result != null) driveModeEnabled = result.optBoolean("enabled", false)
+        driveModeBinding = true
+        toggle.isChecked = driveModeEnabled
+        driveModeBinding = false
+        toggle.isEnabled = true
+        status.setText(
+            when (com.overdrive.app.ui.util.DriveModeWindowClient.statusOf(result)) {
+                com.overdrive.app.ui.util.DriveModeWindowClient.Status.OFF ->
+                    R.string.settings_drive_mode_window_status_off
+                com.overdrive.app.ui.util.DriveModeWindowClient.Status.FLOATING ->
+                    R.string.settings_drive_mode_window_status_floating
+                com.overdrive.app.ui.util.DriveModeWindowClient.Status.WAITING ->
+                    R.string.settings_drive_mode_window_status_waiting
+                com.overdrive.app.ui.util.DriveModeWindowClient.Status.NEEDS_RESTART ->
+                    R.string.settings_drive_mode_window_status_restart
+                com.overdrive.app.ui.util.DriveModeWindowClient.Status.ERROR ->
+                    R.string.settings_drive_mode_window_status_error
+            }
+        )
     }
 
     private fun setupThemePicker(view: View) {

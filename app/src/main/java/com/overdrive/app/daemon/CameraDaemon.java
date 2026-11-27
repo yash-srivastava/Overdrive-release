@@ -9468,6 +9468,12 @@ public class CameraDaemon {
         try {
             com.overdrive.app.briefing.daemon.DaemonBriefingEnv.onGear(gear);
         } catch (Throwable ignored) {}
+        // BYD100F drive mode window (#1002): float OverDrive's screen if the car is about to cover it.
+        if (!redundant) {
+            try {
+                com.overdrive.app.launcher.DriveModeWindow.onGear(gear);
+            } catch (Throwable ignored) {}
+        }
 
         // DiLink 5 deliberately does NOT arbitrate the cameras on gear changes.
         // The Qualcomm AIS server multiplexes the QCarCam inputs to every
