@@ -2060,9 +2060,13 @@ public class CameraDaemon {
         if (dilink4 || pipelineLive) {
             if (!local.isActive()) {
                 local.startKeepAlive();
-                log("AVC keep-alive started (dilink4=" + dilink4
-                    + ", pipelineLive=" + pipelineLive
-                    + ", accOn=" + AccMonitor.isAccOn() + ")");
+                // Platforms without the legacy keep-alive (DiLink 5, Camera2, DiLink 100)
+                // return from startKeepAlive() without starting it.
+                if (local.isActive()) {
+                    log("AVC keep-alive started (dilink4=" + dilink4
+                        + ", pipelineLive=" + pipelineLive
+                        + ", accOn=" + AccMonitor.isAccOn() + ")");
+                }
             }
             // Heartbeat is dilink4-only and self-gates inside; safe on legacy.
             startCameraActiveHeartbeatIfNeeded();

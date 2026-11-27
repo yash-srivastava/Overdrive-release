@@ -10653,6 +10653,12 @@ public class GpuSurveillancePipeline {
         return current != null &&
                 current.isDiLink5SourcePausedForSystemAvm();
     }
+
+    /** True while the camera is being closed and reopened after an error or frame stall. */
+    public boolean isCameraRestartInProgress() {
+        PanoramicCameraGpu current = camera;
+        return current != null && current.isCameraRestartInProgress();
+    }
     
     /**
      * Gets the surveillance engine.
