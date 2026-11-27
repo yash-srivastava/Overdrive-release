@@ -366,11 +366,6 @@ public final class BydApaViewpointHelper {
         }
     }
 
-    /** Snapshot of the active holder count — for diagnostic logs only. */
-    public static int holderCount() {
-        return observerSet.size();
-    }
-
     /**
      * Re-assert viewpoint=2012 if (and only if) we currently hold the viewpoint.
      *
@@ -429,27 +424,6 @@ public final class BydApaViewpointHelper {
                 return false;
             }
         }
-    }
-
-    /** Legacy wrapper: per-process singleton token used by the existing
-     *  startCameraViaAvmReflection callsite. Equivalent to oem's
-     *  C5920a.mo26750v register call (single C5920a instance per camera
-     *  open). New code paths (sentry straddle) should allocate their own
-     *  token so the observerSet semantics work as designed. */
-    private static final Object PIPELINE_TOKEN = new Object() {
-        @Override public String toString() { return "pipeline"; }
-    };
-
-    /** @deprecated use {@link #acquire(Object)} with a per-instance token. */
-    @Deprecated
-    public static void enableForPanoramic() {
-        acquire(PIPELINE_TOKEN);
-    }
-
-    /** @deprecated use {@link #release(Object)} with the matching token. */
-    @Deprecated
-    public static void disable() {
-        release(PIPELINE_TOKEN);
     }
 
     /** Detect DeadObjectException in any reflective wrapper layer. The

@@ -45,48 +45,6 @@ public class PanoramicCameraGpu {
     private static final int PHYSICAL_CAMERA_ID = 1;
     private static final int MAX_CAMERA_ID = 5;     // Probe camera IDs 0-5
 
-    /** Sentry-restart straddle token. The CameraDaemon dilink4 ACC-OFF
-     *  handler acquires this BEFORE calling gpuPipeline.stop(), so the
-     *  BydApaViewpointHelper observer set never goes empty during the
-     *  close+gate+reopen window. Releases automatically on ACC ON or after
-     *  the new pipeline registers its own per-instance token (whichever
-     *  comes first). Mirrors oem's behaviour where the FlameoutService
-     *  keeps no observer of its own but the new C5319i registers its
-     *  fresh C5920a into C6498a.observerSet during the reopen, BEFORE the
-     *  caller's own MainService-side C5320a was released — so the set
-     *  stays non-empty across the whole flow.
-     *
-     *  We approximate that by acquiring the bridge token explicitly at
-     *  ACC-OFF (before stop) and releasing it explicitly after start
-     *  completes. Use a static singleton — there's only ever one ACC-OFF
-     *  in flight per process. */
-    private static final Object SENTRY_BRIDGE_TOKEN = new Object() {
-        @Override public String toString() { return "sentry-bridge"; }
-    };
-    private static volatile boolean sentryBridgeHeld = false;
-
-    /** Called by CameraDaemon at ACC-OFF, BEFORE gpuPipeline.stop().
-     *  Idempotent. */
-    public static void acquireSentryBridgeViewpoint() {
-        if (sentryBridgeHeld) {
-            logger.info("sentry-bridge token already held");
-            return;
-        }
-        BydApaViewpointHelper.acquire(SENTRY_BRIDGE_TOKEN);
-        sentryBridgeHeld = true;
-        logger.info("sentry-bridge viewpoint token acquired (straddling stop+reopen)");
-    }
-
-    /** Called by CameraDaemon AFTER gpuPipeline.start() returns successfully
-     *  (the new pipeline instance has acquired its own per-instance token).
-     *  Also called on ACC ON as a safety net. Idempotent. */
-    public static void releaseSentryBridgeViewpoint() {
-        if (!sentryBridgeHeld) return;
-        BydApaViewpointHelper.release(SENTRY_BRIDGE_TOKEN);
-        sentryBridgeHeld = false;
-        logger.info("sentry-bridge viewpoint token released");
-    }
-
     // AVMCamera surface mode — 0 works on Seal, Atto 1 may need different value
     // Set via setCameraSurfaceMode() before start() for per-model override.
     // On the oem SurfaceTexture path this same value is the previewIndex
@@ -2468,6 +2426,7 @@ public class PanoramicCameraGpu {
                 logger.debug("Downscaler initialized (probe path on its own thread)");
             }
         }
+        publishRoadFrameSource();
 
         if (USE_PASSIVE_APA_MODE) {
             // Port 0 is an opaque full-frame layout on these variants. Do not
@@ -2596,29 +2555,6 @@ public class PanoramicCameraGpu {
     }
     
     /**
-     * Initializes the stream scaler on the GL thread.
-     * 
-     * @param streamScaler GPU stream scaler to initialize
-     * @param streamEncoder Hardware encoder for streaming
-     */
-    public void initStreamScalerOnGlThread(com.overdrive.app.streaming.GpuStreamScaler streamScaler,
-                                          HardwareEventRecorderGpu streamEncoder) {
-        if (glHandler == null) {
-            logger.error("GL thread not started");
-            return;
-        }
-        
-        glHandler.post(() -> {
-            try {
-                streamScaler.init(eglCore, streamEncoder);
-                logger.info("Stream scaler initialized on GL thread");
-            } catch (Exception e) {
-                logger.error("Failed to initialize stream scaler on GL thread", e);
-            }
-        });
-    }
-    
-    /**
      * Gets the EGL core for initializing GPU components.
      * 
      * @return EGLCore instance (only valid after start() is called)
@@ -2645,6 +2581,7 @@ public class PanoramicCameraGpu {
         } else {
             createCameraImageReader();
         }
+        publishRoadFrameSource();
         logger.info("Camera consumer recreated for camera switch");
     }
 
@@ -4609,8 +4546,6 @@ public class PanoramicCameraGpu {
      *  the geometry mismatch can be surfaced rather than silently assumed. */
     private volatile int halBytePathWidth = -1;
     private volatile int halBytePathHeight = -1;
-    public int getHalBytePathWidth() { return halBytePathWidth; }
-    public int getHalBytePathHeight() { return halBytePathHeight; }
 
     /** Dump the four AVM-related SystemProperties. INFORMATIONAL ONLY — see the
      *  call site in {@link #attachSurfaceTextureToCamera} for why the old
@@ -5872,18 +5807,7 @@ public class PanoramicCameraGpu {
         // anyway (no panorama device exposed), but skipping the call also
         // skips a binder round-trip per camera open.
         if (USE_DILINK4_AVM_PATH) {
-            // Acquire our viewpoint token. Mirrors oem C5920a.mo26750v
-            // (gl/C5920a.java:387 — C6498a.f26622a.m28930h(this)). If
-            // we're the only holder this writes viewpoint=2012 and registers
-            // the listener; if a sentry-restart caller is already holding a
-            // token, this just re-issues the viewpoint write idempotently
-            // (matches oem's "size>1 already, no enableDevice/listener" branch).
             BydApaViewpointHelper.acquire(viewpointToken);
-
-            // Release the static sentry-bridge token NOW (set transitions
-            // bridge+pano → pano on the same lock acquire as our add — no
-            // empty-set window). Idempotent + harmless if no bridge was held.
-            releaseSentryBridgeViewpoint();
         }
 
         // DiLink 5.0 (Snapdragon SA8155P): uses fast_cam_capture DMA-FD IPC.
@@ -6845,15 +6769,6 @@ public class PanoramicCameraGpu {
      *  the scale will be < 1.0 on one or both axes and that surfaces here
      *  before we waste cycles wondering why the recorded mosaic looks
      *  squashed. Cheap — one float[16] read per cold attach. */
-    /** Effective HAL-emit dims derived from the SurfaceTexture transform
-     *  matrix on the first frame after each (re)attach. {@code -1} until
-     *  the first frame arrives. Volatile because the GL thread writes and
-     *  HTTP / pipeline threads can read for diagnostics. */
-    private volatile int halEffectiveWidth = -1;
-    private volatile int halEffectiveHeight = -1;
-    public int getHalEffectiveWidth() { return halEffectiveWidth; }
-    public int getHalEffectiveHeight() { return halEffectiveHeight; }
-
     private void logFirstFrameDims(SurfaceTexture st) {
         try {
             float[] m = new float[16];
@@ -6869,8 +6784,6 @@ public class PanoramicCameraGpu {
             // the surface, offset by (tx, ty). Scale 1.0 = full surface.
             float effW = Math.abs(sx) * (float) width;
             float effH = Math.abs(sy) * (float) height;
-            halEffectiveWidth = Math.round(effW);
-            halEffectiveHeight = Math.round(effH);
             logger.info(String.format(java.util.Locale.US,
                 "First frame transform: sx=%.4f sy=%.4f tx=%.4f ty=%.4f → "
                 + "crop covers %.0f%%x%.0f%% of the producer buffer"
@@ -7119,6 +7032,19 @@ public class PanoramicCameraGpu {
             currentBoundCpuSource = new com.overdrive.app.surveillance.CpuFrameSource(currentBoundImage);
         }
         return currentBoundCpuSource;
+    }
+
+    /**
+     * Custom Layouts road model: tells it once per camera consumer whether a front frame can reach it, so it
+     * never loads a model on a camera that cannot feed one (same rules as offerRoadFrame and postRoadFrame).
+     */
+    private void publishRoadFrameSource() {
+        boolean strip = CAMERA_LAYOUT_MODE == 0 && !USE_DILINK5_QCARCAM_PATH;
+        GpuDownscaler ds = downscaler;
+        // A SurfaceTexture consumer always carries a non-identity matrix, which the road view refuses.
+        boolean gpuView = strip && !USE_SURFACE_TEXTURE_CONSUMER && ds != null && ds.isInitialized();
+        com.overdrive.app.customlayouts.daemon.road.RoadFrameTap.noteSource(
+            strip, cpuFrameReaderActive, gpuView, width / 4, height);
     }
 
     /**
@@ -11594,10 +11520,6 @@ public class PanoramicCameraGpu {
         }
     }
 
-    /** Whether PASS 1C is currently drawing the BS lane (the render gate). Used by
-     *  the pipeline to detect a gate/show desync and re-arm. */
-    public boolean isBsLayerVisible() { return bsLayerVisible; }
-
     /**
      * Enables/disables the optional direct windshield camera used by the
      * dashcam recording layout. The actual AVMCamera open/close happens on
@@ -11669,16 +11591,6 @@ public class PanoramicCameraGpu {
      */
     public boolean isFirstFrameReceived() {
         return firstFrameReceived;
-    }
-
-    /**
-     * Number of frames the GL thread has consumed from the HAL since
-     * {@code start()}. Combined with {@link #isFirstFrameReceived()} this
-     * lets callers wait for the BYD HAL warmup probe (frames 1–15 are
-     * cold/dim on most builds) before sampling.
-     */
-    public int getFrameCounter() {
-        return frameCounter;
     }
 
     /**
@@ -11828,13 +11740,6 @@ public class PanoramicCameraGpu {
     }
 
     /**
-     * Gets the current recorder draw stride (1 = every frame).
-     */
-    public int getRecorderFrameStride() {
-        return recorderFrameStride;
-    }
-
-    /**
      * Recompute the stream-lane draw stride from the current camera target fps
      * and the stream encoder's configured fps. Call after enabling streaming or
      * changing the stream quality preset. Stride 1 = every camera frame drawn to
@@ -11943,15 +11848,6 @@ public class PanoramicCameraGpu {
      */
     public void setCameraProbeCallback(CameraProbeCallback callback) {
         this.probeCallback = callback;
-    }
-    
-    /**
-     * Gets the timestamp of the last frame.
-     * 
-     * @return Timestamp in milliseconds
-     */
-    public long getLastFrameTime() {
-        return lastFrameTime;
     }
     
     /**

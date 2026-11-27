@@ -524,7 +524,30 @@ static inline int lerp2(int a, int b, int c, int d, int fx, int fy) {
     return (top * 256 + (bot - top) * fy + 32768) >> 16;
 }
 
+// Separable maps have one vertical coordinate for the whole row. Keep the
+// same single-rounding bilinear math, but hoist the source row addresses.
+struct FixedSampleRow {
+    const uint8_t* a;
+    const uint8_t* b;
+    int width;
+    int pix;
+    int fy;
+
+    FixedSampleRow(const uint8_t* base, size_t stride, int w, int h, int pixel, int vf)
+        : a(base + (size_t) (vf >> 8) * stride),
+          b((vf >> 8) < h - 1 ? a + stride : a), width(w), pix(pixel), fy(vf & 255) {}
+
+    uint8_t sample(int uf) const {
+        const int x = uf >> 8, fx = uf & 255;
+        const size_t i = (size_t) x * pix;
+        const size_t j = x < width - 1 ? i + pix : i;
+        return (uint8_t) lerp2(a[i], a[j], b[i], b[j], fx, fy);
+    }
+};
+
+// FixedY reads only lv[0]; the general sampler reads one coordinate per pixel.
 // __restrict: byte stores could otherwise alias the coordinate rows and force reloads.
+template<bool FixedY = false>
 static void gatherY(const RemapSource& sr, int n, const int32_t* __restrict lu,
                     const int32_t* __restrict lv, int offFx, uint8_t* __restrict out) {
     const int w = sr.w, h = sr.h;
@@ -542,29 +565,31 @@ static void gatherY(const RemapSource& sr, int n, const int32_t* __restrict lu,
     for (; i + 8 <= n; i += 8) {
         const int32x4_t u0 = vminq_s32(vmaxq_s32(vaddq_s32(vld1q_s32(lu + i), vOff), vZero), vMax);
         const int32x4_t u1 = vminq_s32(vmaxq_s32(vaddq_s32(vld1q_s32(lu + i + 4), vOff), vZero), vMax);
-        const int32x4_t v0 = vld1q_s32(lv + i), v1 = vld1q_s32(lv + i + 4);
+        const int32x4_t v0 = FixedY ? vdupq_n_s32(lv[0]) : vld1q_s32(lv + i);
+        const int32x4_t v1 = FixedY ? v0 : vld1q_s32(lv + i + 4);
         const int32x4_t ya = vshrq_n_s32(v0, 8), yb = vshrq_n_s32(v1, 8);
-        const int yMin = vminvq_s32(vminq_s32(ya, yb));
-        const int yMax = vmaxvq_s32(vmaxq_s32(ya, yb));
+        const int yMin = FixedY ? lv[0] >> 8 : vminvq_s32(vminq_s32(ya, yb));
+        const int yMax = FixedY ? yMin : vmaxvq_s32(vmaxq_s32(ya, yb));
         const int32x4_t xa = vshrq_n_s32(u0, 8), xb = vshrq_n_s32(u1, 8);
         const int xMin = vminvq_s32(vminq_s32(xa, xb));
         const int xMax = vmaxvq_s32(vmaxq_s32(xa, xb));
         // Up to two source rows: lanes on yMin + 1 take the next row pair.
         if (yMax - yMin > 1 || yMax >= h - 1 || xMax - xMin > 14 || xMin + 16 > w) {
             for (int k = i; k < i + 8; k++) {
-                out[k] = sample1(base, row, 1, clampFx(lu[k] + offFx, uMax), lv[k], w, h);
+                out[k] = sample1(base, row, 1, clampFx(lu[k] + offFx, uMax), lv[FixedY ? 0 : k], w, h);
             }
             continue;
         }
         const uint8_t* r0 = base + (size_t) yMin * row + xMin;
-        const uint8_t* r2 = yMin + 2 <= h - 1 ? r0 + 2 * row : r0 + row;  // unused if one row
+        const uint8_t* r2 = !FixedY && yMin + 2 <= h - 1 ? r0 + 2 * row : r0 + row;  // unused if one row
         const uint8x16_t row0 = vld1q_u8(r0), row1 = vld1q_u8(r0 + row), row2 = vld1q_u8(r2);
         const int32x4_t xm = vdupq_n_s32(xMin);
         const uint16x8_t idx16 = vcombine_u16(vmovn_u32(vreinterpretq_u32_s32(vsubq_s32(xa, xm))),
                                               vmovn_u32(vreinterpretq_u32_s32(vsubq_s32(xb, xm))));
         const uint8x8_t ia = vmovn_u16(idx16), ib = vadd_u8(ia, vdup_n_u8(1));
         const int32x4_t yN = vdupq_n_s32(yMin + 1);
-        const uint8x8_t next = vmovn_u16(vcombine_u16(vmovn_u32(vceqq_s32(ya, yN)), vmovn_u32(vceqq_s32(yb, yN))));
+        const uint8x8_t next = FixedY ? vdup_n_u8(0) :
+                vmovn_u16(vcombine_u16(vmovn_u32(vceqq_s32(ya, yN)), vmovn_u32(vceqq_s32(yb, yN))));
         const uint8x8_t a0 = vqtbl1_u8(row0, ia), b0 = vqtbl1_u8(row0, ib);
         const uint8x8_t a1 = vqtbl1_u8(row1, ia), b1 = vqtbl1_u8(row1, ib);
         const uint8x8_t a2 = vqtbl1_u8(row2, ia), b2 = vqtbl1_u8(row2, ib);
@@ -584,6 +609,11 @@ static void gatherY(const RemapSource& sr, int n, const int32_t* __restrict lu,
         vst1_u8(out + i, vmovn_u16(vcombine_u16(vshrn_n_u32(lo, 16), vshrn_n_u32(hi, 16))));
     }
 #endif
+    if (FixedY) {
+        const FixedSampleRow fixed(base, row, w, h, 1, lv[0]);
+        for (; i < n; i++) out[i] = fixed.sample(clampFx(lu[i] + offFx, uMax));
+        return;
+    }
     for (; i < n; i++) {
         const int uf = clampFx(lu[i] + offFx, uMax);
         const int vf = lv[i];
@@ -600,6 +630,7 @@ static void gatherY(const RemapSource& sr, int n, const int32_t* __restrict lu,
     }
 }
 
+template<bool FixedY = false>
 static void gatherUV(const RemapSource& sr, int n, const int32_t* __restrict lu,
                      const int32_t* __restrict lv, int offFx, uint8_t* __restrict ou,
                      uint8_t* __restrict ov, int dPix) {
@@ -609,6 +640,16 @@ static void gatherUV(const RemapSource& sr, int n, const int32_t* __restrict lu,
     const int pix = sr.pl.pixUV;
     const Chroma order = chromaOf(sr.pl.u, sr.pl.v, pix);
     if (order == kStrided) {
+        if (FixedY) {
+            const FixedSampleRow u(sr.pl.u, row, cw, ch, pix, lv[0]);
+            const FixedSampleRow v(sr.pl.v, row, cw, ch, pix, lv[0]);
+            for (int i = 0; i < n; i++) {
+                const int uf = clampFx(lu[i] + offFx, uMax);
+                ou[(size_t) i * dPix] = u.sample(uf);
+                ov[(size_t) i * dPix] = v.sample(uf);
+            }
+            return;
+        }
         for (int i = 0; i < n; i++) {
             const int uf = clampFx(lu[i] + offFx, uMax);
             ou[(size_t) i * dPix] = sample1(sr.pl.u, row, pix, uf, lv[i], cw, ch);
@@ -633,10 +674,11 @@ static void gatherUV(const RemapSource& sr, int n, const int32_t* __restrict lu,
     for (; i + 8 <= n; i += 8) {
         const int32x4_t u0 = vminq_s32(vmaxq_s32(vaddq_s32(vld1q_s32(lu + i), vOff), vZero), vMax);
         const int32x4_t u1 = vminq_s32(vmaxq_s32(vaddq_s32(vld1q_s32(lu + i + 4), vOff), vZero), vMax);
-        const int32x4_t v0 = vld1q_s32(lv + i), v1 = vld1q_s32(lv + i + 4);
+        const int32x4_t v0 = FixedY ? vdupq_n_s32(lv[0]) : vld1q_s32(lv + i);
+        const int32x4_t v1 = FixedY ? v0 : vld1q_s32(lv + i + 4);
         const int32x4_t ya = vshrq_n_s32(v0, 8), yb = vshrq_n_s32(v1, 8);
-        const int yMin = vminvq_s32(vminq_s32(ya, yb));
-        const int yMax = vmaxvq_s32(vmaxq_s32(ya, yb));
+        const int yMin = FixedY ? lv[0] >> 8 : vminvq_s32(vminq_s32(ya, yb));
+        const int yMax = FixedY ? yMin : vmaxvq_s32(vmaxq_s32(ya, yb));
         const int32x4_t xa = vshrq_n_s32(u0, 8), xb = vshrq_n_s32(u1, 8);
         const int xMin = vminvq_s32(vminq_s32(xa, xb));
         const int xMax = vmaxvq_s32(vmaxq_s32(xa, xb));
@@ -644,14 +686,14 @@ static void gatherUV(const RemapSource& sr, int n, const int32_t* __restrict lu,
                 || xMin + 16 > cw || !(dstNv12 || dstNv21 || dstPlanar)) {
             for (int k = i; k < i + 8; k++) {
                 const int uf = clampFx(lu[k] + offFx, uMax);
-                ou[(size_t) k * dPix] = sample1(sr.pl.u, row, pix, uf, lv[k], cw, ch);
-                ov[(size_t) k * dPix] = sample1(sr.pl.v, row, pix, uf, lv[k], cw, ch);
+                ou[(size_t) k * dPix] = sample1(sr.pl.u, row, pix, uf, lv[FixedY ? 0 : k], cw, ch);
+                ov[(size_t) k * dPix] = sample1(sr.pl.v, row, pix, uf, lv[FixedY ? 0 : k], cw, ch);
             }
             continue;
         }
         // 16 interleaved samples = 32 bytes per row.
         const uint8_t* r0 = base + (size_t) yMin * row + (size_t) xMin * 2;
-        const uint8_t* r2 = yMin + 2 <= ch - 1 ? r0 + 2 * row : r0 + row;
+        const uint8_t* r2 = !FixedY && yMin + 2 <= ch - 1 ? r0 + 2 * row : r0 + row;
         uint8x16x2_t t0, t1, t2;
         t0.val[0] = vld1q_u8(r0);
         t0.val[1] = vld1q_u8(r0 + 16);
@@ -660,7 +702,8 @@ static void gatherUV(const RemapSource& sr, int n, const int32_t* __restrict lu,
         t2.val[0] = vld1q_u8(r2);
         t2.val[1] = vld1q_u8(r2 + 16);
         const int32x4_t yN = vdupq_n_s32(yMin + 1);
-        const uint8x8_t next = vmovn_u16(vcombine_u16(vmovn_u32(vceqq_s32(ya, yN)), vmovn_u32(vceqq_s32(yb, yN))));
+        const uint8x8_t next = FixedY ? vdup_n_u8(0) :
+                vmovn_u16(vcombine_u16(vmovn_u32(vceqq_s32(ya, yN)), vmovn_u32(vceqq_s32(yb, yN))));
         const int32x4_t xm = vdupq_n_s32(xMin);
         const uint16x8_t idx16 = vcombine_u16(vmovn_u32(vreinterpretq_u32_s32(vsubq_s32(xa, xm))),
                                               vmovn_u32(vreinterpretq_u32_s32(vsubq_s32(xb, xm))));
@@ -699,6 +742,16 @@ static void gatherUV(const RemapSource& sr, int n, const int32_t* __restrict lu,
         }
     }
 #endif
+    if (FixedY) {
+        const FixedSampleRow u(sr.pl.u, row, cw, ch, pix, lv[0]);
+        const FixedSampleRow v(sr.pl.v, row, cw, ch, pix, lv[0]);
+        for (; i < n; i++) {
+            const int uf = clampFx(lu[i] + offFx, uMax);
+            ou[(size_t) i * dPix] = u.sample(uf);
+            ov[(size_t) i * dPix] = v.sample(uf);
+        }
+        return;
+    }
     for (; i < n; i++) {
         const int uf = clampFx(lu[i] + offFx, uMax);
         const int vf = lv[i];
@@ -836,23 +889,22 @@ static void gridRows(const RemapSpec& p, const RemapSource& sr, const Planes& d,
             startC[q] = contiguousStart(chromaLu, tw / 2, offC[q], sr.w / 2);
         }
     }
-    const bool allY = std::all_of(startY, startY + 4, [](int x) { return x >= 0; });
-    const bool allC = std::all_of(startC, startC + 4, [](int x) { return x >= 0; });
     for (int y = ty0; y < ty1; y++) {
         const float ty = ((float) y + 0.5f) / (float) th;
-        if (identity) identityY(allY ? 1 : tw, ty, p.aspect, (float) sr.h, lv);
+        if (identity) identityY(1, ty, p.aspect, (float) sr.h, lv);
         else rectifyRow(p, tw, 0.5f / (float) tw, 1.f / (float) tw, ty,
                         0.25f * (float) sr.w, (float) sr.h, lu, lv);
         for (int q = 0; q < 4; q++) {
             uint8_t* out = d.y + (size_t) (y + (q >> 1) * th) * d.rowY + (size_t) (q & 1) * tw;
             if (startY[q] >= 0) verticalY(sr, startY[q], tw, lv[0], out);
+            else if (identity) gatherY<true>(sr, tw, lu, lv, offY[q], out);
             else gatherY(sr, tw, lu, lv, offY[q], out);
         }
         if (y & 1) continue;
         const int yc = y / 2;
         const int tcw = tw / 2, tch = th / 2;
         const float cty = (float) (2 * yc + 1) / (float) th;
-        if (identity) identityY(allC ? 1 : tcw, cty, p.aspect, (float) (sr.h / 2), lv);
+        if (identity) identityY(1, cty, p.aspect, (float) (sr.h / 2), lv);
         else rectifyRow(p, tcw, 1.f / (float) tw, 2.f / (float) tw, cty,
                         0.25f * (float) (sr.w / 2), (float) (sr.h / 2), lu, lv);
         for (int q = 0; q < 4; q++) {
@@ -861,7 +913,8 @@ static void gridRows(const RemapSpec& p, const RemapSource& sr, const Planes& d,
             uint8_t* ou = d.u + rowOff + colOff;
             uint8_t* ov = d.v + rowOff + colOff;
             if (startC[q] >= 0) verticalUV(sr, startC[q], tcw, lv[0], ou, ov, d.pixUV);
-            else gatherUV(sr, tcw, identity ? chromaLu : lu, lv, offC[q], ou, ov, d.pixUV);
+            else if (identity) gatherUV<true>(sr, tcw, chromaLu, lv, offC[q], ou, ov, d.pixUV);
+            else gatherUV(sr, tcw, lu, lv, offC[q], ou, ov, d.pixUV);
         }
     }
 }
@@ -959,20 +1012,20 @@ static void dashcamRow(const RemapSpec& p, const RemapSource* src, const Planes&
             const int wh = ws.h / div;
             const float t = p.cropY + ly * (1.f - p.cropY * 2.f);
             const int start = cols.topStart[div - 1];
-            linearY(start >= 0 ? 1 : n, t * (float) wh - 0.5f, wh, lv);
+            linearY(1, t * (float) wh - 0.5f, wh, lv);
             const int32_t* u = chroma ? cols.topC : cols.topY;
             if (start >= 0) {
                 if (chroma) verticalUV(ws, start, n, lv[0], ou, ov, d.pixUV);
                 else verticalY(ws, start, n, lv[0], oy);
-            } else if (chroma) gatherUV(ws, n, u, lv, 0, ou, ov, d.pixUV);
-            else gatherY(ws, n, u, lv, 0, oy);
+            } else if (chroma) gatherUV<true>(ws, n, u, lv, 0, ou, ov, d.pixUV);
+            else gatherY<true>(ws, n, u, lv, 0, oy);
             return;
         }
         const int32_t* u = lu;
         const int start = cols.topStart[div - 1];
         if (cols.topReady) {
             u = chroma ? cols.topC : cols.topY;
-            identityY(start >= 0 ? 1 : n, ly, p.aspect, (float) sh, lv);
+            identityY(1, ly, p.aspect, (float) sh, lv);
         } else {
             rectifyRow(p, n, vx0, dvx, ly, 0.25f * (float) sw, (float) sh, lu, lv);
         }
@@ -980,6 +1033,9 @@ static void dashcamRow(const RemapSpec& p, const RemapSource* src, const Planes&
         if (start >= 0) {
             if (chroma) verticalUV(strip, start, n, lv[0], ou, ov, d.pixUV);
             else verticalY(strip, start, n, lv[0], oy);
+        } else if (cols.topReady) {
+            if (chroma) gatherUV<true>(strip, n, u, lv, off, ou, ov, d.pixUV);
+            else gatherY<true>(strip, n, u, lv, off, oy);
         } else if (chroma) gatherUV(strip, n, u, lv, off, ou, ov, d.pixUV);
         else gatherY(strip, n, u, lv, off, oy);
         return;
@@ -995,7 +1051,7 @@ static void dashcamRow(const RemapSpec& p, const RemapSource* src, const Planes&
         const int start = cols.bottomStart[div - 1][c];
         if (cols.bottomReady) {
             u = (chroma ? cols.bottomC : cols.bottomY) + a;
-            identityY(start >= 0 ? 1 : b - a, by, p.aspect, (float) sh, lv);
+            identityY(1, by, p.aspect, (float) sh, lv);
         } else {
             rectifyRow(p, b - a, tx0, dvx * 3.f, by, 0.25f * (float) sw, (float) sh, lu, lv);
         }
@@ -1004,6 +1060,10 @@ static void dashcamRow(const RemapSpec& p, const RemapSource* src, const Planes&
             if (chroma) verticalUV(strip, start, b - a, lv[0],
                     ou + (size_t) a * d.pixUV, ov + (size_t) a * d.pixUV, d.pixUV);
             else verticalY(strip, start, b - a, lv[0], oy + a);
+        } else if (cols.bottomReady) {
+            if (chroma) gatherUV<true>(strip, b - a, u, lv, off,
+                    ou + (size_t) a * d.pixUV, ov + (size_t) a * d.pixUV, d.pixUV);
+            else gatherY<true>(strip, b - a, u, lv, off, oy + a);
         } else if (chroma) gatherUV(strip, b - a, u, lv, off, ou + (size_t) a * d.pixUV, ov + (size_t) a * d.pixUV, d.pixUV);
         else gatherY(strip, b - a, u, lv, off, oy + a);
     }

@@ -76,7 +76,7 @@ class RoadSenseStore private constructor() {
 
         /**
          * JDBC URL — identical flag set to SocHistoryDatabase:
-         *  • FILE_LOCK=SOCKET     — socket lock, the real cross-process safety net.
+         *  • FILE_LOCK=FS         — kernel lock on the .mv.db, the cross-process guard.
          *  • TRACE_LEVEL_FILE=0   — no .trace.db spew.
          *  • DB_CLOSE_ON_EXIT=FALSE — we drive shutdown from [stop]; H2's JVM
          *    shutdown hook must not race our explicit close (the "Database is
@@ -90,7 +90,7 @@ class RoadSenseStore private constructor() {
         // WRITE_DELAY=5000: H2 housekeeps every WRITE_DELAY/10 ms. Detections may lose the
         // last 5 s on a kill; user verdicts and clears checkpoint at once.
         private val JDBC_URL: String get() =
-            "jdbc:h2:file:$DB_PATH;FILE_LOCK=SOCKET;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
+            "jdbc:h2:file:$DB_PATH;FILE_LOCK=FS;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
                 ";AUTO_COMPACT_FILL_RATE=50;WRITE_DELAY=5000"
 
         private const val TABLE = "roadsense_hazards"

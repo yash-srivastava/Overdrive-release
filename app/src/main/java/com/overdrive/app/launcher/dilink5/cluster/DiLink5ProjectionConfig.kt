@@ -90,6 +90,9 @@ data class DiLink5ProjectionConfig(
             normalized.toValues().forEach { (key, value) ->
                 if (!projection.has(key)) projection.put(key, value)
             }
+            if (!projection.has(Sealion7HdmiProjection.CONFIG_KEY)) {
+                projection.put(Sealion7HdmiProjection.CONFIG_KEY, false)
+            }
         }
     }
 }

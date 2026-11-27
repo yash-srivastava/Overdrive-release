@@ -29,8 +29,6 @@ public class SocHistoryDatabase {
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
     
     // H2 JDBC URL - file-based embedded database
-    // FILE_LOCK=SOCKET uses socket-based locking (more reliable than file locks on Android)
-    // AUTO_SERVER=TRUE allows multiple processes to connect via TCP fallback
     private static final String DB_PATH = com.overdrive.app.util.ScratchRoot.path("overdrive_soc_h2");
     // DB_CLOSE_ON_EXIT=FALSE: we drive shutdown ourselves from CameraDaemon.shutdown().
     // Without it, H2's JVM shutdown hook runs concurrently with our explicit
@@ -41,17 +39,19 @@ public class SocHistoryDatabase {
     // AUTO_SERVER intentionally omitted — H2 throws
     // "AUTO_SERVER=TRUE && DB_CLOSE_ON_EXIT=FALSE is not supported" if both
     // are set. We're single-process anyway (only the camera daemon writes;
-    // HTTP reads happen in the same JVM via NotificationApiHandler). The
-    // FILE_LOCK=SOCKET is the actual cross-process safety net.
+    // HTTP reads happen in the same JVM via NotificationApiHandler).
+    // FILE_LOCK=FS: the kernel lock MVStore takes on the .mv.db (it does so under every
+    // lock mode) is the cross-process guard, released when the process dies. SOCKET only
+    // added a .lock.db, a listening socket on all interfaces and a 1 Hz watchdog thread.
     // AUTO_COMPACT_FILL_RATE=50: idle-CPU tuning shared by all seven H2 stores.
     // The default fill-rate target of 90 keeps the MVStore background thread
     // rewriting chunks while the car idles (FileStore.rewriteChunks /
     // getChunksFillRate showed up in on-device profiles); 50 stops that without
-    // touching durability. WRITE_DELAY is deliberately left at its 500ms default:
-    // a head unit loses power abruptly with the car, and raising the delay widens
-    // the delayed-write loss window on every one of these stores.
+    // touching durability. WRITE_DELAY stays out of the URL: a head unit loses power
+    // abruptly with the car, so H2CommitPoint raises it at runtime only together with
+    // an explicit commit + fsync per write (the store stays at 500 ms if that fails).
     private static final String JDBC_URL = "jdbc:h2:file:" + DB_PATH +
-        ";FILE_LOCK=SOCKET;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
+        ";FILE_LOCK=FS;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
         ";AUTO_COMPACT_FILL_RATE=50";
     
     // Table names
@@ -487,7 +487,8 @@ public class SocHistoryDatabase {
             for (int attempt = 1; attempt <= maxRetries; attempt++) {
                 try {
                     // Open H2 connection (pure Java - no native code)
-                    connection = DriverManager.getConnection(JDBC_URL, "sa", "");
+                    connection = com.overdrive.app.storage.H2CommitPoint.wrap(
+                            DriverManager.getConnection(JDBC_URL, "sa", ""));
                     logger.info("H2 connection established");
                     
                     // Tune H2 for embedded daemon use
@@ -1047,7 +1048,8 @@ public class SocHistoryDatabase {
                     try { connection.close(); } catch (Exception ignored) { /* already dead */ }
                     connection = null;
                 }
-                connection = DriverManager.getConnection(JDBC_URL, "sa", "");
+                connection = com.overdrive.app.storage.H2CommitPoint.wrap(
+                        DriverManager.getConnection(JDBC_URL, "sa", ""));
                 // Re-assert the schema BEFORE flagging ready. If the store
                 // file was wiped or recreated, H2 hands back a fresh EMPTY
                 // database — flagging initialized without this would leave

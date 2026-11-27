@@ -1001,7 +1001,7 @@ public class StorageManager {
         // JVM-local (so it raced the daemon's reaper), and its post-delete
         // RecordingsIndex.removeByPath() ran against a daemon-UID-only H2
         // (swallowed failure → ghost rows until the next reconcile; see
-        // RecordingsIndex's FILE_LOCK=SOCKET cross-UID warning).
+        // RecordingsIndex's cross-UID warning).
         discoverVolumes();
         initDirectories();
         loadConfig();

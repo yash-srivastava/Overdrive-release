@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_security_byd_tools_title">Menus de service BYD</string>
+    <string name="settings_security_byd_tools_description">Ouvrir les outils de configuration intégrés de l’écran multimédia.</string>
+    <string name="settings_security_byd_adb_title">ADB / Options pour les développeurs</string>
+    <string name="settings_security_byd_adb_hint">Ouvrez les Options pour les développeurs et activez-y le débogage USB.</string>
+    <string name="settings_security_byd_adb_unavailable">Les paramètres ADB ne sont pas disponibles sur ce firmware.</string>
+    <string name="settings_security_country_code_title">Code pays</string>
+    <string name="settings_security_country_code_warning">Ceci ouvre les paramètres de pays/région BYD. Modifier le code pays peut affecter les services régionaux ou nécessiter un redémarrage de l’écran multimédia. Ne continuez qu’à l’arrêt.</string>
+    <string name="settings_security_country_code_open">Ouvrir les paramètres</string>
+    <string name="settings_security_country_code_unavailable">Le code pays n’est pas disponible sur cet écran multimédia.</string>
+</resources>

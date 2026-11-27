@@ -68,14 +68,38 @@ class DiLink5CustomProjectionParityTest {
         }
     }
 
-    @Test fun customLayoutsRequireDiLink5EvenWhenOrdinaryProjectionSupportsHdmi() {
+    @Test fun customLayoutsUseHdmiOnlyThroughTheOptedInSealion7Route() {
         val entry = cast.substringAfter("fun startCustomLayouts(owner: Long): Long {")
             .substringBefore("return startTarget(")
-        assertTrue(entry.contains("!ClusterTransport.isDiLink5()"))
+        assertTrue(entry.contains("!supportsCustomLayouts()"))
+
+        val support = cast.substringAfter("fun supportsCustomLayouts(): Boolean")
+            .substringBefore("fun startCustomLayouts(")
+        assertTrue(support.contains("ClusterTransport.isDiLink5()"))
+        assertTrue(support.contains("Sealion7HdmiProjection::isEnabled"))
+
         val hdmi = method("enableAndAwaitProjectionDisplay")
             .substringAfter("if (ClusterTransport.isAaosHdmi()) {")
-            .substringBefore("configureHostedProjectionTarget(")
-        assertTrue(hdmi.contains("check(kind != SessionKind.CUSTOM)"))
+            .substringBefore("if (factoryMiniMap)")
+        val sealion = hdmi.substringBefore("check(kind != SessionKind.CUSTOM)")
+        assertTrue(sealion.contains("if (Sealion7HdmiProjection.isEnabled(context))"))
+        assertTrue(sealion.contains("sealion7Hdmi = true"))
+        assertTrue(sealion.contains("return configureHostedProjectionTarget("))
+        val factory = hdmi.substringAfter("check(kind != SessionKind.CUSTOM)", "")
+        assertTrue(factory.contains("AaosNavigationPresentation.isOpen("))
+        assertTrue(factory.contains("aaosMapArea = true"))
+    }
+
+    @Test fun temporaryInstrumentFullIsAcquiredOnlyAfterHostedContentIsVerified() {
+        val start = method("startSession")
+        val launch = start.indexOf("if (!launch.succeeded)")
+        val acquired = start.indexOf("DiLink5InstrumentFullSession.start(")
+        val published = start.indexOf("phase = SessionPhase.ACTIVE")
+        assertTrue(launch >= 0 && acquired in (launch + 1) until published)
+        assertTrue(start.substring(launch, acquired).contains("if (live.sealion7Hdmi)"))
+        assertTrue(method("failCurrent").contains("releaseInstrumentMode(live)"))
+        assertTrue(method("stopInternal").contains("releaseInstrumentMode(live)"))
+        assertTrue(method("recoverAtBootAttempt").contains("recoverInstrumentModeIfIdle()"))
     }
 
     private fun method(name: String): String {

@@ -471,14 +471,6 @@ public final class AiLaneGl {
     }
 
     /**
-     * Mark the cropper for late attach. Cropper's GL resources allocate
-     * lazily when first used; we just store the reference.
-     */
-    public void attachFoveatedCropper(FoveatedCropper cropper) {
-        this.foveatedCropper = cropper;
-    }
-
-    /**
      * Run a Runnable on this lane's GL thread, blocking until done. Used by
      * the encoder thread during init / shutdown to allocate or free GL
      * resources on this context.
