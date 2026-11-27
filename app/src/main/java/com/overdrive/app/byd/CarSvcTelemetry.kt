@@ -82,8 +82,12 @@ object CarSvcTelemetry {
         val observedAtNanos: Long,
         val cachedAtNanos: Long,
         // elapsedRealtime keeps counting through suspend, unlike nanoTime
-        val observedAtElapsedMs: Long
-    )
+        val observedAtElapsedMs: Long,
+        val exitCode: Int = 0
+    ) {
+        fun successfulObservation(nowElapsedMs: Long): CachedDump? =
+            if (exitCode == 0) cachedDumpFrom(this, nowElapsedMs) else null
+    }
     @Volatile private var cachedDump: DumpSnapshot? = null
     @Volatile private var lastDumpFailureAtNanos = 0L
 
@@ -261,7 +265,8 @@ object CarSvcTelemetry {
                     text,
                     observedAtNanos,
                     System.nanoTime(),
-                    observedAtElapsedMs
+                    observedAtElapsedMs,
+                    process.exitValue()
                 )
                 val durationMs = elapsedMs(snapshot.cachedAtNanos, observedAtNanos)
                 // A slow read is already an aged observation when it completes.
@@ -330,6 +335,9 @@ object CarSvcTelemetry {
         nowNanos >= cachedAtNanos &&
             elapsedMs(nowNanos, cachedAtNanos) < DUMP_TTL_MS &&
             dumpSourceFresh(nowElapsedMs, observedAtElapsedMs)
+
+    internal fun readFreshDump(): CachedDump? =
+        dumpSnapshot()?.successfulObservation(android.os.SystemClock.elapsedRealtime())
 
     fun dumpsysText(): String? = dumpSnapshot()?.text
 

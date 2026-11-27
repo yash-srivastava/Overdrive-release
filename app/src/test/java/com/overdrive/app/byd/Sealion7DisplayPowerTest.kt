@@ -2,6 +2,7 @@ package com.overdrive.app.byd
 
 import java.util.concurrent.Executor
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -9,10 +10,14 @@ class Sealion7DisplayPowerTest {
     private var now = 10_000_000_000L
     private var eligible = true
     private var dump: String? = row(92)
+    private var dumpTime = { now }
+    private fun snapshot(text: String?) = text?.let {
+        CarSvcTelemetry.CachedDump(it, dumpTime() / 1_000_000L, 0L)
+    }
     private var reads = 0
     private val jobs = ArrayDeque<Runnable>()
     private val source = Sealion7DisplayPower(
-        Executor { jobs.addLast(it) }, { eligible }, { reads++; dump }, { now }
+        Executor { jobs.addLast(it) }, { eligible }, { reads++; snapshot(dump) }, { now }
     )
 
     private fun row(kw: Int, ts: Long = now) =
@@ -69,14 +74,63 @@ class Sealion7DisplayPowerTest {
     }
 
     @Test
-    fun repeatedFreshDumpsCannotRenewAnOldGaugeEvent() {
-        dump = row(1)
+    fun freshObservationsKeepUnchangedParkedPowerUntilTheSignalIsLost() {
+        dump = row(2)
+        refresh()
+        repeat(5) {
+            now += 2_000_000_000L
+            refresh()
+            assertEquals(2.0, sample(), 0.0)
+        }
+        val old = dump
+        dump = null
+        now += 2_000_000_000L
+        refresh()
+        assertTrue(sample().isNaN())
+        dump = old
+        now += 2_000_000_000L
+        refresh()
+        assertTrue(sample().isNaN())
+        dump = row(0)
+        now += 2_000_000_000L
+        refresh()
+        assertEquals(0.0, sample(), 0.0)
+    }
+
+    @Test
+    fun failedCommandWithAValidPowerRowCannotConfirmPower() {
+        val partial = CarSvcTelemetry.DumpSnapshot(row(2), now, now, now / 1_000_000L, exitCode = 1)
+        assertNull(partial.successfulObservation(now / 1_000_000L))
+    }
+
+    @Test
+    fun sharedDumpSchedulesNextRefreshFromItsOriginalCapture() {
+        val first = now
+        dumpTime = { first }
+        dump = row(2)
+        now += 1_500_000_000L // another consumer captured the dump first
+        refresh()
+        assertEquals(2.0, sample(), 0.0)
+        assertTrue(jobs.isEmpty())
+        now += 500_000_000L
+        dumpTime = { now }
+        dump = row(3)
+        refresh()
+        assertEquals(3.0, sample(), 0.0)
+    }
+
+    @Test
+    fun reusingACachedDumpOrStallingTheWorkerCannotExtendAnObservation() {
+        val first = now
+        dumpTime = { first }
         refresh()
         now += 2_000_000_000L
         refresh()
-        now += 1_000_000_000L
-        assertEquals(1.0, sample(), 0.0)
-        now++
+        now += 1_100_000_000L
+        assertTrue(sample().isNaN())
+        dumpTime = { now }
+        // No refresh covered the gap. The same old row cannot restart the gauge.
+        jobs.removeFirst().run()
         assertTrue(sample().isNaN())
     }
 
@@ -92,7 +146,7 @@ class Sealion7DisplayPowerTest {
             row(1, 0), "$valid\n$valid"
         )
         for (bad in invalid) {
-            val display = Sealion7DisplayPower(Executor { it.run() }, { true }, { bad }, { now })
+            val display = Sealion7DisplayPower(Executor { it.run() }, { true }, { snapshot(bad) }, { now })
             assertTrue("unexpected value for $bad", display.resolve(Double.NaN).isNaN())
         }
         dump = row(1, now + 1)
