@@ -366,12 +366,8 @@ public class PerformanceMonitor {
     private void collectCpuMetrics(PerformanceSnapshot snapshot) {
         try {
             // Read /proc/stat for system CPU. Only the aggregate first line is
-            // needed; a buffered reader fetches it in one read() instead of
-            // RandomAccessFile.readLine()'s one read() per byte.
-            String line;
-            try (BufferedReader reader = new BufferedReader(new FileReader("/proc/stat"))) {
-                line = reader.readLine();
-            }
+            // needed; use a small first-line read rather than a full text reader.
+            String line = KernelFirstLine.read(new java.io.File("/proc/stat"));
 
             // A malformed aggregate line skips this tick's system and app CPU
             // deltas (their baselines must advance together); freq/temp still run.
@@ -394,10 +390,7 @@ public class PerformanceMonitor {
             }
             
             // Read /proc/[pid]/stat for app CPU
-            String appLine;
-            try (BufferedReader appReader = new BufferedReader(new FileReader("/proc/" + pid + "/stat"))) {
-                appLine = appReader.readLine();
-            }
+            String appLine = KernelFirstLine.read(new java.io.File("/proc/" + pid + "/stat"));
 
             if (systemSampled && appLine != null) {
                 // /proc/<pid>/stat field 2 (comm) is parenthesized and may
@@ -668,8 +661,8 @@ public class PerformanceMonitor {
             if ("unavailable".equals(snapshot.gpuUsageSource)) {
                 java.io.File gpuBusyFile = resolveGpuBusyFile();
                 if (gpuBusyFile != null) {
-                    try (BufferedReader br = new BufferedReader(new FileReader(gpuBusyFile))) {
-                        String line = br.readLine();
+                    try {
+                        String line = KernelFirstLine.read(gpuBusyFile);
                         if (line != null) {
                             String[] parts = line.trim().split("\\s+");
                             if (parts.length >= 2) {
@@ -754,8 +747,8 @@ public class PerformanceMonitor {
             "/sys/class/kgsl/kgsl-3d0/devfreq/available_frequencies"
         };
         for (String path : paths) {
-            try (BufferedReader br = new BufferedReader(new FileReader(path))) {
-                String line = br.readLine();
+            try {
+                String line = KernelFirstLine.read(new java.io.File(path));
                 if (line == null || line.trim().isEmpty()) continue;
                 if (path.contains("available_frequencies")) {
                     long maxRaw = 0;
@@ -806,8 +799,8 @@ public class PerformanceMonitor {
         if (!f.exists()) {
             gpuBusyPathAbsent = true;
         } else if (f.canRead()) {
-            try (BufferedReader br = new BufferedReader(new FileReader(f))) {
-                String line = br.readLine();
+            try {
+                String line = KernelFirstLine.read(f);
                 if (line != null) {
                     String[] parts = line.trim().split("\\s+");
                     if (parts.length >= 2) {
@@ -845,8 +838,8 @@ public class PerformanceMonitor {
      */
     private long readLongFromFile(java.io.File file) {
         if (!file.exists() || !file.canRead()) return -1;
-        try (BufferedReader br = new BufferedReader(new FileReader(file))) {
-            String line = br.readLine();
+        try {
+            String line = KernelFirstLine.read(file);
             if (line == null) return -1;
             // Read the leading number only. Concatenating every digit would
             // misread "45@1000" as 451000; a negative value is not valid data.
@@ -1016,9 +1009,8 @@ public class PerformanceMonitor {
         }
 
         String type = null;
-        try (BufferedReader reader = new BufferedReader(new FileReader(
-                "/sys/class/thermal/thermal_zone" + index + "/type"))) {
-            type = reader.readLine();
+        try {
+            type = KernelFirstLine.read(new java.io.File("/sys/class/thermal/thermal_zone" + index + "/type"));
         } catch (Exception ignored) {
             // A missing/unreadable zone is cached as null.
         }
@@ -1034,8 +1026,8 @@ public class PerformanceMonitor {
      * single open+parse with no directory scan.
      */
     private static Double readTempFile(java.io.File f, boolean sanityCheck) {
-        try (BufferedReader reader = new BufferedReader(new FileReader(f))) {
-            String line = reader.readLine();
+        try {
+            String line = KernelFirstLine.read(f);
             if (line == null || line.trim().isEmpty()) return null;
             double temp = Double.parseDouble(line.trim());
             double result = temp > 1000 ? temp / 1000.0 : temp;
@@ -1050,9 +1042,8 @@ public class PerformanceMonitor {
         JSONArray zones = new JSONArray();
         for (int index : indices) {
             java.io.File directory = new java.io.File(zonesDirectory, "thermal_zone" + index);
-            try (BufferedReader reader = new BufferedReader(new FileReader(
-                    new java.io.File(directory, "type")))) {
-                String type = reader.readLine();
+            try {
+                String type = KernelFirstLine.read(new java.io.File(directory, "type"));
                 if (type == null || type.trim().isEmpty()) continue;
 
                 JSONObject zone = new JSONObject();
