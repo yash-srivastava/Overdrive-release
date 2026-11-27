@@ -277,14 +277,53 @@ int main() {
             cases++;
         }
     }
-    // Full geometry fits at smaller sizes; 1080p caches only the lower band.
+    // Small geometries use raw coordinates; 1080p fits entirely when packed.
     odcpu::check(640, 480, 2560, 480, 1280, 720, 0, 2, false,
                  0.3f, 0.07f, 0.75f, 0.7f, 0.f, 16, rng);
     odcpu::check(1920, 1080, 2560, 480, 1280, 720, 1, 0, false,
                  0.3f, 0.07f, 0.75f, 0.7f, 0.f, 16, rng);
     cases += 2;
-    // Legacy panoramic recording (5120x960 strip -> 2560x1920): the lower band
-    // must fit the cache, with and without the windshield top band.
+    // Exercise the signed U bias, high nibble boundaries and full V range.
+    {
+        const int32_t u[] = {-128, -1, 0, 65407, 65408, 524160};
+        const int32_t v[] = {0, 65535, 65536, 524287, 524288, 1048320};
+        uint16_t packed[15];
+        int32_t actualU[6], actualV[6];
+        odcpu::DashcamRemapCache::packRow(packed, 6, u, v);
+        odcpu::DashcamRemapCache::unpackRow(packed, 6, actualU, actualV);
+        assert(std::equal(u, u + 6, actualU) && std::equal(v, v + 6, actualV));
+    }
+    {
+        odcpu::DashcamRemapCache cache;
+        odcpu::RemapSource sr = {};
+        sr.w = 2560;
+        sr.h = 480;
+        odcpu::RemapSpec p = {1920, 1080, 1, {0.f, 0.25f, 0.5f, 0.75f},
+                              0.3f, 0.07f, 0.75f, 0, 0.12f, 0.7f};
+        cache.prepare(p, sr);
+        assert(cache.packed && !cache.data && cache.needsFill);
+        assert(cache.planes[0].first == 0 && cache.planes[1].first == 0);
+        assert(cache.samples() * 5 == 12960000);
+        cache.needsFill = false;
+        cache.prepare(p, sr);
+        assert(!cache.needsFill);
+        p.k1 = 0.4f;
+        cache.prepare(p, sr);
+        assert(cache.packed && cache.needsFill);
+        p.windshield = 1;
+        cache.prepare(p, sr);
+        assert(!cache.packed && cache.data && cache.needsFill);
+        p.k1 = p.k2 = 0.f;
+        cache.prepare(p, sr);
+        assert(!cache.packed && !cache.data && !cache.needsFill);
+        p.k1 = 0.3f;
+        p.windshield = 0;
+        sr.h = 4098;
+        cache.prepare(p, sr);
+        assert(!cache.packed && cache.data);
+    }
+    // Legacy panoramic recording: use the raw lower band with a windshield,
+    // or pack more rows when all four cameras need lens correction.
     for (int ws : {0, 1}) {
         odcpu::DashcamRemapCache cache;
         odcpu::RemapSpec p = {2560, 1920, 1, {0.75f, 0.5f, 0.f, 0.25f},
@@ -293,12 +332,23 @@ int main() {
         sr.w = 5120;
         sr.h = 960;
         cache.prepare(p, sr);
-        assert(cache.data && cache.needsFill);
-        assert(cache.planes[0].first == 1344 && cache.planes[1].first == 672);
+        assert(cache.needsFill);
+        if (ws) {
+            assert(cache.data && !cache.packed);
+            assert(cache.planes[0].first == 1344 && cache.planes[1].first == 672);
+        } else {
+            assert(cache.packed && !cache.data);
+            assert(cache.planes[0].first == 872 && cache.planes[1].first == 436);
+            assert(cache.samples() * 5 <= 16 * 1024 * 1024);
+        }
         odcpu::check(2560, 1920, 5120, 960, 1920, 1080, 1, 0, ws == 1,
                      0.12f, 0.04f, 0.75f, 0.7f, 0.12f, 32, rng);
         cases++;
     }
+    // An oversized lower band must still respect the budget and render uncached rows.
+    odcpu::check(1920, 1080, 2560, 480, 1280, 720, 2, 1, true,
+                 0.3f, 0.07f, 0.75f, 0.1f, 0.12f, 16, rng);
+    cases++;
     // Same-width windshield, including nonlinear correction of the lower band.
     for (int src = 0; src < 3; src++) {
         for (int dst = 0; dst < 3; dst++) {
