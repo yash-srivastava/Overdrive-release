@@ -12,6 +12,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
+#include <memory>
 #include <thread>
 #include <vector>
 #if defined(__ANDROID__) || defined(__linux__)
@@ -989,14 +990,92 @@ static void dashcamColumns(const RemapSpec& p, const RemapSource* src,
     }
 }
 
+// A CPU recording lane keeps its lens geometry for the whole session. Store
+// only fixed-point coordinates, never frame pointers or pixels. Limit the
+// cache to 8 MiB; prefer the entire corrected image, then the lower band.
+// The calling thread owns it, so a retired recording lane frees its table.
+struct DashcamRemapCache {
+    struct Plane {
+        int first = 0, last = 0, width = 0;
+        size_t offset = 0;
+
+        uint64_t size() const { return (uint64_t) (last - first) * width * 2; }
+    };
+    std::unique_ptr<int32_t[]> data;
+    Plane planes[2];
+    int outW = 0, outH = 0, sw = 0, sh = 0, windshield = 0;
+    float k1 = 0, k2 = 0, aspect = 0, split = 0;
+    bool needsFill = false;
+
+    bool matches(const RemapSpec& p, const RemapSource& sr) const {
+        return outW == p.outW && outH == p.outH && sw == sr.w && sh == sr.h
+                && windshield == p.windshield && k1 == p.k1 && k2 == p.k2
+                && aspect == p.aspect && split == p.split;
+    }
+
+    static float rowV(const RemapSpec& p, int y, int div) {
+        return div == 2 ? (float) (2 * y + 1) / (float) p.outH
+                        : ((float) y + 0.5f) / (float) p.outH;
+    }
+
+    void prepare(const RemapSpec& p, const RemapSource& sr) {
+        if (p.k1 == 0.f && p.k2 == 0.f) {
+            data.reset();
+            outW = 0;
+            return;
+        }
+        if (matches(p, sr)) return;
+        data.reset();  // release the old geometry before allocating a replacement
+        needsFill = false;
+        outW = p.outW; outH = p.outH; sw = sr.w; sh = sr.h;
+        windshield = p.windshield; k1 = p.k1; k2 = p.k2;
+        aspect = p.aspect; split = p.split;
+
+        int bottom[2];
+        for (int div : {1, 2}) {
+            Plane& plane = planes[div - 1];
+            plane.last = p.outH / div;
+            plane.width = p.outW / div;
+            int lo = 0, hi = plane.last;
+            while (lo < hi) {
+                const int mid = lo + (hi - lo) / 2;
+                if (rowV(p, mid, div) < p.split) lo = mid + 1;
+                else hi = mid;
+            }
+            bottom[div - 1] = lo;
+            plane.first = p.windshield ? lo : 0;
+        }
+        constexpr size_t maxEntries = 8 * 1024 * 1024 / sizeof(int32_t);
+        if (planes[0].size() + planes[1].size() > maxEntries) {
+            planes[0].first = bottom[0];
+            planes[1].first = bottom[1];
+        }
+        const uint64_t count = planes[0].size() + planes[1].size();
+        if (count == 0 || count > maxEntries) return;
+        planes[0].offset = 0;
+        planes[1].offset = (size_t) planes[0].size();
+        data.reset(new (std::nothrow) int32_t[(size_t) count]);
+        // Fill rows on the existing band workers during the first frame.
+        // Each band owns distinct luma/chroma rows; later frames only read.
+        needsFill = data != nullptr;
+    }
+
+    int32_t* row(int y, int div) const {
+        const Plane& plane = planes[div - 1];
+        if (!data || y < plane.first || y >= plane.last) return nullptr;
+        return data.get() + plane.offset + (size_t) (y - plane.first) * plane.width * 2;
+    }
+};
+
 // Dashcam: 360 front (or windshield) on top, left / rear / right below.
 static void dashcamRow(const RemapSpec& p, const RemapSource* src, const Planes& d,
-                       const CellBounds& cb, const DashcamColumns& cols, int y, bool chroma) {
+                       const CellBounds& cb, const DashcamColumns& cols,
+                       const DashcamRemapCache& cache, int y, bool chroma) {
     int32_t lu[kMaxRow], lv[kMaxRow];
     const int div = chroma ? 2 : 1;
     const int n = p.outW / div;
-    const float vy = chroma ? (float) (2 * y + 1) / (float) p.outH
-                            : ((float) y + 0.5f) / (float) p.outH;
+    int32_t* cached = cache.row(y, div);
+    const float vy = DashcamRemapCache::rowV(p, y, div);
     // Output pixel i sits at vx = (i * div + 0.5 * div) / outW.
     const float vx0 = (0.5f * (float) div) / (float) p.outW;
     const float dvx = (float) div / (float) p.outW;
@@ -1022,10 +1101,16 @@ static void dashcamRow(const RemapSpec& p, const RemapSource* src, const Planes&
             return;
         }
         const int32_t* u = lu;
+        const int32_t* v = lv;
         const int start = cols.topStart[div - 1];
         if (cols.topReady) {
             u = chroma ? cols.topC : cols.topY;
             identityY(1, ly, p.aspect, (float) sh, lv);
+        } else if (cached) {
+            if (cache.needsFill) rectifyRow(p, n, vx0, dvx, ly, 0.25f * (float) sw,
+                                            (float) sh, cached, cached + n);
+            u = cached;
+            v = cached + n;
         } else {
             rectifyRow(p, n, vx0, dvx, ly, 0.25f * (float) sw, (float) sh, lu, lv);
         }
@@ -1036,8 +1121,8 @@ static void dashcamRow(const RemapSpec& p, const RemapSource* src, const Planes&
         } else if (cols.topReady) {
             if (chroma) gatherUV<true>(strip, n, u, lv, off, ou, ov, d.pixUV);
             else gatherY<true>(strip, n, u, lv, off, oy);
-        } else if (chroma) gatherUV(strip, n, u, lv, off, ou, ov, d.pixUV);
-        else gatherY(strip, n, u, lv, off, oy);
+        } else if (chroma) gatherUV(strip, n, u, v, off, ou, ov, d.pixUV);
+        else gatherY(strip, n, u, v, off, oy);
         return;
     }
     const float by = (vy - p.split) / (1.f - p.split);
@@ -1048,10 +1133,17 @@ static void dashcamRow(const RemapSpec& p, const RemapSource* src, const Planes&
         if (b <= a) continue;
         const float tx0 = (vx0 + (float) a * dvx) * 3.f - (float) c;
         const int32_t* u = lu;
+        const int32_t* v = lv;
         const int start = cols.bottomStart[div - 1][c];
         if (cols.bottomReady) {
             u = (chroma ? cols.bottomC : cols.bottomY) + a;
             identityY(1, by, p.aspect, (float) sh, lv);
+        } else if (cached) {
+            if (cache.needsFill) rectifyRow(p, b - a, tx0, dvx * 3.f, by,
+                                            0.25f * (float) sw, (float) sh,
+                                            cached + a, cached + n + a);
+            u = cached + a;
+            v = cached + n + a;
         } else {
             rectifyRow(p, b - a, tx0, dvx * 3.f, by, 0.25f * (float) sw, (float) sh, lu, lv);
         }
@@ -1064,8 +1156,8 @@ static void dashcamRow(const RemapSpec& p, const RemapSource* src, const Planes&
             if (chroma) gatherUV<true>(strip, b - a, u, lv, off,
                     ou + (size_t) a * d.pixUV, ov + (size_t) a * d.pixUV, d.pixUV);
             else gatherY<true>(strip, b - a, u, lv, off, oy + a);
-        } else if (chroma) gatherUV(strip, b - a, u, lv, off, ou + (size_t) a * d.pixUV, ov + (size_t) a * d.pixUV, d.pixUV);
-        else gatherY(strip, b - a, u, lv, off, oy + a);
+        } else if (chroma) gatherUV(strip, b - a, u, v, off, ou + (size_t) a * d.pixUV, ov + (size_t) a * d.pixUV, d.pixUV);
+        else gatherY(strip, b - a, u, v, off, oy + a);
     }
 }
 
@@ -1219,6 +1311,7 @@ struct BandJob {
     int per;
     CellBounds cb;
     const DashcamColumns* columns;
+    const DashcamRemapCache* cache;
 };
 
 static void gridBand(void* ctx, int b) {
@@ -1233,9 +1326,9 @@ static void dashcamBand(void* ctx, int b) {
     const int c0 = b * j.per;
     const int c1 = c0 + j.per < j.rows ? c0 + j.per : j.rows;
     for (int yc = c0; yc < c1; yc++) {
-        dashcamRow(*j.p, j.src, *j.d, j.cb, *j.columns, yc * 2, false);
-        dashcamRow(*j.p, j.src, *j.d, j.cb, *j.columns, yc * 2 + 1, false);
-        dashcamRow(*j.p, j.src, *j.d, j.cb, *j.columns, yc, true);
+        dashcamRow(*j.p, j.src, *j.d, j.cb, *j.columns, *j.cache, yc * 2, false);
+        dashcamRow(*j.p, j.src, *j.d, j.cb, *j.columns, *j.cache, yc * 2 + 1, false);
+        dashcamRow(*j.p, j.src, *j.d, j.cb, *j.columns, *j.cache, yc, true);
     }
 }
 
@@ -1254,11 +1347,14 @@ int remapGrid(const RemapSpec& p, const RemapSource& strip, const RemapSource* w
     RemapSource src[2] = {strip, strip};
     if (p.layout == 1 && p.windshield) src[1] = *windshield;
     if (bands < 1) bands = 1;
+    thread_local DashcamRemapCache cache;
     BandJob job;
     job.p = &p;
     job.src = src;
     job.d = &d;
     if (p.layout == 0) {
+        cache.data.reset();
+        cache.outW = 0;
         // Bands of tile rows, even-aligned so each owns its chroma rows.
         const int th = p.outH / 2;
         job.rows = th;
@@ -1272,7 +1368,10 @@ int remapGrid(const RemapSpec& p, const RemapSource& strip, const RemapSource* w
         DashcamColumns columns;
         dashcamColumns(p, src, job.cb, columns);
         job.columns = &columns;
+        cache.prepare(p, strip);
+        job.cache = &cache;
         Pool::get().run(bands, dashcamBand, &job);
+        cache.needsFill = false;
     }
     return 0;
 }

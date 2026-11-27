@@ -108,6 +108,22 @@ static void check(int w, int h, int sw, int sh, int ww, int wh,
     }
     assert(remapGrid(p, src[0], windshield ? &src[1] : nullptr, actual.planes, bands) == 0);
     assert(actual.y == expected.y && actual.u == expected.u && actual.v == expected.v);
+
+    // Same geometry, different frame content and destination. Exercise the
+    // warm coordinate cache, including offsets that are intentionally not keys.
+    if (k1 != 0.f || k2 != 0.f) {
+        for (auto* pixels : {&strip.y, &strip.u, &strip.v, &ws.y, &ws.u, &ws.v}) {
+            for (uint8_t& pixel : *pixels) pixel ^= 0x5a;
+        }
+        p.off[0] = 0.029f;
+        for (int yc = 0; yc < h / 2; yc++) {
+            referenceDashcamRow(p, src, expected.planes, cb, yc * 2, false);
+            referenceDashcamRow(p, src, expected.planes, cb, yc * 2 + 1, false);
+            referenceDashcamRow(p, src, expected.planes, cb, yc, true);
+        }
+        assert(remapGrid(p, src[0], windshield ? &src[1] : nullptr, actual.planes, bands) == 0);
+        assert(actual.y == expected.y && actual.u == expected.u && actual.v == expected.v);
+    }
 }
 // A horizontally exact grid with vertical scaling uses the new path even
 // though it does not qualify for the separate 1:1 composeGrid fast path.
@@ -261,6 +277,12 @@ int main() {
             cases++;
         }
     }
+    // Full geometry fits at smaller sizes; 1080p caches only the lower band.
+    odcpu::check(640, 480, 2560, 480, 1280, 720, 0, 2, false,
+                 0.3f, 0.07f, 0.75f, 0.7f, 0.f, 16, rng);
+    odcpu::check(1920, 1080, 2560, 480, 1280, 720, 1, 0, false,
+                 0.3f, 0.07f, 0.75f, 0.7f, 0.f, 16, rng);
+    cases += 2;
     // Same-width windshield, including nonlinear correction of the lower band.
     for (int src = 0; src < 3; src++) {
         for (int dst = 0; dst < 3; dst++) {

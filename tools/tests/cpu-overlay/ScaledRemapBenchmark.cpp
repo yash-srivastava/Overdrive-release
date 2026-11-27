@@ -25,11 +25,13 @@ struct Frame {
 int main() {
     Frame strip(2560, 480), windshield(1280, 720), dst(1920, 1080);
     odcpu::RemapSource sr = {strip.planes, 2560, 480}, wr = {windshield.planes, 1280, 720};
-    const char* names[] = {"grid", "dashcam", "windshield"};
+    const char* names[] = {"grid", "dashcam", "windshield", "dewarped dashcam",
+                           "dewarped windshield"};
     constexpr int frames = 80;
-    for (int mode = 0; mode < 3; mode++) {
+    for (int mode = 0; mode < 5; mode++) {
         odcpu::RemapSpec p = {1920, 1080, mode == 0 ? 0 : 1, {0.f, .25f, .5f, .75f},
-                              0.f, 0.f, .75f, mode == 2, .12f, .7f};
+                              mode >= 3 ? .3f : 0.f, mode >= 3 ? .07f : 0.f, .75f,
+                              mode == 2 || mode == 4, .12f, .7f};
         for (int i = 0; i < 5; i++) {
             if (odcpu::remapGrid(p, sr, &wr, dst.planes, 16)) return 1;
         }
