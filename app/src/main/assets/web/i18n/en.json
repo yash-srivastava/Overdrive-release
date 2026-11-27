@@ -4758,6 +4758,7 @@
     "fps_tradeoff": "15 fps: half the CPU/encoder load, sharper frames at the same bitrate; 30 fps: smoother motion",
     "fps_follow": "Follow",
     "fps_follow_note": "Follow recording frame rate (currently {n} fps)",
+    "fps_follow_note_split": "Follow recording frame rate (currently {n} fps driving, {p} fps parked)",
     "fps_next_session": "Applies from the next DVR session; a clip in progress keeps its rate.",
     "proximity_idle_title": "Low-rate DVR while Proximity Guard waits",
     "proximity_idle_desc": "Smart mode. While Proximity Guard waits at its low-power monitor rate, the DVR records its pre-roll at that rate too and snaps back to full rate on the event. Saves power; pre-roll before the event is choppier."

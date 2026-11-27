@@ -2442,10 +2442,18 @@ object UnifiedConfigManager {
         OEM_FPS_MODE_FOLLOW == getOemDashcam().optString("fpsMode", OEM_FPS_MODE_FIXED)
     } catch (t: Throwable) { false }
 
-    /** ACC-on recording fps (camera.targetFps) the OEM DVR follows, read live. */
+    /** ACC-on recording fps (camera.targetFps) the OEM DVR follows while driving. */
     @JvmStatic
     fun getOemFollowFps(): Int = try {
         (loadConfig().optJSONObject("camera")?.optInt("targetFps", 15) ?: 15).coerceIn(1, 60)
+    } catch (t: Throwable) { 15 }
+
+    /** Parked (surveillance) recording fps the OEM DVR follows: camera.surveillanceTargetFps, else targetFps. */
+    @JvmStatic
+    fun getOemFollowParkedFps(): Int = try {
+        val cam = loadConfig().optJSONObject("camera")
+        val drive = cam?.optInt("targetFps", 15) ?: 15
+        (cam?.optInt("surveillanceTargetFps", drive) ?: drive).coerceIn(1, 60)
     } catch (t: Throwable) { 15 }
 
     /** Opt-in: stride the warm DVR to the Proximity monitor rate while it waits. Default FALSE. */

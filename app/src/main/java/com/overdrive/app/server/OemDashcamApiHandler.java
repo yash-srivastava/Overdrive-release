@@ -1121,11 +1121,20 @@ public class OemDashcamApiHandler {
         response.put("fpsMode", follow
             ? com.overdrive.app.config.UnifiedConfigManager.OEM_FPS_MODE_FOLLOW
             : com.overdrive.app.config.UnifiedConfigManager.OEM_FPS_MODE_FIXED);
-        int halFps = Math.max(15, Math.min(60, oem.optInt("fps", 30)));
+        // Same axis resolution as OemDashcamPipeline.applyRecordingConfigFromUcm.
+        int storedFps = oem.optInt("fps", 30);
         int followFps = com.overdrive.app.config.UnifiedConfigManager.getOemFollowFps();
-        int followStride = com.overdrive.app.camera.OemDashcamPipeline.followDrawStride(halFps, followFps);
+        int followParked = com.overdrive.app.config.UnifiedConfigManager.getOemFollowParkedFps();
+        JSONObject camCfg = com.overdrive.app.config.UnifiedConfigManager.loadConfig().optJSONObject("camera");
+        int parkedAxisFps = camCfg != null ? camCfg.optInt("surveillanceTargetFps", storedFps) : storedFps;
+        int driveHal = com.overdrive.app.camera.OemDashcamPipeline.followHalFps(storedFps, storedFps, followFps);
+        int parkedHal = com.overdrive.app.camera.OemDashcamPipeline.followHalFps(parkedAxisFps, storedFps, followParked);
         response.put("followFps", followFps);
-        response.put("followEncodeFps", Math.max(1, Math.round((float) halFps / followStride)));
+        response.put("followEncodeFps",
+            com.overdrive.app.camera.OemDashcamPipeline.followEncodeFps(driveHal, followFps));
+        response.put("followParkedFps", followParked);
+        response.put("followEncodeFpsParked",
+            com.overdrive.app.camera.OemDashcamPipeline.followEncodeFps(parkedHal, followParked));
         response.put("proximityIdleThrottle",
             com.overdrive.app.config.UnifiedConfigManager.isOemProximityIdleThrottle());
         response.put("disableNativeDvr", oem.optBoolean("disableNativeDvr", false));
@@ -1221,11 +1230,14 @@ public class OemDashcamApiHandler {
                 if (com.overdrive.app.config.UnifiedConfigManager.OEM_FPS_MODE_FOLLOW.equals(m)
                         || com.overdrive.app.config.UnifiedConfigManager.OEM_FPS_MODE_FIXED.equals(m)) {
                     delta.put("fpsMode", m);
-                    // Follow strides the encode over a 30 fps HAL (the seeded default),
-                    // so frames stay evenly spaced whatever fixed rate was stored.
+                    // Keep the stored camera rate when it already yields the drive
+                    // follow rate; raise to 30 only when that is what reaches it.
                     if (com.overdrive.app.config.UnifiedConfigManager.OEM_FPS_MODE_FOLLOW.equals(m)
                             && !delta.has("fps")) {
-                        delta.put("fps", 30);
+                        int stored = beforeOem == null ? 30 : beforeOem.optInt("fps", 30);
+                        int follow = com.overdrive.app.config.UnifiedConfigManager.getOemFollowFps();
+                        int hal = com.overdrive.app.camera.OemDashcamPipeline.followHalFps(stored, 30, follow);
+                        if (hal != Math.max(15, Math.min(60, stored))) delta.put("fps", hal);
                     }
                 }
             } else if (delta.has("fps")) {

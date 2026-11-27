@@ -531,7 +531,7 @@ public class OemDashcamPipeline {
                 logger.info("OemDashcamPipeline started: " + width + "x" + height + " @ "
                     + fps + " fps" + (clipDrawStride > 1
                         ? " (encode " + encodeFps() + " fps, stride " + clipDrawStride + ", follow "
-                            + sessionFollowFps + ")" : "")
+                            + activeFollowFps + ")" : "")
                     + (sessionProximityIdleThrottle ? " [proximity-idle throttle]" : "")
                     + ", " + (bitrate / 1_000_000) + " Mbps, id=" + oemDashcamCameraId
                     + ", codec=" + (isHevc() ? "H.265" : "H.264"));
@@ -958,35 +958,40 @@ public class OemDashcamPipeline {
             // inside the same lock) is observed here as recording==true, so we skip
             // the write and never clobber a freshly-opened full-rate clip's stride.
             boolean surveillanceAxis = !com.overdrive.app.monitor.AccMonitor.isAccOn();
-            int target = idleDrawStride(surveillanceAxis);
+            int throttle = idleThrottleStride(surveillanceAxis);
+            int axisFollow = surveillanceAxis ? sessionFollowParkedFps : sessionFollowDriveFps;
             synchronized (recordingStateLock) {
                 if (recording.get()) return;  // a new clip already opened — leave its stride
-                recorderDrawStride = target;
+                // Between clips the follow target tracks the current axis.
+                activeFollowFps = axisFollow;
+                clipDrawStride = followDrawStride(fps, axisFollow);
+                recorderDrawStride = Math.max(clipDrawStride, throttle);
             }
+            HardwareEventRecorderGpu enc = encoder;
+            if (enc != null && axisFollow > 0) enc.setTargetFps(encodeFps());
         } catch (Throwable t) {
             recorderDrawStride = clipDrawStride;  // fail safe: full session rate
         }
     }
 
     /**
-     * Not-recording encode stride. Parked: the existing idle throttle. Driving:
-     * the opt-in Proximity-monitor throttle while the pano's low-power monitor
-     * waits. Otherwise the session's clip stride. Never below the clip stride.
+     * Not-recording throttle stride, 0 = none. Parked: the existing idle throttle.
+     * Driving: the opt-in Proximity-monitor throttle while the pano's low-power
+     * monitor waits. Callers take max(clip stride, this).
      */
-    private int idleDrawStride(boolean surveillanceAxis) {
-        int base = clipDrawStride;
+    private int idleThrottleStride(boolean surveillanceAxis) {
         if (surveillanceAxis) {
             if (UnifiedConfigManager.isOemIdleThrottleWhenParked()) {
                 int idleFps = UnifiedConfigManager.getOemIdleFps();
-                return (idleFps > 0) ? Math.max(base, Math.round((float) fps / idleFps)) : base;
+                return (idleFps > 0) ? Math.round((float) fps / idleFps) : 0;
             }
-            return base;
+            return 0;
         }
         int monitorFps = com.overdrive.app.recording.OemDashcamMirror.getProximityMonitorFps();
         if (sessionProximityIdleThrottle && monitorFps > 0) {
-            return Math.max(base, Math.round((float) fps / monitorFps));
+            return Math.round((float) fps / monitorFps);
         }
-        return base;
+        return 0;
     }
 
     /**
@@ -999,10 +1004,10 @@ public class OemDashcamPipeline {
         try {
             boolean surveillanceAxis = !com.overdrive.app.monitor.AccMonitor.isAccOn();
             if (surveillanceAxis) return;  // parked stride is owned by the idle throttle
-            int target = idleDrawStride(false);
+            int throttle = idleThrottleStride(false);
             synchronized (recordingStateLock) {
                 if (recording.get()) return;
-                recorderDrawStride = target;
+                recorderDrawStride = Math.max(clipDrawStride, throttle);
             }
         } catch (Throwable t) {
             recorderDrawStride = clipDrawStride;
@@ -1171,7 +1176,9 @@ public class OemDashcamPipeline {
     private void applyRecordingConfigFromUcm(boolean sessionStart) {
         if (sessionStart) {
             // Fail-safe defaults = today's path if any read below throws.
-            sessionFollowFps = 0;
+            sessionFollowDriveFps = 0;
+            sessionFollowParkedFps = 0;
+            activeFollowFps = 0;
             sessionProximityIdleThrottle = false;
             clipDrawStride = 1;
         }
@@ -1222,24 +1229,28 @@ public class OemDashcamPipeline {
             }
             fps = Math.max(15, Math.min(60, requestedFps));
 
-            // "follow" encodes at the ACC-on recording fps by striding the
-            // encode; the camera HAL keeps the rate above, so frames stay evenly
-            // spaced. Locked per session (KEY_FRAME_RATE is configure-time); only
-            // the stride is re-derived if the HAL rate changes live.
+            // "follow" encodes at the current axis's recording fps (driving:
+            // camera.targetFps, parked: camera.surveillanceTargetFps) by striding
+            // the encode over the camera rate, so frames stay evenly spaced. The
+            // camera rate is raised to oemDashcam.fps only when the axis rate
+            // can't reach the follow rate. Targets lock per session; a clip in
+            // flight keeps the rate it opened with. Fixed mode: untouched.
+            if (sessionStart && UnifiedConfigManager.isOemFpsFollow()) {
+                sessionFollowDriveFps = UnifiedConfigManager.getOemFollowFps();
+                sessionFollowParkedFps = UnifiedConfigManager.getOemFollowParkedFps();
+            }
             if (sessionStart) {
-                sessionFollowFps = UnifiedConfigManager.isOemFpsFollow()
-                    ? UnifiedConfigManager.getOemFollowFps() : 0;
                 sessionProximityIdleThrottle = UnifiedConfigManager.isOemProximityIdleThrottle();
             }
-            clipDrawStride = followDrawStride(fps, sessionFollowFps);
+            int axisFollow = surveillanceAxis ? sessionFollowParkedFps : sessionFollowDriveFps;
+            if (axisFollow > 0) fps = followHalFps(fps, recAxisFps, axisFollow);
 
-            // Not recording: the idle stride (parked idle throttle / Proximity
-            // monitor throttle / clip stride). Recording: the clip stride, which
-            // is 1 unless following — the same value the clip opened with unless
-            // the HAL rate just moved. Explicit-fps sessions stay at 1 = today.
-            int idleTarget = idleDrawStride(surveillanceAxis);
+            int throttle = idleThrottleStride(surveillanceAxis);
             synchronized (recordingStateLock) {
-                recorderDrawStride = recording.get() ? clipDrawStride : idleTarget;
+                if (!recording.get()) activeFollowFps = axisFollow;
+                clipDrawStride = followDrawStride(fps, activeFollowFps);
+                recorderDrawStride = recording.get()
+                    ? clipDrawStride : Math.max(clipDrawStride, throttle);
             }
 
             // Recording-axis tier chain (also the surveillance-axis fallback).
@@ -1278,6 +1289,7 @@ public class OemDashcamPipeline {
     public void reapplyAxisProfileFromUcm() {
         if (!running.get()) return;
         int oldFps = fps;
+        int oldEncodeFps = encodeFps();
         int oldBitrate = bitrate;
         applyRecordingConfigFromUcm(false);  // re-resolves fps/bitrate for the live axis
         try {
@@ -1301,6 +1313,10 @@ public class OemDashcamPipeline {
                 if (enc != null) {
                     enc.setTargetFps(encodeFps());
                 }
+            }
+            if (fps == oldFps && encodeFps() != oldEncodeFps) {
+                HardwareEventRecorderGpu enc = encoder;
+                if (enc != null) enc.setTargetFps(encodeFps());
             }
             if (fps != oldFps || bitrate != oldBitrate) {
                 logger.info("OEM axis profile re-applied live: fps " + oldFps + "→" + fps
@@ -1904,8 +1920,11 @@ public class OemDashcamPipeline {
     private volatile int recorderDrawStride = 1;
     // Session clip stride: round(HAL fps / follow fps) in "follow" mode, else 1.
     private volatile int clipDrawStride = 1;
-    // Follow target locked at start(); 0 = explicit fps (stride 1, today's path).
-    private volatile int sessionFollowFps = 0;
+    // Follow targets per axis, locked at start(); 0 = fixed fps (stride 1, today's path).
+    private volatile int sessionFollowDriveFps = 0;
+    private volatile int sessionFollowParkedFps = 0;
+    // Follow target of the current/next clip (changes only between clips).
+    private volatile int activeFollowFps = 0;
     // Opt-in Proximity-monitor throttle, locked at start().
     private volatile boolean sessionProximityIdleThrottle = false;
 
@@ -1913,6 +1932,23 @@ public class OemDashcamPipeline {
     public static int followDrawStride(int halFps, int followFps) {
         if (followFps <= 0 || followFps >= halFps) return 1;
         return Math.max(1, Math.round((float) halFps / followFps));
+    }
+
+    /** Encoded rate for a camera rate and follow target. */
+    public static int followEncodeFps(int halFps, int followFps) {
+        return Math.max(1, Math.round((float) halFps / followDrawStride(halFps, followFps)));
+    }
+
+    /**
+     * Camera rate for follow: the axis rate when it already yields the follow rate,
+     * else the stored OEM rate (both clamped 15..60) if that does, else the axis rate.
+     */
+    public static int followHalFps(int axisFps, int storedFps, int followFps) {
+        int axis = Math.max(15, Math.min(60, axisFps));
+        if (followFps <= 0 || followEncodeFps(axis, followFps) == followFps) return axis;
+        int alt = Math.max(15, Math.min(60, storedFps));
+        if (alt > axis && followEncodeFps(alt, followFps) == followFps) return alt;
+        return axis;
     }
 
     /** Rate the encoder actually receives at the clip stride. */

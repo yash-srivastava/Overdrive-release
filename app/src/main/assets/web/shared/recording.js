@@ -2925,6 +2925,8 @@ BYD.recording = {
             return;
         }
         this._oemFollowEncodeFps = typeof sdata.followEncodeFps === 'number' ? sdata.followEncodeFps : null;
+        this._oemFollowEncodeFpsParked = typeof sdata.followEncodeFpsParked === 'number'
+            ? sdata.followEncodeFpsParked : null;
         const server = {
             oemFpsMode: sdata.fpsMode,
             oemFps: typeof sdata.fps === 'number' ? sdata.fps : 30,
@@ -2955,10 +2957,16 @@ BYD.recording = {
         const note = document.getElementById('oemFpsFollowNote');
         if (note) {
             const n = this._oemFollowEncodeFps;
+            const p = this._oemFollowEncodeFpsParked;
             note.style.display = n ? '' : 'none';
             if (n) {
-                let t = BYD.i18n && BYD.i18n.t ? BYD.i18n.t('oem_dashcam.fps_follow_note', { n: n }) : null;
-                if (!t || t === 'oem_dashcam.fps_follow_note') t = 'Follow recording frame rate (currently ' + n + ' fps)';
+                const split = p && p !== n;
+                const key = split ? 'oem_dashcam.fps_follow_note_split' : 'oem_dashcam.fps_follow_note';
+                let t = BYD.i18n && BYD.i18n.t ? BYD.i18n.t(key, { n: n, p: p }) : null;
+                if (!t || t === key) {
+                    t = 'Follow recording frame rate (currently ' + n + ' fps'
+                        + (split ? ' driving, ' + p + ' fps parked' : '') + ')';
+                }
                 note.textContent = t;
             }
         }
