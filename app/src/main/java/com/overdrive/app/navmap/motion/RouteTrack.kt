@@ -22,6 +22,7 @@ class RouteTrack private constructor(val route: NavRoute) {
     /** Along-route positions of the maneuvers worth framing (turns, exits, roundabouts, arrival). */
     private val keyS: DoubleArray
     private var seg = 0
+    private var nextKey = 0
 
     val length: Double
 
@@ -69,15 +70,34 @@ class RouteTrack private constructor(val route: NavRoute) {
 
     /** Distance from [s] to the next framed maneuver ahead, or +∞. */
     fun distanceToNextKey(s: Double): Double {
-        for (k in keyS) if (k > s + 0.5) return k - s
-        return Double.POSITIVE_INFINITY
+        val cutoff = s + 0.5
+        val i = firstKeyAfter(cutoff)
+        return if (i < keyS.size && keyS[i] > cutoff) keyS[i] - s else Double.POSITIVE_INFINITY
     }
 
     /** Distance travelled since the last framed maneuver at or behind [s], or +∞. */
     fun distanceSinceLastKey(s: Double): Double {
-        var best = Double.POSITIVE_INFINITY
-        for (k in keyS) if (k <= s + 0.5) best = s - k else break
-        return max(0.0, best)
+        val i = firstKeyAfter(s + 0.5)
+        return if (i > 0) max(0.0, s - keyS[i - 1]) else Double.POSITIVE_INFINITY
+    }
+
+    /** Upper bound in the sorted maneuver distances. Both camera queries usually
+     * share the same bracket for many consecutive frames. Recheck both sides so
+     * backwards movement and large jumps also work without resetting the cursor. */
+    private fun firstKeyAfter(cutoff: Double): Int {
+        if (cutoff.isNaN()) return 0
+        val i = nextKey
+        if ((i == 0 || keyS[i - 1] <= cutoff) &&
+            (i == keyS.size || !(keyS[i] <= cutoff))) return i
+        var lo = 0
+        var hi = keyS.size
+        while (lo < hi) {
+            val mid = (lo + hi) ushr 1
+            // NaN distances sort last and never qualify as a previous key.
+            if (keyS[mid] <= cutoff) lo = mid + 1 else hi = mid
+        }
+        nextKey = lo
+        return lo
     }
 
     /**
