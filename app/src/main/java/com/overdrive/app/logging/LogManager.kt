@@ -17,16 +17,9 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class LogManager private constructor(@Volatile private var config: LogConfig) {
     
-    interface LogListener {
-        fun onLog(tag: String, message: String, level: LogLevel)
-    }
-    
     companion object {
         @Volatile
         private var instance: LogManager? = null
-        
-        @Volatile
-        private var logListener: LogListener? = null
         
         private const val TAG = "LogManager"
         
@@ -34,10 +27,6 @@ class LogManager private constructor(@Volatile private var config: LogConfig) {
             return instance ?: synchronized(this) {
                 instance ?: LogManager(config).also { instance = it }
             }
-        }
-        
-        fun setLogListener(listener: LogListener?) {
-            logListener = listener
         }
     }
     
@@ -57,23 +46,11 @@ class LogManager private constructor(@Volatile private var config: LogConfig) {
         // logDir all read a single consistent instance even if updateConfig()
         // swaps it on another thread mid-call.
         val cfg = config
-        // Level gate for the EXPENSIVE sinks only (logcat + the synchronously
-        // FLUSHED file append, plus the timestamp format + string build they need).
+        // Level gate for logcat and the synchronously
+        // flushed file append, including timestamp formatting and string building.
         // Background paths call debug() on every adb shell command, so an ungated
         // DEBUG did a flushed disk write under a process-global lock thousands of
         // times a day. Mirrors DaemonLogger's minLevel gate.
-        //
-        // The listener is deliberately OUTSIDE this gate: it feeds the in-app Logs
-        // screen (MainActivity.setupLogListener → LogsViewModel.addLog), which has
-        // its own DEBUG level and does its own filtering. Early-returning before it
-        // would silently empty the DEBUG view — a user-visible regression, not an
-        // optimisation. Notifying a listener is a cheap in-memory call.
-        try {
-            logListener?.onLog(tag, message, level)
-        } catch (e: Exception) {
-            // Ignore listener errors
-        }
-
         if (level.ordinal < cfg.minLevel.ordinal) return
         val timestamp = timestampFormat.get()!!.format(Date())
         val logLine = "[$timestamp] [${level.name}] [$tag] $message"
