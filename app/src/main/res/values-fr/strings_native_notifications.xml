@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notif_channel_roadsense_overlay">Superposition RoadSense</string>
+    <string name="notif_roadsense_overlay_text">Superposition des dangers active</string>
+    <string name="notif_channel_roadsense_imu">IMU RoadSense</string>
+    <string name="notif_roadsense_imu_text">Détection de la route active</string>
+    <string name="notif_channel_onscreen_messages">Messages à l’écran</string>
+    <string name="notif_onscreen_message_title">Message à l’écran</string>
+    <string name="notif_channel_parked_impact">Détection des chocs à l’arrêt</string>
+    <string name="notif_parked_impact_title">Surveillance</string>
+    <string name="notif_parked_impact_text">Détection des chocs pendant le stationnement</string>
+    <string name="notif_channel_proximity_collector">Verrouillage de proximité</string>
+    <string name="notif_proximity_collector_title">Proximité</string>
+    <string name="notif_proximity_collector_text">Recherche de votre téléphone pendant le stationnement</string>
+    <string name="notif_network_hotspot">Réseau et point d’accès</string>
+    <string name="notif_channel_media_playback">Lecture multimédia</string>
+    <string name="notif_roadsense_chime_title">Alerte RoadSense</string>
+    <string name="notif_roadsense_chime_text">Lecture d’un signal sonore de sécurité</string>
+    <string name="notif_channel_location">Service de localisation</string>
+    <string name="notif_channel_location_desc">Suivi GPS pour la surveillance</string>
+    <string name="notif_location_title">Localisation active</string>
+    <string name="notif_location_text">Suivi GPS en cours</string>
+    <string name="notif_vehicle_control">Contrôle du véhicule</string>
+    <string name="notif_media_title">Lecture audio</string>
+    <string name="notif_media_text">Automatisation OverDrive</string>
+    <string name="notif_channel_keepalive">Maintien des services</string>
+    <string name="notif_channel_keepalive_desc">Maintient les services actifs en arrière-plan</string>
+    <string name="notif_channel_summary">État d’Overdrive</string>
+    <string name="notif_channel_summary_desc">Ligne d’état combinée des services d’arrière-plan d’Overdrive</string>
+    <string name="notif_channel_remote_voice">Voix à distance</string>
+    <string name="notif_channel_status_overlay">Superposition d’état</string>
+    <string name="notif_channel_status_overlay_desc">Superposition d’état de l’enregistrement et du trajet</string>
+</resources>

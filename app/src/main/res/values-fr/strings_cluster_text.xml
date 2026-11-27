@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="cluster_text_title">Saisie de texte sur le combiné</string>
+    <string name="cluster_text_service_label">Saisie de texte sur le combiné OverDrive</string>
+    <string name="cluster_text_service_description">Permet de saisir du texte sur l’écran multimédia dans le champ actif d’une application projetée sur le combiné DiLink 5. Les champs de mot de passe sont exclus. N’activez l’ouverture automatique que si vous souhaitez que la fenêtre de clavier s’ouvre quand un champ de texte du combiné est sélectionné.</string>
+    <string name="cluster_text_hint">Texte pour l’application du combiné</string>
+    <string name="cluster_text_auto_prompt">Ouvrir automatiquement pour les champs de texte du combiné</string>
+    <string name="cluster_text_send">Envoyer le texte</string>
+    <string name="cluster_text_send_submit">Envoyer le texte et valider</string>
+    <string name="cluster_text_retry">Vérifier le champ actif</string>
+    <string name="cluster_text_enable_service">Paramètres d’accessibilité</string>
+    <string name="cluster_text_enable_hint">Activez « Saisie de texte sur le combiné OverDrive » dans les paramètres d’accessibilité, sélectionnez un champ de texte dans l’application projetée, puis vérifiez à nouveau.</string>
+    <string name="cluster_text_checking">Vérification du champ de texte du combiné…</string>
+    <string name="cluster_text_target">Champ de texte dans %1$s</string>
+    <string name="cluster_text_requires_android11">La saisie de texte sur le combiné nécessite DiLink 5 avec Android 11 ou plus récent et l’accès aux fenêtres d’accessibilité du combiné. Ce firmware ne permet pas de vérifier quel écran possède un champ de texte.</string>
+    <string name="cluster_text_requires_cast">Lancez une projection d’application DiLink 5 avant de saisir du texte.</string>
+    <string name="cluster_text_no_field">Aucun champ de texte actif et accessible n’a été trouvé sur le combiné. Sélectionnez un champ dans l’application projetée et vérifiez à nouveau. Les champs de mot de passe sont exclus.</string>
+    <string name="cluster_text_field_changed">La session de projection ou le champ actif a changé. Vérifiez à nouveau le champ avant l’envoi.</string>
+    <string name="cluster_text_unavailable">Impossible de vérifier le champ de texte du combiné. Vérifiez la projection et la connexion d’accessibilité, puis réessayez.</string>
+    <string name="cluster_text_rejected">L’application n’a pas confirmé le texte. Vérifiez le champ sur le combiné avant de réessayer.</string>
+    <string name="cluster_text_submit_rejected">Le texte a été envoyé, mais l’application n’a pas accepté Entrée. Validez depuis l’application du combiné.</string>
+</resources>
