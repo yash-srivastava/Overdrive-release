@@ -2000,14 +2000,6 @@ public class CameraDaemon {
         }
     }
 
-    /**
-     * Force stop a camera, even if recording.
-     * Use this when user explicitly wants to stop everything.
-     */
-    public static void forceStopCamera(int viewId) {
-        stopCamera(viewId, true);
-    }
-
     public static boolean stopAllCameras() {
         return stopAllCameras(true);
     }
@@ -2513,11 +2505,6 @@ public class CameraDaemon {
     }
 
     // ==================== GETTERS ====================
-
-    public static java.util.Map<Integer, Object> getVirtualViews() {
-        // GPU pipeline doesn't use VirtualView - return empty map for compatibility
-        return new java.util.HashMap<>();
-    }
 
     public static boolean isRunning() {
         return running.get();
@@ -9935,21 +9922,10 @@ public class CameraDaemon {
 
     /**
      * Get current recording quality tier (ECONOMY..MAX).
-     * Canonical accessor — prefer this over the deprecated bitrate alias.
      */
     public static String getRecordingQuality() {
         if (gpuPipeline == null || gpuPipeline.getConfig() == null) return "STANDARD";
         return gpuPipeline.getConfig().getRecordingQuality().name();
-    }
-
-    /**
-     * Get current recording bitrate setting.
-     * @deprecated Use {@link #getRecordingQuality()} for the canonical tier.
-     */
-    @Deprecated
-    public static String getRecordingBitrate() {
-        if (gpuPipeline == null) return "MEDIUM";
-        return gpuPipeline.getConfig().getBitratePreset().name();
     }
 
     /**
