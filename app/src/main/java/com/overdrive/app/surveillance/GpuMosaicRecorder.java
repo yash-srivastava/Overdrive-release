@@ -2232,12 +2232,9 @@ public class GpuMosaicRecorder {
         if (!cpuEngine || cpuEngineFailed || enc == null) return;
         long start = System.nanoTime();
         long cpuStart = android.os.Debug.threadCpuTimeNanos();
-        if (!w.bindSource(job.source.image)) {
-            failCpuEngine(RecordingEngine.WHY_FRAMES_UNREADABLE, w.error);
-            return;
-        }
-        // A windshield frame the CPU can't read falls back to the 360 front too.
-        w.windshield = job.windshield != null && w.bindWindshield(job.windshield.image);
+        // Reset per-job failure state even when the codec never calls write().
+        w.sourceRejected = false;
+        w.error = "encoder input image unavailable";
         int overlayTable = job.overlay ? acquireCpuOverlayTable() : -1;
         java.nio.ByteBuffer table = overlayTable >= 0
                 && cpuOverlayTableStrip[overlayTable] == job.strip
@@ -2261,6 +2258,8 @@ public class GpuMosaicRecorder {
             w.overlayTable = null;
             w.job = null;
             cpuOverlayHazard = -1;
+            // Busy/no-buffer/error paths must return camera slots too, before logging.
+            job.releaseSources();
         }
 
         switch (result) {
@@ -2743,6 +2742,19 @@ public class GpuMosaicRecorder {
 
         @Override
         public boolean write(android.media.Image input) {
+            CpuFrameJob j = job;
+            if (j == null) {
+                error = "no frame";
+                return false;
+            }
+            // MediaCodec has admitted this frame. Avoid mapping camera planes
+            // (which may lock gralloc buffers) for busy/full codec input.
+            if (!bindSource(j.source.image)) {
+                sourceRejected = true;
+                return false;
+            }
+            // An unreadable windshield frame still falls back to the 360 front.
+            windshield = j.windshield != null && bindWindshield(j.windshield.image);
             android.media.Image.Plane[] d = input.getPlanes();
             if (d == null || d.length < 3 || d[0].getPixelStride() != 1
                     || d[1].getPixelStride() != d[2].getPixelStride()
@@ -2755,11 +2767,6 @@ public class GpuMosaicRecorder {
             java.nio.ByteBuffer dv = d[2].getBuffer();
             int dstW = input.getWidth();
             int dstH = input.getHeight();
-            CpuFrameJob j = job;
-            if (j == null) {
-                error = "no frame";
-                return false;
-            }
             int layout = j.layout;
             long rc;
             // 2x2 grid clips are raw tiles (lens correction runs in the player);
