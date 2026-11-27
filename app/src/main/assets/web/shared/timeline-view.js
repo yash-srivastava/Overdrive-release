@@ -1997,15 +1997,65 @@
         st.innerHTML = on ? ICON.eq + esc(tr('playing'))
             : (m.level ? '<i aria-hidden="true"></i>' + esc(tr(m.level === 'critical' ? 'critical' : 'alert')) : '');
     }
-    function activeMomentId() {
-        var t = V.playhead, best = null;
-        for (var i = 0; i < V.moments.length; i++) {
-            var m = V.moments[i], end = m.end != null ? m.end : m.start + SEC;
-            if (t < m.start - 250 || t >= end + 250) continue;
-            if (m.id === V.itemId) return m.id;
-            if (!best || m.start > best.start) best = m;
+    function momentEnd(m) { var end = m.end; return (end != null ? end : m.start + SEC) + 250; }
+    function coversMoment(m, t) { return !(t < m.start - 250 || t >= momentEnd(m)); }
+
+    // Store refreshes replace the moments array; only labels change in place.
+    // Index by clip start (not moment/event time), retaining source order on ties.
+    function ActiveMomentLookup() {
+        this.source = null;
+        this.order = null;
+        this.maxEnd = null;
+    }
+    ActiveMomentLookup.prototype.find = function (moments, byId, t, preferredId) {
+        if (this.source !== moments) {
+            this.source = moments;
+            this.order = null;
+            this.maxEnd = null;
         }
-        return best ? best.id : null;
+        // The merged store has unique recording IDs. Prefer the currently playing
+        // clip even when a newer overlapping clip also covers the playhead.
+        var preferred = byId[preferredId];
+        if (preferred && preferred.id === preferredId && coversMoment(preferred, t)) return preferred.id;
+        // Small histories are cheaper to scan than to index, particularly when
+        // data is frequently replaced. Keep the original tie rule.
+        if (moments.length <= 256) {
+            var best = null;
+            for (var k = 0; k < moments.length; k++) {
+                var candidate = moments[k];
+                if (coversMoment(candidate, t) && (!best || candidate.start > best.start)) best = candidate;
+            }
+            return best ? best.id : null;
+        }
+        if (!this.order) {
+            var order = moments.map(function (m, i) { return i; });
+            order.sort(function (a, b) { return moments[b].start - moments[a].start || a - b; });
+            var maxEnd = new Float64Array(order.length), end = -Infinity;
+            for (var i = order.length - 1; i >= 0; i--) {
+                end = Math.max(end, momentEnd(moments[order[i]]));
+                maxEnd[i] = end;
+            }
+            this.order = order;
+            this.maxEnd = maxEnd;
+        }
+        var list = this.order, lo = 0, hi = list.length;
+        // Skip clips that have not started, using the original inclusive slop.
+        while (lo < hi) {
+            var mid = lo + ((hi - lo) >>> 1);
+            if (t < moments[list[mid]].start - 250) lo = mid + 1;
+            else hi = mid;
+        }
+        // Older clips may overlap the newer ones. Stop only when every remaining
+        // clip has expired; the first covering clip wins (latest start, source tie).
+        for (var j = lo; j < list.length && !(t >= this.maxEnd[j]); j++) {
+            var m = moments[list[j]];
+            if (coversMoment(m, t)) return m.id;
+        }
+        return null;
+    };
+    var activeMomentLookup = new ActiveMomentLookup();
+    function activeMomentId() {
+        return activeMomentLookup.find(V.moments, V.momentsById, V.playhead, V.itemId);
     }
     function markActive(force) {
         var id = activeMomentId();
@@ -2718,7 +2768,7 @@
             buildMoments: buildMoments, momentKind: momentKind, momentPasses: momentPasses, momentMeta: momentMeta,
             segClasses: segClasses, pushRows: pushRows, fmtSpan: fmtSpan, fmtClipDur: fmtClipDur, FILTERS: FILTERS,
             Store: Store, normalizeWindow: normalizeWindow, MomentNavigation: MomentNavigation,
-            PortraitMomentRows: PortraitMomentRows
+            PortraitMomentRows: PortraitMomentRows, ActiveMomentLookup: ActiveMomentLookup
         }
     };
 
