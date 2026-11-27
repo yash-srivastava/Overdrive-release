@@ -60,6 +60,8 @@
     const DV_SEAM_MS = 1000;
     const DV_PENDING = { pending: true };
     const GRID_ROLES = ['front', 'right', 'rear', 'left'];
+    // Events that count as user activation everywhere (iOS: not pointerdown).
+    const DV_GESTURES = ['touchend', 'click', 'keydown', 'pointerup'];
     const MOSAIC_RANK = { normal: 0, sentry: 1, proximity: 2, replay: 4 };
     const GENERIC_CODECS = {
         avc1: 'avc1.42E01E', avc3: 'avc3.42E01E', hvc1: 'hvc1.1.6.L93.B0', hev1: 'hev1.1.6.L93.B0',
@@ -2906,7 +2908,7 @@
         const dv = {
             comp: comp, canvas: canvas, el: f, hls: null, fLoading: false, fKey: null, fGen: 0, fCtl: null,
             tb: null, tbDirty: false, tbAt: 0, fStart: null, fFailed: false, failN: 0, failWin: null, failTimer: 0,
-            netTries: 0, mediaTries: 0, needGesture: false, onGesture: null, noOemWin: null,
+            netTries: 0, mediaTries: 0, needGesture: false, onGesture: null, noOemWin: null, suspect: null,
             engaged: false, shown: false, ready: false, readySeq: 0, hideSeq: 0, unsynced: false, unsyncKey: null,
             seekPending: false, settle: 0, seeks: 0, seekAt: -1e9, nudge: false, fWaiting: false, fMT: -1,
             ring: new Float64Array(8), ringN: 0, ringI: 0, scratch: new Float64Array(8), frameDur: 1 / 15,
@@ -2957,7 +2959,7 @@
             error: function () {
                 if (!mine() || self.engineKind !== 'native' || !f.getAttribute('src')) return;
                 const code = f.error ? f.error.code : 0;
-                if (code === 3 || code === 4) self._dvBadClip(null);
+                if (code === 3 || code === 4) self._dvBadClip(null, false);
                 self._dvSoftFail(code === 3 || code === 4 ? 2000 : 0);
             }
         };
@@ -2967,7 +2969,6 @@
             if (!mine()) return;
             dv.sleepPage = !!document.hidden;
             if (dv.sleepPage) { self._dvSleep(false); return; }
-            dv.sleepView = false;
             self._dvEval();
         };
         document.addEventListener('visibilitychange', dv.onVis);
@@ -2980,12 +2981,12 @@
         if (!dv) return;
         this._dvDisengage(true);
         this._dvCloseF();
+        this._dvGestureOff(dv);
         this.dv = null;
         const v = this.video, f = dv.el;
         Object.keys(dv.lh).forEach(function (k) { v.removeEventListener(k, dv.lh[k]); });
         Object.keys(dv.fh).forEach(function (k) { f.removeEventListener(k, dv.fh[k]); });
         document.removeEventListener('visibilitychange', dv.onVis);
-        this._dvGestureOff();
         clearTimeout(dv.failTimer);
         if (f.parentNode) f.parentNode.removeChild(f);
         const wasShown = dv.shown;
@@ -3074,15 +3075,17 @@
         this._dvEval();
     };
 
-    // A clip that failed to decode even after recovery: never composed again by this player.
-    Player.prototype._dvBadClip = function (url) {
+    // A clip that keeps failing (now: already retried; else on its second failure): not composed again by this player.
+    Player.prototype._dvBadClip = function (url, now) {
         const dv = this.dv;
         let ref = url ? idFromUrl(url) : null;
         if (!ref && dv.tb) {
-            const it = itemAtMedia(dv.tb, dv.el.currentTime);
+            const it = itemAtMedia(dv.tb, dv.fStart !== null ? dv.fStart : dv.el.currentTime);
             if (it && it.id) ref = { id: it.id, fp: it.fp };
         }
-        if (ref) this.dvBad.add(ref.id + '|' + ref.fp);
+        if (!ref) return;
+        const key = ref.id + '|' + ref.fp;
+        if (now || dv.suspect === key) this.dvBad.add(key); else dv.suspect = key;
     };
 
     // Play refused without a user gesture (WebKit policy): single source until the next tap or key.
@@ -3093,20 +3096,20 @@
         const self = this;
         dv.onGesture = function () {
             if (self.dv !== dv) return;
-            self._dvGestureOff();
+            self._dvGestureOff(dv);
             dv.needGesture = false;
             self._dvEval();
             if (dv.engaged && !self.video.paused) self._dvPlayF();
         };
-        ['pointerdown', 'touchend', 'keydown', 'click'].forEach(function (n) { document.addEventListener(n, dv.onGesture, true); });
+        DV_GESTURES.forEach(function (n) { document.addEventListener(n, dv.onGesture, true); });
         this._dvEval();
     };
 
-    Player.prototype._dvGestureOff = function () {
-        const dv = this.dv, fn = dv && dv.onGesture;
+    Player.prototype._dvGestureOff = function (dv) {
+        const fn = dv && dv.onGesture;
         if (!fn) return;
         dv.onGesture = null;
-        ['pointerdown', 'touchend', 'keydown', 'click'].forEach(function (n) { document.removeEventListener(n, fn, true); });
+        DV_GESTURES.forEach(function (n) { document.removeEventListener(n, fn, true); });
     };
 
     // Decide composite vs single-source for the current instant. offer: from _dvOffer (undefined = compute).
@@ -3147,8 +3150,10 @@
         if (want) { this._dvEngage(offer.geo, tf); return; }
         // Leading for an OEM preference but the composite can't engage here: back to the OEM clip,
         // and wait longer before trying again (no reload churn).
-        if (this.dvLead && this.prefer && familyOf({ type: this.prefer }) === OEM && this._dvOemAt(this._currentWall())) {
+        if (this.dvLead && this.prefer && familyOf({ type: this.prefer }) === OEM && !dv.sleepView && !dv.sleepPage
+            && !this.scrub && this._dvOemAt(this._currentWall())) {
             this.dvLeadGap = Math.min(60000, this.dvLeadGap * 2);
+            this.dvLeadAt = perfNow();
             this.dvLead = false;
             this._openSource(this._currentWall());
             this.dvHoldLead = false;
@@ -3408,11 +3413,17 @@
                 try { dv.hls.recoverMediaError(); return; } catch (e) { /* fall through */ }
             }
             // Still undecodable after recovery: that clip only.
-            this._dvBadClip(d.frag && d.frag.url);
+            this._dvBadClip(d.frag && d.frag.url, true);
             failed(0, 2);
             return;
         }
-        failed(code, null);
+        // A fragment gone after the retries above is that clip, not the window (404 = playlist rule only).
+        if ((code === 404 || code === 410) && d.frag) {
+            this._dvBadClip(d.frag.url, true);
+            failed(0, 2);
+            return;
+        }
+        failed(0, null);
     };
 
     // Stop and release the follower decoder (removeAttribute('src') + load()).
