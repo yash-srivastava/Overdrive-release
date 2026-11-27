@@ -41,9 +41,6 @@ public class WebSocketStreamServer extends WebSocketServer
 
     private volatile byte[] cachedSpsPps = null;
     
-    /** Returns cached SPS/PPS for late-joining clients. */
-    public byte[] getCachedSpsPps() { return cachedSpsPps; }
-    
     private final Set<WebSocket> clients = Collections.newSetFromMap(new ConcurrentHashMap<>());
     // Share one daemon scheduler instead of creating a Timer thread for every
     // early keyframe request. Retries are coalesced per connected client below.
@@ -87,13 +84,6 @@ public class WebSocketStreamServer extends WebSocketServer
         setReuseAddr(true);
         setConnectionLostTimeout(30);
         logger.info("WebSocketStreamServer created on port " + PORT);
-    }
-
-    public WebSocketStreamServer(int port) {
-        super(new InetSocketAddress(port));
-        setReuseAddr(true);
-        setConnectionLostTimeout(30);
-        logger.info("WebSocketStreamServer created on port " + port);
     }
 
     public void setIdleShutdownCallback(Runnable callback) {
@@ -593,9 +583,6 @@ public class WebSocketStreamServer extends WebSocketServer
             return true;
         }
     }
-
-    public int getClientCount() { return clients.size(); }
-    public boolean hasClients() { return !clients.isEmpty(); }
 
     public void shutdown() {
         // Set the terminal latch BEFORE conn.close()/stop() invoke onClose or
