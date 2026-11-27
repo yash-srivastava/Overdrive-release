@@ -29,7 +29,7 @@ import com.overdrive.app.services.DaemonKeepaliveService
 
 /**
  * App-side floating overlay for RoadSense (D-024). Pure RENDERER: it polls the
- * daemon-published `roadSense.overlayState` from UCM and draws the pill / card.
+ * daemon's live overlay state ([RoadSenseOverlayClient]) and draws the pill / card.
  * All detection + warning logic is daemon-side; this service owns only the window.
  *
  * Mirrors StatusOverlayService's proven mechanics: TYPE_APPLICATION_OVERLAY window,
@@ -52,6 +52,8 @@ class RoadSenseOverlayService : Service() {
     // back to [handler] (main).
     private var ioThread: android.os.HandlerThread? = null
     private var ioHandler: Handler? = null
+    // Live overlay state from the daemon (IO thread only).
+    private val stateClient = RoadSenseOverlayClient()
     // Day/night-resolved context the overlay was inflated with; status colors are
     // looked up from it so they track the theme instead of being hardcoded hex.
     private var themedCtx: Context? = null
@@ -162,6 +164,7 @@ class RoadSenseOverlayService : Service() {
         if (instance === this) instance = null
         pollRunnable?.let { ioHandler?.removeCallbacks(it) }
         pollRunnable = null
+        stateClient.close()
         ioThread?.quitSafely()
         ioThread = null
         ioHandler = null
@@ -680,22 +683,9 @@ class RoadSenseOverlayService : Service() {
     }
 
     private fun readState(): OverlayState? = try {
-        // mtime-gated loadConfig (NOT forceReload): the daemon (UID 2000) wrote this,
-        // but loadConfig() stats the file's lastModified each call and only re-parses
-        // when it actually changed — so we pick up daemon writes without doing a full
-        // disk read + JSON parse on EVERY 400 ms poll. forceReload() here meant the
-        // config was re-read+re-parsed 2-4×/s for the whole drive even while parked
-        // and nothing changed (the "Config loaded from…" log spam). The daemon's
-        // overlay-state writer changes the file ~every 3 s idle / ~500 ms during an
-        // active approach, so loadConfig re-reads exactly when there's something new.
-        // Worst case (ext4 1 s mtime granularity right after an app self-write) is a
-        // single ~1 s-late render — invisible for a glanceable overlay, and the
-        // audio warning is daemon-side and unaffected. The confirm-verdict round-trip
-        // that DOES need cross-UID immediacy stays forceReload, daemon-side.
-        val root = UnifiedConfigManager.loadConfig()
-        OverlayState.fromJson(
-            root.optJSONObject(OverlayState.SECTION)?.optJSONObject(OverlayState.KEY)
-        )
+        // The daemon's in-memory state over loopback IPC (legacy config key until it answers).
+        // The audio warning is daemon-side and does not depend on this read.
+        OverlayState.fromJson(stateClient.read())
     } catch (_: Throwable) { null }
 
     // ── Write-backs ──────────────────────────────────────────────────────────
@@ -710,8 +700,8 @@ class RoadSenseOverlayService : Service() {
      */
     private fun toggleWarnMode(audioChip: Boolean) {
         // forceReload so we flip from the TRUE current mode, not a stale app-cache
-        // value: the daemon rewrites the roadSense section on its overlay heartbeat,
-        // so a plain (mtime-gated) loadConfig here could read a pre-daemon-write mode
+        // value: another process (the web settings page) may have just written it,
+        // so a plain (mtime-gated) loadConfig here could read a pre-write mode
         // and compute the wrong toggle. Runs on the IO thread (off the UI looper).
         val cur = try {
             UnifiedConfigManager.forceReload().optJSONObject("roadSense")
@@ -734,8 +724,8 @@ class RoadSenseOverlayService : Service() {
         handler.post { if (overlayView != null) applyWarnModeChips(next) }
     }
 
-    /** Current warnMode from config (readState already refreshed the UCM cache
-     *  this tick, so a plain loadConfig is cache-fresh — no extra disk read). */
+    /** Current warnMode from config (the overlayShouldShow snapshot already refreshed
+     *  the UCM cache this tick, so a plain loadConfig is cache-fresh). */
     private fun currentWarnMode(): String = try {
         UnifiedConfigManager.loadConfig().optJSONObject("roadSense")
             ?.optString("warnMode", "both") ?: "both"

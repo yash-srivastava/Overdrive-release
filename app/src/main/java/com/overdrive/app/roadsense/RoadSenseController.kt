@@ -155,10 +155,10 @@ class RoadSenseController @JvmOverloads constructor(
     // level reflects WHERE WE ARE, not a stale tile). @Volatile: written on the warn
     // tick, read by the visualSink supplier lambda on the same tick — kept simple.
     @Volatile private var lastCoverageLevel = 0
-    // Daemon-side visual sink publishes overlay state to UCM (D-024); calibration
-    // level for the green/orange/red dot comes from the calibrator's maturity, and
-    // route coverage (new/seen/mapped) from RouteCoverage.
-    private val visualSink = com.overdrive.app.roadsense.warn.UcmVisualSink(
+    // Daemon-side visual sink publishes overlay state to RoadSenseOverlayChannel (daemon
+    // memory, D-024); calibration level for the green/orange/red dot comes from the
+    // calibrator's maturity, and route coverage (new/seen/mapped) from RouteCoverage.
+    private val visualSink = com.overdrive.app.roadsense.warn.OverlayVisualSink(
         calibrationLevelSupplier = { calibrator.maturity },
         coverageSupplier = { lastCoverageLevel },
         clock = clock,

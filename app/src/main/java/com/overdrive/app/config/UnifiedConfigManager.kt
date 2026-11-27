@@ -105,6 +105,10 @@ object UnifiedConfigManager {
     private const val MUTATION_CLOCKS_KEY = "__overdriveMutationClocks"
     private val processMutationOrigin = UUID.randomUUID().toString()
     private val processMutationSequence = AtomicLong(0)
+    // Per-origin [wall ms, configSeq] of its last applied write; not a section name.
+    private const val MUTATION_TOUCH_KEY = "@touched"
+    private const val MUTATION_CLOCK_PRUNE_MS = 7L * 24 * 60 * 60 * 1000
+    private const val MUTATION_CLOCK_PRUNE_COMMITS = 1_000L
 
     // Daemon IPC: the app process (UID >= 10000) cannot create the .tmp sibling
     // needed for an atomic write in sticky /data/local/tmp/. App-process writes are
@@ -3954,8 +3958,41 @@ object UnifiedConfigManager {
             sectionClock.put(key, stamp.sequence)
         }
         originClock.put(section, sectionClock)
+        val now = System.currentTimeMillis()
+        val seq = seqOf(config)
+        originClock.put(MUTATION_TOUCH_KEY, org.json.JSONArray().put(now).put(seq))
         clocks.put(stamp.origin, originClock)
+        pruneMutationClocks(clocks, now, seq)
         config.put(MUTATION_CLOCKS_KEY, clocks)
+    }
+
+    /**
+     * Drop the clocks of origins (one per process start) untouched for both
+     * [MUTATION_CLOCK_PRUNE_MS] and [MUTATION_CLOCK_PRUNE_COMMITS] commits. A clock
+     * only orders its own origin's writes, and a stamped write resolves within its
+     * IPC and lock timeouts (seconds), so nothing from a pruned origin is in flight;
+     * a later write from it carries a higher sequence and applies as it should. The
+     * commit bound keeps an RTC jump forward from pruning alone; a clock stepped back
+     * never prunes. Origins recorded before touches existed start ageing now. This
+     * process's origin is never pruned.
+     */
+    private fun pruneMutationClocks(clocks: JSONObject, now: Long, seq: Long) {
+        val origins = ArrayList<String>()
+        clocks.keys().forEach { origins.add(it) }
+        for (origin in origins) {
+            if (origin == processMutationOrigin) continue
+            val clock = clocks.optJSONObject(origin) ?: continue
+            val touched = clock.optJSONArray(MUTATION_TOUCH_KEY)
+            if (touched == null || touched.length() < 2) {
+                clock.put(MUTATION_TOUCH_KEY, org.json.JSONArray().put(now).put(seq))
+                continue
+            }
+            val idleMs = now - touched.optLong(0, now)
+            val idleCommits = seq - touched.optLong(1, seq)
+            if (idleMs >= MUTATION_CLOCK_PRUNE_MS && idleCommits >= MUTATION_CLOCK_PRUNE_COMMITS) {
+                clocks.remove(origin)
+            }
+        }
     }
 
     private fun isBluetoothPreferenceKey(section: String, key: String): Boolean =

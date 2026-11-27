@@ -195,6 +195,8 @@ class GlassWidgetsOverlayService : Service() {
     private val main = Handler(Looper.getMainLooper())
     private var ioThread: HandlerThread? = null
     private var io: Handler? = null
+    // RoadSense's live overlay state from the daemon (io thread only)
+    private val roadState = com.overdrive.app.roadsense.overlay.RoadSenseOverlayClient()
     private var feedThread: HandlerThread? = null
     private var feed: Handler? = null
     // the live drive samples get their own thread: the summary poll's latency would space them unevenly
@@ -435,6 +437,7 @@ class GlassWidgetsOverlayService : Service() {
         io?.removeCallbacksAndMessages(null)
         feed?.removeCallbacksAndMessages(null)
         liveH?.removeCallbacksAndMessages(null)
+        roadState.close()
         ioThread?.quitSafely()
         feedThread?.quitSafely()
         liveThread?.quitSafely()
@@ -2045,10 +2048,7 @@ class GlassWidgetsOverlayService : Service() {
         // after the settings that list them: docs land once their ids are known on main
         syncDocs(s)
         if ("roadsense" in s.widgets || customRoad) {
-            val o = try {
-                UnifiedConfigManager.loadConfig().optJSONObject(ROADSENSE_SECTION)?.optJSONObject(ROADSENSE_KEY)
-            } catch (_: Throwable) { null }
-            val r = GlassWidgetsFeed.road(o, System.currentTimeMillis())
+            val r = GlassWidgetsFeed.road(roadState.read(), System.currentTimeMillis())
             val key = "${r.feed}|${r.clear}|${r.kind}|${r.severity}|${r.distanceM}|${r.cluster}"
             if (key != lastRoadKey) {
                 lastRoadKey = key
@@ -2293,8 +2293,6 @@ class GlassWidgetsOverlayService : Service() {
     companion object {
         private const val TAG = "GlassWidgets"
         private const val SECTION = "glassWidgets"
-        private const val ROADSENSE_SECTION = "roadSense"
-        private const val ROADSENSE_KEY = "overlayState"
         private const val CHANNEL = "glass_widgets_overlay"
         private const val NOTIFICATION_ID = 9988
         private const val PREFS = "glass_widgets"

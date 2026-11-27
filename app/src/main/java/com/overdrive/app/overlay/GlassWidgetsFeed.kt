@@ -282,7 +282,7 @@ internal object GlassWidgetsFeed {
         )
     }
 
-    /** The RoadSense widget's hazard fields from `roadSense.overlayState`, which the daemon heartbeats every 3 s while it runs. */
+    /** The RoadSense widget's hazard fields from the daemon's live overlay state, published every warn tick while driving. */
     class Road(val feed: Boolean, val clear: Boolean, val kind: GlassRoadSenseView.Kind, val severity: Int, val distanceM: Float, val cluster: Int)
 
     // a profile needs two readings to draw; an altitude without one isn't shown
