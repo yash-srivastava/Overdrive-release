@@ -1,5 +1,6 @@
 #include "../../../app/src/main/cpp/surveillance/motion_sampled_luma.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <iostream>
@@ -23,23 +24,34 @@ int rgbLuma(const uint8_t* rgb) {
 }
 
 void checkPlane(const std::vector<uint8_t>& rgb) {
-    // Guard bytes catch an overrun at the final sampled row.
+    // A quadrant within a mosaic has a nonzero origin and a larger row stride.
+    constexpr int Stride = Width * 2 * 3 + 7;
+    constexpr int Origin = Width * 3;
+    std::vector<uint8_t> mosaic(Stride * Height, 0x69);
+    for (int y = 0; y < Height; ++y) {
+        std::copy_n(rgb.data() + y * Width * 3, Width * 3,
+                    mosaic.data() + y * Stride + Origin);
+    }
+    std::vector<uint8_t> gray(Width * Height + 2, 0x5a);
     std::array<uint8_t, Samples + 2> plane{};
-    plane.front() = 0x5a;
-    plane.back() = 0xa5;
-    motion_luma::sampleFrame<Width, Height>(rgb.data(), plane.data() + 1);
+    std::array<uint8_t, Samples * 3 + 2> colors{};
+    plane.front() = colors.front() = 0x5a;
+    plane.back() = colors.back() = 0xa5;
+    motion_luma::packHistory<Width, Height>(mosaic.data() + Origin, Stride,
+            gray.data() + 1, plane.data() + 1, colors.data() + 1);
+    require(gray.front() == 0x5a && gray.back() == 0x5a, "Full luma guard overwritten");
     require(plane.front() == 0x5a && plane.back() == 0xa5, "Plane guard overwritten");
-    for (int y = 0; y < Height; y += 4) {
-        for (int x = 0; x < Width; x += 4) {
-            const int i = 1 + (y / 4) * (Width / 4) + x / 4;
+    require(colors.front() == 0x5a && colors.back() == 0xa5, "RGB guard overwritten");
+    for (int y = 0; y < Height; ++y) {
+        for (int x = 0; x < Width; ++x) {
             const int p = (y * Width + x) * 3;
-            require(plane[i] == rgbLuma(rgb.data() + p), "Sample mismatch");
-            if (x + 4 < Width) {
-                require(plane[i + 1] == rgbLuma(rgb.data() + p + 12), "Right edge mismatch");
-            }
-            if (y + 4 < Height) {
-                require(plane[i + Width / 4] == rgbLuma(rgb.data() + p + 4 * Width * 3),
-                        "Bottom edge mismatch");
+            require(gray[1 + y * Width + x] == rgbLuma(rgb.data() + p), "Full luma mismatch");
+            if (y % 4 == 0 && x % 4 == 0) {
+                const int i = (y / 4) * (Width / 4) + x / 4;
+                require(plane[1 + i] == rgbLuma(rgb.data() + p), "Sample mismatch");
+                for (int c = 0; c < 3; ++c) {
+                    require(colors[1 + i * 3 + c] == rgb[p + c], "Sample RGB mismatch");
+                }
             }
         }
     }
@@ -96,5 +108,5 @@ int main() {
         require(motion_luma::rowHasChange(a.data(), b.data(), threshold)
                         == scalarAny(a.data(), b.data(), threshold), "Mixed row mismatch");
     }
-    std::cout << "Sampled luma and row gate cases passed\n";
+    std::cout << "Packed motion history and row gate cases passed\n";
 }
