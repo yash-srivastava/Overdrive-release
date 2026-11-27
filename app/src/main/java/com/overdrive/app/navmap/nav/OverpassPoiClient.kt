@@ -235,7 +235,7 @@ object OverpassPoiClient {
                 val el = elements.optJSONObject(i) ?: continue
                 val lat = el.optDouble("lat", Double.NaN)
                 val lng = el.optDouble("lon", Double.NaN)
-                if (lat.isNaN() || lng.isNaN()) continue
+                if (lat !in -90.0..90.0 || lng !in -180.0..180.0) continue
 
                 val tags = el.optJSONObject("tags") ?: continue
                 val kind = when (tags.optString("amenity", "")) {
