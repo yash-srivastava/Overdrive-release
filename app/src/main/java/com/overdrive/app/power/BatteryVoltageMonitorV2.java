@@ -29,8 +29,7 @@ import com.overdrive.app.logging.DaemonLogger;
  *       to do work before the next sleep.</li>
  * </ul>
  *
- * <p>This replaces the older 45-second MCU pulse loop in
- * {@code AccSentryDaemon.startChargingMaintenance}, which woke the MCU every
+ * <p>This replaces the older MCU pulse loop, which woke the MCU every
  * 45 s while ACC=OFF — counterproductive on a parked car (no alternator load,
  * just drains the 12V faster). The new model lets the MCU stay asleep when
  * the 12V is healthy and only intervenes on sustained low voltage.

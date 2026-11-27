@@ -1,48 +1,28 @@
 package com.overdrive.app.daemon;
 
-import android.annotation.SuppressLint;
 import android.content.Context;
-import android.os.IAccModeManager;
-import android.os.IBinder;
 import android.os.Looper;
-import android.os.PowerManager;
 
 import com.overdrive.app.daemon.proxy.Safe;
 import com.overdrive.app.logging.DaemonLogger;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
-import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
 /**
- * Sentry Daemon - runs as system user (UID 1000) via privileged shell.
- * 
- * RESPONSIBILITIES:
- * 1. ACQUIRE ACC LOCK - This is the CRITICAL one that prevents force_suspend!
- * 2. Acquire WakeLock to prevent CPU sleep
- * 3. Whitelist UIDs (1000, 2000, app UID) for network access
- * 4. Whitelist app package via accmodemanager
- * 5. Keep WiFi enabled
- * 
- * UID 1000 (system) has android.permission.DEVICE_ACC which is required for ACC Lock!
+ * Sentry daemon: keeps Wi-Fi enabled (unless suppressed), monitors the location
+ * sidecar, and handles lifecycle control from the privileged shell.
  */
 public class SentryDaemon {
     
     private static final String TAG = "SentryDaemon";
     private static DaemonLogger logger;
-    private static PowerManager.WakeLock wakeLock;
 
     // ==================== ENCRYPTED CONSTANTS (SOTA Java obfuscation) ====================
     // Decrypted at runtime via Safe.s() - AES-256-CBC with stack-based key reconstruction
     /** com.overdrive.app */
     private static String APP_PACKAGE_NAME() { return Safe.s("3Is1Ze/xWL6dkFvd9bF+deUGK/HqnInkSi6jinpc6s8="); }
-    /** accmodemanager */
-    private static String SERVICE_ACCMODE() { return Safe.s("tr877WU3+MV4zFtCjanWUw=="); }
-    /** byd_datacached */
-    private static String SERVICE_BYD_DATACACHE() { return Safe.s("JQiIxMJxYlF8spk2fIi8Sg=="); }
-    /** bg_datacache */
-    private static String SERVICE_BG_DATACACHE() { return Safe.s("m84QJmAGTQpH+XP36MaDpA=="); }
     /** /data/local/tmp */
     private static String PATH_DATA_LOCAL_TMP() { return com.overdrive.app.util.ScratchRoot.path(Safe.s("vuaMjrmBGBFh07qqnUuL8w==")); }
     /** /data/data/com.android.providers.settings */
@@ -54,8 +34,6 @@ public class SentryDaemon {
     /** cmd wifi set-wifi-enabled enabled */
     private static String CMD_WIFI_ENABLE_ALT() { return Safe.s("OHt1ORBfaA6jti9DhL+LSDghCI3qSNr9WYGyb82Ov2DsCnMgXaYKKKOzpoICOnGX"); }
     
-    // ACC Lock - COMMENTED OUT (using whitelistAppPackageOld instead)
-    // private static Object accLockObject = null;
     private static Context appContext = null;
     
     public static void main(String[] args) {
@@ -98,10 +76,6 @@ public class SentryDaemon {
         log("UID: " + myUid + " (" + uidToName(myUid) + ")");
         log("PID: " + android.os.Process.myPid());
         
-        if (myUid == 1000) {
-            log("*** RUNNING AS SYSTEM - CAN ACQUIRE ACC LOCK! ***");
-        }
-        
         if (Looper.myLooper() == null) {
             Looper.prepare();
         }
@@ -123,20 +97,14 @@ public class SentryDaemon {
                 // Start control socket for clean shutdown
                 startControlSocket();
                 
-                // ACC whitelist and protection DISABLED - causes BYD default dashcam
-                // to lose video signal when running as privileged (UID 1000).
-                // The setPkg2AccWhiteList call elevates our app's camera priority
-                // above the BYD dashcam, stealing its AVMCamera feed.
-                // whitelistAppPackageOld();
-                // protectDaemon(context);
-                
+                // Do not acquire ACC protection here: raising camera priority can
+                // deprive the vehicle's factory dashcam of its AVM feed.
                 // Keep WiFi enabled
                 enableWifi();
             } else {
                 log("WARNING: Running without context - using shell fallbacks");
                 writePidFile();
                 startControlSocket();
-                // protectDaemonViaShell(); // DISABLED - same reason as above
                 enableWifi();
             }
             
@@ -168,360 +136,6 @@ public class SentryDaemon {
             logger.info(msg);
         }
         // Note: System.out.println is now handled by DaemonLogger when enableStdoutLog is true
-    }
-    
-    // ==================== ACC LOCK (COMMENTED OUT) ====================
-    
-    /*
-     * Acquire ACC Lock - COMMENTED OUT, replaced by whitelistAppPackageOld.
-     *
-     * UID 1000 (system) has android.permission.DEVICE_ACC which is required.
-     * This sets mDirty bit 4 (acclock) in AccModeManagerService.
-     */
-    /*
-    @SuppressLint("WrongConstant")
-    private static void acquireAccLock(Context context) {
-        log("=== ACQUIRING ACC LOCK (UID 1000) ===");
-        
-        try {
-            Object accModeManager = context.getSystemService(SERVICE_ACCMODE());
-            if (accModeManager == null) {
-                log("  AccModeManager is null!");
-                return;
-            }
-            
-            log("  Got AccModeManager: " + accModeManager.getClass().getName());
-            
-            // Find newAccLock method
-            Method newAccLockMethod = null;
-            for (Method m : accModeManager.getClass().getMethods()) {
-                if (m.getName().equals("newAccLock")) {
-                    newAccLockMethod = m;
-                    log("  Found newAccLock: " + m);
-                    break;
-                }
-            }
-            
-            if (newAccLockMethod == null) {
-                log("  newAccLock method not found!");
-                return;
-            }
-            
-            // Create ACC Lock with level 1 (PARTIAL)
-            // Level 1 is the only valid level based on previous testing
-            Object accLock = newAccLockMethod.invoke(accModeManager, 1, "SentryDaemon:AccLock");
-            
-            if (accLock == null) {
-                log("  newAccLock returned null!");
-                return;
-            }
-            
-            log("  Got AccLock object: " + accLock.getClass().getName());
-            
-            // List available methods
-            log("  AccLock methods:");
-            for (Method m : accLock.getClass().getMethods()) {
-                if (m.getDeclaringClass() != Object.class) {
-                    log("    " + m.getName());
-                }
-            }
-            
-            // Call acquire()
-            Method acquireMethod = accLock.getClass().getMethod("acquire");
-            acquireMethod.invoke(accLock);
-            
-            accLockObject = accLock;
-            log("  >>> ACC LOCK ACQUIRED! <<<");
-            
-            // Verify it's held
-            try {
-                Method isHeldMethod = accLock.getClass().getMethod("isHeld");
-                boolean isHeld = (Boolean) isHeldMethod.invoke(accLock);
-                log("  isHeld: " + isHeld);
-            } catch (Exception e) {
-                // Ignore
-            }
-            
-        } catch (Exception e) {
-            String msg = e.getMessage();
-            if (e.getCause() != null) {
-                msg = e.getCause().getMessage();
-            }
-            log("  ACC Lock error: " + msg);
-            e.printStackTrace();
-            
-            // Try alternative approach via mService
-            tryAccLockViaMService(context);
-        }
-    }
-    */
-    
-    /*
-     * Alternative: Try to acquire ACC Lock via direct mService access.
-     * COMMENTED OUT - using whitelistAppPackageOld instead.
-     */
-    /*
-    @SuppressLint("WrongConstant")
-    private static void tryAccLockViaMService(Context context) {
-        log("  Trying ACC Lock via mService...");
-        
-        try {
-            Object accModeManager = context.getSystemService(SERVICE_ACCMODE());
-            if (accModeManager == null) return;
-            
-            Field mServiceField = accModeManager.getClass().getDeclaredField("mService");
-            mServiceField.setAccessible(true);
-            Object mService = mServiceField.get(accModeManager);
-            
-            if (mService == null) {
-                log("    mService is null");
-                return;
-            }
-            
-            log("    Got mService: " + mService.getClass().getName());
-            
-            // List all methods
-            log("    mService methods:");
-            for (Method m : mService.getClass().getMethods()) {
-                if (m.getDeclaringClass() != Object.class) {
-                    StringBuilder params = new StringBuilder();
-                    for (Class<?> p : m.getParameterTypes()) {
-                        if (params.length() > 0) params.append(", ");
-                        params.append(p.getSimpleName());
-                    }
-                    log("      " + m.getName() + "(" + params + ")");
-                }
-            }
-            
-            // Try acquireAccLock directly
-            for (Method m : mService.getClass().getMethods()) {
-                if (m.getName().equals("acquireAccLock")) {
-                    log("    Found acquireAccLock: " + m);
-                    Class<?>[] params = m.getParameterTypes();
-                    
-                    // acquireAccLock(IBinder, int, String, String, WorkSource, String)
-                    if (params.length >= 2) {
-                        try {
-                            IBinder token = new android.os.Binder();
-                            if (params.length == 6) {
-                                m.invoke(mService, token, 1, "SentryDaemon", "AccLock", null, APP_PACKAGE_NAME());
-                            } else if (params.length == 2) {
-                                m.invoke(mService, token, 1);
-                            }
-                            log("    >>> acquireAccLock via mService: SUCCESS! <<<");
-                            return;
-                        } catch (Exception e) {
-                            String msg = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
-                            log("    acquireAccLock error: " + msg);
-                        }
-                    }
-                }
-            }
-            
-            // Try requestSuspending(0) to block suspend
-            for (Method m : mService.getClass().getMethods()) {
-                if (m.getName().equals("requestSuspending")) {
-                    try {
-                        m.invoke(mService, 0);  // 0 = don't suspend?
-                        log("    requestSuspending(0): called");
-                    } catch (Exception e) {
-                        log("    requestSuspending error: " + e.getMessage());
-                    }
-                }
-            }
-            
-        } catch (Exception e) {
-            log("    mService error: " + e.getMessage());
-        }
-    }
-    */
-    
-    /*
-     * Release ACC Lock (call when exiting).
-     * COMMENTED OUT - using whitelistAppPackageOld instead.
-     */
-    /*
-    public static void releaseAccLock() {
-        if (accLockObject == null) return;
-        
-        try {
-            Method releaseMethod = accLockObject.getClass().getMethod("release");
-            releaseMethod.invoke(accLockObject);
-            log("ACC Lock released");
-        } catch (Exception e) {
-            log("ACC Lock release error: " + e.getMessage());
-        }
-        
-        accLockObject = null;
-    }
-    */
-    
-    // ==================== WHITELIST APP PACKAGE (from AccSentryDaemon) ====================
-    
-    /*
-     * DISABLED: Whitelist our app package from ACC power management killing.
-     * This causes BYD default dashcam to show "no signal" when SentryDaemon
-     * runs as privileged (UID 1000). The setPkg2AccWhiteList binder call
-     * elevates our app's priority in the BYD ACC system, which causes the
-     * camera HAL to give our app priority over the default dashcam for
-     * AVMCamera access.
-     *
-     * private static void whitelistAppPackageOld() {
-     *     String pkg = APP_PACKAGE_NAME();
-     *     log("Whitelisting package " + pkg + " via accmodemanager...");
-     *     boolean success = false;
-     *     try {
-     *         Class<?> serviceManager = Class.forName("android.os.ServiceManager");
-     *         Method getService = serviceManager.getMethod("getService", String.class);
-     *         IBinder binder = (IBinder) getService.invoke(null, SERVICE_ACCMODE());
-     *         if (binder != null) {
-     *             IAccModeManager service = IAccModeManager.Stub.asInterface(binder);
-     *             if (service != null) {
-     *                 service.setPkg2AccWhiteList(pkg);
-     *                 success = true;
-     *             }
-     *         }
-     *     } catch (Exception e) { }
-     * }
-     */
-    
-    // ==================== DAEMON PROTECTION ====================
-    
-    private static void protectDaemon(Context context) {
-        int myUid = android.os.Process.myUid();
-        boolean isSystem = (myUid == 1000);
-        
-        log("=== PROTECTING DAEMON ===");
-        
-        // 1. Acquire WakeLock
-        acquireWakeLock(context);
-        
-        // 2. Whitelist UIDs for network access
-        int[] uidsToWhitelist = isSystem ? new int[]{1000, 2000} : new int[]{myUid};
-        for (int uid : uidsToWhitelist) {
-            whitelistUidForNetwork(context, uid);
-        }
-        
-        // 3. Whitelist app package
-        whitelistAppPackage(context);
-        
-        // 4. Whitelist app UID if running as system
-        if (isSystem) {
-            whitelistAppUid(context);
-        }
-        
-        log("=== DAEMON PROTECTION COMPLETE ===");
-    }
-    
-    private static void protectDaemonViaShell() {
-        log("=== PROTECTING DAEMON (shell fallback) ===");
-        
-        String pkg = APP_PACKAGE_NAME();
-        
-        // Whitelist UIDs
-        for (int uid : new int[]{1000, 2000}) {
-            String uidStr = String.valueOf(uid);
-            for (int code = 1; code <= 3; code++) {
-                execShell("service call " + SERVICE_BYD_DATACACHE() + " " + code + " s16 '" + uidStr + "' i32 0 2>/dev/null");
-                execShell("service call " + SERVICE_BG_DATACACHE() + " " + code + " s16 '" + uidStr + "' i32 0 2>/dev/null");
-            }
-        }
-        
-        // Whitelist package
-        for (int code = 1; code <= 5; code++) {
-            execShell("service call " + SERVICE_ACCMODE() + " " + code + " s16 '" + pkg + "' 2>/dev/null");
-        }
-        
-        log("=== SHELL FALLBACK COMPLETE ===");
-    }
-    
-    private static void acquireWakeLock(Context context) {
-        try {
-            PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
-            if (pm != null) {
-                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SentryDaemon::Lock");
-                wakeLock.acquire();
-                log("WakeLock acquired");
-            }
-        } catch (Exception e) {
-            log("WARN: Failed to acquire WakeLock: " + e.getMessage());
-        }
-    }
-    
-    private static void whitelistUidForNetwork(Context context, int uid) {
-        String uidStr = String.valueOf(uid);
-        log("Whitelisting UID " + uid + "...");
-        
-        // Try byd_datacached
-        try {
-            @SuppressLint("WrongConstant")
-            Object service = context.getSystemService(SERVICE_BYD_DATACACHE());
-            if (service != null) {
-                Method method = service.getClass().getMethod("setAppStartupData", String.class, Integer.TYPE);
-                method.invoke(service, uidStr, 0);
-                log("  byd_datacached: OK");
-                return;
-            }
-        } catch (Exception e) { }
-        
-        // Try bg_datacache
-        try {
-            @SuppressLint("WrongConstant")
-            Object service = context.getSystemService(SERVICE_BG_DATACACHE());
-            if (service != null) {
-                Method method = service.getClass().getMethod("setAppOpsData", String.class, Integer.TYPE);
-                method.invoke(service, uidStr, 0);
-                log("  bg_datacache: OK");
-                return;
-            }
-        } catch (Exception e) { }
-        
-        // Shell fallback
-        for (int code = 1; code <= 3; code++) {
-            execShell("service call " + SERVICE_BYD_DATACACHE() + " " + code + " s16 '" + uidStr + "' i32 0 2>/dev/null");
-            execShell("service call " + SERVICE_BG_DATACACHE() + " " + code + " s16 '" + uidStr + "' i32 0 2>/dev/null");
-        }
-        log("  shell fallback: done");
-    }
-    
-    private static void whitelistAppPackage(Context context) {
-        String pkg = APP_PACKAGE_NAME();
-        log("Whitelisting package " + pkg + "...");
-        
-        try {
-            @SuppressLint("WrongConstant")
-            Object accManager = context.getSystemService(SERVICE_ACCMODE());
-            if (accManager != null) {
-                java.lang.reflect.Field mServiceField = accManager.getClass().getDeclaredField("mService");
-                mServiceField.setAccessible(true);
-                Object iAccService = mServiceField.get(accManager);
-                
-                if (iAccService != null) {
-                    Method whitelistMethod = iAccService.getClass().getDeclaredMethod("setPkg2AccWhiteList", String.class);
-                    whitelistMethod.setAccessible(true);
-                    whitelistMethod.invoke(iAccService, pkg);
-                    log("  accmodemanager: OK");
-                    return;
-                }
-            }
-        } catch (Exception e) { }
-        
-        // Shell fallback
-        for (int code = 1; code <= 5; code++) {
-            execShell("service call " + SERVICE_ACCMODE() + " " + code + " s16 '" + pkg + "' 2>/dev/null");
-        }
-        log("  shell fallback: done");
-    }
-    
-    private static void whitelistAppUid(Context context) {
-        String pkg = APP_PACKAGE_NAME();
-        try {
-            int appUid = context.getPackageManager().getApplicationInfo(pkg, 0).uid;
-            log("App UID: " + appUid);
-            whitelistUidForNetwork(context, appUid);
-        } catch (Exception e) {
-            log("Could not get app UID: " + e.getMessage());
-        }
     }
     
     private static void enableWifi() {
@@ -868,19 +482,6 @@ public class SentryDaemon {
     private static void shutdown() {
         log("=== SHUTTING DOWN ===");
         running = false;
-        
-        // Release ACC Lock
-        //releaseAccLock();
-        
-        // Release WakeLock
-        if (wakeLock != null && wakeLock.isHeld()) {
-            try {
-                wakeLock.release();
-                log("WakeLock released");
-            } catch (Exception e) {
-                // Ignore
-            }
-        }
         
         // Close control socket
         if (controlSocket != null) {
