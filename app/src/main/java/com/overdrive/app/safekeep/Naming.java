@@ -6,6 +6,7 @@ import java.io.File;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
+import java.util.TimeZone;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -73,8 +74,14 @@ public final class Naming {
         Matcher m = TS.matcher(f.getName());
         if (m.find()) {
             try {
+                String timestamp = m.group(1) + m.group(2);
+                // Validate in UTC so impossible fields are rejected without rejecting local DST gaps.
+                SimpleDateFormat validator = new SimpleDateFormat("yyyyMMddHHmmss", Locale.US);
+                validator.setTimeZone(TimeZone.getTimeZone("UTC"));
+                validator.setLenient(false);
+                validator.parse(timestamp);
                 SimpleDateFormat p = new SimpleDateFormat("yyyyMMddHHmmss", Locale.US);
-                Date d = p.parse(m.group(1) + m.group(2));
+                Date d = p.parse(timestamp);
                 if (d != null) return d.getTime();
             } catch (Exception ignored) {
             }
