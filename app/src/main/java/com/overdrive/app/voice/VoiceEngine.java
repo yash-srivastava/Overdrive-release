@@ -1188,11 +1188,7 @@ final class VoiceEngine implements PcmSink {
     /** The last {@code samples} of command-stage audio, oldest first. */
     private short[] recentTail(int samples) {
         int have = Math.min(samples, recentFull ? recent.length : recentPos);
-        short[] out = new short[have];
-        int from = recentPos - have;
-        if (from < 0) from += recent.length;
-        for (int i = 0; i < have; i++) out[i] = recent[(from + i) % recent.length];
-        return out;
+        return RecentAudioRange.copy(recent, recentPos, have, have);
     }
 
     /**
@@ -1510,7 +1506,7 @@ final class VoiceEngine implements PcmSink {
         long oldest = turnSamples - (recentFull ? recent.length : recentPos);
         from = Math.max(from, oldest);
         if (to <= from) return new short[0];
-        return java.util.Arrays.copyOf(recentTail((int) (turnSamples - from)), (int) (to - from));
+        return RecentAudioRange.copy(recent, recentPos, (int) (turnSamples - from), (int) (to - from));
     }
 
     private void onLocalMatch(LocalCommandSpotter.Match m) {
