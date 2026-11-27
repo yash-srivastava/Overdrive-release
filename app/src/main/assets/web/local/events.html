@@ -2056,7 +2056,7 @@
         // ?file= first; if they fail to load, the List shows and works as before.
         (function () {
             var html = document.documentElement, root = document.getElementById('tlvRoot');
-            var SRC = ['../shared/timeline-strip.js?v=5', '../shared/timeline-player.js?v=4', '../shared/timeline-view.js?v=5'];
+            var SRC = ['../shared/timeline-strip.js?v=5', '../shared/dashcam-view.js?v=1', '../shared/timeline-player.js?v=5', '../shared/timeline-view.js?v=6'];
             var loaded = {}, wait = null, chosen = null, first = html.classList.contains('tlv-on'), listReady = !first, waiters = [];
             function view() { return window.BYD && BYD.tlview && BYD.tlview.setMode ? BYD.tlview : null; }
             function paint(mode) {
