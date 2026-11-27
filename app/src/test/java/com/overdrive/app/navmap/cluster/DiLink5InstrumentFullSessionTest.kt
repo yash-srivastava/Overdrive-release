@@ -204,12 +204,98 @@ class DiLink5InstrumentFullSessionTest {
         for (mode in listOf(1, 2, 3, 4)) {
             for (closing in listOf(false, true)) {
                 if (mode == 4 && !closing) continue
-                val io = FakeIo().apply { marker = owner.copy(closing = closing); this.mode = mode; acc = false }
+                val io = FakeIo().apply { marker = owner.copy(closing = closing); this.mode = mode }
                 assertTrue(Lifecycle(io).release(null, "next-boot"))
                 assertNull(io.marker)
                 assertTrue(io.commands.isEmpty())
             }
         }
+    }
+
+    @Test
+    fun shutdownBroadcastFailureSurvivesEarlyOffUntilReadyFullThenRestoresExactlyOnce() {
+        var modeReads = 0
+        var savedMode = 1
+        val io = FakeIo { modeReads++; savedMode }.apply {
+            marker = owner
+            nextReply = Reply(false, false, -1, "", 0, "broadcast_failed")
+        }
+        assertFalse(Lifecycle(io).release(owner.generation, owner.bootId))
+        val pending = owner.copy(closing = true, closeNotSent = true)
+        assertEquals(pending, io.marker)
+        io.marker = Owner.decode(pending.encode())
+        val readsAtShutdown = modeReads
+
+        io.acc = false
+        assertFalse(Lifecycle(io).release(null, "new-boot"))
+        assertEquals(readsAtShutdown, modeReads)
+        assertEquals(pending, io.marker)
+
+        io.acc = true
+        io.mode = 4
+        savedMode = 4
+        io.nextReply = answered(RESULT_SENT, 4)
+        assertTrue(Lifecycle(io).release(null, "new-boot"))
+        assertTrue(Lifecycle(io).release(null, "new-boot"))
+        val restore = owner.copy(bootId = "new-boot", closing = true, rebootRestore = true)
+        assertEquals(listOf(owner.copy(closing = true), restore), io.commands)
+        assertEquals(listOf(owner.copy(closing = true), pending, restore, null), io.writes)
+    }
+
+    @Test
+    fun failedRetryPermissionWriteOrUncertainDeliveryCannotOverrideFullAfterReboot() {
+        val unknown = Reply(true, false, -1, "", 0, "app_unavailable")
+        val unsent = Reply(false, false, -1, "", 0, "broadcast_failed")
+        for (reply in listOf(unsent, unknown, answered(RESULT_EXPIRED, 2))) {
+            val io = FakeIo().apply {
+                marker = owner
+                nextReply = reply
+                if (reply === unsent) writeAllowed = { candidate -> candidate?.closeNotSent != true }
+            }
+            assertFalse(Lifecycle(io).release(null, owner.bootId))
+            assertEquals(owner.copy(closing = true), io.marker)
+            io.writeAllowed = { true }
+            io.nextReply = unsent
+            // One later failed attempt cannot prove the earlier close was never sent.
+            assertFalse(Lifecycle(io).release(null, owner.bootId))
+            assertEquals(owner.copy(closing = true), io.marker)
+            io.mode = 4
+            assertTrue(Lifecycle(io).release(null, "new-boot"))
+            assertNull(io.marker)
+            assertEquals(2, io.commands.size)
+        }
+    }
+
+    @Test
+    fun failedClearAfterCompletedOrSupersededClosePreservesDriverFullAcrossReboot() {
+        for (driverSelectedFull in listOf(false, true)) {
+            val io = FakeIo().apply {
+                marker = owner.copy(closing = true, closeNotSent = true)
+                observedModeAtDispatch = if (driverSelectedFull) 4 else 1
+                writeAllowed = { candidate -> candidate != null }
+            }
+            assertFalse(Lifecycle(io).release(null, owner.bootId))
+            assertEquals(owner.copy(closing = true), io.marker)
+            io.mode = 4
+            io.writeAllowed = { true }
+            assertTrue(Lifecycle(io).release(null, "new-boot"))
+            assertNull(io.marker)
+            assertEquals(1, io.commands.size)
+        }
+    }
+
+    @Test
+    fun unsentCloseFromManualFullDoesNotAcquireCrossBootPermission() {
+        val io = FakeIo().apply {
+            marker = owner
+            mode = 4
+            nextReply = Reply(false, false, -1, "", 0, "broadcast_failed")
+        }
+        assertFalse(Lifecycle(io).release(null, owner.bootId))
+        assertEquals(owner.copy(closing = true), io.marker)
+        assertTrue(Lifecycle(io).release(null, "new-boot"))
+        assertNull(io.marker)
+        assertEquals(1, io.commands.size)
     }
 
     @Test
@@ -260,6 +346,7 @@ class DiLink5InstrumentFullSessionTest {
         assertEquals(close, Owner.decode(close.encode()))
         assertFalse(Owner.decode(owner.encode()) == close)
         assertNull(Owner.decode(owner.copy(rebootRestore = true).encode()))
+        assertNull(Owner.decode(owner.copy(closeNotSent = true).encode()))
         assertEquals(close, Owner.decode("""{"generation":42,"bootId":"boot-id","closing":true,"legacyMapFocus":false}"""))
         assertNull(Owner.decode("""{"generation":42,"bootId":"boot-id"}"""))
     }
@@ -288,6 +375,7 @@ class DiLink5InstrumentFullSessionTest {
         var mode = 1
         var acc = true
         var canWrite = true
+        var writeAllowed: (Owner?) -> Boolean = { true }
         var observedModeAtDispatch: Int? = null
         var nextReply = answered(RESULT_SENT, 4)
         val writes = mutableListOf<Owner?>()
@@ -296,7 +384,7 @@ class DiLink5InstrumentFullSessionTest {
         override fun readOwner() = marker
 
         override fun writeOwner(owner: Owner?): Boolean {
-            if (!canWrite) return false
+            if (!canWrite || !writeAllowed(owner)) return false
             marker = owner
             writes += owner
             return true
@@ -310,6 +398,7 @@ class DiLink5InstrumentFullSessionTest {
             assertEquals(marker, owner)
             commands += owner
             observedModeAtDispatch?.let { mode = it }
+            if (!nextReply.dispatched) return nextReply
             val declined = DiLink5InstrumentFullSession.savedModeDisposition(mode, owner)
             return if (declined != null) answered(declined) else nextReply
         }
