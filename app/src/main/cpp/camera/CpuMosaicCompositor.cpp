@@ -1205,6 +1205,8 @@ static void dashcamColumns(const RemapSpec& p, const RemapSource* src,
 // The CPU recording lane owns a bounded, geometry-only cache. Keep the
 // directly sampled int32 rows when they fit; otherwise pack exact 20-bit
 // coordinates (16 low bits + one shared high-nibble byte per sample).
+// For larger frames, try a lossless block predictor to retain every row within
+// the same budget. A row that cannot be represented stays on the original path.
 // No frame pointers or pixels are retained. The lane's exit frees the cache.
 struct DashcamRemapCache {
     struct Plane {
@@ -1215,6 +1217,20 @@ struct DashcamRemapCache {
     };
     std::unique_ptr<int32_t[]> data;
     std::unique_ptr<uint16_t[]> packed;
+
+    // Store the exact fixed-point coordinates as a linear predictor plus signed
+    // byte residuals. Each block is independent, including at camera seams.
+    static constexpr int kBlock = 32;
+    struct Block {
+        int32_t u0, v0, du, dv;
+        int8_t u[kBlock], v[kBlock];
+    };
+    struct CompactPlane {
+        size_t blocksPerRow = 0, offset = 0, flagOffset = 0;
+    };
+    std::unique_ptr<Block[]> compact;
+    std::unique_ptr<uint8_t[]> validRows;
+    CompactPlane compactPlanes[2];
     Plane planes[2];
     int outW = 0, outH = 0, sw = 0, sh = 0, windshield = 0;
     float k1 = 0, k2 = 0, aspect = 0, split = 0;
@@ -1223,6 +1239,8 @@ struct DashcamRemapCache {
     void clear() {
         data.reset();
         packed.reset();
+        compact.reset();
+        validRows.reset();
         outW = 0;
         needsFill = false;
     }
@@ -1240,7 +1258,7 @@ struct DashcamRemapCache {
 
     uint64_t samples() const { return planes[0].samples() + planes[1].samples(); }
 
-    void prepare(const RemapSpec& p, const RemapSource& sr) {
+    void prepare(const RemapSpec& p, const RemapSource& sr, bool allowCompact = true) {
         if (p.k1 == 0.f && p.k2 == 0.f) {
             clear();
             return;
@@ -1270,6 +1288,9 @@ struct DashcamRemapCache {
         // The packed format biases U by 128 and preserves all fractional bits.
         // remapGrid already bounds sw <= 8192; keep a raw fallback for taller sources.
         if (samples() > budget / 8 && sr.h <= 4096 && sr.w <= 8192) {
+            // Try the full compact map only where the existing packed map
+            // would drop rows. Keep the small/fully packed paths unchanged.
+            if (allowCompact && samples() > budget / 5 && prepareCompact(budget)) return;
             // Retain complete luma/chroma row pairs up to the budget, preferring
             // the three-camera bottom band. A windshield never needs a table.
             if (samples() > budget / 5) {
@@ -1303,6 +1324,110 @@ struct DashcamRemapCache {
         planes[1].offset = (size_t) planes[0].samples() * 2;
         data.reset(new (std::nothrow) int32_t[(size_t) count * 2]);
         needsFill = data != nullptr;
+    }
+
+    bool prepareCompact(size_t budget) {
+        size_t blocks = 0, rows = 0;
+        for (int i = 0; i < 2; ++i) {
+            const Plane& p = planes[i];
+            CompactPlane& c = compactPlanes[i];
+            // Splitting at two cell boundaries can add at most two blocks.
+            c.blocksPerRow = (p.width + kBlock - 1) / kBlock + 2;
+            c.offset = blocks;
+            c.flagOffset = rows;
+            const size_t height = p.last - p.first;
+            if (height > (budget / sizeof(Block) - blocks) / c.blocksPerRow) return false;
+            blocks += height * c.blocksPerRow;
+            rows += height;
+        }
+        if (!blocks || rows > budget - blocks * sizeof(Block)) return false;
+        compact.reset(new (std::nothrow) Block[blocks]);
+        if (!compact) return false;
+        validRows.reset(new (std::nothrow) uint8_t[rows]());
+        if (!validRows) {
+            compact.reset();
+            return false;
+        }
+        needsFill = true;
+        return true;
+    }
+
+    void finishFrame(const RemapSpec& p, const RemapSource& sr) {
+        if (compact && needsFill) {
+            // Very strong distortion can defeat the predictor. Keep the old
+            // packed path if the compact map does not cover substantially
+            // more samples; do not retry until the geometry changes.
+            constexpr size_t budget = 16 * 1024 * 1024;
+            const int pairs = (int) (budget / ((size_t) p.outW * 25 / 2));
+            const int first = std::max(0, p.outH - pairs * 2);
+            uint64_t validSamples = 0, packedSamples = 0;
+            for (int i = 0; i < 2; ++i) {
+                const Plane& plane = planes[i];
+                const CompactPlane& c = compactPlanes[i];
+                for (int y = plane.first; y < plane.last; ++y) {
+                    if (validRows[c.flagOffset + y - plane.first]) validSamples += plane.width;
+                }
+                const int start = std::max(plane.first, first / (i + 1));
+                packedSamples += (uint64_t) (plane.last - start) * plane.width;
+            }
+            if (validSamples * 4 < packedSamples * 5) {
+                clear();
+                prepare(p, sr, false);
+                return; // fill the packed map on the next frame
+            }
+        }
+        needsFill = false;
+    }
+
+    // Bounds also protect the integer predictor from unexpected coordinates.
+    static bool encodeBlock(Block& b, int n, const int32_t* u, const int32_t* v) {
+        const int last = n - 1;
+        if (u[0] < -128 || u[0] > 524160 || u[last] < -128 || u[last] > 524160
+                || v[0] < 0 || v[0] > 1048320 || v[last] < 0 || v[last] > 1048320) return false;
+        b.u0 = u[0];
+        b.v0 = v[0];
+        b.du = last ? (u[last] - b.u0) / last : 0;
+        b.dv = last ? (v[last] - b.v0) / last : 0;
+        for (int i = 0; i < n; ++i) {
+            const int64_t ru = (int64_t) u[i] - (b.u0 + i * b.du);
+            const int64_t rv = (int64_t) v[i] - (b.v0 + i * b.dv);
+            if (ru < -128 || ru > 127 || rv < -128 || rv > 127) return false;
+            b.u[i] = (int8_t) ru;
+            b.v[i] = (int8_t) rv;
+        }
+        return true;
+    }
+
+    static void decodeBlock(const Block& b, int n, int32_t* u, int32_t* v) {
+        for (int i = 0; i < n; ++i) {
+            u[i] = b.u0 + i * b.du + b.u[i];
+            v[i] = b.v0 + i * b.dv + b.v[i];
+        }
+    }
+
+    // Each worker owns a complete row. A validity byte is published only
+    // after all blocks encode successfully; failed rows are recomputed.
+    bool compactRow(int y, int div, const int* bounds, int segments,
+                    int32_t* u, int32_t* v) const {
+        const Plane& p = planes[div - 1];
+        if (!compact || y < p.first || y >= p.last) return false;
+        const CompactPlane& c = compactPlanes[div - 1];
+        const size_t rowIndex = (size_t) (y - p.first);
+        uint8_t& valid = validRows[c.flagOffset + rowIndex];
+        if (!needsFill && !valid) return false;
+        Block* block = compact.get() + c.offset + rowIndex * c.blocksPerRow;
+        for (int segment = 0; segment < segments; ++segment) {
+            for (int x = bounds[segment]; x < bounds[segment + 1]; x += kBlock, ++block) {
+                const int n = std::min(kBlock, bounds[segment + 1] - x);
+                if (needsFill) {
+                    if (!encodeBlock(*block, n, u + x, v + x)) return false;
+                } else {
+                    decodeBlock(*block, n, u + x, v + x);
+                }
+            }
+        }
+        if (needsFill) valid = 1;
+        return true;
     }
 
     int32_t* row(int y, int div) const {
@@ -1349,9 +1474,14 @@ static void dashcamRow(const RemapSpec& p, const RemapSource* src, const Planes&
     uint16_t* packed = cache.packedRow(y, div);
     int32_t* rowU = cached ? cached : lu;
     int32_t* rowV = cached ? cached + n : lv;
-    const bool warm = (cached || packed) && !cache.needsFill;
-    if (packed && warm) cache.unpackRow(packed, n, lu, lv);
     const float vy = DashcamRemapCache::rowV(p, y, div);
+    const int topBounds[2] = {0, n};
+    const bool top = vy < p.split;
+    const int* bounds = top ? topBounds : (chroma ? cb.chroma : cb.luma);
+    const int segments = top ? 1 : 3;
+    const bool warm = !cache.needsFill && ((cached || packed)
+            || cache.compactRow(y, div, bounds, segments, lu, lv));
+    if (packed && warm) cache.unpackRow(packed, n, lu, lv);
     // Output pixel i sits at vx = (i * div + 0.5 * div) / outW.
     const float vx0 = (0.5f * (float) div) / (float) p.outW;
     const float dvx = (float) div / (float) p.outW;
@@ -1386,6 +1516,7 @@ static void dashcamRow(const RemapSpec& p, const RemapSource* src, const Planes&
             if (!warm) rectifyRow(p, n, vx0, dvx, ly, 0.25f * (float) sw,
                                   (float) sh, rowU, rowV);
             if (packed && !warm) cache.packRow(packed, n, rowU, rowV);
+            if (cache.needsFill && cache.compact) cache.compactRow(y, div, bounds, segments, lu, lv);
             u = rowU;
             v = rowV;
         }
@@ -1403,7 +1534,6 @@ static void dashcamRow(const RemapSpec& p, const RemapSource* src, const Planes&
     const float by = (vy - p.split) / (1.f - p.split);
     const float cellOff[3] = {p.off[3], p.off[2], p.off[1]};  // left, rear, right
     for (int c = 0; c < 3; c++) {
-        const int* bounds = chroma ? cb.chroma : cb.luma;
         const int a = bounds[c], b = bounds[c + 1];
         if (b <= a) continue;
         const float tx0 = (vx0 + (float) a * dvx) * 3.f - (float) c;
@@ -1432,6 +1562,7 @@ static void dashcamRow(const RemapSpec& p, const RemapSource* src, const Planes&
         else gatherY(strip, b - a, u, v, off, oy + a);
     }
     if (packed && !warm) cache.packRow(packed, n, rowU, rowV);
+    if (cache.needsFill && cache.compact) cache.compactRow(y, div, bounds, segments, lu, lv);
 }
 
 // Small persistent pool; the caller also works. Helpers prefer the slowest
@@ -1643,7 +1774,7 @@ int remapGrid(const RemapSpec& p, const RemapSource& strip, const RemapSource* w
         cache.prepare(p, strip);
         job.cache = &cache;
         Pool::get().run(bands, dashcamBand, &job);
-        cache.needsFill = false;
+        cache.finishFrame(p, strip);
     }
     return 0;
 }
