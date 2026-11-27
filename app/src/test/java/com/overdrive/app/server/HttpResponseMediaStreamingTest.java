@@ -1,6 +1,7 @@
 package com.overdrive.app.server;
 
 import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertThrows;
 
 import org.junit.Rule;
 import org.junit.Test;
@@ -8,9 +9,16 @@ import org.junit.rules.TemporaryFolder;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 public class HttpResponseMediaStreamingTest {
     @Rule public final TemporaryFolder temp = new TemporaryFolder();
@@ -59,6 +67,60 @@ public class HttpResponseMediaStreamingTest {
         HttpResponse.sendMediaFileRanged(out, file, "audio/wav", "bytes=-3");
         assertResponse(out, rangeHeaders("audio/wav", data.length, data.length - 3, data.length - 1, NO_CACHE),
                 Arrays.copyOfRange(data, data.length - 3, data.length));
+    }
+
+    @Test
+    public void overlappingRequestsKeepIndependentPositionsAndExactRangeEnds() throws Exception {
+        byte[] data = sampleData();
+        File file = writeFile(data);
+        int[][] ranges = {
+                {0, 0}, {1, 65536}, {65535, 65537}, {65536, 131071},
+                {13, 131072}, {131072, data.length - 1}, {data.length - 1, data.length - 1}
+        };
+        ExecutorService pool = Executors.newFixedThreadPool(4);
+        try {
+            // Each HTTP request must own its position even when reading the same file.
+            List<Future<?>> pending = new ArrayList<>();
+            for (int[] range : ranges) {
+                pending.add(pool.submit(() -> {
+                    int start = range[0], end = range[1];
+                    ByteArrayOutputStream out = new ByteArrayOutputStream();
+                    HttpResponse.sendVideoRange(out, file, start, end, "\"test\"");
+                    assertResponse(out, rangeHeaders("video/mp4", data.length, start, end, CACHED),
+                            Arrays.copyOfRange(data, start, end + 1));
+                    return null;
+                }));
+            }
+            for (Future<?> request : pending) request.get();
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    public void failedRangeWriteDoesNotAffectNextRequest() throws Exception {
+        File first = writeFile(sampleData());
+        OutputStream broken = new OutputStream() {
+            private boolean headersWritten;
+
+            @Override public void write(int value) throws IOException {
+                throw new IOException("disconnected");
+            }
+            @Override public void write(byte[] bytes, int offset, int length) throws IOException {
+                // Allow the headers, reject the first body chunk.
+                if (headersWritten) throw new IOException("disconnected");
+                headersWritten = true;
+            }
+        };
+        assertThrows(IOException.class,
+                () -> HttpResponse.sendVideoRange(broken, first, 0, 65536));
+
+        byte[] data = {10, 20, 30, 40};
+        File second = writeFile(data);
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        HttpResponse.sendVideoRange(out, second, 1, 2);
+        assertResponse(out, rangeHeaders("video/mp4", data.length, 1, 2, NO_CACHE),
+                new byte[]{20, 30});
     }
 
     @Test

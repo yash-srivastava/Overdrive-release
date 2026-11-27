@@ -1,14 +1,15 @@
 package com.overdrive.app.server;
 
 import com.overdrive.app.storage.removable.RemovableStorageFs;
-import com.overdrive.app.storage.removable.SeekableFileReader;
 
 import org.json.JSONObject;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Map;
+import java.util.concurrent.ArrayBlockingQueue;
 
 /**
  * HTTP Response utilities - shared by all handlers.
@@ -17,6 +18,8 @@ public class HttpResponse {
 
     // File streaming chunk: fewer reads and socket writes per clip.
     private static final int FILE_STREAM_BUFFER = 64 * 1024;
+    // At most 256 KiB idle across all range requests; never wait for a buffer.
+    private static final ArrayBlockingQueue<byte[]> RANGE_BUFFERS = new ArrayBlockingQueue<>(4);
 
     /**
      * No fetch directives: live view (JMuxer from jsDelivr, Broadway and Draco blob workers,
@@ -442,16 +445,25 @@ public class HttpResponse {
 
     private static void streamFileRange(OutputStream out, File file, long start,
                                         long contentLength) throws Exception {
-        try (SeekableFileReader raf = new SeekableFileReader(file)) {
-            raf.seek(start);
-            byte[] buffer = new byte[FILE_STREAM_BUFFER];
-            long remaining = contentLength;
-            while (remaining > 0) {
-                int toRead = (int) Math.min(buffer.length, remaining);
-                int read = raf.read(buffer, 0, toRead);
-                if (read <= 0) break;
-                out.write(buffer, 0, read);
-                remaining -= read;
+        try (FileInputStream fis = RemovableStorageFs.openInput(file)) {
+            // This request owns the descriptor and reads forward. Seek once, then
+            // read into the heap buffer directly instead of staging positional NIO reads.
+            fis.getChannel().position(start);
+            byte[] buffer = RANGE_BUFFERS.poll();
+            if (buffer == null) buffer = new byte[FILE_STREAM_BUFFER];
+            try {
+                long remaining = contentLength;
+                while (remaining > 0) {
+                    int toRead = (int) Math.min(buffer.length, remaining);
+                    int read = fis.read(buffer, 0, toRead);
+                    if (read <= 0) break;
+                    out.write(buffer, 0, read);
+                    remaining -= read;
+                }
+            } finally {
+                // Do not keep recording contents in the idle pool, even after a failed write.
+                Arrays.fill(buffer, (byte) 0);
+                RANGE_BUFFERS.offer(buffer);
             }
         }
         out.flush();
