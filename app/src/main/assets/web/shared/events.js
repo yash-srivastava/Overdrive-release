@@ -107,7 +107,7 @@ BYD.events = {
     _recordingNavBoundary: { '-1': false, '1': false },
     _timelineSeq: 0,
     // Off by default: continuing to the next clip is an opt-in (it streams over tunnels too).
-    _playlist: { direction: 0, skipDvr: false, skipEvent: false, skipCam: false, unwatchedOnly: false },
+    _playlist: { direction: 0, skipDvr: false, skipDvrOn: false, skipEvent: false, skipCam: false, unwatchedOnly: false },
     _playlistRequest: null,
     _PLAYLIST_LS_KEY: 'byd.events.playlist',
 
@@ -118,7 +118,7 @@ BYD.events = {
             const saved = JSON.parse(localStorage.getItem(this._PLAYLIST_LS_KEY));
             if (saved) {
                 if ([-1, 0, 1].includes(saved.direction)) this._playlist.direction = saved.direction;
-                for (const key of ['skipDvr', 'skipEvent', 'skipCam', 'unwatchedOnly']) {
+                for (const key of ['skipDvr', 'skipDvrOn', 'skipEvent', 'skipCam', 'unwatchedOnly']) {
                     if (typeof saved[key] === 'boolean') this._playlist[key] = saved[key];
                 }
             }
@@ -177,6 +177,7 @@ BYD.events = {
         if (resume) params.push('resume=1');
         else params.push('fromId=' + encodeURIComponent(this._activeRecording.id));
         if (this._playlist.skipDvr) params.push('skip_dvr_p=1');
+        if (this._playlist.skipDvrOn) params.push('skip_dvr_=1');
         if (this._playlist.skipEvent) params.push('skip_event_=1');
         if (this._playlist.skipCam) params.push('skip_cam_=1');
         if (this._playlist.unwatchedOnly) params.push('unwatchedOnly=1');
