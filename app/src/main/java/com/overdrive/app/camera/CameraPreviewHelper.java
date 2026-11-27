@@ -900,14 +900,8 @@ public final class CameraPreviewHelper {
         int vPixelStride = planes[2].getPixelStride();
         int chromaHeight = height / 2;
         int chromaWidth = width / 2;
-        for (int row = 0; row < chromaHeight; row++) {
-            int uRowOffset = row * uRowStride;
-            int vRowOffset = row * vRowStride;
-            for (int col = 0; col < chromaWidth; col++) {
-                out[dst++] = vBuffer.get(vRowOffset + col * vPixelStride);
-                out[dst++] = uBuffer.get(uRowOffset + col * uPixelStride);
-            }
-        }
+        PreviewChroma.copyToNv21(uBuffer, uRowStride, uPixelStride,
+                vBuffer, vRowStride, vPixelStride, chromaWidth, chromaHeight, out, dst);
         return out;
     }
 }
