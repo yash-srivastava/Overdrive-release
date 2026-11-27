@@ -36,6 +36,7 @@ public class AccMonitor {
     private static volatile long accStateUpdatedAtElapsedMs;
     private static volatile long lastAccOnElapsedMs;
     private static volatile long lastAccOffEdgeElapsedMs;
+    private static volatile long lastAccOnEdgeElapsedMs;
     private static final long DILINK5_SAFETY_STATE_MAX_AGE_MS = 15_000L;
 
     // DiLink 5 car_service power-mode dump source: ACC-OFF admission dampener.
@@ -148,6 +149,11 @@ public class AccMonitor {
     /** elapsedRealtime of the latest genuine ON→OFF edge (0 = none this process). */
     public static long lastAccOffEdgeElapsedMs() {
         return lastAccOffEdgeElapsedMs;
+    }
+
+    /** elapsedRealtime of the latest OFF→ON edge, or the first ON report (0 = none this process). */
+    public static long lastAccOnEdgeElapsedMs() {
+        return lastAccOnEdgeElapsedMs;
     }
 
     /** Fail-safe guard used immediately before any full-screen deterrent render. */
@@ -293,6 +299,7 @@ public class AccMonitor {
         if (!isAccOn && previousEdgeState == 1) {
             lastAccOffEdgeElapsedMs = android.os.SystemClock.elapsedRealtime();
         }
+        if (isAccOn) lastAccOnEdgeElapsedMs = android.os.SystemClock.elapsedRealtime();
         try {
             ParkedPosition.get().onAccEdge(isAccOn);
         } catch (Throwable ignored) {}

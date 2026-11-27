@@ -1187,6 +1187,32 @@ class YoloDetector(private val context: Context) {
     }
     
     /**
+     * Drop the Java-heap input/output scratch (FP32 input tensor, letterbox canvas,
+     * resize bitmap, output copy) while keeping the interpreter. Every buffer is
+     * re-created lazily inside detect() under interpLock before it is used.
+     */
+    fun releaseScratchBuffers() {
+        synchronized(interpLock) {
+            if (interpreter == null) return
+            inputImageBuffer = TensorImage(DataType.UINT8)
+            shapedBuffer = null
+            shapedBufferW = -1
+            shapedBufferH = -1
+            floatOutput = null
+            boxesScratch = null
+            nmsScratch = null
+            normalizedInput = null
+            letterboxProcessor = null
+            letterboxGeom = null
+            letterboxSrcW = -1
+            letterboxSrcH = -1
+            letterboxBytes = null
+            letterboxBuffer = null
+            letterboxImage = null
+        }
+    }
+
+    /**
      * Clean up resources
      */
     fun close() {

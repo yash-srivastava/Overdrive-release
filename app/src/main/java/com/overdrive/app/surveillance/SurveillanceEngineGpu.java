@@ -704,6 +704,12 @@ public class SurveillanceEngineGpu {
     // finishing after release() from leaking a native interpreter.
     private final Object yoloLifecycleLock = new Object();
     private boolean yoloReleased = false;
+    // Drive-time unload: YOLO only runs while armed with ACC off, so after
+    // YOLO_IDLE_RELEASE_MS of ACC on (disarmed) the interpreter is closed and
+    // enable() reloads it before arming. Both guarded by yoloLifecycleLock.
+    private static final long YOLO_IDLE_RELEASE_MS = 5 * 60_000L;
+    private java.util.concurrent.ScheduledFuture<?> yoloIdleCheck = null;
+    private boolean yoloClosedForDrive = false;
     
     // Object detection filters (SOTA: Quadrant-relative height filter in YoloDetector)
     private float minObjectSize = 0.12f;  // 12% of QUADRANT height (~8m for person in 2x2 grid)
@@ -1990,6 +1996,7 @@ public class SurveillanceEngineGpu {
         }
         
         logger.info("Initialized surveillance engine (buffer=" + FRAME_SIZE + " bytes)");
+        scheduleYoloIdleCheck(YOLO_IDLE_RELEASE_MS);
 
         // Sweep orphan recordings: any .mp4 without a sibling hero .jpg is
         // either pre-fix legacy or a daemon-killed-mid-finalizer victim.
@@ -8177,7 +8184,9 @@ public class SurveillanceEngineGpu {
                 if (ok) {
                     yoloDetector = candidate;
                     useObjectDetection = true;
+                    yoloClosedForDrive = false;
                     logger.info("YOLO detector reloaded (object detection re-enabled)");
+                    scheduleYoloIdleCheck(YOLO_IDLE_RELEASE_MS);
                 } else {
                     logger.warn("YOLO reload failed");
                 }
@@ -8203,6 +8212,87 @@ public class SurveillanceEngineGpu {
         }
         if (aiEnabled && yoloDetector == null) {
             reloadYoloDetectorIfPossible();
+        }
+    }
+
+    /** (Re)arms the one-shot drive-unload check. No-op when nothing is loaded. */
+    private void scheduleYoloIdleCheck(long delayMs) {
+        synchronized (yoloLifecycleLock) {
+            if (yoloIdleCheck != null) yoloIdleCheck.cancel(false);
+            yoloIdleCheck = null;
+            if (yoloReleased || yoloDetector == null) return;
+            try {
+                yoloIdleCheck = aiScheduler.schedule(this::yoloIdleCheckTick,
+                        Math.max(60_000L, delayMs), java.util.concurrent.TimeUnit.MILLISECONDS);
+            } catch (java.util.concurrent.RejectedExecutionException ignored) {
+                // Engine released.
+            }
+        }
+    }
+
+    /**
+     * ACC on and disarmed: drop the heap scratch (first tick, >=60 s), close the interpreter
+     * once ACC has been on for YOLO_IDLE_RELEASE_MS. Armed or parked: keep it
+     * (disable() re-arms the check). Under stateTransitionLock so it can never
+     * close the detector between enable()'s reload and active=true.
+     */
+    private void yoloIdleCheckTick() {
+        synchronized (stateTransitionLock) {
+            synchronized (yoloLifecycleLock) {
+                yoloIdleCheck = null;
+                final YoloDetector det = yoloDetector;
+                if (yoloReleased || det == null || active) return;
+                long nextDelay = YOLO_IDLE_RELEASE_MS;
+                if (com.overdrive.app.monitor.AccMonitor.isAccOn()) {
+                    long onSince = com.overdrive.app.monitor.AccMonitor.lastAccOnEdgeElapsedMs();
+                    long onFor = onSince > 0
+                            ? android.os.SystemClock.elapsedRealtime() - onSince : 0;
+                    if (onSince > 0 && onFor >= YOLO_IDLE_RELEASE_MS) {
+                        try {
+                            det.close();
+                        } catch (Throwable t) {
+                            logger.warn("YoloDetector close failed: " + t.getMessage());
+                        }
+                        yoloDetector = null;
+                        yoloClosedForDrive = true;
+                        logger.info("YOLO detector closed: ACC on for " + (onFor / 1000)
+                                + " s with sentry disarmed (reloaded before next arm)");
+                        return;
+                    }
+                    try {
+                        det.releaseScratchBuffers();
+                    } catch (Throwable t) {
+                        logger.warn("YOLO scratch release failed: " + t.getMessage());
+                    }
+                    if (onSince > 0) nextDelay = YOLO_IDLE_RELEASE_MS - onFor;
+                }
+                scheduleYoloIdleCheck(nextDelay);
+            }
+        }
+    }
+
+    /**
+     * Arm path: the drive-unloaded detector is back before active=true and before
+     * any baseline seed. A failed reload degrades to motion-only like a failed
+     * cold-start load, and is retried on the next arm.
+     */
+    private void reloadYoloForArm() {
+        boolean needed;
+        synchronized (yoloLifecycleLock) {
+            if (yoloIdleCheck != null) yoloIdleCheck.cancel(false);
+            yoloIdleCheck = null;
+            needed = yoloClosedForDrive && yoloDetector == null;
+        }
+        if (!needed) return;
+        if (!aiEnabled) return;  // all classes off: setObjectFilters reloads on re-enable
+        long t0 = android.os.SystemClock.elapsedRealtime();
+        reloadYoloDetectorIfPossible();
+        if (yoloDetector != null) {
+            logger.info("YOLO reloaded for arming in "
+                    + (android.os.SystemClock.elapsedRealtime() - t0) + " ms");
+        } else {
+            useObjectDetection = false;
+            logger.error("YOLO reload before arming failed - sentry runs motion-only this session");
         }
     }
     
@@ -12391,6 +12481,8 @@ public class SurveillanceEngineGpu {
             return;
         }
 
+        reloadYoloForArm();
+
         // Sentry armed → publish surveillanceArmed=on and seed the event verdicts to
         // idle so the first real detection is a genuine transition. Both modes
         // (continuous / smart) flow through here after the ACC guard. try/catch inside
@@ -12689,6 +12781,8 @@ public class SurveillanceEngineGpu {
     }
 
     private void disableLocked() {
+        // ACC-on disarm: drop YOLO scratch within a minute, unload it after the drive delay.
+        scheduleYoloIdleCheck(com.overdrive.app.monitor.AccMonitor.isAccOn() ? 0 : YOLO_IDLE_RELEASE_MS);
         // Sentry disarmed → publish surveillanceArmed=off (before the continuous-mode
         // early return so both modes emit it). try/catch — never blocks teardown.
         try {
