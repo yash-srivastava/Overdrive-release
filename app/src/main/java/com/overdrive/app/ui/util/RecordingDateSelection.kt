@@ -87,7 +87,11 @@ internal object RecordingDateSelection {
     private fun classifyDay(dayStart: Long, now: Calendar): DayHeader {
         val today = (now.clone() as Calendar).apply { clearTimeOfDay() }
         val todayMs = today.timeInMillis
-        val yesterdayMs = (today.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, -1) }.timeInMillis
+        val yesterdayMs = (now.clone() as Calendar).apply {
+            add(Calendar.DAY_OF_YEAR, -1)
+            // Normalize each civil day independently: a DST gap can move midnight to 01:00.
+            clearTimeOfDay()
+        }.timeInMillis
         val relative = when (dayStart) {
             todayMs -> RelativeDay.TODAY
             yesterdayMs -> RelativeDay.YESTERDAY

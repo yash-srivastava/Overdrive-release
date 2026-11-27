@@ -79,6 +79,31 @@ class RecordingDateSelectionTest {
         assertEquals(header, RecordingDateSelection.dayHeader(day, 31, now))
     }
 
+    @Test
+    fun headersClassifyYesterdayWhenDaylightSavingStartsAtMidnight() {
+        // Sao Paulo skipped 00:00 on 4 November 2018, starting that day at 01:00.
+        val zone = "America/Sao_Paulo"
+        for (todayDate in listOf(4, 5)) {
+            val now = calendar(zone, 2018, Calendar.NOVEMBER, todayDate)
+            val day = calendar(zone, 2018, Calendar.NOVEMBER, todayDate - 1)
+            val header = RecordingDateSelection.dayHeader(day.timeInMillis, now)
+            val dayStart = (day.clone() as Calendar).apply {
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            assertEquals(RecordingDateSelection.RelativeDay.YESTERDAY, header.relativeDay)
+            assertEquals(dayStart.timeInMillis, header.dayStartMs)
+            assertTrue(header.canAdvance)
+            assertEquals(header, RecordingDateSelection.dayHeader(day, todayDate - 1, now))
+
+            val today = RecordingDateSelection.dayHeader(now.timeInMillis, now)
+            assertEquals(RecordingDateSelection.RelativeDay.TODAY, today.relativeDay)
+            assertFalse(today.canAdvance)
+        }
+    }
+
     private fun calendar(zone: String, year: Int, month: Int, day: Int): Calendar =
         Calendar.getInstance(TimeZone.getTimeZone(zone)).apply {
             clear()
