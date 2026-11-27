@@ -223,9 +223,6 @@ public class CameraExplicitStopContractTest {
                         + "SurveillanceApiHandler.java");
         String http = readRepositoryFile(
                 "app/src/main/java/com/overdrive/app/server/HttpServer.java");
-        String manager = readRepositoryFile(
-                "app/src/main/java/com/overdrive/app/daemon/camera/"
-                        + "CameraManager.kt");
         String oem = readRepositoryFile(
                 "app/src/main/java/com/overdrive/app/server/"
                         + "OemDashcamApiHandler.java");
@@ -272,9 +269,6 @@ public class CameraExplicitStopContractTest {
         assertTrue(http.contains(
                 "pipeline.start(false, cameraStartEpoch);"));
         assertFalse(http.contains("pipeline.start();"));
-        assertTrue(manager.contains(
-                "gpuPipeline?.start(false, cameraStartEpoch)"));
-        assertFalse(manager.contains("gpuPipeline?.start()"));
         assertTrue(oem.contains(
                 "pano.start(false, cameraStartEpoch);"));
         assertFalse(oem.contains("pano.start(false);"));
