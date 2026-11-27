@@ -179,13 +179,18 @@ Look for issues labeled `good first issue` or `help wanted`. These are a great s
 ## Pull Request Process
 
 1. **Branch naming**: Use descriptive branch names like `fix/camera-crash`, `feature/trip-export`, or `docs/update-readme`.
-2. **Keep PRs focused**: One feature or fix per PR. Smaller PRs are easier to review and merge.
-3. **Write a clear description**: Explain what changed, why, and how to test it.
-4. **Update documentation**: If your change affects behavior, update the existing docs it touches (README, CONTRIBUTING).
+2. **Keep PRs focused**: One area and one kind of change per PR, for example "camera: remove dead code". Don't mix
+   removals, behaviour fixes and speed-ups. Keep a PR to about 500 changed lines, and have at most about 10 open at a time.
+3. **Speed-ups need a number**: Show a measured gain on a path that runs often, ideally on a car.
+4. **Tests go with a fix or a real coverage gap**: Please don't send test-only PRs on their own.
+5. **Web changes bump `?v=`**: Raise it on every page or loader script that loads a changed file, otherwise browsers
+   can keep serving the old copy.
+6. **Write a clear description**: Explain what changed, why, and how to test it.
+7. **Update documentation**: If your change affects behavior, update the existing docs it touches (README, CONTRIBUTING).
    Do not add new Markdown files (in `docs/` or anywhere else) to describe a change. The reasoning goes in the
    PR description and commit message, and short notes go in code comments next to the code they explain.
-5. **Ensure the build passes**: Run `./gradlew assembleDebug` and `./gradlew test` before submitting.
-6. **Respond to feedback**: Be open to review comments and iterate on your changes.
+8. **Ensure the build passes**: Run `./gradlew assembleDebug` and `./gradlew test` before submitting.
+9. **Respond to feedback**: Be open to review comments and iterate on your changes.
 
 ### PR Template
 
