@@ -284,27 +284,6 @@ public class GpsMonitor {
     /**
      * Called by SurveillanceIpcServer when GPS update arrives via IPC.
      */
-    public void updateFromIpc(double lat, double lng, float speed, float heading, float accuracy, long time, double altitude) {
-        // Back-compat overload: no monotonic fix time → 0 sentinel → geo gate falls
-        // back to send-time aging (prior behavior). New callers use the 8-arg form.
-        updateFromIpc(lat, lng, speed, heading, accuracy, time, altitude, 0L);
-    }
-
-    public void updateFromIpc(double lat, double lng, float speed, float heading, float accuracy, long time, double altitude, long fixElapsedMs) {
-        // Back-compat overload: no vertical accuracy / altitude source → 0 =
-        // unreported, false = ellipsoidal (prior behavior).
-        updateFromIpc(lat, lng, speed, heading, accuracy, time, altitude, fixElapsedMs,
-                0.0f, false);
-    }
-
-    public void updateFromIpc(double lat, double lng, float speed, float heading, float accuracy,
-                              long time, double altitude, long fixElapsedMs,
-                              float verticalAccuracy, boolean altitudeIsMsl) {
-        // Back-compat overload: no wall-clock stamp → 0 = unreported.
-        updateFromIpc(lat, lng, speed, heading, accuracy, time, altitude, fixElapsedMs,
-                verticalAccuracy, altitudeIsMsl, 0L);
-    }
-
     public void updateFromIpc(double lat, double lng, float speed, float heading, float accuracy,
                               long time, double altitude, long fixElapsedMs,
                               float verticalAccuracy, boolean altitudeIsMsl, long fixTimeUtc) {
@@ -547,10 +526,6 @@ public class GpsMonitor {
     public float getHeading() { return fixSnapshot.heading; }
     public float getAccuracy() { return fixSnapshot.accuracy; }
     public double getAltitude() { return fixSnapshot.altitude; }
-    /** Reported 1-sigma vertical accuracy (m); 0 = unreported by the current fix. */
-    public float getVerticalAccuracy() { return fixSnapshot.verticalAccuracy; }
-    /** True when the current fix's altitude is MSL (geoid-corrected). */
-    public boolean isAltitudeMsl() { return fixSnapshot.altitudeIsMsl; }
     public long getLastUpdate() { return fixSnapshot.lastUpdate; }
     /** Monotonic since-boot fix timestamp (elapsedRealtime ms) — what geo-tagging
      *  ages against the daemon's own elapsedRealtime(). 0 = no monotonic basis
