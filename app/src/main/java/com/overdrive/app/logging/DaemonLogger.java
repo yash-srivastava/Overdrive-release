@@ -17,7 +17,6 @@ import java.util.concurrent.ConcurrentHashMap;
  * Features:
  * - Thread-safe file logging
  * - Automatic log rotation by size
- * - Configurable retention and cleanup
  * - Per-daemon log files
  * - Dual logging (console + file)
  * - Works in both app context and daemon context (app_process)
@@ -42,7 +41,6 @@ public class DaemonLogger {
      */
     public static class Config {
         public String logDir = com.overdrive.app.util.ScratchRoot.dir();
-        public int retentionHours = 24;
         public int maxFileSizeMB = 10;
         public int rotationCount = 3;
         public boolean enableConsoleLog = true;
@@ -64,21 +62,6 @@ public class DaemonLogger {
             return this;
         }
 
-        public Config withLogDir(String dir) {
-            this.logDir = dir;
-            return this;
-        }
-        
-        public Config withMaxFileSizeMB(int size) {
-            this.maxFileSizeMB = size;
-            return this;
-        }
-        
-        public Config withRotationCount(int count) {
-            this.rotationCount = count;
-            return this;
-        }
-        
         public Config withConsoleLog(boolean enable) {
             this.enableConsoleLog = enable;
             return this;
@@ -513,65 +496,6 @@ public class DaemonLogger {
     }
 
     
-    // ==================== CLEANUP OPERATIONS ====================
-    
-    /**
-     * Cleanup old log files based on retention policy.
-     * Call this periodically (e.g., on daemon startup or via scheduler).
-     */
-    public static CleanupStats cleanupOldLogs() {
-        int filesDeleted = 0;
-        long spaceFreeBytes = 0;
-        
-        try {
-            File logDir = new File(globalConfig.logDir);
-            if (!logDir.exists() || !logDir.isDirectory()) {
-                return new CleanupStats(System.currentTimeMillis(), 0, 0);
-            }
-            
-            long retentionMs = globalConfig.retentionHours * 60L * 60L * 1000L;
-            long cutoffTime = System.currentTimeMillis() - retentionMs;
-            
-            File[] files = logDir.listFiles((dir, name) -> name.endsWith(".log") || name.contains(".log."));
-            if (files != null) {
-                for (File file : files) {
-                    if (file.lastModified() < cutoffTime) {
-                        long fileSize = file.length();
-                        if (file.delete()) {
-                            filesDeleted++;
-                            spaceFreeBytes += fileSize;
-                            Log.i(META_TAG, "Deleted old log: " + file.getName());
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            Log.e(META_TAG, "Cleanup error: " + e.getMessage());
-        }
-        
-        return new CleanupStats(System.currentTimeMillis(), filesDeleted, spaceFreeBytes / 1024);
-    }
-    
-    /**
-     * Cleanup statistics.
-     */
-    public static class CleanupStats {
-        public final long lastCleanupTime;
-        public final int filesDeleted;
-        public final long spaceFreeKB;
-        
-        public CleanupStats(long lastCleanupTime, int filesDeleted, long spaceFreeKB) {
-            this.lastCleanupTime = lastCleanupTime;
-            this.filesDeleted = filesDeleted;
-            this.spaceFreeKB = spaceFreeKB;
-        }
-        
-        @Override
-        public String toString() {
-            return "CleanupStats{deleted=" + filesDeleted + ", freedKB=" + spaceFreeKB + "}";
-        }
-    }
-    
     // ==================== LIFECYCLE ====================
     
     /**
@@ -589,25 +513,6 @@ public class DaemonLogger {
         instances.remove(cacheKey, this);
     }
     
-    /**
-     * Close all logger instances.
-     */
-    public static void closeAll() {
-        synchronized (globalLock) {
-            for (DaemonLogger logger : instances.values()) {
-                synchronized (logger.writeLock) {
-                    if (logger.writer != null) {
-                        logger.writer.close();
-                        logger.writer = null;
-                        logger.writerInitialized = false;
-                    }
-                }
-            }
-            instances.clear();
-        }
-        Log.i(META_TAG, "All loggers closed");
-    }
-    
     // ==================== GETTERS ====================
     
     /**
@@ -622,12 +527,5 @@ public class DaemonLogger {
      */
     public String getTag() {
         return tag;
-    }
-    
-    /**
-     * Get current file size in bytes.
-     */
-    public long getCurrentFileSize() {
-        return currentFileSize;
     }
 }

@@ -31,9 +31,6 @@ class LogCleaner(
             logManager.info("LogCleaner", 
                 "Cleanup complete: ${stats.filesDeleted} files deleted, ${stats.spaceFreeKB}KB freed")
             
-            // Update stats in LogManager
-            logManager.updateCleanupStats(stats)
-            
             Result.success()
         } catch (e: Exception) {
             LogManager.getInstance().error("LogCleaner", "Cleanup failed", e)
@@ -47,7 +44,7 @@ class LogCleaner(
     private fun performCleanup(config: LogConfig): CleanupStats {
         val logDir = File(config.logDir)
         if (!logDir.exists() || !logDir.isDirectory) {
-            return CleanupStats(System.currentTimeMillis(), 0, 0)
+            return CleanupStats(0, 0)
         }
         
         val now = System.currentTimeMillis()
@@ -82,9 +79,11 @@ class LogCleaner(
             }
         }
         
-        return CleanupStats(now, filesDeleted, spaceFreeKB)
+        return CleanupStats(filesDeleted, spaceFreeKB)
     }
     
+    private data class CleanupStats(val filesDeleted: Int, val spaceFreeKB: Long)
+
     companion object {
         /**
          * Schedule periodic log cleanup.
