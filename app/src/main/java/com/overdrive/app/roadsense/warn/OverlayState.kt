@@ -3,14 +3,10 @@ package com.overdrive.app.roadsense.warn
 import org.json.JSONObject
 
 /**
- * The cross-process overlay state (D-024): the daemon's WarningCoordinator writes
- * this into UCM `roadSense.overlayState`; the app-side `RoadSenseOverlayService`
- * polls + renders it. Both sides share THIS codec so the JSON keys never drift.
- *
- * Why a snapshot-over-UCM bridge instead of IPC: it mirrors exactly how
- * StatusOverlayService already gets daemon-produced status to an app-side floating
- * window (file-backed UCM, cross-UID). One writer (daemon warn-tick thread), one
- * reader (app overlay poll). No new socket, no window code in the daemon.
+ * The cross-process overlay state (D-024): the daemon's WarningCoordinator publishes
+ * this to [RoadSenseOverlayChannel]; the app-side overlays read it over the loopback
+ * IPC and render it. Both sides share THIS codec so the JSON keys never drift.
+ * [SECTION]/[KEY] name the legacy config key, still read as a fallback for one release.
  *
  * Pure data + JSON (no Android), so both sides + tests use it identically.
  */
@@ -93,7 +89,7 @@ data class OverlayState(
     }
 
     companion object {
-        /** UCM section + key the bridge lives under. */
+        /** Legacy config section + key (fallback only; the daemon no longer writes it). */
         const val SECTION = "roadSense"
         const val KEY = "overlayState"
 
