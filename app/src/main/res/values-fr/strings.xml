@@ -1543,25 +1543,4 @@
     <string name="projection_target_standard">Écran standard</string>
     <string name="projection_target_full">Plein écran</string>
     <string name="projection_path_active">Chemin actif : %1$s · écran %2$d · contenu %3$d. La réussite des ressources et de la tâche ne confirme pas l’affichage visible.</string>
-    <string name="projection_picker_title">Touchez une application pour l\'afficher sur le combiné</string>
-    <string name="projection_picker_hint">Appui long sur une application pour régler la position et la taille de sa fenêtre, et ses outils.</string>
-    <string name="projection_cluster_label">Combiné conducteur</string>
-    <string name="projection_favorites">Favoris</string>
-    <string name="projection_all_apps">Toutes les applications</string>
-    <string name="projection_apps_empty">Aucune application ne peut encore être projetée.</string>
-    <string name="projection_now_on_cluster">Sur le combiné</string>
-    <string name="projection_app_live_description">%1$s, sur le combiné</string>
-    <string name="projection_app_actions">Fenêtre et outils</string>
-    <string name="projection_actions_window_saved">Fenêtre enregistrée pour cette application</string>
-    <string name="projection_actions_resize_hint">Sur la recopie</string>
-    <string name="projection_actions_tools">Outils de l\'application</string>
-    <string name="projection_actions_tools_hint">DPI de l\'application, clavier</string>
-    <string name="projection_favorite_add">Ajouter aux favoris</string>
-    <string name="projection_favorite_remove">Retirer des favoris</string>
-    <string name="projection_stop_casting">Arrêter la projection</string>
-    <string name="projection_settings_title">Paramètres de projection</string>
-    <string name="projection_window_settings_desc">Chaque application garde sa propre fenêtre. Appui long sur une application pour changer sa position ou sa taille.</string>
-    <string name="projection_advanced_title">Avancé</string>
-    <string name="projection_advanced_desc">Transport du combiné et options DiLink 5. Ne les modifiez que si la projection échoue.</string>
-    <string name="projection_layouts_desc">Afficher plusieurs applications à la fois sur le combiné.</string>
 </resources>
