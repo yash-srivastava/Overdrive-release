@@ -213,14 +213,16 @@ public class ProjectionLayoutAssetTest {
         String tiles = readRepositoryFile(TILES);
         assertTrue(tiles.contains("R.layout.item_projection_app_tile"));
         assertTrue(tiles.contains("R.layout.item_projection_app_chip"));
-        assertTrue(tiles.contains("R.drawable.projection_app_tile_live"));
+        assertTrue(tiles.contains("colorSecondaryContainer"));
 
         String tile = readRepositoryFile("app/src/main/res/layout/item_projection_app_tile.xml");
-        assertTrue(tile.contains("android:textColor=\"?attr/colorOnSurface\""));
+        assertTrue(tile.contains("style=\"@style/Widget.Overdrive.Revamp.Tile\""));
+        assertTrue(tile.contains("@style/TextAppearance.Overdrive.Settings.RowTitle"));
         assertTrue(tile.contains("android:layout_height=\"112dp\""));
         String chip = readRepositoryFile("app/src/main/res/layout/item_projection_app_chip.xml");
-        assertTrue(chip.contains("android:layout_width=\"64dp\""));
-        assertTrue(chip.contains("android:layout_height=\"64dp\""));
+        assertTrue(chip.contains("style=\"@style/Widget.Overdrive.Revamp.Tile\""));
+        assertTrue(chip.contains("android:layout_width=\"@dimen/od_touch_primary\""));
+        assertTrue(chip.contains("android:layout_height=\"@dimen/od_touch_primary\""));
     }
 
     @Test
@@ -305,6 +307,59 @@ public class ProjectionLayoutAssetTest {
         String panelTag = openingTag(land, "projectionSettingsPanel");
         assertTrue(panelTag.contains("android:layout_gravity=\"end\""));
         assertTrue(panelTag.contains("android:visibility=\"gone\""));
+    }
+
+    /** Stop pressed (or the cast ending) in full screen must not strand the user there. */
+    @Test
+    public void fullScreenEndsWhenNothingIsLive() throws IOException {
+        String fragment = readRepositoryFile(FRAGMENT);
+        int render = fragment.indexOf("private fun renderLiveState(");
+        assertTrue(render >= 0);
+        assertTrue(fragment.indexOf("if (!live && theater) setTheater(false)", render) > render);
+    }
+
+    /** On DiLink 5 a switch restarts the cast: the strip sits behind a divider and its own label. */
+    @Test
+    public void appStripStaysApartFromTheKeyRow() throws IOException {
+        for (String path : new String[] {PORTRAIT, LAND}) {
+            String xml = readRepositoryFile(path);
+            int keys = xml.indexOf("@+id/projectionClusterKeys");
+            int label = xml.indexOf("@+id/projectionAppStripLabel");
+            int strip = xml.indexOf("@+id/projectionAppStrip\"");
+            assertTrue(path, keys >= 0 && label > keys && strip > label);
+            String between = xml.substring(keys, label);
+            assertTrue(path, between.contains("android:background=\"?attr/colorOutlineVariant\""));
+            assertTrue(path, xml.contains("@string/projection_switch_app"));
+        }
+    }
+
+    /** A preset for the app the resize frame belongs to goes through the frame's commit path. */
+    @Test
+    public void presetForTheFramesAppGoesThroughTheFrame() throws IOException {
+        String fragment = readRepositoryFile(FRAGMENT);
+        int apply = fragment.indexOf("private fun applyPresetFor(");
+        assertTrue(apply >= 0);
+        int frame = fragment.indexOf("(!casting && boxPackage == pkg)", apply);
+        int prefs = fragment.indexOf("persistWindowPrefsOnly(pkg", apply);
+        assertTrue(frame > apply && prefs > frame);
+    }
+
+    /** Dock buttons, Stop included, use the 56dp standard touch target and the shared icons. */
+    @Test
+    public void dockUsesTheSharedTouchTargetAndIcons() throws IOException {
+        for (String path : new String[] {PORTRAIT, LAND}) {
+            String xml = readRepositoryFile(path);
+            assertTrue(path, openingTag(xml, "projectionStopButton")
+                    .contains("android:layout_height=\"@dimen/od_touch_standard\""));
+            assertTrue(path, openingTag(xml, "projectionKeyBack")
+                    .contains("android:layout_height=\"@dimen/od_touch_standard\""));
+            assertTrue(path, xml.contains("app:icon=\"@drawable/ic_saved_home\""));
+            assertTrue(path, xml.contains("app:icon=\"@drawable/ic_volume_on\""));
+            assertTrue(path, xml.contains("app:icon=\"@drawable/ic_clear\""));
+            assertTrue(path, xml.contains("android:background=\"@color/projection_settings_scrim\""));
+        }
+        assertTrue(readRepositoryFile(FRAGMENT)
+                .contains("if (favorite) R.drawable.ic_star_filled else R.drawable.ic_star"));
     }
 
     /** The opening tag (attributes) of the view carrying {@code id}. */

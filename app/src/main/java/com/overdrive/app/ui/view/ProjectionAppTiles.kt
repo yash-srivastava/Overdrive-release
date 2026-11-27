@@ -10,6 +10,8 @@ import androidx.core.view.AccessibilityDelegateCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.card.MaterialCardView
+import com.google.android.material.color.MaterialColors
 import com.overdrive.app.R
 
 /** One castable app as the Projection picker shows it. */
@@ -73,8 +75,14 @@ internal class ProjectionAppTileAdapter(
         holder.label?.text = item.label
         holder.live?.visibility = if (isLive) View.VISIBLE else View.GONE
         holder.badge?.visibility = if (isLive) View.GONE else View.VISIBLE
-        view.setBackgroundResource(
-            if (isLive) R.drawable.projection_app_tile_live else R.drawable.projection_app_tile_background)
+        // Shared Revamp tile; the app on the cluster gets a primary outline on a tonal fill.
+        (view as? MaterialCardView)?.let { card ->
+            card.strokeWidth = if (isLive) res.getDimensionPixelSize(R.dimen.od_space_2) else 0
+            card.strokeColor = MaterialColors.getColor(card, androidx.appcompat.R.attr.colorPrimary)
+            card.setCardBackgroundColor(MaterialColors.getColor(card,
+                if (isLive) com.google.android.material.R.attr.colorSecondaryContainer
+                else com.google.android.material.R.attr.colorSurfaceContainerHigh))
+        }
         view.contentDescription =
             if (isLive) res.getString(R.string.projection_app_live_description, item.label) else item.label
         if (compact) view.tooltipText = item.label

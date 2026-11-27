@@ -1,23 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Compact app chip for the strip under the live mirror: switch apps in one tap,
-  long-press for the same window/tools menu as the idle tiles.
+  Compact app chip for the "Switch app" strip under the live mirror, on the shared Revamp tile
+  (76dp touch target). Long-press opens the same window/tools menu as the idle tiles.
 -->
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/projectionTile"
-    android:layout_width="64dp"
-    android:layout_height="64dp"
-    android:layout_marginEnd="8dp"
-    android:background="@drawable/projection_app_tile_background"
-    android:clickable="true"
-    android:focusable="true"
+    style="@style/Widget.Overdrive.Revamp.Tile"
+    android:layout_width="@dimen/od_touch_primary"
+    android:layout_height="@dimen/od_touch_primary"
+    android:layout_marginEnd="@dimen/od_space_8"
     android:longClickable="true">
 
     <ImageView
         android:id="@+id/projectionTileIcon"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
+        android:layout_width="@dimen/od_icon_tile"
+        android:layout_height="@dimen/od_icon_tile"
         android:layout_gravity="center"
         android:importantForAccessibility="no"
         android:scaleType="fitCenter" />
-</FrameLayout>
+</com.google.android.material.card.MaterialCardView>

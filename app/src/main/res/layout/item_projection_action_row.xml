@@ -8,14 +8,14 @@
     android:clickable="true"
     android:focusable="true"
     android:gravity="center_vertical"
-    android:minHeight="56dp"
+    android:minHeight="@dimen/od_touch_standard"
     android:orientation="horizontal"
-    android:paddingHorizontal="4dp">
+    android:paddingHorizontal="@dimen/od_space_4">
 
     <ImageView
         android:id="@+id/projectionActionRowIcon"
-        android:layout_width="24dp"
-        android:layout_height="24dp"
+        android:layout_width="@dimen/od_icon_md"
+        android:layout_height="@dimen/od_icon_md"
         android:importantForAccessibility="no"
         app:tint="?attr/colorOnSurfaceVariant" />
 
@@ -23,16 +23,14 @@
         android:id="@+id/projectionActionRowTitle"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
+        android:layout_marginStart="@dimen/od_space_16"
         android:layout_weight="1"
-        android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
-        android:textColor="?attr/colorOnSurface" />
+        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle" />
 
     <TextView
         android:id="@+id/projectionActionRowHint"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginStart="12dp"
-        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-        android:textColor="?attr/colorOnSurfaceVariant" />
+        android:layout_marginStart="@dimen/od_space_12"
+        android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowMeta" />
 </LinearLayout>

@@ -14,9 +14,9 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:paddingHorizontal="24dp"
-        android:paddingTop="20dp"
-        android:paddingBottom="16dp">
+        android:paddingHorizontal="@dimen/od_space_24"
+        android:paddingTop="@dimen/od_space_20"
+        android:paddingBottom="@dimen/od_space_16">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -26,15 +26,15 @@
 
             <ImageView
                 android:id="@+id/projectionActionsIcon"
-                android:layout_width="44dp"
-                android:layout_height="44dp"
+                android:layout_width="@dimen/od_icon_tile"
+                android:layout_height="@dimen/od_icon_tile"
                 android:importantForAccessibility="no"
                 android:scaleType="fitCenter" />
 
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="16dp"
+                android:layout_marginStart="@dimen/od_space_16"
                 android:layout_weight="1"
                 android:orientation="vertical">
 
@@ -52,24 +52,22 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/projection_actions_window_saved"
-                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                    android:textColor="?attr/colorOnSurfaceVariant" />
+                    android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowMeta" />
             </LinearLayout>
         </LinearLayout>
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
+            android:layout_marginTop="@dimen/od_space_20"
             android:text="@string/projection_window_title"
-            android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-            android:textColor="?attr/colorOnSurfaceVariant" />
+            android:textAppearance="@style/TextAppearance.Overdrive.Overline" />
 
         <com.google.android.material.button.MaterialButtonToggleGroup
             android:id="@+id/projectionActionsPresets"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="@dimen/od_space_8"
             app:singleSelection="true">
 
             <com.google.android.material.button.MaterialButton
@@ -79,7 +77,7 @@
                 android:layout_height="@dimen/dashboard_modern_touch_target"
                 android:layout_weight="1"
                 android:maxLines="1"
-                android:paddingHorizontal="4dp"
+                android:paddingHorizontal="@dimen/od_space_4"
                 android:text="@string/projection_preset_full"
                 app:autoSizeMaxTextSize="14sp"
                 app:autoSizeMinTextSize="10sp"
@@ -92,7 +90,7 @@
                 android:layout_height="@dimen/dashboard_modern_touch_target"
                 android:layout_weight="1"
                 android:maxLines="1"
-                android:paddingHorizontal="4dp"
+                android:paddingHorizontal="@dimen/od_space_4"
                 android:text="@string/projection_preset_left"
                 app:autoSizeMaxTextSize="14sp"
                 app:autoSizeMinTextSize="10sp"
@@ -105,7 +103,7 @@
                 android:layout_height="@dimen/dashboard_modern_touch_target"
                 android:layout_weight="1"
                 android:maxLines="1"
-                android:paddingHorizontal="4dp"
+                android:paddingHorizontal="@dimen/od_space_4"
                 android:text="@string/projection_preset_right"
                 app:autoSizeMaxTextSize="14sp"
                 app:autoSizeMinTextSize="10sp"
@@ -118,7 +116,7 @@
                 android:layout_height="@dimen/dashboard_modern_touch_target"
                 android:layout_weight="1"
                 android:maxLines="1"
-                android:paddingHorizontal="4dp"
+                android:paddingHorizontal="@dimen/od_space_4"
                 android:text="@string/projection_preset_center"
                 app:autoSizeMaxTextSize="14sp"
                 app:autoSizeMinTextSize="10sp"
@@ -128,8 +126,8 @@
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
-            android:layout_marginTop="16dp"
-            android:layout_marginBottom="4dp"
+            android:layout_marginTop="@dimen/od_space_16"
+            android:layout_marginBottom="@dimen/od_space_4"
             android:background="?attr/colorOutlineVariant" />
 
         <include
@@ -148,8 +146,8 @@
             android:id="@+id/projectionActionsPrimary"
             style="@style/Widget.Overdrive.M3.Button.Icon"
             android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:layout_marginTop="12dp"
+            android:layout_height="@dimen/od_touch_standard"
+            android:layout_marginTop="@dimen/od_space_12"
             android:text="@string/projection_cast"
             app:icon="@drawable/ic_projection"
             app:iconGravity="textStart" />
