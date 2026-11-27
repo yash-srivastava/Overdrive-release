@@ -251,6 +251,21 @@ final class RecordingsIndexSchema {
         statement.execute("DROP INDEX IF EXISTS idx_rec_ts_rank");
     }
 
+    /** Every index {@link #createIndexes} creates. PK and UNIQUE constraint indexes are not here. */
+    private static final String[] SECONDARY_INDEXES = {
+        "idx_rec_available_ts", "idx_rec_filename_rank", "idx_rec_root_id", "idx_rec_type_ts",
+        "idx_rec_ymd", "idx_rec_place", "idx_rec_country", "idx_rec_severity", "idx_rec_storage",
+        "idx_rec_parking", SORT_INDEX, NEWER_INDEX,
+    };
+
+    /** Rebuilds the secondary indexes of recordings from its rows (an index that lost a row's entry). */
+    static void rebuildSecondaryIndexes(Connection connection) throws Exception {
+        try (Statement statement = connection.createStatement()) {
+            for (String index : SECONDARY_INDEXES) statement.execute("DROP INDEX IF EXISTS " + index);
+            createIndexes(statement);
+        }
+    }
+
     /** True when {@link #SORT_INDEX} exists; gate for the USE INDEX hint. */
     static boolean sortIndexExists(Connection connection) {
         try (PreparedStatement ps = connection.prepareStatement(

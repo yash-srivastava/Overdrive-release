@@ -1129,17 +1129,92 @@ public final class RecordingsIndex {
     public synchronized boolean removeById(String recordingId) {
         if (recordingId == null || recordingId.isEmpty()) return false;
         noteRemoval(recordingId);
+        // A row whose delete failed on a damaged index after the one repair: each attempt
+        // spins 2 s in H2 under this monitor, so don't retry it this process.
+        if (undeletableIds.contains(recordingId)) return false;
         final String id = recordingId;
         return withRetry("removeById(" + recordingId + ")", Boolean.FALSE, () -> {
             try { com.overdrive.app.server.timeline.TimelineLedger.onRowRemoving(connection, id); } catch (Throwable ignored) { }
-            try (PreparedStatement ps = connection.prepareStatement(
-                    "DELETE FROM recordings WHERE recording_id = ?")) {
-                ps.setString(1, id);
-                boolean deleted = ps.executeUpdate() > 0;
-                if (deleted) invalidateQueryMemos();
-                return deleted;
+            try {
+                return deleteRow(id);
+            } catch (Exception e) {
+                int code = lostIndexEntryCode(e);
+                if (code == 0) throw e;
+                return repairAndDelete(id, code, e);
             }
         });
+    }
+
+    private boolean deleteRow(String id) throws Exception {
+        try (PreparedStatement ps = connection.prepareStatement(
+                "DELETE FROM recordings WHERE recording_id = ?")) {
+            ps.setString(1, id);
+            boolean deleted = ps.executeUpdate() > 0;
+            if (deleted) invalidateQueryMemos();
+            return deleted;
+        }
+    }
+
+    private final Set<String> undeletableIds = new HashSet<>();
+    private boolean secondaryIndexRebuildTried;
+
+    /**
+     * 90112 / 90143 anywhere in the cause chain: an index of recordings lost this row's
+     * entry. H2 retries those until the lock timeout and then reports 50200, so the code
+     * that names the damage is only in the cause.
+     */
+    private static int lostIndexEntryCode(Throwable failure) {
+        Throwable t = failure;
+        for (int depth = 0; t != null && depth < 16; depth++, t = t.getCause()) {
+            int code = t instanceof java.sql.SQLException ? ((java.sql.SQLException) t).getErrorCode()
+                    : t instanceof org.h2.message.DbException ? ((org.h2.message.DbException) t).getErrorCode()
+                    : 0;
+            if (code == org.h2.api.ErrorCode.ROW_NOT_FOUND_WHEN_DELETING_1
+                    || code == org.h2.api.ErrorCode.ROW_NOT_FOUND_IN_PRIMARY_INDEX) {
+                return code;
+            }
+            if (t.getCause() == t) break;
+        }
+        return 0;
+    }
+
+    /**
+     * Rebuilds the secondary indexes once per process, then retries the delete once. A
+     * damaged primary index (90143) is not rebuilt here: only the open-time corrupt-store
+     * wipe in {@link #init()} recovers that, so the row is skipped and reported.
+     */
+    private boolean repairAndDelete(String id, int code, Exception failure) throws Exception {
+        if (code == org.h2.api.ErrorCode.ROW_NOT_FOUND_IN_PRIMARY_INDEX || secondaryIndexRebuildTried) {
+            undeletableIds.add(id);
+            logger.error("removeById(" + id + "): recordings "
+                    + (code == org.h2.api.ErrorCode.ROW_NOT_FOUND_IN_PRIMARY_INDEX
+                            ? "primary index is damaged" : "index still damaged after rebuild")
+                    + " (" + code + "); row left in place, skipped until restart", failure);
+            return false;
+        }
+        secondaryIndexRebuildTried = true;
+        logger.error("removeById(" + id + "): a recordings index lost this row (" + code
+                + "); rebuilding the secondary indexes once", failure);
+        long started = System.currentTimeMillis();
+        try {
+            RecordingsIndexSchema.rebuildSecondaryIndexes(connection);
+        } finally {
+            // A half-done rebuild must not leave a USE INDEX hint pointing at a dropped index.
+            sortIndexAvailable = RecordingsIndexSchema.sortIndexExists(connection);
+            invalidateQueryMemos();
+        }
+        logger.warn("removeById(" + id + "): recordings secondary indexes rebuilt in "
+                + (System.currentTimeMillis() - started) + " ms");
+        try {
+            return deleteRow(id);
+        } catch (Exception retryFailure) {
+            int retryCode = lostIndexEntryCode(retryFailure);
+            if (retryCode == 0) throw retryFailure;
+            undeletableIds.add(id);
+            logger.error("removeById(" + id + "): delete still fails after the index rebuild ("
+                    + retryCode + "); row left in place, skipped until restart", retryFailure);
+            return false;
+        }
     }
 
     /**
