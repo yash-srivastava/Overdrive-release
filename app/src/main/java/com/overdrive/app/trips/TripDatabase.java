@@ -74,6 +74,7 @@ public class TripDatabase {
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
                 connection = DriverManager.getConnection(JDBC_URL, "sa", "");
+                synchronized (this) { tripsWriteGen++; }
                 logger.info("H2 connection established");
 
                 // Tune H2 for embedded daemon use
