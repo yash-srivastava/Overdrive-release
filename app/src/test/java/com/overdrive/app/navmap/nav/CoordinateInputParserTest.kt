@@ -110,6 +110,47 @@ class CoordinateInputParserTest {
     }
 
     @Test
+    fun paddedFullPlusCodesResolveWithoutReference() {
+        // Padding represents progressively larger cells, not missing reference digits.
+        val coarse = CoordinateInputParser.parse("8F000000+")
+        assertNotNull(coarse)
+        assertEquals(40.0, coarse!!.lat, eps)
+        assertEquals(10.0, coarse.lng, eps)
+        assertEquals("8F000000+", coarse.label)
+
+        val degree = CoordinateInputParser.parse("8FVC0000+")
+        assertNotNull(degree)
+        assertEquals(47.5, degree!!.lat, eps)
+        assertEquals(8.5, degree.lng, eps)
+        assertEquals("8FVC0000+", degree.label)
+
+        val finer = CoordinateInputParser.parse("8FVC2200+")
+        assertNotNull(finer)
+        assertEquals(47.025, finer!!.lat, eps)
+        assertEquals(8.025, finer.lng, eps)
+        assertEquals("8FVC2200+", finer.label)
+    }
+
+    @Test
+    fun paddedFullPlusCodeNormalizesCaseAndAcceptsLocality() {
+        val r = CoordinateInputParser.parse("  8fvc0000+ Region", -41.0, 174.0)
+        assertNotNull(r)
+        assertEquals(47.5, r!!.lat, eps)
+        assertEquals(8.5, r.lng, eps)
+        assertEquals("8FVC0000+", r.label)
+    }
+
+    @Test
+    fun malformedPaddingAndEmbeddedPaddedCodesAreRejected() {
+        assertNull(CoordinateInputParser.parse("8FVC0000+22"))
+        assertNull(CoordinateInputParser.parse("8FVC0200+"))
+        assertNull(CoordinateInputParser.parse("8FVC2000+"))
+        assertNull(CoordinateInputParser.parse("8F00+", 47.0, 8.0))
+        assertNull(CoordinateInputParser.parse("8FVC0000+text"))
+        assertNull(CoordinateInputParser.parse("Cafe near 8FVC0000+"))
+    }
+
+    @Test
     fun shortPlusCode_recoversWithReference() {
         // shortCodeTests.csv: 9C3W9QCJ+2VX,51.3701125,-1.217765625,CJ+2VX,B
         // Recover "CJ+2VX" against the reference → full 9C3W9QCJ+2VX, whose center
