@@ -2,21 +2,7 @@ package com.overdrive.app.surveillance;
 
 import java.nio.ByteBuffer;
 
-/**
- * NativeMotion - JNI interface for advanced motion detection.
- * 
- * Provides two detection methods:
- * 1. SAD (Sum of Absolute Differences) - Fast, simple frame differencing
- * 2. MOG2 (Mixture of Gaussians) - Advanced background subtraction
- * 
- * MOG2 is superior because it:
- * - Learns the background (trees, clouds, lighting changes)
- * - Ignores shadows and gradual changes
- * - Only detects NEW objects entering the scene
- * - Reduces false positives by 90%
- * 
- * Performance: <1ms per frame on ARM64 with NEON
- */
+/** JNI entry points for surveillance motion detection and texture tracking. */
 public class NativeMotion {
     private static boolean libraryLoaded = false;
     private static String loadError = null;
@@ -71,94 +57,6 @@ public class NativeMotion {
     public static String getLoadError() {
         return loadError;
     }
-    
-    /**
-     * Computes Sum of Absolute Differences between current and reference frames.
-     * 
-     * This is a lightweight motion detection algorithm that compares pixel
-     * values between two frames. The result is normalized to 0.0-1.0 range.
-     * 
-     * Uses ARM NEON SIMD instructions for vectorized computation, achieving
-     * <0.5ms processing time on 320x240 RGB frames.
-     * 
-     * @param currentFrame Direct ByteBuffer containing current frame RGB data
-     * @param referenceFrame Direct ByteBuffer containing reference frame RGB data
-     * @param width Frame width (typically 320)
-     * @param height Frame height (typically 240)
-     * @return Normalized motion score (0.0 = no motion, 1.0 = maximum motion)
-     */
-    public static native float computeSAD(
-        ByteBuffer currentFrame,
-        ByteBuffer referenceFrame,
-        int width,
-        int height
-    );
-    
-    /**
-     * Computes motion using MOG2 background subtraction with optional ROI mask.
-     * 
-     * MOG2 learns the background over time and only detects foreground objects.
-     * This is the SOTA approach used by professional surveillance systems.
-     * 
-     * @param rgbFrame Direct ByteBuffer containing RGB frame data
-     * @param width Frame width (typically 320)
-     * @param height Frame height (typically 240)
-     * @param roiMask Optional ROI mask (null = full frame, byte array with 0/1 values)
-     * @param learningRate Learning rate (0.0-1.0, typically 0.001 for slow adaptation)
-     * @return Normalized motion score (0.0 = no motion, 1.0 = maximum motion)
-     */
-    public static native float computeMOG2(
-        ByteBuffer rgbFrame,
-        int width,
-        int height,
-        byte[] roiMask,
-        float learningRate
-    );
-    
-    /**
-     * Detects objects in the frame using YOLO or similar detector.
-     * 
-     * Returns bounding boxes with class labels and confidence scores.
-     * Filters objects by minimum size to reduce false positives.
-     * 
-     * @param rgbFrame Direct ByteBuffer containing RGB frame data
-     * @param width Frame width
-     * @param height Frame height
-     * @param minObjectSize Minimum object size (0.0-1.0, fraction of frame)
-     * @param confidenceThreshold Minimum confidence (0.0-1.0)
-     * @param classFilter Array of class IDs to detect (null = all classes)
-     * @return Array of detected objects [x, y, w, h, classId, confidence, ...]
-     */
-    public static native float[] detectObjects(
-        ByteBuffer rgbFrame,
-        int width,
-        int height,
-        float minObjectSize,
-        float confidenceThreshold,
-        int[] classFilter
-    );
-    
-    /**
-     * Updates the reference frame with exponential moving average.
-     * 
-     * This slowly adapts the reference frame to changing lighting conditions
-     * and static scene changes, preventing false positives.
-     * 
-     * Formula: reference = (1-alpha) * reference + alpha * current
-     * 
-     * @param currentFrame Direct ByteBuffer containing current frame RGB data
-     * @param referenceFrame Direct ByteBuffer containing reference frame RGB data (modified in-place)
-     * @param width Frame width (typically 320)
-     * @param height Frame height (typically 240)
-     * @param alpha Adaptation rate (0.0-1.0, typically 0.02 for slow adaptation)
-     */
-    public static native void updateReference(
-        ByteBuffer currentFrame,
-        ByteBuffer referenceFrame,
-        int width,
-        int height,
-        float alpha
-    );
     
     /**
      * Checks if MOG2 is available (requires OpenCV).
@@ -216,27 +114,6 @@ public class NativeMotion {
         int height,
         float learningRate,
         float[] outQuadrantFractions
-    );
-    
-    /**
-     * Checks if object detection is available (requires YOLO model).
-     * 
-     * @return true if object detection is available
-     */
-    public static native boolean isObjectDetectionAvailable();
-    
-    /**
-     * Loads YOLO model from assets.
-     * 
-     * @param assetManager Android AssetManager
-     * @param paramPath Path to .param file in assets (e.g., "models/yolov8s.param")
-     * @param binPath Path to .bin file in assets (e.g., "models/yolov8s.bin")
-     * @return true if loaded successfully
-     */
-    public static native boolean loadYoloFromAssets(
-        android.content.res.AssetManager assetManager,
-        String paramPath,
-        String binPath
     );
     
     /**
