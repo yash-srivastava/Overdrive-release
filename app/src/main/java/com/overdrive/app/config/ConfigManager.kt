@@ -4,12 +4,9 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.overdrive.app.logging.LogConfig
 import com.overdrive.app.logging.LogLevel
-import org.json.JSONObject
 
 /**
- * Centralized configuration manager.
- * 
- * Manages all application configuration with persistence via SharedPreferences.
+ * Persists app logging and daemon settings via SharedPreferences.
  */
 class ConfigManager private constructor(private val context: Context) {
     
@@ -25,11 +22,6 @@ class ConfigManager private constructor(private val context: Context) {
         }
         
         private const val PREFS_NAME = "overdrive_config"
-        private const val KEY_DEVICE_ID = "device_id"
-        private const val KEY_OUTPUT_DIR = "output_dir"
-        private const val KEY_STREAM_MODE = "stream_mode"
-        private const val KEY_SENTRY_MODE = "sentry_mode"
-        private const val KEY_LOCATION_SIDECAR_ENABLED = "location_sidecar_enabled"
         private const val KEY_LOG_RETENTION = "log_retention_hours"
         private const val KEY_LOG_CLEANUP_INTERVAL = "log_cleanup_interval_hours"
         private const val KEY_LOG_MAX_SIZE = "log_max_size_mb"
@@ -41,34 +33,7 @@ class ConfigManager private constructor(private val context: Context) {
     private val listeners = mutableListOf<ConfigChangeListener>()
     
     // In-memory cache
-    private var appConfigCache: AppConfig? = null
     private var loggingConfigCache: LogConfig? = null
-    
-    /**
-     * Get application configuration.
-     */
-    fun getAppConfig(): AppConfig {
-        return appConfigCache ?: loadAppConfig().also { appConfigCache = it }
-    }
-    
-    /**
-     * Update application configuration.
-     */
-    fun updateAppConfig(config: AppConfig) {
-        val old = getAppConfig()
-        
-        prefs.edit().apply {
-            putString(KEY_DEVICE_ID, config.deviceId)
-            putString(KEY_OUTPUT_DIR, config.outputDir)
-            putString(KEY_STREAM_MODE, config.streamMode.name)
-            putBoolean(KEY_SENTRY_MODE, config.sentryModeEnabled)
-            putBoolean(KEY_LOCATION_SIDECAR_ENABLED, config.locationSidecarEnabled)
-            apply()
-        }
-        
-        appConfigCache = config
-        notifyListeners("appConfig", old, config)
-    }
     
     /**
      * Get logging configuration.
@@ -137,28 +102,6 @@ class ConfigManager private constructor(private val context: Context) {
     }
     
     /**
-     * Get stream mode.
-     */
-    fun getStreamMode(): StreamMode {
-        val modeName = prefs.getString(KEY_STREAM_MODE, StreamMode.PRIVATE.name)
-        return try {
-            StreamMode.valueOf(modeName ?: StreamMode.PRIVATE.name)
-        } catch (e: Exception) {
-            StreamMode.PRIVATE
-        }
-    }
-    
-    /**
-     * Set stream mode.
-     */
-    fun setStreamMode(mode: StreamMode) {
-        val old = getStreamMode()
-        prefs.edit().putString(KEY_STREAM_MODE, mode.name).apply()
-        appConfigCache = appConfigCache?.copy(streamMode = mode)
-        notifyListeners("streamMode", old, mode)
-    }
-    
-    /**
      * Add configuration change listener.
      */
     fun addConfigChangeListener(listener: ConfigChangeListener) {
@@ -176,85 +119,6 @@ class ConfigManager private constructor(private val context: Context) {
         }
     }
     
-    /**
-     * Export configuration as JSON.
-     */
-    fun exportConfig(): String {
-        val json = JSONObject()
-        json.put("app", JSONObject().apply {
-            val app = getAppConfig()
-            put("deviceId", app.deviceId)
-            put("outputDir", app.outputDir)
-            put("streamMode", app.streamMode.name)
-            put("sentryMode", app.sentryModeEnabled)
-            put("locationSidecar", app.locationSidecarEnabled)
-        })
-        json.put("logging", JSONObject().apply {
-            val logging = getLoggingConfig()
-            put("retentionHours", logging.retentionHours)
-            put("cleanupIntervalHours", logging.cleanupIntervalHours)
-            put("maxFileSizeMB", logging.maxFileSizeMB)
-            put("rotationCount", logging.rotationCount)
-            put("minLevel", logging.minLevel.name)
-        })
-        return json.toString(2)
-    }
-    
-    /**
-     * Import configuration from JSON.
-     */
-    fun importConfig(json: String): Boolean {
-        return try {
-            val root = JSONObject(json)
-            
-            // Import app config
-            if (root.has("app")) {
-                val app = root.getJSONObject("app")
-                val config = AppConfig(
-                    deviceId = app.optString("deviceId", "unknown"),
-                    outputDir = app.optString("outputDir", "/sdcard/DCIM/Overdrive"),
-                    streamMode = StreamMode.valueOf(app.optString("streamMode", "PRIVATE")),
-                    sentryModeEnabled = app.optBoolean("sentryMode", false),
-                    locationSidecarEnabled = app.optBoolean("locationSidecar", false)
-                )
-                updateAppConfig(config)
-            }
-            
-            // Import logging config
-            if (root.has("logging")) {
-                val logging = root.getJSONObject("logging")
-                val config = LogConfig(
-                    retentionHours = logging.optInt("retentionHours", 24),
-                    cleanupIntervalHours = logging.optInt("cleanupIntervalHours", 4),
-                    maxFileSizeMB = logging.optInt("maxFileSizeMB", 5),
-                    rotationCount = logging.optInt("rotationCount", 3),
-                    // "minLevel": "DEBUG" switches on a field debug session without a
-                    // rebuild. Omitted or misspelled ⇒ INFO.
-                    minLevel = parseMinLevel(logging.optString("minLevel").takeIf { it.isNotEmpty() })
-                )
-                if (config.isValid()) {
-                    updateLoggingConfig(config)
-                }
-            }
-            
-            true
-        } catch (e: Exception) {
-            false
-        }
-    }
-    
-    // Private helpers
-    
-    private fun loadAppConfig(): AppConfig {
-        return AppConfig(
-            deviceId = prefs.getString(KEY_DEVICE_ID, "unknown") ?: "unknown",
-            outputDir = prefs.getString(KEY_OUTPUT_DIR, "/sdcard/DCIM/Overdrive") ?: "/sdcard/DCIM/Overdrive",
-            streamMode = getStreamMode(),
-            sentryModeEnabled = prefs.getBoolean(KEY_SENTRY_MODE, false),
-            locationSidecarEnabled = prefs.getBoolean(KEY_LOCATION_SIDECAR_ENABLED, false)
-        )
-    }
-    
     private fun loadLoggingConfig(): LogConfig {
         // Defaults mirror LogConfig's own defaults (5MB cap, 4h cleanup) so the
         // app-side and daemon-side rotation policy stay coherent. See
@@ -269,7 +133,7 @@ class ConfigManager private constructor(private val context: Context) {
     }
 
     /**
-     * Read a persisted/imported [LogLevel] name, falling back to INFO. Unrecognised input
+     * Read a persisted [LogLevel] name, falling back to INFO. Unrecognised input
      * must NOT throw — this is the one setting a user is likely to hand-edit over ADB, and
      * a typo that broke config load would take the whole app's logging with it.
      */
