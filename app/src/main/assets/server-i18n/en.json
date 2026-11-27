@@ -889,7 +889,7 @@
     "target_soc": "Target SOC",
     "target_soc_description": "The battery SOC target currently configured in the vehicle, as a percentage.",
     "set_target_soc": "Set target SOC",
-    "set_target_soc_description": "Set the PHEV driving SOC target (15-70%). DM2.5 vehicles enforce a 25% minimum. This changes the saved SOC-hold target but does not enable Battery Hold.",
+    "set_target_soc_description": "Set the PHEV driving SOC target (15-70%). You can use a variable or signal; its value is rounded to a whole number and clamped to 15-70%. DM2.5 vehicles enforce a 25% minimum. This changes the saved SOC-hold target but does not enable Battery Hold.",
     "estimated_range": "Estimated Range",
     "estimated_range_description": "The current estimated range in km. This tracks the EV range so does not include additional range provided with fuel for HEVs.",
     "lights": "Lights State",
