@@ -18,7 +18,7 @@ import java.net.Socket;
 import java.util.Map;
 
 /**
- * TCP Command Server - handles JSON commands from DaemonClient.
+ * TCP Command Server - handles JSON commands from CameraDaemonClient.
  * Listens on localhost:19876 for security.
  */
 public class TcpCommandServer {
