@@ -2,6 +2,7 @@
 // via this include, using the JDK JNI headers and -pthread (see PR test steps).
 #include "../../../app/src/main/cpp/camera/CpuMosaicCompositor.cpp"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <random>
@@ -160,6 +161,73 @@ static void check(int bw, int bh, int w, int h, int pad, int mode) {
     assert(rgba == original);
 }
 
+// Partial rebuilds must leave exactly the table a full build writes, whatever changed.
+static void checkUpdate(int bw, int bh, int w, int h, int pad, uint32_t seed) {
+    const int stride = bw * 4 + pad;
+    std::mt19937 rng(seed);
+    std::vector<uint8_t> prev((bh - 1) * stride + bw * 4, 0xa5);
+    for (int y = 0; y < bh; ++y) {
+        for (int x = 0; x < bw; ++x) {
+            uint8_t* p = prev.data() + y * stride + x * 4;
+            // Opaque black strip with a translucent panel and sparse text.
+            const uint8_t black[4] = {0, 0, 0, 255}, panel[4] = {40, 40, 40, 160};
+            memcpy(p, x >= bw / 4 && x < bw / 2 ? panel : black, 4);
+            if (rng() % 10 == 0) for (int c = 0; c < 4; ++c) p[c] = (uint8_t) rng();
+        }
+    }
+    const size_t bytes = odcpu::overlayBytes(w, h);
+    assert(bytes != 0);
+    std::vector<uint32_t> table((bytes + 3) / 4 + 2, 0xa5a5a5a5u);
+    uint8_t* out = reinterpret_cast<uint8_t*>(table.data() + 1);
+    // A table that was never built is refused and left alone.
+    assert(odcpu::updateOverlay(prev.data(), prev.size(), prev.data(), prev.size(),
+            bw, bh, stride, out, bytes, w, h) == -1);
+    assert(table == std::vector<uint32_t>((bytes + 3) / 4 + 2, 0xa5a5a5a5u));
+    assert(odcpu::prepareOverlay(prev.data(), prev.size(), bw, bh, stride, out, bytes, w, h));
+
+    for (int step = 0; step < 30; ++step) {
+        std::vector<uint8_t> cur = prev;
+        // Row padding is not part of the bitmap: it may differ freely.
+        for (int y = 0; y + 1 < bh; ++y) for (int i = 0; i < pad; ++i) cur[y * stride + bw * 4 + i] = (uint8_t) rng();
+        const int kind = step % 6;
+        const int x0 = rng() % bw, y0 = rng() % bh;
+        const int x1 = std::min(bw, x0 + 1 + (int) (rng() % 40)), y1 = std::min(bh, y0 + 1 + (int) (rng() % 40));
+        if (kind == 1) {          // one texel
+            cur[y0 * stride + x0 * 4 + rng() % 4] ^= 0x40;
+        } else if (kind == 2) {   // a text-like rectangle
+            for (int y = y0; y < y1; ++y) for (int x = x0; x < x1; ++x)
+                if (rng() % 3 == 0) for (int c = 0; c < 4; ++c) cur[y * stride + x * 4 + c] = (uint8_t) rng();
+        } else if (kind == 3) {   // a rectangle going fully transparent
+            for (int y = y0; y < y1; ++y) memset(cur.data() + y * stride + x0 * 4, 0, (x1 - x0) * 4);
+        } else if (kind == 4) {   // corners and the last column
+            cur[0] ^= 0x11;
+            cur[(bh - 1) * stride + (bw - 1) * 4 + 3] ^= 0x7f;
+            for (int y = 0; y < bh; y += 2) cur[y * stride + (bw - 1) * 4 + 1] ^= 0x33;
+        } else if (kind == 5) {   // everything
+            for (int y = 0; y < bh; ++y) for (int x = 0; x < bw * 4; ++x) cur[y * stride + x] = (uint8_t) rng();
+        }
+        std::vector<uint32_t> full((bytes + 3) / 4 + 2, 0xa5a5a5a5u);
+        assert(odcpu::prepareOverlay(cur.data(), cur.size(), bw, bh, stride,
+                reinterpret_cast<uint8_t*>(full.data() + 1), bytes, w, h));
+        const int cells = odcpu::updateOverlay(prev.data(), prev.size(), cur.data(), cur.size(),
+                bw, bh, stride, out, bytes, w, h);
+        assert(cells >= 0);
+        if (kind == 0) assert(cells == 0);
+        if (kind == 5) assert(cells == (w / 2) * (h / 2));
+        assert(table == full);
+        prev = cur;
+    }
+    // Another geometry than the table's is refused.
+    assert(odcpu::updateOverlay(prev.data(), prev.size(), prev.data(), prev.size(),
+            bw, bh, stride, out, bytes, w, h + 2) == -1);
+
+    // forceOpaque is the recorder's makeOpaque loop.
+    std::vector<uint8_t> opaque = prev, expected = prev;
+    for (int y = 0; y < bh; ++y) for (int x = 0; x < bw; ++x) expected[y * stride + x * 4 + 3] = 0xFF;
+    assert(odcpu::forceOpaque(opaque.data(), opaque.size(), bw, bh, stride));
+    assert(opaque == expected);
+}
+
 int main() {
     for (int mode = 0; mode < 6; ++mode) {
         for (int pad : {0, 7}) {
@@ -171,5 +239,15 @@ int main() {
             check(1280, 80, 2560, 160, pad, mode);
         }
     }
-    std::puts("Overlay table parity passed (72 cases)");
+    int updates = 0;
+    for (int pad : {0, 7}) {
+        checkUpdate(1, 1, 2, 2, pad, 11);
+        checkUpdate(2, 2, 32, 16, pad, 12);
+        checkUpdate(7, 5, 14, 10, pad, 13);
+        checkUpdate(15, 11, 8, 6, pad, 14);
+        checkUpdate(23, 9, 18, 14, pad, 15);
+        checkUpdate(1280, 80, 2560, 160, pad, 16);
+        updates += 6;
+    }
+    std::printf("Overlay table parity passed (72 cases, %d update sequences)\n", updates);
 }

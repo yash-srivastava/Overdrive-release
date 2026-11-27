@@ -305,6 +305,10 @@ public class GpuMosaicRecorder {
     // camera thread is blending, so the builder never writes a table in use.
     private java.nio.ByteBuffer cpuOverlayRgba;
     private final java.nio.ByteBuffer[] cpuOverlayTables = new java.nio.ByteBuffer[3];
+    // The bitmap copy each table was last built from, with {gen, width, height, rowBytes}:
+    // the next build of that table only recomputes what changed. Builder thread only.
+    private final java.nio.ByteBuffer[] cpuOverlaySource = new java.nio.ByteBuffer[3];
+    private final int[][] cpuOverlaySourceKey = new int[3][4];
     private volatile int cpuOverlayFront = -1;
     private volatile int cpuOverlayHazard = -1;
     private int cpuOverlayGen;  // guarded by cpuOverlayTables; bumped on init/release
@@ -2065,6 +2069,7 @@ public class GpuMosaicRecorder {
         if (!cpuOverlayBuilding.get()) {
             cpuOverlayRgba = null;
             java.util.Arrays.fill(cpuOverlayTables, null);
+            java.util.Arrays.fill(cpuOverlaySource, null);
         }
         
         logger.info( "GpuMosaicRecorder released");
@@ -2411,15 +2416,36 @@ public class GpuMosaicRecorder {
             int t = 0;
             while (t == front || t == hazard) t++;  // one of three is always free
             java.nio.ByteBuffer table = cpuOverlayTables[t];
-            // Premultiplied RGB at full alpha is the overlay drawn over black.
-            if (strip) makeOpaque(rgba, bw, bh, rowBytes);
-            if (table != null && CpuMosaicCompositor.nativePrepareOverlay(
-                    rgba, bw, bh, rowBytes, table, bandW, bandH)) {
-                synchronized (cpuOverlayTables) {
-                    if (gen == cpuOverlayGen) {  // not into a re-initialised session
-                        cpuOverlayTableStrip[t] = strip;
-                        cpuOverlayFront = t;
-                    }
+            if (table == null) return;
+            // Table t still holds what its last build wrote, and its source is the bitmap
+            // that build read: only what changed since is recomputed. The pairing is
+            // dropped first, so a failure below leaves a table that gets fully rebuilt.
+            java.nio.ByteBuffer source = cpuOverlaySource[t];
+            int[] key = cpuOverlaySourceKey[t];
+            boolean paired = source != null && source != rgba
+                && source.capacity() == rgba.capacity()
+                && key[0] == gen && key[1] == bw && key[2] == bh && key[3] == rowBytes;
+            cpuOverlaySource[t] = null;
+            boolean built = paired && CpuMosaicCompositor.nativeUpdateOverlay(
+                source, rgba, bw, bh, rowBytes, strip, table, bandW, bandH) >= 0;
+            if (!built) {
+                // Premultiplied RGB at full alpha is the overlay drawn over black.
+                if (strip) makeOpaque(rgba, bw, bh, rowBytes);
+                built = CpuMosaicCompositor.nativePrepareOverlay(
+                    rgba, bw, bh, rowBytes, table, bandW, bandH);
+            }
+            if (!built) return;
+            // rgba now belongs to table t; the bitmap it replaces takes the next copy.
+            cpuOverlaySource[t] = rgba;
+            key[0] = gen;
+            key[1] = bw;
+            key[2] = bh;
+            key[3] = rowBytes;
+            cpuOverlayRgba = source;
+            synchronized (cpuOverlayTables) {
+                if (gen == cpuOverlayGen) {  // not into a re-initialised session
+                    cpuOverlayTableStrip[t] = strip;
+                    cpuOverlayFront = t;
                 }
             }
         } catch (Throwable e) {

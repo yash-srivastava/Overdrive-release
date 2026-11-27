@@ -59,6 +59,16 @@ final class CpuMosaicCompositor {
     static native boolean nativePrepareOverlay(
             ByteBuffer rgba, int bw, int bh, int rowBytes, ByteBuffer table, int w, int h);
 
+    /**
+     * Brings {@code table}, built from {@code previous}, to what nativePrepareOverlay writes
+     * for {@code rgba}, recomputing only what changed; {@code opaque} first sets alpha to 255
+     * in {@code rgba}. Returns the cells recomputed (0: same bitmap), or a negative value
+     * when the table must be rebuilt with nativePrepareOverlay.
+     */
+    static native int nativeUpdateOverlay(
+            ByteBuffer previous, ByteBuffer rgba, int bw, int bh, int rowBytes,
+            boolean opaque, ByteBuffer table, int w, int h);
+
     /** 0 = blended, 1 = table not ready, negative = rejected. */
     static native int nativeBlendOverlay(
             ByteBuffer table, ByteBuffer dstY, ByteBuffer dstU, ByteBuffer dstV,
