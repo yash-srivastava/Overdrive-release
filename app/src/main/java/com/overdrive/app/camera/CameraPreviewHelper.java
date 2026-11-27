@@ -128,17 +128,6 @@ public final class CameraPreviewHelper {
         return captureWithSize(cameraId, preferredWidth, preferredHeight, fps, timeoutMs);
     }
 
-    public static byte[] captureDirectPreviewJpegExact(int cameraId, int width, int height,
-                                                       int fps, int timeoutMs) {
-        if (width <= 0 || height <= 0) return null;
-        if (isCameraHeldByPipeline(cameraId)) {
-            logger.info("Refusing direct preview for cam=" + cameraId
-                    + " — surveillance pipeline already holds this camera id");
-            return null;
-        }
-        return captureWithSize(cameraId, width, height, fps, timeoutMs);
-    }
-
     /**
      * Crop the panoramic mosaic JPEG into the slice quadrant. Single-flight,
      * zero camera open.
