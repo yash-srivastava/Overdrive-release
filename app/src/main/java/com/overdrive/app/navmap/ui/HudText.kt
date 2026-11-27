@@ -162,10 +162,11 @@ object HudFormat {
     /** "180", "6.6", "12" in the default locale's digits and decimal mark. */
     fun number(key: Long): String {
         val v = key and 0xFFFFFFFFFFL
+        val locale = Locale.getDefault()
         return when (unit(key)) {
-            KM -> if (v >= 100L) (v / 10L).toString() else String.format(Locale.getDefault(), "%.1f", v / 10.0)
-            MI -> String.format(Locale.getDefault(), "%.1f", v / 10.0)
-            else -> v.toString()
+            KM -> if (v >= 100L) String.format(locale, "%d", v / 10L) else String.format(locale, "%.1f", v / 10.0)
+            MI -> String.format(locale, "%.1f", v / 10.0)
+            else -> String.format(locale, "%d", v)
         }
     }
 
