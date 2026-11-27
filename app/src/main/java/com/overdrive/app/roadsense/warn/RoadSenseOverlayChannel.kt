@@ -24,7 +24,7 @@ object RoadSenseOverlayChannel {
         synchronized(lock) { put(s) }
     }
 
-    /** Before the first tick publishes: a stale (ts 0) idle state, so the pill shows Idle and the calibration dot. */
+    /** Before the first tick publishes: a stale (ts 0) state, so the pill shows Idle and the calibration dot. */
     fun seedIfEmpty(s: OverlayState) {
         synchronized(lock) { if (state == null) put(s) }
     }

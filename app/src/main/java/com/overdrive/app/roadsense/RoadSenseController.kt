@@ -425,9 +425,25 @@ class RoadSenseController @JvmOverloads constructor(
                 Log.i(TAG, "RoadSenseController attached (live-toggle listener armed)")
             }
         }
+        seedOverlayFromLegacyKey()
         // Bring the running state in line with the persisted flag right now (boot thread —
         // not under the config lock, so a synchronous start() here is fine).
         reconcile()
+    }
+
+    /**
+     * The overlay showed the last state written to the old `roadSense.overlayState` key
+     * whenever this controller wasn't publishing (paused, disabled, not yet DRIVING). Seed the
+     * channel with that same state, stale (ts 0), so the pill renders exactly that Idle view.
+     */
+    private fun seedOverlayFromLegacyKey() {
+        try {
+            val o = com.overdrive.app.config.UnifiedConfigManager.loadConfig()
+                .optJSONObject(com.overdrive.app.roadsense.warn.OverlayState.SECTION)
+                ?.optJSONObject(com.overdrive.app.roadsense.warn.OverlayState.KEY) ?: return
+            val s = com.overdrive.app.roadsense.warn.OverlayState.fromJson(o) ?: return
+            com.overdrive.app.roadsense.warn.RoadSenseOverlayChannel.seedIfEmpty(s.copy(updatedMs = 0L))
+        } catch (_: Throwable) { /* no seed: start() seeds idle */ }
     }
 
     /**
