@@ -71,4 +71,6 @@
     <!-- Buttons -->
 
     <!-- Gradient -->
+    <!-- Projection settings panel: dims the page behind the side panel. -->
+    <color name="projection_settings_scrim">#99000000</color>
 </resources>

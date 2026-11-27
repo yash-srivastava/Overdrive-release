@@ -74,7 +74,7 @@ import kotlin.math.roundToInt
  * cluster), long-pressing opens that app's own menu (saved window presets, Resize, app tools,
  * favorite). While idle the tiles lead the page; once an app is live the mirror and its dock
  * (cluster keys, Resize, Full screen, Stop, an app strip) take over. Settings shared by every
- * app stay on the page under the dock.
+ * app sit in a side panel opened from the gear, still inside this view tree.
  *
  * ## How the pixels get here
  * The daemon (uid 2000) composites the cluster into a TextureView Surface owned by this
@@ -110,6 +110,10 @@ class ProjectionFragment : Fragment() {
     private var appStrip: RecyclerView? = null
     private var nowIcon: ImageView? = null
     private var nowLabel: TextView? = null
+    private var settingsPanel: View? = null
+    private var settingsScrim: View? = null
+    private var advancedContent: View? = null
+    private var advancedChevron: View? = null
     private var idleNotice: View? = null
     private var idleNoticeText: TextView? = null
     // Idle-only blocker shown under the picker (the stage pill that carried it is hidden while
@@ -172,6 +176,9 @@ class ProjectionFragment : Fragment() {
     private var contentPadding = IntArray(4)
     private val theaterBackCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() { setTheater(false) }
+    }
+    private val settingsBackCallback = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() { setSettingsOpen(false) }
     }
     private var busy = false
     private var castInFlight = false
@@ -366,8 +373,10 @@ class ProjectionFragment : Fragment() {
             btnFullscreen?.setOnClickListener { setTheater(!theater) }
             theaterBackCallback.isEnabled = false
             requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, theaterBackCallback)
+            settingsBackCallback.isEnabled = false
+            requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, settingsBackCallback)
             wireAppPicker(view)
-            wireSettingsRows(view)
+            wireSettingsPanel(view)
             wireBounds()
             wireClusterInputKeys(view)
             wireTexture()
@@ -503,8 +512,10 @@ class ProjectionFragment : Fragment() {
         favoriteGrid?.adapter = null; appGrid?.adapter = null; appStrip?.adapter = null
         pickerHero = null; appPicker = null; favoritesLabel = null; favoriteGrid = null
         allAppsLabel = null; appGrid = null; appsEmpty = null; appStrip = null
-        nowIcon = null; nowLabel = null
+        nowIcon = null; nowLabel = null; settingsPanel = null; settingsScrim = null
+        advancedContent = null; advancedChevron = null
         idleNotice = null; idleNoticeText = null
+        settingsBackCallback.isEnabled = false
         appToast?.cancel()
         appToast = null
         lastStickyError = null
@@ -822,11 +833,49 @@ class ProjectionFragment : Fragment() {
         renderAppTiles()
     }
 
-    // ── Settings shared by every app ─────────────────────────────────────────────────
+    // ── Settings panel (shared by every app) ─────────────────────────────────────────
 
-    private fun wireSettingsRows(root: View) {
+    private fun wireSettingsPanel(root: View) {
+        settingsPanel = root.findViewById(R.id.projectionSettingsPanel)
+        settingsScrim = root.findViewById(R.id.projectionSettingsScrim)
+        advancedContent = root.findViewById(R.id.projectionAdvancedContent)
+        advancedChevron = root.findViewById(R.id.projectionAdvancedChevron)
+        root.findViewById<View>(R.id.projectionSettingsButton)?.setOnClickListener { setSettingsOpen(true) }
+        root.findViewById<View>(R.id.projectionDockSettingsButton)?.setOnClickListener { setSettingsOpen(true) }
+        root.findViewById<View>(R.id.projectionSettingsClose)?.setOnClickListener { setSettingsOpen(false) }
+        settingsScrim?.setOnClickListener { setSettingsOpen(false) }
+        root.findViewById<View>(R.id.projectionAdvancedHeader)?.setOnClickListener {
+            val open = advancedContent?.visibility != View.VISIBLE
+            setVisible(advancedContent, open)
+            advancedChevron?.animate()?.rotation(if (open) 180f else 0f)?.setDuration(SETTINGS_ANIM_MS)?.start()
+        }
         root.findViewById<View>(R.id.projectionLayoutsRow)?.setOnClickListener {
+            setSettingsOpen(false)
             ProjectionLayoutTools.open(this)
+        }
+    }
+
+    private fun setSettingsOpen(open: Boolean) {
+        val panel = settingsPanel ?: return
+        // Full screen hides the settings content; leave it before showing the panel.
+        if (open && theater) setTheater(false)
+        settingsBackCallback.isEnabled = open
+        setVisible(settingsScrim, open)
+        panel.animate().cancel()
+        val rtl = panel.layoutDirection == View.LAYOUT_DIRECTION_RTL
+        val width = if (panel.width > 0) panel.width.toFloat()
+            else SETTINGS_PANEL_FALLBACK_DP * panel.resources.displayMetrics.density
+        val offscreen = if (rtl) -width else width
+        if (open) {
+            if (panel.visibility != View.VISIBLE) {
+                panel.translationX = offscreen
+                panel.visibility = View.VISIBLE
+            }
+            panel.animate().translationX(0f).setDuration(SETTINGS_ANIM_MS).start()
+        } else if (panel.visibility == View.VISIBLE) {
+            panel.animate().translationX(offscreen).setDuration(SETTINGS_ANIM_MS)
+                .withEndAction { if (!settingsBackCallback.isEnabled) panel.visibility = View.GONE }
+                .start()
         }
     }
 
@@ -2065,6 +2114,7 @@ class ProjectionFragment : Fragment() {
         if (on && (!alive || !isResumed)) return
         theater = on
         theaterBackCallback.isEnabled = on
+        if (on) setSettingsOpen(false)
         // The presets and portrait's Resize button live in the settings that are hidden.
         if (on && adjusting) toggleAdjust()
         (activity as? MainActivity)?.setContentImmersive(on)
@@ -2768,6 +2818,9 @@ class ProjectionFragment : Fragment() {
         private const val APP_ICON_DP = 48f
         // Narrowest tile the idle grid allows before it drops a column.
         private const val TILE_MIN_DP = 132f
+        private const val SETTINGS_ANIM_MS = 200L
+        // Settings panel width to slide by before its first layout (landscape is 440dp).
+        private const val SETTINGS_PANEL_FALLBACK_DP = 440f
         // A saved window counts as a preset when every edge is within 2% of it.
         private const val PRESET_MATCH = 0.02f
         private const val DISABLED_ALPHA = 0.38f

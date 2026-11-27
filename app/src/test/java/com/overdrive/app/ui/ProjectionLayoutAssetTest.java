@@ -26,8 +26,9 @@ public class ProjectionLayoutAssetTest {
             "projectionPickerHero", "projectionAppPicker", "projectionFavoriteGrid",
             "projectionAppGrid", "projectionAppStrip", "projectionNowPlaying",
             "projectionClusterKeys", "projectionKeyBack", "projectionKeyHome",
-            "projectionKeyVolumeDown", "projectionKeyVolumeUp",
-            "projectionTransportSettings", "projectionStopButton",
+            "projectionKeyVolumeDown", "projectionKeyVolumeUp", "projectionSettingsButton",
+            "projectionDockSettingsButton", "projectionSettingsPanel", "projectionSettingsScrim",
+            "projectionAdvancedContent", "projectionTransportSettings", "projectionStopButton",
             "projectionStatus", "projectionStatusDot", "projectionStage", "projectionTexture",
             "projectionBounds", "projectionProgress", "projectionScaleGroup", "projectionScaleFit",
             "projectionScaleFill", "projectionScaleZoom",
@@ -147,7 +148,7 @@ public class ProjectionLayoutAssetTest {
             String xml = readRepositoryFile(path);
             int dock = xml.indexOf("@+id/projectionDock");
             int keys = xml.indexOf("@+id/projectionClusterKeys");
-            int panel = xml.indexOf("@+id/projectionSettings\"");
+            int panel = xml.indexOf("@+id/projectionSettingsPanel");
             assertTrue(path, dock >= 0 && keys > dock && panel > keys);
         }
         String fragment = readRepositoryFile(FRAGMENT);
@@ -197,7 +198,7 @@ public class ProjectionLayoutAssetTest {
             int stage = xml.indexOf("@+id/projectionStage\"");
             int dock = xml.indexOf("@+id/projectionDock");
             int adjust = xml.indexOf("@+id/projectionAdjustButton");
-            int settings = xml.indexOf("@+id/projectionSettings\"");
+            int settings = xml.indexOf("@+id/projectionSettingsPanel");
             assertTrue(path, stage >= 0 && dock > stage && adjust > dock && settings > adjust);
         }
     }
@@ -311,14 +312,20 @@ public class ProjectionLayoutAssetTest {
         assertFalse(helper.contains("text.text = message"));
     }
 
-    /** Landscape stacks the full-width stage over the dock and its app strip; settings follow. */
+    /**
+     * Landscape stacks the full-width stage over the dock and its app strip; settings shared by
+     * every app slide in from the end edge instead of filling the page under the mirror.
+     */
     @Test
     public void landscapeStacksTheStageOverTheDock() throws IOException {
         String land = readRepositoryFile(LAND);
         int stage = land.indexOf("@+id/projectionStage\"");
         int strip = land.indexOf("@+id/projectionAppStrip");
-        int settings = land.indexOf("@+id/projectionSettings\"");
-        assertTrue(stage >= 0 && strip > stage && settings > strip);
+        int panel = land.indexOf("@+id/projectionSettingsPanel");
+        assertTrue(stage >= 0 && strip > stage && panel > strip);
+        String panelTag = openingTag(land, "projectionSettingsPanel");
+        assertTrue(panelTag.contains("android:layout_gravity=\"end\""));
+        assertTrue(panelTag.contains("android:visibility=\"gone\""));
     }
 
     /** Stop pressed (or the cast ending) in full screen must not strand the user there. */
@@ -367,6 +374,8 @@ public class ProjectionLayoutAssetTest {
                     .contains("android:layout_height=\"@dimen/od_touch_standard\""));
             assertTrue(path, xml.contains("app:icon=\"@drawable/ic_saved_home\""));
             assertTrue(path, xml.contains("app:icon=\"@drawable/ic_volume_on\""));
+            assertTrue(path, xml.contains("app:icon=\"@drawable/ic_clear\""));
+            assertTrue(path, xml.contains("android:background=\"@color/projection_settings_scrim\""));
         }
         assertTrue(readRepositoryFile(FRAGMENT)
                 .contains("if (favorite) R.drawable.ic_star_filled else R.drawable.ic_star"));

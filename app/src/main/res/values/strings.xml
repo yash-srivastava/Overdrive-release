@@ -2425,7 +2425,10 @@
     <string name="projection_favorite_add">Add to favorites</string>
     <string name="projection_favorite_remove">Remove from favorites</string>
     <string name="projection_stop_casting">Stop casting</string>
+    <string name="projection_settings_title">Projection settings</string>
     <string name="projection_window_settings_desc">Each app keeps its own window. Long-press an app to change its position or size.</string>
+    <string name="projection_advanced_title">Advanced</string>
+    <string name="projection_advanced_desc">Cluster transport and DiLink 5 options. Change these only if casting fails.</string>
     <string name="projection_layouts_desc">Show several apps on the cluster at once.</string>
     <string name="projection_switch_app">Switch app</string>
     <!-- Translations kept from the public repository -->

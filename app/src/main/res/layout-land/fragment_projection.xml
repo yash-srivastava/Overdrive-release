@@ -79,6 +79,18 @@
                             android:text="@string/projection_picker_hint"
                             android:textAppearance="@style/TextAppearance.Overdrive.Settings.Lede" />
                     </LinearLayout>
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/projectionSettingsButton"
+                        style="@style/Widget.Overdrive.M3.HeaderIconButton"
+                        android:layout_width="@dimen/dashboard_modern_touch_target"
+                        android:layout_height="@dimen/dashboard_modern_touch_target"
+                        android:layout_marginStart="8dp"
+                        android:contentDescription="@string/projection_settings_title"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:tooltipText="@string/projection_settings_title"
+                        app:icon="@drawable/ic_settings" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
@@ -433,6 +445,18 @@
                             android:text="@string/projection_stop"
                             app:icon="@drawable/ic_stop"
                             app:iconGravity="textStart" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/projectionDockSettingsButton"
+                            style="@style/Widget.Overdrive.M3.HeaderIconButton"
+                            android:layout_width="@dimen/od_touch_standard"
+                            android:layout_height="@dimen/od_touch_standard"
+                            android:layout_marginStart="@dimen/od_space_8"
+                            android:contentDescription="@string/projection_settings_title"
+                            android:insetTop="0dp"
+                            android:insetBottom="0dp"
+                            android:tooltipText="@string/projection_settings_title"
+                            app:icon="@drawable/ic_settings" />
                     </LinearLayout>
 
                     <!-- Kept apart from the key row (divider + label): on DiLink 5 a switch is a full
@@ -469,15 +493,78 @@
                     </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
 
-            <!-- ================== SETTINGS ==================
-                 Settings shared by every app; each app's own window lives in its long-press menu. -->
+    <!-- ================== SETTINGS PANEL ==================
+         Settings shared by every app, opened from the gear. It stays in this view tree (not a
+         dialog) so every switch keeps the findViewById wiring it had when it lived on the page. -->
+    <View
+        android:id="@+id/projectionSettingsScrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/projection_settings_scrim"
+        android:clickable="true"
+        android:focusable="false"
+        android:importantForAccessibility="no"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/projectionSettingsPanel"
+        android:layout_width="440dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="end"
+        android:background="?attr/colorSurfaceContainerHigh"
+        android:clickable="true"
+        android:elevation="8dp"
+        android:focusable="true"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/od_space_24"
+            android:paddingTop="@dimen/od_space_16"
+            android:paddingEnd="@dimen/od_space_12"
+            android:paddingBottom="@dimen/od_space_8">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/projection_settings_title"
+                android:textAppearance="@style/TextAppearance.Material3.TitleLarge"
+                android:textColor="?attr/colorOnSurface" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/projectionSettingsClose"
+                style="@style/Widget.Overdrive.M3.HeaderIconButton"
+                android:layout_width="@dimen/dashboard_modern_touch_target"
+                android:layout_height="@dimen/dashboard_modern_touch_target"
+                android:layout_marginStart="8dp"
+                android:contentDescription="@string/dialog_close"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:tooltipText="@string/dialog_close"
+                app:icon="@drawable/ic_clear" />
+        </LinearLayout>
+
+        <androidx.core.widget.NestedScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:clipToPadding="false">
+
             <LinearLayout
                 android:id="@+id/projectionSettings"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/od_space_12"
-                android:orientation="vertical">
+                android:orientation="vertical"
+                android:paddingHorizontal="@dimen/od_space_16"
+                android:paddingBottom="@dimen/od_space_24">
 
                 <!-- Sealion 7 Full HDMI opt-in: only shown once the daemon reports support. Its own card,
                      ahead of the others, because it stays relevant on AAOS where the standard cards hide. -->
@@ -838,9 +925,54 @@
                         android:padding="@dimen/dashboard_modern_card_padding">
 
                         <LinearLayout
+                            android:id="@+id/projectionAdvancedHeader"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:orientation="vertical">
+                            android:background="?attr/selectableItemBackground"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:gravity="center_vertical"
+                            android:minHeight="@dimen/dashboard_modern_touch_target"
+                            android:orientation="horizontal">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="@string/projection_advanced_title"
+                                    android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowTitle"
+                                    android:textColor="?attr/colorOnSurface" />
+
+                                <TextView
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="2dp"
+                                    android:text="@string/projection_advanced_desc"
+                                    android:textAppearance="@style/TextAppearance.Overdrive.Settings.RowMeta"
+                                    android:textColor="?attr/colorOnSurfaceVariant" />
+                            </LinearLayout>
+
+                            <ImageView
+                                android:id="@+id/projectionAdvancedChevron"
+                                android:layout_width="@dimen/od_icon_md"
+                                android:layout_height="@dimen/od_icon_md"
+                                android:layout_marginStart="12dp"
+                                android:importantForAccessibility="no"
+                                android:src="@drawable/ic_expand"
+                                app:tint="?attr/colorOnSurfaceVariant" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:id="@+id/projectionAdvancedContent"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:visibility="gone">
 
                             <LinearLayout
                                 android:id="@+id/projectionTransportSettings"
@@ -1058,10 +1190,9 @@
                         </LinearLayout>
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
-
             </LinearLayout>
-        </LinearLayout>
-    </androidx.core.widget.NestedScrollView>
+        </androidx.core.widget.NestedScrollView>
+    </LinearLayout>
 
     <include layout="@layout/app_toast" />
 </FrameLayout>
