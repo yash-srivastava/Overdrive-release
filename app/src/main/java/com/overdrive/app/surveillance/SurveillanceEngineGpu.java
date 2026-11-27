@@ -8271,29 +8271,57 @@ public class SurveillanceEngineGpu {
         }
     }
 
-    /**
-     * Arm path: the drive-unloaded detector is back before active=true and before
-     * any baseline seed. A failed reload degrades to motion-only like a failed
-     * cold-start load, and is retried on the next arm.
-     */
-    private void reloadYoloForArm() {
-        boolean needed;
+    private boolean yoloNeedsArmReload() {
         synchronized (yoloLifecycleLock) {
-            if (yoloIdleCheck != null) yoloIdleCheck.cancel(false);
-            yoloIdleCheck = null;
-            needed = yoloClosedForDrive && yoloDetector == null;
+            return yoloClosedForDrive && yoloDetector == null && !yoloReleased;
         }
-        if (!needed) return;
-        if (!aiEnabled) return;  // all classes off: setObjectFilters reloads on re-enable
+    }
+
+    /**
+     * Loads a drive-unloaded detector BEFORE enable() takes stateTransitionLock,
+     * so the ~0.3-1 s load never blocks a concurrent disable()/reacquire. Smart
+     * mode only (cached config read; enableLocked re-checks with the latched mode).
+     * Returns true when a load was attempted.
+     */
+    private boolean preloadYoloForArm() {
+        if (active || !aiEnabled || com.overdrive.app.monitor.AccMonitor.isAccOn()
+                || !yoloNeedsArmReload()) return false;
+        try {
+            org.json.JSONObject surv = com.overdrive.app.config.UnifiedConfigManager.getSurveillance();
+            if (surv != null && "continuous".equals(surv.optString("accOffMode", "smart"))) return false;
+        } catch (Throwable ignored) {}
         long t0 = android.os.SystemClock.elapsedRealtime();
         reloadYoloDetectorIfPossible();
         if (yoloDetector != null) {
             logger.info("YOLO reloaded for arming in "
                     + (android.os.SystemClock.elapsedRealtime() - t0) + " ms");
-        } else {
-            useObjectDetection = false;
-            logger.error("YOLO reload before arming failed - sentry runs motion-only this session");
         }
+        return true;
+    }
+
+    /**
+     * Smart-mode arm path, after the mode latch and before active=true / any
+     * baseline seed: the drive-unloaded detector must be back. Loads here only if
+     * the pre-lock load did not run (stale mode cache). A failed reload degrades
+     * to motion-only like a failed cold-start load, and is retried on the next arm.
+     */
+    private void ensureYoloForArm(boolean preloadTried) {
+        synchronized (yoloLifecycleLock) {
+            if (yoloIdleCheck != null) yoloIdleCheck.cancel(false);
+            yoloIdleCheck = null;
+        }
+        if (continuousMode || !aiEnabled || !yoloNeedsArmReload()) return;
+        if (!preloadTried) {
+            long t0 = android.os.SystemClock.elapsedRealtime();
+            reloadYoloDetectorIfPossible();
+            if (yoloDetector != null) {
+                logger.info("YOLO reloaded for arming in "
+                        + (android.os.SystemClock.elapsedRealtime() - t0) + " ms");
+                return;
+            }
+        }
+        useObjectDetection = false;
+        logger.error("YOLO reload before arming failed - sentry runs motion-only this session");
     }
     
     /**
@@ -12454,12 +12482,13 @@ public class SurveillanceEngineGpu {
         // second enable() can no longer observe (or mutate) the partially
         // initialized session between entry and the publication at the end.
         // See stateTransitionLock's field doc for the lock-order analysis.
+        final boolean yoloPreloadTried = preloadYoloForArm();
         synchronized (stateTransitionLock) {
-            enableLocked();
+            enableLocked(yoloPreloadTried);
         }
     }
 
-    private void enableLocked() {
+    private void enableLocked(boolean yoloPreloadTried) {
         // RACE CONDITION FIX (defense in depth): Final guard at the engine level.
         // If ACC is ON, refuse to enable. This catches any edge case where the
         // higher-level guards in CameraDaemon/AccSentryDaemon were bypassed.
@@ -12480,8 +12509,6 @@ public class SurveillanceEngineGpu {
             logger.warn(">>> Surveillance enable ignored — already armed (disable first to re-arm)");
             return;
         }
-
-        reloadYoloForArm();
 
         // Sentry armed → publish surveillanceArmed=on and seed the event verdicts to
         // idle so the first real detection is a genuine transition. Both modes
@@ -12505,6 +12532,7 @@ public class SurveillanceEngineGpu {
         } catch (Throwable t) {
             continuousMode = false;
         }
+        ensureYoloForArm(yoloPreloadTried);
 
         if (continuousMode) {
             // Plain rolling 4-cam recording: skip motion + YOLO + baseline
