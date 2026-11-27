@@ -19,6 +19,9 @@ final class DirectRgbReadback {
     private final Mode mode;
     private byte[] published;
     private byte[] staging;
+    // Native mode can fall back without allocating or retaining a full RGBA frame.
+    private final byte[] fallbackRow;
+    private boolean packedFallback;
     private boolean copied;
     private boolean packed;
     private boolean nativeDisabled;
@@ -40,11 +43,13 @@ final class DirectRgbReadback {
         published = new byte[width * height * 3];
         packer.reserveScratch();
         if (this.mode != Mode.JAVA) staging = new byte[published.length];
+        fallbackRow = this.mode == Mode.NATIVE ? new byte[width * 4] : null;
     }
 
     void prepare(ByteBuffer rgba) {
         copied = false;
         packed = false;
+        packedFallback = false;
         if ((mode == Mode.VERIFY || selfCheckFrames > 0) && !nativeDisabled) {
             copied = packer.copyRgba(rgba);
             if (!copied) return;
@@ -52,7 +57,15 @@ final class DirectRgbReadback {
         if (mode != Mode.JAVA && !nativeDisabled) {
             packed = nativePacker.pack(rgba, staging);
         }
-        if (!packed && !copied) copied = packer.copyRgba(rgba);
+        if (!packed && !copied) {
+            if (mode == Mode.NATIVE && !nativeDisabled && selfCheckFrames == 0) {
+                // The full scratch was released after warmup. Only the rare fallback
+                // packs while mapped; stage it so a failed unmap cannot publish it.
+                packedFallback = packer.packRows(rgba, staging, fallbackRow);
+            } else {
+                copied = packer.copyRgba(rgba);
+            }
+        }
     }
 
     byte[] finish(boolean valid) {
@@ -60,10 +73,10 @@ final class DirectRgbReadback {
         lastCompared = false;
         lastMismatch = false;
         try {
-            if (!valid || (!packed && !copied)) return null;
-            if (packed) {
-                lastNative = true;
-                if (copied) {
+            if (!valid || (!packed && !copied && !packedFallback)) return null;
+            if (packed || packedFallback) {
+                lastNative = packed;
+                if (packed && copied) {
                     packer.packCopied(published);
                     lastCompared = true;
                     if (selfCheckFrames > 0) selfCheckFrames--;
@@ -71,8 +84,11 @@ final class DirectRgbReadback {
                         // Publish the reference, not the bad native result.
                         lastMismatch = true;
                         nativeDisabled = true;
+                        staging = null;
                         return published;
                     }
+                    // Only release after a successful comparison and valid unmap.
+                    if (mode == Mode.NATIVE && selfCheckFrames == 0) packer.clear();
                 }
                 byte[] previous = published;
                 published = staging;
@@ -83,6 +99,7 @@ final class DirectRgbReadback {
             return published;
         } finally {
             packed = false;
+            packedFallback = false;
             copied = false;
         }
     }
