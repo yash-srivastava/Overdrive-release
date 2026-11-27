@@ -319,11 +319,10 @@ class DaemonManager private constructor(
     }
     
     private fun startBydEventDaemon(callback: DaemonCallback?) {
-        // BydEventDaemon was previously started via PrivilegedShellSetup (now disabled)
-        // This is handled by BydSystemManager
-        logManager.info(TAG, "BydEventDaemon managed by BydSystemManager")
-        updateDaemonState(DaemonType.BYD_EVENT, true)
-        callback?.onStarted(DaemonType.BYD_EVENT)
+        // No app-side launcher remains for the standalone BYD event daemon.
+        logManager.info(TAG, "BydEventDaemon start not implemented")
+        updateDaemonState(DaemonType.BYD_EVENT, false)
+        callback?.onError(DaemonType.BYD_EVENT, "Start not implemented")
     }
     
     private fun stopBydEventDaemon(callback: DaemonCallback?) {
