@@ -83,6 +83,40 @@ public class ElevationEstimatorTest {
         assertEquals(10.0, estimator.getLossM(), 0.0);
     }
 
+    @Test
+    public void infiniteAltitudeDoesNotPoisonClimbOrDescent() {
+        for (double invalid : new double[]{Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY}) {
+            for (int direction : new int[]{1, -1}) {
+                ElevationEstimator estimator = new ElevationEstimator();
+                // Finite negative altitudes remain valid (below sea level).
+                estimator.addSample(0, -100, 0, true, true);
+                estimator.addSample(11_000, -100 + direction * 10, 0, true, true);
+                estimator.addSample(22_000, -100 + direction * 20, 0, true, true);
+
+                estimator.addSample(33_000, invalid, 0, true, true);
+                estimator.addSample(44_000, -100 + direction * 30, 0, true, true);
+
+                assertEquals(direction > 0 ? 20.0 : 0.0, estimator.getGainM(), 0.0);
+                assertEquals(direction < 0 ? 20.0 : 0.0, estimator.getLossM(), 0.0);
+            }
+        }
+    }
+
+    @Test
+    public void rejectedAltitudeDoesNotChangeSourceOrTimestampState() {
+        ElevationEstimator estimator = new ElevationEstimator();
+        estimator.addSample(0, 100, 0, true, true);
+        estimator.addSample(11_000, 110, 0, true, true);
+        estimator.addSample(22_000, 120, 0, true, true);
+
+        // A rejected fix must not reset the filter for a source flip or clock jump.
+        estimator.addSample(1_000, Double.POSITIVE_INFINITY, 0, false, true);
+        estimator.addSample(33_000, 130, 0, true, true);
+
+        assertEquals(20.0, estimator.getGainM(), 0.0);
+        assertEquals(0.0, estimator.getLossM(), 0.0);
+    }
+
     private static double median(double[] values, int count) {
         if (count == 0) return 0;
         Arrays.sort(values, 0, count);
