@@ -139,7 +139,7 @@ object RecordingsApiClient {
             return sb.toString()
         }
 
-        /** Same as toQuery but without paging — for /places, /dates, /stats. */
+        /** Same as toQuery but without paging — for /places. */
         fun toContextQuery(): String {
             val sb = StringBuilder()
             typeParam()?.let { appendParam(sb, "type", it) }
@@ -210,9 +210,6 @@ object RecordingsApiClient {
 
     /** /api/recordings/places row. */
     data class PlaceBucket(val key: String, val label: String, val count: Int)
-
-    /** /api/recordings/dates row. */
-    data class DateBucket(val date: String, val count: Int, val hasSentry: Boolean)
 
     // -------------------------------------------------------------------
     // Public API
@@ -393,38 +390,11 @@ object RecordingsApiClient {
         }
     }
 
-    /** /api/recordings/dates. Null on failure. */
-    fun fetchDates(): List<DateBucket>? {
-        return try {
-            val body = httpGet("$BASE_URL/api/recordings/dates") ?: return null
-            val root = JSONObject(body)
-            if (!root.optBoolean("success", false)) return null
-            val arr = root.optJSONArray("dates") ?: JSONArray()
-            val out = ArrayList<DateBucket>(arr.length())
-            for (i in 0 until arr.length()) {
-                val r = arr.optJSONObject(i) ?: continue
-                out.add(DateBucket(
-                    date = r.optString("date", ""),
-                    count = r.optInt("count", 0),
-                    hasSentry = r.optBoolean("hasSentry", false)
-                ))
-            }
-            out
-        } catch (t: Throwable) {
-            Log.w(TAG, "fetchDates failed: ${t.message}")
-            null
-        }
-    }
-
     /**
      * DELETE /api/recordings/{filename}. Returns true on HTTP 200 with
      * {success:true}. Body of the DELETE response is otherwise ignored.
      */
-    fun deleteRecording(filename: String): Boolean {
-        return deleteRecording(filename, null)
-    }
-
-    fun deleteRecording(filename: String, absolutePath: String?): Boolean {
+    private fun deleteRecording(filename: String, absolutePath: String?): Boolean {
         val pathQuery = absolutePath
             ?.takeIf(String::isNotEmpty)
             ?.let { "?path=${enc(it)}" }

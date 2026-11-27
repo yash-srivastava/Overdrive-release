@@ -340,11 +340,6 @@ class RecordingsFragment : Fragment() {
 
     override fun onResume() {
         super.onResume()
-        // Drop any stale scan-cache the dashboard or another surface left
-        // behind. Without this, refreshCounts() and the library reload could
-        // both serve the same cached snapshot up to 5s after returning to
-        // this page — including any cache populated before a parser bug fix.
-        com.overdrive.app.ui.util.RecordingScanner.invalidateCache()
         // Refresh counts every time the user returns to this page so the
         // header reflects any new captures since the last visit.
         refreshCounts()
