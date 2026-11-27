@@ -168,13 +168,6 @@ object GoogleMapsBudget {
         return perDay.coerceIn(1L, Int.MAX_VALUE.toLong()).toInt()
     }
 
-    /** Estimated spend this month beyond the free usage, in micro-USD. */
-    @JvmStatic
-    fun estimatedSpendMicros(): Long {
-        ensurePeriod(System.currentTimeMillis())
-        return spendMicros(GoogleMapsConfig.cached().pricing)
-    }
-
     @JvmStatic
     fun paidMode(): Boolean = try { GoogleMapsConfig.cached().paid } catch (_: Throwable) { false }
 
@@ -223,12 +216,6 @@ object GoogleMapsBudget {
     }
 
     @JvmStatic
-    fun usedThisMonth(sku: GoogleSku): Int {
-        ensurePeriod(System.currentTimeMillis())
-        return monthOf(counters.get(sku.ordinal))
-    }
-
-    @JvmStatic
     fun tileLevel(): TileBudgetLevel {
         if (latch(GoogleApi.TILES) != null) return TileBudgetLevel.EXHAUSTED
         val settings = GoogleMapsConfig.cached()
@@ -274,19 +261,6 @@ object GoogleMapsBudget {
     @JvmStatic
     fun latch(api: GoogleApi): GoogleLatch? =
         latches.get(api.ordinal)?.takeIf { isActive(it, System.currentTimeMillis()) }
-
-    @JvmStatic
-    fun clearLatches() {
-        val now = System.currentTimeMillis()
-        var changed = false
-        for (i in APIS.indices) {
-            val prev = latches.getAndSet(i, null)
-            if (prev != null && isActive(prev, now)) changed = true
-        }
-        persistSoon()
-        scheduleTick()
-        notifyIfChanged(changed)
-    }
 
     @JvmStatic
     fun nextResetMs(): Long {
