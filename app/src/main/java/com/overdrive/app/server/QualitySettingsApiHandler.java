@@ -1568,7 +1568,11 @@ public class QualitySettingsApiHandler {
             JSONObject oemDelta = new JSONObject();
             if (pendingQuality != null) oemDelta.put("recordingQuality", pendingQuality);
             if (pendingCodec != null)   oemDelta.put("codec", pendingCodec);
-            if (pendingFps != null)     oemDelta.put("fps", pendingFps);
+            // A "follow" DVR keeps its HAL rate and reads camera.targetFps itself, so
+            // the copy is skipped (the marker survives); the restart below still runs.
+            boolean oemFollowsFps = pendingFps != null
+                && com.overdrive.app.config.UnifiedConfigManager.isOemFpsFollow();
+            if (pendingFps != null && !oemFollowsFps) oemDelta.put("fps", pendingFps);
             // Also accept explicit oemDashcam.* overrides from a future UI.
             JSONObject oemBlock = settings.optJSONObject("oemDashcam");
             if (oemBlock != null) {
@@ -1588,8 +1592,10 @@ public class QualitySettingsApiHandler {
                     if (f >= 10 && f <= 30) oemDelta.put("fps", f);
                 }
             }
-            if (oemDelta.length() > 0) {
-                com.overdrive.app.config.UnifiedConfigManager.setOemDashcam(oemDelta);
+            if (oemDelta.length() > 0 || oemFollowsFps) {
+                if (oemDelta.length() > 0) {
+                    com.overdrive.app.config.UnifiedConfigManager.setOemDashcam(oemDelta);
+                }
                 // R8-A #16: forceReload so the upcoming OEM restart on
                 // a different thread sees the new mtime-cached values.
                 // Without this, the restart's applyRecordingConfigFromUcm
@@ -1603,30 +1609,8 @@ public class QualitySettingsApiHandler {
                 // user toggles OEM off+on. Stop+start asynchronously to
                 // pick up the new bitrate / codec / fps without making the
                 // HTTP worker block on encoder teardown.
-                com.overdrive.app.camera.OemDashcamPipeline live =
-                    CameraDaemon.getOemDashcamPipeline();
-                if (live != null && live.isRunning()) {
-                    // Route through LIFECYCLE_EXEC so the restart serializes against picker
-                    // applies. Use applyTriggerLifecycleFromUcm instead of applyLifecycle(true)
-                    // so the desired-state computation reads the user's current
-                    // oemRecordingMode + oemSurveillanceMode rather than hardcoding
-                    // recordingDesired=true. Without this, a user with rec=off + surv=smart
-                    // would silently start recording a dvr_*.mp4 every time they change
-                    // quality/codec/fps. Mirrors the OemDashcamApiHandler.handlePost
-                    // restart:true path (OemDashcamApiHandler.java around line 618-625).
-                    com.overdrive.app.server.OemDashcamApiHandler.LIFECYCLE_EXEC.execute(() -> {
-                        try {
-                            com.overdrive.app.server.OemDashcamApiHandler
-                                .forceRestartPipelineFromCurrentIntent();
-                        } catch (Exception e) {
-                            // Best-effort — quality apply itself already succeeded; restart
-                            // failure leaves the user with their old encoder settings until
-                            // the next mode change or ACC cycle.
-                            android.util.Log.w("QualitySettings",
-                                "OEM dashcam quality-mirror restart failed: " + e.getMessage());
-                        }
-                    });
-                }
+                // A following DVR restarts after camera.targetFps is persisted below.
+                if (!oemFollowsFps) scheduleOemQualityRestart();
             }
 
             // OEM Dashcam bitrate budget — soft cap on combined pano+OEM
@@ -1803,6 +1787,10 @@ public class QualitySettingsApiHandler {
                 } catch (Exception e) {
                     CameraDaemon.log("Failed to save camera FPS: " + e.getMessage());
                 }
+            }
+            if (oemFollowsFps) {
+                com.overdrive.app.config.UnifiedConfigManager.forceReload();
+                scheduleOemQualityRestart();
             }
             
             JSONObject response = new JSONObject();
@@ -2752,6 +2740,34 @@ public class QualitySettingsApiHandler {
         } catch (Exception e) {
             CameraDaemon.log("Error setting geocoding: " + e.getMessage());
             HttpResponse.sendJsonError(out, e.getMessage());
+        }
+    }
+
+    /** Restart a running OEM pipeline so mirrored quality/codec/fps apply (async). */
+    private static void scheduleOemQualityRestart() {
+        com.overdrive.app.camera.OemDashcamPipeline live =
+            CameraDaemon.getOemDashcamPipeline();
+        if (live != null && live.isRunning()) {
+            // Route through LIFECYCLE_EXEC so the restart serializes against picker
+            // applies. Use applyTriggerLifecycleFromUcm instead of applyLifecycle(true)
+            // so the desired-state computation reads the user's current
+            // oemRecordingMode + oemSurveillanceMode rather than hardcoding
+            // recordingDesired=true. Without this, a user with rec=off + surv=smart
+            // would silently start recording a dvr_*.mp4 every time they change
+            // quality/codec/fps. Mirrors the OemDashcamApiHandler.handlePost
+            // restart:true path (OemDashcamApiHandler.java around line 618-625).
+            com.overdrive.app.server.OemDashcamApiHandler.LIFECYCLE_EXEC.execute(() -> {
+                try {
+                    com.overdrive.app.server.OemDashcamApiHandler
+                        .forceRestartPipelineFromCurrentIntent();
+                } catch (Exception e) {
+                    // Best-effort — quality apply itself already succeeded; restart
+                    // failure leaves the user with their old encoder settings until
+                    // the next mode change or ACC cycle.
+                    android.util.Log.w("QualitySettings",
+                        "OEM dashcam quality-mirror restart failed: " + e.getMessage());
+                }
+            });
         }
     }
 }

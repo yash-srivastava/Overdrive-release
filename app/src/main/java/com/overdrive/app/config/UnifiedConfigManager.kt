@@ -979,7 +979,14 @@ object UnifiedConfigManager {
         // clips well under the budget without user tuning.
         if (!oemDashcam.has("recordingQuality")) oemDashcam.put("recordingQuality", "STANDARD")
         if (!oemDashcam.has("codec")) oemDashcam.put("codec", "H264")
-        if (!oemDashcam.has("fps")) oemDashcam.put("fps", 30)
+        // fpsMode marker: every existing install already has fps=30 stored (seeded),
+        // which can't be told from a user pick, so they stay "fixed". Only a config
+        // with no stored fps (fresh install) follows the ACC-on recording fps. The
+        // seeded fps=30 stays the camera HAL rate; follow strides the encode.
+        if (!oemDashcam.has("fps")) {
+            if (!oemDashcam.has("fpsMode")) oemDashcam.put("fpsMode", OEM_FPS_MODE_FOLLOW)
+            oemDashcam.put("fps", 30)
+        }
         // ---- OEM parked-idle low-power throttle (default OFF = byte-identical) ----
         // When parked + smart surveillance + vehicle OFF, the OEM dashcam is kept
         // warm but only records event clips (triggered by the pano detector). While
@@ -2425,6 +2432,27 @@ object UnifiedConfigManager {
     @JvmStatic
     fun getOemIdleFps(): Int =
         getOemDashcam().optInt("idleFps", 5).coerceIn(1, 15)
+
+    const val OEM_FPS_MODE_FOLLOW = "follow"
+    const val OEM_FPS_MODE_FIXED = "fixed"
+
+    /** True when the OEM DVR follows the ACC-on recording fps. Absent = fixed (existing installs). */
+    @JvmStatic
+    fun isOemFpsFollow(): Boolean = try {
+        OEM_FPS_MODE_FOLLOW == getOemDashcam().optString("fpsMode", OEM_FPS_MODE_FIXED)
+    } catch (t: Throwable) { false }
+
+    /** ACC-on recording fps (camera.targetFps) the OEM DVR follows, read live. */
+    @JvmStatic
+    fun getOemFollowFps(): Int = try {
+        (loadConfig().optJSONObject("camera")?.optInt("targetFps", 15) ?: 15).coerceIn(1, 60)
+    } catch (t: Throwable) { 15 }
+
+    /** Opt-in: stride the warm DVR to the Proximity monitor rate while it waits. Default FALSE. */
+    @JvmStatic
+    fun isOemProximityIdleThrottle(): Boolean = try {
+        getOemDashcam().optBoolean("proximityIdleThrottle", false)
+    } catch (t: Throwable) { false }
 
     /** Blind-spot display target: "head_unit" (default) or "cluster". */
     @JvmStatic

@@ -1115,6 +1115,19 @@ public class OemDashcamApiHandler {
         response.put("recordingQuality", oem.optString("recordingQuality", "STANDARD"));
         response.put("codec", oem.optString("codec", "H264"));
         response.put("fps", oem.optInt("fps", 30));
+        // Frame-rate mode: "follow" encodes at the ACC-on recording fps (stride over
+        // the HAL rate), "fixed" records at fps. followEncodeFps = what follow yields.
+        boolean follow = com.overdrive.app.config.UnifiedConfigManager.isOemFpsFollow();
+        response.put("fpsMode", follow
+            ? com.overdrive.app.config.UnifiedConfigManager.OEM_FPS_MODE_FOLLOW
+            : com.overdrive.app.config.UnifiedConfigManager.OEM_FPS_MODE_FIXED);
+        int halFps = Math.max(15, Math.min(60, oem.optInt("fps", 30)));
+        int followFps = com.overdrive.app.config.UnifiedConfigManager.getOemFollowFps();
+        int followStride = com.overdrive.app.camera.OemDashcamPipeline.followDrawStride(halFps, followFps);
+        response.put("followFps", followFps);
+        response.put("followEncodeFps", Math.max(1, Math.round((float) halFps / followStride)));
+        response.put("proximityIdleThrottle",
+            com.overdrive.app.config.UnifiedConfigManager.isOemProximityIdleThrottle());
         response.put("disableNativeDvr", oem.optBoolean("disableNativeDvr", false));
         if (oem.has("lastStartError") && !oem.isNull("lastStartError")) {
             response.put("lastStartError", oem.optString("lastStartError", ""));
@@ -1152,6 +1165,7 @@ public class OemDashcamApiHandler {
             String oldQuality = beforeOem == null ? "" : beforeOem.optString("recordingQuality", "");
             String oldCodec = beforeOem == null ? "" : beforeOem.optString("codec", "");
             int oldFps = beforeOem == null ? 0 : beforeOem.optInt("fps", 0);
+            String oldFpsMode = beforeOem == null ? "" : beforeOem.optString("fpsMode", "");
 
             // The two mode pickers — recording page and surveillance page
             // post their own flag independently. updateSection merges
@@ -1200,6 +1214,26 @@ public class OemDashcamApiHandler {
             if (req.has("fps")) {
                 int f = req.optInt("fps", -1);
                 if (f >= 10 && f <= 60) delta.put("fps", f);
+            }
+            // fpsMode: "follow" | "fixed". An fps pick without a mode is a fixed choice.
+            if (req.has("fpsMode")) {
+                String m = req.optString("fpsMode", "");
+                if (com.overdrive.app.config.UnifiedConfigManager.OEM_FPS_MODE_FOLLOW.equals(m)
+                        || com.overdrive.app.config.UnifiedConfigManager.OEM_FPS_MODE_FIXED.equals(m)) {
+                    delta.put("fpsMode", m);
+                    // Follow strides the encode over a 30 fps HAL (the seeded default),
+                    // so frames stay evenly spaced whatever fixed rate was stored.
+                    if (com.overdrive.app.config.UnifiedConfigManager.OEM_FPS_MODE_FOLLOW.equals(m)
+                            && !delta.has("fps")) {
+                        delta.put("fps", 30);
+                    }
+                }
+            } else if (delta.has("fps")) {
+                delta.put("fpsMode", com.overdrive.app.config.UnifiedConfigManager.OEM_FPS_MODE_FIXED);
+            }
+            // Opt-in: low-rate DVR pre-roll while the Proximity monitor waits.
+            if (req.has("proximityIdleThrottle")) {
+                delta.put("proximityIdleThrottle", req.optBoolean("proximityIdleThrottle", false));
             }
             // Parked-idle encode throttle knobs (separate clause — the drive/
             // continuous fps floor above is untouched). idleFps is the effective
@@ -1295,10 +1329,12 @@ public class OemDashcamApiHandler {
             String newQuality = afterOem == null ? "" : afterOem.optString("recordingQuality", "");
             String newCodec = afterOem == null ? "" : afterOem.optString("codec", "");
             int newFps = afterOem == null ? 0 : afterOem.optInt("fps", 0);
+            String newFpsMode = afterOem == null ? "" : afterOem.optString("fpsMode", "");
             boolean modesChanged = !oldRec.equals(newRec) || !oldSurv.equals(newSurv);
             boolean qualityChanged = !oldQuality.equals(newQuality)
                     || !oldCodec.equals(newCodec)
-                    || oldFps != newFps;
+                    || oldFps != newFps
+                    || !oldFpsMode.equals(newFpsMode);
             // The 'restart' branch above already scheduled an applyLifecycle
             // sequence; we still recalc on mode/quality changes regardless,
             // because the restart path resolves desired state from UCM and
