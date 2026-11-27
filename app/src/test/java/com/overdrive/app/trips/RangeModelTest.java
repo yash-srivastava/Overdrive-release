@@ -60,15 +60,15 @@ public class RangeModelTest {
     public void calibrationBlendsOnlyTripsCompletedAfterItWasSet() {
         long setAt = NOW - HALF_LIFE_MS;
         List<RangeModel.Sample> history = Arrays.asList(sample(setAt - DAY_MS, 200, 0.40),
-                sample(setAt, 100, 0.40), sample(NOW, 50, 0.30), sample(NOW, 100, 0.15));
+                sample(setAt, 100, 0.40), sample(NOW, 50, 0.30), sample(NOW, 50, 0.15));
         RangeCalibration calibration = new RangeCalibration(0.10, 0.10, 400, 80, setAt);
         RangeModel.Fit fit = RangeModel.fit(history, neutralCurves(), NOW, calibration);
         assertNotNull(fit);
         assertTrue(fit.anchored);
         // A 300 km calibration aged one half-life contributes 150 weighted km.
-        // Only the two post-calibration trips contribute to the anchored level.
-        assertEquals(0.5, fit.anchorShare, EPS);
-        assertEquals((150 * 0.10 + 50 * 0.30 + 100 * 0.15) / 300, fit.anchoredLevel, EPS);
+        // Only the two post-calibration trips contribute 100 weighted km.
+        assertEquals(0.6, fit.anchorShare, EPS);
+        assertEquals((150 * 0.10 + 50 * 0.30 + 50 * 0.15) / 250, fit.anchoredLevel, EPS);
         assertTrue(fit.level > fit.anchoredLevel);
     }
 
