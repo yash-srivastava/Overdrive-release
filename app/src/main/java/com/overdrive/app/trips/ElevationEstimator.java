@@ -99,7 +99,7 @@ public final class ElevationEstimator {
      * via the MAX_ALT_GAP_MS rule).
      *
      * @param timestampMs        sample wall-clock time
-     * @param altitudeM          altitude in metres; 0.0 / NaN = no fix
+     * @param altitudeM          altitude in metres; 0.0 or non-finite = no fix
      * @param verticalAccuracyM  reported 1-sigma vertical accuracy; <=0 / NaN = unreported
      * @param altitudeIsMsl      true if this altitude is MSL (geoid-corrected)
      * @param eligible           movement gate, see {@link #isElevationEligible}
@@ -107,7 +107,7 @@ public final class ElevationEstimator {
     public void addSample(long timestampMs, double altitudeM, double verticalAccuracyM,
                           boolean altitudeIsMsl, boolean eligible) {
         if (!eligible) return;
-        if (Double.isNaN(altitudeM) || altitudeM == 0.0) return;
+        if (!Double.isFinite(altitudeM) || altitudeM == 0.0) return;
 
         // Vertical-accuracy gate — only when the fix actually reports one.
         boolean vAccReported = !Double.isNaN(verticalAccuracyM) && verticalAccuracyM > 0;
