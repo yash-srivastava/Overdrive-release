@@ -368,11 +368,11 @@ class RecordingLibraryFragment : Fragment() {
 
     /**
      * Fires only when the underlying file set CHANGES (delete / batch
-     * delete / external rescan after invalidate). Distinct from
+     * delete / external rescan). Distinct from
      * [onListChanged] which fires on every filter pass / re-render — the
      * parent fragment uses this to refresh its chip-derivation scan
      * (which walks every directory) WITHOUT re-walking on every chip
-     * click. Pre-existing scan-cache (5s) absorbs back-to-back fires.
+     * click.
      */
     var onContentChanged: (() -> Unit)? = null
 
@@ -439,7 +439,7 @@ class RecordingLibraryFragment : Fragment() {
             dateRowContainer?.visibility = View.GONE
         }
 
-        checkPermissionsAndScan()
+        setupStorageDirectories()
 
         // No load here: standalone mode loads in onResume, embedded mode via the
         // parent's applyAllFiltersTo → applyAll. Loading here made both modes
@@ -485,15 +485,6 @@ class RecordingLibraryFragment : Fragment() {
             )
         }
         super.onSaveInstanceState(outState)
-    }
-
-    /**
-     * SOTA: Setup directories and load recordings.
-     * Since App owns the directories, we use direct file access.
-     */
-    private fun checkPermissionsAndScan() {
-        setupStorageDirectories()
-        RecordingScanner.invalidateCache()
     }
 
     private fun setupStorageDirectories() {
@@ -674,7 +665,6 @@ class RecordingLibraryFragment : Fragment() {
         dateNarrowed = narrowToDate
 
         if (view != null && ::recordingAdapter.isInitialized) {
-            com.overdrive.app.ui.util.RecordingScanner.invalidateCache()
             updateDateHeader()
             renderActiveFilters()
             loadRecordingsForSelectedDate()
@@ -1256,10 +1246,6 @@ class RecordingLibraryFragment : Fragment() {
 
     fun shareRecording(recording: RecordingFile) {
         shareSingleRecording(recording)
-    }
-
-    fun requestDeleteRecording(recording: RecordingFile) {
-        confirmDelete(recording)
     }
 
     /**
@@ -2184,7 +2170,6 @@ class RecordingLibraryFragment : Fragment() {
 
     override fun onResume() {
         super.onResume()
-        RecordingScanner.invalidateCache()
         // When embedded, the parent's onResume re-applies every filter
         // dimension atomically via applyAll(). Re-loading here using THIS
         // fragment's own (possibly stale) date state caused a brief flash

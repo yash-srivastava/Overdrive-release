@@ -12,8 +12,8 @@ import java.util.Locale
  * via {@link RecordingsApiClient}, with the legacy direct-filesystem
  * walk retained as a graceful fallback.
  *
- * <p>Every public method tries the API first; on transport failure it
- * falls back to {@code *Direct} (the original implementation, unchanged).
+ * <p>Recording queries try the API first, falling back to direct filesystem
+ * access on transport failure.
  * On warmup ({@code warming=true}) the API result is honored — caller
  * gets an empty list and is expected to poll, NOT fall back to the
  * 2-minute direct walk that was the original problem.
@@ -41,48 +41,6 @@ object RecordingScanner {
         return scanRecordingsDirect(context)
     }
 
-    fun scanNormalRecordings(context: Context): List<RecordingFile> {
-        val apiResult = RecordingsApiClient.fetchAllRecordings(
-            RecordingsApiClient.Filter(type = "normal"))
-        if (apiResult != null) return apiResult
-        Log.w(TAG, "scanNormalRecordings: API unreachable, falling back")
-        return scanRecordingsDirect(context).filter { it.type == RecordingFile.RecordingType.NORMAL }
-    }
-
-    fun scanSentryRecordings(context: Context): List<RecordingFile> {
-        val apiResult = RecordingsApiClient.fetchAllRecordings(
-            RecordingsApiClient.Filter(type = "sentry"))
-        if (apiResult != null) return apiResult
-        Log.w(TAG, "scanSentryRecordings: API unreachable, falling back")
-        return scanRecordingsDirect(context).filter { it.type == RecordingFile.RecordingType.SENTRY }
-    }
-
-    fun scanProximityRecordings(context: Context): List<RecordingFile> {
-        val apiResult = RecordingsApiClient.fetchAllRecordings(
-            RecordingsApiClient.Filter(type = "proximity"))
-        if (apiResult != null) return apiResult
-        Log.w(TAG, "scanProximityRecordings: API unreachable, falling back")
-        return scanRecordingsDirect(context).filter { it.type == RecordingFile.RecordingType.PROXIMITY }
-    }
-
-    fun scanOemDashcamRecordings(context: Context): List<RecordingFile> {
-        val apiResult = RecordingsApiClient.fetchAllRecordings(
-            RecordingsApiClient.Filter(type = "oemDashcam"))
-        if (apiResult != null) return apiResult
-        Log.w(TAG, "scanOemDashcamRecordings: API unreachable, falling back")
-        return scanRecordingsDirect(context).filter { it.type == RecordingFile.RecordingType.OEM_DASHCAM }
-    }
-
-    /**
-     * No-op now — the H2 index is server-driven and the local
-     * {@code cachedRecordings} pre-cache it used to populate is gone.
-     * Kept as a public symbol because callers (RecordingsFragment, etc.)
-     * still call it after writes for symmetry; safe to keep.
-     */
-    fun invalidateCache() {
-        // Server-driven cache; nothing to invalidate locally.
-    }
-
     /**
      * Delete a recording and its sidecars. Tries the daemon's DELETE
      * endpoint first (so the H2 row drops eagerly); falls back to direct
@@ -99,14 +57,11 @@ object RecordingScanner {
         val apiOk = RecordingsApiClient.deleteRecording(recording)
         if (apiOk) {
             cleanupLocalSidecars(recording)
-            invalidateCache()
             return true
         }
 
         Log.w(TAG, "deleteRecording API failed, falling back to direct delete")
-        val ok = deleteRecordingDirect(recording)
-        invalidateCache()
-        return ok
+        return deleteRecordingDirect(recording)
     }
 
     // ==================== Directory Getters ====================
@@ -139,9 +94,6 @@ object RecordingScanner {
     internal fun dateKey(year: Int, month: Int, day: Int): String =
         String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, day)
 
-    internal fun monthPrefix(year: Int, month: Int): String =
-        String.format(Locale.US, "%04d-%02d-", year, month + 1)
-
     fun getRecordingsForDate(context: Context, year: Int, month: Int, day: Int): List<RecordingFile> {
         val ymd = dateKey(year, month, day)
         val apiResult = RecordingsApiClient.fetchAllRecordings(
@@ -149,82 +101,6 @@ object RecordingScanner {
         if (apiResult != null) return apiResult
         Log.w(TAG, "getRecordingsForDate: API unreachable, falling back")
         return getRecordingsForDateDirect(context, year, month, day)
-    }
-
-    fun getDatesWithRecordings(context: Context): Set<Long> {
-        val buckets = RecordingsApiClient.fetchDates()
-        if (buckets != null) {
-            val out = HashSet<Long>(buckets.size * 2)
-            val cal = Calendar.getInstance()
-            for (b in buckets) {
-                val parts = b.date.split("-")
-                if (parts.size != 3) continue
-                val y = parts[0].toIntOrNull() ?: continue
-                val m = parts[1].toIntOrNull() ?: continue
-                val d = parts[2].toIntOrNull() ?: continue
-                cal.clear()
-                // month is 0-based in Calendar; ymd is 1-based.
-                cal.set(y, m - 1, d, 0, 0, 0)
-                cal.set(Calendar.MILLISECOND, 0)
-                out.add(cal.timeInMillis)
-            }
-            return out
-        }
-        Log.w(TAG, "getDatesWithRecordings: API unreachable, falling back")
-        return getDatesWithRecordingsDirect(context)
-    }
-
-    fun getRecordingCountsByDate(context: Context, year: Int, month: Int): Map<Int, Int> {
-        val buckets = RecordingsApiClient.fetchDates()
-        if (buckets != null) {
-            val out = HashMap<Int, Int>()
-            val prefix = monthPrefix(year, month)
-            for (b in buckets) {
-                if (!b.date.startsWith(prefix)) continue
-                val day = b.date.substring(prefix.length).toIntOrNull() ?: continue
-                out[day] = (out[day] ?: 0) + b.count
-            }
-            return out
-        }
-        Log.w(TAG, "getRecordingCountsByDate: API unreachable, falling back")
-        return getRecordingCountsByDateDirect(context, year, month)
-    }
-
-    // ==================== Size Queries ====================
-
-    fun getTotalRecordingsSize(context: Context): Long {
-        val s = RecordingsApiClient.fetchStats()
-        // indexUnavailable => counters are zeroed placeholders, not real sizes.
-        if (s != null && !s.indexUnavailable) return s.totalSize
-        Log.w(TAG, "getTotalRecordingsSize: API unreachable, falling back")
-        return scanRecordingsDirect(context).sumOf { it.sizeBytes }
-    }
-
-    fun getNormalRecordingsSize(context: Context): Long {
-        val s = RecordingsApiClient.fetchStats()
-        if (s != null && !s.indexUnavailable) return s.normalSize
-        Log.w(TAG, "getNormalRecordingsSize: API unreachable, falling back")
-        return scanRecordingsDirect(context)
-            .filter { it.type == RecordingFile.RecordingType.NORMAL }
-            .sumOf { it.sizeBytes }
-    }
-
-    fun getSentryRecordingsSize(context: Context): Long {
-        val s = RecordingsApiClient.fetchStats()
-        if (s != null && !s.indexUnavailable) return s.sentrySize
-        Log.w(TAG, "getSentryRecordingsSize: API unreachable, falling back")
-        return scanRecordingsDirect(context)
-            .filter { it.type == RecordingFile.RecordingType.SENTRY }
-            .sumOf { it.sizeBytes }
-    }
-
-    fun getProximityRecordingsSize(context: Context): Long {
-        val s = RecordingsApiClient.fetchStats()
-        if (s != null && !s.indexUnavailable) return s.proximitySize
-        Log.w(TAG, "getProximityRecordingsSize: API unreachable, falling back")
-        return scanRecordingsDirect(context)
-            .filter { it.type == RecordingFile.RecordingType.PROXIMITY }
-            .sumOf { it.sizeBytes }
     }
 
     // ====================================================================
@@ -518,36 +394,5 @@ object RecordingScanner {
         return scanRecordingsDirect(context).filter {
             it.timestamp in startOfDay until endOfDay
         }
-    }
-
-    private fun getDatesWithRecordingsDirect(context: Context): Set<Long> {
-        val calendar = Calendar.getInstance()
-        return scanRecordingsDirect(context).map { recording ->
-            calendar.timeInMillis = recording.timestamp
-            calendar.set(Calendar.HOUR_OF_DAY, 0)
-            calendar.set(Calendar.MINUTE, 0)
-            calendar.set(Calendar.SECOND, 0)
-            calendar.set(Calendar.MILLISECOND, 0)
-            calendar.timeInMillis
-        }.toSet()
-    }
-
-    private fun getRecordingCountsByDateDirect(context: Context, year: Int, month: Int): Map<Int, Int> {
-        val rangeCalendar = Calendar.getInstance().apply {
-            set(year, month, 1, 0, 0, 0)
-            set(Calendar.MILLISECOND, 0)
-        }
-        val startOfMonth = rangeCalendar.timeInMillis
-        rangeCalendar.add(Calendar.MONTH, 1)
-        val endOfMonth = rangeCalendar.timeInMillis
-
-        return scanRecordingsDirect(context)
-            .filter { it.timestamp in startOfMonth until endOfMonth }
-            .groupBy { recording ->
-                val dayCalendar = Calendar.getInstance()
-                dayCalendar.timeInMillis = recording.timestamp
-                dayCalendar.get(Calendar.DAY_OF_MONTH)
-            }
-            .mapValues { it.value.size }
     }
 }

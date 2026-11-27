@@ -270,7 +270,6 @@ class DashboardFragment : Fragment() {
         super.onResume()
         dashboardResumed = true
         recordingStatsRetryCount = 0
-        RecordingScanner.invalidateCache()
         // Queue the live cockpit state before filesystem scans and insight
         // generation on the shared worker so SOC/charging paint first.
         refreshVehicleStatus(showLoading = true)

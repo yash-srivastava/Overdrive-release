@@ -171,11 +171,6 @@ class RecordingAdapter(
     
     val selectedCount: Int get() = selectedItems.size
 
-    /** Evidence pack (indexed clips) or SafeKeep actions are available for [recording]. */
-    fun hasExtraActions(recording: RecordingFile): Boolean =
-        (onEvidencePack != null && !recording.recordingId.isNullOrEmpty()) ||
-            (onSafeKeepAction != null && safeKeepEnabled)
-
     /**
      * Per-recording actions menu anchored to [anchor]. Share and delete are left out when the
      * caller already shows them as buttons.
