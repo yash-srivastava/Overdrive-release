@@ -436,6 +436,60 @@ class DashboardStatusParserTest {
     }
 
     @Test
+    fun malformedOptionalStatusStringsAreIgnoredWithoutLosingMeasurements() {
+        for (value in listOf("null", "true", "123", "{}", "[]")) {
+            val result = DashboardStatusParser.parse(
+                """
+                {
+                  "status": "ok",
+                  "soc": {"percent": 43},
+                  "recordingStatus": {"gear": $value},
+                  "charging": {
+                    "plugged": true,
+                    "stateName": $value,
+                    "sessionEnergySource": $value,
+                    "sessionKwh": 2.1
+                  }
+                }
+                """.trimIndent()
+            ) as DashboardStatusResult.Available
+
+            assertNull("gear: $value", result.snapshot.gear)
+            assertEquals(43.0, result.snapshot.socPercent!!, 0.0)
+            val charging = result.snapshot.charging!!
+            assertTrue(charging.plugged)
+            assertNull("stateName: $value", charging.stateName)
+            assertNull("sessionEnergySource: $value", charging.sessionEnergySource)
+            assertEquals(2.1, charging.sessionKwh!!, 0.0)
+            assertTrue(charging.sessionEnergyEstimated)
+        }
+    }
+
+    @Test
+    fun validOptionalStatusStringsRetainTheirExistingMeaning() {
+        val result = DashboardStatusParser.parse(
+            """
+            {
+              "status": "ok",
+              "recordingStatus": {"gear": "P"},
+              "charging": {
+                "plugged": true,
+                "stateName": " Ready ",
+                "sessionEnergySource": " metered_counter ",
+                "sessionKwh": 2.1
+              }
+            }
+            """.trimIndent()
+        ) as DashboardStatusResult.Available
+
+        assertEquals("P", result.snapshot.gear)
+        val charging = result.snapshot.charging!!
+        assertEquals("Ready", charging.stateName)
+        assertEquals("metered_counter", charging.sessionEnergySource)
+        assertFalse(charging.sessionEnergyEstimated)
+    }
+
+    @Test
     fun missingRealVehicleValuesIsExplicitlyUnavailable() {
         val result = DashboardStatusParser.parse(
             """{"status":"ok","vehicleDataReady":true,"charging":{"charging":false}}"""
