@@ -322,8 +322,40 @@ int main() {
         cache.prepare(p, sr);
         assert(!cache.packed && cache.data);
     }
+    // Compact predictor: exact reconstruction, signed residuals, partial
+    // blocks, and rejection rather than truncation for unrepresentable rows.
+    {
+        using Cache = odcpu::DashcamRemapCache;
+        Cache::Block block;
+        int32_t u[Cache::kBlock], v[Cache::kBlock], actualU[Cache::kBlock], actualV[Cache::kBlock];
+        for (int n : {1, 7, Cache::kBlock}) {
+            for (int i = 0; i < n; ++i) {
+                u[i] = -128 + i * 437 + (i % 2 ? 7 : 0);
+                v[i] = 1048320 - i * 311 - (i % 2 ? 9 : 0);
+            }
+            assert(Cache::encodeBlock(block, n, u, v));
+            Cache::decodeBlock(block, n, actualU, actualV);
+            assert(std::equal(u, u + n, actualU) && std::equal(v, v + n, actualV));
+        }
+        u[12] += 200;
+        assert(!Cache::encodeBlock(block, Cache::kBlock, u, v));
+
+        Cache cache;
+        cache.planes[0].last = 2;
+        cache.planes[0].width = Cache::kBlock;
+        assert(cache.prepareCompact(4096));
+        const int bounds[] = {0, Cache::kBlock};
+        assert(!cache.compactRow(0, 1, bounds, 1, u, v));
+        u[12] -= 200;
+        assert(cache.compactRow(1, 1, bounds, 1, u, v));
+        cache.needsFill = false;
+        assert(!cache.compactRow(0, 1, bounds, 1, actualU, actualV));
+        assert(cache.compactRow(1, 1, bounds, 1, actualU, actualV));
+        assert(std::equal(u, u + Cache::kBlock, actualU));
+        assert(std::equal(v, v + Cache::kBlock, actualV));
+    }
     // Legacy panoramic recording: use the raw lower band with a windshield,
-    // or pack more rows when all four cameras need lens correction.
+    // or try the full compact map when all four cameras need lens correction.
     for (int ws : {0, 1}) {
         odcpu::DashcamRemapCache cache;
         odcpu::RemapSpec p = {2560, 1920, 1, {0.75f, 0.5f, 0.f, 0.25f},
@@ -337,14 +369,28 @@ int main() {
             assert(cache.data && !cache.packed);
             assert(cache.planes[0].first == 1344 && cache.planes[1].first == 672);
         } else {
-            assert(cache.packed && !cache.data);
+            assert(cache.compact && !cache.packed && !cache.data);
+            assert(cache.planes[0].first == 0 && cache.planes[1].first == 0);
+            const size_t blocks = cache.compactPlanes[1].offset
+                    + cache.compactPlanes[1].blocksPerRow * cache.planes[1].last;
+            assert(blocks * sizeof(odcpu::DashcamRemapCache::Block)
+                    + cache.planes[0].last + cache.planes[1].last <= 16 * 1024 * 1024);
+            // No rows encoded: choose the original partial packed fallback,
+            // and do not retry the compact map on the same geometry.
+            cache.finishFrame(p, sr);
+            assert(cache.packed && !cache.compact && cache.needsFill);
             assert(cache.planes[0].first == 872 && cache.planes[1].first == 436);
-            assert(cache.samples() * 5 <= 16 * 1024 * 1024);
+            cache.prepare(p, sr);
+            assert(cache.packed && !cache.compact && cache.needsFill);
         }
         odcpu::check(2560, 1920, 5120, 960, 1920, 1080, 1, 0, ws == 1,
                      0.12f, 0.04f, 0.75f, 0.7f, 0.12f, 32, rng);
         cases++;
     }
+    // A highly nonlinear map may reject compact rows and return to the packed path.
+    odcpu::check(2560, 1920, 5120, 960, 1920, 1080, 2, 1, false,
+                 5.f, 0.04f, 0.75f, 0.7f, 0.12f, 16, rng);
+    cases++;
     // An oversized lower band must still respect the budget and render uncached rows.
     odcpu::check(1920, 1080, 2560, 480, 1280, 720, 2, 1, true,
                  0.3f, 0.07f, 0.75f, 0.1f, 0.12f, 16, rng);
