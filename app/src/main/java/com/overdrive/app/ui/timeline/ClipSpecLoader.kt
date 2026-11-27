@@ -142,7 +142,8 @@ class ClipSpecLoader {
                 else -> ZoomableVideoView.Layout.STANDARD
             }
             val lens = if (single) null else PlaybackDewarp.specFor(json)
-            return ClipSpec(layout, lens, single)
+            val grid = if (single || !json.has("grid")) null else GridSpec.parse(json, PlaybackDewarp.liveStrength())
+            return ClipSpec(layout, lens, single, grid)
         }
     }
 }

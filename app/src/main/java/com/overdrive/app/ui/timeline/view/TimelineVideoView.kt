@@ -38,6 +38,9 @@ class TimelineVideoView @JvmOverloads constructor(
     /** The last delivered Surface must no longer be rendered into. */
     var onDecoderSurfaceLost: (() -> Unit)? = null
 
+    /** GL dropped the follower Surface (rebuild or release); called on the GL thread. */
+    @Volatile var onFollowerSurfaceLost: (() -> Unit)? = null
+
     /** Camera shown after a tap; ALL when the tap returned to every camera. */
     var onCameraTapped: ((Quadrant) -> Unit)? = null
 
@@ -78,6 +81,10 @@ class TimelineVideoView @JvmOverloads constructor(
                 this@TimelineVideoView.camera = camera
                 onCameraTapped?.invoke(camera)
             }
+        }
+
+        override fun onFollowerSurfaceLost() {
+            onFollowerSurfaceLost?.invoke()
         }
 
         override fun onGeometry(camera: Quadrant, tiles: List<CameraTile>) {
@@ -153,6 +160,31 @@ class TimelineVideoView @JvmOverloads constructor(
     fun resetZoom(animate: Boolean) {
         renderer?.resetZoom(animate)
     }
+
+    /** Dashcam view follower input; [onSurface] runs on the GL thread, null when unavailable. Any thread. */
+    fun openFollowerInput(onSurface: (Surface?) -> Unit): Boolean {
+        val r = renderer ?: return false
+        r.openFollowerInput(onSurface)
+        return true
+    }
+
+    fun closeFollowerInput() {
+        renderer?.closeFollowerInput()
+    }
+
+    fun setFollowerShown(on: Boolean) {
+        renderer?.setFollowerShown(on)
+    }
+
+    fun setFollowerVideoSize(w: Int, h: Int) {
+        renderer?.setFollowerVideoSize(w, h)
+    }
+
+    /** Follower frames latched so far (monotonic while the input lives). */
+    fun followerFrames(): Int = renderer?.followerFrames ?: 0
+
+    /** Median follower frame interval in real-time ns, 0 when unknown. */
+    fun followerFrameNs(): Long = renderer?.followerFrameNs ?: 0L
 
     /** Frees the GL thread and the decoder Surface within ~500 ms; the view is inert afterwards. */
     fun release() {

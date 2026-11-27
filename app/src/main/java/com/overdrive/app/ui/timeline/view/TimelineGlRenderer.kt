@@ -40,6 +40,8 @@ internal class TimelineGlRenderer(private val host: Host) {
         fun onDecoderSurfaceLost()
         fun onCameraTapped(camera: Quadrant)
         fun onGeometry(camera: Quadrant, tiles: List<CameraTile>)
+        /** The follower Surface was torn down by GL (rebuild or release): stop rendering into it. */
+        fun onFollowerSurfaceLost() {}
     }
 
     private class Prog(val id: Int) {
@@ -53,6 +55,11 @@ internal class TimelineGlRenderer(private val host: Host) {
         val uHalfTexel = GLES20.glGetUniformLocation(id, "uHalfTexel")
         val uStrip = GLES20.glGetUniformLocation(id, "uStrip")
         val uClamp = GLES20.glGetUniformLocation(id, "uClamp")
+        val uDvr = GLES20.glGetUniformLocation(id, "uDvr")
+        val uDvrMatrix = GLES20.glGetUniformLocation(id, "uDvrMatrix")
+        val uSplit = GLES20.glGetUniformLocation(id, "uSplit")
+        val uCropY = GLES20.glGetUniformLocation(id, "uCropY")
+        val uCells = GLES20.glGetUniformLocation(id, "uCells")
     }
 
     private val thread = HandlerThread("TimelineGl", Process.THREAD_PRIORITY_DISPLAY).apply { start() }
@@ -94,6 +101,32 @@ internal class TimelineGlRenderer(private val host: Host) {
     private val slotW = IntArray(2)
     private val slotH = IntArray(2)
     private var fromSlot = 0
+
+    // Dashcam view: second OES input (windshield clip), alive only while the mode wants it.
+    private var dvrTex = 0
+    private var dvrInput: SurfaceTexture? = null
+    private var dvrSurface: Surface? = null
+    private var dvrPending = 0
+    private var dvrHasFrame = false
+    private var dvrW = 0
+    private var dvrH = 0
+    private val dvrMatrix = FloatArray(16)
+    private val dvrTs = LongArray(DVR_TS_RING)
+    private val dvrSort = LongArray(DVR_TS_RING - 1)
+    private var dvrTsCount = 0
+    private var dashProg: Prog? = null
+    private var dashWanted = false
+    private var grid: com.overdrive.app.ui.timeline.GridSpec? = null
+    private var specLayout = TileLayout.STANDARD
+    private var composite = false
+
+    /** Frames latched from the follower input (any thread may read). */
+    @Volatile var followerFrames = 0
+        private set
+
+    /** Median real-time interval of the last follower frames in ns, 0 when unknown. */
+    @Volatile var followerFrameNs = 0L
+        private set
 
     private val schedule = FrameSchedule<ClipSpec>()
     private val viewport = ViewportState()
@@ -163,6 +196,29 @@ internal class TimelineGlRenderer(private val host: Host) {
     fun scheduleCrossfade(atNs: Long, durationMs: Long) = post { schedule.scheduleFade(atNs, durationMs) }
 
     fun holdFrame() = post { onHold() }
+
+    /** Creates the follower input; [onSurface] gets its Surface on the GL thread (null when GL is down). */
+    fun openFollowerInput(onSurface: (Surface?) -> Unit) = post { onSurface(createFollowerInput()) }
+
+    /** Frees the follower input; the decoder must have stopped rendering into it. */
+    fun closeFollowerInput() = post {
+        // Fade out while the windshield texture still holds its picture.
+        dashWanted = false
+        refreshComposite()
+        releaseFollowerInput()
+    }
+
+    /** The follower is in sync: draw the Dashcam view once both inputs have a frame. */
+    fun setFollowerShown(on: Boolean) = post {
+        dashWanted = on
+        refreshComposite()
+    }
+
+    fun setFollowerVideoSize(w: Int, h: Int) = post {
+        dvrW = if (w in 1..MAX_DIM) w else 0
+        dvrH = if (h in 1..MAX_DIM) h else 0
+        requestRender()
+    }
 
     fun setDewarpStrength(value: Int) = post {
         strength = value.coerceIn(0, 100)
@@ -342,6 +398,7 @@ internal class TimelineGlRenderer(private val host: Host) {
         if (!bindForWork()) return
         if (input == null) createGlObjects()
         if (pendingFrames > 0) latch(frameTimeNs)
+        if (dvrPending > 0) latchFollower()
         val moving = viewport.update(frameTimeNs)
         schedule.fadeProgress(frameTimeNs)
         zoomed = viewport.zoomed()
@@ -390,6 +447,105 @@ internal class TimelineGlRenderer(private val host: Host) {
         if (schedule.endLatch(dueFade, frameTimeNs)) fromSlot = snap
     }
 
+    private fun onFollowerFrame() {
+        if (released) return
+        if (dvrPending < MAX_PENDING_FRAMES) dvrPending++
+        requestRender()
+    }
+
+    /** updateTexImage only for queued follower frames; keeps the newest. */
+    private fun latchFollower() {
+        val st = dvrInput ?: run { dvrPending = 0; return }
+        val n = dvrPending.coerceAtMost(MAX_LATCH)
+        var latched = 0
+        try {
+            while (latched < n) {
+                st.updateTexImage()
+                latched++
+                noteFollowerTs(st.timestamp)
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "follower updateTexImage failed: ${t.message}")
+            dvrPending = 0
+        }
+        if (dvrPending > 0) dvrPending -= latched
+        if (dvrPending > 0) requestRender()
+        if (latched == 0) return
+        try { st.getTransformMatrix(dvrMatrix) } catch (_: Throwable) {}
+        followerFrames += latched
+        if (!dvrHasFrame) {
+            dvrHasFrame = true
+            refreshComposite()
+        }
+    }
+
+    private fun noteFollowerTs(ts: Long) {
+        if (ts <= 0L) return
+        val ring = dvrTs
+        val last = if (dvrTsCount > 0) ring[(dvrTsCount - 1) % ring.size] else 0L
+        // A jump (seek, pause, new clip) restarts the measurement.
+        if (dvrTsCount > 0 && (ts <= last || ts - last > DVR_GAP_NS)) dvrTsCount = 0
+        ring[dvrTsCount % ring.size] = ts
+        dvrTsCount++
+        if (dvrTsCount < ring.size) return
+        val sorted = dvrSort
+        val base = dvrTsCount - ring.size
+        for (i in sorted.indices) sorted[i] = ring[(base + i + 1) % ring.size] - ring[(base + i) % ring.size]
+        java.util.Arrays.sort(sorted)
+        followerFrameNs = sorted[sorted.size / 2]
+    }
+
+    private fun createFollowerInput(): Surface? {
+        dvrSurface?.let { return it }
+        if (context == EGL14.EGL_NO_CONTEXT || !bindForWork()) return null
+        return try {
+            if (dashProg == null) dashProg = buildOrNull(PlaybackGl.dashcamViewShader)
+            if (dashProg == null) return null
+            val ids = IntArray(1)
+            GLES20.glGenTextures(1, ids, 0)
+            dvrTex = ids[0]
+            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, dvrTex)
+            PlaybackGl.setLinearClamp(GLES11Ext.GL_TEXTURE_EXTERNAL_OES)
+            val st = SurfaceTexture(dvrTex)
+            st.setDefaultBufferSize(DVR_DEFAULT_W, DVR_DEFAULT_H)
+            st.setOnFrameAvailableListener({ t -> if (t === dvrInput) onFollowerFrame() }, handler)
+            dvrInput = st
+            Surface(st).also { dvrSurface = it }
+        } catch (t: Throwable) {
+            Log.w(TAG, "follower surface failed: ${t.message}")
+            releaseFollowerInput()
+            null
+        }
+    }
+
+    /** GL objects go only with a current context; the caller keeps one bound when it can. */
+    private fun releaseFollowerInput() {
+        try { dvrInput?.setOnFrameAvailableListener(null) } catch (_: Throwable) {}
+        try { dvrSurface?.release() } catch (_: Throwable) {}
+        try { dvrInput?.release() } catch (_: Throwable) {}
+        dvrSurface = null
+        dvrInput = null
+        if (dvrTex != 0 && context != EGL14.EGL_NO_CONTEXT && bindAny()) {
+            try { GLES20.glDeleteTextures(1, intArrayOf(dvrTex), 0) } catch (_: Throwable) {}
+        }
+        dvrTex = 0
+        dvrPending = 0
+        dvrHasFrame = false
+        dvrTsCount = 0
+        followerFrameNs = 0L
+    }
+
+    /** Composite on/off; a switch crossfades from the picture on screen (no black flash, no jump). */
+    private fun refreshComposite(animate: Boolean = true) {
+        val on = dashWanted && dvrHasFrame && dvrInput != null && grid != null && dashProg != null &&
+            specLayout != TileLayout.SINGLE && !fallback
+        if (on == composite) return
+        if (animate && hasFrame && !schedule.fading) fadeFor(COMPOSITE_FADE_MS)
+        composite = on
+        viewport.applyLayout(if (on) TileLayout.DASHCAM else specLayout)
+        requestRender()
+    }
+
     private fun onScheduleSpec(atNs: Long, spec: ClipSpec?) {
         schedule.scheduleSpec(atNs, spec)
         // Scheduled after its frame was latched: correct the picture now.
@@ -402,7 +558,11 @@ internal class TimelineGlRenderer(private val host: Host) {
     private fun applySpec(next: ClipSpec?) {
         val layout = TileLayout.of(next)
         lens = next?.lens?.takeIf { layout != TileLayout.SINGLE && CameraRegions.lensUsable(it) }
-        viewport.applyLayout(layout)
+        specLayout = layout
+        grid = next?.grid?.takeIf { layout != TileLayout.SINGLE }
+        val was = composite
+        refreshComposite(animate = false)
+        if (was == composite) viewport.applyLayout(if (composite) TileLayout.DASHCAM else layout)
         updateViewportVideoSize()
     }
 
@@ -457,13 +617,15 @@ internal class TimelineGlRenderer(private val host: Host) {
     }
 
     /** Reduced motion: a short crossfade from the current picture replaces the spring. */
-    private fun fadeNow() {
+    private fun fadeNow() = fadeFor(REDUCED_FADE_MS)
+
+    private fun fadeFor(ms: Long) {
         if (!hasFrame || fallback || schedule.holdShown || !bindForWork()) return
         val slot = 1 - fromSlot
         val now = System.nanoTime()
         if (capture(slot, now)) {
             fromSlot = slot
-            schedule.fadeNow(now, REDUCED_FADE_MS)
+            schedule.fadeNow(now, ms)
         }
     }
 
@@ -546,6 +708,7 @@ internal class TimelineGlRenderer(private val host: Host) {
     private fun enterFallback() {
         fallback = true
         schedule.clearPresentation()
+        refreshComposite(animate = false)
         Log.w(TAG, "GL error, drawing plain frames")
     }
 
@@ -576,6 +739,12 @@ internal class TimelineGlRenderer(private val host: Host) {
         if (!hasFrame) return
         val r = viewport.place(placement)
         if (!CameraRegions.visibleQuad(viewW.toFloat(), viewH.toFloat(), r, placement, quad)) return
+        val g = grid
+        val dp = dashProg
+        if (composite && g != null && dp != null) {
+            drawComposite(dp, g, alpha)
+            return
+        }
         val l = lens
         var dewarp = false
         if (l != null && dewarpProg != null) {
@@ -596,6 +765,39 @@ internal class TimelineGlRenderer(private val host: Host) {
             setClamp(prog, r)
         }
         drawQuad(prog)
+    }
+
+    /** Both inputs in one pass; the quad is the visible part of the composed frame (zoom/crop as usual). */
+    private fun drawComposite(prog: Prog, g: com.overdrive.app.ui.timeline.GridSpec, alpha: Float) {
+        putQuad(quad[0], quad[1], quad[2], quad[3], quad[4], quad[5], quad[6], quad[7])
+        GLES20.glUseProgram(prog.id)
+        bindOes(prog)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
+        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, dvrTex)
+        GLES20.glUniform1i(prog.uDvr, 1)
+        GLES20.glUniformMatrix4fv(prog.uDvrMatrix, 1, false, dvrMatrix, 0)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        if (g.raw && strength >= 0) {
+            val t = strength.coerceIn(0, 100) / 100f
+            GLES20.glUniform2f(prog.uK, 0.30f * t, 0.10f * t)
+        } else {
+            GLES20.glUniform2f(prog.uK, g.k1, g.k2)
+        }
+        GLES20.glUniform1f(prog.uAspect, g.aspect)
+        GLES20.glUniform2f(prog.uHalfTexel, 0.5f / g.width, 0.5f / g.height)
+        GLES20.glUniform1f(prog.uStrip, g.stripFrac)
+        GLES20.glUniform1f(prog.uSplit, g.split)
+        GLES20.glUniform1f(prog.uCropY, windshieldCropY(g))
+        GLES20.glUniform2fv(prog.uCells, 3, g.cells, 0)
+        GLES20.glUniform1f(prog.uAlpha, alpha)
+        drawQuad(prog)
+    }
+
+    /** GpuMosaicRecorder.windshieldCropY for the actual windshield clip size (16:9 until it is known). */
+    private fun windshieldCropY(g: com.overdrive.app.ui.timeline.GridSpec): Float {
+        val bandAspect = (g.width.toFloat() / g.height) / g.split
+        val srcAspect = if (dvrW > 0 && dvrH > 0) dvrW.toFloat() / dvrH else 16f / 9f
+        return if (bandAspect > srcAspect) ((1f - srcAspect / bandAspect) * 0.5f).coerceIn(0f, 0.45f) else 0f
     }
 
     private fun drawHeld(alpha: Float) {
@@ -859,7 +1061,19 @@ internal class TimelineGlRenderer(private val host: Host) {
         while (retired.isNotEmpty()) freeRetired(retired[0].first)
     }
 
+    /** GL goes away under the follower: tell its owner first, then free the input (frames into it are dropped). */
+    private fun dropFollowerInput() {
+        if (dvrSurface != null) host.onFollowerSurfaceLost()
+        releaseFollowerInput()
+        dashWanted = false
+        if (composite) {
+            composite = false
+            viewport.applyLayout(specLayout)
+        }
+    }
+
     private fun releaseGl() {
+        dropFollowerInput()
         try { input?.setOnFrameAvailableListener(null) } catch (_: Throwable) {}
         try { inputSurface?.release() } catch (_: Throwable) {}
         inputSurface = null
@@ -892,6 +1106,7 @@ internal class TimelineGlRenderer(private val host: Host) {
         dewarpProg = null
         plainProg = null
         heldProg = null
+        dashProg = null
         fallback = false
         window = EGL14.EGL_NO_SURFACE
         pbuffer = EGL14.EGL_NO_SURFACE
@@ -911,6 +1126,7 @@ internal class TimelineGlRenderer(private val host: Host) {
         dewarpProg?.let { GLES20.glDeleteProgram(it.id) }
         plainProg?.let { GLES20.glDeleteProgram(it.id) }
         heldProg?.let { GLES20.glDeleteProgram(it.id) }
+        dashProg?.let { GLES20.glDeleteProgram(it.id) }
     }
 
     private fun clearGlErrors() {
@@ -934,6 +1150,11 @@ internal class TimelineGlRenderer(private val host: Host) {
         private const val MAX_DIM = 8192
         private const val SIZE_GRACE_MS = 250L
         private const val REDUCED_FADE_MS = 150L
+        private const val COMPOSITE_FADE_MS = 180L
+        private const val DVR_DEFAULT_W = 1920
+        private const val DVR_DEFAULT_H = 1080
+        private const val DVR_TS_RING = 9
+        private const val DVR_GAP_NS = 500_000_000L
         private const val MAX_WINDOW_RETRIES = 2
         private const val MAX_RECOVERIES = 3
         private const val RECOVERY_WINDOW_MS = 60_000L

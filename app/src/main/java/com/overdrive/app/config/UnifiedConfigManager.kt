@@ -2857,6 +2857,17 @@ object UnifiedConfigManager {
         return raw.coerceIn(0, 100)
     }
 
+    /** Playback opens in the Dashcam view where it can be composed (recordings.dashcamViewDefault, default on). */
+    @JvmStatic
+    fun isDashcamViewDefault(): Boolean = try {
+        loadConfig().optJSONObject("recordings")?.optBoolean("dashcamViewDefault", true) ?: true
+    } catch (_: Throwable) {
+        true
+    }
+
+    @JvmStatic
+    fun setDashcamViewDefault(on: Boolean): Boolean = updateValues("recordings", mapOf("dashcamViewDefault" to on))
+
     /** Set the shared recording/surveillance dewarp strength (0..100). */
     @JvmStatic
     fun setRectifyStrength(strength: Int): Boolean {
