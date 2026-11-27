@@ -159,7 +159,8 @@ public final class TripExporter {
 
     private static String csv(String s) {
         if (s == null) return "";
-        return s.contains(",") || s.contains("\"") ? "\"" + s.replace("\"", "\"\"") + "\"" : s;
+        return s.contains(",") || s.contains("\"") || s.contains("\r") || s.contains("\n")
+                ? "\"" + s.replace("\"", "\"\"") + "\"" : s;
     }
 
     private static String esc(String s) {
