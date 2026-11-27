@@ -5633,7 +5633,7 @@
     "sd_format_reason_cdr_running": "Factory BYD DVR is running. Stop it first or select temporary DVR shutdown.",
     "sd_format_reason_changed": "The SD card has changed. Review its identity and confirm again.",
     "sd_format_reason_cleaner": "Could not pause SD cleanup safely. Formatting is blocked.",
-    "sd_format_reason_dilink100_unsupported": "Formatting is not supported on DiLink 100 (BYD100F): the SD card and recorder belong to another Android user, so this daemon cannot verify a safe erase.",
+    "sd_format_reason_dvr_restart": "The SD card was formatted, but the factory DVR has not restarted yet. Restart the car to resume DVR recording.",
     "sd_format_reason_dvr_disable": "Could not verify temporary factory DVR shutdown. Formatting is blocked.",
     "sd_format_reason_generic": "Formatting was refused or failed. Check the daemon logs before retrying.",
     "sd_format_reason_media_identity": "Only a built-in MMC SD slot with a verifiable SD CID is supported. This reader's identity is unverified; USB-bridged slots, USB sticks, and external readers are refused.",
