@@ -5,11 +5,6 @@ import android.util.Log;
 import com.overdrive.app.config.UnifiedConfigManager;
 import com.overdrive.app.server.LocaleManager;
 import com.overdrive.app.telegram.config.UnifiedTelegramConfig;
-import com.overdrive.app.telegram.event.CriticalEvent;
-import com.overdrive.app.telegram.event.MotionEvent;
-import com.overdrive.app.telegram.event.TelegramEventBus;
-import com.overdrive.app.telegram.event.TunnelEvent;
-import com.overdrive.app.telegram.event.VideoEvent;
 
 import org.json.JSONObject;
 
@@ -23,14 +18,12 @@ import java.util.concurrent.Executors;
 /**
  * Static helper for emitting Telegram events from anywhere in the app.
  * 
- * Sends notifications via IPC to TelegramBotDaemon (port 19877).
- * Also publishes to TelegramEventBus for in-app listeners.
+ * Sends notifications via IPC to TelegramBotDaemon.
  * 
  * Usage:
  *   TelegramNotifier.notifyVideoRecorded("/path/to/video.mp4", "person", 30);
  *   TelegramNotifier.notifyTunnelUrl("https://xxx.trycloudflare.com", true);
  *   TelegramNotifier.notifyMotion("person", 0.95f);
- *   TelegramNotifier.notifyCritical(CriticalEvent.CriticalType.LOW_BATTERY, "12%");
  */
 public class TelegramNotifier {
     
@@ -125,11 +118,6 @@ public class TelegramNotifier {
     /** Video notification with optional confirmed deterrent execution details. */
     public static void notifyVideoRecorded(String filePath, String aiDetection, int durationSeconds,
                                            String extraCaption) {
-        // Publish to in-app event bus (independent of Telegram delivery)
-        TelegramEventBus.getInstance().publish(
-                new VideoEvent(filePath, aiDetection, durationSeconds)
-        );
-
         // Send via IPC to daemon on the dedicated VIDEO lane so a slow clip
         // upload can't delay the next event's motion text / hero photo.
         videoExecutor.execute(() -> {
@@ -167,11 +155,6 @@ public class TelegramNotifier {
      */
     public static void notifyTunnelUrl(String url, boolean isNew) {
         Log.i(TAG, "notifyTunnelUrl called: url=" + url + ", isNew=" + isNew);
-
-        // Publish to in-app event bus
-        TelegramEventBus.getInstance().publish(
-                new TunnelEvent(url, isNew)
-        );
 
         // Send via IPC to daemon
         executor.execute(() -> {
@@ -231,11 +214,6 @@ public class TelegramNotifier {
                                     String severity,
                                     int personCount, int vehicleCount, int bikeCount, int animalCount,
                                     String closestProximity, String camera) {
-        // Publish to in-app event bus (legacy MotionEvent shape preserved)
-        TelegramEventBus.getInstance().publish(
-                new MotionEvent(aiDetection, confidence)
-        );
-
         // Capture the detection time NOW (call moment), not inside the lambda
         // which runs later once the executor drains — so a delayed send still
         // reports when the event actually happened.
@@ -404,40 +382,6 @@ public class TelegramNotifier {
             case "motion": return TelegramMessages.get("recording_label.motion");
             default: return detection;
         }
-    }
-    
-    /**
-     * Notify critical system event.
-     * 
-     * @param type Critical event type
-     * @param details Additional details
-     */
-    public static void notifyCritical(CriticalEvent.CriticalType type, String details) {
-        // Publish to in-app event bus
-        TelegramEventBus.getInstance().publish(
-                new CriticalEvent(type, details)
-        );
-
-        // Send via IPC to daemon — on the dedicated critical lane so a motion/
-        // video burst can't delay it.
-        criticalExecutor.execute(() -> {
-            try {
-                if (!isEnabled(Category.CRITICAL)) {
-                    Log.d(TAG, "notifyCritical skipped — critical alerts disabled");
-                    return;
-                }
-                JSONObject cmd = new JSONObject();
-                cmd.put("cmd", "notifyCritical");
-                cmd.put("type", type.name());
-                cmd.put("details", details);
-                // Critical alerts are worth delivering late: spool if the
-                // daemon is down (ACC ON). Replay re-applies the criticalAlerts
-                // + owner gate on the daemon side.
-                sendIpc(cmd, /*spoolOnDaemonDown=*/true);
-            } catch (Exception e) {
-                Log.e(TAG, "notifyCritical IPC error", e);
-            }
-        });
     }
     
     /**
